@@ -1,13 +1,15 @@
 // Sidebar navigation registry: the ordered list of dashboard pages with
 // their lucide icons and optional runtime-config visibility gates.
-// Each item is { page, label, icon, visible? }: `page` is the route id under
-// /admin/dashboard/{page} (see $lib/stores/router), `label` is a generated
-// Paraglide message function, `icon` is a lucide icon
-// imported below and passed to the Icon atom, and `visible` a feature gate —
-// it reads the runtimeConfig runes store, so call it inside a reactive
-// context (Sidebar's $derived) to re-filter when flags load.
+// Each item is { page, label, icon, visible?, notify? }: `page` is the route
+// id under /admin/dashboard/{page} (see $lib/stores/router), `label` is a
+// generated Paraglide message function, `icon` is a lucide icon
+// imported below and passed to the Icon atom, `visible` a feature gate, and
+// `notify` marks the item with a dot when it has something waiting. Both
+// read runes stores, so call them inside a reactive context (Sidebar's
+// $derived and markup) to re-evaluate when the underlying state changes.
 
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { versionStore } from "$lib/stores/version.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
   Box,
@@ -58,5 +60,12 @@ export const NAV_ITEMS = [
     icon: Plug,
     visible: () => runtimeConfig.mcpVisible(),
   },
-  { page: "settings", label: m.navigation_settings, icon: Settings },
+  {
+    page: "settings",
+    label: m.navigation_settings,
+    icon: Settings,
+    // A newer release is announced on the Settings page; the dot is what
+    // makes an operator look there.
+    notify: () => versionStore.updateAvailable,
+  },
 ];

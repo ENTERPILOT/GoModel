@@ -41,6 +41,11 @@ func (p *Provider) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest
 		// Pinning keeps the in-session selection on the routed model.
 		endpoint, err = providers.OpenAIRealtimeTranscriptionURL(p.GetBaseURL())
 		target.PinSessionModel = strings.TrimSpace(req.Model)
+		// Most transcription models report usage in their completed event, and
+		// that report is what bills the session. A model that omits usage there,
+		// or streams only transcript deltas, would otherwise record the session
+		// as free, so the relayed audio backs it as a fallback.
+		target.MeterInputAudio = true
 	default:
 		endpoint, err = providers.OpenAIRealtimeURL(p.GetBaseURL(), req.Model)
 	}

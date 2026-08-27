@@ -51,6 +51,12 @@ export default defineConfig(({ command }) => ({
         target: process.env.GOMODEL_DEV_PROXY || "http://localhost:8080",
         changeOrigin: true,
       },
+      // The update check and its visit cookie are served by the gateway, not
+      // by Vite; without this the daily check 404s in frontend dev mode.
+      "/version": {
+        target: process.env.GOMODEL_DEV_PROXY || "http://localhost:8080",
+        changeOrigin: true,
+      },
     },
   },
 }));

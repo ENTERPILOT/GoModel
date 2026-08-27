@@ -111,6 +111,22 @@ func ExtractFromRealtimeTranscriptionCompleted(payload []byte, requestID, model,
 	return realtimeUsageEntry(&event.Usage.realtimeUsage, requestID, model, provider, pricing...)
 }
 
+// HasBillableUsage reports whether an entry carries usage worth billing: tokens,
+// or metered audio seconds. A provider that answers with a usage object of all
+// zeros has reported a number, not a bill, so a session holding only such
+// entries is still unaccounted for and a metered session must fall back to the
+// audio it relayed rather than treat itself as already billed.
+func HasBillableUsage(entry *UsageEntry) bool {
+	if entry == nil {
+		return false
+	}
+	if entry.TotalTokens > 0 || entry.InputTokens > 0 || entry.OutputTokens > 0 {
+		return true
+	}
+	seconds, _ := entry.RawData[rawKeyAudioSeconds].(float64)
+	return seconds > 0
+}
+
 // NewRealtimeDurationEntry builds a usage entry for realtime audio billed by
 // duration rather than tokens. The duration is carried as input audio seconds so
 // the model's per-second input rate prices it, the same as HTTP transcription

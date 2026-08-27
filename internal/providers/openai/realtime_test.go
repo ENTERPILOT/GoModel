@@ -217,6 +217,13 @@ func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 		if target.PinSessionModel != "gpt-4o-transcribe" {
 			t.Errorf("intent %q: PinSessionModel = %q, want the routed model", intent, target.PinSessionModel)
 		}
+		// Transcription models usually report usage in their completed event,
+		// but a model that omits it would otherwise leave the session free, so
+		// the relayed audio has to back it. The gateway meters it only when the
+		// session reports nothing, so this never double-bills the common case.
+		if !target.MeterInputAudio {
+			t.Errorf("intent %q: MeterInputAudio = false, want the session metered as a fallback", intent)
+		}
 	}
 
 	// The model still gates the request: without one there is nothing to route

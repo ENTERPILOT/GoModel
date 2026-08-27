@@ -20,6 +20,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/versioncheck"
 )
 
 // Handler holds the HTTP handlers
@@ -57,6 +58,7 @@ type Handler struct {
 	guardrailsHash               string
 	storageProbe                 ReadinessProbe
 	cacheProbe                   ReadinessProbe
+	versionChecker               *versioncheck.Checker
 
 	translatedSvc     *translatedInferenceService // snapshot of handler fields at first use; server.New sets cache/hash before traffic
 	translatedSvcOnce sync.Once

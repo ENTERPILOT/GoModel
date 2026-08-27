@@ -204,6 +204,29 @@ jobs:
             -d "deploy ${GITHUB_REF_NAME}" \
             https://demo.enterpilot.io/hooks/update-demo
 
+  publish-version-manifest:
+    name: Publish version manifest
+    runs-on: ubuntu-latest
+    # Gateways check this manifest daily, so it must only ever advertise a
+    # release operators can actually download.
+    needs: github-release
+    # Prereleases are not an upgrade the manifest should offer.
+    if: ${{ !contains(github.ref_name, '-') }}
+    # Best-effort: running gateways keep working on a stale manifest.
+    continue-on-error: true
+    steps:
+      - name: Checkout website repository
+        uses: actions/checkout@v7
+        with:
+          repository: ENTERPILOT/gomodel.enterpilot.io
+          # A deploy key is scoped to that one repository and carries no user
+          # identity. Pushing the manifest is itself the website's deploy
+          # trigger, so the new version is served within minutes.
+          ssh-key: ${{ secrets.WEBSITE_PUSH_KEY }}
+
+      - name: Publish core.txt
+        run: ./scripts/publish-version.sh core "${GITHUB_REF_NAME#v}"
+
   publish-mcp:
     name: Publish to MCP Registry
     runs-on: ubuntu-latest

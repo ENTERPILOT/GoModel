@@ -226,3 +226,28 @@ func TestExtractFromRealtimeTranscriptionCompletedSkipsNonBillable(t *testing.T)
 		}
 	}
 }
+
+func TestHasBillableUsage(t *testing.T) {
+	// The gateway meters a session's relayed audio only when the session itself
+	// reported nothing billable, so a zero-value report must not read as a bill.
+	tests := []struct {
+		name  string
+		entry *UsageEntry
+		want  bool
+	}{
+		{name: "nil entry"},
+		{name: "tokens", entry: &UsageEntry{TotalTokens: 30, InputTokens: 25}, want: true},
+		{name: "output tokens only", entry: &UsageEntry{OutputTokens: 5}, want: true},
+		{name: "audio seconds", entry: &UsageEntry{RawData: map[string]any{rawKeyAudioSeconds: 2.5}}, want: true},
+		{name: "zero tokens", entry: &UsageEntry{}},
+		{name: "zero seconds", entry: &UsageEntry{RawData: map[string]any{rawKeyAudioSeconds: 0.0}}},
+		{name: "unrelated raw data", entry: &UsageEntry{RawData: map[string]any{"prompt_text_tokens": 0}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasBillableUsage(tt.entry); got != tt.want {
+				t.Errorf("HasBillableUsage() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

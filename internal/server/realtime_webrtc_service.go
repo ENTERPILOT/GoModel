@@ -288,7 +288,10 @@ func realtimeCallIDFromLocation(location string) string {
 // the call; if it cannot attach, the call proceeds untracked and a warning is
 // logged. No-op when usage tracking is off.
 func (s *realtimeService) observeCall(ctx context.Context, route realtimeRoute, callID string) {
-	tap := s.usageTap(ctx, route)
+	// A WebRTC call carries its audio on the media plane, direct between client
+	// and provider, so there is no relayed audio to fall back on and nothing to
+	// gate: the sideband observer is this session's only accounting.
+	tap := s.usageTap(ctx, route, nil)
 	if tap == nil {
 		return
 	}

@@ -88,7 +88,6 @@
       <GoModelLogo />
     </div>
     <h1>GoModel</h1>
-    <span class="badge">{m.common_label_admin()}</span>
   </div>
   <nav class="sidebar-nav">
     {#each navItems as item (item.page)}
@@ -104,6 +103,13 @@
       >
         <Icon icon={item.icon} class="nav-icon" />
         <span class="nav-label">{item.label()}</span>
+        {#if item.notify?.()}
+          <span
+            class="nav-notify"
+            role="img"
+            aria-label={m.sidebar_has_notice()}
+          ></span>
+        {/if}
       </a>
     {/each}
   </nav>
@@ -248,6 +254,30 @@
     color: #fff;
   }
 
+/* Anchors the notification dot, which sits over the icon when the sidebar is
+   collapsed and the label is hidden. */
+.nav-item {
+    position: relative;
+  }
+
+.nav-notify {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warning);
+    flex-shrink: 0;
+  }
+
+/* Collapsed: no label to sit beside, so pin it to the icon's corner. A ring
+   in the sidebar's own background keeps it legible against the active
+   item's accent fill. */
+.sidebar.sidebar-collapsed .nav-notify {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    box-shadow: 0 0 0 2px var(--bg-surface);
+  }
+
 .nav-label {
     flex: 1;
     min-width: 0;
@@ -352,7 +382,7 @@
     padding: 16px;
   }
 
-.sidebar.sidebar-collapsed .sidebar-header :global(h1), .sidebar.sidebar-collapsed :global(.badge) {
+.sidebar.sidebar-collapsed .sidebar-header :global(h1) {
     display: none;
   }
 
@@ -399,6 +429,15 @@
 
   .sidebar-nav .nav-item .nav-label {
           display: none;
+        }
+
+  /* No label to sit beside once it is hidden, so the dot moves onto the
+           icon exactly as it does in the collapsed desktop sidebar. */
+  .sidebar-nav .nav-item .nav-notify {
+          position: absolute;
+          top: 6px;
+          right: 6px;
+          box-shadow: 0 0 0 2px var(--bg-surface);
         }
 
   .sidebar-footer {

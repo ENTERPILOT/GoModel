@@ -88,6 +88,21 @@ audio it relays, at the model's per-second input rate. WebRTC translation calls
 are the exception: their media never transits the gateway, so they are not
 metered.
 
+### Realtime transcription sessions
+
+Transcription sessions (`/v1/realtime?intent=transcription`) pick their model in
+`session.update` rather than in the URL; the `model` query parameter routes the
+request and the gateway pins the in-session selection to it.
+
+Most transcription models report usage in their
+`conversation.item.input_audio_transcription.completed` event — tokens, or
+seconds for whisper-style models — and that report prices the session. A model
+that omits usage there reports nothing, so the gateway falls back to the input
+audio it relayed, at the per-second input rate. The fallback applies only when a
+session reported no usage of its own, so a session is never billed twice. As with
+translation, WebRTC calls carry their media outside the gateway and are not
+metered.
+
 ## Anthropic-Compatible API
 
 | Endpoint                    | Method | Description                                                                   |

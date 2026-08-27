@@ -31,6 +31,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/versioncheck"
 )
 
 // Server wraps the Echo server
@@ -117,6 +118,7 @@ type Config struct {
 	RequestAuthenticators           []ext.RequestAuthenticator             // Optional extension-provided request authentication mechanisms
 	Tagging                         *tagging.Service                       // Optional: request labelling based on configured tagging headers
 	SessionDetector                 *session.Detector                      // Optional: client session identification for sticky routing and audit grouping
+	VersionChecker                  *versioncheck.Checker                  // Optional: daily update check backing GET /version
 }
 
 // ReadinessProbe verifies that a dependency the gateway owns is reachable.
@@ -200,6 +202,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// so the documented default and the registered route stay consistent.
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
 	if cfg != nil {
+		handler.versionChecker = cfg.VersionChecker
+	}
+	if cfg != nil {
 		handler.mcpEnabled = cfg.MCPEnabled
 		handler.mcpGateway = cfg.MCPGateway
 	}
@@ -220,7 +225,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 
 	// Build list of paths that skip authentication
-	authSkipPaths := []string{"/health", "/health/ready"}
+	authSkipPaths := []string{"/health", "/health/ready", "/version"}
 
 	// Determine metrics path
 	metricsPath := config.ResolveMetricsEndpoint("")
@@ -383,6 +388,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	// Public routes
 	e.GET("/health", handler.Health)
 	e.GET("/health/ready", handler.Ready)
+	e.GET("/version", handler.Version)
 	registerSwagger(e, cfg)
 	if cfg != nil && cfg.MetricsEnabled {
 		e.GET(metricsPath, echo.WrapHandler(promhttp.Handler()))
