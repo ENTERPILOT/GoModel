@@ -277,11 +277,20 @@ func TestVersionEndpointSkipsAuthentication(t *testing.T) {
 // regardless of how slow the release host is.
 func TestVersionEndpointDoesNotWaitOnASlowManifest(t *testing.T) {
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
 	srv, _, _ := versionTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		<-release
+		// Bounded: httptest.Server.Close waits for outstanding requests, so a
+		// handler that could block forever would wedge the whole package if
+		// the release below ever failed to reach it.
+		select {
+		case <-release:
+		case <-time.After(10 * time.Second):
+		}
 		_, _ = w.Write([]byte("0.1.82"))
 	})
+	// Registered after versionTestServer so it runs before that helper's
+	// origin.Close cleanup: t.Cleanup is LIFO, and closing the origin first
+	// would block on the stalled handler this test deliberately creates.
+	t.Cleanup(func() { close(release) })
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	req.Header.Set("User-Agent", "Mozilla/5.0")
