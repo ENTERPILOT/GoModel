@@ -72,6 +72,9 @@ models:
 #     targets:
 #       - { model: openai/gpt-4o }
 #       - { model: groq/llama-3.3-70b }
+#   - source: openai/gpt-5 # an access policy: no target; allowed for the listed
+#     user_paths: ["/team/alpha"] # subtrees OR members of the listed user groups
+#     groups: ["beta-testers"] # (see the dashboard Users page; policies only)
 
 # MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the
 # authenticated /mcp endpoint. Tools/prompts are namespaced as {server}_{name};

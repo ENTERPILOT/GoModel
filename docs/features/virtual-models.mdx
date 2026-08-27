@@ -164,7 +164,9 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 `strategy` (`round_robin` or `cost`), `session_affinity` (default `true`; see
-[Session Keeping](/features/session-keeping)), `user_paths`, `description`,
+[Session Keeping](/features/session-keeping)), `user_paths`, `groups`
+(access policies only; see [Users & Groups](/features/users-groups)),
+`description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
 `10`), and `enabled`.
 Leave the targets empty to declare an access policy on the `source` selector. An

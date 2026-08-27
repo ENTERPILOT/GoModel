@@ -31,6 +31,7 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		SessionAffinity: entry.SessionAffinity,
 		Targets:         configTargets(entry),
 		UserPaths:       entry.UserPaths,
+		Groups:          entry.Groups,
 		Description:     entry.Description,
 		Slowdown:        entry.Slowdown,
 		Enabled:         enabled,

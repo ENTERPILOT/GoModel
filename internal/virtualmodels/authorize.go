@@ -21,16 +21,24 @@ func (s *Service) EffectiveState(selector core.ModelSelector) EffectiveState {
 	return s.snapshot().effectiveState(selector)
 }
 
+// SetGroupResolver installs the function that resolves the group memberships
+// carried by a user path (the users registry). Must be called before the
+// service starts resolving requests. Without a resolver, group-scoped
+// policies admit nobody through their groups.
+func (s *Service) SetGroupResolver(resolver func(userPath string) []string) {
+	if s == nil {
+		return
+	}
+	s.groupResolver = resolver
+}
+
 // AllowsModel reports whether selector is available for the effective request user path.
 func (s *Service) AllowsModel(ctx context.Context, selector core.ModelSelector) bool {
 	state := s.EffectiveState(selector)
 	if !state.Enabled {
 		return false
 	}
-	if len(state.UserPaths) == 0 {
-		return true
-	}
-	return userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths)
+	return s.identityAllowed(core.UserPathFromContext(ctx), state.UserPaths, state.Groups)
 }
 
 // ValidateModelAccess returns a typed request error when selector is not available.
@@ -43,10 +51,7 @@ func (s *Service) ValidateModelAccess(ctx context.Context, selector core.ModelSe
 			nil,
 		).WithCode("model_access_denied")
 	}
-	if len(state.UserPaths) == 0 {
-		return nil
-	}
-	if userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths) {
+	if s.identityAllowed(core.UserPathFromContext(ctx), state.UserPaths, state.Groups) {
 		return nil
 	}
 	return core.NewInvalidRequestErrorWithStatus(
@@ -73,6 +78,33 @@ func (s *Service) FilterPublicModels(ctx context.Context, models []core.Model) [
 		result = append(result, model)
 	}
 	return result
+}
+
+// identityAllowed applies the combined path/group scope of a policy: an empty
+// scope admits everyone; otherwise the caller passes by user path subtree OR
+// by group membership resolved from its user path.
+func (s *Service) identityAllowed(userPath string, allowedPaths, allowedGroups []string) bool {
+	if len(allowedPaths) == 0 && len(allowedGroups) == 0 {
+		return true
+	}
+	if len(allowedPaths) > 0 && userPathAllowed(userPath, allowedPaths) {
+		return true
+	}
+	return len(allowedGroups) > 0 && s.groupAllowed(userPath, allowedGroups)
+}
+
+// groupAllowed reports whether the user path carries one of the allowed
+// groups. allowed must be sorted (normalizeGroups sorts).
+func (s *Service) groupAllowed(userPath string, allowed []string) bool {
+	if s == nil || s.groupResolver == nil || len(allowed) == 0 {
+		return false
+	}
+	for _, group := range s.groupResolver(userPath) {
+		if _, ok := slices.BinarySearch(allowed, group); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func userPathAllowed(userPath string, allowed []string) bool {

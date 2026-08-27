@@ -46,6 +46,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/versioncheck"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/internal/workflows"
@@ -71,6 +72,7 @@ type App struct {
 	providerCredentials *providers.CredentialsResult
 	pricingOverrides    *pricingoverrides.Result
 	authKeys            *authkeys.Result
+	users               *users.Result
 	guardrails          *guardrails.Result
 	workflows           *workflows.Result
 	live                *live.Broker
@@ -656,6 +658,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	app.authKeys = authKeyResult
 	app.register(subsystemAuthKeys, ownedByShutdown, app.authKeys.Close)
 
+	var usersResult *users.Result
+	usersResult, err = users.New(ctx, sharedStorage)
+	if err != nil {
+		return fail("failed to initialize users", err)
+	}
+	app.users = usersResult
+	app.register(subsystemUsers, ownedByShutdown, app.users.Close)
+	// Group-scoped access policies resolve a caller's groups from its user
+	// path through the users registry.
+	vm.SetGroupResolver(usersResult.Service.GroupsForPath)
+
 	// Log configuration status after auth has been initialized so the startup
 	// message reflects both bootstrap and managed auth modes.
 	app.logStartupInfo()
@@ -814,6 +827,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			providerResult.Registry,
 			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
+			usersResult.Service,
 			vm,
 			failoverResult.Service,
 			app.pricingOverrides.Service,
@@ -1250,6 +1264,7 @@ func initAdmin(
 	registry *providers.ModelRegistry,
 	configuredProviders []providers.SanitizedProviderConfig,
 	authKeyService *authkeys.Service,
+	usersService *users.Service,
 	virtualModelService *virtualmodels.Service,
 	failoverService *failover.Service,
 	pricingOverrideService *pricingoverrides.Service,
@@ -1313,6 +1328,7 @@ func initAdmin(
 		admin.WithPricingResolver(pricingOverrideService),
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
+		admin.WithUsers(usersService),
 		admin.WithVirtualModels(virtualModelService),
 		admin.WithFailover(failoverService),
 		admin.WithPricingOverrides(pricingOverrideService),

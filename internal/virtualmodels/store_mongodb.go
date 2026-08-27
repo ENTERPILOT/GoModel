@@ -20,6 +20,7 @@ type mongoVirtualModelDocument struct {
 	ProviderName    string    `bson:"provider_name,omitempty"`
 	Model           string    `bson:"model,omitempty"`
 	UserPaths       []string  `bson:"user_paths,omitempty"`
+	Groups          []string  `bson:"groups,omitempty"`
 	Description     string    `bson:"description,omitempty"`
 	Slowdown        *float64  `bson:"slowdown,omitempty"`
 	Enabled         bool      `bson:"enabled"`
@@ -101,6 +102,7 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 			"provider_name":    vm.ProviderName,
 			"model":            vm.Model,
 			"user_paths":       vm.UserPaths,
+			"groups":           vm.Groups,
 			"description":      vm.Description,
 			"slowdown":         vm.Slowdown,
 			"enabled":          vm.Enabled,
@@ -150,6 +152,9 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 	}
 	if len(doc.UserPaths) > 0 {
 		vm.UserPaths = append([]string(nil), doc.UserPaths...)
+	}
+	if len(doc.Groups) > 0 {
+		vm.Groups = append([]string(nil), doc.Groups...)
 	}
 	return vm
 }

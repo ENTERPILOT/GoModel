@@ -26,6 +26,7 @@
   import McpServersPage from "$pages/mcp-servers/McpServersPage.svelte";
   import ProvidersConfigPage from "$pages/providers-config/ProvidersConfigPage.svelte";
   import AuthKeysPage from "$pages/auth-keys/AuthKeysPage.svelte";
+  import UsersPage from "$pages/users/UsersPage.svelte";
   import SettingsPage from "$pages/settings/SettingsPage.svelte";
   import ConversationDrawer from "$pages/audit-logs/ConversationDrawer.svelte";
   import { conversationDrawer } from "$pages/audit-logs/conversationDrawer.svelte.js";
@@ -43,6 +44,7 @@
     "mcp-servers": McpServersPage,
     "providers-config": ProvidersConfigPage,
     "auth-keys": AuthKeysPage,
+    users: UsersPage,
     settings: SettingsPage,
   };
 

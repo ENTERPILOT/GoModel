@@ -24,6 +24,7 @@ var sqlSchema = []string{
 		provider_name TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		user_paths TEXT NOT NULL DEFAULT '[]',
+		user_groups TEXT NOT NULL DEFAULT '[]',
 		description TEXT NOT NULL DEFAULT '',
 		slowdown DOUBLE PRECISION DEFAULT NULL,
 		enabled ` + sqlx.TypeBool + ` NOT NULL DEFAULT TRUE,
@@ -40,19 +41,20 @@ var sqlSchema = []string{
 var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN slowdown DOUBLE PRECISION DEFAULT NULL",
+	"ALTER TABLE virtual_models ADD COLUMN user_groups TEXT NOT NULL DEFAULT '[]'",
 }
 
 const selectVirtualModelColumns = `
 	SELECT source, targets, strategy, session_affinity, provider_name, model, user_paths,
-		description, slowdown, enabled, created_at, updated_at
+		user_groups, description, slowdown, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, session_affinity, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
+		source, targets, strategy, session_affinity, provider_name, model, user_paths, user_groups, description, slowdown, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
@@ -60,6 +62,7 @@ const upsertVirtualModelSQL = `
 		provider_name = excluded.provider_name,
 		model = excluded.model,
 		user_paths = excluded.user_paths,
+		user_groups = excluded.user_groups,
 		description = excluded.description,
 		slowdown = excluded.slowdown,
 		enabled = excluded.enabled,
@@ -150,6 +153,10 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	groupsJSON, err := encodeGroups(vm.Groups)
+	if err != nil {
+		return nil, err
+	}
 	return []any{
 		strings.TrimSpace(vm.Source),
 		targetsJSON,
@@ -158,6 +165,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		vm.ProviderName,
 		vm.Model,
 		pathsJSON,
+		groupsJSON,
 		vm.Description,
 		vm.Slowdown,
 		vm.Enabled,
@@ -168,7 +176,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 
 func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
-	var targets, userPaths []byte
+	var targets, userPaths, groups []byte
 	var sessionAffinity string
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
@@ -179,6 +187,7 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		&vm.ProviderName,
 		&vm.Model,
 		&userPaths,
+		&groups,
 		&vm.Description,
 		&vm.Slowdown,
 		&vm.Enabled,
@@ -192,6 +201,9 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		return VirtualModel{}, err
 	}
 	if vm.UserPaths, err = decodeUserPaths(userPaths); err != nil {
+		return VirtualModel{}, err
+	}
+	if vm.Groups, err = decodeGroups(groups); err != nil {
 		return VirtualModel{}, err
 	}
 	vm.SessionAffinity = decodeTriStateBool(sessionAffinity)

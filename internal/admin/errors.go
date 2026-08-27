@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/internal/workflows"
 )
@@ -73,6 +74,18 @@ func virtualModelWriteError(err error) error {
 		return core.NewInvalidRequestError(err.Error(), err)
 	}
 	return core.NewProviderError("virtual_models", http.StatusBadGateway, err.Error(), err)
+}
+
+// usersWriteError surfaces validation errors as 400 and other failures as 502
+// so the dashboard distinguishes store failures from input issues.
+func usersWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if users.IsValidationError(err) {
+		return core.NewInvalidRequestError(err.Error(), err)
+	}
+	return core.NewProviderError("users", http.StatusBadGateway, err.Error(), err)
 }
 
 func pricingOverrideWriteError(err error) error {

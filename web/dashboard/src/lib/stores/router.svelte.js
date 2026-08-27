@@ -17,6 +17,7 @@ export const PAGES = [
   "mcp-servers",
   "providers-config",
   "auth-keys",
+  "users",
   "settings",
 ];
 

@@ -37,6 +37,11 @@ type VirtualModelConfig struct {
 	// UserPaths scopes the entry to specific request user paths. Empty means all.
 	UserPaths []string `yaml:"user_paths,omitempty" json:"user_paths,omitempty"`
 
+	// Groups scopes an access policy to members of named user groups from the
+	// user registry. A caller passes when its user path matches UserPaths OR it
+	// carries one of the Groups. Access policies only.
+	Groups []string `yaml:"groups,omitempty" json:"groups,omitempty"`
+
 	// Description is an optional human-readable note.
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 

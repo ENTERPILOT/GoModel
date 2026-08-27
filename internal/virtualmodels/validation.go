@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modelselectors"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/validation"
 )
 
@@ -81,6 +82,9 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 		return VirtualModel{}, nil, err
 	}
 	vm.UserPaths = paths
+	if len(vm.Groups) > 0 {
+		return VirtualModel{}, nil, newValidationError("groups are only supported on access policies, not redirects", nil)
+	}
 	return vm, selectors, nil
 }
 
@@ -107,6 +111,11 @@ func normalizePolicyInput(catalog Catalog, vm VirtualModel) (VirtualModel, error
 	}
 	// Empty user_paths is allowed now: a policy with no paths means "all paths".
 	vm.UserPaths = paths
+	groups, err := normalizeGroups(vm.Groups)
+	if err != nil {
+		return VirtualModel{}, err
+	}
+	vm.Groups = groups
 	return vm, nil
 }
 
@@ -131,6 +140,11 @@ func normalizeStoredPolicy(vm VirtualModel) (VirtualModel, error) {
 		return VirtualModel{}, err
 	}
 	vm.UserPaths = paths
+	groups, err := normalizeGroups(vm.Groups)
+	if err != nil {
+		return VirtualModel{}, err
+	}
+	vm.Groups = groups
 	return vm, nil
 }
 
@@ -170,6 +184,20 @@ func normalizeUserPaths(paths []string) ([]string, error) {
 	sort.Strings(normalized)
 	if len(normalized) == 0 {
 		return nil, nil
+	}
+	return normalized, nil
+}
+
+// normalizeGroups dedupes, trims, and sorts policy group names. Empty input is
+// allowed and yields nil. Sorted order is what groupAllowed's binary search
+// relies on.
+func normalizeGroups(groups []string) ([]string, error) {
+	if len(groups) == 0 {
+		return nil, nil
+	}
+	normalized, err := users.NormalizeGroupNames(groups)
+	if err != nil {
+		return nil, newValidationError("invalid groups value", err)
 	}
 	return normalized, nil
 }

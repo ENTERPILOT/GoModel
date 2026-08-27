@@ -101,6 +101,12 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 		"PUT /admin/model-pricing-overrides",
 		"DELETE /admin/model-pricing-overrides",
 
+		"GET /admin/users",
+		"PUT /admin/users",
+		"DELETE /admin/users",
+		"GET /admin/user-groups",
+		"PUT /admin/user-groups",
+		"DELETE /admin/user-groups",
 		"GET /admin/auth-keys",
 		"POST /admin/auth-keys",
 		"PUT /admin/auth-keys/:id/labels",

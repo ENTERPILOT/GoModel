@@ -236,6 +236,7 @@ func (s snapshot) effectiveState(selector core.ModelSelector) EffectiveState {
 		// row with user_paths restricts; an enabled row with no paths allows.
 		state.Enabled = rule.Enabled
 		state.UserPaths = append([]string(nil), rule.UserPaths...)
+		state.Groups = append([]string(nil), rule.Groups...)
 	}
 	return state
 }

@@ -34,6 +34,10 @@ type Service struct {
 	// redirects stay valid. Set once during startup, before serving.
 	targetCapacity func(qualifiedModel string) bool
 
+	// groupResolver resolves the group memberships carried by a user path
+	// (the users registry). Set once during startup, before serving.
+	groupResolver func(userPath string) []string
+
 	// routeSelector optionally delegates target choice for redirects using
 	// the adaptive strategy. Set once during startup, before serving.
 	// routeSelectorName is captured panic-safe at install time so failure
@@ -266,6 +270,7 @@ func (s *Service) ListViews() []View {
 			ProviderName:    vm.ProviderName,
 			Model:           vm.Model,
 			UserPaths:       vm.UserPaths,
+			Groups:          vm.Groups,
 			Description:     vm.Description,
 			Slowdown:        vm.Slowdown,
 			Enabled:         vm.Enabled,
@@ -499,34 +504,35 @@ func (s *Service) policyIsRedundant(policy VirtualModel, fallbackRows []VirtualM
 // policyIsNoop reports whether an otherwise empty policy changes effective
 // access compared with the snapshot that would remain without that policy.
 func policyIsNoop(policy VirtualModel, fallback snapshot) bool {
-	if policy.IsRedirect() || len(policy.UserPaths) > 0 || strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil {
+	if policy.IsRedirect() || len(policy.UserPaths) > 0 || len(policy.Groups) > 0 ||
+		strings.TrimSpace(policy.Description) != "" || policy.Slowdown != nil {
 		return false
 	}
 
-	matches := func(enabled bool, userPaths []string) bool {
-		return policy.Enabled == enabled && len(userPaths) == 0
+	matches := func(enabled bool, userPaths, groups []string) bool {
+		return policy.Enabled == enabled && len(userPaths) == 0 && len(groups) == 0
 	}
 	selector := core.ModelSelector{Provider: policy.ProviderName, Model: policy.Model}
 
 	switch scopeKindFor(policy.Source, policy.ProviderName, policy.Model) {
 	case modelselectors.ScopeGlobal:
-		return matches(fallback.defaultEnable, nil)
+		return matches(fallback.defaultEnable, nil, nil)
 	case modelselectors.ScopeProvider:
 		state := fallback.effectiveState(selector)
-		if !matches(state.Enabled, state.UserPaths) {
+		if !matches(state.Enabled, state.UserPaths, state.Groups) {
 			return false
 		}
 		// Provider-wide policies outrank model-wide policies. Removing one can
 		// therefore expose any model-wide rule for this provider.
 		for _, modelPolicy := range fallback.modelWide {
-			if !matches(modelPolicy.Enabled, modelPolicy.UserPaths) {
+			if !matches(modelPolicy.Enabled, modelPolicy.UserPaths, modelPolicy.Groups) {
 				return false
 			}
 		}
 		return true
 	default:
 		state := fallback.effectiveState(selector)
-		return matches(state.Enabled, state.UserPaths)
+		return matches(state.Enabled, state.UserPaths, state.Groups)
 	}
 }
 

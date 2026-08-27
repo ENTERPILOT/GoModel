@@ -1,0 +1,87 @@
+---
+title: "Users & Groups"
+description: "Register users for your user paths, organize them into groups, and grant model access per user or per group."
+icon: "users-round"
+keywords: ["users", "groups", "user_path", "access control", "model access", "multi-tenancy"]
+---
+
+## Overview
+
+The user registry gives [user paths](/features/user-path) an identity: a
+**user** binds one unique `user_path` to a display name, a description, and
+group memberships. A **group** is a named, cross-cutting set of users that
+model access policies can target — for example `beta-testers` spanning teams
+from different parts of the hierarchy.
+
+Requests keep authenticating and being accounted by `user_path`; the registry
+is metadata on top. Nothing changes for existing deployments until you create
+users or groups.
+
+Manage both on the **Users** page of the dashboard.
+
+## Users
+
+Create a user with `Users -> New user`:
+
+- **User path** (required, unique) — the hierarchy path this user owns, for
+  example `/engineering/team-a`. API keys bound to that path act as this user.
+- **Name, description** — display metadata.
+- **Groups** — memberships used by group-scoped access policies.
+
+The Users page lays users out as a tree following their paths, with the
+active API keys bound to each path. One user can have any number of API keys;
+create them on the **API Keys** page with the user's path.
+
+Descendant paths inherit from their ancestors: a request under
+`/engineering/team-a/service` carries the groups of the user registered at
+`/engineering/team-a` (and of any deeper registered ancestor).
+
+## Groups
+
+Create a group with `Users -> New group`. The group name is its identity —
+it cannot contain `/` or `,` and cannot be renamed later.
+
+Deleting a group removes the membership from every user. Access policies that
+reference the deleted group keep the name but no longer match anyone.
+
+## Model access
+
+Access policies (virtual models without a target) can scope a model by
+`user_paths`, by `groups`, or both. A caller is allowed when its user path
+matches `user_paths` **or** it carries one of the `groups`:
+
+```yaml
+virtual_models:
+  - source: "openai/gpt-5"
+    user_paths: ["/engineering/team-a"]
+    groups: ["beta-testers"]
+```
+
+`groups` applies to access policies only, not redirects.
+
+The easiest way to manage this is the **Model access** action on a user or
+group row: check the models the subject should have, and GoModel updates the
+underlying access policies. The editor shows each model's effective state —
+open to everyone, granted, inherited (via an ancestor path or a group),
+no access, or disabled — and warns before a change that:
+
+- restricts a previously open model to the listed subjects only, or
+- removes a policy's last subject, which reopens the model for every caller.
+
+`GET /v1/models` respects group grants too, so a key whose path carries a
+group sees the models granted to that group.
+
+## Admin API
+
+```http
+GET    /admin/users
+PUT    /admin/users          {"user_path": "/team/a", "name": "Team A", "groups": ["beta-testers"]}
+DELETE /admin/users          {"id": "..."}
+
+GET    /admin/user-groups
+PUT    /admin/user-groups    {"name": "beta-testers", "description": "Early access"}
+DELETE /admin/user-groups    {"name": "beta-testers"}
+```
+
+Passing an existing `id` to `PUT /admin/users` updates that user (including
+moving it to a new path); omitting it creates a new user.

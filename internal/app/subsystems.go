@@ -65,6 +65,7 @@ const (
 	subsystemGuardrails          = "guardrails"
 	subsystemWorkflows           = "workflows"
 	subsystemAuthKeys            = "auth keys"
+	subsystemUsers               = "users"
 	subsystemMCPGateway          = "mcp gateway"
 	subsystemResponseCache       = "response cache"
 )
@@ -121,6 +122,7 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemPricingOverrides, close: closerOf(a.pricingOverrides)},
 		{name: subsystemGuardrails, close: closerOf(a.guardrails)},
 		{name: subsystemAuthKeys, close: closerOf(a.authKeys)},
+		{name: subsystemUsers, close: closerOf(a.users)},
 		{name: subsystemFileStore, close: closerOf(a.fileStore)},
 		// The remaining stores flush buffered work into storage, so they must
 		// close before the connection they write through.

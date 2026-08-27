@@ -19,6 +19,7 @@ import {
   History,
   KeyRound,
   LayoutDashboard,
+  UsersRound,
   Plug,
   ServerCog,
   Settings,
@@ -47,6 +48,7 @@ export const NAV_ITEMS = [
     visible: () => runtimeConfig.rateLimitsVisible(),
   },
   { page: "auth-keys", label: m.navigation_api_keys, icon: KeyRound },
+  { page: "users", label: m.navigation_users, icon: UsersRound },
   { page: "workflows", label: m.navigation_workflows, icon: Workflow },
   {
     page: "guardrails",

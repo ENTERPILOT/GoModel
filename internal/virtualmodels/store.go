@@ -43,6 +43,31 @@ func encodeUserPaths(paths []string) (string, error) {
 	return string(data), nil
 }
 
+func encodeGroups(groups []string) (string, error) {
+	if groups == nil {
+		groups = []string{}
+	}
+	data, err := json.Marshal(groups)
+	if err != nil {
+		return "", fmt.Errorf("encode groups: %w", err)
+	}
+	return string(data), nil
+}
+
+func decodeGroups(data []byte) ([]string, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var groups []string
+	if err := json.Unmarshal(data, &groups); err != nil {
+		return nil, fmt.Errorf("decode groups: %w", err)
+	}
+	if len(groups) == 0 {
+		return nil, nil
+	}
+	return groups, nil
+}
+
 func decodeTargets(data []byte) ([]Target, error) {
 	if len(data) == 0 {
 		return nil, nil

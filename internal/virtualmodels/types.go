@@ -46,7 +46,11 @@ type VirtualModel struct {
 	ProviderName string   `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
 	Model        string   `json:"model,omitempty" bson:"model,omitempty"`
 	UserPaths    []string `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
-	Description  string   `json:"description,omitempty" bson:"description,omitempty"`
+	// Groups limits an access policy to members of named user groups (see
+	// internal/users). A caller is allowed when its user path matches
+	// UserPaths OR it carries one of the Groups. Policies only.
+	Groups      []string `json:"groups,omitempty" bson:"groups,omitempty"`
+	Description string   `json:"description,omitempty" bson:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil
 	// leaves the setting unspecified so an alias can inherit its target model.
 	Slowdown *float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
@@ -126,6 +130,9 @@ func (v VirtualModel) clone() VirtualModel {
 	if len(v.UserPaths) > 0 {
 		v.UserPaths = append([]string(nil), v.UserPaths...)
 	}
+	if len(v.Groups) > 0 {
+		v.Groups = append([]string(nil), v.Groups...)
+	}
 	if v.SessionAffinity != nil {
 		affinity := *v.SessionAffinity
 		v.SessionAffinity = &affinity
@@ -149,6 +156,7 @@ type View struct {
 	ProviderName    string   `json:"provider_name,omitempty"`
 	Model           string   `json:"model,omitempty"`
 	UserPaths       []string `json:"user_paths,omitempty"`
+	Groups          []string `json:"groups,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown      *float64  `json:"slowdown,omitempty"`
@@ -178,6 +186,7 @@ type EffectiveState struct {
 	DefaultEnabled bool     `json:"default_enabled"`
 	Enabled        bool     `json:"enabled"`
 	UserPaths      []string `json:"user_paths,omitempty"`
+	Groups         []string `json:"groups,omitempty"`
 }
 
 // Catalog is the combined catalog surface the native engine needs.

@@ -196,8 +196,13 @@
   "audit_retention_indefinitely": "indefinitely",
   "audit_retention_days": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} day",
         "count_plural=*": "{count} days"
@@ -227,8 +232,13 @@
   "audit_live_pause_pagination": "Live paused on later pages. Go to the first page to resume.",
   "audit_session_description": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "Session with {count} request",
         "count_plural=*": "Session with {count} requests"
@@ -257,8 +267,13 @@
   "audit_attempt_failed": "Provider attempt failed",
   "audit_provider_attempts": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} provider attempt",
         "count_plural=*": "{count} provider attempts"
@@ -427,8 +442,13 @@
   "overview_no_data": "no data",
   "overview_provider_attention": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} needs attention",
         "count_plural=*": "{count} need attention"
@@ -896,8 +916,13 @@
   "settings_runtime_refresh_summary": "{status} {models} · {providers}.",
   "settings_runtime_refresh_models": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} model",
         "count_plural=*": "{count} models"
@@ -906,8 +931,13 @@
   ],
   "settings_runtime_refresh_providers": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} provider",
         "count_plural=*": "{count} providers"
@@ -934,8 +964,14 @@
   "settings_pricing_failed": "Unable to recalculate pricing.",
   "settings_pricing_summary": [
     {
-      "declarations": ["input matched", "input recalculated", "local matched_plural = matched: plural"],
-      "selectors": ["matched_plural"],
+      "declarations": [
+        "input matched",
+        "input recalculated",
+        "local matched_plural = matched: plural"
+      ],
+      "selectors": [
+        "matched_plural"
+      ],
       "match": {
         "matched_plural=one": "Pricing recalculated for {recalculated} of {matched} usage record.",
         "matched_plural=*": "Pricing recalculated for {recalculated} of {matched} usage records."
@@ -944,8 +980,13 @@
   ],
   "settings_pricing_missing": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} usage record still lacks pricing metadata.",
         "count_plural=*": "{count} usage records still lack pricing metadata."
@@ -984,8 +1025,13 @@
   "pagination_summary": "Showing {start}–{end} of {total}",
   "date_picker_last_days": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "Last {count} day",
         "count_plural=*": "Last {count} days"
@@ -994,8 +1040,13 @@
   ],
   "date_picker_days": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} day",
         "count_plural=*": "{count} days"
@@ -1126,8 +1177,13 @@
   "providers_default_value": "Defaults to {value}",
   "providers_keys_count": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} key",
         "count_plural=*": "{count} keys"
@@ -1139,8 +1195,13 @@
   "providers_auto_discovered": "auto-discovered",
   "providers_models_count": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} model",
         "count_plural=*": "{count} models"
@@ -1179,8 +1240,13 @@
   "models_allowed_for": "Allowed for {paths}",
   "models_count": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} model",
         "count_plural=*": "{count} models"
@@ -1189,8 +1255,13 @@
   ],
   "models_alias_count": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "{count} alias",
         "count_plural=*": "{count} aliases"
@@ -1399,8 +1470,13 @@
   "models_failover_no_suggestions": "No Failover suggestions were generated for this model.",
   "models_failover_generated": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "Generated {count} Fallback model.",
         "count_plural=*": "Generated {count} Fallback models."
@@ -1418,8 +1494,13 @@
   "models_failover_draft_invalid": "Generated Failover draft is missing model data.",
   "models_failover_saved": [
     {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
       "match": {
         "count_plural=one": "Saved {count} Failover mapping.",
         "count_plural=*": "Saved {count} Failover mappings."
@@ -1462,5 +1543,77 @@
   "models_source_conflict": "A virtual model for \"{source}\" already exists. Choose a different Source.",
   "models_mask_rename_confirm": "A model named \"{name}\" already exists. Renaming to that name will mask the model in the list. Continue?",
   "models_remove_policy_confirm": "Remove the virtual model for \"{source}\"? This reverts to inherited/default behavior.",
-  "models_pricing_remove_confirm": "Remove the model pricing override for \"{selector}\"?"
+  "models_pricing_remove_confirm": "Remove the model pricing override for \"{selector}\"?",
+  "navigation_users": "Users",
+  "users_title": "Users & Groups",
+  "users_help": "Users bind a unique user path to a name and group memberships; API keys bound to the same path count toward the user. Grant model access per user or per group — descendants of a user path inherit its access and groups.",
+  "users_loading": "Loading users...",
+  "users_load_failed": "Unable to load users.",
+  "users_unavailable": "The users feature is unavailable on this gateway.",
+  "users_empty": "No users yet. Create a user to give a user path a name, groups, and model access.",
+  "users_create": "New user",
+  "users_edit_title": "Edit user",
+  "users_save": "Save",
+  "users_saving": "Saving...",
+  "users_save_failed": "Unable to save the user.",
+  "users_saved": "User {path} saved.",
+  "users_delete_confirm": "Delete user {path}? API keys and usage keep the path; only the registry entry is removed.",
+  "users_delete_failed": "Unable to delete the user.",
+  "users_deleted": "User {path} deleted.",
+  "users_filter_placeholder": "Filter by path, name, or group…",
+  "users_filter_label": "Filter users",
+  "users_column_user": "User",
+  "users_column_groups": "Groups",
+  "users_column_keys": "API keys",
+  "users_actions": "Actions",
+  "users_grant_access": "Model access",
+  "users_edit": "Edit user",
+  "users_delete": "Delete user",
+  "users_register_path": "Register this path as a user",
+  "users_required": "required",
+  "users_field_path": "User path",
+  "users_field_name": "Name",
+  "users_field_groups": "Groups",
+  "users_field_description": "Description",
+  "users_path_help_label": "What is a user path?",
+  "users_path_help": "The unique hierarchy path this user owns, e.g. /engineering/team-a. API keys bound to this path act as this user, and deeper paths inherit its groups and access.",
+  "users_path_required": "User path is required.",
+  "users_no_groups_hint": "No groups yet — create one with “New group” to organize users.",
+  "users_description_placeholder": "What this user is for…",
+  "groups_title": "Groups",
+  "groups_create": "New group",
+  "groups_edit_title": "Edit group",
+  "groups_edit": "Edit group",
+  "groups_delete": "Delete group",
+  "groups_empty": "No groups yet. Groups let one access policy cover users from different parts of the hierarchy.",
+  "groups_saved": "Group {name} saved.",
+  "groups_save_failed": "Unable to save the group.",
+  "groups_deleted": "Group {name} deleted.",
+  "groups_delete_failed": "Unable to delete the group.",
+  "groups_delete_confirm": "Delete group {name}? It is removed from every member; access policies referencing it stop matching anyone.",
+  "groups_name_required": "Group name is required.",
+  "groups_name_invalid": "Group names cannot contain “/” or “,”.",
+  "groups_name_hint": "The name is the group's identity and cannot be changed later.",
+  "groups_field_name": "Name",
+  "groups_column_name": "Group",
+  "groups_column_description": "Description",
+  "groups_column_members": "Members",
+  "groups_description_placeholder": "Who belongs here…",
+  "users_access_title": "Model access — {subject}",
+  "users_access_help": "Checked models are explicitly granted to this subject on their access policy. Unrestricted models are open to everyone; restrict them from the Models page or by granting them here.",
+  "users_access_apply": "Apply {count} change(s)",
+  "users_access_filter_placeholder": "Filter models…",
+  "users_access_models": "Models",
+  "users_access_no_models": "No models match.",
+  "users_access_status_open": "Open to everyone",
+  "users_access_status_granted": "Granted",
+  "users_access_status_inherited": "Inherited",
+  "users_access_status_blocked": "No access",
+  "users_access_status_disabled": "Disabled",
+  "users_access_managed": "managed by config",
+  "users_access_restrict_warning": "{count} model(s) are currently open to everyone; granting them here restricts them to the listed subjects only.",
+  "users_access_reopen_warning": "{count} model(s) lose their last subject; their policy is removed and they reopen for every caller.",
+  "users_access_load_failed": "Unable to load models or access policies.",
+  "users_access_save_failed": "Unable to update model access.",
+  "users_access_saved": "Model access updated."
 }

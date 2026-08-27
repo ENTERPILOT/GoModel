@@ -92,6 +92,7 @@
                             "features/playground",
                             "features/session-keeping",
                             "features/user-path",
+                            "features/users-groups",
                             "features/passthrough-api",
                             "features/budgets",
                             "features/rate-limits",

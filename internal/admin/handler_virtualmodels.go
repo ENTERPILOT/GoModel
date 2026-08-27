@@ -25,6 +25,7 @@ type upsertVirtualModelRequest struct {
 	// before. Omitted means enabled; false restores stateless balancing.
 	SessionAffinity *bool    `json:"session_affinity,omitempty"`
 	UserPaths       []string `json:"user_paths,omitempty"`
+	Groups          []string `json:"groups,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
@@ -163,6 +164,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		Strategy:        strings.TrimSpace(req.Strategy),
 		SessionAffinity: req.SessionAffinity,
 		UserPaths:       req.UserPaths,
+		Groups:          req.Groups,
 		Description:     strings.TrimSpace(req.Description),
 		Slowdown:        req.Slowdown,
 		Enabled:         h.virtualModels.ResolveUpsertEnabled(source, req.OldSource, req.Enabled),

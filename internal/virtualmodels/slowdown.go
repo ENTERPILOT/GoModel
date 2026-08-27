@@ -29,7 +29,7 @@ func (s *Service) ResolveSlowdown(
 	}
 
 	if policy, ok := snap.matchingPolicy(resolved.Provider, resolved.Model); ok &&
-		policy.Slowdown != nil && userPathAllowed(userPath, policy.UserPaths) {
+		policy.Slowdown != nil && s.identityAllowed(userPath, policy.UserPaths, policy.Groups) {
 		return *policy.Slowdown
 	}
 	return 0
