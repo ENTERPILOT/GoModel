@@ -34,6 +34,14 @@ func TestIsNewer(t *testing.T) {
 		{"longer prerelease supersedes its prefix", "1.0.0-rc", "1.0.0-rc.1", true},
 		{"double digit prerelease beats single", "1.0.0-rc.9", "1.0.0-rc.10", true},
 		{"identical pro suffix", "1.0.0-pro", "1.0.0-pro", false},
+		// A distribution marker belongs in build metadata, which is excluded
+		// from precedence, so a gateway never reports an update to itself.
+		{"build metadata marker on the manifest", "1.0.0+core.0.1.83", "1.0.0+pro", false},
+		{"build metadata marker on a prerelease", "1.2.3-beta.1+core.0.1.83", "1.2.3-beta.1+pro", false},
+		{"build metadata does not mask a real bump", "1.2.3-beta.1+core.0.1.83", "1.2.4+pro", true},
+		// The same marker as a prerelease suffix silently extends the
+		// identifier and outranks the release it annotates.
+		{"prerelease suffix would outrank its own release", "1.2.3-beta.1+core.0.1.83", "1.2.3-beta.1-pro", true},
 		// A numeric identifier larger than an int must still rank below an
 		// alphanumeric one rather than falling back to a lexical comparison.
 		{"oversized numeric prerelease ranks below alphanumeric", "1.0.0-999999999999999999999", "1.0.0-2foo", true},

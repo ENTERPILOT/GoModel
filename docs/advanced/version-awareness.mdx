@@ -31,7 +31,7 @@ The check reads one plain-text file:
 | Distribution | URL                              | Contents    |
 | ------------ | -------------------------------- | ----------- |
 | GoModel      | `(thiswebsite)/version/core.txt` | `X.Y.Z`     |
-| GoModel Pro  | `(thiswebsite)/version/pro.txt`  | `X.Y.Z-pro` |
+| GoModel Pro  | `(thiswebsite)/version/pro.txt`  | `X.Y.Z+pro` |
 
 ## When it runs
 
@@ -105,6 +105,12 @@ GOMODEL_VERSION_CHECK_URL=https://releases.internal.example.com/version
 
 The gateway appends `/core.txt` or `/pro.txt` based on its distribution, and
 expects a bare version string with no leading `v`.
+
+A mirror may annotate the value with semantic-versioning **build metadata**
+(`1.2.3+mirror`), which is excluded from precedence and therefore safe. Do not
+annotate with a prerelease suffix (`1.2.3-mirror`): that ranks *above* a plain
+`1.2.3` and below `1.2.3-mirrorx`, so gateways would compare against something
+other than the release you published.
 
 ## Configuration
 
