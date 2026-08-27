@@ -153,7 +153,7 @@ func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	yesterday := time.Now().AddDate(0, 0, -1).Format(time.DateOnly)
-	req.AddCookie(&http.Cookie{Name: versioncheck.CookieName, Value: yesterday + "-keep-me"})
+	req.AddCookie(&http.Cookie{Name: versioncheck.CookieName, Value: yesterday + "-3f2504e0-4f89-11d3-9a0c-0305e82c3301"})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -162,7 +162,7 @@ func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
 	if date != time.Now().Format(time.DateOnly) {
 		t.Errorf("cookie date = %q, want it rolled to today", date)
 	}
-	if id != "keep-me" {
+	if id != "3f2504e0-4f89-11d3-9a0c-0305e82c3301" {
 		t.Errorf("cookie id = %q, want the browser's id preserved across days", id)
 	}
 }
@@ -308,5 +308,33 @@ func TestVersionEndpointDoesNotWaitOnASlowManifest(t *testing.T) {
 	}
 	if status := decodeStatus(t, rec); status.Version != "0.1.81" {
 		t.Fatalf("got %+v, want the local build reported", status)
+	}
+}
+
+// /version is unauthenticated, and the visit id it accepts is echoed into an
+// outbound request header and back into Set-Cookie. A caller-supplied id that
+// is not the canonical UUID must be discarded rather than forwarded.
+func TestVersionEndpointRejectsAForgedVisitID(t *testing.T) {
+	srv, calls, headers := versionTestServer(t, manifestOK)
+
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	stale := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
+	forged := stale + "-" + strings.Repeat("A", 120) + "-injected"
+	req.AddCookie(&http.Cookie{Name: versioncheck.CookieName, Value: forged})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	awaitChecks(t, calls, 1)
+
+	if sent := headers().Get("X-GoModel-Date"); strings.Contains(sent, "injected") || strings.Contains(sent, "AAAA") {
+		t.Errorf("X-GoModel-Date = %q, want the forged id discarded", sent)
+	}
+	issued := visitCookie(t, rec)
+	if strings.Contains(issued, "injected") || strings.Contains(issued, "AAAA") {
+		t.Errorf("Set-Cookie = %q, want the forged id discarded", issued)
+	}
+	date, id := versioncheck.SplitVisit(issued)
+	if date != time.Now().UTC().Format(time.DateOnly) || id == "" {
+		t.Fatalf("issued cookie %q, want today plus a freshly minted id", issued)
 	}
 }

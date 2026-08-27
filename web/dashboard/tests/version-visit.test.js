@@ -44,8 +44,8 @@ test("readVisitCookie survives a value that is not valid percent-encoding", () =
 });
 
 test("checkedToday is true only for today's marker", () => {
-  assert.equal(checkedToday("2026-08-26-abc", "2026-08-26"), true);
-  assert.equal(checkedToday("2026-08-25-abc", "2026-08-26"), false);
+  assert.equal(checkedToday("2026-08-26-3f2504e0-4f89-11d3-9a0c-0305e82c3301", "2026-08-26"), true);
+  assert.equal(checkedToday("2026-08-25-3f2504e0-4f89-11d3-9a0c-0305e82c3301", "2026-08-26"), false);
 });
 
 test("checkedToday treats a missing or malformed cookie as due", () => {
@@ -65,18 +65,28 @@ test("checkedToday rejects a marker with no identifier", () => {
   assert.equal(checkPlan("2026-08-26-", "2026-08-26").delayed, true);
 });
 
+// The gateway accepts only a canonical UUID and replaces anything else, so a
+// non-conforming id must not count as "already checked in" here either.
+test("checkedToday accepts only a canonical uuid identifier", () => {
+  const uuid = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+  assert.equal(checkedToday(`2026-08-26-${uuid}`, "2026-08-26"), true);
+  assert.equal(checkedToday(`2026-08-26-${uuid.toUpperCase()}`, "2026-08-26"), false);
+  assert.equal(checkedToday("2026-08-26-not-a-uuid", "2026-08-26"), false);
+  assert.equal(checkedToday(`2026-08-26-${uuid.replace(/-/g, "")}`, "2026-08-26"), false);
+});
+
 // Regression: gating the request on the cookie made the update indicator show
 // on the day's first page load and disappear on every load after it. The
 // status must be fetched every time; only the timing depends on the cookie.
 test("the status is fetched on every page load, checked in today or not", () => {
-  assert.equal(checkPlan("2026-08-26-abc", "2026-08-26").fetch, true);
-  assert.equal(checkPlan("2026-08-25-abc", "2026-08-26").fetch, true);
+  assert.equal(checkPlan("2026-08-26-3f2504e0-4f89-11d3-9a0c-0305e82c3301", "2026-08-26").fetch, true);
+  assert.equal(checkPlan("2026-08-25-3f2504e0-4f89-11d3-9a0c-0305e82c3301", "2026-08-26").fetch, true);
   assert.equal(checkPlan("", "2026-08-26").fetch, true);
   assert.equal(checkPlan("garbage", "2026-08-26").fetch, true);
 });
 
 test("only a browser that has not checked in today delays its request", () => {
-  assert.equal(checkPlan("2026-08-26-abc", "2026-08-26").delayed, false);
-  assert.equal(checkPlan("2026-08-25-abc", "2026-08-26").delayed, true);
+  assert.equal(checkPlan("2026-08-26-3f2504e0-4f89-11d3-9a0c-0305e82c3301", "2026-08-26").delayed, false);
+  assert.equal(checkPlan("2026-08-25-3f2504e0-4f89-11d3-9a0c-0305e82c3301", "2026-08-26").delayed, true);
   assert.equal(checkPlan("", "2026-08-26").delayed, true);
 });

@@ -11,6 +11,12 @@ type Beacon struct {
 	Visit          string
 }
 
+// maxForwardedValue bounds each forwarded browser header. /version is
+// unauthenticated, so these values are supplied by whoever calls it; a cap
+// keeps an oversized one out of the outbound request and the release host's
+// records.
+const maxForwardedValue = 512
+
 // forwardedHeaders are the browser headers copied verbatim onto an update
 // check. Anything absent from this list is dropped.
 var forwardedHeaders = []string{
@@ -23,12 +29,12 @@ var forwardedHeaders = []string{
 // BeaconFromRequest extracts the allowlisted fields of a dashboard request.
 func BeaconFromRequest(r *http.Request, visit string) Beacon {
 	beacon := Beacon{
-		UserAgent:      r.Header.Get("User-Agent"),
-		AcceptLanguage: r.Header.Get("Accept-Language"),
+		UserAgent:      bound(r.Header.Get("User-Agent")),
+		AcceptLanguage: bound(r.Header.Get("Accept-Language")),
 		Visit:          visit,
 	}
 	for _, name := range forwardedHeaders {
-		if value := r.Header.Get(name); value != "" {
+		if value := bound(r.Header.Get(name)); value != "" {
 			if beacon.ClientHints == nil {
 				beacon.ClientHints = make(map[string]string, len(forwardedHeaders))
 			}
@@ -36,6 +42,13 @@ func BeaconFromRequest(r *http.Request, visit string) Beacon {
 		}
 	}
 	return beacon
+}
+
+func bound(value string) string {
+	if len(value) > maxForwardedValue {
+		return value[:maxForwardedValue]
+	}
+	return value
 }
 
 // dashboard reports whether the beacon came from a browser visit rather than

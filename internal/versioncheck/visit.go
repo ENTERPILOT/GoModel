@@ -23,6 +23,12 @@ const dateLength = len("2006-01-02")
 // SplitVisit separates a cookie value into its date and id halves. An empty
 // or malformed value yields empty strings, which callers treat as a first
 // visit.
+//
+// The id must be exactly the canonical UUID NewVisit generates. /version is
+// unauthenticated and the id is echoed into an outbound request header and
+// back into Set-Cookie, so an unvalidated one would let any caller put text of
+// their choosing into both. Anything else is discarded and replaced with a
+// fresh id, which is also the right answer for a cookie corrupted in transit.
 func SplitVisit(value string) (date, id string) {
 	value = strings.TrimSpace(value)
 	if len(value) < dateLength+2 || value[dateLength] != '-' {
@@ -32,7 +38,20 @@ func SplitVisit(value string) (date, id string) {
 	if _, err := time.Parse(time.DateOnly, date); err != nil {
 		return "", ""
 	}
-	return date, value[dateLength+1:]
+	id = value[dateLength+1:]
+	if !validID(id) {
+		return "", ""
+	}
+	return date, id
+}
+
+// validID reports whether id is a canonical lower-case hyphenated UUID.
+// uuid.Parse alone is too permissive: it also accepts braced, URN and
+// unhyphenated forms, so the round-trip comparison pins the exact shape
+// NewVisit emits.
+func validID(id string) bool {
+	parsed, err := uuid.Parse(id)
+	return err == nil && parsed.String() == id
 }
 
 // NewVisit builds a cookie value for today, reusing id when the browser

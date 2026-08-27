@@ -8,6 +8,12 @@ export const VISIT_COOKIE = "gomodel_version_check";
 
 const DATE_LENGTH = "2026-08-26".length;
 
+// The gateway mints and accepts only this shape, and discards anything else
+// as a first visit. Matching it here keeps the two sides from disagreeing
+// about whether this browser has already checked in.
+const CANONICAL_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
  * utcDateKey returns a date as YYYY-MM-DD in UTC.
  *
@@ -46,11 +52,11 @@ export function readVisitCookie(cookieHeader = "") {
  */
 export function checkedToday(cookieValue, today = utcDateKey()) {
   const value = String(cookieValue || "");
-  // The identifier after the separator must be non-empty: the gateway treats
-  // "2026-08-27-" as a first visit, and disagreeing with it here would skip
-  // the delay for a cookie it is about to replace.
   if (value.length <= DATE_LENGTH + 1) return false;
-  return value.slice(0, DATE_LENGTH) === today && value[DATE_LENGTH] === "-";
+  if (value.slice(0, DATE_LENGTH) !== today || value[DATE_LENGTH] !== "-") {
+    return false;
+  }
+  return CANONICAL_ID.test(value.slice(DATE_LENGTH + 1));
 }
 
 /**
