@@ -612,3 +612,12 @@ providers:
 # extensions:
 #   example:
 #     enabled: true
+
+# Version awareness. Checks https://gomodel.enterpilot.io/version once a day —
+# and again on the first dashboard visit of each day — so operators learn that a
+# newer release exists. Sends the running version, the distribution name, a random
+# per-deployment install id, and the visiting browser's user agent and language.
+# Never sends API keys, model names, prompts, usage data, client addresses, or
+# the dashboard hostname. Set enabled: false to stop all outbound traffic.
+# version_check:
+#   enabled: true

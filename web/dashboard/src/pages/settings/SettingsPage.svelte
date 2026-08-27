@@ -8,6 +8,7 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { appVersion } from "$lib/api/paths.js";
+  import UpdateBanner from "$lib/components/molecules/UpdateBanner.svelte";
   import LocaleSelector from "$lib/components/molecules/LocaleSelector.svelte";
   import * as m from "$lib/paraglide/messages.js";
   import TimezoneSettings from "./TimezoneSettings.svelte";
@@ -37,6 +38,8 @@
     </div>
   </div>
 
+  <UpdateBanner />
+
   <div class="settings-panel">
     <TimezoneSettings />
     <LocaleSelector />
@@ -59,4 +62,5 @@
     font-size: 12px;
     text-align: right;
   }
+
 </style>

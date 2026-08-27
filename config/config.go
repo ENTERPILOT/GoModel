@@ -39,6 +39,10 @@ type Config struct {
 	Session    SessionConfig    `yaml:"session"`
 	MCP        MCPConfig        `yaml:"mcp"`
 
+	// VersionCheck controls the daily update check against the public
+	// release manifest. See VersionCheckConfig for what it sends.
+	VersionCheck VersionCheckConfig `yaml:"version_check"`
+
 	// Extensions holds configuration owned by custom distributions. Core keeps
 	// the values opaque; an extension decodes its named section with
 	// LoadResult.DecodeExtension.
@@ -193,6 +197,13 @@ func buildDefaultConfig() *Config {
 		},
 		MCP: MCPConfig{
 			Enabled: true,
+		},
+		VersionCheck: VersionCheckConfig{
+			Enabled:        true,
+			URL:            DefaultVersionCheckURL,
+			IntervalHours:  24,
+			TimeoutSeconds: 5,
+			MaxDailyChecks: 500,
 		},
 	}
 }
