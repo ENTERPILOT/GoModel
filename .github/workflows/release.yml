@@ -207,24 +207,111 @@ jobs:
   publish-version-manifest:
     name: Publish version manifest
     runs-on: ubuntu-latest
-    # Runs after the GitHub release exists: the website regenerates
-    # public/version/core.txt from the latest release, so dispatching earlier
-    # would republish the previous version.
+    # Runs after the GitHub release exists: the push triggers a website deploy,
+    # whose sync script regenerates core.txt from the latest release. Running
+    # earlier would let that regeneration overwrite this version with the
+    # previous one.
     needs: github-release
-    # Prereleases (v1.2.3-rc1) are not "latest" on GitHub, so the website
-    # would regenerate the same manifest it already serves.
+    # Prereleases (v1.2.3-rc1) are not "latest" on GitHub, so the website's
+    # sync script would immediately overwrite the manifest with the last
+    # stable release anyway.
     if: ${{ !contains(github.ref_name, '-') }}
     # Best-effort: running gateways keep working on a stale manifest, and the
     # website's nightly deploy regenerates it anyway.
     continue-on-error: true
+    # Serialize with any concurrent release: two runs pushing the manifest at
+    # once would race. Queue rather than cancel, so no release is skipped.
+    concurrency:
+      group: publish-core-version-manifest
+      cancel-in-progress: false
     steps:
-      - name: Dispatch website deploy
+      # This used to fire a repository_dispatch, which needs an API token.
+      # WEBSITE_DISPATCH_TOKEN was never set, so the step failed on every
+      # release and only the website's nightly cron kept core.txt current.
+      # Pushing the manifest instead works with a deploy key, which is scoped
+      # to that one repository and carries no user identity - and the push is
+      # itself a deploy trigger, so the site still rebuilds immediately.
+      - name: Checkout website repository
+        uses: actions/checkout@v7
+        with:
+          repository: ENTERPILOT/gomodel.enterpilot.io
+          ssh-key: ${{ secrets.WEBSITE_PUSH_KEY }}
+          # Pushing back to main needs the credentials to stay in the clone.
+          persist-credentials: true
+
+      - name: Publish core.txt
         env:
-          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          VERSION: ${{ github.ref_name }}
         run: |
-          gh api repos/ENTERPILOT/gomodel.enterpilot.io/dispatches \
-            -f event_type=gomodel-release \
-            -f "client_payload[version]=${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          version="${VERSION#v}"
+          manifest=public/version/core.txt
+          branch="$(git rev-parse --abbrev-ref HEAD)"
+
+          # Echoes the newer of two versions. `sort -V` alone gets prereleases
+          # backwards - it ranks 1.2.3-rc1 above 1.2.3 - so compare the numeric
+          # core first and let a release beat its own prerelease.
+          newer_of() {
+            local a="$1" b="$2"
+            local a_core b_core a_suffix b_suffix
+            a_core="$(printf '%s' "${a}" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+            b_core="$(printf '%s' "${b}" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
+            if [ "${a_core}" != "${b_core}" ]; then
+              if [ "$(printf '%s\n%s\n' "${a_core}" "${b_core}" | sort -V | tail -n1)" = "${a_core}" ]; then
+                printf '%s' "${a}"
+              else
+                printf '%s' "${b}"
+              fi
+              return
+            fi
+            a_suffix="${a#"${a_core}"}"
+            b_suffix="${b#"${b_core}"}"
+            if [ -z "${a_suffix}" ]; then printf '%s' "${a}"; return; fi
+            if [ -z "${b_suffix}" ]; then printf '%s' "${b}"; return; fi
+            printf '%s\n%s\n' "${a}" "${b}" | sort -V | tail -n1
+          }
+
+          for attempt in 1 2 3; do
+            git fetch origin "${branch}"
+            git reset --hard "origin/${branch}"
+
+            # Re-runs of an older tag, and releases that finish out of order,
+            # must never walk the advertised version backwards: gateways would
+            # stop seeing an update that is already published.
+            published="$(tr -d '[:space:]' < "${manifest}" 2>/dev/null || true)"
+            if [ -n "${published}" ] && [ "${published}" != "${version}" ]; then
+              if [ "$(newer_of "${published}" "${version}")" = "${published}" ]; then
+                echo "core.txt already advertises ${published}, newer than ${version} - not downgrading"
+                exit 0
+              fi
+            fi
+
+            mkdir -p "$(dirname "${manifest}")"
+            # The bare version a gateway compares against its own build, with
+            # no leading "v" - matching what the website's sync script writes.
+            printf '%s\n' "${version}" > "${manifest}"
+            cat "${manifest}"
+
+            # Stage before comparing: an untracked manifest is invisible to
+            # `git diff`, which would report no change and skip the publish.
+            git add "${manifest}"
+            if git diff --cached --quiet -- "${manifest}"; then
+              echo "core.txt already at ${version} - nothing to publish"
+              exit 0
+            fi
+
+            git commit -m "chore(version): publish GoModel ${version}"
+            if git push origin "HEAD:${branch}"; then
+              exit 0
+            fi
+            echo "push rejected (attempt ${attempt}); refetching and retrying"
+          done
+
+          echo "could not publish core.txt after 3 attempts" >&2
+          exit 1
 
   publish-mcp:
     name: Publish to MCP Registry
