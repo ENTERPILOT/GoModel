@@ -115,7 +115,7 @@ func New(cfg Config) *Checker {
 		cfg.Client = &http.Client{Timeout: cfg.Timeout}
 	}
 	manifest := manifestURL(cfg.URL, cfg.App)
-	return &Checker{cfg: cfg, url: manifest, safeURL: safeURL(manifest)}
+	return &Checker{cfg: cfg, url: manifest, safeURL: SafeURL(manifest)}
 }
 
 // manifestURL appends the distribution's channel file to the configured base.
@@ -136,11 +136,28 @@ func manifestURL(base, app string) string {
 	return parsed.String()
 }
 
+// LeaksQueryInCleartext reports whether a configured manifest URL would put
+// its query string on the wire unencrypted. A private mirror may authenticate
+// with a query token, and over plain HTTP that token is readable by anything
+// on the path — redacting it from logs does not help there.
+//
+// Reported rather than rejected: the URL is a deliberate operator choice, an
+// internal mirror on a trusted network is a legitimate setup, and refusing to
+// start the gateway over a non-essential update check would be a worse
+// outcome than telling the operator what they have configured.
+func LeaksQueryInCleartext(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return parsed.Scheme == "http" && parsed.RawQuery != ""
+}
+
 // safeURL identifies the manifest host for errors and logs without quoting
 // anything an operator may have embedded in the configured URL. A private
 // mirror can carry a secret in userinfo, in the query, or in the path itself,
 // so only the scheme and host survive.
-func safeURL(raw string) string {
+func SafeURL(raw string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
 		return "the configured manifest host"

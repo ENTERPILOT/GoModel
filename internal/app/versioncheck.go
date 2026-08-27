@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
@@ -23,6 +24,10 @@ func newVersionChecker(cfg config.VersionCheckConfig) *versioncheck.Checker {
 	}
 	if cfg.Enabled {
 		checkerCfg.InstallID = versioncheck.InstallID()
+		if versioncheck.LeaksQueryInCleartext(cfg.URL) {
+			slog.Warn("version check URL sends its query string unencrypted; use https if it carries a credential",
+				"host", versioncheck.SafeURL(cfg.URL))
+		}
 	}
 	return versioncheck.New(checkerCfg)
 }

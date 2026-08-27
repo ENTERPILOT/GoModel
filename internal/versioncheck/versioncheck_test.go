@@ -70,13 +70,13 @@ func TestSafeURLKeepsOnlySchemeAndHost(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.want+" "+tt.raw, func(t *testing.T) {
-			got := safeURL(tt.raw)
+			got := SafeURL(tt.raw)
 			if got != tt.want {
-				t.Fatalf("safeURL(%q) = %q, want %q", tt.raw, got, tt.want)
+				t.Fatalf("SafeURL(%q) = %q, want %q", tt.raw, got, tt.want)
 			}
 			for _, secret := range []string{"hunter2", "token=abc", "s3cr3t"} {
 				if strings.Contains(got, secret) {
-					t.Fatalf("safeURL(%q) leaked %q", tt.raw, secret)
+					t.Fatalf("SafeURL(%q) leaked %q", tt.raw, secret)
 				}
 			}
 		})
@@ -298,5 +298,27 @@ func TestDisabledCheckerNeverCallsOut(t *testing.T) {
 	status := checker.Status()
 	if status.Enabled || status.Version != "0.1.81" {
 		t.Fatalf("got %+v, want the local version with Enabled false", status)
+	}
+}
+
+func TestLeaksQueryInCleartext(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"http with a query token", "http://mirror.test/version?token=abc", true},
+		{"https with a query token", "https://mirror.test/version?token=abc", false},
+		{"http without a query", "http://mirror.test/version", false},
+		{"https without a query", "https://mirror.test/version", false},
+		{"default url", DefaultURL, false},
+		{"unparseable", "://nope", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := LeaksQueryInCleartext(tt.raw); got != tt.want {
+				t.Fatalf("LeaksQueryInCleartext(%q) = %v, want %v", tt.raw, got, tt.want)
+			}
+		})
 	}
 }
