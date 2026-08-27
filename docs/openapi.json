@@ -236,6 +236,14 @@
             }
           },
           {
+            "description": "Case-insensitive substring search on the tracked user path",
+            "name": "user_path_search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Filter by exact request id",
             "name": "request_id",
             "in": "query",
@@ -413,6 +421,14 @@
           {
             "description": "Filter by tracked user path subtree",
             "name": "user_path",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Case-insensitive substring search on the tracked user path",
+            "name": "user_path_search",
             "in": "query",
             "schema": {
               "type": "string"

@@ -19,6 +19,10 @@ type LogQueryParams struct {
 	Method         string
 	Path           string
 	UserPath       string
+	// UserPathSearch is a case-insensitive substring filter used by the
+	// dashboard's incremental user-path search. UserPath keeps its canonical
+	// exact/subtree semantics for API callers.
+	UserPathSearch string
 	RequestID      string // exact-match request id filter
 	SessionID      string // exact-match session id filter
 	ErrorType      string

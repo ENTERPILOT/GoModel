@@ -262,11 +262,14 @@ func mongoLogMatchFilters(params LogQueryParams) (bson.D, error) {
 		if params.ExactUserPath {
 			matchFilters = append(matchFilters, mongoExactUserPathMatchFilter(userPath))
 		} else {
-			matchFilters = append(matchFilters, bson.E{Key: "user_path", Value: bson.D{
-				{Key: "$regex", Value: regexp.QuoteMeta(userPath)},
-				{Key: "$options", Value: "i"},
-			}})
+			matchFilters = append(matchFilters, mongoUserPathMatchFilter(userPath))
 		}
+	}
+	if userPathSearch := strings.TrimSpace(params.UserPathSearch); userPathSearch != "" {
+		matchFilters = append(matchFilters, bson.E{Key: "user_path", Value: bson.D{
+			{Key: "$regex", Value: regexp.QuoteMeta(userPathSearch)},
+			{Key: "$options", Value: "i"},
+		}})
 	}
 	if params.ErrorType != "" {
 		matchFilters = append(matchFilters, bson.E{

@@ -187,6 +187,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Case-insensitive substring search on the tracked user path",
+                        "name": "user_path_search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Filter by exact request id",
                         "name": "request_id",
                         "in": "query"
@@ -318,6 +324,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Filter by tracked user path subtree",
                         "name": "user_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive substring search on the tracked user path",
+                        "name": "user_path_search",
                         "in": "query"
                     },
                     {

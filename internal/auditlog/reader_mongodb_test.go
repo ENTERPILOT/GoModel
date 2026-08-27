@@ -156,3 +156,17 @@ func TestMongoLogMatchFilters_RequestIDUsesExactFieldMatch(t *testing.T) {
 		t.Fatalf("mongoLogMatchFilters(request_id) = %#v, want %#v", got, want)
 	}
 }
+
+func TestMongoLogMatchFilters_UserPathSearchUsesSubstringRegex(t *testing.T) {
+	got, err := mongoLogMatchFilters(LogQueryParams{UserPathSearch: "xinat"})
+	if err != nil {
+		t.Fatalf("mongoLogMatchFilters returned error: %v", err)
+	}
+	want := bson.D{{Key: "user_path", Value: bson.D{
+		{Key: "$regex", Value: "xinat"},
+		{Key: "$options", Value: "i"},
+	}}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mongoLogMatchFilters(user_path_search) = %#v, want %#v", got, want)
+	}
+}

@@ -65,7 +65,7 @@ func TestAuditSessions_Success(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/sessions?days=7&user_path=/team")
+	c, rec := newHandlerContext("/admin/audit/sessions?days=7&user_path=/team&user_path_search=xinat")
 
 	if err := h.AuditSessions(c); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -75,6 +75,9 @@ func TestAuditSessions_Success(t *testing.T) {
 	}
 	if reader.lastQuery.UserPath != "/team" {
 		t.Errorf("user_path filter not forwarded: %q", reader.lastQuery.UserPath)
+	}
+	if reader.lastQuery.UserPathSearch != "xinat" {
+		t.Errorf("user_path_search filter not forwarded: %q", reader.lastQuery.UserPathSearch)
 	}
 
 	var result struct {

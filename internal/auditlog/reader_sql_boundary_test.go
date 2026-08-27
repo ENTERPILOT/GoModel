@@ -139,10 +139,16 @@ func TestSQLReaderGetLogs_UserPathFilterMatchesPartialPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create store: %v", err)
 		}
-		if err := store.WriteBatch(context.Background(), []*LogEntry{{
-			ID: "partial-user-path", Timestamp: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
-			RequestedModel: "gpt-5", Provider: "openai", UserPath: "/team/alpha",
-		}}); err != nil {
+		if err := store.WriteBatch(context.Background(), []*LogEntry{
+			{
+				ID: "partial-user-path", Timestamp: time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
+				RequestedModel: "gpt-5", Provider: "openai", UserPath: "/team/alpha",
+			},
+			{
+				ID: "video-user-path", Timestamp: time.Date(2026, 1, 16, 11, 0, 0, 0, time.UTC),
+				RequestedModel: "gpt-5", Provider: "openai", UserPath: "/voxinate/events/97gn9a9e",
+			},
+		}); err != nil {
 			t.Fatalf("failed to seed audit log: %v", err)
 		}
 
@@ -150,12 +156,33 @@ func TestSQLReaderGetLogs_UserPathFilterMatchesPartialPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create reader: %v", err)
 		}
-		result, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "alpha", Limit: 10})
-		if err != nil {
-			t.Fatalf("GetLogs returned error: %v", err)
+
+		for _, tc := range []struct {
+			name, query, wantID string
+		}{
+			{name: "complete segment", query: "alpha", wantID: "partial-user-path"},
+			{name: "video prefix", query: "voxina", wantID: "video-user-path"},
+			{name: "word fragment", query: "xinat", wantID: "video-user-path"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				result, err := reader.GetLogs(context.Background(), LogQueryParams{UserPathSearch: tc.query, Limit: 10})
+				if err != nil {
+					t.Fatalf("GetLogs returned error: %v", err)
+				}
+				if result.Total != 1 || len(result.Entries) != 1 || result.Entries[0].ID != tc.wantID {
+					t.Fatalf("partial user path %q returned %#v (total %d), want %s", tc.query, result.Entries, result.Total, tc.wantID)
+				}
+			})
 		}
-		if result.Total != 1 || result.Entries[0].ID != "partial-user-path" {
-			t.Fatalf("partial user path returned %#v, want partial-user-path", result.Entries)
+
+		sessions, err := reader.GetSessions(context.Background(), LogQueryParams{
+			UserPathSearch: "voxina", Limit: 10,
+		})
+		if err != nil {
+			t.Fatalf("GetSessions returned error: %v", err)
+		}
+		if sessions.Total != 1 || len(sessions.Sessions) != 1 || sessions.Sessions[0].Latest.ID != "video-user-path" {
+			t.Fatalf("partial user path sessions = %#v (total %d), want video-user-path", sessions.Sessions, sessions.Total)
 		}
 	})
 }
