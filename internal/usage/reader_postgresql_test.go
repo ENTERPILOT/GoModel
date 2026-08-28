@@ -10,9 +10,9 @@ import (
 
 func TestPostgreSQLSessionUsageQueriesArePagedAndExcludeCachedCost(t *testing.T) {
 	countQuery, dataQuery, args, dataArgs, limit, offset, err := postgresqlSessionUsageQueries(SessionUsageParams{
-		UsageQueryParams: UsageQueryParams{SessionID: "scoped-session", CacheMode: CacheModeUncached},
-		Limit:            25,
-		Offset:           10,
+		SessionID: "scoped-session", CacheMode: CacheModeUncached,
+		Limit:  25,
+		Offset: 10,
 	})
 	if err != nil {
 		t.Fatalf("postgresqlSessionUsageQueries: %v", err)

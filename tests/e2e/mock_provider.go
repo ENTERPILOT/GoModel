@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"time"
 
@@ -505,8 +506,8 @@ func extractInputText(input any) string {
 		return v
 	case []any:
 		// Array input - extract from last user message
-		for i := len(v) - 1; i >= 0; i-- {
-			if msg, ok := v[i].(map[string]any); ok {
+		for _, v0 := range slices.Backward(v) {
+			if msg, ok := v0.(map[string]any); ok {
 				if role, _ := msg["role"].(string); role == "user" {
 					if content, ok := msg["content"].(string); ok {
 						return content

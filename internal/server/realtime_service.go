@@ -263,8 +263,7 @@ func (s *realtimeService) proxy(c *echo.Context, ctx context.Context, target *co
 	slog.Info("realtime session opened", "request_id", route.requestID, "model", route.model, "provider", route.providerType)
 	err := realtime.Proxy(c.Response(), c.Request(), t, hooks)
 
-	var de *realtime.DialError
-	if errors.As(err, &de) {
+	if de, ok := errors.AsType[*realtime.DialError](err); ok {
 		slog.Warn("realtime upstream dial failed", "request_id", route.requestID, "provider", route.providerType, "error", de.Err)
 		return handleError(c, core.NewProviderError(route.providerType, http.StatusBadGateway, "failed to connect to realtime upstream", de.Err))
 	}

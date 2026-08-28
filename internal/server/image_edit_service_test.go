@@ -87,7 +87,7 @@ var catPNG = editFormFile{field: "image", filename: "cat.png", contentType: "ima
 
 func TestImageEdits_ReturnsProviderResponse(t *testing.T) {
 	mock := newImageEditMock()
-	svc := &imageService{modelCallService: modelCallService{provider: mock}}
+	svc := &imageService{provider: mock}
 	c, rec := newImageEditRequest(t,
 		[][2]string{{"model", "gpt-image-1"}, {"prompt", "add a hat"}, {"n", "1"}, {"size", "1024x1024"}, {"input_fidelity", "high"}},
 		catPNG,
@@ -138,7 +138,7 @@ func TestImageEdits_ReturnsProviderResponse(t *testing.T) {
 
 func TestImageEdits_CollectsImageArray(t *testing.T) {
 	mock := newImageEditMock()
-	svc := &imageService{modelCallService: modelCallService{provider: mock}}
+	svc := &imageService{provider: mock}
 	c, rec := newImageEditRequest(t,
 		[][2]string{{"model", "gpt-image-1"}, {"prompt", "combine"}},
 		editFormFile{field: "image[]", filename: "one.png", data: "one"},
@@ -172,7 +172,7 @@ func TestImageEdits_RejectsInvalidRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newImageEditMock()
-			svc := &imageService{modelCallService: modelCallService{provider: mock}}
+			svc := &imageService{provider: mock}
 			c, rec := newImageEditRequest(t, tt.values, tt.files...)
 
 			if err := svc.CreateImageEdit(c); err != nil {
@@ -192,7 +192,7 @@ func TestImageEdits_RejectsInvalidRequests(t *testing.T) {
 }
 
 func TestImageEdits_RejectsNonMultipartBody(t *testing.T) {
-	svc := &imageService{modelCallService: modelCallService{provider: newImageEditMock()}}
+	svc := &imageService{provider: newImageEditMock()}
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(`{"model":"gpt-image-1","prompt":"x"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -207,7 +207,7 @@ func TestImageEdits_RejectsNonMultipartBody(t *testing.T) {
 
 func TestImageEdits_RouterWithoutEditSupport(t *testing.T) {
 	// A router that generates images but cannot edit them.
-	svc := &imageService{modelCallService: modelCallService{provider: newImageMock()}}
+	svc := &imageService{provider: newImageMock()}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "dall-e-3"}, {"prompt", "x"}}, catPNG)
 
 	if err := svc.CreateImageEdit(c); err != nil {
@@ -223,7 +223,7 @@ func TestImageEdits_AuthorizesResolvedSelector(t *testing.T) {
 		mock := newImageEditMock()
 		mock.resolved = &core.ModelSelector{Provider: "openai", Model: "gpt-image-1"}
 		authorizer := &recordingModelAuthorizer{}
-		svc := &imageService{modelCallService: modelCallService{provider: mock, modelAuthorizer: authorizer}}
+		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
 		c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
 
 		if err := svc.CreateImageEdit(c); err != nil {
@@ -240,7 +240,7 @@ func TestImageEdits_AuthorizesResolvedSelector(t *testing.T) {
 	t.Run("denied", func(t *testing.T) {
 		mock := newImageEditMock()
 		authorizer := &recordingModelAuthorizer{err: core.NewInvalidRequestError("denied", nil)}
-		svc := &imageService{modelCallService: modelCallService{provider: mock, modelAuthorizer: authorizer}}
+		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
 		c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
 
 		if err := svc.CreateImageEdit(c); err != nil {
@@ -258,7 +258,7 @@ func TestImageEdits_AuthorizesResolvedSelector(t *testing.T) {
 func TestImageEdits_ProviderErrorIsSurfaced(t *testing.T) {
 	mock := newImageEditMock()
 	mock.imageErr = core.NewProviderError("openai", http.StatusBadRequest, "Invalid image format", nil)
-	svc := &imageService{modelCallService: modelCallService{provider: mock}}
+	svc := &imageService{provider: mock}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
 
 	if err := svc.CreateImageEdit(c); err != nil {
@@ -274,7 +274,7 @@ func TestImageEdits_NilProviderResponseIs502(t *testing.T) {
 	mock.imageResp = nil
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
-	svc := &imageService{modelCallService: modelCallService{provider: mock, usageLogger: logger}}
+	svc := &imageService{provider: mock, usageLogger: logger}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
 
 	if err := svc.CreateImageEdit(c); err != nil {
@@ -293,11 +293,10 @@ func TestImageEdits_LogsUsage(t *testing.T) {
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	mock := newImageEditMock()
 	pricing := &core.ModelPricing{PerImage: new(0.04)}
-	svc := &imageService{modelCallService: modelCallService{
+	svc := &imageService{
 		provider:        mock,
 		usageLogger:     logger,
-		pricingResolver: &mockPricingResolver{pricing: pricing},
-	}}
+		pricingResolver: &mockPricingResolver{pricing: pricing}}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
 
 	if err := svc.CreateImageEdit(c); err != nil {
@@ -372,10 +371,10 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 			mock := newImageEditMock()
 			mock.resolved = &core.ModelSelector{Provider: "openai", Model: "gpt-image-1"}
 			svc := &imageService{
-				modelCallService: modelCallService{provider: mock},
-				logBodies:        tt.logBodies,
-				logImageInputs:   tt.logImageInputs,
-				logImageOutputs:  tt.logImageOutputs,
+				provider:        mock,
+				logBodies:       tt.logBodies,
+				logImageInputs:  tt.logImageInputs,
+				logImageOutputs: tt.logImageOutputs,
 			}
 			c, rec := newImageEditRequest(t,
 				[][2]string{{"model", "gpt-image-1"}, {"prompt", "add a hat"}, {"size", "1024x1024"}, {"provider", "openai"}},

@@ -478,8 +478,7 @@ func providerCredentialWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var fieldErr *providers.CredentialFieldError
-	if errors.As(err, &fieldErr) {
+	if fieldErr, ok := errors.AsType[*providers.CredentialFieldError](err); ok {
 		invalid := core.NewInvalidRequestError(fieldErr.Message, err)
 		if fieldErr.Field == "" {
 			// Bad input the form cannot pin on one input; still a 400.

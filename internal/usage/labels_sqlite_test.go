@@ -199,7 +199,7 @@ func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 func TestSQLiteUsageLogLabelFilter(t *testing.T) {
 	reader := newLabelledSQLiteReader(t)
 
-	result, err := reader.GetUsageLog(context.Background(), UsageLogParams{UsageQueryParams: UsageQueryParams{Label: "prod"}})
+	result, err := reader.GetUsageLog(context.Background(), UsageLogParams{Label: "prod"})
 	if err != nil {
 		t.Fatalf("GetUsageLog() error = %v", err)
 	}
@@ -211,7 +211,7 @@ func TestSQLiteUsageLogLabelFilter(t *testing.T) {
 	}
 
 	// A label that is a substring of an existing one must not match.
-	empty, err := reader.GetUsageLog(context.Background(), UsageLogParams{UsageQueryParams: UsageQueryParams{Label: "pro"}})
+	empty, err := reader.GetUsageLog(context.Background(), UsageLogParams{Label: "pro"})
 	if err != nil {
 		t.Fatalf("GetUsageLog() error = %v", err)
 	}

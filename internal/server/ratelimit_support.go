@@ -153,8 +153,7 @@ func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter, route 
 }
 
 func rateLimitCheckError(err error) error {
-	var exceeded *ratelimit.ExceededError
-	if errors.As(err, &exceeded) {
+	if exceeded, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		message := exceeded.Error()
 		if message == "" {
 			message = "rate limit exceeded"

@@ -15,19 +15,17 @@ import (
 
 func TestMessages_NonStreaming(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"claude-test"},
-			response: &core.ChatResponse{
-				ID:     "resp-1",
-				Object: "chat.completion",
-				Model:  "claude-test",
-				Choices: []core.Choice{{
-					Index:        0,
-					Message:      core.ResponseMessage{Role: "assistant", Content: "Hello back"},
-					FinishReason: "stop",
-				}},
-				Usage: core.Usage{PromptTokens: 9, CompletionTokens: 3, TotalTokens: 12},
-			},
+		supportedModels: []string{"claude-test"},
+		response: &core.ChatResponse{
+			ID:     "resp-1",
+			Object: "chat.completion",
+			Model:  "claude-test",
+			Choices: []core.Choice{{
+				Index:        0,
+				Message:      core.ResponseMessage{Role: "assistant", Content: "Hello back"},
+				FinishReason: "stop",
+			}},
+			Usage: core.Usage{PromptTokens: 9, CompletionTokens: 3, TotalTokens: 12},
 		},
 	}
 
@@ -88,10 +86,8 @@ func TestMessages_Streaming(t *testing.T) {
 	}, "\n\n")
 
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"claude-test"},
-			streamData:      chatSSE,
-		},
+		supportedModels: []string{"claude-test"},
+		streamData:      chatSSE,
 	}
 
 	e := echo.New()

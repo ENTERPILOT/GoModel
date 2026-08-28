@@ -255,10 +255,14 @@ func mapAWSError(err error) error {
 		return nil
 	}
 
-	type httpStatus interface{ HTTPStatusCode() int }
-	var hs httpStatus
+	// Every value in an error chain is an error, so embedding it only lets
+	// errors.AsType target the interface; the match is the same as before.
+	type httpStatus interface {
+		error
+		HTTPStatusCode() int
+	}
 	status := http.StatusBadGateway
-	if errors.As(err, &hs) {
+	if hs, ok := errors.AsType[httpStatus](err); ok {
 		if code := hs.HTTPStatusCode(); code > 0 {
 			status = code
 		}
@@ -269,9 +273,8 @@ func mapAWSError(err error) error {
 		ErrorCode() string
 		ErrorMessage() string
 	}
-	var ae apiErr
 	message := err.Error()
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[apiErr](err); ok {
 		if msg := strings.TrimSpace(ae.ErrorMessage()); msg != "" {
 			message = fmt.Sprintf("%s: %s", ae.ErrorCode(), msg)
 		}

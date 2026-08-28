@@ -60,7 +60,7 @@ func newImageRequest(body string) (*echo.Context, *httptest.ResponseRecorder) {
 
 func TestImageGenerations_ReturnsProviderResponse(t *testing.T) {
 	mock := newImageMock()
-	svc := &imageService{modelCallService: modelCallService{provider: mock}}
+	svc := &imageService{provider: mock}
 	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat","n":1,"size":"1024x1024","style":"vivid"}`)
 
 	if err := svc.CreateImage(c); err != nil {
@@ -115,7 +115,7 @@ func TestImageGenerations_RejectsInvalidRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newImageMock()
-			svc := &imageService{modelCallService: modelCallService{provider: mock}}
+			svc := &imageService{provider: mock}
 			c, rec := newImageRequest(tt.body)
 
 			if err := svc.CreateImage(c); err != nil {
@@ -135,7 +135,7 @@ func TestImageGenerations_RejectsInvalidRequests(t *testing.T) {
 }
 
 func TestImageGenerations_RouterWithoutImageSupport(t *testing.T) {
-	svc := &imageService{modelCallService: modelCallService{provider: &mockProvider{supportedModels: []string{"dall-e-3"}}}}
+	svc := &imageService{provider: &mockProvider{supportedModels: []string{"dall-e-3"}}}
 	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
 
 	if err := svc.CreateImage(c); err != nil {
@@ -157,7 +157,7 @@ func TestImageGenerations_AuthorizesResolvedSelector(t *testing.T) {
 		mock := newImageMock()
 		mock.resolved = &core.ModelSelector{Provider: "openai", Model: "dall-e-3"}
 		authorizer := &recordingModelAuthorizer{}
-		svc := &imageService{modelCallService: modelCallService{provider: mock, modelAuthorizer: authorizer}}
+		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
 		c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
 
 		if err := svc.CreateImage(c); err != nil {
@@ -174,7 +174,7 @@ func TestImageGenerations_AuthorizesResolvedSelector(t *testing.T) {
 	t.Run("denied", func(t *testing.T) {
 		mock := newImageMock()
 		authorizer := &recordingModelAuthorizer{err: core.NewInvalidRequestError("denied", nil)}
-		svc := &imageService{modelCallService: modelCallService{provider: mock, modelAuthorizer: authorizer}}
+		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
 		c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
 
 		if err := svc.CreateImage(c); err != nil {
@@ -192,7 +192,7 @@ func TestImageGenerations_AuthorizesResolvedSelector(t *testing.T) {
 func TestImageGenerations_ProviderErrorIsSurfaced(t *testing.T) {
 	mock := newImageMock()
 	mock.imageErr = core.NewProviderError("openai", http.StatusBadRequest, "Your request was rejected by the safety system.", nil)
-	svc := &imageService{modelCallService: modelCallService{provider: mock}}
+	svc := &imageService{provider: mock}
 	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
 
 	if err := svc.CreateImage(c); err != nil {
@@ -211,7 +211,7 @@ func TestImageGenerations_NilProviderResponseIs502(t *testing.T) {
 	mock.imageResp = nil
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
-	svc := &imageService{modelCallService: modelCallService{provider: mock, usageLogger: logger}}
+	svc := &imageService{provider: mock, usageLogger: logger}
 	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
 
 	if err := svc.CreateImage(c); err != nil {
@@ -231,11 +231,10 @@ func TestImageGenerations_LogsUsage(t *testing.T) {
 	mock := newImageMock()
 	mock.imageResp.Data = append(mock.imageResp.Data, core.ImageData{URL: "https://img/2.png"})
 	pricing := &core.ModelPricing{PerImage: new(0.04)}
-	svc := &imageService{modelCallService: modelCallService{
+	svc := &imageService{
 		provider:        mock,
 		usageLogger:     logger,
-		pricingResolver: &mockPricingResolver{pricing: pricing},
-	}}
+		pricingResolver: &mockPricingResolver{pricing: pricing}}
 	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat","n":2}`)
 
 	if err := svc.CreateImage(c); err != nil {
@@ -264,7 +263,7 @@ func TestImageGenerations_LogsUsage(t *testing.T) {
 func TestImageGenerations_UsageDisabledWritesNothing(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: false}, captured: &captured}
-	svc := &imageService{modelCallService: modelCallService{provider: newImageMock(), usageLogger: logger}}
+	svc := &imageService{provider: newImageMock(), usageLogger: logger}
 	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
 
 	if err := svc.CreateImage(c); err != nil {
@@ -316,7 +315,7 @@ func TestImageGenerations_AuditsRequestBody(t *testing.T) {
 		t.Run(map[bool]string{true: "enabled", false: "disabled"}[logBodies], func(t *testing.T) {
 			mock := newImageMock()
 			mock.resolved = &core.ModelSelector{Provider: "openai", Model: "dall-e-3"}
-			svc := &imageService{modelCallService: modelCallService{provider: mock}, logBodies: logBodies}
+			svc := &imageService{provider: mock, logBodies: logBodies}
 			c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat","style":"vivid"}`)
 			entry := &auditlog.LogEntry{}
 			c.Set(string(auditlog.LogEntryKey), entry)
@@ -371,7 +370,7 @@ func TestImageGenerations_AuditsResponseImages(t *testing.T) {
 				Data:    []core.ImageData{{B64JSON: "aGVsbG8="}, {URL: "https://img/2.png"}},
 				Usage:   &core.ImageUsage{TotalTokens: 300},
 			}
-			svc := &imageService{modelCallService: modelCallService{provider: mock}, logBodies: tt.logBodies, logImageOutputs: tt.logImageOutputs}
+			svc := &imageService{provider: mock, logBodies: tt.logBodies, logImageOutputs: tt.logImageOutputs}
 			c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
 			entry := &auditlog.LogEntry{}
 			c.Set(string(auditlog.LogEntryKey), entry)

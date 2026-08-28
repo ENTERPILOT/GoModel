@@ -107,9 +107,8 @@ func isCachePointValidationError(err error) bool {
 		ErrorCode() string
 		ErrorMessage() string
 	}
-	var apiErr apiError
 	code, message := "", err.Error()
-	if errors.As(err, &apiErr) {
+	if apiErr, ok := errors.AsType[apiError](err); ok {
 		code, message = apiErr.ErrorCode(), apiErr.ErrorMessage()
 	}
 	code = strings.ToLower(code)

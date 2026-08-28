@@ -197,11 +197,9 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 	s.refreshBestEffort(ctx, "create")
 
 	return &IssuedKey{
-		View: View{
-			AuthKey: key,
-			Active:  key.Active(now),
-		},
-		Value: value,
+		AuthKey: key,
+		Active:  key.Active(now),
+		Value:   value,
 	}, nil
 }
 

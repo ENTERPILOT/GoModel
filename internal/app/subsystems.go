@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"reflect"
+	"slices"
 )
 
 // Subsystem teardown.
@@ -88,8 +89,8 @@ func (a *App) register(name string, owner closerOwner, closeFn func() error) {
 // of these components, so reverse construction is the correct order.
 func (a *App) unwind() error {
 	var errs []error
-	for i := len(a.registered) - 1; i >= 0; i-- {
-		if closeFn := a.registered[i].close; closeFn != nil {
+	for _, v := range slices.Backward(a.registered) {
+		if closeFn := v.close; closeFn != nil {
 			errs = append(errs, closeFn())
 		}
 	}

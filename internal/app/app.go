@@ -165,14 +165,14 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			observe("attempt_end", func() {
 				source, sessionID := routeAffinityContext(ctx)
 				selector.OnAttemptEnd(ext.RouteOutcome{
-					RouteTarget: ext.RouteTarget{Provider: info.Provider, Model: info.Model},
-					Source:      source,
-					SessionID:   sessionID,
-					Endpoint:    info.Endpoint,
-					StatusCode:  info.StatusCode,
-					Duration:    info.Duration,
-					Stream:      info.Stream,
-					Err:         info.Error,
+					Provider: info.Provider, Model: info.Model,
+					Source:     source,
+					SessionID:  sessionID,
+					Endpoint:   info.Endpoint,
+					StatusCode: info.StatusCode,
+					Duration:   info.Duration,
+					Stream:     info.Stream,
+					Err:        info.Error,
 				})
 			})
 		},
