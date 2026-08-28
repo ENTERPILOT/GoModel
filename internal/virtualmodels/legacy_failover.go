@@ -46,26 +46,30 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 	if err != nil {
 		return fmt.Errorf("list virtual models: %w", err)
 	}
-	taken := make(map[string]struct{}, len(existing))
+	taken := make(map[string]VirtualModel, len(existing))
 	for _, row := range existing {
-		taken[row.Source] = struct{}{}
+		taken[row.Source] = row
 	}
 
 	migrated, unresolved := 0, 0
 	for _, rule := range rules {
 		model, convertible := failoverModel(rule.Source, rule.Fallbacks, false)
 		if rule.Enabled && rule.ManagedSource != "config" && convertible {
-			if _, exists := taken[rule.Source]; exists {
+			// A previous start that stopped between the upsert and the row
+			// delete left its own conversion behind; finish it, do not
+			// report it as a collision.
+			if existing, exists := taken[rule.Source]; exists && !isMigratedFailoverModel(existing) {
 				slog.Warn("legacy failover rule not migrated: a virtual model with the same source exists; add its fallbacks as targets with the failover strategy, then delete the failover_rules row",
 					"source", rule.Source, "fallbacks", rule.Fallbacks)
 				unresolved++
 				continue
+			} else if !exists {
+				if err := store.Upsert(ctx, model); err != nil {
+					return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
+				}
+				taken[rule.Source] = model
+				migrated++
 			}
-			if err := store.Upsert(ctx, model); err != nil {
-				return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
-			}
-			taken[rule.Source] = struct{}{}
-			migrated++
 		}
 		// Converted and obsolete rows leave the store, so only the rows that
 		// still need the operator remain — and a later start does not mistake
@@ -133,6 +137,12 @@ func readLegacyFailoverRules(ctx context.Context, conn storage.Storage) ([]legac
 			}
 			return rules, nil
 		})
+}
+
+// isMigratedFailoverModel reports whether vm is a conversion this migration
+// wrote, by the provenance failoverModel stamps on it.
+func isMigratedFailoverModel(vm VirtualModel) bool {
+	return normalizeStrategy(vm.Strategy) == StrategyFailover && vm.Description == migratedFailoverDescription
 }
 
 func deleteLegacyFailoverRule(ctx context.Context, conn storage.Storage, source string) error {

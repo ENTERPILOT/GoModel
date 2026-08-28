@@ -219,6 +219,46 @@ func TestNew_MigratesLegacyFailoverRulesIntoVirtualModels(t *testing.T) {
 	}
 }
 
+// A start that stopped after writing the converted virtual model but before
+// removing its legacy row must finish the conversion on the next start, not
+// report its own conversion as a collision.
+func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+
+	first, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	converted, _ := failoverModel("openai/gpt-4o", []string{"groq/llama"}, false)
+	if err := first.Service.Upsert(ctx, converted); err != nil {
+		t.Fatalf("Upsert(converted) error = %v", err)
+	}
+	_ = first.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer result.Close()
+	if vm, ok := result.Service.Get("openai/gpt-4o"); !ok || vm.Strategy != StrategyFailover {
+		t.Fatalf("converted model = %+v, %v", vm, ok)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err == nil {
+		t.Fatalf("failover_rules still exists with %d rows, want it dropped", count)
+	}
+}
+
 // A legacy rule colliding with an existing virtual model is neither merged nor
 // discarded: the store stays until the operator resolves it, and the migrated
 // rows are not duplicated on the next start.

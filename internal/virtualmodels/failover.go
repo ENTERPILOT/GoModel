@@ -80,6 +80,10 @@ func FailoverConfigModels(cfg config.FailoverConfig, declared []VirtualModel) []
 	return models
 }
 
+// migratedFailoverDescription marks a virtual model converted from a legacy
+// failover rule, so a later start can tell its own conversion from a collision.
+const migratedFailoverDescription = "Migrated from failover rules"
+
 // failoverModel builds the failover-strategy redirect equivalent to a legacy
 // failover rule: source shadows the primary model, listed first, followed by
 // its ordered fallbacks. It reports false when no fallback distinct from the
@@ -99,7 +103,7 @@ func failoverModel(source string, fallbacks []string, managed bool) (VirtualMode
 		Source:      source,
 		Strategy:    StrategyFailover,
 		Targets:     targets,
-		Description: "Migrated from failover rules",
+		Description: migratedFailoverDescription,
 		Enabled:     true,
 		Managed:     managed,
 	}, true
