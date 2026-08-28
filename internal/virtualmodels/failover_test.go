@@ -257,6 +257,24 @@ func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err == nil {
 		t.Fatalf("failover_rules still exists with %d rows, want it dropped", count)
 	}
+	_ = result.Close()
+
+	// The same marker on a model with different targets is the operator's
+	// own work, so the rule is retained as a collision instead of dropped.
+	if _, err := db.Exec(`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["anthropic/claude"]', 1, 'dashboard', 0, 0)`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	again, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer again.Close()
+	if vm, _ := again.Service.Get("openai/gpt-4o"); vm == nil || vm.Targets[1].Model != "groq/llama" {
+		t.Fatalf("existing model must be untouched, got %+v", vm)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("failover_rules rows = %d, %v; want the differing rule retained", count, err)
+	}
 }
 
 // A legacy rule colliding with an existing virtual model is neither merged nor

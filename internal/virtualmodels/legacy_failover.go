@@ -58,7 +58,7 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 			// A previous start that stopped between the upsert and the row
 			// delete left its own conversion behind; finish it, do not
 			// report it as a collision.
-			if existing, exists := taken[rule.Source]; exists && !isMigratedFailoverModel(existing) {
+			if existing, exists := taken[rule.Source]; exists && !isMigratedFailoverModel(existing, model) {
 				slog.Warn("legacy failover rule not migrated: a virtual model with the same source exists; add its fallbacks as targets with the failover strategy, then delete the failover_rules row",
 					"source", rule.Source, "fallbacks", rule.Fallbacks)
 				unresolved++
@@ -139,10 +139,19 @@ func readLegacyFailoverRules(ctx context.Context, conn storage.Storage) ([]legac
 		})
 }
 
-// isMigratedFailoverModel reports whether vm is a conversion this migration
-// wrote, by the provenance failoverModel stamps on it.
-func isMigratedFailoverModel(vm VirtualModel) bool {
-	return normalizeStrategy(vm.Strategy) == StrategyFailover && vm.Description == migratedFailoverDescription
+// isMigratedFailoverModel reports whether vm is the conversion this migration
+// would write for a rule: it carries the provenance failoverModel stamps and
+// exactly the expected targets. Anything else is the operator's own model.
+func isMigratedFailoverModel(vm, expected VirtualModel) bool {
+	if normalizeStrategy(vm.Strategy) != StrategyFailover || vm.Description != migratedFailoverDescription || len(vm.Targets) != len(expected.Targets) {
+		return false
+	}
+	for i, target := range vm.Targets {
+		if target != expected.Targets[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func deleteLegacyFailoverRule(ctx context.Context, conn storage.Storage, source string) error {
