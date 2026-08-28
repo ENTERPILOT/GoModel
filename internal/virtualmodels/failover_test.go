@@ -258,8 +258,22 @@ func TestNew_KeepsLegacyFailoverStoreWhileARuleCollides(t *testing.T) {
 		}
 		_ = result.Close()
 	}
+	// Only the colliding row remains, so resolving it lets the next start
+	// finish the migration and drop the store.
+	var remaining string
+	if err := db.QueryRow(`SELECT group_concat(primary_model) FROM failover_rules`).Scan(&remaining); err != nil || remaining != "taken" {
+		t.Fatalf("failover_rules rows = %q, %v; want only the colliding row", remaining, err)
+	}
+	if _, err := db.Exec(`DELETE FROM failover_rules WHERE primary_model = 'taken'`); err != nil {
+		t.Fatalf("resolve collision: %v", err)
+	}
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() after resolving error = %v", err)
+	}
+	_ = result.Close()
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err != nil || count != 2 {
-		t.Fatalf("failover_rules rows = %d, %v; want the store kept intact", count, err)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err == nil {
+		t.Fatalf("failover_rules still exists with %d rows, want it dropped", count)
 	}
 }

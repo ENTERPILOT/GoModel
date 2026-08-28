@@ -53,30 +53,29 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 
 	migrated, unresolved := 0, 0
 	for _, rule := range rules {
-		if !rule.Enabled || rule.ManagedSource == "config" {
-			continue
+		model, convertible := failoverModel(rule.Source, rule.Fallbacks, false)
+		if rule.Enabled && rule.ManagedSource != "config" && convertible {
+			if _, exists := taken[rule.Source]; exists {
+				slog.Warn("legacy failover rule not migrated: a virtual model with the same source exists; add its fallbacks as targets with the failover strategy, then delete the failover_rules row",
+					"source", rule.Source, "fallbacks", rule.Fallbacks)
+				unresolved++
+				continue
+			}
+			if err := store.Upsert(ctx, model); err != nil {
+				return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
+			}
+			taken[rule.Source] = struct{}{}
+			migrated++
 		}
-		model, ok := failoverModel(rule.Source, rule.Fallbacks, false)
-		if !ok {
-			continue
+		// Converted and obsolete rows leave the store, so only the rows that
+		// still need the operator remain — and a later start does not mistake
+		// a converted row for a collision.
+		if err := deleteLegacyFailoverRule(ctx, conn, rule.Source); err != nil {
+			return fmt.Errorf("remove legacy failover rule %q: %w", rule.Source, err)
 		}
-		if _, exists := taken[rule.Source]; exists {
-			slog.Warn("legacy failover rule not migrated: a virtual model with the same source exists; add its fallbacks as targets with the failover strategy, then delete the failover_rules row",
-				"source", rule.Source, "fallbacks", rule.Fallbacks)
-			unresolved++
-			continue
-		}
-		if err := store.Upsert(ctx, model); err != nil {
-			return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
-		}
-		taken[rule.Source] = struct{}{}
-		migrated++
 	}
 	if unresolved > 0 {
-		// Migrated rows would be re-imported on the next start, but Upsert
-		// only ever writes sources that have no virtual model, so the
-		// re-import is a no-op; the store is kept so nothing is lost.
-		slog.Warn("legacy failover_rules store kept until every rule is resolved", "unresolved", unresolved)
+		slog.Warn("legacy failover_rules store kept until every remaining rule is resolved", "unresolved", unresolved)
 		return nil
 	}
 	if err := dropLegacyFailoverStore(ctx, conn); err != nil {
@@ -134,6 +133,19 @@ func readLegacyFailoverRules(ctx context.Context, conn storage.Storage) ([]legac
 			}
 			return rules, nil
 		})
+}
+
+func deleteLegacyFailoverRule(ctx context.Context, conn storage.Storage, source string) error {
+	_, err := storage.ResolveSQLBackend[struct{}](ctx, conn,
+		func(db sqlx.DB) (struct{}, error) {
+			_, err := db.Exec(ctx, "DELETE FROM "+legacyFailoverTable+" WHERE primary_model = ?", source)
+			return struct{}{}, err
+		},
+		func(db *mongo.Database) (struct{}, error) {
+			_, err := db.Collection(legacyFailoverTable).DeleteOne(ctx, bson.M{"_id": source})
+			return struct{}{}, err
+		})
+	return err
 }
 
 func dropLegacyFailoverStore(ctx context.Context, conn storage.Storage) error {
