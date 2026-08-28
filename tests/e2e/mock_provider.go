@@ -62,6 +62,14 @@ func (m *MockLLMServer) ResetRequests() {
 	m.mu.Unlock()
 }
 
+// SetCustomHandler installs a handler consulted before the built-in ones; it
+// returns true when it wrote the response. Pass nil to remove it.
+func (m *MockLLMServer) SetCustomHandler(handler func(w http.ResponseWriter, r *http.Request) bool) {
+	m.mu.Lock()
+	m.customHandler = handler
+	m.mu.Unlock()
+}
+
 // SetResponseDelay configures an artificial delay added to every response.
 // Pass 0 to disable. Used by timeout tests.
 func (m *MockLLMServer) SetResponseDelay(d time.Duration) {
@@ -587,6 +595,13 @@ func (m *MockLLMServer) Close() {
 	m.server.Close()
 }
 
+// upstreamError mirrors what real provider adapters return for a non-2xx
+// upstream reply: a provider error carrying the upstream status, so the
+// gateway's failover sweep can classify it.
+func upstreamError(status int, body []byte) error {
+	return core.NewProviderError("test", status, "upstream error", fmt.Errorf("upstream error: %s", string(body)))
+}
+
 // forwardChatRequest forwards a chat request to the mock server.
 func forwardChatRequest(ctx context.Context, client *http.Client, baseURL, apiKey string, req *core.ChatRequest, stream bool) (*core.ChatResponse, error) {
 	req.Stream = stream
@@ -611,7 +626,7 @@ func forwardChatRequest(ctx context.Context, client *http.Client, baseURL, apiKe
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("upstream error: %s", string(respBody))
+		return nil, upstreamError(resp.StatusCode, respBody)
 	}
 
 	var chatResp core.ChatResponse
@@ -646,7 +661,7 @@ func forwardStreamRequest(ctx context.Context, client *http.Client, baseURL, api
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("upstream error: %s", string(respBody))
+		return nil, upstreamError(resp.StatusCode, respBody)
 	}
 
 	return resp.Body, nil
@@ -676,7 +691,7 @@ func forwardResponsesRequest(ctx context.Context, client *http.Client, baseURL, 
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("upstream error: %s", string(respBody))
+		return nil, upstreamError(resp.StatusCode, respBody)
 	}
 
 	var responsesResp core.ResponsesResponse
@@ -711,7 +726,7 @@ func forwardResponsesStreamRequest(ctx context.Context, client *http.Client, bas
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("upstream error: %s", string(respBody))
+		return nil, upstreamError(resp.StatusCode, respBody)
 	}
 
 	return resp.Body, nil
