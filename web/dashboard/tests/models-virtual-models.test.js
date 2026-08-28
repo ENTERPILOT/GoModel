@@ -31,6 +31,7 @@ import {
   vmFormShowStrategy,
   vmFormShowSessionAffinity,
   vmFormShowFailover,
+  vmFormSelfOnly,
   virtualModelTargetOptions,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
@@ -866,6 +867,14 @@ test("virtualModelTargetOptions lists catalog models and other virtual models", 
     { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
   ];
   const aliases = [{ name: "cheap" }, { name: "smart" }, { name: "" }];
+  // Editing a real model lists it first as "this model".
+  assert.deepEqual(
+    virtualModelTargetOptions(models, aliases, "groq/llama").slice(0, 2).map((o) => [o.value, o.description]),
+    [
+      ["groq/llama", "This model"],
+      ["openai/gpt-4o", "openai"],
+    ],
+  );
   const options = virtualModelTargetOptions(models, aliases, "smart");
   assert.deepEqual(
     options.map((option) => [option.value, option.description]),
@@ -877,4 +886,23 @@ test("virtualModelTargetOptions lists catalog models and other virtual models", 
     "duplicates collapse, the edited redirect is excluded, blanks are dropped",
   );
   assert.deepEqual(virtualModelTargetOptions(null, null, ""), []);
+});
+
+test("a real model pinned as its own only target saves as a policy, with a fallback as a failover redirect", () => {
+  const form = defaultVirtualModelForm();
+  form.source = "openai/gpt-4o";
+  form.target_model = "openai/gpt-4o";
+  form.strategy = "failover";
+  assert.equal(vmFormSelfOnly(form), true);
+  assert.equal(vmFormIsRedirect(form), false);
+  let { payload } = buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit");
+  assert.equal("targets" in payload, false);
+  assert.equal("target_model" in payload, false);
+
+  form.targets = [{ model: "azure/gpt-4o", weight: 1 }];
+  assert.equal(vmFormSelfOnly(form), false);
+  assert.equal(vmFormIsRedirect(form), true);
+  ({ payload } = buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit"));
+  assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o" }, { model: "azure/gpt-4o" }]);
+  assert.equal(payload.strategy, "failover");
 });

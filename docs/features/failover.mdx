@@ -33,10 +33,14 @@ Failover strategy always fails over, so the checkbox is not offered there.
 
 ## Configure a failover chain
 
-In the dashboard, open **Models**, create or edit a virtual model, add the
-targets in priority order and choose **Failover** in the **Load-balancing
-strategy** dropdown. Weights and session keeping do not apply to this
-strategy, so the editor hides them.
+In the dashboard, open **Models** and edit the model you want to protect:
+the model is already pinned as the first target, so add the fallbacks below
+it in priority order and save — the strategy defaults to **Failover**. To
+fail over under a new name instead, create a virtual model, list the targets
+in priority order, and pick **Failover** in the **Load-balancing strategy**
+dropdown. Weights and session keeping do not apply to this strategy, so the
+editor hides them. Removing the pinned row turns the entry into a plain
+redirect: requests for the model go to the remaining targets instead.
 
 As code (`config.yaml` or the `VIRTUAL_MODELS` environment variable):
 

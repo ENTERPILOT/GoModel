@@ -574,6 +574,7 @@
   "models_all_scope": "Wszyscy dostawcy i modele",
   "models_all_in_provider": "Wszystkie modele dostawcy {provider}",
   "models_virtual_model": "Model wirtualny",
+  "models_this_model": "Ten model",
   "models_redirect": "Przekierowanie",
   "models_managed_config": "Zarządzane przez config.yaml / VIRTUAL_MODELS",
   "models_config": "Config",

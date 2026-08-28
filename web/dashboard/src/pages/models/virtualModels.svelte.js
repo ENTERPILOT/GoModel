@@ -659,9 +659,23 @@ class VirtualModelsStore {
     this.vmFormEffectiveEnabled = overrideEnabled;
     this.vmFormManaged = Boolean(override && override.managed);
     this.vmFormDisplayName = row.access_display_name || row.display_name || selector || "";
+    // The model itself is pinned as the first target with the failover
+    // strategy, so adding a target makes a fallback for this model rather than
+    // silently replacing it. An existing redirect over the model is shown as
+    // saved.
+    const { primaryModel, primaryWeight, extraTargets } =
+      override && Array.isArray(override.targets) && override.targets.length > 0
+        ? aliasFormTargets(override)
+        : { primaryModel: selector, primaryWeight: 1, extraTargets: [] };
     this.vmForm = {
       ...defaultVirtualModelForm(),
       source: selector,
+      target_model: primaryModel,
+      target_weight: primaryWeight,
+      targets: extraTargets,
+      strategy: (override && override.strategy) || "failover",
+      session_affinity: !override || override.session_affinity !== false,
+      failover: !override || override.failover !== false,
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",

@@ -743,7 +743,9 @@ export function modelOverrideEditButtonLabel(subject, hasOverride) {
 // virtualModelTargetOptions lists what a target row may pick: every catalog
 // model (described by its provider) and every other redirect, since a target
 // may chain through a virtual model — the one being edited excluded, as a
-// redirect cannot target itself alone.
+// redirect cannot target itself alone. When the source is itself a catalog
+// model, that model is listed first as "this model": naming it as a target
+// keeps serving it and turns the other targets into fallbacks.
 export function virtualModelTargetOptions(models, aliases, source) {
   const current = String(source || "").trim();
   const options = [];
@@ -752,6 +754,10 @@ export function virtualModelTargetOptions(models, aliases, source) {
     const value = qualifiedModelName(model);
     if (!value || seen.has(value)) continue;
     seen.add(value);
+    if (value === current) {
+      options.unshift({ value, label: value, description: m.models_this_model() });
+      continue;
+    }
     options.push({ value, label: value, description: String(model.provider_name || "") });
   }
   for (const alias of Array.isArray(aliases) ? aliases : []) {
@@ -783,7 +789,20 @@ export function vmFormHasPrimaryTarget(form) {
   return String((form && form.target_model) || "").trim() !== "";
 }
 
+// vmFormSelfOnly: the editor opened from a real model pins that model as its
+// first target so an added target becomes a fallback rather than a
+// replacement. With nothing added, the pinned row is not a redirect — the
+// model just serves itself — and the form saves as a plain policy.
+export function vmFormSelfOnly(form) {
+  const source = String((form && form.source) || "").trim();
+  const primary = String((form && form.target_model) || "").trim();
+  return Boolean(source) && primary === source && collectExtraTargets(form && form.targets).length === 0;
+}
+
 export function vmFormIsRedirect(form) {
+  if (vmFormSelfOnly(form)) {
+    return false;
+  }
   if (String((form && form.target_model) || "").trim()) {
     return true;
   }
