@@ -67,6 +67,8 @@ models:
 #     targets:
 #       - { model: openai/gpt-4o, weight: 2 }
 #       - { model: anthropic/claude-sonnet-4-6 }
+#     # session_affinity: true # keep a detected client session on the target that served it
+#     # failover: true # retry a failed request on the remaining targets; false returns the error instead
 #   - source: cheap # always route to the cheapest available target
 #     strategy: cost
 #     targets:

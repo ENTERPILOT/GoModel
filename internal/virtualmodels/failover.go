@@ -14,15 +14,16 @@ import (
 // available targets, in declared order and descending chained virtual models,
 // minus the model the request was sent to first. The redirect's strategy only
 // chooses that first target; every other available target is a failover leg,
-// so a load balancer and a priority list fail over the same way. Requests that
-// did not go through a redirect have no chain.
+// so a load balancer and a priority list fail over the same way. A redirect
+// with failover switched off, and requests that did not go through a redirect,
+// have no chain.
 func (s *Service) ResolveFailovers(resolution *core.RequestModelResolution, _ core.Operation) []core.ModelSelector {
 	if s == nil || resolution == nil || !resolution.AliasApplied || resolution.Requested.ExplicitProvider {
 		return nil
 	}
 	snap := s.snapshot()
 	entry, ok := snap.redirects[strings.TrimSpace(resolution.Requested.Model)]
-	if !ok || !entry.vm.Enabled || len(entry.targets) < 2 {
+	if !ok || !entry.vm.Enabled || !entry.failover() || len(entry.targets) < 2 {
 		return nil
 	}
 	seen := map[string]struct{}{resolution.ResolvedQualifiedModel(): {}}

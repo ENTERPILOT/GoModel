@@ -121,13 +121,25 @@
     </FormField>
     {#if vm.vmFormShowSessionAffinity()}
       <div class="form-field">
-        <label class="vm-session-affinity-checkbox">
+        <label class="vm-option-checkbox">
           <input
             type="checkbox"
             bind:checked={vm.vmForm.session_affinity}
             disabled={vm.vmFormManaged}
           />
           <span>{m.models_session_keeping()}</span>
+        </label>
+      </div>
+    {/if}
+    {#if vm.vmFormShowFailover()}
+      <div class="form-field">
+        <label class="vm-option-checkbox">
+          <input
+            type="checkbox"
+            bind:checked={vm.vmForm.failover}
+            disabled={vm.vmFormManaged}
+          />
+          <span>{m.models_failover_option()}</span>
         </label>
       </div>
     {/if}
@@ -224,7 +236,7 @@
 </EditorDialog>
 
 <style>
-  .vm-session-affinity-checkbox {
+  .vm-option-checkbox {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -234,7 +246,7 @@
     user-select: none;
   }
 
-  .vm-session-affinity-checkbox input {
+  .vm-option-checkbox input {
     accent-color: var(--accent);
     cursor: pointer;
   }

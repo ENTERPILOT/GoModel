@@ -8150,6 +8150,10 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "failover": {
+                    "description": "Failover retries a failed request on the remaining targets. Omitted\nmeans enabled; false serves the chosen target only.",
+                    "type": "boolean"
+                },
                 "old_source": {
                     "type": "string"
                 },
@@ -11632,6 +11636,9 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "failover": {
+                    "type": "boolean"
+                },
                 "kind": {
                     "type": "string"
                 },
@@ -11696,6 +11703,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "enabled": {
+                    "type": "boolean"
+                },
+                "failover": {
+                    "description": "Failover retries a failed request against the redirect's remaining\ntargets. Tri-state: nil means enabled (the default); explicit false\nserves the chosen target only. The failover strategy always fails over.",
                     "type": "boolean"
                 },
                 "managed": {

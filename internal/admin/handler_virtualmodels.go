@@ -23,9 +23,12 @@ type upsertVirtualModelRequest struct {
 	Strategy    string                      `json:"strategy,omitempty"`
 	// SessionAffinity keeps a detected session on the target that served it
 	// before. Omitted means enabled; false restores stateless balancing.
-	SessionAffinity *bool    `json:"session_affinity,omitempty"`
-	UserPaths       []string `json:"user_paths,omitempty"`
-	Description     string   `json:"description,omitempty"`
+	SessionAffinity *bool `json:"session_affinity,omitempty"`
+	// Failover retries a failed request on the remaining targets. Omitted
+	// means enabled; false serves the chosen target only.
+	Failover    *bool    `json:"failover,omitempty"`
+	UserPaths   []string `json:"user_paths,omitempty"`
+	Description string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
 	Enabled  *bool    `json:"enabled,omitempty"`
@@ -162,6 +165,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		Source:          source,
 		Strategy:        strings.TrimSpace(req.Strategy),
 		SessionAffinity: req.SessionAffinity,
+		Failover:        req.Failover,
 		UserPaths:       req.UserPaths,
 		Description:     strings.TrimSpace(req.Description),
 		Slowdown:        req.Slowdown,

@@ -227,6 +227,7 @@ export function mapRedirectView(view) {
     strategy: view.strategy || "",
     // Tri-state on the wire; only explicit false disables session affinity.
     session_affinity: view.session_affinity !== false,
+    failover: view.failover !== false,
     description: view.description || "",
     slowdown: view.slowdown == null ? null : Number(view.slowdown),
     enabled: view.enabled !== false,
@@ -747,6 +748,7 @@ export function defaultVirtualModelForm() {
     targets: [],
     strategy: "round_robin",
     session_affinity: true,
+    failover: true,
     user_paths: "",
     description: "",
     slowdown: "",
@@ -789,7 +791,17 @@ export function vmFormShowWeights(form) {
 // vmFormShowSessionAffinity: failover always retries the primary target first,
 // so there is no session to keep on another target and the control is hidden.
 export function vmFormShowSessionAffinity(form) {
-  return vmFormShowStrategy(form) && String((form && form.strategy) || "").toLowerCase() !== "failover";
+  return vmFormShowStrategy(form) && !isFailoverStrategy(form && form.strategy);
+}
+
+// vmFormShowFailover: the failover strategy is a priority list and always
+// fails over, so the opt-out checkbox is only offered to the other strategies.
+export function vmFormShowFailover(form) {
+  return vmFormShowStrategy(form) && !isFailoverStrategy(form && form.strategy);
+}
+
+function isFailoverStrategy(strategy) {
+  return String(strategy || "").toLowerCase() === "failover";
 }
 
 // removePrimaryTarget clears the first target row, promoting the next
@@ -885,6 +897,10 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       if (form && form.session_affinity === false) {
         payload.session_affinity = false;
       }
+      // Same for failover: on by default, only the opt-out travels.
+      if (form && form.failover === false) {
+        payload.failover = false;
+      }
     } else {
       // A single target stays a plain alias on the back-compat field.
       payload.target_model = targets[0].model;
@@ -914,6 +930,9 @@ export function buildAliasTogglePayload(alias) {
     payload.strategy = alias.strategy || "round_robin";
     if (alias.session_affinity === false) {
       payload.session_affinity = false;
+    }
+    if (alias.failover === false) {
+      payload.failover = false;
     }
     // Strategies that ignore weight persist weight-less targets — same
     // contract as the editor save path.

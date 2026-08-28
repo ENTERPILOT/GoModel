@@ -335,3 +335,44 @@ func TestNew_KeepsLegacyFailoverStoreWhileARuleCollides(t *testing.T) {
 		t.Fatalf("failover_rules still exists with %d rows, want it dropped", count)
 	}
 }
+
+func TestFailover_FlagSwitchesTheChainOffPerRedirect(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	ctx := context.Background()
+	off := false
+	upsert := func(source, strategy string, failover *bool) {
+		t.Helper()
+		err := svc.Upsert(ctx, VirtualModel{
+			Source:   source,
+			Strategy: strategy,
+			Failover: failover,
+			Targets:  []Target{{Model: "openai/gpt-4o"}, {Model: "anthropic/claude"}},
+			Enabled:  true,
+		})
+		if err != nil {
+			t.Fatalf("Upsert(%s) error = %v", source, err)
+		}
+	}
+	upsert("default-on", StrategyRoundRobin, nil)
+	upsert("switched-off", StrategyRoundRobin, &off)
+	upsert("priority", StrategyFailover, &off)
+
+	if _, chain := failoverChain(t, svc, "default-on"); len(chain) != 1 {
+		t.Fatalf("default-on chain = %v, want one leg", chain)
+	}
+	if _, chain := failoverChain(t, svc, "switched-off"); len(chain) != 0 {
+		t.Fatalf("switched-off chain = %v, want none", chain)
+	}
+	// The failover strategy is a priority list: the flag cannot switch it off.
+	if _, chain := failoverChain(t, svc, "priority"); len(chain) != 1 {
+		t.Fatalf("priority chain = %v, want one leg despite failover=false", chain)
+	}
+
+	// The flag survives the store round trip and is reported to the admin UI.
+	for _, view := range svc.ListViews() {
+		if view.Source == "switched-off" && (view.Failover == nil || *view.Failover) {
+			t.Fatalf("view.Failover = %v, want false", view.Failover)
+		}
+	}
+}

@@ -25,6 +25,12 @@ first:
 Pick **Failover** when the target list is a priority order — always use the
 best model unless it is down, and only then cascade to the backups.
 
+For the other strategies the editor shows a **Failover** checkbox, on by
+default. Untick it (or set `failover: false` as code) when a redirect should
+only balance and a failed request should return its error, for example when
+the targets are not interchangeable and a client handles retries itself. The
+Failover strategy always fails over, so the checkbox is not offered there.
+
 ## Configure a failover chain
 
 In the dashboard, open **Models**, create or edit a virtual model, add the

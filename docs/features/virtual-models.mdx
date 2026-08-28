@@ -98,8 +98,10 @@ available. A redirect with a single target behaves exactly like a plain alias.
 
 Whatever the strategy, the remaining targets are the redirect's **failover
 chain**: when the chosen target fails with a retryable error, the request is
-retried against the other available targets in the order listed (unless
-failover is switched off globally or by the request's workflow). See
+retried against the other available targets in the order listed. The editor's
+**Failover** checkbox (on by default; `failover: false` as code) switches that
+off for one redirect, so a failed request is answered with the error instead;
+it can also be switched off globally or by the request's workflow. See
 [Failover](/features/failover) for the errors that trigger a retry and for
 adding a failover chain to a real model by shadowing it.
 
@@ -223,7 +225,8 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
 `strategy` (`round_robin`, `cost`, or `failover`), `session_affinity` (default `true`; see
-[Session Keeping](/features/session-keeping)), `user_paths`, `description`,
+[Session Keeping](/features/session-keeping)), `failover` (default `true`; see
+[Failover](/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
 `10`), and `enabled`.
 A target `model` may name another declared virtual model (see

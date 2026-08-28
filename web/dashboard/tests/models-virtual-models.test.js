@@ -30,6 +30,7 @@ import {
   vmFormIsRedirect,
   vmFormShowStrategy,
   vmFormShowSessionAffinity,
+  vmFormShowFailover,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
 } from "../src/pages/models/virtualModelsLogic.js";
@@ -751,6 +752,7 @@ test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targe
   assert.equal(vmFormShowStrategy(form), true);
   assert.equal(vmFormShowWeights(form), false);
   assert.equal(vmFormShowSessionAffinity(form), true);
+  assert.equal(vmFormShowFailover(form), true);
 
   // Failover is a priority list: no weights, and no session keeping since the
   // primary is always retried first.
@@ -758,6 +760,8 @@ test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targe
   assert.equal(vmFormShowStrategy(form), true);
   assert.equal(vmFormShowWeights(form), false);
   assert.equal(vmFormShowSessionAffinity(form), false);
+  // ...and it always fails over, so the opt-out is not offered either.
+  assert.equal(vmFormShowFailover(form), false);
 
   // A second target row appears in the strategy check even when still blank.
   const blank = defaultVirtualModelForm();
@@ -823,4 +827,33 @@ test("strategyOptions keeps the edited value selectable when unsupported", () =>
 test("strategyOptions labels unknown strategies with their raw value", () => {
   const options = strategyOptions(["round_robin"], "experimental");
   assert.deepEqual(options[1], { value: "experimental", label: "experimental" });
+});
+
+test("failover is on by default and only the opt-out reaches the server", () => {
+  const form = defaultVirtualModelForm();
+  form.source = "smart";
+  form.target_model = "openai/gpt-4o";
+  form.targets = [{ model: "groq/llama", weight: 1 }];
+  assert.equal(form.failover, true);
+
+  let { payload } = buildVirtualModelSavePayload(form, "", "create");
+  assert.equal("failover" in payload, false);
+
+  form.failover = false;
+  ({ payload } = buildVirtualModelSavePayload(form, "", "create"));
+  assert.equal(payload.failover, false);
+
+  // Toggling an alias keeps the opt-out so it never silently re-enables.
+  const toggle = buildAliasTogglePayload({
+    name: "smart",
+    targets: [
+      { provider: "openai", model: "gpt-4o" },
+      { provider: "groq", model: "llama" },
+    ],
+    strategy: "round_robin",
+    failover: false,
+    enabled: true,
+    user_paths: [],
+  });
+  assert.equal(toggle.failover, false);
 });

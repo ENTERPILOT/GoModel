@@ -586,6 +586,7 @@
   "models_add_target": "Add target (load balancing)",
   "models_strategy": "Load-balancing strategy",
   "models_session_keeping": "Session keeping (route a detected client session to the target that served it)",
+  "models_failover_option": "Failover (retry a failed request on the next target)",
   "models_user_paths": "User Paths",
   "models_user_paths_help_label": "User paths help",
   "models_user_paths_help": "Use / to allow every user path. Use a team path to restrict to that subtree, or an unused path to make the selector unavailable.",

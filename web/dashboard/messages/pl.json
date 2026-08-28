@@ -594,6 +594,7 @@
   "models_add_target": "Dodaj cel (równoważenie obciążenia)",
   "models_strategy": "Strategia równoważenia obciążenia",
   "models_session_keeping": "Utrzymywanie sesji (kieruj wykrytą sesję klienta do celu, który ją obsłużył)",
+  "models_failover_option": "Failover (ponów nieudane żądanie na kolejnym celu)",
   "models_user_paths": "User Paths",
   "models_user_paths_help_label": "Pomoc dotycząca ścieżek użytkownika",
   "models_user_paths_help": "Użyj /, aby zezwolić na każdy User Path. Użyj User Path zespołu, aby ograniczyć dostęp do jego poddrzewa, albo nieużywanego User Path, aby selektor był niedostępny.",

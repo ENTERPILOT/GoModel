@@ -60,6 +60,11 @@ type VirtualModel struct {
 	// enabled (the default); explicit false restores stateless balancing.
 	SessionAffinity *bool `json:"session_affinity,omitempty" bson:"session_affinity,omitempty"`
 
+	// Failover retries a failed request against the redirect's remaining
+	// targets. Tri-state: nil means enabled (the default); explicit false
+	// serves the chosen target only. The failover strategy always fails over.
+	Failover *bool `json:"failover,omitempty" bson:"failover,omitempty"`
+
 	CreatedAt time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 
@@ -137,6 +142,10 @@ func (v VirtualModel) clone() VirtualModel {
 		affinity := *v.SessionAffinity
 		v.SessionAffinity = &affinity
 	}
+	if v.Failover != nil {
+		failover := *v.Failover
+		v.Failover = &failover
+	}
 	return v
 }
 
@@ -153,6 +162,7 @@ type View struct {
 	Targets         []Target `json:"targets,omitempty"`
 	Strategy        string   `json:"strategy,omitempty"`
 	SessionAffinity *bool    `json:"session_affinity,omitempty"`
+	Failover        *bool    `json:"failover,omitempty"`
 	ProviderName    string   `json:"provider_name,omitempty"`
 	Model           string   `json:"model,omitempty"`
 	UserPaths       []string `json:"user_paths,omitempty"`

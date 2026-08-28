@@ -32,6 +32,7 @@ import {
   strategyOptions,
   vmFormHasPrimaryTarget,
   vmFormShowSessionAffinity,
+  vmFormShowFailover,
   vmFormShowStrategy,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
@@ -526,6 +527,10 @@ class VirtualModelsStore {
     return vmFormShowSessionAffinity(this.vmForm);
   }
 
+  vmFormShowFailover() {
+    return vmFormShowFailover(this.vmForm);
+  }
+
   vmFormSupportsSlowdown() {
     return vmFormSupportsSlowdown(this.vmForm);
   }
@@ -609,6 +614,7 @@ class VirtualModelsStore {
       targets: extraTargets,
       strategy: alias.strategy || "round_robin",
       session_affinity: alias.session_affinity !== false,
+      failover: alias.failover !== false,
       user_paths: (Array.isArray(alias.user_paths) ? alias.user_paths : []).join("\n"),
       description: alias.description || "",
       slowdown: alias.slowdown ?? "",

@@ -265,6 +265,7 @@ func (s *Service) ListViews() []View {
 			Targets:         vm.Targets,
 			Strategy:        vm.Strategy,
 			SessionAffinity: vm.SessionAffinity,
+			Failover:        vm.Failover,
 			ProviderName:    vm.ProviderName,
 			Model:           vm.Model,
 			UserPaths:       vm.UserPaths,

@@ -31,6 +31,13 @@ func (e redirectEntry) sessionAffinity() bool {
 	return e.vm.SessionAffinity == nil || *e.vm.SessionAffinity
 }
 
+// failover reports whether a request that fails on the chosen target is
+// retried on the redirect's other targets. Enabled unless explicitly disabled;
+// the failover strategy is a priority list and always fails over.
+func (e redirectEntry) failover() bool {
+	return e.vm.Failover == nil || *e.vm.Failover || normalizeStrategy(e.strategy) == StrategyFailover
+}
+
 // snapshot is the immutable in-memory projection of all virtual models. It
 // indexes redirect rows by source and policy rows by scope, and keeps every row
 // in bySource for Get and admin listing.
