@@ -639,7 +639,8 @@ func (s *Service) firstUnsupportedTarget(current *snapshot, vm VirtualModel) (st
 			continue // selector parse errors are reported by validateRedirectStructure
 		}
 		qualified := selector.QualifiedModel()
-		if _, chained := current.chained(vm.Source, resolvedTarget{selector: selector, qualified: qualified}); chained {
+		candidate := resolvedTarget{selector: selector, qualified: qualified, explicitProvider: strings.TrimSpace(target.Provider) != ""}
+		if _, chained := current.chained(vm.Source, candidate); chained {
 			continue
 		}
 		if !s.catalog.Supports(qualified) {

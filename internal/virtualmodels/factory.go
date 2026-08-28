@@ -68,9 +68,15 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	// Declarative virtual models (config.yaml / VIRTUAL_MODELS), plus the
 	// deprecated failover rules translated into failover-strategy redirects, are
 	// layered over the store as a managed overlay before the first refresh
-	// builds the snapshot.
+	// builds the snapshot. A translated rule never overlays a stored virtual
+	// model of the same source: the rule used to live beside it, and replacing
+	// the stored redirect would silently change its routing.
+	stored, err := store.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list virtual models: %w", err)
+	}
 	declared := ConfigModels(cfg.VirtualModels)
-	service.SetConfigModels(append(declared, FailoverConfigModels(cfg.Failover, declared)...))
+	service.SetConfigModels(append(declared, FailoverConfigModels(cfg.Failover, declared, stored)...))
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
 	}

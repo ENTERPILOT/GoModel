@@ -220,3 +220,29 @@ func TestChain_SessionAffinityPinsThroughChain(t *testing.T) {
 		}
 	}
 }
+
+func TestChain_SlashNamedVirtualModelIsChained(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	ctx := context.Background()
+	// "team/cheap" parses like provider "team" + model "cheap", but no such
+	// provider exists: as a target without an explicit provider it must be
+	// read as the virtual model of that name.
+	upsertRedirect(t, svc, "team/cheap", "", "groq/llama")
+	upsertRedirect(t, svc, "outer", "", "team/cheap")
+
+	sel, changed, err := svc.ResolveModel(core.NewRequestedModelSelector("outer", ""))
+	if err != nil || !changed || sel.QualifiedModel() != "groq/llama" {
+		t.Fatalf("ResolveModel(outer) = %v, %v, %v; want groq/llama", sel, changed, err)
+	}
+	if err := svc.Delete(ctx, "team/cheap"); err == nil || !IsValidationError(err) {
+		t.Fatalf("Delete(team/cheap) error = %v, want dependent rejection", err)
+	}
+
+	// An explicit provider pins the target to a concrete model even when a
+	// virtual model of the same qualified name exists.
+	err = svc.Upsert(ctx, VirtualModel{Source: "pinned", Targets: []Target{{Provider: "team", Model: "cheap"}}, Enabled: true})
+	if err == nil || !IsValidationError(err) {
+		t.Fatalf("Upsert(pinned) error = %v, want unknown provider rejection", err)
+	}
+}

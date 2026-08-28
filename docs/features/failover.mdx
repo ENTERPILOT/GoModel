@@ -93,11 +93,16 @@ converted automatically:
 
 - Dashboard-managed mappings become virtual models with the failover strategy
   that shadow their primary model. The conversion runs once at startup and
-  then removes the old `failover_rules` store. A mapping whose primary model
-  already had a virtual model is logged and skipped, and the store is kept
-  until it is resolved — add its fallbacks as targets of that virtual model,
-  then delete the row.
+  then removes the old `failover_rules` store (any of its historical shapes).
+  When the primary model already has a plain per-model setting (a slowdown or
+  description set from the Models page), the mapping is merged into it and
+  the setting is kept. A primary that already has a redirect, a path-scoped
+  setting, or is disabled is logged and skipped, and the store is kept until
+  it is resolved — add its fallbacks as targets of that virtual model with
+  the failover strategy, then delete the row.
 - `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON`, and
   `disabled_models` still load and are translated into configuration-managed
-  virtual models on every start, with a deprecation warning. Move them under
-  `virtual_models` at your convenience.
+  virtual models on every start, with a deprecation warning. A rule whose
+  primary model has a virtual model in the dashboard is skipped with a
+  warning, so it never replaces that virtual model's routing. Move the rules
+  under `virtual_models` at your convenience.

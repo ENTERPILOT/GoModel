@@ -142,7 +142,7 @@ func TestFailoverConfigModels_TranslatesLegacyRules(t *testing.T) {
 	}
 	declared := []VirtualModel{{Source: "declared", Targets: []Target{{Model: "openai/gpt-4o"}}}}
 
-	models := FailoverConfigModels(cfg, declared)
+	models := FailoverConfigModels(cfg, declared, nil)
 	if len(models) != 1 {
 		t.Fatalf("FailoverConfigModels() = %+v, want only gpt-4o", models)
 	}
@@ -157,7 +157,7 @@ func TestFailoverConfigModels_TranslatesLegacyRules(t *testing.T) {
 	if strings.Join(got, ",") != "gpt-4o,azure/gpt-4o,gemini/gemini-2.5-pro" {
 		t.Fatalf("targets = %v, want the primary first then the fallbacks in order", got)
 	}
-	if FailoverConfigModels(config.FailoverConfig{}, nil) != nil {
+	if FailoverConfigModels(config.FailoverConfig{}, nil, nil) != nil {
 		t.Fatalf("FailoverConfigModels(empty) should be nil")
 	}
 }
@@ -374,5 +374,118 @@ func TestFailover_FlagSwitchesTheChainOffPerRedirect(t *testing.T) {
 		if view.Source == "switched-off" && (view.Failover == nil || *view.Failover) {
 			t.Fatalf("view.Failover = %v, want false", view.Failover)
 		}
+	}
+}
+
+// A failover_rules table from before its columns were renamed (source /
+// targets / description) is read as-is; the rename used to run in the store
+// constructor that no longer exists.
+func TestNew_MigratesPreRenameLegacyFailoverTable(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (source TEXT PRIMARY KEY, targets TEXT NOT NULL DEFAULT '[]', description TEXT NOT NULL DEFAULT '')`,
+		`INSERT INTO failover_rules VALUES (' openai/gpt-4o ', '["groq/llama"]', 'old note')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer result.Close()
+	migrated, ok := result.Service.Get("openai/gpt-4o")
+	if !ok || migrated.Strategy != StrategyFailover || len(migrated.Targets) != 2 || migrated.Targets[1].Model != "groq/llama" {
+		t.Fatalf("migrated = %+v, %v; want failover redirect over [openai/gpt-4o groq/llama]", migrated, ok)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err == nil {
+		t.Fatalf("failover_rules still exists with %d rows, want it dropped", count)
+	}
+}
+
+// A legacy rule whose primary already has a plain per-model policy (slowdown,
+// description) is merged into it: the policy becomes the failover redirect
+// and keeps its settings. A path-scoped policy is left for the operator.
+func TestNew_MergesLegacyFailoverRuleIntoPlainPolicy(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+
+	first, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	for _, policy := range []VirtualModel{
+		{Source: "openai/gpt-4o", Slowdown: new(0.5), Description: "my note", Enabled: true},
+		{Source: "anthropic/claude", UserPaths: []string{"/team"}, Enabled: true},
+	} {
+		if err := first.Service.Upsert(ctx, policy); err != nil {
+			t.Fatalf("Upsert(%s) error = %v", policy.Source, err)
+		}
+	}
+	_ = first.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+		`INSERT INTO failover_rules VALUES ('anthropic/claude', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer result.Close()
+	merged, ok := result.Service.Get("openai/gpt-4o")
+	if !ok || merged.Strategy != StrategyFailover || len(merged.Targets) != 2 {
+		t.Fatalf("merged = %+v, %v; want failover redirect", merged, ok)
+	}
+	if merged.Description != "my note" || merged.Slowdown == nil || *merged.Slowdown != 0.5 || !merged.Enabled {
+		t.Fatalf("merged policy settings lost: %+v", merged)
+	}
+	if scoped, _ := result.Service.Get("anthropic/claude"); scoped == nil || scoped.IsRedirect() {
+		t.Fatalf("path-scoped policy must be left untouched, got %+v", scoped)
+	}
+	var remaining string
+	if err := db.QueryRow(`SELECT group_concat(primary_model) FROM failover_rules`).Scan(&remaining); err != nil || remaining != "anthropic/claude" {
+		t.Fatalf("failover_rules rows = %q, %v; want only the scoped collision", remaining, err)
+	}
+}
+
+// A deprecated failover.rules entry never overlays a stored virtual model of
+// the same source, so an upgrade cannot silently change its routing.
+func TestNew_ConfigFailoverRuleDoesNotHideStoredVirtualModel(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+
+	first, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := first.Service.Upsert(ctx, VirtualModel{Source: "openai/gpt-4o", Targets: []Target{{Model: "anthropic/claude"}}, Enabled: true}); err != nil {
+		t.Fatalf("Upsert error = %v", err)
+	}
+	_ = first.Close()
+
+	cfg := &config.Config{}
+	cfg.Failover.Manual = map[string][]string{"openai/gpt-4o": {"groq/llama"}, "groq/llama": {"local/mistral"}}
+	result, err := New(ctx, cfg, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer result.Close()
+	stored, ok := result.Service.Get("openai/gpt-4o")
+	if !ok || stored.Managed || stored.Strategy == StrategyFailover || stored.Targets[0].Model != "anthropic/claude" {
+		t.Fatalf("stored virtual model overlaid by the config rule: %+v", stored)
+	}
+	if translated, ok := result.Service.Get("groq/llama"); !ok || !translated.Managed || translated.Strategy != StrategyFailover {
+		t.Fatalf("non-colliding rule not translated: %+v, %v", translated, ok)
 	}
 }

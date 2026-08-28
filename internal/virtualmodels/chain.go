@@ -11,13 +11,15 @@ import (
 const MaxChainDepth = 8
 
 // chained returns the redirect that a target of owner names, when it names
-// one. A target without an explicit provider whose qualified name matches
-// another redirect's source is a chain leg rather than a concrete model. A
-// target naming owner itself is not a chain: it stands for the concrete model
-// the redirect shadows. Disabled redirects are returned too: the caller
-// decides whether that makes the leg unavailable.
+// one. A target declared without a provider whose model matches another
+// redirect's source is a chain leg rather than a concrete model — including
+// slash-named sources such as "team/cheap", which parse like a provider
+// prefix but were not declared as one. A target naming owner itself is not a
+// chain: it stands for the concrete model the redirect shadows. Disabled
+// redirects are returned too: the caller decides whether that makes the leg
+// unavailable.
 func (s *snapshot) chained(owner string, target resolvedTarget) (*redirectEntry, bool) {
-	if target.selector.Provider != "" || target.qualified == owner {
+	if target.explicitProvider || target.qualified == owner {
 		return nil, false
 	}
 	entry, ok := s.redirects[target.qualified]
@@ -122,7 +124,7 @@ func (s *snapshot) dependents(source string) []string {
 			continue
 		}
 		for _, target := range s.redirects[name].targets {
-			if target.selector.Provider == "" && target.qualified == source {
+			if !target.explicitProvider && target.qualified == source {
 				out = append(out, name)
 				break
 			}

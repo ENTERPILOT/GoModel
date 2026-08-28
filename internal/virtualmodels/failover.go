@@ -45,14 +45,20 @@ func (s *Service) ResolveFailovers(resolution *core.RequestModelResolution, _ co
 // redirect that shadows its primary model: the primary is the first target
 // and the fallbacks follow in order. A primary listed in disabled_models is
 // skipped. Sources already declared under virtual_models are left to that
-// declaration.
-func FailoverConfigModels(cfg config.FailoverConfig, declared []VirtualModel) []VirtualModel {
+// declaration, and sources that exist in the store are left to the stored
+// virtual model, with a warning that names it, so the rule's fallbacks can be
+// moved into it by hand.
+func FailoverConfigModels(cfg config.FailoverConfig, declared, stored []VirtualModel) []VirtualModel {
 	if len(cfg.Manual) == 0 {
 		return nil
 	}
 	taken := make(map[string]struct{}, len(declared))
 	for _, model := range declared {
 		taken[strings.TrimSpace(model.Source)] = struct{}{}
+	}
+	inStore := make(map[string]struct{}, len(stored))
+	for _, model := range stored {
+		inStore[strings.TrimSpace(model.Source)] = struct{}{}
 	}
 	sources := make([]string, 0, len(cfg.Manual))
 	for source := range cfg.Manual {
@@ -67,6 +73,11 @@ func FailoverConfigModels(cfg config.FailoverConfig, declared []VirtualModel) []
 			continue
 		}
 		if _, ok := taken[source]; ok {
+			continue
+		}
+		if _, ok := inStore[source]; ok {
+			slog.Warn("deprecated failover rule skipped: a stored virtual model with the same source exists; add the fallbacks as targets of that virtual model with the failover strategy",
+				"source", source, "fallbacks", cfg.Manual[rawSource])
 			continue
 		}
 		if model, ok := failoverModel(source, cfg.Manual[rawSource], true); ok {

@@ -15,6 +15,10 @@ type resolvedTarget struct {
 	selector  core.ModelSelector
 	qualified string
 	weight    float64
+	// explicitProvider records that the declaration named a provider. A
+	// bare "a/b" model may be a slash-shaped model id or a slash-named virtual
+	// model, so only an explicit provider pins the target to a concrete model.
+	explicitProvider bool
 }
 
 // redirectEntry is a redirect row plus its parsed targets and strategy,
@@ -88,9 +92,10 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			targets := make([]resolvedTarget, len(selectors))
 			for i, selector := range selectors {
 				targets[i] = resolvedTarget{
-					selector:  selector,
-					qualified: selector.QualifiedModel(),
-					weight:    normalized.Targets[i].Weight,
+					selector:         selector,
+					qualified:        selector.QualifiedModel(),
+					weight:           normalized.Targets[i].Weight,
+					explicitProvider: normalized.Targets[i].Provider != "",
 				}
 			}
 			next.redirects[normalized.Source] = &redirectEntry{
