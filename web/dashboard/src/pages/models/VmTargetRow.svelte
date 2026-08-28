@@ -3,6 +3,7 @@
   // extra {#each} rows share this shape; two or more rows make the redirect
   // a load balancer (weights show only for round-robin).
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels as vm } from "./virtualModels.svelte.js";
   import { Trash2 } from "lucide";
@@ -19,15 +20,17 @@
 </script>
 
 <div class="vm-target-row">
-  <input
+  <SearchSelect
     {id}
-    type="text"
-    list="virtual-model-target-options"
-    class="mono vm-target-model"
-    {placeholder}
+    class="vm-target-model"
+    options={vm.vmTargetOptions()}
     bind:value={model}
+    {placeholder}
+    searchPlaceholder={m.models_target_search_placeholder()}
+    ariaLabel={m.models_target_model()}
     disabled={vm.vmFormManaged}
-    aria-label={m.models_target_model()}
+    allowCustom
+    mono
   />
   {#if vm.vmFormShowWeights()}
     <input
@@ -36,6 +39,7 @@
       step="1"
       class="mono vm-target-weight"
       placeholder={m.models_weight()}
+      title={m.models_weight_help()}
       bind:value={weight}
       disabled={vm.vmFormManaged}
       required

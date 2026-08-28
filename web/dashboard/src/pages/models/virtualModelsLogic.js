@@ -740,6 +740,29 @@ export function modelOverrideEditButtonLabel(subject, hasOverride) {
 
 // ---- Editor form helpers ----
 
+// virtualModelTargetOptions lists what a target row may pick: every catalog
+// model (described by its provider) and every other redirect, since a target
+// may chain through a virtual model — the one being edited excluded, as a
+// redirect cannot target itself alone.
+export function virtualModelTargetOptions(models, aliases, source) {
+  const current = String(source || "").trim();
+  const options = [];
+  const seen = new Set();
+  for (const model of Array.isArray(models) ? models : []) {
+    const value = qualifiedModelName(model);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    options.push({ value, label: value, description: String(model.provider_name || "") });
+  }
+  for (const alias of Array.isArray(aliases) ? aliases : []) {
+    const value = String((alias && alias.name) || "").trim();
+    if (!value || value === current || seen.has(value)) continue;
+    seen.add(value);
+    options.push({ value, label: value, description: m.models_virtual_model() });
+  }
+  return options;
+}
+
 export function defaultVirtualModelForm() {
   return {
     source: "",

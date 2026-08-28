@@ -31,6 +31,7 @@ import {
   vmFormShowStrategy,
   vmFormShowSessionAffinity,
   vmFormShowFailover,
+  virtualModelTargetOptions,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
 } from "../src/pages/models/virtualModelsLogic.js";
@@ -856,4 +857,24 @@ test("failover is on by default and only the opt-out reaches the server", () => 
     user_paths: [],
   });
   assert.equal(toggle.failover, false);
+});
+
+test("virtualModelTargetOptions lists catalog models and other virtual models", () => {
+  const models = [
+    { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
+    { selector: "groq/llama", provider_name: "groq", model: { id: "llama" } },
+    { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
+  ];
+  const aliases = [{ name: "cheap" }, { name: "smart" }, { name: "" }];
+  const options = virtualModelTargetOptions(models, aliases, "smart");
+  assert.deepEqual(
+    options.map((option) => [option.value, option.description]),
+    [
+      ["openai/gpt-4o", "openai"],
+      ["groq/llama", "groq"],
+      ["cheap", "Virtual model"],
+    ],
+    "duplicates collapse, the edited redirect is excluded, blanks are dropped",
+  );
+  assert.deepEqual(virtualModelTargetOptions(null, null, ""), []);
 });

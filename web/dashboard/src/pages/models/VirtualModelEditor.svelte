@@ -6,10 +6,8 @@
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { modelsStore } from "$lib/stores/models.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
-  import { qualifiedModelName } from "./virtualModelsLogic.js";
   import VmTargetRow from "./VmTargetRow.svelte";
   import { Plus, Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -68,12 +66,6 @@
       data-modal-autofocus
     />
   </FormField>
-
-  <datalist id="virtual-model-target-options">
-    {#each modelsStore.models as m (qualifiedModelName(m))}
-      <option value={qualifiedModelName(m)}>{qualifiedModelName(m)}</option>
-    {/each}
-  </datalist>
 
   <!-- Every target renders the same; two or more turn the redirect into a load balancer. -->
   <div class="form-field">

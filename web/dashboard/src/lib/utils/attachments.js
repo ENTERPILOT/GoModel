@@ -8,6 +8,28 @@
 // Attach a falsy value to disable one: `{@attach open ? dismissOnOutside(close) : undefined}`.
 
 /**
+ * Close a fixed-positioned popup when anything scrolls or the window resizes,
+ * since its viewport coordinates were computed at open time. Scrolling inside
+ * the element itself (its own list) is ignored.
+ *
+ * @param {() => void} onclose
+ */
+export function closeOnScroll(onclose) {
+  return (/** @type {Element} */ node) => {
+    const onScroll = (/** @type {Event} */ event) => {
+      if (event.target instanceof Node && node.contains(event.target)) return;
+      onclose();
+    };
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onclose);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onclose);
+    };
+  };
+}
+
+/**
  * Dismiss a popup when a click lands outside the element or Escape is pressed.
  * Place it on the popup's outermost element (the one that also contains its
  * trigger, so clicking the trigger stays an inside click and the trigger's own

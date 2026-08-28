@@ -12,7 +12,7 @@
   //   allowCustom  offer "Use “<typed text>”" so free-form values still work
   //   disabled, mono (monospace option values), class (trigger wrapper)
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { dismissOnOutside, marqueeOnOverflow } from "$lib/utils/attachments.js";
+  import { closeOnScroll, dismissOnOutside, marqueeOnOverflow } from "$lib/utils/attachments.js";
   import { Check, ChevronDown, Search } from "lucide";
   import { tick } from "svelte";
   import * as m from "$lib/paraglide/messages.js";
@@ -45,6 +45,10 @@
   let activeIndex = $state(-1);
   let searchEl = $state(null);
   let listEl = $state(null);
+  let rootEl = $state(null);
+  // The popover is fixed-positioned from the trigger's viewport rect, so it
+  // is never clipped by a scrolling ancestor such as an editor dialog.
+  let popoverStyle = $state("");
 
   const filtered = $derived(filterSearchOptions(options, query));
   const customValue = $derived(customSearchValue(options, query, allowCustom));
@@ -60,8 +64,15 @@
     return filtered[index]?.value;
   }
 
+  function placePopover() {
+    const rect = rootEl?.getBoundingClientRect();
+    if (!rect) return;
+    popoverStyle = `top:${rect.bottom + 6}px;left:${rect.left}px;min-width:${rect.width}px;`;
+  }
+
   async function openList() {
     if (disabled) return;
+    placePopover();
     open = true;
     query = "";
     const current = filtered.findIndex((option) => option.value === value);
@@ -133,7 +144,9 @@
 <div
   class={["search-select", className]}
   class:search-select-open={open}
+  bind:this={rootEl}
   {@attach open ? dismissOnOutside(close) : undefined}
+  {@attach open ? closeOnScroll(close) : undefined}
 >
   <button
     type="button"
@@ -165,7 +178,7 @@
   </button>
 
   {#if open}
-    <div class="search-select-popover">
+    <div class="search-select-popover" style={popoverStyle}>
       <div class="search-select-search">
         <Icon icon={Search} class="search-select-search-icon" />
         <input
@@ -341,13 +354,12 @@
   }
 
   .search-select-popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
+    position: fixed;
     z-index: 100;
     display: flex;
     flex-direction: column;
-    width: max(100%, 280px);
+    width: max-content;
+    min-width: 280px;
     max-width: min(480px, 90vw);
     background: var(--bg-surface);
     border: 1px solid var(--border);

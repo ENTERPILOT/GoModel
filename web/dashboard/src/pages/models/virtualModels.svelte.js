@@ -33,6 +33,7 @@ import {
   vmFormHasPrimaryTarget,
   vmFormShowSessionAffinity,
   vmFormShowFailover,
+  virtualModelTargetOptions,
   vmFormShowStrategy,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
@@ -531,6 +532,10 @@ class VirtualModelsStore {
     return vmFormShowFailover(this.vmForm);
   }
 
+  vmTargetOptions() {
+    return virtualModelTargetOptions(modelsStore.models, this.aliases, this.vmForm.source);
+  }
+
   vmFormSupportsSlowdown() {
     return vmFormSupportsSlowdown(this.vmForm);
   }
@@ -655,11 +660,8 @@ class VirtualModelsStore {
     this.vmFormManaged = Boolean(override && override.managed);
     this.vmFormDisplayName = row.access_display_name || row.display_name || selector || "";
     this.vmForm = {
+      ...defaultVirtualModelForm(),
       source: selector,
-      target_model: "",
-      target_weight: "",
-      targets: [],
-      strategy: "round_robin",
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
@@ -684,11 +686,8 @@ class VirtualModelsStore {
     this.vmFormManaged = Boolean(override && override.managed);
     this.vmFormDisplayName = m.models_all_scope();
     this.vmForm = {
+      ...defaultVirtualModelForm(),
       source: selector,
-      target_model: "",
-      target_weight: "",
-      targets: [],
-      strategy: "round_robin",
       user_paths: userPaths.join("\n"),
       description: override && override.description ? override.description : "",
       slowdown: override && override.slowdown != null ? override.slowdown : "",
