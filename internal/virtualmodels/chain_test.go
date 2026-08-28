@@ -91,6 +91,12 @@ func TestChain_DisabledOrUnavailableInnerLegIsSkipped(t *testing.T) {
 		}
 	}
 
+	// The refresh target skips the disabled leg and lands on the next concrete one.
+	refresh, ok, _ := svc.ResolveRefreshTarget(core.NewRequestedModelSelector("smart", ""))
+	if !ok || refresh.QualifiedModel() != "openai/gpt-4o" {
+		t.Fatalf("ResolveRefreshTarget(smart) = %v, %v; want openai/gpt-4o past the disabled leg", refresh, ok)
+	}
+
 	// An outer alias whose only leg is a disabled virtual model does not resolve.
 	upsertRedirect(t, svc, "only-cheap", "", "cheap")
 	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("only-cheap", "")); changed {

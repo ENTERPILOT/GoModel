@@ -28,9 +28,10 @@ type legacyFailoverRule struct {
 // importLegacyFailoverRules converts the dashboard-managed rows of the legacy
 // failover_rules store into failover-strategy virtual models and then drops
 // the store, so the conversion runs once. A rule whose primary model already
-// has a virtual model is skipped with a warning rather than merged: the
-// operator decides how the two should combine. Config-managed rows are
-// skipped too — the live configuration still declares them and
+// has a virtual model is not merged — the operator decides how the two should
+// combine — and keeps the store in place, so its fallback list stays readable
+// and the warning repeats on every start until it is resolved. Config-managed
+// rows are skipped — the live configuration still declares them and
 // FailoverConfigModels translates it on every start. Databases that never had
 // the store are a no-op.
 func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.Storage) error {
@@ -50,20 +51,33 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 		taken[row.Source] = struct{}{}
 	}
 
-	migrated := 0
+	migrated, unresolved := 0, 0
 	for _, rule := range rules {
-		if !rule.Enabled || len(rule.Fallbacks) == 0 || rule.ManagedSource == "config" {
+		if !rule.Enabled || rule.ManagedSource == "config" {
 			continue
 		}
-		if _, ok := taken[rule.Source]; ok {
-			slog.Warn("legacy failover rule not migrated: a virtual model with the same source exists; add its fallbacks as targets with the failover strategy",
+		model, ok := failoverModel(rule.Source, rule.Fallbacks, false)
+		if !ok {
+			continue
+		}
+		if _, exists := taken[rule.Source]; exists {
+			slog.Warn("legacy failover rule not migrated: a virtual model with the same source exists; add its fallbacks as targets with the failover strategy, then delete the failover_rules row",
 				"source", rule.Source, "fallbacks", rule.Fallbacks)
+			unresolved++
 			continue
 		}
-		if err := store.Upsert(ctx, failoverModel(rule.Source, rule.Fallbacks, false)); err != nil {
+		if err := store.Upsert(ctx, model); err != nil {
 			return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
 		}
+		taken[rule.Source] = struct{}{}
 		migrated++
+	}
+	if unresolved > 0 {
+		// Migrated rows would be re-imported on the next start, but Upsert
+		// only ever writes sources that have no virtual model, so the
+		// re-import is a no-op; the store is kept so nothing is lost.
+		slog.Warn("legacy failover_rules store kept until every rule is resolved", "unresolved", unresolved)
+		return nil
 	}
 	if err := dropLegacyFailoverStore(ctx, conn); err != nil {
 		return fmt.Errorf("drop legacy failover rules: %w", err)

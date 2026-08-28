@@ -3045,19 +3045,26 @@ curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   | jq -e --arg name "$NAME" '.source == $name and .strategy == "failover" and (.targets | map(.model)) == ["gpt-4.1-nano","gemini-2.5-flash-lite"]' >/dev/null
 curl -fsS "$BASE_URL/admin/virtual-models" \
   | jq -e --arg name "$NAME" 'map(select(.source == $name)) | length == 1' >/dev/null
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\"}" | grep -q '^204$'
 ```
 
 ### S134 Failover strategy always serves the primary target
 
-Two requests through the virtual model are both answered by the first target
-(no rotation), and the audit trail shows a single primary attempt each.
+Creates its own priority list, sends two requests through it — both answered by
+the first target (no rotation) — and removes it.
 
 ```bash
+NAME="qa-failover-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"gemini/gemini-2.5-flash-lite\"}]}" >/dev/null
 for i in 1 2; do
   curl -fsS -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
     -d "{\"model\":\"$NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"ping $i\"}],\"max_tokens\":5}" \
     | jq -e '.model | test("gpt-4.1-nano")' >/dev/null
 done
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\"}" | grep -q '^204$'
 ```
 
 ### S135 Failover for a real model by shadowing it
@@ -3074,8 +3081,6 @@ curl -sS -o /dev/null -w '%{http_code}' -X PUT "$BASE_URL/admin/virtual-models" 
   -d '{"source":"openai/gpt-4.1-nano","targets":[{"model":"openai/gpt-4.1-nano"}]}' | grep -q '^400$'
 curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
   -d '{"source":"openai/gpt-4.1-nano"}' | grep -q '^204$'
-curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
-  -d "{\"source\":\"$NAME\"}" | grep -q '^204$'
 ```
 
 ### S136 Virtual model admin requires authentication

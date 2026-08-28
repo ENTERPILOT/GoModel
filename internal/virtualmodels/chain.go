@@ -75,19 +75,21 @@ func (s snapshot) leaves(owner redirectEntry, target resolvedTarget, catalog Cat
 }
 
 // representativeLeaf returns the first declared concrete model behind entry,
-// descending chains, independent of catalog availability. It gives callers a
-// stable stand-in where no load-balancing state may advance.
+// descending enabled chains, independent of catalog availability. It gives
+// callers a stable stand-in where no load-balancing state may advance. Chains
+// are acyclic by construction (see validateChains), so this terminates.
 func (s snapshot) representativeLeaf(entry redirectEntry) (resolvedTarget, bool) {
-	for depth := 0; depth <= MaxChainDepth; depth++ {
-		if len(entry.targets) == 0 {
-			return resolvedTarget{}, false
-		}
-		target := entry.targets[0]
+	for _, target := range entry.targets {
 		inner, ok := s.chained(entry.vm.Source, target)
 		if !ok {
 			return target, true
 		}
-		entry = inner
+		if !inner.vm.Enabled {
+			continue
+		}
+		if leaf, ok := s.representativeLeaf(inner); ok {
+			return leaf, true
+		}
 	}
 	return resolvedTarget{}, false
 }

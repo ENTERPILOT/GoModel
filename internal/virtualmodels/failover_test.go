@@ -132,10 +132,11 @@ func TestFailoverConfigModels_TranslatesLegacyRules(t *testing.T) {
 	t.Parallel()
 	cfg := config.FailoverConfig{
 		Manual: map[string][]string{
-			"gpt-4o":          {"azure/gpt-4o", " gemini/gemini-2.5-pro "},
+			" gpt-4o ":        {"azure/gpt-4o", " gemini/gemini-2.5-pro "},
 			"claude-sonnet-4": {"openai/gpt-5-mini"},
 			"declared":        {"groq/llama"},
 			"empty":           {},
+			"self-only":       {"self-only", " "},
 		},
 		Disabled: map[string]bool{"claude-sonnet-4": true},
 	}
@@ -181,7 +182,7 @@ func TestNew_MigratesLegacyFailoverRulesIntoVirtualModels(t *testing.T) {
 		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["groq/llama","anthropic/claude"]', 1, 'dashboard', 0, 0)`,
 		`INSERT INTO failover_rules VALUES ('disabled', '["groq/llama"]', 0, 'dashboard', 0, 0)`,
 		`INSERT INTO failover_rules VALUES ('from-config', '["groq/llama"]', 1, 'config', 0, 0)`,
-		`INSERT INTO failover_rules VALUES ('taken', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+		`INSERT INTO failover_rules VALUES ('self-only', '["self-only"]', 1, 'dashboard', 0, 0)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -202,7 +203,7 @@ func TestNew_MigratesLegacyFailoverRulesIntoVirtualModels(t *testing.T) {
 	if primary != "openai/gpt-4o" || strings.Join(chain, ",") != "groq/llama,anthropic/claude" {
 		t.Fatalf("resolved %q with chain %v; want the shadowed model and its fallbacks", primary, chain)
 	}
-	for _, source := range []string{"disabled", "from-config"} {
+	for _, source := range []string{"disabled", "from-config", "self-only"} {
 		if _, ok := result.Service.Get(source); ok {
 			t.Fatalf("rule %q must not be migrated", source)
 		}
@@ -215,5 +216,50 @@ func TestNew_MigratesLegacyFailoverRulesIntoVirtualModels(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err == nil {
 		t.Fatalf("failover_rules still exists with %d rows, want it dropped", count)
+	}
+}
+
+// A legacy rule colliding with an existing virtual model is neither merged nor
+// discarded: the store stays until the operator resolves it, and the migrated
+// rows are not duplicated on the next start.
+func TestNew_KeepsLegacyFailoverStoreWhileARuleCollides(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+
+	first, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := first.Service.Upsert(ctx, VirtualModel{Source: "taken", Targets: []Target{{Model: "openai/gpt-4o"}}, Enabled: true}); err != nil {
+		t.Fatalf("Upsert(taken) error = %v", err)
+	}
+	_ = first.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+		`INSERT INTO failover_rules VALUES ('taken', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	for range 2 {
+		result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if migrated, ok := result.Service.Get("openai/gpt-4o"); !ok || migrated.Strategy != StrategyFailover {
+			t.Fatalf("migrated rule = %+v, %v", migrated, ok)
+		}
+		if taken, _ := result.Service.Get("taken"); taken == nil || taken.Strategy == StrategyFailover {
+			t.Fatalf("colliding virtual model must be left untouched, got %+v", taken)
+		}
+		_ = result.Close()
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("failover_rules rows = %d, %v; want the store kept intact", count, err)
 	}
 }

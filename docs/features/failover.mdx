@@ -87,9 +87,10 @@ converted automatically:
 
 - Dashboard-managed mappings become virtual models with the failover strategy
   that shadow their primary model. The conversion runs once at startup and
-  removes the old `failover_rules` store. A mapping whose primary model already
-  had a virtual model is logged and skipped — add its fallbacks as targets of
-  that virtual model instead.
+  then removes the old `failover_rules` store. A mapping whose primary model
+  already had a virtual model is logged and skipped, and the store is kept
+  until it is resolved — add its fallbacks as targets of that virtual model,
+  then delete the row.
 - `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON`, and
   `disabled_models` still load and are translated into configuration-managed
   virtual models on every start, with a deprecation warning. Move them under

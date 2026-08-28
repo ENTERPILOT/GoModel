@@ -160,7 +160,7 @@ function strategyLabel(strategy) {
     case "cost":
       return "lowest cost";
     case "failover":
-      return "failover";
+      return m.models_strategy_failover();
     case "round_robin":
     case "":
       return "round robin";

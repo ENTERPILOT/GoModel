@@ -60,16 +60,18 @@ func FailoverConfigModels(cfg config.FailoverConfig, declared []VirtualModel) []
 	sort.Strings(sources)
 
 	models := make([]VirtualModel, 0, len(sources))
-	for _, source := range sources {
-		source = strings.TrimSpace(source)
-		fallbacks := cfg.Manual[source]
-		if source == "" || len(fallbacks) == 0 || cfg.Disabled[source] {
+	for _, rawSource := range sources {
+		source := strings.TrimSpace(rawSource)
+		if source == "" || cfg.Disabled[source] {
 			continue
 		}
 		if _, ok := taken[source]; ok {
 			continue
 		}
-		models = append(models, failoverModel(source, fallbacks, true))
+		if model, ok := failoverModel(source, cfg.Manual[rawSource], true); ok {
+			models = append(models, model)
+			taken[source] = struct{}{}
+		}
 	}
 	if len(models) > 0 {
 		slog.Warn("the failover rules configuration is deprecated; declare a virtual model with strategy \"failover\" under virtual_models instead",
@@ -80,14 +82,18 @@ func FailoverConfigModels(cfg config.FailoverConfig, declared []VirtualModel) []
 
 // failoverModel builds the failover-strategy redirect equivalent to a legacy
 // failover rule: source shadows the primary model, listed first, followed by
-// its ordered fallbacks.
-func failoverModel(source string, fallbacks []string, managed bool) VirtualModel {
+// its ordered fallbacks. It reports false when no fallback distinct from the
+// source remains, since a redirect made only of itself is invalid.
+func failoverModel(source string, fallbacks []string, managed bool) (VirtualModel, bool) {
 	targets := make([]Target, 0, len(fallbacks)+1)
 	targets = append(targets, Target{Model: source})
 	for _, fallback := range fallbacks {
 		if fallback = strings.TrimSpace(fallback); fallback != "" && fallback != source {
 			targets = append(targets, Target{Model: fallback})
 		}
+	}
+	if len(targets) == 1 {
+		return VirtualModel{}, false
 	}
 	return VirtualModel{
 		Source:      source,
@@ -96,5 +102,5 @@ func failoverModel(source string, fallbacks []string, managed bool) VirtualModel
 		Description: "Migrated from failover rules",
 		Enabled:     true,
 		Managed:     managed,
-	}
+	}, true
 }

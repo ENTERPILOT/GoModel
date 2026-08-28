@@ -154,6 +154,9 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 	tests := []struct {
 		name    string
 		entries []config.VirtualModelConfig
+		// rejectedByRefresh marks declarations the snapshot build itself
+		// rejects; the others must be caught by ValidateManagedConfig.
+		rejectedByRefresh bool
 	}{
 		{
 			name:    "self target",
@@ -165,6 +168,7 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 				{Source: "smart", Target: "other"},
 				{Source: "other", Target: "smart"},
 			},
+			rejectedByRefresh: true,
 		},
 	}
 
@@ -177,6 +181,9 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 			// rejects chain cycles), then the managed-config check rejects the
 			// remaining invalid declarations.
 			err := svc.Refresh(context.Background())
+			if (err != nil) != tt.rejectedByRefresh {
+				t.Fatalf("Refresh() error = %v, want rejected by refresh = %v", err, tt.rejectedByRefresh)
+			}
 			if err == nil {
 				err = svc.ValidateManagedConfig(nil)
 			}

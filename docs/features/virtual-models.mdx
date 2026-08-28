@@ -98,7 +98,8 @@ available. A redirect with a single target behaves exactly like a plain alias.
 
 Whatever the strategy, the remaining targets are the redirect's **failover
 chain**: when the chosen target fails with a retryable error, the request is
-retried against the other available targets in the order listed. See
+retried against the other available targets in the order listed (unless
+failover is switched off globally or by the request's workflow). See
 [Failover](/features/failover) for the errors that trigger a retry and for
 adding a failover chain to a real model by shadowing it.
 
