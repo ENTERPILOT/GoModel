@@ -23,7 +23,7 @@ func (r *roundRobin) next(source string) uint64 {
 
 // prune removes counters for redirect sources no longer present in the latest
 // snapshot, preventing long-lived processes from retaining deleted aliases.
-func (r *roundRobin) prune(active map[string]redirectEntry) {
+func (r *roundRobin) prune(active map[string]*redirectEntry) {
 	r.counters.Range(func(key, _ any) bool {
 		source, ok := key.(string)
 		if !ok {
@@ -46,7 +46,7 @@ func (r *roundRobin) prune(active map[string]redirectEntry) {
 // served the session before is preferred while it stays viable; otherwise the
 // strategy picks and the choice is re-pinned. It reports false when no target
 // is available.
-func (s *Service) balancedResolution(snap snapshot, entry redirectEntry, sessionID string) (core.ModelSelector, bool) {
+func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessionID string) (core.ModelSelector, bool) {
 	supported := snap.viableTargets(entry, s.catalog)
 	if len(supported) == 0 {
 		return core.ModelSelector{}, false
@@ -124,7 +124,7 @@ func (s *Service) balancedResolution(snap snapshot, entry redirectEntry, session
 // execute: the target itself, or — when it names another virtual model — that
 // redirect's own balanced resolution. Chains are acyclic and bounded by
 // construction (see validateChains), so the recursion terminates.
-func (s *Service) concreteTarget(snap snapshot, entry redirectEntry, target resolvedTarget, sessionID string) (core.ModelSelector, bool) {
+func (s *Service) concreteTarget(snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string) (core.ModelSelector, bool) {
 	inner, ok := snap.chained(entry.vm.Source, target)
 	if !ok {
 		return target.selector, true
@@ -148,7 +148,7 @@ func poolTarget(pool []resolvedTarget, qualified string) (resolvedTarget, bool) 
 // targetsWithCapacity filters targets through the optional rate-limit capacity
 // probe. Without a probe every target has capacity. A chained target has
 // capacity while any concrete model behind it does.
-func (s *Service) targetsWithCapacity(snap snapshot, entry redirectEntry, targets []resolvedTarget) []resolvedTarget {
+func (s *Service) targetsWithCapacity(snap *snapshot, entry *redirectEntry, targets []resolvedTarget) []resolvedTarget {
 	if s.targetCapacity == nil {
 		return targets
 	}
@@ -208,7 +208,7 @@ func normalizeWeight(weight float64) int {
 // when none are priced it falls back to the first supported target so the cost
 // strategy stays deterministic. Ties keep the earlier target in support order.
 // A chained target is priced at the cheapest concrete model behind it.
-func (s *Service) cheapestTarget(snap snapshot, entry redirectEntry, supported []resolvedTarget) resolvedTarget {
+func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported []resolvedTarget) resolvedTarget {
 	best := supported[0]
 	bestCost, bestPriced := s.legCost(snap, entry, best)
 	for _, target := range supported[1:] {
@@ -225,7 +225,7 @@ func (s *Service) cheapestTarget(snap snapshot, entry redirectEntry, supported [
 
 // legCost prices one leg of a strategy: a concrete target's own price, or the
 // lowest price among the available concrete models behind a chained target.
-func (s *Service) legCost(snap snapshot, entry redirectEntry, target resolvedTarget) (float64, bool) {
+func (s *Service) legCost(snap *snapshot, entry *redirectEntry, target resolvedTarget) (float64, bool) {
 	if _, ok := snap.chained(entry.vm.Source, target); !ok {
 		return s.targetCost(target)
 	}

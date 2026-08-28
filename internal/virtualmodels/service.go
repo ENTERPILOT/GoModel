@@ -96,15 +96,17 @@ func NewService(store Store, catalog Catalog, defaultEnabled bool) (*Service, er
 		catalog:        catalog,
 		defaultEnabled: defaultEnabled,
 	}
-	service.current.Store(emptySnapshot(defaultEnabled))
+	empty := emptySnapshot(defaultEnabled)
+	service.current.Store(&empty)
 	return service, nil
 }
 
-func (s *Service) snapshot() snapshot {
+func (s *Service) snapshot() *snapshot {
 	if s == nil {
-		return emptySnapshot(true)
+		empty := emptySnapshot(true)
+		return &empty
 	}
-	return s.current.Load().(snapshot)
+	return s.current.Load().(*snapshot)
 }
 
 // Refresh reloads virtual models from storage and atomically swaps the snapshot.
@@ -123,7 +125,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.current.Store(next)
+	s.current.Store(&next)
 	s.balancer.prune(next.redirects)
 	s.sticky.prune(next.redirects)
 	return nil
@@ -558,7 +560,7 @@ func (s *Service) normalizeForUpsert(vm VirtualModel) (VirtualModel, error) {
 // is a caller mistake worth rejecting up front. Startup config validation skips
 // the availability check, because the catalog may not be warm yet (see
 // ValidateManagedConfig).
-func (s *Service) validateRedirectTarget(current snapshot, vm VirtualModel) error {
+func (s *Service) validateRedirectTarget(current *snapshot, vm VirtualModel) error {
 	if err := validateRedirectStructure(vm); err != nil {
 		return err
 	}
@@ -630,7 +632,7 @@ func validateRedirectStructure(vm VirtualModel) error {
 // availability is transient — it depends on async model loading and provider
 // health — and is already handled at resolve time by skipping unavailable
 // targets, so it gates the admin write path only, never startup.
-func (s *Service) firstUnsupportedTarget(current snapshot, vm VirtualModel) (string, bool) {
+func (s *Service) firstUnsupportedTarget(current *snapshot, vm VirtualModel) (string, bool) {
 	for _, target := range vm.Targets {
 		selector, err := target.selector()
 		if err != nil {
@@ -649,7 +651,7 @@ func (s *Service) firstUnsupportedTarget(current snapshot, vm VirtualModel) (str
 
 // rejectDependents refuses to remove or rename a virtual model that other
 // redirects chain through, so an outer alias cannot silently lose a leg.
-func rejectDependents(current snapshot, source string) error {
+func rejectDependents(current *snapshot, source string) error {
 	dependents := current.dependents(source)
 	if len(dependents) == 0 {
 		return nil
