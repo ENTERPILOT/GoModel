@@ -31,32 +31,6 @@ func (e redirectEntry) sessionAffinity() bool {
 	return e.vm.SessionAffinity == nil || *e.vm.SessionAffinity
 }
 
-// representative returns the first declared target, used where a redirect needs
-// a stable stand-in independent of catalog availability or load-balancing state.
-func (e redirectEntry) representative() (resolvedTarget, bool) {
-	if len(e.targets) == 0 {
-		return resolvedTarget{}, false
-	}
-	return e.targets[0], true
-}
-
-// supportedTargets returns the entry's targets currently backed by the catalog
-// AND owned by a provider with fresh inventory, preserving declared order. A
-// provider whose latest model refresh failed keeps its models registered but
-// is skipped here, so redirects route around it.
-func (e redirectEntry) supportedTargets(catalog Catalog) []resolvedTarget {
-	if catalog == nil {
-		return nil
-	}
-	out := make([]resolvedTarget, 0, len(e.targets))
-	for _, target := range e.targets {
-		if catalog.ModelAvailable(target.qualified) {
-			out = append(out, target)
-		}
-	}
-	return out
-}
-
 // snapshot is the immutable in-memory projection of all virtual models. It
 // indexes redirect rows by source and policy rows by scope, and keeps every row
 // in bySource for Get and admin listing.
@@ -140,6 +114,9 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 		}
 	}
 	sort.Strings(next.order)
+	if err := validateChains(next); err != nil {
+		return snapshot{}, err
+	}
 	return next, nil
 }
 
@@ -193,8 +170,9 @@ func (s snapshot) findRedirect(name, userPath string, enforceUserPaths bool) (re
 }
 
 // resolveRedirect returns a stateless, representative resolution for a redirect
-// name: the first catalog-supported target. It backs validity checks and model
-// listing, which must not advance any load-balancing state. The request path uses
+// name: the first catalog-supported concrete model behind it, descending chained
+// virtual models. It backs validity checks and model listing, which must not
+// advance any load-balancing state. The request path uses
 // Service.balancedResolution, which applies the redirect's load-balancing
 // strategy across all available targets.
 func (s snapshot) resolveRedirect(name string, catalog Catalog, userPath string, enforceUserPaths bool) (Resolution, bool) {
@@ -207,11 +185,11 @@ func (s snapshot) resolveRedirect(name string, catalog Catalog, userPath string,
 	if !ok {
 		return resolution, false
 	}
-	supported := entry.supportedTargets(catalog)
-	if len(supported) == 0 {
+	leaves := s.leafTargets(entry, catalog)
+	if len(leaves) == 0 {
 		return resolution, false
 	}
-	resolution.Resolved = supported[0].selector
+	resolution.Resolved = leaves[0].selector
 	resolution.Source = entry.vm.Source
 	return resolution, true
 }

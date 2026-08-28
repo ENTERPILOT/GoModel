@@ -4,7 +4,6 @@
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
-  import { failover } from "./failover.svelte.js";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
   import {
     aliasRowCanRemove,
@@ -18,7 +17,7 @@
     rowRedirectCanRemove,
   } from "./virtualModelsLogic.js";
   import AccessToggle from "./AccessToggle.svelte";
-  import { CircleDollarSign, Gauge, Pencil, Shuffle, Trash2 } from "lucide";
+  import { CircleDollarSign, Gauge, Pencil, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   // columns: the active category's column spec from categoryColumns.js
@@ -133,15 +132,6 @@
             onclick={() => pricingOverrides.openModelPricingOverrideEdit(row)}
           >
             <Icon icon={CircleDollarSign} class="table-icon-svg" />
-          </TableActionButton>
-        {/if}
-        {#if failover.failoverAvailable && failover.failoverEnabled()}
-          <TableActionButton
-            label={failover.failoverButtonLabel(row)}
-            class="table-icon-btn {failover.failoverButtonClass(row)}"
-            onclick={() => failover.openFailoverForModel(row)}
-          >
-            <Icon icon={Shuffle} class="table-icon-svg" />
           </TableActionButton>
         {/if}
         {#if rateLimits.rateLimitsEnabled() && rateLimits.rateLimitInspectorModelID(row)}

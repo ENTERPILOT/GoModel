@@ -1,7 +1,7 @@
 <script>
   // Models page — grouped model inventory with virtual models (redirects /
-  // load balancers / access policies), pricing overrides, failover and rate
-  // limit entry points.
+  // load balancers / access policies), pricing overrides and rate limit
+  // entry points.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
@@ -15,9 +15,6 @@
   import ModelTable from "./ModelTable.svelte";
   import VirtualModelEditor from "./VirtualModelEditor.svelte";
   import PricingOverrideEditor from "./PricingOverrideEditor.svelte";
-  import FailoverEditor from "./FailoverEditor.svelte";
-  import FailoverDrafts from "./FailoverDrafts.svelte";
-  import { failover } from "./failover.svelte.js";
   import RateLimitEditor from "$pages/rate-limits/RateLimitEditor.svelte";
   import RateLimitInspector from "$pages/rate-limits/RateLimitInspector.svelte";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
@@ -26,15 +23,14 @@
 
   const PAGE = "models";
 
-  // Page data: virtual models, pricing overrides and failover rules load on
-  // boot/refresh; rate limit rules feed the gauge buttons, so they are
-  // fetched on entering both the rate-limits and models pages.
+  // Page data: virtual models and pricing overrides load on boot/refresh;
+  // rate limit rules feed the gauge buttons, so they are fetched on entering
+  // both the rate-limits and models pages.
   $effect(() => {
     void auth.refreshTick;
     if (router.page !== PAGE) return;
     virtualModels.fetchVirtualModels();
     pricingOverrides.fetchModelPricingOverrides();
-    failover.fetchFailoverRules();
     rateLimits.fetchRateLimitsPage();
   });
 
@@ -157,8 +153,6 @@
 
   <RateLimitInspector />
   <RateLimitEditor />
-  <FailoverEditor />
-  <FailoverDrafts />
 </div>
 
 <style>

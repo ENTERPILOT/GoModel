@@ -12,7 +12,6 @@
   import LocaleSelector from "$lib/components/molecules/LocaleSelector.svelte";
   import * as m from "$lib/paraglide/messages.js";
   import TimezoneSettings from "./TimezoneSettings.svelte";
-  import FailoverSettings from "./FailoverSettings.svelte";
   import BudgetSettings from "./BudgetSettings.svelte";
   import BudgetResetSettings from "./BudgetResetSettings.svelte";
   import TaggingSettings from "./TaggingSettings.svelte";
@@ -43,7 +42,6 @@
   <div class="settings-panel">
     <TimezoneSettings />
     <LocaleSelector />
-    <FailoverSettings />
     <BudgetSettings />
     <BudgetResetSettings />
     <TaggingSettings />

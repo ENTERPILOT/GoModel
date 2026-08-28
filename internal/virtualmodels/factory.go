@@ -57,14 +57,20 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err := rejectUnmigratedLegacyData(ctx, store, shared); err != nil {
 		return nil, err
 	}
+	if err := importLegacyFailoverRules(ctx, store, shared); err != nil {
+		return nil, err
+	}
 
 	service, err := NewService(store, catalog, cfg.Models.EnabledByDefault)
 	if err != nil {
 		return nil, err
 	}
-	// Declarative virtual models (config.yaml / VIRTUAL_MODELS) are layered over the
-	// store as a managed overlay before the first refresh builds the snapshot.
-	service.SetConfigModels(ConfigModels(cfg.VirtualModels))
+	// Declarative virtual models (config.yaml / VIRTUAL_MODELS), plus the
+	// deprecated failover rules translated into failover-strategy redirects, are
+	// layered over the store as a managed overlay before the first refresh
+	// builds the snapshot.
+	declared := ConfigModels(cfg.VirtualModels)
+	service.SetConfigModels(append(declared, FailoverConfigModels(cfg.Failover, declared)...))
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err
 	}

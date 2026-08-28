@@ -117,3 +117,44 @@ A follow-up change completed the unification the first version staged:
   always-present target field, `user_paths`, `enabled`, description) plus a
   per-row enable/disable toggle and alias-like styling for any model that carries
   a virtual model.
+
+## Update — chained virtual models
+
+A redirect target may name another virtual model's `source`, turning the
+redirect graph from a star into a DAG without adding an entity:
+
+- **Lazy, level-by-level resolution.** A chained target is one leg of the outer
+  strategy (weight included). Only once chosen does the inner virtual model
+  apply its own strategy, so inner load-balancing state advances only for
+  requests that actually reach it, and session keeping pins at each level.
+- **Validation is a graph property.** `buildSnapshot` rejects cycles (spelling
+  out the offending chain) and chains deeper than `MaxChainDepth` (8). Because
+  every admin write and the initial config refresh build a candidate snapshot,
+  the check covers both without consulting the provider catalog. Removing or
+  renaming a virtual model that others chain through is refused.
+- **Projections descend chains.** `Supports`, `/v1/models` exposure, and the
+  admin view resolve to the first available concrete leaf; a disabled inner
+  virtual model makes its leg unavailable. Only the outer redirect's
+  `user_paths` and `slowdown` apply to a request.
+
+## Update — failover is a load-balancing behaviour of redirects
+
+The standalone failover feature (per-model `failover_rules` rows, the
+`/admin/failover` endpoints, the `failover.rules` configuration and the
+dashboard's shuffle icon) is folded into virtual models (#530, #560):
+
+- **Every multi-target redirect fails over.** The strategy picks the target a
+  request is sent to first; `Service.ResolveFailovers` returns the redirect's
+  remaining available targets (descending chains) as the gateway's failover
+  chain. The gateway sweep, attempt recording and the workflow/`FAILOVER_ENABLED`
+  gates are unchanged — only the source of the chain moved.
+- **`failover` strategy.** A priority list: always the first available target,
+  no weights, no session pinning.
+- **Self target = shadowed model.** A redirect may list its own source as a
+  target, meaning the concrete model it shadows. That is how failover for a real
+  model is expressed (`gpt-4o -> [gpt-4o, azure/gpt-4o]`); a redirect may not
+  consist of its own source alone.
+- **Migration.** Dashboard-managed `failover_rules` rows are converted once at
+  startup into store-backed failover-strategy redirects and the table is
+  dropped; the deprecated `failover.rules` configuration is translated into
+  managed redirects on every start. The `internal/failover` package is removed.

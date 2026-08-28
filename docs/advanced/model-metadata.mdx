@@ -58,8 +58,8 @@ flowchart LR
 - **Pricing** drives [cost tracking](/features/cost-tracking), budgets, and
   `cost` load-balancing. Each priced field remembers its source, so the
   dashboard can show where a rate came from.
-- **Modes and categories** drive dashboard grouping and failover suggestions
-  only — routing never blocks on them, so `/v1/embeddings` reaches any model
+- **Modes and categories** drive dashboard grouping only — routing never
+  blocks on them, so `/v1/embeddings` reaches any model
   the provider serves.
 - **Context window and capabilities** are advertised on `GET /v1/models` for
   clients that pick models dynamically.

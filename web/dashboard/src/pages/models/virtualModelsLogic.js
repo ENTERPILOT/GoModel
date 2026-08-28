@@ -159,12 +159,23 @@ function strategyLabel(strategy) {
   switch (String(strategy || "").toLowerCase()) {
     case "cost":
       return "lowest cost";
+    case "failover":
+      return "failover";
     case "round_robin":
     case "":
       return "round robin";
     default:
       return strategy;
   }
+}
+
+// Strategies where per-target weight has no effect: cost always routes to the
+// cheapest target and failover always to the first available one, so the
+// editor hides weights and the save path strips them.
+const WEIGHTLESS_STRATEGIES = new Set(["cost", "failover"]);
+
+function strategyUsesWeights(strategy) {
+  return !WEIGHTLESS_STRATEGIES.has(String(strategy || "").toLowerCase());
 }
 
 // Editor labels per strategy value. Values come from the backend
@@ -174,6 +185,7 @@ const STRATEGY_OPTION_LABELS = {
   round_robin: m.models_strategy_round_robin(),
   cost: m.models_strategy_cost(),
   adaptive: m.models_strategy_adaptive(),
+  failover: m.models_strategy_failover(),
 };
 
 // strategyOptions builds the editor dropdown from the deployment's supported
@@ -768,11 +780,16 @@ export function vmFormShowStrategy(form) {
   return Boolean(form) && Array.isArray(form.targets) && form.targets.length > 0;
 }
 
-// vmFormShowWeights: only round-robin honors weight; cost balancing always
-// routes to the cheapest target, so weights are hidden to avoid implying they
-// have an effect.
+// vmFormShowWeights: weights are hidden for strategies that ignore them, to
+// avoid implying they have an effect.
 export function vmFormShowWeights(form) {
-  return vmFormShowStrategy(form) && String((form && form.strategy) || "").toLowerCase() !== "cost";
+  return vmFormShowStrategy(form) && strategyUsesWeights(form && form.strategy);
+}
+
+// vmFormShowSessionAffinity: failover always retries the primary target first,
+// so there is no session to keep on another target and the control is hidden.
+export function vmFormShowSessionAffinity(form) {
+  return vmFormShowStrategy(form) && String((form && form.strategy) || "").toLowerCase() !== "failover";
 }
 
 // removePrimaryTarget clears the first target row, promoting the next
@@ -857,12 +874,12 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
     }
     targets.push(...extraTargets);
     if (targets.length > 1) {
-      // Multiple targets load balance; carry the chosen strategy. Weight only
-      // biases round-robin, so cost balancers drop it rather than persist a
-      // value that has no effect.
+      // Multiple targets load balance; carry the chosen strategy. Strategies
+      // that ignore weight drop it rather than persist a value with no effect.
       const strategy = form.strategy || "round_robin";
-      payload.targets =
-        strategy === "cost" ? targets.map((target) => ({ model: target.model })) : targets;
+      payload.targets = strategyUsesWeights(strategy)
+        ? targets
+        : targets.map((target) => ({ model: target.model }));
       payload.strategy = strategy;
       // Affinity defaults to on server-side; only an explicit opt-out is sent.
       if (form && form.session_affinity === false) {
@@ -898,12 +915,11 @@ export function buildAliasTogglePayload(alias) {
     if (alias.session_affinity === false) {
       payload.session_affinity = false;
     }
-    // Weight only biases round-robin, so cost balancers persist weight-less
-    // targets — same contract as the editor save path.
-    payload.targets =
-      payload.strategy === "cost"
-        ? lbTargets.map((target) => ({ model: qualifyTarget(target) }))
-        : lbTargets.map((target) => targetEntry(qualifyTarget(target), target.weight));
+    // Strategies that ignore weight persist weight-less targets — same
+    // contract as the editor save path.
+    payload.targets = strategyUsesWeights(payload.strategy)
+      ? lbTargets.map((target) => targetEntry(qualifyTarget(target), target.weight))
+      : lbTargets.map((target) => ({ model: qualifyTarget(target) }));
   } else if (lbTargets.length === 1) {
     payload.target_model = qualifyTarget(lbTargets[0]);
   } else {

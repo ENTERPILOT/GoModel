@@ -1,88 +1,96 @@
 ---
 title: "Failover"
-description: "Configure GoModel failover with manual mappings and know when failover attempts run."
+description: "Fail over between the targets of a virtual model, and make a target list a strict priority order with the failover strategy."
 icon: "shuffle"
-keywords: ["failover", "fallback", "provider outage", "automatic retry", "high availability"]
+keywords: ["failover", "fallback", "provider outage", "automatic retry", "high availability", "priority routing"]
 ---
-
-<img
-  src="/features/failover.png"
-  alt="GoModel dashboard failover mapping editor for a model, showing an ordered fallback model list, Add fallback model and Generate automatically buttons"
-  style={{ width: "100%", maxWidth: "795px", height: "auto" }}
-  className="rounded-lg"
-/>
 
 ## Overview
 
-GoModel exposes failover through the `failover` config block, environment
-variables, and the Dashboard.
+Failover is part of [virtual models](/features/virtual-models). Every
+redirect with two or more targets fails over between them: when the target a
+request was sent to returns a failover-eligible error, GoModel retries the
+request against the redirect's remaining available targets, in declared order,
+and stops at the first success.
 
-When a request fails, GoModel can retry it against alternate models. Runtime
-failover uses manual rules only.
+The redirect's **load-balancing strategy** decides only which target is tried
+first:
 
-## Manual Mappings
+| Strategy | First target | Then |
+| --- | --- | --- |
+| Round-robin | rotates across targets (weighted) | the other targets, in declared order |
+| Lowest cost | the cheapest available target | the other targets, in declared order |
+| **Failover** | the first available target, always | the next targets, in declared order |
+
+Pick **Failover** when the target list is a priority order — always use the
+best model unless it is down, and only then cascade to the backups.
+
+## Configure a failover chain
+
+In the dashboard, open **Models**, create or edit a virtual model, add the
+targets in priority order and choose **Failover** in the **Load-balancing
+strategy** dropdown. Weights and session keeping do not apply to this
+strategy, so the editor hides them.
+
+As code (`config.yaml` or the `VIRTUAL_MODELS` environment variable):
 
 ```yaml
-failover:
-  enabled: true
-  manual_rules_path: "config/failover.json"
+virtual_models:
+  # A new name that always prefers the first target.
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - { model: kimicode/kimi-k2 }
+      - { model: openai/gpt-4o }
+      - { model: ollama/qwen3:8b }
+
+  # Failover for a real model: the redirect shadows `gpt-4o`, tries it first,
+  # then the fallbacks in order. Listing the source itself as the first target
+  # stands for the concrete model it shadows.
+  - source: gpt-4o
+    strategy: failover
+    targets:
+      - { model: gpt-4o }
+      - { model: azure/gpt-4o }
+      - { model: gemini/gemini-2.5-pro }
 ```
 
-`config/failover.json` is a JSON object where each primary model entry contains
-an ordered failover target list (array); top-level keys are not ordered:
+A target may also name another virtual model
+([chaining](/features/virtual-models#chain-virtual-models)); the sweep then
+tries every concrete model behind it.
 
-```json
-{
-  "gpt-4o": [
-    "azure/gpt-4o",
-    "gemini/gemini-2.5-pro"
-  ]
-}
-```
+## When it runs
 
-The order-sensitive part is the array under each model entry.
-
-GoModel tries the listed candidates in order and stops on the first success.
-Use bare model names like `gpt-4o` or provider-qualified selectors like
-`azure/gpt-4o`.
-
-For env-only deployments, use inline JSON:
-
-```bash
-FAILOVER_RULES_JSON='{"gpt-4o":["azure/gpt-4o","gemini/gemini-2.5-pro"]}'
-```
-
-`failover.default_mode` and `FAILOVER_MODE` are deprecated
-compatibility inputs. They are accepted but ignored by runtime failover.
-
-The Dashboard can generate suggested mappings from model metadata, but
-suggestions must be saved as manual mappings before they affect traffic.
-
-Two ways to reach the generator in the dashboard:
-
-- Per model: open a model's row on the **Models** page and click the
-  shuffle icon to edit its failover mapping, then **Generate automatically**
-  to populate suggested fallback models before **Save**.
-- For everything at once: **Settings -> Failover -> Generate failover models
-  automatically** proposes mappings for every eligible model in one pass.
-
-<img
-  src="/features/failover-generate.png"
-  alt="GoModel dashboard Settings page Failover section with Generate failover models automatically and Remove all the failover models buttons"
-  style={{ width: "100%", maxWidth: "1000px", height: "auto" }}
-  className="rounded-lg"
-/>
-
-## When It Runs
-
-Failover is attempted only after the primary request returns:
+Failover is attempted only after an attempt returns:
 
 - `5xx`
-- `429`
+- `429`, including a rate limit GoModel itself enforces on the target — a
+  saturated target is skipped while another target has capacity
 - model unavailable, unsupported, or not found style errors
 - upstream failure messages relayed with a `4xx` status (aggregator providers
   such as OpenCode Zen can report a transient failure of their own upstream as
   `400 "Upstream request failed"`)
 
-It currently applies to translated `/v1/chat/completions`, `/v1/responses`,
-and `/v1/messages` requests, not `/v1/embeddings`.
+It applies to translated `/v1/chat/completions`, `/v1/responses`, and
+`/v1/messages` requests. The request log shows every attempt, so a served
+failover is visible in the audit trail and priced at the model that answered.
+
+Set `FAILOVER_ENABLED=false` (or `failover.enabled: false`) to switch the
+sweep off globally; a [workflow](/advanced/workflows) can also turn it off for
+its scope. The chosen target is still served, without retries.
+
+## Migrating from failover rules
+
+Earlier releases managed failover as separate per-model mappings (the shuffle
+icon on the Models page and the `failover.rules` configuration). Both are
+converted automatically:
+
+- Dashboard-managed mappings become virtual models with the failover strategy
+  that shadow their primary model. The conversion runs once at startup and
+  removes the old `failover_rules` store. A mapping whose primary model already
+  had a virtual model is logged and skipped — add its fallbacks as targets of
+  that virtual model instead.
+- `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON`, and
+  `disabled_models` still load and are translated into configuration-managed
+  virtual models on every start, with a deprecation warning. Move them under
+  `virtual_models` at your convenience.

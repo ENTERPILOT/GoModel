@@ -31,6 +31,7 @@ import {
   splitVirtualModelViews,
   strategyOptions,
   vmFormHasPrimaryTarget,
+  vmFormShowSessionAffinity,
   vmFormShowStrategy,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
@@ -519,6 +520,10 @@ class VirtualModelsStore {
 
   vmFormShowWeights() {
     return vmFormShowWeights(this.vmForm);
+  }
+
+  vmFormShowSessionAffinity() {
+    return vmFormShowSessionAffinity(this.vmForm);
   }
 
   vmFormSupportsSlowdown() {

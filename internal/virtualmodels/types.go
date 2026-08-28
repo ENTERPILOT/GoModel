@@ -4,10 +4,13 @@
 //
 // A row with Targets is a REDIRECT: Source is a new addressable name that
 // rewrites to one or more real models. A redirect with a single target is a
-// plain alias; a redirect with several targets is load balanced, distributing
-// requests across them by Strategy (round robin or lowest cost). A row without
-// Targets is an ACCESS POLICY: Source is a scoped selector over existing
-// models, gated by UserPaths.
+// plain alias; a redirect with several targets is load balanced: Strategy
+// picks the target a request is sent to first, and the remaining available
+// targets are its failover chain when that attempt fails. A target may name
+// another virtual model (a chain) or the redirect's own Source, which stands
+// for the concrete model the redirect shadows. A row without Targets is an
+// ACCESS POLICY: Source is a scoped selector over existing models, gated by
+// UserPaths.
 //
 // The Service is a single native engine: it operates directly on VirtualModel
 // rows behind one in-memory snapshot, serving both redirect resolution and
@@ -80,6 +83,10 @@ const (
 	// it behaves exactly like round_robin, so configs stay portable between
 	// core and extended builds.
 	StrategyAdaptive = "adaptive"
+	// StrategyFailover always routes to the first currently-available target
+	// in declared order: the target list is a priority list, and lower legs
+	// serve only while every leg above them is unavailable or fails.
+	StrategyFailover = "failover"
 )
 
 // normalizeStrategy lower-cases and defaults a strategy string. An empty value
@@ -95,7 +102,7 @@ func normalizeStrategy(strategy string) string {
 // validStrategy reports whether strategy names a supported load-balancing mode.
 func validStrategy(strategy string) bool {
 	switch normalizeStrategy(strategy) {
-	case StrategyRoundRobin, StrategyCost, StrategyAdaptive:
+	case StrategyRoundRobin, StrategyCost, StrategyAdaptive, StrategyFailover:
 		return true
 	default:
 		return false

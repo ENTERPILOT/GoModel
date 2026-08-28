@@ -119,16 +119,18 @@
         {/each}
       </select>
     </FormField>
-    <div class="form-field">
-      <label class="vm-session-affinity-checkbox">
-        <input
-          type="checkbox"
-          bind:checked={vm.vmForm.session_affinity}
-          disabled={vm.vmFormManaged}
-        />
-        <span>{m.models_session_keeping()}</span>
-      </label>
-    </div>
+    {#if vm.vmFormShowSessionAffinity()}
+      <div class="form-field">
+        <label class="vm-session-affinity-checkbox">
+          <input
+            type="checkbox"
+            bind:checked={vm.vmForm.session_affinity}
+            disabled={vm.vmFormManaged}
+          />
+          <span>{m.models_session_keeping()}</span>
+        </label>
+      </div>
+    {/if}
   {/if}
 
   <div class="form-field">

@@ -29,6 +29,7 @@ import {
   vmFormHasPrimaryTarget,
   vmFormIsRedirect,
   vmFormShowStrategy,
+  vmFormShowSessionAffinity,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
 } from "../src/pages/models/virtualModelsLogic.js";
@@ -604,6 +605,25 @@ test("save payload drops per-target weights for the cost strategy", () => {
   assert.equal(payload.strategy, "cost");
 });
 
+test("save payload keeps declared order and drops weights for the failover strategy", () => {
+  const { payload } = buildVirtualModelSavePayload(
+    {
+      source: "resilient",
+      target_model: "openai/gpt-4o",
+      target_weight: 3,
+      targets: [{ model: "groq/llama", weight: 1 }],
+      strategy: "failover",
+      user_paths: "",
+      description: "",
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o" }, { model: "groq/llama" }]);
+  assert.equal(payload.strategy, "failover");
+});
+
 test("editing a weighted redirect preserves the primary target weight", () => {
   const { primaryModel, primaryWeight, extraTargets } = aliasFormTargets({
     name: "smart",
@@ -730,6 +750,14 @@ test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targe
   form.strategy = "cost";
   assert.equal(vmFormShowStrategy(form), true);
   assert.equal(vmFormShowWeights(form), false);
+  assert.equal(vmFormShowSessionAffinity(form), true);
+
+  // Failover is a priority list: no weights, and no session keeping since the
+  // primary is always retried first.
+  form.strategy = "failover";
+  assert.equal(vmFormShowStrategy(form), true);
+  assert.equal(vmFormShowWeights(form), false);
+  assert.equal(vmFormShowSessionAffinity(form), false);
 
   // A second target row appears in the strategy check even when still blank.
   const blank = defaultVirtualModelForm();

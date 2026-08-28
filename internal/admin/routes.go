@@ -76,12 +76,6 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/mcp-servers/:name/reconnect", h.ReconnectMCPServer)
 	g.GET("/mcp-servers/:name/catalog", h.MCPServerCatalog)
 
-	g.GET("/failover", h.ListFailoverRules)
-	g.PUT("/failover", h.UpsertFailoverRule)
-	g.DELETE("/failover", h.DeleteFailoverRule)
-	g.POST("/failover/reset", h.ResetFailoverRules)
-	g.POST("/failover/generate", h.GenerateFailoverRules)
-
 	g.GET("/model-pricing-overrides", h.ListModelPricingOverrides)
 	g.PUT("/model-pricing-overrides", h.UpsertModelPricingOverride)
 	g.DELETE("/model-pricing-overrides", h.DeleteModelPricingOverride)
