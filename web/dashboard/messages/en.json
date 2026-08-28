@@ -586,6 +586,7 @@
   "models_source": "Source",
   "models_add_target": "Add target (load balancing)",
   "models_strategy": "Load-balancing strategy",
+  "models_strategy_pending_hint": "Applies once two or more targets are listed.",
   "models_session_keeping": "Session keeping (route a detected client session to the target that served it)",
   "models_failover_option": "Failover (retry a failed request on the next target)",
   "models_user_paths": "User Paths",

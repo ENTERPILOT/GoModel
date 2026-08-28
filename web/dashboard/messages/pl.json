@@ -594,6 +594,7 @@
   "models_source": "Źródło",
   "models_add_target": "Dodaj cel (równoważenie obciążenia)",
   "models_strategy": "Strategia równoważenia obciążenia",
+  "models_strategy_pending_hint": "Ma zastosowanie, gdy wskazane są co najmniej dwa cele.",
   "models_session_keeping": "Utrzymywanie sesji (kieruj wykrytą sesję klienta do celu, który ją obsłużył)",
   "models_failover_option": "Failover (ponów nieudane żądanie na kolejnym celu)",
   "models_user_paths": "User Paths",

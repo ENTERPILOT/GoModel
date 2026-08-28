@@ -110,6 +110,9 @@
           <option value={option.value}>{option.label}</option>
         {/each}
       </select>
+      {#if vm.vmFormStrategyPending()}
+        <span class="form-hint">{m.models_strategy_pending_hint()}</span>
+      {/if}
     </FormField>
     {#if vm.vmFormShowSessionAffinity()}
       <div class="form-field">

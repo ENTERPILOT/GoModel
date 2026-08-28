@@ -817,17 +817,31 @@ export function vmFormSupportsSlowdown(form) {
   return Boolean(source) && source !== GLOBAL_OVERRIDE_SELECTOR && !source.endsWith("/");
 }
 
-// vmFormShowStrategy: the primary row is always visible, so the presence of a
-// second target row means the editor is configuring a load balancer — the
-// rows do not need to be filled yet for the strategy choice to be relevant.
-export function vmFormShowStrategy(form) {
+// vmFormHasExtraTargetRows: a second target row (filled or not) means the
+// editor is configuring a load balancer.
+export function vmFormHasExtraTargetRows(form) {
   return Boolean(form) && Array.isArray(form.targets) && form.targets.length > 0;
 }
 
+// vmFormShowStrategy: the strategy is shown as soon as the form has a target,
+// so the user sees how added targets will be used before adding them — with
+// a pinned real model, that "Failover" is what turns the next row into a
+// fallback. A policy form (no target) has no routing to configure.
+export function vmFormShowStrategy(form) {
+  return vmFormHasPrimaryTarget(form) || vmFormHasExtraTargetRows(form);
+}
+
+// vmFormStrategyPending: the strategy is visible but has nothing to balance
+// yet, so the editor explains that it applies from the second target on.
+export function vmFormStrategyPending(form) {
+  return vmFormShowStrategy(form) && !vmFormHasExtraTargetRows(form);
+}
+
 // vmFormShowWeights: weights are hidden for strategies that ignore them, to
-// avoid implying they have an effect.
+// avoid implying they have an effect, and until there is something to
+// balance against.
 export function vmFormShowWeights(form) {
-  return vmFormShowStrategy(form) && strategyUsesWeights(form && form.strategy);
+  return vmFormHasExtraTargetRows(form) && strategyUsesWeights(form && form.strategy);
 }
 
 // vmFormShowSessionAffinity: failover always retries the primary target first,

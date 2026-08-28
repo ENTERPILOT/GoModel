@@ -32,6 +32,7 @@ import {
   vmFormShowSessionAffinity,
   vmFormShowFailover,
   vmFormSelfOnly,
+  vmFormStrategyPending,
   virtualModelTargetOptions,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
@@ -735,10 +736,14 @@ test("removePrimaryTarget clears the primary when it is the only target", () => 
 });
 
 test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targets", () => {
-  // Single target: no balancing, no weights.
+  // Single target: the strategy is already offered (with a pending hint) so
+  // the user sees how the next target will be used, but nothing balances yet.
   let form = { target_model: "openai/gpt-4o", targets: [], strategy: "round_robin" };
-  assert.equal(vmFormShowStrategy(form), false);
+  assert.equal(vmFormShowStrategy(form), true);
+  assert.equal(vmFormStrategyPending(form), true);
   assert.equal(vmFormShowWeights(form), false);
+  // A policy form has no routing to configure.
+  assert.equal(vmFormShowStrategy({ target_model: "", targets: [] }), false);
 
   // Two targets under round-robin: weights are meaningful.
   form = {

@@ -33,6 +33,7 @@ import {
   vmFormHasPrimaryTarget,
   vmFormShowSessionAffinity,
   vmFormShowFailover,
+  vmFormStrategyPending,
   virtualModelTargetOptions,
   vmFormShowStrategy,
   vmFormShowWeights,
@@ -530,6 +531,10 @@ class VirtualModelsStore {
 
   vmFormShowFailover() {
     return vmFormShowFailover(this.vmForm);
+  }
+
+  vmFormStrategyPending() {
+    return vmFormStrategyPending(this.vmForm);
   }
 
   vmTargetOptions() {
