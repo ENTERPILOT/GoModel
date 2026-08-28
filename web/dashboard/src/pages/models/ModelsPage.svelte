@@ -8,6 +8,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
@@ -40,6 +41,11 @@
   // first and rows stream in. untrack keeps the window bookkeeping
   // (modelRenderLimit, modelsRendering) out of this effect's dependencies —
   // the batch loop writes them, and tracking them would restart forever.
+  // Rows read FAILOVER_ENABLED to describe a virtual model's routing.
+  $effect(() => {
+    runtimeConfig.ensureLoaded();
+  });
+
   $effect(() => {
     const total = virtualModels.filteredDisplayModels.length;
     untrack(() => virtualModels.restartModelRendering(total));

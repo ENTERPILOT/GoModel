@@ -9,6 +9,9 @@ import {
   aliasFormTargets,
   aliasRowCanRemove,
   aliasTargetLabel,
+  maskingFailsOver,
+  maskingRoutingKind,
+  maskingRoutingLabel,
   buildAliasTogglePayload,
   buildDisplayModels,
   buildModelTogglePayload,
@@ -135,7 +138,7 @@ test("mapRedirectView keeps load-balanced targets, strategy, and labels them", (
   assert.equal(alias.targets.length, 2);
   assert.equal(alias.targets[1].weight, 2);
   assert.equal(alias.strategy, "round_robin");
-  assert.equal(aliasTargetLabel(alias), "2 targets · round robin");
+  assert.equal(aliasTargetLabel(alias), "openai/gpt-4o, groq/llama · round robin");
 });
 
 test("buildDisplayModels combines source-backed redirects with the concrete model row", () => {
@@ -910,4 +913,36 @@ test("a real model pinned as its own only target saves as a policy, with a fallb
   ({ payload } = buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit"));
   assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o" }, { model: "azure/gpt-4o" }]);
   assert.equal(payload.strategy, "failover");
+});
+
+test("maskingRoutingKind tells failover, balancing, and true redirects apart", () => {
+  const self = { provider: "openai", model: "gpt-4o" };
+  const azure = { provider: "azure", model: "gpt-4o" };
+  const gemini = { provider: "gemini", model: "gemini-2.5-pro" };
+  const over = (targets, extra = {}) => ({ name: "openai/gpt-4o", targets, ...extra });
+
+  // Failover strategy with the model first: a safety net, listed in order.
+  const failover = over([self, azure, gemini], { strategy: "failover" });
+  assert.equal(maskingRoutingKind(failover), "failover");
+  assert.equal(maskingRoutingLabel(failover, "failover"), "azure/gpt-4o → gemini/gemini-2.5-pro");
+  assert.equal(maskingFailsOver(failover), true);
+  // Failover switched off globally: it only ever serves itself.
+  assert.equal(maskingRoutingKind(failover, false), "balanced");
+  assert.equal(maskingFailsOver(failover, false), false);
+  // The model listed after another one is replaced as the primary.
+  assert.equal(maskingRoutingKind(over([azure, self], { strategy: "failover" })), "redirect");
+
+  // Round-robin including the model: balanced; the flag decides retries.
+  const balanced = over([self, azure], { strategy: "round_robin" });
+  assert.equal(maskingRoutingKind(balanced), "balanced");
+  assert.equal(maskingRoutingLabel(balanced, "balanced"), "azure/gpt-4o · round robin");
+  assert.equal(maskingFailsOver(balanced), true);
+  assert.equal(maskingFailsOver(over([self, azure], { strategy: "round_robin", failover: false })), false);
+
+  // Not a target at all: a real redirect, single or balanced.
+  assert.equal(maskingRoutingKind(over([azure])), "redirect");
+  assert.equal(maskingRoutingLabel(over([azure]), "redirect"), "azure/gpt-4o");
+  assert.equal(maskingRoutingKind(over([azure, gemini], { strategy: "cost" })), "redirect");
+  // Plain single-target alias fields are honoured too.
+  assert.equal(maskingRoutingKind({ name: "openai/gpt-4o", target_provider: "azure", target_model: "gpt-4o" }), "redirect");
 });

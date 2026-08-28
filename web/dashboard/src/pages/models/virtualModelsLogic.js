@@ -270,15 +270,83 @@ export function splitVirtualModelViews(views) {
 
 // ---- Alias / access presentation ----
 
+// aliasTargets lists a redirect's targets as qualified selectors, falling
+// back to the single-target fields of a plain alias.
+export function aliasTargets(alias) {
+  if (!alias) return [];
+  const targets = Array.isArray(alias.targets) ? alias.targets.map(qualifyTarget).filter(Boolean) : [];
+  if (targets.length > 0) return targets;
+  const single = alias.target_provider
+    ? alias.target_provider + "/" + alias.target_model
+    : String(alias.target_model || "");
+  return single ? [single] : [];
+}
+
+// targetListLabel joins targets for a table cell, truncating long lists.
+function targetListLabel(targets, separator) {
+  const shown = targets.slice(0, 3);
+  const more = targets.length - shown.length;
+  return shown.join(separator) + (more > 0 ? " +" + more : "");
+}
+
 export function aliasTargetLabel(alias) {
   if (!alias) return "—";
-  const targets = Array.isArray(alias.targets) ? alias.targets : [];
+  const targets = aliasTargets(alias);
   if (targets.length > 1) {
-    return targets.length + " targets · " + strategyLabel(alias.strategy);
+    return targetListLabel(targets, ", ") + " · " + strategyLabel(alias.strategy);
   }
   if (alias.resolved_model) return alias.resolved_model;
-  if (alias.target_provider) return alias.target_provider + "/" + alias.target_model;
-  return alias.target_model || "—";
+  return targets[0] || "—";
+}
+
+// ---- Routing kind of a virtual model over a real model ----
+
+// maskingRoutingKind says what a redirect whose source is a real model does
+// to requests for that model, so the list can show the right icon and words:
+//   "failover" — the model serves first; the other targets are its safety net
+//                (failover strategy with the model as the first target).
+//   "balanced" — the model is one of several targets a strategy spreads
+//                requests across (it may or may not fail over).
+//   "redirect" — the model is not a target at all: requests go elsewhere.
+// With failover switched off globally, a failover-strategy redirect always
+// serves its first target, which for these rows is the model itself, so it
+// reads as balanced-without-failover rather than promising a fallback.
+export function maskingRoutingKind(alias, globalFailover = true) {
+  const targets = aliasTargets(alias);
+  const source = normalizedAliasName(alias && alias.name);
+  const selfIndex = targets.findIndex((target) => normalizedAliasName(target) === source);
+  if (selfIndex < 0) return "redirect";
+  const strategy = String((alias && alias.strategy) || "").toLowerCase();
+  if (strategy === "failover") {
+    if (selfIndex !== 0) return "redirect";
+    return globalFailover && targets.length > 1 ? "failover" : "balanced";
+  }
+  return "balanced";
+}
+
+// maskingFailsOver reports whether a balanced/failover row actually retries
+// on the remaining targets, for the tooltip.
+export function maskingFailsOver(alias, globalFailover = true) {
+  if (!globalFailover) return false;
+  if (aliasTargets(alias).length < 2) return false;
+  if (String((alias && alias.strategy) || "").toLowerCase() === "failover") return true;
+  return !(alias && alias.failover === false);
+}
+
+// maskingRoutingLabel is the secondary line next to the kind's prefix: the
+// fallbacks in order, the balancing peers with the strategy, or the redirect
+// destination.
+export function maskingRoutingLabel(alias, kind) {
+  const source = normalizedAliasName(alias && alias.name);
+  const others = aliasTargets(alias).filter((target) => normalizedAliasName(target) !== source);
+  switch (kind) {
+    case "failover":
+      return targetListLabel(others, " → ");
+    case "balanced":
+      return targetListLabel(others, ", ") + " · " + strategyLabel(alias && alias.strategy);
+    default:
+      return aliasTargetLabel(alias);
+  }
 }
 
 function aliasStateClass(alias) {
