@@ -6,15 +6,19 @@
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
-  import { modelsStore } from "$lib/stores/models.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-  import { virtualModels } from "./virtualModels.svelte.js";
-  import { qualifiedModelName } from "./virtualModelsLogic.js";
+  import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
+  import {
+    vmFormHasPrimaryTarget,
+    vmFormShowBalancingOptions,
+    vmFormStrategyPending,
+    vmFormSupportsSlowdown,
+  } from "./vmForm.js";
   import VmTargetRow from "./VmTargetRow.svelte";
   import { Plus, Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
-  const vm = virtualModels;
+  const vm = virtualModelEditor;
 
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
   // sure the runtime config is loaded by the time the editor shows it.
@@ -69,25 +73,21 @@
     />
   </FormField>
 
-  <datalist id="virtual-model-target-options">
-    {#each modelsStore.models as m (qualifiedModelName(m))}
-      <option value={qualifiedModelName(m)}>{qualifiedModelName(m)}</option>
-    {/each}
-  </datalist>
-
   <!-- Every target renders the same; two or more turn the redirect into a load balancer. -->
   <div class="form-field">
     <span class="form-field-label">{m.models_targets()}</span>
     <VmTargetRow
       id="virtual-model-target"
+      bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
-      showRemove={vm.vmFormHasPrimaryTarget()}
+      showRemove={vmFormHasPrimaryTarget(vm.vmForm)}
       onremove={() => vm.removePrimaryTarget()}
     />
     {#each vm.vmForm.targets as target, index (index)}
       <VmTargetRow
         placeholder="groq/llama"
+        bind:provider={target.provider}
         bind:model={target.model}
         bind:weight={target.weight}
         onremove={() => vm.removeVmTarget(index)}
@@ -106,27 +106,56 @@
     </div>
   </div>
 
-  {#if vm.vmFormShowStrategy()}
-    <FormField id="virtual-model-strategy" label={m.models_strategy()}>
-      <select
-        id="virtual-model-strategy"
-        class="form-select"
-        bind:value={vm.vmForm.strategy}
-        disabled={vm.vmFormManaged}
-      >
-        {#each vm.vmStrategyOptions() as option (option.value)}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
-    </FormField>
+  {@const summary = vm.vmRoutingSummary()}
+  {#if summary.text}
+    <p class="form-hint vm-routing-summary" class:vm-routing-replaces={summary.replaces} role="status">
+      {summary.text}
+    </p>
+  {/if}
+
+  <div class="form-field">
+    <InlineHelpSection
+      copyId="virtual-model-strategy-help"
+      label={m.models_strategy_help_label()}
+      bind:open={vm.vmFormStrategyHelpOpen}
+    >
+      {#snippet title()}
+        <label class="form-field-label" for="virtual-model-strategy">{m.models_strategy()}</label>
+      {/snippet}
+      {#snippet help()}
+        {m.models_strategy_pending_hint()}
+      {/snippet}
+    </InlineHelpSection>
+    <select
+      id="virtual-model-strategy"
+      class="form-select"
+      bind:value={vm.vmForm.strategy}
+      disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
+    >
+      {#each vm.vmStrategyOptions() as option (option.value)}
+        <option value={option.value}>{option.label}</option>
+      {/each}
+    </select>
+  </div>
+  {#if vmFormShowBalancingOptions(vm.vmForm)}
     <div class="form-field">
-      <label class="vm-session-affinity-checkbox">
+      <label class="vm-option-checkbox">
         <input
           type="checkbox"
           bind:checked={vm.vmForm.session_affinity}
-          disabled={vm.vmFormManaged}
+          disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
         />
         <span>{m.models_session_keeping()}</span>
+      </label>
+    </div>
+    <div class="form-field">
+      <label class="vm-option-checkbox">
+        <input
+          type="checkbox"
+          bind:checked={vm.vmForm.failover}
+          disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
+        />
+        <span>{m.models_failover_option()}</span>
       </label>
     </div>
   {/if}
@@ -164,7 +193,7 @@
     ></textarea>
   </FormField>
 
-  {#if vm.vmFormSupportsSlowdown()}
+  {#if vmFormSupportsSlowdown(vm.vmForm)}
     <FormField id="virtual-model-slowdown" label={m.models_slowdown_field()}>
       <input
         id="virtual-model-slowdown"
@@ -222,7 +251,7 @@
 </EditorDialog>
 
 <style>
-  .vm-session-affinity-checkbox {
+  .vm-option-checkbox {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -232,8 +261,16 @@
     user-select: none;
   }
 
-  .vm-session-affinity-checkbox input {
+  .vm-option-checkbox input {
     accent-color: var(--accent);
     cursor: pointer;
+  }
+
+  .vm-routing-summary {
+    margin: 0;
+  }
+
+  .vm-routing-replaces {
+    color: var(--warning);
   }
 </style>

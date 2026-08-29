@@ -472,8 +472,48 @@ func TestUpsertRedirectVirtualModelReplacesAccessPolicy(t *testing.T) {
 	if len(view.UserPaths) != 0 {
 		t.Fatalf("view.UserPaths = %v, want none after full replacement", view.UserPaths)
 	}
-	if got := view.Targets[0].Provider + "/" + view.Targets[0].Model; got != "openai/gpt-4o-mini" {
-		t.Fatalf("target = %q, want openai/gpt-4o-mini", got)
+	if got := view.Targets[0]; got.Provider != "" || got.Model != "openai/gpt-4o-mini" {
+		t.Fatalf("target = %+v, want the bare name openai/gpt-4o-mini", got)
+	}
+}
+
+// A target written as one name is kept by name, so it may chain to a virtual
+// model that looks like provider/model; an explicit provider pins a concrete
+// model and is validated as such.
+func TestUpsertVirtualModelBareTargetChainsToSlashNamedVirtualModel(t *testing.T) {
+	h := newVMHandler(t, redirectVM("team/cheap", "openai/gpt-4o", true))
+	e := echo.New()
+
+	body := `{"source":"outer","target_model":"team/cheap","enabled":true}`
+	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(outer) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var view virtualmodels.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(view.Targets) != 1 || view.Targets[0].Provider != "" || view.Targets[0].Model != "team/cheap" {
+		t.Fatalf("targets = %+v, want the bare name team/cheap", view.Targets)
+	}
+	if view.ResolvedModel != "openai/gpt-4o" {
+		t.Fatalf("resolved_model = %q, want the chained virtual model's target", view.ResolvedModel)
+	}
+
+	body = `{"source":"pinned","targets":[{"provider":"team","model":"cheap"}],"enabled":true}`
+	req = httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("UpsertVirtualModel(pinned) error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an explicit provider that does not exist body=%s", rec.Code, rec.Body.String())
 	}
 }
 

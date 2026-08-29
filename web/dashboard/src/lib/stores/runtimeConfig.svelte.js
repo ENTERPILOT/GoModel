@@ -27,7 +27,7 @@ const CONFIG_KEYS = [
 
 // Strategies every gateway supports; used when the backend predates the
 // VIRTUAL_MODEL_STRATEGIES key.
-const DEFAULT_VM_STRATEGIES = ["round_robin", "cost"];
+const DEFAULT_VM_STRATEGIES = ["round_robin", "cost", "failover"];
 
 class RuntimeConfigStore {
   config = $state({});

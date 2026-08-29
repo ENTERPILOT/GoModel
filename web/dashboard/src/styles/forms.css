@@ -277,13 +277,6 @@ textarea:focus {
   margin-top: 16px;
 }
 
-.failover-target-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
 .data-table tr.alias-row.is-valid td {
   background: var(--alias-row-valid-bg);
 }

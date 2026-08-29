@@ -154,17 +154,21 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 	tests := []struct {
 		name    string
 		entries []config.VirtualModelConfig
+		// rejectedByRefresh marks declarations the snapshot build itself
+		// rejects; the others must be caught by ValidateManagedConfig.
+		rejectedByRefresh bool
 	}{
 		{
 			name:    "self target",
 			entries: []config.VirtualModelConfig{{Source: "smart", Target: "smart"}},
 		},
 		{
-			name: "virtual model target",
+			name: "chain cycle",
 			entries: []config.VirtualModelConfig{
 				{Source: "smart", Target: "other"},
-				{Source: "other", Target: "openai/gpt-4o"},
+				{Source: "other", Target: "smart"},
 			},
+			rejectedByRefresh: true,
 		},
 	}
 
@@ -173,19 +177,43 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 			t.Parallel()
 			svc := newBalancingService(t)
 			svc.SetConfigModels(ConfigModels(tt.entries))
-			if err := svc.Refresh(context.Background()); err != nil {
-				t.Fatalf("Refresh() error = %v", err)
+			// Startup mirrors the factory: Refresh builds the snapshot (which
+			// rejects chain cycles), then the managed-config check rejects the
+			// remaining invalid declarations.
+			err := svc.Refresh(context.Background())
+			if (err != nil) != tt.rejectedByRefresh {
+				t.Fatalf("Refresh() error = %v, want rejected by refresh = %v", err, tt.rejectedByRefresh)
 			}
-			// Startup mirrors the factory: Refresh builds the snapshot, then the
-			// managed-config check rejects invalid declarations.
-			err := svc.ValidateManagedConfig(nil)
 			if err == nil {
-				t.Fatalf("ValidateManagedConfig() error = nil, want validation failure")
+				err = svc.ValidateManagedConfig(nil)
+			}
+			if err == nil {
+				t.Fatalf("startup validation error = nil, want validation failure")
 			}
 			if !IsValidationError(err) {
-				t.Fatalf("ValidateManagedConfig() error = %v, want validation error", err)
+				t.Fatalf("startup validation error = %v, want validation error", err)
 			}
 		})
+	}
+}
+
+// A declarative virtual model may chain through another declarative one.
+func TestService_ConfigOverlayChainsVirtualModels(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{
+		{Source: "production", Target: "cheap"},
+		{Source: "cheap", Target: "groq/llama"},
+	}))
+	if err := svc.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if err := svc.ValidateManagedConfig(nil); err != nil {
+		t.Fatalf("ValidateManagedConfig() error = %v", err)
+	}
+	sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector("production", ""))
+	if err != nil || sel.QualifiedModel() != "groq/llama" {
+		t.Fatalf("ResolveModel(production) = %q, %v; want groq/llama", sel.QualifiedModel(), err)
 	}
 }
 

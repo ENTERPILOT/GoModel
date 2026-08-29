@@ -23,9 +23,12 @@ type upsertVirtualModelRequest struct {
 	Strategy    string                      `json:"strategy,omitempty"`
 	// SessionAffinity keeps a detected session on the target that served it
 	// before. Omitted means enabled; false restores stateless balancing.
-	SessionAffinity *bool    `json:"session_affinity,omitempty"`
-	UserPaths       []string `json:"user_paths,omitempty"`
-	Description     string   `json:"description,omitempty"`
+	SessionAffinity *bool `json:"session_affinity,omitempty"`
+	// Failover retries a failed request on the remaining targets. Omitted
+	// means enabled; false serves the chosen target only.
+	Failover    *bool    `json:"failover,omitempty"`
+	UserPaths   []string `json:"user_paths,omitempty"`
+	Description string   `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown *float64 `json:"slowdown,omitempty"`
 	Enabled  *bool    `json:"enabled,omitempty"`
@@ -162,6 +165,7 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		Source:          source,
 		Strategy:        strings.TrimSpace(req.Strategy),
 		SessionAffinity: req.SessionAffinity,
+		Failover:        req.Failover,
 		UserPaths:       req.UserPaths,
 		Description:     strings.TrimSpace(req.Description),
 		Slowdown:        req.Slowdown,
@@ -179,6 +183,11 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 // buildVirtualModelTargets resolves the redirect targets from the request. The
 // multi-target `targets` form takes precedence; a single `target_model` is the
 // backward-compatible shorthand. An empty result makes the row an access policy.
+//
+// A target given as one name ("openai/gpt-4o", "team/cheap") is stored as
+// written, like a config declaration: the name may belong to a virtual model,
+// which makes the target a chain leg. Only an explicit `provider` pins the
+// target to a concrete model.
 func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Target, error) {
 	if len(req.Targets) > 0 {
 		targets := make([]virtualmodels.Target, 0, len(req.Targets))
@@ -187,15 +196,12 @@ func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Ta
 			if model == "" {
 				continue
 			}
-			selector, err := core.ParseModelSelector(model, strings.TrimSpace(t.Provider))
+			target, err := virtualModelTarget(model, strings.TrimSpace(t.Provider))
 			if err != nil {
 				return nil, core.NewInvalidRequestError("invalid target model "+model+": "+err.Error(), err)
 			}
-			targets = append(targets, virtualmodels.Target{
-				Provider: selector.Provider,
-				Model:    selector.Model,
-				Weight:   t.Weight,
-			})
+			target.Weight = t.Weight
+			targets = append(targets, target)
 		}
 		// A targets list with only blank entries is a malformed redirect, not an
 		// access policy — fail loudly rather than silently demoting it.
@@ -205,14 +211,28 @@ func buildVirtualModelTargets(req upsertVirtualModelRequest) ([]virtualmodels.Ta
 		return targets, nil
 	}
 
-	if target := strings.TrimSpace(req.TargetModel); target != "" {
-		selector, err := core.ParseModelSelector(target, "")
+	if model := strings.TrimSpace(req.TargetModel); model != "" {
+		target, err := virtualModelTarget(model, "")
 		if err != nil {
 			return nil, core.NewInvalidRequestError("invalid target_model: "+err.Error(), err)
 		}
-		return []virtualmodels.Target{{Provider: selector.Provider, Model: selector.Model}}, nil
+		return []virtualmodels.Target{target}, nil
 	}
 	return nil, nil
+}
+
+// virtualModelTarget validates one target declaration and keeps it in the
+// shape it was given: a bare name stays whole, an explicit provider is split
+// off the model.
+func virtualModelTarget(model, provider string) (virtualmodels.Target, error) {
+	selector, err := core.ParseModelSelector(model, provider)
+	if err != nil {
+		return virtualmodels.Target{}, err
+	}
+	if provider == "" {
+		return virtualmodels.Target{Model: model}, nil
+	}
+	return virtualmodels.Target{Provider: selector.Provider, Model: selector.Model}, nil
 }
 
 // findVirtualModelView returns the admin view for a source after an upsert by

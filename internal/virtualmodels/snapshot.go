@@ -15,6 +15,10 @@ type resolvedTarget struct {
 	selector  core.ModelSelector
 	qualified string
 	weight    float64
+	// explicitProvider records that the declaration named a provider. A
+	// bare "a/b" model may be a slash-shaped model id or a slash-named virtual
+	// model, so only an explicit provider pins the target to a concrete model.
+	explicitProvider bool
 }
 
 // redirectEntry is a redirect row plus its parsed targets and strategy,
@@ -31,30 +35,23 @@ func (e redirectEntry) sessionAffinity() bool {
 	return e.vm.SessionAffinity == nil || *e.vm.SessionAffinity
 }
 
-// representative returns the first declared target, used where a redirect needs
-// a stable stand-in independent of catalog availability or load-balancing state.
-func (e redirectEntry) representative() (resolvedTarget, bool) {
-	if len(e.targets) == 0 {
-		return resolvedTarget{}, false
-	}
-	return e.targets[0], true
+// failover reports whether a request that fails on the chosen target is
+// retried on the redirect's other targets. Enabled unless explicitly disabled;
+// the failover strategy is a priority list and always fails over.
+func (e redirectEntry) failover() bool {
+	return e.vm.Failover == nil || *e.vm.Failover || normalizeStrategy(e.strategy) == StrategyFailover
 }
 
-// supportedTargets returns the entry's targets currently backed by the catalog
-// AND owned by a provider with fresh inventory, preserving declared order. A
-// provider whose latest model refresh failed keeps its models registered but
-// is skipped here, so redirects route around it.
-func (e redirectEntry) supportedTargets(catalog Catalog) []resolvedTarget {
-	if catalog == nil {
-		return nil
-	}
-	out := make([]resolvedTarget, 0, len(e.targets))
+// shadowsSource reports whether the redirect lists its own source among its
+// targets: it then covers the concrete model of that name (adding failover or
+// balancing to it) instead of replacing it.
+func (e *redirectEntry) shadowsSource() bool {
 	for _, target := range e.targets {
-		if catalog.ModelAvailable(target.qualified) {
-			out = append(out, target)
+		if target.qualified == e.vm.Source {
+			return true
 		}
 	}
-	return out
+	return false
 }
 
 // snapshot is the immutable in-memory projection of all virtual models. It
@@ -62,7 +59,7 @@ func (e redirectEntry) supportedTargets(catalog Catalog) []resolvedTarget {
 // in bySource for Get and admin listing.
 type snapshot struct {
 	// redirects holds redirect rows keyed by trimmed Source, plus sorted order.
-	redirects map[string]redirectEntry
+	redirects map[string]*redirectEntry
 	order     []string
 
 	// bySource holds every row (redirect and policy) keyed by Source.
@@ -79,7 +76,7 @@ type snapshot struct {
 
 func emptySnapshot(defaultEnable bool) snapshot {
 	return snapshot{
-		redirects:     map[string]redirectEntry{},
+		redirects:     map[string]*redirectEntry{},
 		order:         []string{},
 		bySource:      map[string]VirtualModel{},
 		exact:         map[string]VirtualModel{},
@@ -94,7 +91,7 @@ func emptySnapshot(defaultEnable bool) snapshot {
 // committing it.
 func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 	next := emptySnapshot(defaultEnable)
-	next.redirects = make(map[string]redirectEntry, len(rows))
+	next.redirects = make(map[string]*redirectEntry, len(rows))
 	next.order = make([]string, 0, len(rows))
 	next.bySource = make(map[string]VirtualModel, len(rows))
 
@@ -107,12 +104,13 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 			targets := make([]resolvedTarget, len(selectors))
 			for i, selector := range selectors {
 				targets[i] = resolvedTarget{
-					selector:  selector,
-					qualified: selector.QualifiedModel(),
-					weight:    normalized.Targets[i].Weight,
+					selector:         selector,
+					qualified:        selector.QualifiedModel(),
+					weight:           normalized.Targets[i].Weight,
+					explicitProvider: normalized.Targets[i].Provider != "",
 				}
 			}
-			next.redirects[normalized.Source] = redirectEntry{
+			next.redirects[normalized.Source] = &redirectEntry{
 				vm:       normalized,
 				targets:  targets,
 				strategy: normalized.Strategy,
@@ -140,12 +138,15 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 		}
 	}
 	sort.Strings(next.order)
+	if err := validateChains(&next); err != nil {
+		return snapshot{}, err
+	}
 	return next, nil
 }
 
 // rows returns a deep copy of every stored row, sorted by source. It is the
 // basis for the candidate-snapshot validation in Upsert/Delete.
-func (s snapshot) rows() []VirtualModel {
+func (s *snapshot) rows() []VirtualModel {
 	sources := make([]string, 0, len(s.bySource))
 	for source := range s.bySource {
 		sources = append(sources, source)
@@ -161,7 +162,7 @@ func (s snapshot) rows() []VirtualModel {
 // lookupCanonicalSource finds a row by source, accepting an unnormalized policy
 // selector (e.g. a raw model ID) by normalizing before giving up. It returns the
 // row, its canonical source key, and whether it was found.
-func (s snapshot) lookupCanonicalSource(source string) (VirtualModel, string, bool) {
+func (s *snapshot) lookupCanonicalSource(source string) (VirtualModel, string, bool) {
 	source = strings.TrimSpace(source)
 	if vm, ok := s.bySource[source]; ok {
 		return vm, source, true
@@ -177,27 +178,28 @@ func (s snapshot) lookupCanonicalSource(source string) (VirtualModel, string, bo
 // findRedirect returns the redirect entry for a requested model name when it is
 // enabled and, when enforced, the caller's user path is in scope. It performs no
 // catalog lookup or target selection, so it never advances load-balancing state.
-func (s snapshot) findRedirect(name, userPath string, enforceUserPaths bool) (redirectEntry, bool) {
+func (s *snapshot) findRedirect(name, userPath string, enforceUserPaths bool) (*redirectEntry, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return redirectEntry{}, false
+		return nil, false
 	}
 	entry, ok := s.redirects[name]
 	if !ok || !entry.vm.Enabled {
-		return redirectEntry{}, false
+		return nil, false
 	}
 	if enforceUserPaths && len(entry.vm.UserPaths) > 0 && !userPathAllowed(userPath, entry.vm.UserPaths) {
-		return redirectEntry{}, false
+		return nil, false
 	}
 	return entry, true
 }
 
 // resolveRedirect returns a stateless, representative resolution for a redirect
-// name: the first catalog-supported target. It backs validity checks and model
-// listing, which must not advance any load-balancing state. The request path uses
+// name: the first catalog-supported concrete model behind it, descending chained
+// virtual models. It backs validity checks and model listing, which must not
+// advance any load-balancing state. The request path uses
 // Service.balancedResolution, which applies the redirect's load-balancing
 // strategy across all available targets.
-func (s snapshot) resolveRedirect(name string, catalog Catalog, userPath string, enforceUserPaths bool) (Resolution, bool) {
+func (s *snapshot) resolveRedirect(name string, catalog Catalog, userPath string, enforceUserPaths bool) (Resolution, bool) {
 	name = strings.TrimSpace(name)
 	resolution := Resolution{
 		Requested: core.ModelSelector{Model: name},
@@ -207,17 +209,17 @@ func (s snapshot) resolveRedirect(name string, catalog Catalog, userPath string,
 	if !ok {
 		return resolution, false
 	}
-	supported := entry.supportedTargets(catalog)
-	if len(supported) == 0 {
+	leaves := s.leafTargets(entry, catalog)
+	if len(leaves) == 0 {
 		return resolution, false
 	}
-	resolution.Resolved = supported[0].selector
+	resolution.Resolved = leaves[0].selector
 	resolution.Source = entry.vm.Source
 	return resolution, true
 }
 
 // effectiveState resolves the compiled access state for one concrete selector.
-func (s snapshot) effectiveState(selector core.ModelSelector) EffectiveState {
+func (s *snapshot) effectiveState(selector core.ModelSelector) EffectiveState {
 	model := strings.TrimSpace(selector.Model)
 	providerName := strings.TrimSpace(selector.Provider)
 	state := EffectiveState{
@@ -242,7 +244,7 @@ func (s snapshot) effectiveState(selector core.ModelSelector) EffectiveState {
 
 // matchingPolicy returns the most specific policy row matching providerName and
 // model: exact > providerWide > modelWide > global.
-func (s snapshot) matchingPolicy(providerName, model string) (VirtualModel, bool) {
+func (s *snapshot) matchingPolicy(providerName, model string) (VirtualModel, bool) {
 	if key := modelselectors.ExactMatchKey(providerName, model); key != "" {
 		if exact, ok := s.exact[key]; ok {
 			return exact, true
