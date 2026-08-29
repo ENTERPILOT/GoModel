@@ -28,6 +28,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
@@ -740,6 +741,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		ModelResolver:                   vm,
 		ModelAuthorizer:                 vm,
 		FailoverResolver:                failoverResolver(appCfg, vm),
+		FailoverPolicy:                  gateway.NewFailoverPolicy(appCfg.Failover),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
 		BatchRequestPreparer:            batchRequestPreparer,
@@ -875,6 +877,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: workflowResult.Service,
 		FailoverResolver:       serverCfg.FailoverResolver,
+		FailoverPolicy:         serverCfg.FailoverPolicy,
 		AuditLogger:            auditResult.Logger,
 		// The tapped logger, so guardrail LLM calls count toward the
 		// request's rate limit token windows like any other completion.
