@@ -29,6 +29,7 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 		Source:          entry.Source,
 		Strategy:        entry.Strategy,
 		SessionAffinity: entry.SessionAffinity,
+		Failover:        entry.Failover,
 		Targets:         configTargets(entry),
 		UserPaths:       entry.UserPaths,
 		Description:     entry.Description,

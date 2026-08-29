@@ -201,13 +201,13 @@ func (s *concurrentStore) Close() error { return nil }
 type blockingCompiler struct {
 	delegate  Compiler
 	blockCall int32
-	callCount int32
+	callCount atomic.Int32
 	blocked   chan struct{}
 	release   chan struct{}
 }
 
 func (c *blockingCompiler) Compile(version Version) (*CompiledWorkflow, error) {
-	call := atomic.AddInt32(&c.callCount, 1)
+	call := c.callCount.Add(1)
 	if call == c.blockCall {
 		close(c.blocked)
 		<-c.release
@@ -1302,19 +1302,17 @@ func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) 
 
 func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *testing.T) {
 	store := &contextCancelingStore{
-		staticStore: staticStore{
-			versions: []Version{
-				{
-					ID:       "global-v1",
-					Scope:    Scope{},
-					ScopeKey: "global",
-					Version:  1,
-					Active:   true,
-					Name:     "global",
-					Payload: Payload{
-						SchemaVersion: 1,
-						Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-					},
+		versions: []Version{
+			{
+				ID:       "global-v1",
+				Scope:    Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
 			},
 		},
@@ -1360,19 +1358,17 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 
 func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
 	store := &refreshFailingStore{
-		staticStore: staticStore{
-			versions: []Version{
-				{
-					ID:       "global-v1",
-					Scope:    Scope{},
-					ScopeKey: "global",
-					Version:  1,
-					Active:   true,
-					Name:     "global",
-					Payload: Payload{
-						SchemaVersion: 1,
-						Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-					},
+		versions: []Version{
+			{
+				ID:       "global-v1",
+				Scope:    Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
 			},
 		},
@@ -1415,31 +1411,29 @@ func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testin
 
 func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t *testing.T) {
 	store := &contextCancelingStore{
-		staticStore: staticStore{
-			versions: []Version{
-				{
-					ID:       "global-v1",
-					Scope:    Scope{},
-					ScopeKey: "global",
-					Version:  1,
-					Active:   true,
-					Name:     "global",
-					Payload: Payload{
-						SchemaVersion: 1,
-						Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-					},
+		versions: []Version{
+			{
+				ID:       "global-v1",
+				Scope:    Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				{
-					ID:       "provider-v1",
-					Scope:    Scope{Provider: "openai"},
-					ScopeKey: "provider:openai",
-					Version:  1,
-					Active:   true,
-					Name:     "openai",
-					Payload: Payload{
-						SchemaVersion: 1,
-						Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
-					},
+			},
+			{
+				ID:       "provider-v1",
+				Scope:    Scope{Provider: "openai"},
+				ScopeKey: "provider:openai",
+				Version:  1,
+				Active:   true,
+				Name:     "openai",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 				},
 			},
 		},
@@ -1473,31 +1467,29 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 
 func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
 	store := &refreshFailingStore{
-		staticStore: staticStore{
-			versions: []Version{
-				{
-					ID:       "global-v1",
-					Scope:    Scope{},
-					ScopeKey: "global",
-					Version:  1,
-					Active:   true,
-					Name:     "global",
-					Payload: Payload{
-						SchemaVersion: 1,
-						Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-					},
+		versions: []Version{
+			{
+				ID:       "global-v1",
+				Scope:    Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 				},
-				{
-					ID:       "provider-v1",
-					Scope:    Scope{Provider: "openai"},
-					ScopeKey: "provider:openai",
-					Version:  1,
-					Active:   true,
-					Name:     "openai",
-					Payload: Payload{
-						SchemaVersion: 1,
-						Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
-					},
+			},
+			{
+				ID:       "provider-v1",
+				Scope:    Scope{Provider: "openai"},
+				ScopeKey: "provider:openai",
+				Version:  1,
+				Active:   true,
+				Name:     "openai",
+				Payload: Payload{
+					SchemaVersion: 1,
+					Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 				},
 			},
 		},

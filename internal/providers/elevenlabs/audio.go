@@ -72,7 +72,9 @@ func speechFormat(responseFormat string) (openAIFormat, outputFormat string, err
 	case "opus":
 		return format, "opus_48000_128", nil
 	case "pcm":
-		return format, "pcm_44100", nil
+		// pcm_44100 is gated to ElevenLabs Pro plans and above; 24 kHz is what OpenAI-
+		// compatible callers expect for "pcm" anyway and is available on every plan.
+		return format, "pcm_24000", nil
 	case "wav":
 		return format, "wav_44100", nil
 	default:

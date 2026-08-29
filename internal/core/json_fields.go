@@ -344,13 +344,13 @@ func extractUnknownJSONFieldsWith(data []byte, isKnown func(string) bool) (Unkno
 		return UnknownJSONFields{}, fmt.Errorf("expected JSON object")
 	}
 
-	// Pre-size for typical unknown-field payloads without reserving
-	// request-sized capacity: the result is retained on the decoded request
-	// for its whole lifetime, so a body-sized backing array would pin a full
-	// body copy per decoded object even when the extras are a few bytes.
+	// The buffer is sized on the first unknown member so objects without
+	// extras (the common case) allocate nothing here. It is pre-sized for
+	// typical unknown-field payloads without reserving request-sized
+	// capacity: the result is retained on the decoded request for its whole
+	// lifetime, so a body-sized backing array would pin a full body copy per
+	// decoded object even when the extras are a few bytes.
 	var buf bytes.Buffer
-	buf.Grow(min(len(data), 256))
-	buf.WriteByte('{')
 	wrote := false
 	root.ForEach(func(key, value gjson.Result) bool {
 		if isKnown(key.String()) {
@@ -358,6 +358,9 @@ func extractUnknownJSONFieldsWith(data []byte, isKnown func(string) bool) (Unkno
 		}
 		if wrote {
 			buf.WriteByte(',')
+		} else {
+			buf.Grow(min(len(data), 256))
+			buf.WriteByte('{')
 		}
 		buf.WriteString(key.Raw)
 		buf.WriteByte(':')

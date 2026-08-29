@@ -20,7 +20,7 @@ import (
 )
 
 // staticFailoverResolver returns a fixed selector list, standing in for the
-// failover rules service.
+// virtual models service's failover chain.
 type staticFailoverResolver struct {
 	selectors []core.ModelSelector
 }

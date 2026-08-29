@@ -236,7 +236,7 @@ func TestRoundRobin_PruneRemovesStaleCounters(t *testing.T) {
 	rr.next("keep")
 	rr.next("gone")
 
-	rr.prune(map[string]redirectEntry{"keep": {}})
+	rr.prune(map[string]*redirectEntry{"keep": {}})
 
 	if _, ok := rr.counters.Load("keep"); !ok {
 		t.Fatalf("keep counter removed, want retained")

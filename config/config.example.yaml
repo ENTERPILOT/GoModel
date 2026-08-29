@@ -63,15 +63,27 @@ models:
 #     target: anthropic/claude-sonnet-4-6
 #     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
 #   - source: smart # weighted round-robin load balancer
-#     strategy: round_robin # round_robin (default) | cost | adaptive (uses a routing extension when registered; otherwise falls back to round_robin)
+#     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin)
 #     targets:
 #       - { model: openai/gpt-4o, weight: 2 }
 #       - { model: anthropic/claude-sonnet-4-6 }
+#     # session_affinity: true # keep a detected client session on the target that served it
+#     # failover: true # retry a failed request on the remaining targets; false returns the error instead
 #   - source: cheap # always route to the cheapest available target
 #     strategy: cost
 #     targets:
 #       - { model: openai/gpt-4o }
 #       - { model: groq/llama-3.3-70b }
+#   - source: production # chain: a target may name another virtual model (acyclic, max 8 deep)
+#     targets:
+#       - { model: cheap, weight: 3 }
+#       - { model: anthropic/claude-sonnet-4-6 }
+#   - source: gpt-4o # failover: shadow a real model, try it first, then the fallbacks in order
+#     strategy: failover
+#     targets:
+#       - { model: gpt-4o }
+#       - { model: azure/gpt-4o }
+#       - { model: gemini/gemini-2.5-pro }
 
 # MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the
 # authenticated /mcp endpoint. Tools/prompts are namespaced as {server}_{name};
@@ -318,16 +330,20 @@ guardrails:
     #     skip_content_prefix: "### safe"
     #     # prompt: "Custom rewrite instructions here."
 
+# Failover is a load-balancing behaviour of virtual models: when the target a
+# request was sent to fails, the redirect's remaining targets are tried in
+# order. Declare a virtual model with `strategy: failover` (see virtual_models
+# above) to make a target list a priority list. `enabled: false` switches the
+# failover sweep off for every request.
 failover:
   enabled: true # env: FAILOVER_ENABLED; default true
-  manual_rules_path: "config/failover.example.json" # optional JSON map: {"primary-model": ["fallback-1", "provider/model"]}
-  rules:
-    "gpt-4o":
-      - "azure/gpt-4o"
-      - "gemini/gemini-2.5-pro"
-  disabled_models:
-    - "claude-sonnet-4"
-  default_mode: "manual" # deprecated compatibility field; accepted but ignored at runtime
+  # Deprecated: `rules`, `manual_rules_path`, `rules_json`, and `disabled_models`
+  # still load and are translated into managed failover-strategy virtual models
+  # that shadow the primary model. Move them under virtual_models.
+  # rules:
+  #   "gpt-4o":
+  #     - "azure/gpt-4o"
+  #     - "gemini/gemini-2.5-pro"
 
 providers:
   openai:

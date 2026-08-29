@@ -844,10 +844,8 @@ func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
 	}
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{
-		UsageQueryParams: UsageQueryParams{
-			UserPath: "/team",
-		},
-		Limit: 10,
+		UserPath: "/team",
+		Limit:    10,
 	})
 	if err != nil {
 		t.Fatalf("GetUsageLog returned error: %v", err)

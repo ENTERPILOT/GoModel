@@ -1,37 +1,53 @@
 // Ported pure-logic cases from the legacy
 // internal/admin/dashboard/static/js/modules/virtual-models.test.cjs,
-// exercising web/dashboard/src/pages/models/virtualModelsLogic.js.
+// exercising the pure modules under web/dashboard/src/pages/models/.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  aliasFormTargets,
   aliasRowCanRemove,
-  aliasTargetLabel,
-  buildAliasTogglePayload,
   buildDisplayModels,
-  buildModelTogglePayload,
-  buildVirtualModelSavePayload,
-  computeRenderStep,
-  defaultVirtualModelForm,
   displayRowClass,
   filterDisplayModels,
   groupDisplayModels,
-  initialRenderStep,
-  mapRedirectView,
-  qualifiedModelName,
-  removePrimaryTarget,
-  strategyOptions,
   rowIsManaged,
   rowRedirectCanRemove,
+  rowAnchorID,
+} from "../src/pages/models/displayRows.js";
+import {
+  qualifiedModelName,
+} from "../src/pages/models/modelIdentity.js";
+import {
+  computeRenderStep,
+  initialRenderStep,
+} from "../src/pages/models/renderBatching.js";
+import {
+  aliasTargetLabel,
+  mapRedirectView,
+  maskingFailsOver,
+  maskingRoutingKind,
+  maskingRoutingLabel,
   splitVirtualModelViews,
+  strategyOptions,
+} from "../src/pages/models/routing.js";
+import {
+  aliasFormTargets,
+  buildAliasTogglePayload,
+  buildModelTogglePayload,
+  buildVirtualModelSavePayload,
+  defaultVirtualModelForm,
+  removePrimaryTarget,
+  virtualModelTargetOptions,
   vmFormHasPrimaryTarget,
   vmFormIsRedirect,
-  vmFormShowStrategy,
+  vmFormSelfOnly,
+  vmFormShowBalancingOptions,
   vmFormShowWeights,
+  vmFormStrategyPending,
   vmFormSupportsSlowdown,
-} from "../src/pages/models/virtualModelsLogic.js";
+  vmRoutingSummary,
+} from "../src/pages/models/vmForm.js";
 
 function display(models, aliases, { available = true, activeCategory = "" } = {}) {
   return buildDisplayModels({
@@ -130,7 +146,7 @@ test("mapRedirectView keeps load-balanced targets, strategy, and labels them", (
   assert.equal(alias.targets.length, 2);
   assert.equal(alias.targets[1].weight, 2);
   assert.equal(alias.strategy, "round_robin");
-  assert.equal(aliasTargetLabel(alias), "2 targets · round robin");
+  assert.equal(aliasTargetLabel(alias), "openai/gpt-4o, groq/llama · Round-robin");
 });
 
 test("buildDisplayModels combines source-backed redirects with the concrete model row", () => {
@@ -427,8 +443,12 @@ test("buildAliasTogglePayload round-trips every target and strategy for a cost a
     user_paths: [],
   });
   // Cost balancers persist weight-less targets, matching the save path, even
-  // though a stored target happened to carry a weight.
-  assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o" }, { model: "groq/llama" }]);
+  // though a stored target happened to carry a weight. An explicit provider
+  // stays explicit, so the toggle never turns a pinned target into a name.
+  assert.deepEqual(payload.targets, [
+    { provider: "openai", model: "gpt-4o" },
+    { provider: "groq", model: "llama" },
+  ]);
   assert.equal(payload.strategy, "cost");
   assert.equal(payload.enabled, false);
 });
@@ -445,10 +465,35 @@ test("buildAliasTogglePayload keeps per-target weights for a round-robin alias",
     user_paths: [],
   });
   assert.deepEqual(payload.targets, [
-    { model: "openai/gpt-4o" },
-    { model: "groq/llama", weight: 2 },
+    { provider: "openai", model: "gpt-4o" },
+    { provider: "groq", model: "llama", weight: 2 },
   ]);
   assert.equal(payload.strategy, "round_robin");
+});
+
+test("buildAliasTogglePayload keeps a by-name target by name", () => {
+  const payload = buildAliasTogglePayload({
+    name: "outer",
+    targets: [{ model: "team/cheap" }, { model: "openai/gpt-4o", weight: 2 }],
+    strategy: "round_robin",
+    enabled: true,
+    user_paths: [],
+  });
+  assert.deepEqual(payload.targets, [
+    { model: "team/cheap" },
+    { model: "openai/gpt-4o", weight: 2 },
+  ]);
+});
+
+test("buildAliasTogglePayload sends a single pinned target through the targets list", () => {
+  const payload = buildAliasTogglePayload({
+    name: "pinned",
+    targets: [{ provider: "openai", model: "gpt-4o" }],
+    enabled: true,
+    user_paths: [],
+  });
+  assert.equal(payload.target_model, undefined);
+  assert.deepEqual(payload.targets, [{ provider: "openai", model: "gpt-4o" }]);
 });
 
 test("save payload sends a redirect body when target_model is filled", () => {
@@ -604,22 +649,44 @@ test("save payload drops per-target weights for the cost strategy", () => {
   assert.equal(payload.strategy, "cost");
 });
 
+test("save payload keeps declared order and drops weights for the failover strategy", () => {
+  const { payload } = buildVirtualModelSavePayload(
+    {
+      source: "resilient",
+      target_model: "openai/gpt-4o",
+      target_weight: 3,
+      targets: [{ model: "groq/llama", weight: 1 }],
+      strategy: "failover",
+      user_paths: "",
+      description: "",
+      enabled: true,
+    },
+    "",
+    "create",
+  );
+  assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o" }, { model: "groq/llama" }]);
+  assert.equal(payload.strategy, "failover");
+});
+
 test("editing a weighted redirect preserves the primary target weight", () => {
-  const { primaryModel, primaryWeight, extraTargets } = aliasFormTargets({
-    name: "smart",
-    strategy: "round_robin",
-    enabled: true,
-    targets: [
-      { provider: "openai", model: "gpt-4o", weight: 3 },
-      { provider: "groq", model: "llama", weight: 1 },
-    ],
-  });
+  const { primaryProvider, primaryModel, primaryWeight, extraTargets } =
+    aliasFormTargets({
+      name: "smart",
+      strategy: "round_robin",
+      enabled: true,
+      targets: [
+        { provider: "openai", model: "gpt-4o", weight: 3 },
+        { provider: "groq", model: "llama", weight: 1 },
+      ],
+    });
+  assert.equal(primaryProvider, "openai");
   assert.equal(primaryModel, "openai/gpt-4o");
   assert.equal(primaryWeight, 3);
 
   const { payload } = buildVirtualModelSavePayload(
     {
       source: "smart",
+      target_provider: primaryProvider,
       target_model: primaryModel,
       target_weight: primaryWeight,
       targets: extraTargets,
@@ -629,11 +696,51 @@ test("editing a weighted redirect preserves the primary target weight", () => {
     "smart",
     "edit",
   );
+  // The explicit providers the row was stored with survive the round trip.
   assert.deepEqual(payload.targets, [
-    { model: "openai/gpt-4o", weight: 3 },
-    { model: "groq/llama", weight: 1 },
+    { provider: "openai", model: "gpt-4o", weight: 3 },
+    { provider: "groq", model: "llama", weight: 1 },
   ]);
   assert.equal(payload.strategy, "round_robin");
+});
+
+test("picking another target in the editor drops the stored provider pin", () => {
+  // VmTargetRow clears `provider` on selection; the payload then sends the
+  // chosen name as written, so it may reach a virtual model of that name.
+  const { payload } = buildVirtualModelSavePayload(
+    {
+      source: "smart",
+      target_provider: "",
+      target_model: "team/cheap",
+      target_weight: 1,
+      targets: [{ provider: "groq", model: "groq/llama", weight: 1 }],
+      strategy: "round_robin",
+      enabled: true,
+    },
+    "smart",
+    "edit",
+  );
+  assert.deepEqual(payload.targets, [
+    { model: "team/cheap", weight: 1 },
+    { provider: "groq", model: "llama", weight: 1 },
+  ]);
+});
+
+test("a single pinned target is saved through the targets list", () => {
+  const { payload } = buildVirtualModelSavePayload(
+    {
+      source: "pinned",
+      target_provider: "openai",
+      target_model: "openai/gpt-4o",
+      target_weight: 1,
+      targets: [],
+      enabled: true,
+    },
+    "pinned",
+    "edit",
+  );
+  assert.equal(payload.target_model, undefined);
+  assert.deepEqual(payload.targets, [{ provider: "openai", model: "gpt-4o" }]);
 });
 
 test("editing a redirect preserves a provider prefix on a multi-slash model name", () => {
@@ -650,11 +757,14 @@ test("editing a redirect preserves a provider prefix on a multi-slash model name
   });
   assert.equal(primaryModel, "groq/openai/gpt-oss-120b");
   // Stored targets without an explicit weight surface the neutral default of 1.
-  assert.deepEqual(extraTargets, [{ model: "openrouter/openai/gpt-4o", weight: 1 }]);
+  assert.deepEqual(extraTargets, [
+    { provider: "openrouter", model: "openrouter/openai/gpt-4o", weight: 1 },
+  ]);
 
   const { payload } = buildVirtualModelSavePayload(
     {
       source: "oss",
+      target_provider: "groq",
       target_model: primaryModel,
       target_weight: 1,
       targets: extraTargets,
@@ -664,9 +774,10 @@ test("editing a redirect preserves a provider prefix on a multi-slash model name
     "oss",
     "edit",
   );
+  // Only the provider's own prefix is split back off; the model's slashes stay.
   assert.deepEqual(payload.targets, [
-    { model: "groq/openai/gpt-oss-120b", weight: 1 },
-    { model: "openrouter/openai/gpt-4o", weight: 1 },
+    { provider: "groq", model: "openai/gpt-oss-120b", weight: 1 },
+    { provider: "openrouter", model: "openai/gpt-4o", weight: 1 },
   ]);
 });
 
@@ -711,10 +822,10 @@ test("removePrimaryTarget clears the primary when it is the only target", () => 
   assert.equal(vmFormIsRedirect(form), false);
 });
 
-test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targets", () => {
-  // Single target: no balancing, no weights.
+test("strategy is always shown; weights and balancing options follow targets and strategy", () => {
+  // Single target: nothing balances yet, so the strategy carries a hint.
   let form = { target_model: "openai/gpt-4o", targets: [], strategy: "round_robin" };
-  assert.equal(vmFormShowStrategy(form), false);
+  assert.equal(vmFormStrategyPending(form), true);
   assert.equal(vmFormShowWeights(form), false);
 
   // Two targets under round-robin: weights are meaningful.
@@ -723,18 +834,63 @@ test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targe
     targets: [{ model: "groq/llama", weight: "" }],
     strategy: "round_robin",
   };
-  assert.equal(vmFormShowStrategy(form), true);
+  assert.equal(vmFormStrategyPending(form), false);
   assert.equal(vmFormShowWeights(form), true);
+  assert.equal(vmFormShowBalancingOptions(form), true);
 
-  // Same targets under cost: the strategy selector stays, weights disappear.
+  // Cost: weights disappear, the balancing options stay.
   form.strategy = "cost";
-  assert.equal(vmFormShowStrategy(form), true);
   assert.equal(vmFormShowWeights(form), false);
+  assert.equal(vmFormShowBalancingOptions(form), true);
 
-  // A second target row appears in the strategy check even when still blank.
+  // Failover is a priority list: no weights, no session keeping (the primary
+  // is always retried first) and no failover opt-out (it always fails over).
+  form.strategy = "failover";
+  assert.equal(vmFormShowWeights(form), false);
+  assert.equal(vmFormShowBalancingOptions(form), false);
+
+  // A blank second row already counts as a second target for the hint.
   const blank = defaultVirtualModelForm();
   blank.targets = [{ model: "", weight: 1 }];
-  assert.equal(vmFormShowStrategy(blank), true);
+  assert.equal(vmFormStrategyPending(blank), false);
+});
+
+test("vmRoutingSummary spells out the effect on the source, warning when a real model is replaced", () => {
+  const form = (source, target_model, targets, strategy) => ({
+    ...defaultVirtualModelForm(),
+    source,
+    target_model,
+    targets: targets.map((model) => ({ model, weight: 1 })),
+    strategy,
+  });
+  const me = "openai/gpt-4o";
+
+  // Real model kept as its own first target: a safety net, never a warning.
+  let s = vmRoutingSummary(form(me, me, ["azure/gpt-4o", "gemini/g"], "failover"), true);
+  assert.equal(s.text, "Requests for openai/gpt-4o are served by openai/gpt-4o; if it fails, by azure/gpt-4o → gemini/g.");
+  assert.equal(s.replaces, false);
+  s = vmRoutingSummary(form(me, me, ["azure/gpt-4o"], "round_robin"), true);
+  assert.equal(s.text, "Requests for openai/gpt-4o are balanced across openai/gpt-4o and azure/gpt-4o (Round-robin).");
+  assert.equal(s.replaces, false);
+  // Only itself: a plain policy, nothing to say.
+  assert.equal(vmRoutingSummary(form(me, me, [], "failover"), true).text, "");
+
+  // Real model missing from its own targets: replaced, and flagged.
+  s = vmRoutingSummary(form(me, "azure/gpt-4o", [], "failover"), true);
+  assert.equal(s.text, "Requests are routed to azure/gpt-4o. Add openai/gpt-4o as a target if you don't want to shadow the source model.");
+  assert.equal(s.replaces, true);
+  s = vmRoutingSummary(form(me, "azure/gpt-4o", ["gemini/g"], "failover"), true);
+  assert.equal(s.text, "Requests are routed to azure/gpt-4o; if it fails, to gemini/g. Add openai/gpt-4o as a target if you don't want to shadow the source model.");
+  assert.equal(s.replaces, true);
+  s = vmRoutingSummary(form(me, "azure/gpt-4o", ["gemini/g"], "cost"), true);
+  assert.equal(s.replaces, true);
+
+  // Named virtual models: plain wording, never a warning.
+  s = vmRoutingSummary(form("smart", "openai/gpt-4o", ["groq/llama"], "failover"), false);
+  assert.equal(s.text, "Requests for smart go to openai/gpt-4o; if it fails, to groq/llama.");
+  assert.equal(s.replaces, false);
+  assert.equal(vmRoutingSummary(form("smart", "openai/gpt-4o", [], "round_robin"), false).text, "Requests for smart go to openai/gpt-4o.");
+  assert.equal(vmRoutingSummary(form("smart", "", [], "round_robin"), false).text, "");
 });
 
 test("managed rows are read-only: rowIsManaged and can-remove predicates", () => {
@@ -795,4 +951,119 @@ test("strategyOptions keeps the edited value selectable when unsupported", () =>
 test("strategyOptions labels unknown strategies with their raw value", () => {
   const options = strategyOptions(["round_robin"], "experimental");
   assert.deepEqual(options[1], { value: "experimental", label: "experimental" });
+});
+
+test("failover is on by default and only the opt-out reaches the server", () => {
+  const form = defaultVirtualModelForm();
+  form.source = "smart";
+  form.target_model = "openai/gpt-4o";
+  form.targets = [{ model: "groq/llama", weight: 1 }];
+  assert.equal(form.failover, true);
+
+  let { payload } = buildVirtualModelSavePayload(form, "", "create");
+  assert.equal("failover" in payload, false);
+
+  form.failover = false;
+  ({ payload } = buildVirtualModelSavePayload(form, "", "create"));
+  assert.equal(payload.failover, false);
+
+  // Toggling an alias keeps the opt-out so it never silently re-enables.
+  const toggle = buildAliasTogglePayload({
+    name: "smart",
+    targets: [
+      { provider: "openai", model: "gpt-4o" },
+      { provider: "groq", model: "llama" },
+    ],
+    strategy: "round_robin",
+    failover: false,
+    enabled: true,
+    user_paths: [],
+  });
+  assert.equal(toggle.failover, false);
+});
+
+test("virtualModelTargetOptions lists catalog models and other virtual models", () => {
+  const models = [
+    { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
+    { selector: "groq/llama", provider_name: "groq", model: { id: "llama" } },
+    { selector: "openai/gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
+  ];
+  const aliases = [{ name: "cheap" }, { name: "smart" }, { name: "" }];
+  // Editing a real model lists it first as "this model".
+  assert.deepEqual(
+    virtualModelTargetOptions(models, aliases, "groq/llama").slice(0, 2).map((o) => [o.value, o.description]),
+    [
+      ["groq/llama", "This model"],
+      ["openai/gpt-4o", "openai"],
+    ],
+  );
+  const options = virtualModelTargetOptions(models, aliases, "smart");
+  assert.deepEqual(
+    options.map((option) => [option.value, option.description]),
+    [
+      ["openai/gpt-4o", "openai"],
+      ["groq/llama", "groq"],
+      ["cheap", "Virtual model"],
+    ],
+    "duplicates collapse, the edited redirect is excluded, blanks are dropped",
+  );
+  assert.deepEqual(virtualModelTargetOptions(null, null, ""), []);
+});
+
+test("a real model pinned as its own only target saves as a policy, with a fallback as a failover redirect", () => {
+  const form = defaultVirtualModelForm();
+  form.source = "openai/gpt-4o";
+  form.target_model = "openai/gpt-4o";
+  form.strategy = "failover";
+  assert.equal(vmFormSelfOnly(form), true);
+  assert.equal(vmFormIsRedirect(form), false);
+  let { payload } = buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit");
+  assert.equal("targets" in payload, false);
+  assert.equal("target_model" in payload, false);
+
+  form.targets = [{ model: "azure/gpt-4o", weight: 1 }];
+  assert.equal(vmFormSelfOnly(form), false);
+  assert.equal(vmFormIsRedirect(form), true);
+  ({ payload } = buildVirtualModelSavePayload(form, "openai/gpt-4o", "edit"));
+  assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o" }, { model: "azure/gpt-4o" }]);
+  assert.equal(payload.strategy, "failover");
+});
+
+test("maskingRoutingKind tells failover, balancing, and true redirects apart", () => {
+  const self = { provider: "openai", model: "gpt-4o" };
+  const azure = { provider: "azure", model: "gpt-4o" };
+  const gemini = { provider: "gemini", model: "gemini-2.5-pro" };
+  const over = (targets, extra = {}) => ({ name: "openai/gpt-4o", targets, ...extra });
+
+  // Failover strategy with the model first: a safety net, listed in order.
+  const failover = over([self, azure, gemini], { strategy: "failover" });
+  assert.equal(maskingRoutingKind(failover), "failover");
+  assert.equal(maskingRoutingLabel(failover, "failover"), "azure/gpt-4o → gemini/gemini-2.5-pro");
+  assert.equal(maskingFailsOver(failover), true);
+  // Failover switched off globally: it only ever serves itself.
+  assert.equal(maskingRoutingKind(failover, false), "balanced");
+  assert.equal(maskingFailsOver(failover, false), false);
+  // The model listed after another one is replaced as the primary.
+  assert.equal(maskingRoutingKind(over([azure, self], { strategy: "failover" })), "redirect");
+
+  // Round-robin including the model: balanced; the flag decides retries.
+  const balanced = over([self, azure], { strategy: "round_robin" });
+  assert.equal(maskingRoutingKind(balanced), "balanced");
+  assert.equal(maskingRoutingLabel(balanced, "balanced"), "azure/gpt-4o · Round-robin");
+  assert.equal(maskingFailsOver(balanced), true);
+  assert.equal(maskingFailsOver(over([self, azure], { strategy: "round_robin", failover: false })), false);
+
+  // Not a target at all: a real redirect, single or balanced.
+  assert.equal(maskingRoutingKind(over([azure])), "redirect");
+  assert.equal(maskingRoutingLabel(over([azure]), "redirect"), "azure/gpt-4o");
+  assert.equal(maskingRoutingKind(over([azure, gemini], { strategy: "cost" })), "redirect");
+  // Plain single-target alias fields are honoured too.
+  assert.equal(maskingRoutingKind({ name: "openai/gpt-4o", target_provider: "azure", target_model: "gpt-4o" }), "redirect");
+});
+
+test("rowAnchorID keeps distinct alias names on distinct DOM ids", () => {
+  const id = (name) => rowAnchorID({ is_alias: true, alias: { name } });
+  assert.notEqual(id("foo/bar"), id("foo-bar"));
+  assert.match(id("team/cheap"), /^alias-row-[A-Za-z0-9%._~-]+$/);
+  assert.equal(rowAnchorID({ is_alias: false, alias: { name: "x" } }), "");
 });

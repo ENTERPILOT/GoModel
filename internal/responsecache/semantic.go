@@ -9,6 +9,7 @@ import (
 	"hash"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -166,7 +167,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 			slog.Info("semantic cache hit",
 				"path", path,
 				"score", results[0].Score,
-				"request_id", ex.RequestHeader("X-Request-ID"),
+				"request_id", core.GetRequestID(ex.Context()),
 			)
 			return nil
 		}
@@ -324,8 +325,8 @@ func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerpr
 	}
 
 	lastUser := -1
-	for i := len(included) - 1; i >= 0; i-- {
-		if included[i].role == "user" {
+	for i, part := range slices.Backward(included) {
+		if part.role == "user" {
 			lastUser = i
 			break
 		}

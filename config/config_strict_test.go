@@ -222,8 +222,7 @@ func TestLoad_ConfigStrictRejectsNonBoolean(t *testing.T) {
 
 // TestApplyYAML_ExampleConfigParses keeps the shipped example honest: every key it
 // documents must exist on Config, or operators who copy it cannot boot under strict
-// parsing. It exercises the decode only — Load additionally resolves paths the
-// example points at (failover rules), which do not exist relative to a temp dir.
+// parsing. It exercises the decode only.
 func TestApplyYAML_ExampleConfigParses(t *testing.T) {
 	clearAllConfigEnvVars(t)
 

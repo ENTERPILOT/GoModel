@@ -136,14 +136,6 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
     "5 aliasów",
   );
   assert.equal(
-    m.models_failover_generated({ count: 5 }, { locale: "pl" }),
-    "Wygenerowano 5 modeli Fallback.",
-  );
-  assert.equal(
-    m.models_failover_saved({ count: 5 }, { locale: "pl" }),
-    "Zapisano 5 mapowań Failover.",
-  );
-  assert.equal(
     m.overview_total_requests({}, { locale: "pl" }),
     "Łączna liczba Request'ów",
   );

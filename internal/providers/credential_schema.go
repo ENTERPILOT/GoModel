@@ -96,8 +96,8 @@ func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchem
 	if len(fields) == 0 {
 		fields = defaultCredentialFields(spec)
 	}
-	schema := CredentialSchema{Type: providerType, DefaultBaseURL: spec.DefaultBaseURL}
-	schema.Fields = make([]CredentialField, 0, len(fields)+3)
+	schema := CredentialSchema{Type: providerType, DefaultBaseURL: spec.DefaultBaseURL,
+		Fields: make([]CredentialField, 0, len(fields)+3)}
 	schema.Fields = append(schema.Fields, fields...)
 	for _, field := range fields {
 		if field.Name == CredentialFieldAPIKeys {

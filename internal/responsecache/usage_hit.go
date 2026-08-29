@@ -42,7 +42,7 @@ func newUsageHitRecorder(logger usage.LoggerInterface, pricingResolver usage.Pri
 		endpoint := ex.Path()
 		requestID := core.GetRequestID(ctx)
 		if requestID == "" {
-			requestID = ex.RequestHeader("X-Request-ID")
+			requestID = ex.RequestHeader(core.RequestIDHeader)
 		}
 
 		var pricing *core.ModelPricing

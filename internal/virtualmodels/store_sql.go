@@ -21,6 +21,7 @@ var sqlSchema = []string{
 		targets TEXT NOT NULL DEFAULT '[]',
 		strategy TEXT NOT NULL DEFAULT '',
 		session_affinity TEXT NOT NULL DEFAULT '',
+		failover TEXT NOT NULL DEFAULT '',
 		provider_name TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		user_paths TEXT NOT NULL DEFAULT '[]',
@@ -40,23 +41,25 @@ var sqlSchema = []string{
 var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN slowdown DOUBLE PRECISION DEFAULT NULL",
+	"ALTER TABLE virtual_models ADD COLUMN failover TEXT NOT NULL DEFAULT ''",
 }
 
 const selectVirtualModelColumns = `
-	SELECT source, targets, strategy, session_affinity, provider_name, model, user_paths,
+	SELECT source, targets, strategy, session_affinity, failover, provider_name, model, user_paths,
 		description, slowdown, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, session_affinity, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
+		source, targets, strategy, session_affinity, failover, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
 		session_affinity = excluded.session_affinity,
+		failover = excluded.failover,
 		provider_name = excluded.provider_name,
 		model = excluded.model,
 		user_paths = excluded.user_paths,
@@ -155,6 +158,7 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 		targetsJSON,
 		vm.Strategy,
 		encodeTriStateBool(vm.SessionAffinity),
+		encodeTriStateBool(vm.Failover),
 		vm.ProviderName,
 		vm.Model,
 		pathsJSON,
@@ -169,13 +173,14 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
 	var targets, userPaths []byte
-	var sessionAffinity string
+	var sessionAffinity, failover string
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&vm.Source,
 		&targets,
 		&vm.Strategy,
 		&sessionAffinity,
+		&failover,
 		&vm.ProviderName,
 		&vm.Model,
 		&userPaths,
@@ -195,6 +200,7 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		return VirtualModel{}, err
 	}
 	vm.SessionAffinity = decodeTriStateBool(sessionAffinity)
+	vm.Failover = decodeTriStateBool(failover)
 	vm.CreatedAt = time.Unix(createdAt, 0).UTC()
 	vm.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 	return vm, nil

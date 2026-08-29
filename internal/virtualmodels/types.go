@@ -4,10 +4,13 @@
 //
 // A row with Targets is a REDIRECT: Source is a new addressable name that
 // rewrites to one or more real models. A redirect with a single target is a
-// plain alias; a redirect with several targets is load balanced, distributing
-// requests across them by Strategy (round robin or lowest cost). A row without
-// Targets is an ACCESS POLICY: Source is a scoped selector over existing
-// models, gated by UserPaths.
+// plain alias; a redirect with several targets is load balanced: Strategy
+// picks the target a request is sent to first, and the remaining available
+// targets are its failover chain when that attempt fails. A target may name
+// another virtual model (a chain) or the redirect's own Source, which stands
+// for the concrete model the redirect shadows. A row without Targets is an
+// ACCESS POLICY: Source is a scoped selector over existing models, gated by
+// UserPaths.
 //
 // The Service is a single native engine: it operates directly on VirtualModel
 // rows behind one in-memory snapshot, serving both redirect resolution and
@@ -57,6 +60,11 @@ type VirtualModel struct {
 	// enabled (the default); explicit false restores stateless balancing.
 	SessionAffinity *bool `json:"session_affinity,omitempty" bson:"session_affinity,omitempty"`
 
+	// Failover retries a failed request against the redirect's remaining
+	// targets. Tri-state: nil means enabled (the default); explicit false
+	// serves the chosen target only. The failover strategy always fails over.
+	Failover *bool `json:"failover,omitempty" bson:"failover,omitempty"`
+
 	CreatedAt time.Time `json:"created_at" bson:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 
@@ -80,6 +88,10 @@ const (
 	// it behaves exactly like round_robin, so configs stay portable between
 	// core and extended builds.
 	StrategyAdaptive = "adaptive"
+	// StrategyFailover always routes to the first currently-available target
+	// in declared order: the target list is a priority list, and lower legs
+	// serve only while every leg above them is unavailable or fails.
+	StrategyFailover = "failover"
 )
 
 // normalizeStrategy lower-cases and defaults a strategy string. An empty value
@@ -95,7 +107,7 @@ func normalizeStrategy(strategy string) string {
 // validStrategy reports whether strategy names a supported load-balancing mode.
 func validStrategy(strategy string) bool {
 	switch normalizeStrategy(strategy) {
-	case StrategyRoundRobin, StrategyCost, StrategyAdaptive:
+	case StrategyRoundRobin, StrategyCost, StrategyAdaptive, StrategyFailover:
 		return true
 	default:
 		return false
@@ -130,6 +142,10 @@ func (v VirtualModel) clone() VirtualModel {
 		affinity := *v.SessionAffinity
 		v.SessionAffinity = &affinity
 	}
+	if v.Failover != nil {
+		failover := *v.Failover
+		v.Failover = &failover
+	}
 	return v
 }
 
@@ -146,6 +162,7 @@ type View struct {
 	Targets         []Target `json:"targets,omitempty"`
 	Strategy        string   `json:"strategy,omitempty"`
 	SessionAffinity *bool    `json:"session_affinity,omitempty"`
+	Failover        *bool    `json:"failover,omitempty"`
 	ProviderName    string   `json:"provider_name,omitempty"`
 	Model           string   `json:"model,omitempty"`
 	UserPaths       []string `json:"user_paths,omitempty"`

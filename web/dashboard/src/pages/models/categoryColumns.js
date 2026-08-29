@@ -6,11 +6,6 @@
 import { formatPrice, formatPriceFine } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
 
-const modes = {
-  headerLines: [m.models_column_modes()],
-  value: (row) => (row.model?.metadata?.modes ?? []).join(", ") || "-",
-};
-
 function price(headerLines, value) {
   return { headerLines, class: "col-price", value };
 }
@@ -23,7 +18,6 @@ const inputOutput = price(
 const CATEGORY_COLUMNS = {
   all: [inputOutput],
   text_generation: [
-    modes,
     inputOutput,
     price([m.models_column_cached()], (row, p) => formatPrice(p?.cached_input_per_mtok)),
   ],

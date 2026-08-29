@@ -61,8 +61,7 @@ func TestObserveTapsFramesUntilClose(t *testing.T) {
 
 func TestObserveReturnsDialError(t *testing.T) {
 	err := Observe(context.Background(), Target{URL: "ws://127.0.0.1:1/v1/realtime"}, nil)
-	var de *DialError
-	if !errors.As(err, &de) {
+	if _, ok := errors.AsType[*DialError](err); !ok {
 		t.Fatalf("err = %v, want *DialError", err)
 	}
 }
@@ -118,8 +117,7 @@ func TestObserveStopsOnContextCancel(t *testing.T) {
 	if err == nil {
 		return // normalized cancellation is acceptable
 	}
-	var de *DialError
-	if errors.As(err, &de) {
+	if _, ok := errors.AsType[*DialError](err); ok {
 		t.Fatalf("err = %v, want a post-dial termination, not a dial error", err)
 	}
 }

@@ -234,10 +234,6 @@
         }
 }
 
-.failover-drafts-loading {
-    min-height: 96px;
-  }
-
 /* Models loading pill: an out-of-flow overlay like the flash region —
    fixed to the viewport, centered in the content area (left/right + auto
    margins), below flash toasts (z 120) and above the table, and click-

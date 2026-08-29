@@ -149,8 +149,7 @@ func TestCompilerCompile_ReturnsGatewayErrorWhenGuardrailsCatalogIsEmpty(t *test
 	if err == nil {
 		t.Fatal("Compile() error = nil, want gateway error")
 	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 		t.Fatalf("Compile() error = %T, want *core.GatewayError", err)
 	}
 }
@@ -185,8 +184,7 @@ func TestCompilerCompile_WrapsBuildPipelineErrorsAsGatewayErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("Compile() error = nil, want gateway error")
 	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 		t.Fatalf("Compile() error = %T, want *core.GatewayError", err)
 	}
 }

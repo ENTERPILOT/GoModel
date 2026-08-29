@@ -54,12 +54,10 @@ func TestSQLReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractionalEn
 		}
 
 		result, err := reader.GetLogs(ctx, LogQueryParams{
-			QueryParams: QueryParams{
-				StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
-				EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
-			},
-			Limit:  10,
-			Offset: 0,
+			StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
+			EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
+			Limit:     10,
+			Offset:    0,
 		})
 		if err != nil {
 			t.Fatalf("GetLogs returned error: %v", err)

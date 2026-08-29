@@ -1,23 +1,22 @@
 <script>
   // Models page — grouped model inventory with virtual models (redirects /
-  // load balancers / access policies), pricing overrides, failover and rate
-  // limit entry points.
+  // load balancers / access policies), pricing overrides and rate limit
+  // entry points.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import AuthBanner from "$lib/components/organisms/AuthBanner.svelte";
   import { untrack } from "svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { router } from "$lib/stores/router.svelte.js";
   import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
+  import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import ModelTable from "./ModelTable.svelte";
   import VirtualModelEditor from "./VirtualModelEditor.svelte";
   import PricingOverrideEditor from "./PricingOverrideEditor.svelte";
-  import FailoverEditor from "./FailoverEditor.svelte";
-  import FailoverDrafts from "./FailoverDrafts.svelte";
-  import { failover } from "./failover.svelte.js";
   import RateLimitEditor from "$pages/rate-limits/RateLimitEditor.svelte";
   import RateLimitInspector from "$pages/rate-limits/RateLimitInspector.svelte";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
@@ -26,15 +25,14 @@
 
   const PAGE = "models";
 
-  // Page data: virtual models, pricing overrides and failover rules load on
-  // boot/refresh; rate limit rules feed the gauge buttons, so they are
-  // fetched on entering both the rate-limits and models pages.
+  // Page data: virtual models and pricing overrides load on boot/refresh;
+  // rate limit rules feed the gauge buttons, so they are fetched on entering
+  // both the rate-limits and models pages.
   $effect(() => {
     void auth.refreshTick;
     if (router.page !== PAGE) return;
     virtualModels.fetchVirtualModels();
     pricingOverrides.fetchModelPricingOverrides();
-    failover.fetchFailoverRules();
     rateLimits.fetchRateLimitsPage();
   });
 
@@ -44,6 +42,11 @@
   // first and rows stream in. untrack keeps the window bookkeeping
   // (modelRenderLimit, modelsRendering) out of this effect's dependencies —
   // the batch loop writes them, and tracking them would restart forever.
+  // Rows read FAILOVER_ENABLED to describe a virtual model's routing.
+  $effect(() => {
+    runtimeConfig.ensureLoaded();
+  });
+
   $effect(() => {
     const total = virtualModels.filteredDisplayModels.length;
     untrack(() => virtualModels.restartModelRendering(total));
@@ -124,7 +127,7 @@
             class="btn btn-primary btn-with-icon alias-create-btn"
             aria-label={m.models_new_virtual_label()}
             title={m.models_alias()}
-            onclick={() => virtualModels.openVirtualModelCreate()}
+            onclick={() => virtualModelEditor.openVirtualModelCreate()}
           >
             <Icon icon={Plus} class="alias-create-icon" />
             <span>{m.models_new_virtual()}</span>
@@ -157,8 +160,6 @@
 
   <RateLimitInspector />
   <RateLimitEditor />
-  <FailoverEditor />
-  <FailoverDrafts />
 </div>
 
 <style>

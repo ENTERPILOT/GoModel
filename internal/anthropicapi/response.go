@@ -63,9 +63,9 @@ func usageFromCore(usage core.Usage) Usage {
 	out := Usage{
 		InputTokens:  usage.PromptTokens,
 		OutputTokens: usage.CompletionTokens,
-	}
-	out.CacheCreationInputTokens = intFromRaw(usage.RawUsage["cache_creation_input_tokens"])
-	out.CacheReadInputTokens = intFromRaw(usage.RawUsage["cache_read_input_tokens"])
+
+		CacheCreationInputTokens: intFromRaw(usage.RawUsage["cache_creation_input_tokens"]),
+		CacheReadInputTokens:     intFromRaw(usage.RawUsage["cache_read_input_tokens"])}
 	return out
 }
 
