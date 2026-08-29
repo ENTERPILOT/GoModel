@@ -9,7 +9,6 @@ import * as m from "$lib/paraglide/messages.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
-  findModelOverrideView,
   modelOverridesDefaultEnabled,
   rowAccessSelector,
 } from "./displayRows.js";
