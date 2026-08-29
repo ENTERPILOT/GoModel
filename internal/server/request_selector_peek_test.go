@@ -66,19 +66,20 @@ func TestSeedRequestBodySelectorHintsDoesNotMarkModelOnlyPeekAsParsed(t *testing
 	}
 }
 
-func TestSeedRequestBodySelectorHintsAppliesPartialModelForOpaqueBody(t *testing.T) {
+func TestSeedRequestBodySelectorHintsAppliesCompleteModelForOpaqueBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini","stream":true}`))
+	req.ContentLength = -1
 	req.Header.Set("Content-Type", "application/json")
 	env := &core.WhiteBoxPrompt{}
 	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
 	seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-	if env.JSONBodyParsed {
-		t.Fatal("JSONBodyParsed = true, want false for partial model-only peek")
+	if !env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = false, want true for complete model-only peek")
 	}
-	if env.StreamRequested {
-		t.Fatal("StreamRequested = true, want false until stream is parsed")
+	if !env.StreamRequested {
+		t.Fatal("StreamRequested = false, want true")
 	}
 	if env.RouteHints.Model != "gpt-4o-mini" {
 		t.Fatalf("RouteHints.Model = %q, want gpt-4o-mini", env.RouteHints.Model)
@@ -90,8 +91,91 @@ func TestSeedRequestBodySelectorHintsAppliesPartialModelForOpaqueBody(t *testing
 	if info.Model != "gpt-4o-mini" {
 		t.Fatalf("PassthroughRouteInfo.Model = %q, want gpt-4o-mini", info.Model)
 	}
-	if !info.StreamUncertain {
-		t.Fatal("PassthroughRouteInfo.StreamUncertain = false, want true")
+	if !info.Stream || info.StreamUncertain {
+		t.Fatalf("stream state = stream %v uncertain %v, want true and false", info.Stream, info.StreamUncertain)
+	}
+	restored, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read restored body: %v", err)
+	}
+	if string(restored) != `{"model":"gpt-4o-mini","stream":true}` {
+		t.Fatalf("restored body = %q, want original body", string(restored))
+	}
+}
+
+func TestSeedRequestBodySelectorHintsRejectsIncompleteOpaqueModel(t *testing.T) {
+	tests := []struct {
+		name          string
+		prefix        string
+		wantStream    bool
+		wantUncertain bool
+	}{
+		{name: "model first", prefix: `{"model":"allowed-model","padding":"`, wantUncertain: true},
+		{name: "stream first", prefix: `{"stream":true,"model":"allowed-model","padding":"`, wantStream: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := test.prefix + strings.Repeat("x", int(requestSelectorPeekLimit)) + `","model":"restricted-model"}`
+			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
+			req.ContentLength = -1
+			req.Header.Set("Content-Type", "application/json")
+			env := &core.WhiteBoxPrompt{}
+			core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
+
+			seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
+
+			if env.JSONBodyParsed {
+				t.Fatal("JSONBodyParsed = true, want false for incomplete opaque body")
+			}
+			if env.RouteHints.Model != "" {
+				t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
+			}
+			info := env.CachedPassthroughRouteInfo()
+			if info == nil {
+				t.Fatal("CachedPassthroughRouteInfo() = nil")
+			}
+			if info.Model != "" {
+				t.Fatalf("PassthroughRouteInfo.Model = %q, want empty", info.Model)
+			}
+			if info.Stream != test.wantStream || info.StreamUncertain != test.wantUncertain {
+				t.Fatalf("stream state = stream %v uncertain %v, want stream %v uncertain %v", info.Stream, info.StreamUncertain, test.wantStream, test.wantUncertain)
+			}
+		})
+	}
+}
+
+func TestSeedRequestBodySelectorHintsRejectsDuplicateOpaqueModel(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"allowed-model","model":"restricted-model"}`))
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	env := &core.WhiteBoxPrompt{}
+	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
+
+	seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
+
+	if env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = true, want false for duplicate model fields")
+	}
+	if env.RouteHints.Model != "" {
+		t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
+	}
+}
+
+func TestDecodeCompleteRequestBodySelectorHintsRejectsAmbiguousBodies(t *testing.T) {
+	bodies := []string{
+		`{"model":"first","model":"second"}`,
+		`{"provider":"first","provider":"second"}`,
+		`{"stream":false,"stream":true}`,
+		`{"model":"gpt-4o-mini"`,
+		`{"model":"gpt-4o-mini"} {}`,
+	}
+
+	for _, body := range bodies {
+		hints := decodeCompleteRequestBodySelectorHints(strings.NewReader(body))
+		if hints.complete {
+			t.Fatalf("decodeCompleteRequestBodySelectorHints(%q).complete = true, want false", body)
+		}
 	}
 }
 

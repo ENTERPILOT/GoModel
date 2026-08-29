@@ -186,44 +186,31 @@ func TestDeriveWhiteBoxPrompt_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *t
 	}
 }
 
-func TestApplyPartialBodyModelHintPreservesParseAndStreamState(t *testing.T) {
-	env := &WhiteBoxPrompt{StreamRequested: true}
+func TestApplyBodyStreamHintPreservesSelectorConfidence(t *testing.T) {
+	env := &WhiteBoxPrompt{RouteHints: RouteHints{Model: "existing-model", Provider: "openai"}}
 	CachePassthroughRouteInfo(env, &PassthroughRouteInfo{
 		Provider:        "openai",
-		Stream:          true,
+		Model:           "existing-model",
 		StreamUncertain: true,
 	})
 
-	ApplyPartialBodyModelHint(env, "gpt-5-mini")
+	ApplyBodyStreamHint(env, true)
 
 	if env.JSONBodyParsed {
 		t.Fatal("JSONBodyParsed = true, want false")
 	}
 	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want preserved true")
+		t.Fatal("StreamRequested = false, want true")
 	}
-	if env.RouteHints.Model != "gpt-5-mini" {
-		t.Fatalf("RouteHints.Model = %q, want gpt-5-mini", env.RouteHints.Model)
+	if env.RouteHints.Model != "existing-model" || env.RouteHints.Provider != "openai" {
+		t.Fatalf("RouteHints = %+v, want existing selector preserved", env.RouteHints)
 	}
 	info := env.CachedPassthroughRouteInfo()
 	if info == nil {
 		t.Fatal("CachedPassthroughRouteInfo() = nil")
 	}
-	if info.Model != "gpt-5-mini" {
-		t.Fatalf("PassthroughRouteInfo.Model = %q, want gpt-5-mini", info.Model)
-	}
-	if !info.Stream || !info.StreamUncertain {
-		t.Fatalf("stream state = stream %v uncertain %v, want both true", info.Stream, info.StreamUncertain)
-	}
-}
-
-func TestApplyPartialBodyModelHintIgnoresMissingInput(t *testing.T) {
-	ApplyPartialBodyModelHint(nil, "gpt-5-mini")
-
-	env := &WhiteBoxPrompt{RouteHints: RouteHints{Model: "existing-model"}}
-	ApplyPartialBodyModelHint(env, "")
-	if env.RouteHints.Model != "existing-model" {
-		t.Fatalf("RouteHints.Model = %q, want existing-model", env.RouteHints.Model)
+	if info.Model != "existing-model" || !info.Stream || info.StreamUncertain {
+		t.Fatalf("PassthroughRouteInfo = %+v, want model preserved and stream confirmed", info)
 	}
 }
 

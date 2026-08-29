@@ -28,10 +28,21 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 	}
 
 	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
-	if hints.parsed || hints.streamParsed {
+	if bodyMode == core.BodyModeOpaque && !hints.complete {
+		// A partial selector must not become authoritative because a duplicate
+		// field beyond the peek boundary could change what the provider executes.
+		if hints.model != "" {
+			if completeHints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit); completeHints.complete {
+				hints = completeHints
+			}
+		}
+		if hints.complete {
+			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
+		} else if hints.streamParsed {
+			core.ApplyBodyStreamHint(env, hints.stream)
+		}
+	} else if hints.parsed || hints.streamParsed {
 		core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
-	} else if bodyMode == core.BodyModeOpaque && hints.model != "" {
-		core.ApplyPartialBodyModelHint(env, hints.model)
 	}
 	if !hints.streamParsed {
 		core.MarkPassthroughStreamUncertain(env)
@@ -74,7 +85,35 @@ func peekRequestBodySelectorHints(req *http.Request, limit int64) requestBodySel
 	return hints
 }
 
+// peekCompleteRequestBodySelectorHints returns hints only when the entire body
+// fits within limit and has no duplicate selector fields. The body is restored
+// before returning so passthrough forwarding remains byte-for-byte unchanged.
+func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) requestBodySelectorHints {
+	if req == nil || req.Body == nil || limit <= 0 || req.ContentLength > limit {
+		return requestBodySelectorHints{}
+	}
+
+	originalBody := req.Body
+	body, err := io.ReadAll(io.LimitReader(originalBody, limit+1))
+	req.Body = &combinedReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(body), originalBody),
+		rc:     originalBody,
+	}
+	if err != nil || int64(len(body)) > limit {
+		return requestBodySelectorHints{}
+	}
+	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body))
+}
+
 func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
+	return decodeRequestBodySelectorHintsWithMode(r, false)
+}
+
+func decodeCompleteRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
+	return decodeRequestBodySelectorHintsWithMode(r, true)
+}
+
+func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) requestBodySelectorHints {
 	dec := json.NewDecoder(r)
 	token, err := dec.Token()
 	if err != nil {
@@ -86,6 +125,7 @@ func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
 	}
 
 	var hints requestBodySelectorHints
+	var modelSeen, providerSeen, streamSeen bool
 	for dec.More() {
 		keyToken, err := dec.Token()
 		if err != nil {
@@ -98,29 +138,41 @@ func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
 
 		switch key {
 		case "model":
+			if requireComplete && modelSeen {
+				return requestBodySelectorHints{}
+			}
+			modelSeen = true
 			model, ok, err := readOptionalJSONString(dec)
 			if err != nil || !ok {
 				return requestBodySelectorHints{}
 			}
 			hints.model = model
-			if model != "" && hints.provider != "" {
+			if !requireComplete && model != "" && hints.provider != "" {
 				hints.parsed = true
 				return hints
 			}
-			if model != "" {
+			if !requireComplete && model != "" {
 				return hints
 			}
 		case "provider":
+			if requireComplete && providerSeen {
+				return requestBodySelectorHints{}
+			}
+			providerSeen = true
 			provider, ok, err := readOptionalJSONString(dec)
 			if err != nil || !ok {
 				return requestBodySelectorHints{}
 			}
 			hints.provider = provider
-			if hints.provider != "" && hints.model != "" {
+			if !requireComplete && hints.provider != "" && hints.model != "" {
 				hints.parsed = true
 				return hints
 			}
 		case "stream":
+			if requireComplete && streamSeen {
+				return requestBodySelectorHints{}
+			}
+			streamSeen = true
 			stream, ok, err := readOptionalJSONBool(dec)
 			if err != nil || !ok {
 				return requestBodySelectorHints{}
@@ -131,6 +183,15 @@ func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
 			if err := skipJSONValue(dec); err != nil {
 				return requestBodySelectorHints{}
 			}
+		}
+	}
+	if requireComplete {
+		closing, err := dec.Token()
+		if err != nil || closing != json.Delim('}') {
+			return requestBodySelectorHints{}
+		}
+		if _, err := dec.Token(); err != io.EOF {
+			return requestBodySelectorHints{}
 		}
 	}
 
