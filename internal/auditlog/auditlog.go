@@ -366,15 +366,20 @@ func RedactHeaders(headers map[string]string) map[string]string {
 
 	result := make(map[string]string, len(headers))
 	for key, value := range headers {
-		if core.IsCredentialHeader(key) {
-			result[key] = "[REDACTED]"
-		} else if strings.EqualFold(key, "Location") {
-			result[key] = core.RedactSensitiveURLQuery(value)
-		} else {
-			result[key] = value
-		}
+		result[key] = redactHeaderValue(key, value)
 	}
 	return result
+}
+
+// redactHeaderValue returns the audit-safe value of one header.
+func redactHeaderValue(key, value string) string {
+	if core.IsCredentialHeader(key) {
+		return "[REDACTED]"
+	}
+	if strings.EqualFold(key, "Location") {
+		return core.RedactSensitiveURLQuery(value)
+	}
+	return value
 }
 
 // Config holds audit logging configuration

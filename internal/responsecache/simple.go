@@ -92,7 +92,7 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 		}
 		slog.Info("response cache hit (exact)",
 			"path", path,
-			"request_id", ex.RequestHeader("X-Request-ID"),
+			"request_id", ex.RequestHeader(core.RequestIDHeader),
 		)
 		return true, nil
 	}

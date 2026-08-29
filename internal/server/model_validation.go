@@ -126,8 +126,12 @@ func storeWorkflow(c *echo.Context, workflow *core.Workflow) {
 	if c == nil || workflow == nil {
 		return
 	}
-	ctx := core.WithWorkflow(c.Request().Context(), workflow)
-	c.SetRequest(c.Request().WithContext(ctx))
+	// Resolution stores the workflow once and the inference path stores it
+	// again after preparation; skip the context wrap (and request copy) when
+	// the context already carries this exact workflow.
+	if ctx := c.Request().Context(); core.GetWorkflow(ctx) != workflow {
+		c.SetRequest(c.Request().WithContext(core.WithWorkflow(ctx, workflow)))
+	}
 	auditlog.EnrichEntryWithWorkflow(c, workflow)
 }
 

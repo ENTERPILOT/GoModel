@@ -291,18 +291,20 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			LogRequestID:     true,
 			LogContentLength: true,
 			LogResponseSize:  true,
+			// LogAttrs with typed attrs: slog.Info's variadic ...any would box
+			// every value (an allocation each) on every model request.
 			LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
-				slog.Info("REQUEST",
-					"method", v.Method,
-					"uri", v.URI,
-					"status", v.Status,
-					"latency", v.Latency.String(),
-					"host", v.Host,
-					"bytes_in", v.ContentLength,
-					"bytes_out", v.ResponseSize,
-					"user_agent", v.UserAgent,
-					"remote_ip", v.RemoteIP,
-					"request_id", v.RequestID,
+				slog.LogAttrs(context.Background(), slog.LevelInfo, "REQUEST",
+					slog.String("method", v.Method),
+					slog.String("uri", v.URI),
+					slog.Int("status", v.Status),
+					slog.String("latency", v.Latency.String()),
+					slog.String("host", v.Host),
+					slog.String("bytes_in", v.ContentLength),
+					slog.Int64("bytes_out", v.ResponseSize),
+					slog.String("user_agent", v.UserAgent),
+					slog.String("remote_ip", v.RemoteIP),
+					slog.String("request_id", v.RequestID),
 				)
 				return nil
 			},
