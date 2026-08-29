@@ -109,9 +109,12 @@ func TestSeedRequestBodySelectorHintsRejectsIncompleteOpaqueModel(t *testing.T) 
 		prefix        string
 		wantStream    bool
 		wantUncertain bool
+		knownLength   bool
 	}{
 		{name: "model first", prefix: `{"model":"allowed-model","padding":"`, wantUncertain: true},
 		{name: "stream first", prefix: `{"stream":true,"model":"allowed-model","padding":"`, wantStream: true},
+		{name: "model before stream", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true},
+		{name: "model before stream with known length", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true, knownLength: true},
 		{name: "stream before oversized value", prefix: `{"stream":true,"padding":"`, wantStream: true},
 	}
 
@@ -119,7 +122,9 @@ func TestSeedRequestBodySelectorHintsRejectsIncompleteOpaqueModel(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			body := test.prefix + strings.Repeat("x", int(requestSelectorPeekLimit)) + `","model":"restricted-model"}`
 			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
-			req.ContentLength = -1
+			if !test.knownLength {
+				req.ContentLength = -1
+			}
 			req.Header.Set("Content-Type", "application/json")
 			env := &core.WhiteBoxPrompt{}
 			core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
@@ -165,6 +170,51 @@ func TestSeedRequestBodySelectorHintsRejectsAmbiguousStreamBeforePeekLimit(t *te
 	}
 	if info.Stream || !info.StreamUncertain {
 		t.Fatalf("stream state = stream %v uncertain %v, want false and true", info.Stream, info.StreamUncertain)
+	}
+}
+
+func TestSeedRequestBodySelectorHintsRejectsCompleteDuplicateOpaqueFields(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		wantStream    bool
+		wantUncertain bool
+	}{
+		{
+			name:          "stream",
+			body:          `{"stream":true,"stream":false}`,
+			wantUncertain: true,
+		},
+		{
+			name:       "provider",
+			body:       `{"provider":"first","provider":"second","stream":true}`,
+			wantStream: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(test.body))
+			req.Header.Set("Content-Type", "application/json")
+			env := &core.WhiteBoxPrompt{}
+			core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
+
+			seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
+
+			if env.JSONBodyParsed {
+				t.Fatal("JSONBodyParsed = true, want false for duplicate fields")
+			}
+			if env.RouteHints.Provider != "openai" {
+				t.Fatalf("RouteHints.Provider = %q, want route provider openai", env.RouteHints.Provider)
+			}
+			info := env.CachedPassthroughRouteInfo()
+			if info == nil {
+				t.Fatal("CachedPassthroughRouteInfo() = nil")
+			}
+			if info.Stream != test.wantStream || info.StreamUncertain != test.wantUncertain {
+				t.Fatalf("stream state = stream %v uncertain %v, want stream %v uncertain %v", info.Stream, info.StreamUncertain, test.wantStream, test.wantUncertain)
+			}
+		})
 	}
 }
 

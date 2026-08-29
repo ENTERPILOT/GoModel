@@ -27,25 +27,21 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		return
 	}
 
-	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
-	if bodyMode == core.BodyModeOpaque && !hints.complete {
-		// A partial selector must not become authoritative because a duplicate
-		// field beyond the peek boundary could change what the provider executes.
-		if hints.model != "" {
-			completeHints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
-			if completeHints.complete {
-				hints = completeHints
-			} else if completeHints.streamParsed {
-				hints.stream = completeHints.stream
-				hints.streamParsed = true
-			}
-		}
+	if bodyMode == core.BodyModeOpaque {
+		hints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
 		if hints.complete {
 			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 		} else if hints.streamParsed {
 			core.ApplyBodyStreamHint(env, hints.stream)
 		}
-	} else if hints.parsed || hints.streamParsed {
+		if !hints.streamParsed {
+			core.MarkPassthroughStreamUncertain(env)
+		}
+		return
+	}
+
+	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
+	if hints.parsed || hints.streamParsed {
 		core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 	}
 	if !hints.streamParsed {
@@ -89,11 +85,13 @@ func peekRequestBodySelectorHints(req *http.Request, limit int64) requestBodySel
 	return hints
 }
 
-// peekCompleteRequestBodySelectorHints returns hints only when the entire body
-// fits within limit and has no duplicate selector fields. The body is restored
-// before returning so passthrough forwarding remains byte-for-byte unchanged.
+// peekCompleteRequestBodySelectorHints returns authoritative selector hints
+// only when the entire body fits within limit and has no duplicate selector
+// fields. A unique stream hint may be returned independently from a bounded
+// oversized body. The body is restored before returning so passthrough
+// forwarding remains byte-for-byte unchanged.
 func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) requestBodySelectorHints {
-	if req == nil || req.Body == nil || limit <= 0 || req.ContentLength > limit {
+	if req == nil || req.Body == nil || limit <= 0 {
 		return requestBodySelectorHints{}
 	}
 
@@ -103,10 +101,24 @@ func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) reques
 		Reader: io.MultiReader(bytes.NewReader(body), originalBody),
 		rc:     originalBody,
 	}
-	if err != nil || int64(len(body)) > limit {
+	if err != nil {
 		return requestBodySelectorHints{}
 	}
+	if int64(len(body)) > limit {
+		hints := decodeCompleteRequestBodySelectorHints(bytes.NewReader(body[:limit]))
+		return hints.independentStreamHint()
+	}
 	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body))
+}
+
+func (hints requestBodySelectorHints) independentStreamHint() requestBodySelectorHints {
+	if !hints.streamParsed {
+		return requestBodySelectorHints{}
+	}
+	return requestBodySelectorHints{
+		stream:       hints.stream,
+		streamParsed: true,
+	}
 }
 
 func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
@@ -132,13 +144,10 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 	var modelSeen, providerSeen, streamSeen bool
 	var modelAmbiguous, providerAmbiguous, streamAmbiguous bool
 	partialHints := func() requestBodySelectorHints {
-		if requireComplete || !hints.streamParsed || streamAmbiguous {
+		if !hints.streamParsed || streamAmbiguous {
 			return requestBodySelectorHints{}
 		}
-		return requestBodySelectorHints{
-			stream:       hints.stream,
-			streamParsed: true,
-		}
+		return hints.independentStreamHint()
 	}
 	for dec.More() {
 		keyToken, err := dec.Token()
