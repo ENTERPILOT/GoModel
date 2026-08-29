@@ -268,7 +268,8 @@
     color: var(--accent);
   }
 
-  .model-kind-icon-svg {
+  /* :global so the rule also reaches the SVG rendered by the Icon component. */
+  .model-kind-icon :global(.model-kind-icon-svg) {
     width: 14px;
     height: 14px;
   }
