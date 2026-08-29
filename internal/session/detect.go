@@ -1,11 +1,8 @@
 package session
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
-	"io"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -159,7 +156,11 @@ func contentSessionID(snapshot *core.RequestSnapshot, body []byte, userPath stri
 		return ""
 	}
 	sum := sha256.Sum256(payload)
-	return "auto-" + hex.EncodeToString(sum[:16])
+	const prefix = "auto-"
+	var id [len(prefix) + 32]byte
+	copy(id[:], prefix)
+	hex.Encode(id[len(prefix):], sum[:16])
+	return string(id[:])
 }
 
 // maxOpeningMessages bounds the anchor when a conversation opens with an
@@ -180,48 +181,4 @@ func openingMessages(messages gjson.Result) []json.RawMessage {
 		return true
 	})
 	return opening
-}
-
-// rawSegment clones a gjson result's raw JSON. gjson results alias the parsed
-// body, so the copy keeps the anchor independent of the request buffer.
-func rawSegment(result gjson.Result) json.RawMessage {
-	if !result.Exists() {
-		return nil
-	}
-	return json.RawMessage(strings.Clone(result.Raw))
-}
-
-// canonicalSegment gives semantically equivalent JSON the same session
-// anchor. In particular, object-key order, insignificant whitespace, and
-// equivalent string escapes must not split one conversation into multiple
-// auto-detected sessions. UseNumber preserves number spelling/precision while
-// arrays retain their original order.
-//
-// The goccy canonical bytes are byte-identical to encoding/json's (pinned by
-// TestCanonicalSegmentMatchesStdlib), so auto-detected ids are stable across
-// the library switch. The trailing-data guard must decode to io.EOF rather
-// than check Decoder.More: More treats a stray closing bracket ("1]", "1}")
-// as end of input, which would canonicalize malformed raw segments instead of
-// falling back to their exact bytes. For valid input the extra decode reads
-// only the empty remainder, so it costs nothing on the hot path.
-func canonicalSegment(result gjson.Result) json.RawMessage {
-	raw := rawSegment(result)
-	if len(raw) == 0 {
-		return nil
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return raw
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return raw
-	}
-	canonical, err := json.Marshal(value)
-	if err != nil {
-		return raw
-	}
-	return canonical
 }

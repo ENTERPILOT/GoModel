@@ -5,13 +5,14 @@
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
+  import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
   import {
-    hasAccessOverride,
-    modelOverrideEditButtonClass,
-    modelOverrideEditButtonLabel,
-  } from "./virtualModelsLogic.js";
+  hasAccessOverride,
+  modelOverrideEditButtonClass,
+  modelOverrideEditButtonLabel,
+} from "./displayRows.js";
   import AccessToggle from "./AccessToggle.svelte";
   import ModelGlobalActions from "./ModelGlobalActions.svelte";
   import ModelRow from "./ModelRow.svelte";
@@ -84,7 +85,7 @@
                   <TableActionButton
                     label={modelOverrideEditButtonLabel(m.models_provider_access_for({ name: group.display_name }), hasAccessOverride(group.access))}
                     class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(group.access))}"
-                    onclick={() => virtualModels.openProviderOverrideEdit(group)}
+                    onclick={() => virtualModelEditor.openProviderOverrideEdit(group)}
                   >
                     <Icon icon={Pencil} class="table-icon-svg" />
                   </TableActionButton>

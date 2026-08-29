@@ -219,8 +219,9 @@ stale, and the dashboard shows the provider as Offline:
   provider's models until it recovers, so clients are not offered models that
   cannot currently be served.
 - **Direct requests** to its models (`provider/model`) still resolve and are
-  sent to the provider, so callers get an honest `502`/`503` (and manual
-  failover rules can fire) instead of a misleading "model not found".
+  sent to the provider, so callers get an honest `502`/`503` (and a
+  shadowing virtual model's failover chain can fire) instead of a misleading
+  "model not found".
 - **Virtual-model redirects** skip the provider's targets, so a
   load-balanced redirect keeps working through its healthy targets.
 
@@ -239,5 +240,5 @@ Unhealthy until its first successful fetch.
 
 The retry and circuit breaker layers stay on a single provider. If you also
 want GoModel to try a different model or provider when the primary keeps
-failing, configure manual failover rules. See
-[Failover](/features/failover).
+failing, give the model a virtual model with more than one target — the
+remaining targets are its failover chain. See [Failover](/features/failover).

@@ -69,13 +69,11 @@ func TestSQLiteStoreRecalculatePricingUpdatesFilteredUsageCosts(t *testing.T) {
 	inputRate := 2.0
 	outputRate := 6.0
 	result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{
-		UsageQueryParams: UsageQueryParams{
-			StartDate: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
-			EndDate:   time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
-			UserPath:  "/team",
-			Provider:  "primary-openai",
-			Model:     "gpt-4o",
-		},
+		StartDate: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
+		EndDate:   time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
+		UserPath:  "/team",
+		Provider:  "primary-openai",
+		Model:     "gpt-4o",
 	}, staticTestPricingResolver{
 		"primary-openai/gpt-4o": {
 			InputPerMtok:  &inputRate,
@@ -147,7 +145,7 @@ func TestSQLiteStoreRecalculatePricingFiltersByLabel(t *testing.T) {
 	inputRate := 2.0
 	// The padded label exercises normalizedRecalculatePricingParams trimming.
 	result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{
-		UsageQueryParams: UsageQueryParams{Label: " env:prod "},
+		Label: " env:prod ",
 	}, staticTestPricingResolver{
 		"openai/gpt-4o": {InputPerMtok: &inputRate},
 	})
@@ -218,7 +216,7 @@ func TestSQLiteStoreRecalculatePricingProcessesBatches(t *testing.T) {
 
 	inputRate := 2.0
 	result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{
-		UsageQueryParams: UsageQueryParams{Model: "gpt-4o"},
+		Model: "gpt-4o",
 	}, staticTestPricingResolver{
 		"openai/gpt-4o": {
 			InputPerMtok: &inputRate,

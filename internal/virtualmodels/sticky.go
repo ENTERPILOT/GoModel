@@ -99,7 +99,7 @@ func (s *stickySessions) resolve(source, session string, viable func(string) boo
 
 // prune drops expired pins and pins for redirect sources no longer present in
 // the latest snapshot, mirroring roundRobin.prune.
-func (s *stickySessions) prune(active map[string]redirectEntry) {
+func (s *stickySessions) prune(active map[string]*redirectEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock()

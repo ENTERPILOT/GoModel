@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"reflect"
+	"slices"
 )
 
 // Subsystem teardown.
@@ -59,7 +60,6 @@ const (
 	subsystemConversationStore   = "conversation store"
 	subsystemProviderCredentials = "provider credentials"
 	subsystemVirtualModels       = "virtual models"
-	subsystemFailover            = "failover"
 	subsystemTagging             = "tagging"
 	subsystemPricingOverrides    = "model pricing overrides"
 	subsystemGuardrails          = "guardrails"
@@ -89,8 +89,8 @@ func (a *App) register(name string, owner closerOwner, closeFn func() error) {
 // of these components, so reverse construction is the correct order.
 func (a *App) unwind() error {
 	var errs []error
-	for i := len(a.registered) - 1; i >= 0; i-- {
-		if closeFn := a.registered[i].close; closeFn != nil {
+	for _, v := range slices.Backward(a.registered) {
+		if closeFn := v.close; closeFn != nil {
 			errs = append(errs, closeFn())
 		}
 	}
@@ -116,7 +116,6 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemMCPGateway, close: closerOf(a.mcpGateway)},
 		{name: subsystemProviderCredentials, close: closerOf(a.providerCredentials)},
 		{name: subsystemVirtualModels, close: closerOf(a.virtualModels)},
-		{name: subsystemFailover, close: closerOf(a.failover)},
 		{name: subsystemTagging, close: closerOf(a.tagging)},
 		{name: subsystemWorkflows, close: closerOf(a.workflows)},
 		{name: subsystemPricingOverrides, close: closerOf(a.pricingOverrides)},

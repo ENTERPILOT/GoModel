@@ -2,6 +2,7 @@
   // Workflow editor modal (EditorDialog shell): scope selection, feature
   // toggles, guardrail steps and the live preview card. Submitting POSTs an
   // immutable version that activates for the selected scope.
+  import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
@@ -55,16 +56,19 @@
 
     {#if wf.form.scope_provider}
       <FormField id="workflow-scope-model" label={m.workflows_model()}>
-        <select
+        <SearchSelect
           id="workflow-scope-model"
-          class="form-select workflow-input"
+          class="workflow-input"
+          options={[
+            { value: "", label: m.workflows_all_provider_models() },
+            ...wf.modelOptions(wf.form.scope_provider),
+          ]}
           bind:value={wf.form.scope_model}
-        >
-          <option value="">{m.workflows_all_provider_models()}</option>
-          {#each wf.modelOptions(wf.form.scope_provider) as modelID (wf.form.scope_provider + "-" + modelID)}
-            <option value={modelID}>{modelID}</option>
-          {/each}
-        </select>
+          placeholder={m.workflows_all_provider_models()}
+          searchPlaceholder={m.workflows_model_search_placeholder()}
+          ariaLabel={m.workflows_model()}
+          mono
+        />
       </FormField>
     {/if}
 
@@ -259,7 +263,8 @@
   flex: 0 0 120px;
 }
 
-.workflow-input {
+.workflow-input,
+:global(.search-select.workflow-input) {
   max-width: none;
   width: 100%;
 }

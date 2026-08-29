@@ -130,8 +130,8 @@ func (o *responseFeedbackStreamObserver) OnJSONEvent(payload map[string]any) {
 	if !ok {
 		return
 	}
-	usage := responseCacheUsage{observed: true}
-	usage.input = firstNumericInt(usageMap, "prompt_tokens", "input_tokens")
+	usage := responseCacheUsage{observed: true,
+		input: firstNumericInt(usageMap, "prompt_tokens", "input_tokens")}
 	usage.read, usage.write = cacheTokensFromMap(usageMap)
 	if details, ok := nestedMap(usageMap["prompt_tokens_details"]); ok {
 		usage.read = max(usage.read, firstNumericInt(details, "cached_tokens"))

@@ -74,7 +74,7 @@ func TestSQLiteSessionUsageRoundTripAggregationAndFilter(t *testing.T) {
 	}
 
 	result, err := reader.GetUsageBySession(context.Background(), SessionUsageParams{
-		UsageQueryParams: UsageQueryParams{CacheMode: CacheModeUncached},
+		CacheMode: CacheModeUncached,
 	})
 	if err != nil {
 		t.Fatalf("GetUsageBySession: %v", err)
@@ -106,10 +106,9 @@ func TestSQLiteSessionUsageRoundTripAggregationAndFilter(t *testing.T) {
 		t.Fatalf("session page = %+v", page)
 	}
 
-	logResult, err := reader.GetUsageLog(context.Background(), UsageLogParams{UsageQueryParams: UsageQueryParams{
+	logResult, err := reader.GetUsageLog(context.Background(), UsageLogParams{
 		SessionID: "scoped-session-b",
-		CacheMode: CacheModeAll,
-	}})
+		CacheMode: CacheModeAll})
 	if err != nil {
 		t.Fatalf("GetUsageLog session filter: %v", err)
 	}

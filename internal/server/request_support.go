@@ -18,7 +18,7 @@ func requestIDFromContextOrHeader(req *http.Request) string {
 	if requestID != "" {
 		return requestID
 	}
-	return strings.TrimSpace(req.Header.Get("X-Request-ID"))
+	return strings.TrimSpace(req.Header.Get(core.RequestIDHeader))
 }
 
 func requestContextWithRequestID(req *http.Request) (context.Context, string) {
@@ -35,7 +35,7 @@ func requestContextWithRequestID(req *http.Request) (context.Context, string) {
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
-	req.Header.Set("X-Request-ID", requestID)
+	req.Header.Set(core.RequestIDHeader, requestID)
 
 	ctx := req.Context()
 	if strings.TrimSpace(core.GetRequestID(ctx)) != requestID {

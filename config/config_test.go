@@ -1248,14 +1248,6 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to read config.example.yaml: %v", err)
 	}
-	failoverExamplePath, err := filepath.Abs("failover.example.json")
-	if err != nil {
-		t.Fatalf("Failed to resolve failover.example.json path: %v", err)
-	}
-	failoverExampleData, err := os.ReadFile(failoverExamplePath)
-	if err != nil {
-		t.Fatalf("Failed to read failover.example.json: %v", err)
-	}
 
 	withTempDir(t, func(dir string) {
 		if err := os.MkdirAll(filepath.Join(dir, "config"), 0755); err != nil {
@@ -1263,9 +1255,6 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 		}
 		if err := os.WriteFile(filepath.Join(dir, "config", "config.yaml"), exampleData, 0644); err != nil {
 			t.Fatalf("Failed to write config/config.yaml: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "config", "failover.example.json"), failoverExampleData, 0644); err != nil {
-			t.Fatalf("Failed to write failover.example.json: %v", err)
 		}
 
 		result, err := Load()

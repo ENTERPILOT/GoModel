@@ -12,7 +12,7 @@ import (
 // with a model outside the pool, or it panics. Selectors are extension code
 // running on the request path, so a panic is contained here rather than
 // failing the request.
-func (s *Service) adaptiveTarget(entry redirectEntry, sessionID string, pool []resolvedTarget) (target resolvedTarget, ok bool) {
+func (s *Service) adaptiveTarget(entry *redirectEntry, sessionID string, pool []resolvedTarget) (target resolvedTarget, ok bool) {
 	selector := s.routeSelector
 	if selector == nil {
 		return resolvedTarget{}, false

@@ -21,8 +21,9 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 	if requested.ExplicitProvider {
 		return Resolution{Requested: selector, Resolved: selector}, false, nil
 	}
-	if entry, ok := s.snapshot().findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		if resolved, ok := s.balancedResolution(entry, sessionID); ok {
+	snap := s.snapshot()
+	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
+		if resolved, ok := s.balancedResolution(snap, entry, sessionID); ok {
 			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
 		}
 	}
@@ -62,13 +63,15 @@ func (s *Service) ResolveRefreshTarget(requested core.RequestedModelSelector) (c
 	if name == "" {
 		return core.ModelSelector{}, false, nil
 	}
-	entry, ok := s.snapshot().redirects[name]
+	snap := s.snapshot()
+	entry, ok := snap.redirects[name]
 	if !ok || !entry.vm.Enabled {
 		return core.ModelSelector{}, false, nil
 	}
 	// Any target's provider serves to refresh an unavailable upstream before the
-	// balanced resolution retries, so the first declared target is sufficient.
-	representative, ok := entry.representative()
+	// balanced resolution retries, so the first declared concrete model is
+	// sufficient.
+	representative, ok := snap.representativeLeaf(entry)
 	if !ok {
 		return core.ModelSelector{}, false, nil
 	}
@@ -120,9 +123,10 @@ func (s *Service) exposedModels(userPath string, enforceUserPaths bool, allow fu
 		if enforceUserPaths && len(entry.vm.UserPaths) > 0 && !userPathAllowed(userPath, entry.vm.UserPaths) {
 			continue
 		}
-		// Expose a load-balanced redirect when at least one of its targets is both
-		// catalog-supported and permitted, listing it with that target's metadata.
-		chosen, ok := representativeExposedTarget(entry.supportedTargets(s.catalog), allow)
+		// Expose a load-balanced redirect when at least one concrete model behind
+		// it (descending chains) is both catalog-supported and permitted, listing
+		// it with that model's metadata.
+		chosen, ok := representativeExposedTarget(snap.leafTargets(entry, s.catalog), allow)
 		if !ok {
 			continue
 		}

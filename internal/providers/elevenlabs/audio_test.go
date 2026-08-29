@@ -74,7 +74,7 @@ func TestCreateSpeech_MapsResponseFormats(t *testing.T) {
 	}{
 		{"default mp3", "", "output_format=mp3_44100_128", "audio/mpeg"},
 		{"opus", "opus", "output_format=opus_48000_128", "audio/ogg"},
-		{"pcm", "pcm", "output_format=pcm_44100", "audio/pcm"},
+		{"pcm", "pcm", "output_format=pcm_24000", "audio/pcm"},
 		{"wav", "wav", "output_format=wav_44100", "audio/wav"},
 	}
 	for _, tt := range tests {

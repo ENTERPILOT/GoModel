@@ -49,8 +49,7 @@ func enforceBudgetForContext(ctx context.Context, checker BudgetChecker) error {
 }
 
 func budgetCheckError(err error) error {
-	var exceeded *budget.ExceededError
-	if errors.As(err, &exceeded) {
+	if exceeded, ok := errors.AsType[*budget.ExceededError](err); ok {
 		message := exceeded.Error()
 		if message == "" {
 			message = "budget exceeded"

@@ -322,10 +322,10 @@ func (r *MongoDBReader) GetUsageByModel(ctx context.Context, params UsageQueryPa
 			ProviderName: displayUsageProviderName(row.ID.ProviderName, row.ID.Provider),
 			InputTokens:  row.InputTokens,
 			OutputTokens: row.OutputTokens,
-		}
-		m.InputCost = costPtr(row.HasInputCost, row.InputCost)
-		m.OutputCost = costPtr(row.HasOutputCost, row.OutputCost)
-		m.TotalCost = costPtr(row.HasTotalCost, row.TotalCost)
+
+			InputCost:  costPtr(row.HasInputCost, row.InputCost),
+			OutputCost: costPtr(row.HasOutputCost, row.OutputCost),
+			TotalCost:  costPtr(row.HasTotalCost, row.TotalCost)}
 		result = append(result, m)
 	}
 
@@ -1131,8 +1131,8 @@ func (r *MongoDBReader) GetCacheOverview(ctx context.Context, params UsageQueryP
 			InputTokens:  row.InputTokens,
 			OutputTokens: row.OutputTokens,
 			TotalTokens:  row.TotalTokens,
-		}
-		entry.SavedCost = costPtr(row.HasSavedCost, row.SavedCost)
+
+			SavedCost: costPtr(row.HasSavedCost, row.SavedCost)}
 		overview.Daily = append(overview.Daily, entry)
 	}
 

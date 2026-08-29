@@ -11,9 +11,9 @@ import (
 
 func TestMongoSessionUsagePipelinesArePagedAndExcludeCachedCost(t *testing.T) {
 	dataPipeline, countPipeline, limit, offset, err := mongoSessionUsagePipelines(SessionUsageParams{
-		UsageQueryParams: UsageQueryParams{SessionID: "scoped-session", CacheMode: CacheModeUncached},
-		Limit:            12,
-		Offset:           7,
+		SessionID: "scoped-session", CacheMode: CacheModeUncached,
+		Limit:  12,
+		Offset: 7,
 	})
 	if err != nil {
 		t.Fatalf("mongoSessionUsagePipelines: %v", err)
@@ -62,10 +62,8 @@ func TestSessionCostPtrUsesZeroForCacheOnlySession(t *testing.T) {
 
 func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 	got, err := mongoUsageLogMatchFilters(UsageLogParams{
-		UsageQueryParams: UsageQueryParams{
-			CacheMode: CacheModeUncached,
-		},
-		Search: "gpt",
+		CacheMode: CacheModeUncached,
+		Search:    "gpt",
 	})
 	if err != nil {
 		t.Fatalf("mongoUsageLogMatchFilters() error = %v", err)
@@ -95,10 +93,8 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 
 func TestMongoUsageLogMatchFiltersLabel(t *testing.T) {
 	got, err := mongoUsageLogMatchFilters(UsageLogParams{
-		UsageQueryParams: UsageQueryParams{
-			CacheMode: CacheModeAll,
-			Label:     "team-alpha",
-		},
+		CacheMode: CacheModeAll,
+		Label:     "team-alpha",
 	})
 	if err != nil {
 		t.Fatalf("mongoUsageLogMatchFilters() error = %v", err)
@@ -141,10 +137,8 @@ func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
 
 func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 	got, err := mongoUsageLogMatchFilters(UsageLogParams{
-		UsageQueryParams: UsageQueryParams{
-			CacheMode: CacheModeAll,
-		},
-		Search: "gpt.4+",
+		CacheMode: CacheModeAll,
+		Search:    "gpt.4+",
 	})
 	if err != nil {
 		t.Fatalf("mongoUsageLogMatchFilters() error = %v", err)

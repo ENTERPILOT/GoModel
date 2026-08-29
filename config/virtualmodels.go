@@ -26,6 +26,12 @@ type VirtualModelConfig struct {
 	// to true when omitted; set false to restore stateless balancing.
 	SessionAffinity *bool `yaml:"session_affinity,omitempty" json:"session_affinity,omitempty"`
 
+	// Failover retries a request that failed on the chosen target against the
+	// remaining targets, in declared order. Defaults to true when omitted; set
+	// false to serve the chosen target only. The failover strategy always
+	// fails over.
+	Failover *bool `yaml:"failover,omitempty" json:"failover,omitempty"`
+
 	// Target is shorthand for a single-target alias, e.g. "openai/gpt-4o". Use
 	// Targets instead to load balance across several models.
 	Target string `yaml:"target,omitempty" json:"target,omitempty"`

@@ -824,7 +824,7 @@ func TestRouterCreateBatch_AdaptsAnthropicCacheControlAfterRouting(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := &mockBatchProvider{mockProvider: mockProvider{name: tt.providerType}}
+			provider := &mockBatchProvider{name: tt.providerType}
 			lookup := newMockLookup()
 			lookup.addModel("gpt-4o", provider, tt.providerType)
 			router, _ := NewRouter(lookup)
@@ -934,10 +934,8 @@ func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 
 func TestRouterChatCompletion_RefreshesProviderModelsForQualifiedRequest(t *testing.T) {
 	provider := &lazyRefreshProvider{
-		mockProvider: mockProvider{
-			name:         "ollama",
-			chatResponse: &core.ChatResponse{ID: "chatcmpl-later", Model: "later-model"},
-		},
+		name:         "ollama",
+		chatResponse: &core.ChatResponse{ID: "chatcmpl-later", Model: "later-model"},
 		modelsResponse: &core.ModelsResponse{
 			Object: "list",
 			Data: []core.Model{
@@ -980,10 +978,8 @@ func TestRouterChatCompletion_RefreshesMissingProviderWithoutDroppingExistingMod
 		chatResponse: &core.ChatResponse{ID: "openai", Model: "gpt-4o"},
 	}
 	ollama := &lazyRefreshProvider{
-		mockProvider: mockProvider{
-			name:         "ollama",
-			chatResponse: &core.ChatResponse{ID: "ollama", Model: "local-model"},
-		},
+		name:         "ollama",
+		chatResponse: &core.ChatResponse{ID: "ollama", Model: "local-model"},
 		modelsResponse: &core.ModelsResponse{
 			Object: "list",
 			Data: []core.Model{
@@ -1021,10 +1017,8 @@ func TestRouterChatCompletion_RefreshesMissingProviderWithoutDroppingExistingMod
 
 func TestRouterChatCompletion_RequestTimeRefreshUnavailableProvider(t *testing.T) {
 	provider := &lazyRefreshProvider{
-		mockProvider: mockProvider{
-			name:         "ollama",
-			chatResponse: &core.ChatResponse{ID: "should-not-run"},
-		},
+		name:            "ollama",
+		chatResponse:    &core.ChatResponse{ID: "should-not-run"},
 		availabilityErr: errors.New("connection refused"),
 		modelsResponse: &core.ModelsResponse{
 			Object: "list",
@@ -1678,8 +1672,7 @@ func TestRouterEmbeddings_ProviderError(t *testing.T) {
 	if err == nil {
 		t.Error("expected error from provider")
 	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 		t.Errorf("expected GatewayError, got %T: %v", err, err)
 	}
 }
@@ -1760,8 +1753,7 @@ func TestRouterPassthrough_ErrorCases(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
+		if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 			t.Fatalf("expected GatewayError, got %T: %v", err, err)
 		}
 	})

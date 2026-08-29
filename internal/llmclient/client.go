@@ -712,8 +712,7 @@ func extractModel(body any) string {
 
 // extractStatusCode tries to extract HTTP status code from an error
 func extractStatusCode(err error) int {
-	var gwErr *core.GatewayError
-	if errors.As(err, &gwErr) {
+	if gwErr, ok := errors.AsType[*core.GatewayError](err); ok {
 		return gwErr.StatusCode
 	}
 

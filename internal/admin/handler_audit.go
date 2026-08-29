@@ -348,13 +348,11 @@ func (h *Handler) AuditStats(c *echo.Context) error {
 
 	_, location := dashboardTimeZone(c)
 	params := auditlog.RequestStatsParams{
-		QueryParams: auditlog.QueryParams{
-			StartDate: dateRange.StartDate,
-			EndDate:   dateRange.EndDate,
-		},
-		Interval: interval,
-		Location: location,
-		Now:      timeNow(),
+		StartDate: dateRange.StartDate,
+		EndDate:   dateRange.EndDate,
+		Interval:  interval,
+		Location:  location,
+		Now:       timeNow(),
 	}
 
 	stats, err := h.auditReader.GetRequestStats(c.Request().Context(), params)

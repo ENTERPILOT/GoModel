@@ -1,6 +1,8 @@
 package mcpgateway
 
 import (
+	"github.com/enterpilot/gomodel/internal/core"
+
 	"encoding/json"
 	"strings"
 	"time"
@@ -39,7 +41,7 @@ func (s *Service) recordToolCall(req *mcp.CallToolRequest, server, exposedTool, 
 	}
 
 	if extra := req.GetExtra(); extra != nil && extra.Header != nil {
-		entry.RequestID = strings.TrimSpace(extra.Header.Get("X-Request-ID"))
+		entry.RequestID = strings.TrimSpace(extra.Header.Get(core.RequestIDHeader))
 		entry.UserPath = strings.TrimSpace(extra.Header.Get(s.userPathHeader))
 		entry.Labels = parseLabelsHeader(extra.Header.Get(labelsHeader))
 	}

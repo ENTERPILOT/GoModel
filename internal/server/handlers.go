@@ -588,7 +588,7 @@ func (h *Handler) Health(c *echo.Context) error {
 // @Router       /v1/models [get]
 func (h *Handler) ListModels(c *echo.Context) error {
 	// Create context with request ID for provider
-	requestID := c.Request().Header.Get("X-Request-ID")
+	requestID := c.Request().Header.Get(core.RequestIDHeader)
 	ctx := core.WithRequestID(c.Request().Context(), requestID)
 
 	resp, err := h.provider.ListModels(ctx)

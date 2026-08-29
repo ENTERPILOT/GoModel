@@ -885,271 +885,6 @@ const docTemplate = `{
                 ]
             }
         },
-        "/admin/failover": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "List failover mappings",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/failover.View"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
-            },
-            "put": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Create or update one failover mapping",
-                "parameters": [
-                    {
-                        "description": "Failover mapping",
-                        "name": "mapping",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/admin.upsertFailoverRuleRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/failover.View"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
-            },
-            "delete": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Delete one failover mapping",
-                "parameters": [
-                    {
-                        "description": "Failover primary model to remove",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/admin.deleteFailoverRuleRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/admin/failover/generate": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Generate failover mapping suggestions",
-                "parameters": [
-                    {
-                        "description": "Optional source model filter",
-                        "name": "request",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/admin.generateFailoverRulesRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/failover.View"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/admin/failover/reset": {
-            "post": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Reset dashboard-managed failover mappings",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/failover.View"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/core.GatewayError"
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ]
-            }
-        },
         "/admin/mcp-servers": {
             "get": {
                 "produces": [
@@ -8060,14 +7795,6 @@ const docTemplate = `{
                 }
             }
         },
-        "admin.deleteFailoverRuleRequest": {
-            "type": "object",
-            "properties": {
-                "primary_model": {
-                    "type": "string"
-                }
-            }
-        },
         "admin.deleteGroupRequest": {
             "type": "object",
             "properties": {
@@ -8119,17 +7846,6 @@ const docTemplate = `{
             "required": [
                 "source"
             ]
-        },
-        "admin.generateFailoverRulesRequest": {
-            "type": "object",
-            "properties": {
-                "model": {
-                    "type": "string"
-                },
-                "primary_model": {
-                    "type": "string"
-                }
-            }
         },
         "admin.mcpServerViewResponse": {
             "type": "object",
@@ -8622,23 +8338,6 @@ const docTemplate = `{
                 }
             }
         },
-        "admin.upsertFailoverRuleRequest": {
-            "type": "object",
-            "properties": {
-                "enabled": {
-                    "type": "boolean"
-                },
-                "fallback_models": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "primary_model": {
-                    "type": "string"
-                }
-            }
-        },
         "admin.upsertGroupRequest": {
             "type": "object",
             "properties": {
@@ -8829,6 +8528,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "enabled": {
+                    "type": "boolean"
+                },
+                "failover": {
+                    "description": "Failover retries a failed request on the remaining targets. Omitted\nmeans enabled; false serves the chosen target only.",
                     "type": "boolean"
                 },
                 "groups": {
@@ -11283,35 +10986,6 @@ const docTemplate = `{
                 }
             }
         },
-        "failover.View": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "fallback_models": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "managed": {
-                    "type": "boolean"
-                },
-                "managed_source": {
-                    "type": "string"
-                },
-                "primary_model": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
         "mcpgateway.CatalogFeature": {
             "type": "object",
             "properties": {
@@ -12394,6 +12068,9 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "failover": {
+                    "type": "boolean"
+                },
                 "groups": {
                     "type": "array",
                     "items": {
@@ -12464,6 +12141,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "enabled": {
+                    "type": "boolean"
+                },
+                "failover": {
+                    "description": "Failover retries a failed request against the redirect's remaining\ntargets. Tri-state: nil means enabled (the default); explicit false\nserves the chosen target only. The failover strategy always fails over.",
                     "type": "boolean"
                 },
                 "groups": {

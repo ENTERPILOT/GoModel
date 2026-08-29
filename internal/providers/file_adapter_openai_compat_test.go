@@ -54,8 +54,7 @@ func TestValidatedOpenAICompatibleFileID(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error")
 				}
-				var gwErr *core.GatewayError
-				if !errors.As(err, &gwErr) {
+				if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 					t.Fatalf("expected GatewayError, got %T: %v", err, err)
 				}
 				return
@@ -210,8 +209,7 @@ func TestGetOpenAICompatibleFileContent(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error")
 				}
-				var gwErr *core.GatewayError
-				if !errors.As(err, &gwErr) {
+				if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 					t.Fatalf("expected GatewayError, got %T: %v", err, err)
 				}
 				return

@@ -153,8 +153,7 @@ func acquireRateLimitForContext(ctx context.Context, limiter RateLimiter, route 
 }
 
 func rateLimitCheckError(err error) error {
-	var exceeded *ratelimit.ExceededError
-	if errors.As(err, &exceeded) {
+	if exceeded, ok := errors.AsType[*ratelimit.ExceededError](err); ok {
 		message := exceeded.Error()
 		if message == "" {
 			message = "rate limit exceeded"
@@ -173,6 +172,18 @@ func rateLimitCheckError(err error) error {
 		WithCode("rate_limit_check_failed")
 }
 
+// Rate-limit response headers in canonical textproto form: Header.Set only
+// skips copying/canonicalizing the key when it is already canonical, and these
+// are set on every rate-limited request.
+const (
+	rateLimitLimitRequestsHeader     = "X-Ratelimit-Limit-Requests"
+	rateLimitRemainingRequestsHeader = "X-Ratelimit-Remaining-Requests"
+	rateLimitResetRequestsHeader     = "X-Ratelimit-Reset-Requests"
+	rateLimitLimitTokensHeader       = "X-Ratelimit-Limit-Tokens"
+	rateLimitRemainingTokensHeader   = "X-Ratelimit-Remaining-Tokens"
+	rateLimitResetTokensHeader       = "X-Ratelimit-Reset-Tokens"
+)
+
 func rateLimitBreachHeaders(exceeded *ratelimit.ExceededError) http.Header {
 	headers := http.Header{}
 	headers.Set("Retry-After", strconv.FormatInt(retryAfterSeconds(exceeded.RetryAfter), 10))
@@ -180,27 +191,27 @@ func rateLimitBreachHeaders(exceeded *ratelimit.ExceededError) http.Header {
 	limit := strconv.FormatInt(exceeded.Limit, 10)
 	switch exceeded.Scope {
 	case ratelimit.ScopeRequests:
-		headers.Set("x-ratelimit-limit-requests", limit)
-		headers.Set("x-ratelimit-remaining-requests", "0")
-		headers.Set("x-ratelimit-reset-requests", reset)
+		headers.Set(rateLimitLimitRequestsHeader, limit)
+		headers.Set(rateLimitRemainingRequestsHeader, "0")
+		headers.Set(rateLimitResetRequestsHeader, reset)
 	case ratelimit.ScopeTokens:
-		headers.Set("x-ratelimit-limit-tokens", limit)
-		headers.Set("x-ratelimit-remaining-tokens", "0")
-		headers.Set("x-ratelimit-reset-tokens", reset)
+		headers.Set(rateLimitLimitTokensHeader, limit)
+		headers.Set(rateLimitRemainingTokensHeader, "0")
+		headers.Set(rateLimitResetTokensHeader, reset)
 	}
 	return headers
 }
 
 func applyRateLimitHeaders(target http.Header, snapshot ratelimit.HeaderSnapshot) {
 	if snapshot.HasRequests {
-		target.Set("x-ratelimit-limit-requests", strconv.FormatInt(snapshot.RequestLimit, 10))
-		target.Set("x-ratelimit-remaining-requests", strconv.FormatInt(snapshot.RequestRemaining, 10))
-		target.Set("x-ratelimit-reset-requests", strconv.FormatInt(retryAfterSeconds(snapshot.RequestResetAfter), 10))
+		target.Set(rateLimitLimitRequestsHeader, strconv.FormatInt(snapshot.RequestLimit, 10))
+		target.Set(rateLimitRemainingRequestsHeader, strconv.FormatInt(snapshot.RequestRemaining, 10))
+		target.Set(rateLimitResetRequestsHeader, strconv.FormatInt(retryAfterSeconds(snapshot.RequestResetAfter), 10))
 	}
 	if snapshot.HasTokens {
-		target.Set("x-ratelimit-limit-tokens", strconv.FormatInt(snapshot.TokenLimit, 10))
-		target.Set("x-ratelimit-remaining-tokens", strconv.FormatInt(snapshot.TokenRemaining, 10))
-		target.Set("x-ratelimit-reset-tokens", strconv.FormatInt(retryAfterSeconds(snapshot.TokenResetAfter), 10))
+		target.Set(rateLimitLimitTokensHeader, strconv.FormatInt(snapshot.TokenLimit, 10))
+		target.Set(rateLimitRemainingTokensHeader, strconv.FormatInt(snapshot.TokenRemaining, 10))
+		target.Set(rateLimitResetTokensHeader, strconv.FormatInt(retryAfterSeconds(snapshot.TokenResetAfter), 10))
 	}
 }
 

@@ -100,15 +100,17 @@ func NewService(store Store, catalog Catalog, defaultEnabled bool) (*Service, er
 		catalog:        catalog,
 		defaultEnabled: defaultEnabled,
 	}
-	service.current.Store(emptySnapshot(defaultEnabled))
+	empty := emptySnapshot(defaultEnabled)
+	service.current.Store(&empty)
 	return service, nil
 }
 
-func (s *Service) snapshot() snapshot {
+func (s *Service) snapshot() *snapshot {
 	if s == nil {
-		return emptySnapshot(true)
+		empty := emptySnapshot(true)
+		return &empty
 	}
-	return s.current.Load().(snapshot)
+	return s.current.Load().(*snapshot)
 }
 
 // Refresh reloads virtual models from storage and atomically swaps the snapshot.
@@ -127,7 +129,7 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.current.Store(next)
+	s.current.Store(&next)
 	s.balancer.prune(next.redirects)
 	s.sticky.prune(next.redirects)
 	return nil
@@ -174,13 +176,15 @@ func (s *Service) isManagedSource(source string) bool {
 }
 
 // ValidateManagedConfig checks that every declarative config redirect satisfies
-// the catalog-independent redirect invariants (valid selector, no self- or
-// cross-redirect target, no misspelled target provider), so a malformed IaC
-// entry fails startup loudly. declaredProviders lists the names present in the
-// providers configuration even when they did not register — e.g. their
-// credentials are unset in this environment — so a config shared across
-// environments still boots; such targets only warn and stay unavailable. Call
-// it once after the initial Refresh.
+// the catalog-independent redirect invariants (valid selector, not solely a
+// self-target, no misspelled target provider), so a malformed IaC entry fails
+// startup loudly.
+// Chain cycles and depth are rejected earlier, by the initial Refresh.
+// declaredProviders lists the names present in the providers configuration even
+// when they did not register — e.g. their credentials are unset in this
+// environment — so a config shared across environments still boots; such
+// targets only warn and stay unavailable. Call it once after the initial
+// Refresh.
 //
 // It deliberately does NOT require targets to be catalog-supported: the provider
 // model catalog loads asynchronously and may still be warming when this runs, and
@@ -196,7 +200,7 @@ func (s *Service) ValidateManagedConfig(declaredProviders []string) error {
 		if !vm.Managed || !vm.IsRedirect() {
 			continue
 		}
-		if err := validateRedirectStructure(current, vm); err != nil {
+		if err := validateRedirectStructure(vm); err != nil {
 			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
 		}
 		if err := s.validateTargetProviders(vm, declared); err != nil {
@@ -267,6 +271,7 @@ func (s *Service) ListViews() []View {
 			Targets:         vm.Targets,
 			Strategy:        vm.Strategy,
 			SessionAffinity: vm.SessionAffinity,
+			Failover:        vm.Failover,
 			ProviderName:    vm.ProviderName,
 			Model:           vm.Model,
 			UserPaths:       vm.UserPaths,
@@ -289,24 +294,23 @@ func (s *Service) ListViews() []View {
 }
 
 // redirectViewResolution summarizes a redirect for the admin view: a
-// representative resolved model (the first available target, else the
-// first declared one), its provider type, and whether any target is available.
+// representative resolved model (the first available concrete model behind it,
+// else the first declared one), its provider type, and whether any target is
+// available. Chained virtual models are descended to their concrete models.
 func (s *Service) redirectViewResolution(vm VirtualModel) (resolved, providerType string, valid bool) {
-	for _, target := range vm.Targets {
-		selector, err := target.selector()
-		if err != nil {
-			continue
-		}
-		qualified := selector.QualifiedModel()
-		if s.catalog.ModelAvailable(qualified) {
-			return qualified, strings.TrimSpace(s.catalog.GetProviderType(qualified)), true
-		}
-		if resolved == "" {
-			resolved = qualified
-			providerType = strings.TrimSpace(s.catalog.GetProviderType(qualified))
-		}
+	snap := s.snapshot()
+	entry, ok := snap.redirects[vm.Source]
+	if !ok {
+		return "", "", false
 	}
-	return resolved, providerType, valid
+	if leaves := snap.leafTargets(entry, s.catalog); len(leaves) > 0 {
+		qualified := leaves[0].qualified
+		return qualified, strings.TrimSpace(s.catalog.GetProviderType(qualified)), true
+	}
+	if representative, ok := snap.representativeLeaf(entry); ok {
+		return representative.qualified, strings.TrimSpace(s.catalog.GetProviderType(representative.qualified)), false
+	}
+	return "", "", false
 }
 
 // Upsert validates and stores one virtual model, replacing any existing row at
@@ -414,6 +418,9 @@ func (s *Service) Rename(ctx context.Context, oldSource string, vm VirtualModel)
 	if _, taken := current.bySource[normalized.Source]; taken {
 		return newValidationError(fmt.Sprintf("virtual model %q already exists; choose a different source", normalized.Source), nil)
 	}
+	if err := rejectDependents(current, oldSource); err != nil {
+		return err
+	}
 	baseRows := removeRow(current.rows(), oldSource)
 	redundant, err := s.policyIsRedundant(normalized, baseRows)
 	if err != nil {
@@ -478,6 +485,9 @@ func (s *Service) Delete(ctx context.Context, source string) error {
 	}
 	if previous.Managed || s.isManagedSource(canonical) {
 		return managedSourceError(canonical)
+	}
+	if err := rejectDependents(current, canonical); err != nil {
+		return err
 	}
 	source = canonical
 
@@ -556,14 +566,14 @@ func (s *Service) normalizeForUpsert(vm VirtualModel) (VirtualModel, error) {
 // is a caller mistake worth rejecting up front. Startup config validation skips
 // the availability check, because the catalog may not be warm yet (see
 // ValidateManagedConfig).
-func (s *Service) validateRedirectTarget(current snapshot, vm VirtualModel) error {
-	if err := validateRedirectStructure(current, vm); err != nil {
+func (s *Service) validateRedirectTarget(current *snapshot, vm VirtualModel) error {
+	if err := validateRedirectStructure(vm); err != nil {
 		return err
 	}
 	if err := s.validateTargetProviders(vm, nil); err != nil {
 		return err
 	}
-	if missing, ok := s.firstUnsupportedTarget(vm); ok {
+	if missing, ok := s.firstUnsupportedTarget(current, vm); ok {
 		return newValidationError("target model not found: "+missing, nil)
 	}
 	return nil
@@ -598,11 +608,16 @@ func (s *Service) validateTargetProviders(vm VirtualModel, declared map[string]s
 }
 
 // validateRedirectStructure enforces the catalog-INDEPENDENT redirect invariants:
-// each target must parse, a redirect cannot target itself, and it cannot target
-// another redirect's source. These are pure properties of the declaration and the
-// redirect graph, so they hold whether or not the provider catalog is warm —
-// making them safe to enforce at startup, before async model loading completes.
-func validateRedirectStructure(current snapshot, vm VirtualModel) error {
+// each target must parse, and a redirect cannot consist solely of itself. A
+// target naming the redirect's own source stands for the concrete model it
+// shadows — meaningful only next to other targets (e.g. a failover chain for a
+// real model). A target may name another redirect's source (a chain); the
+// wider graph rules — no cycles, at most MaxChainDepth hops — are checked by
+// validateChains whenever a candidate snapshot is built. These are pure
+// properties of the declaration and the redirect graph, so they hold whether
+// or not the provider catalog is warm — making them safe to enforce at
+// startup, before async model loading completes.
+func validateRedirectStructure(vm VirtualModel) error {
 	if !vm.IsRedirect() {
 		return nil
 	}
@@ -611,32 +626,46 @@ func validateRedirectStructure(current snapshot, vm VirtualModel) error {
 		if err != nil {
 			return newValidationError("invalid target selector: "+err.Error(), err)
 		}
-		qualified := selector.QualifiedModel()
-		if vm.Source == qualified {
-			return newValidationError(fmt.Sprintf("virtual model %q cannot target itself", vm.Source), nil)
-		}
-		if existing, ok := current.redirects[qualified]; ok && existing.vm.Source != vm.Source {
-			return newValidationError(fmt.Sprintf("target %q refers to another virtual model", qualified), nil)
+		if len(vm.Targets) == 1 && vm.Source == selector.QualifiedModel() {
+			return newValidationError(fmt.Sprintf("virtual model %q cannot target only itself", vm.Source), nil)
 		}
 	}
 	return nil
 }
 
-// firstUnsupportedTarget reports the first target the catalog cannot currently
-// serve, if any. Availability is transient — it depends on async model loading
-// and provider health — and is already handled at resolve time by skipping
-// unavailable targets, so it gates the admin write path only, never startup.
-func (s *Service) firstUnsupportedTarget(vm VirtualModel) (string, bool) {
+// firstUnsupportedTarget reports the first target that is neither a model the
+// catalog can currently serve nor an existing virtual model, if any. Catalog
+// availability is transient — it depends on async model loading and provider
+// health — and is already handled at resolve time by skipping unavailable
+// targets, so it gates the admin write path only, never startup.
+func (s *Service) firstUnsupportedTarget(current *snapshot, vm VirtualModel) (string, bool) {
 	for _, target := range vm.Targets {
 		selector, err := target.selector()
 		if err != nil {
 			continue // selector parse errors are reported by validateRedirectStructure
 		}
-		if qualified := selector.QualifiedModel(); !s.catalog.Supports(qualified) {
+		qualified := selector.QualifiedModel()
+		candidate := resolvedTarget{selector: selector, qualified: qualified, explicitProvider: strings.TrimSpace(target.Provider) != ""}
+		if _, chained := current.chained(vm.Source, candidate); chained {
+			continue
+		}
+		if !s.catalog.Supports(qualified) {
 			return qualified, true
 		}
 	}
 	return "", false
+}
+
+// rejectDependents refuses to remove or rename a virtual model that other
+// redirects chain through, so an outer alias cannot silently lose a leg.
+func rejectDependents(current *snapshot, source string) error {
+	dependents := current.dependents(source)
+	if len(dependents) == 0 {
+		return nil
+	}
+	return newValidationError(fmt.Sprintf(
+		"virtual model %q is a target of %s; repoint them first",
+		source, strings.Join(dependents, ", ")), nil)
 }
 
 // managedSourceError is returned when the admin API tries to write a virtual

@@ -18,9 +18,27 @@ var credentialHeaders = map[string]struct{}{
 	"x-gomodel-key":       {},
 }
 
+// maxCredentialHeaderLen bounds the lowercase scratch buffer below; every
+// credentialHeaders key is shorter, so longer names can never match.
+const maxCredentialHeaderLen = 32
+
 // IsCredentialHeader reports whether the header name carries credentials.
-// Matching is case-insensitive and ignores surrounding whitespace.
+// Matching is case-insensitive and ignores surrounding whitespace. It runs
+// for every header of every audited request, so the fold happens in a stack
+// buffer rather than through strings.ToLower.
 func IsCredentialHeader(name string) bool {
-	_, ok := credentialHeaders[strings.ToLower(strings.TrimSpace(name))]
+	name = strings.TrimSpace(name)
+	if len(name) > maxCredentialHeaderLen {
+		return false
+	}
+	var lower [maxCredentialHeaderLen]byte
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		lower[i] = c
+	}
+	_, ok := credentialHeaders[string(lower[:len(name)])]
 	return ok
 }

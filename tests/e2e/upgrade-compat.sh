@@ -169,6 +169,8 @@ seed() {
   jput /admin/virtual-models \
     '{"source":"compat-lb","targets":[{"provider":"openai","model":"gpt-4.1-nano","weight":2},{"provider":"groq","model":"groq/compound-mini"}],"strategy":"round_robin"}' >/dev/null
 
+  # The baseline still has the standalone failover store; the working tree
+  # converts this mapping into a failover-strategy virtual model at startup.
   jput /admin/failover \
     '{"primary_model":"compat-failover-src","fallback_models":["groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]}' >/dev/null
 
@@ -231,9 +233,10 @@ snapshot() {
   local out="$1"
   mkdir -p "$out"
 
+  # compat-failover-src exists only after the upgrade (converted from the
+  # failover store), so it is asserted separately rather than diffed.
   curl -fsS "$BASE/admin/virtual-models" \
-    | jq -S 'map(select(.source|startswith("compat")))' > "$out/virtual-models.json"
-  curl -fsS "$BASE/admin/failover" | jq -S '.' > "$out/failover.json"
+    | jq -S 'map(select((.source|startswith("compat")) and .source != "compat-failover-src"))' > "$out/virtual-models.json"
   curl -fsS "$BASE/admin/guardrails" \
     | jq -S 'map(select(.name|startswith("compat")))' > "$out/guardrails.json"
   curl -fsS "$BASE/admin/budgets" \
@@ -349,6 +352,13 @@ for baseline_file in "$WORK/baseline"/*.json; do
   fi
 done
 
+# The baseline's failover mapping must come back as a failover-strategy
+# virtual model shadowing its primary model, with the fallbacks in order.
+migrated="$(curl -fsS "$BASE/admin/virtual-models" \
+  | jq -c '.[] | select(.source == "compat-failover-src") | [.strategy, (.targets | map(.model))]')"
+[[ "$migrated" == '["failover",["compat-failover-src","groq/groq/compound-mini","gemini/gemini-2.5-flash-lite"]]' ]]
+report "failover mapping converted into a failover-strategy virtual model" "$?"
+
 echo "-- exercising writes on the upgraded database"
 write_check() {
   local label="$1" rc=0
@@ -359,7 +369,7 @@ write_check() {
 }
 
 write_check "virtual-models upsert" jput /admin/virtual-models '{"source":"compat-alias","target_model":"openai/gpt-4.1-mini","description":"updated after upgrade"}'
-write_check "failover upsert" jput /admin/failover '{"primary_model":"compat-failover-src","fallback_models":["groq/groq/compound-mini"]}'
+write_check "failover virtual model upsert" jput /admin/virtual-models '{"source":"compat-failover","strategy":"failover","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"groq/groq/compound-mini"}]}'
 write_check "guardrail upsert" jput /admin/guardrails '{"name":"compat-guardrail","type":"system_prompt","description":"updated","config":{"mode":"inject","content":"updated content"}}'
 write_check "budget upsert" jput /admin/budgets '{"user_path":"/compat/budget","budget_key":{"period":"daily"},"amount":22.5}'
 write_check "label budget upsert" jput /admin/budgets '{"scope":"label","subject":"compat-label","budget_key":{"period":"daily"},"amount":7.5}'

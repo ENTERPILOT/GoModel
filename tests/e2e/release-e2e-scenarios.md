@@ -54,11 +54,10 @@ Stateful note:
   them, so they are self-contained and rerunnable in any order
 - `S126`-`S132` exercise token throughput and cache analytics; they are
   read-mostly (`S128`/`S132` add a little usage/cache traffic) and self-contained
-- `S133`-`S141` exercise manual failover management (admin CRUD, suggestion
-  generation, reset, validation negatives, and auth gating); each positive
-  scenario creates `$QA_SUFFIX`-scoped dashboard mappings and deletes them, and
-  `S137` calls reset (which clears all dashboard-managed failover mappings), so
-  they are self-contained and rerunnable in any order
+- `S133`-`S136` exercise the failover load-balancing strategy of virtual
+  models (create, resolve, validation negatives, and auth gating); each positive
+  scenario creates `$QA_SUFFIX`-scoped virtual models and deletes them, so they
+  are self-contained and rerunnable in any order
 - `S142`-`S148` exercise header tagging (admin rule CRUD, validation negatives,
   label extraction onto usage entries and audit `data.labels`, streaming,
   PostgreSQL/MongoDB backend parity, and auth gating); each scenario uses
@@ -3024,411 +3023,74 @@ curl -fsS "$AUTH_BASE_URL/admin/usage/throughput?granularity=minute" -H "$ADMIN_
   | jq -e '([.buckets[].locally_cached_tokens] | add) > 0' >/dev/null
 ```
 
-## 19. Manual failover management
+## 19. Failover strategy
 
-These scenarios exercise the dashboard-managed manual failover mappings (#444)
-on the main SQLite gateway. Failover management is enabled by default, so the
-admin endpoints (`GET/PUT/DELETE /admin/failover`,
-`POST /admin/failover/generate`, `POST /admin/failover/reset`) are live. The
-upsert path does not validate that the primary or target selectors exist in the
-catalog, so each scenario uses `$QA_SUFFIX`-scoped synthetic sources and deletes
-them at the end, making them self-contained and rerunnable in any order.
+Failover is a load-balancing behaviour of virtual models: every multi-target
+redirect fails over between its targets, and the `failover` strategy makes the
+target list a strict priority order. There are no separate failover endpoints;
+these scenarios use `PUT/GET/DELETE /admin/virtual-models` on the main SQLite
+gateway. Targets must exist in the catalog, so the scenarios use the models the
+QA gateway is configured with.
 
-### S133 Create and inspect a failover mapping
+### S133 Create a failover-strategy virtual model
 
-Creates a two-target dashboard mapping and verifies the admin view shape.
+Creates a two-target priority list and verifies the admin view carries the
+strategy and the declared order.
 
 ```bash
-SRC="qa-fo-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/failover" \
+NAME="qa-failover-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/groq/compound-mini\",\"gemini/gemini-2.5-flash-lite\"]}" \
-  | jq -e --arg s "$SRC" '
-      .primary_model == $s
-      and (.fallback_models | length) == 2
-      and .fallback_models[0] == "groq/groq/compound-mini"
-      and .fallback_models[1] == "gemini/gemini-2.5-flash-lite"
-      and .enabled == true
-      and .managed == false
-      and .managed_source == "dashboard"
-    ' >/dev/null
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s133.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/failover" \
-  -H 'Content-Type: application/json' -d "{\"primary_model\":\"$SRC\"}"
-sed -n '1,20p' "$HEADERS_FILE"
-grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
+  -d "{\"source\":\"$NAME\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"gemini/gemini-2.5-flash-lite\"}]}" \
+  | jq -e --arg name "$NAME" '.source == $name and .strategy == "failover" and (.targets | map(.model)) == ["gpt-4.1-nano","gemini-2.5-flash-lite"]' >/dev/null
+curl -fsS "$BASE_URL/admin/virtual-models" \
+  | jq -e --arg name "$NAME" 'map(select(.source == $name)) | length == 1' >/dev/null
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\"}" | grep -q '^204$'
 ```
 
-### S134 Failover mapping is listed and updatable
+### S134 Failover strategy always serves the primary target
 
-Creates a mapping, confirms it appears in the listing, then updates its targets
-and toggles it disabled, confirming the change is persisted.
-
-```bash
-SRC="qa-fo-upd-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"groq/groq/compound-mini\"]}" >/dev/null
-curl -fsS "$BASE_URL/admin/failover" \
-  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == true and (.fallback_models | index("groq/groq/compound-mini")))' >/dev/null
-curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[\"openai/gpt-4.1-mini\",\"xai/grok-4.3\"],\"enabled\":false}" \
-  | jq -e --arg s "$SRC" '
-      .primary_model == $s
-      and (.fallback_models | length) == 2
-      and .fallback_models[0] == "openai/gpt-4.1-mini"
-      and .enabled == false
-    ' >/dev/null
-curl -fsS "$BASE_URL/admin/failover" \
-  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == false)' >/dev/null
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s134.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/failover" \
-  -H 'Content-Type: application/json' -d "{\"primary_model\":\"$SRC\"}"
-grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
-```
-
-### S135 Disable a primary with an empty target list
-
-A disabled mapping is allowed to omit targets, which records the primary as a
-failover-disabled source rather than rejecting the request.
+Creates its own priority list, sends two requests through it — both answered by
+the first target (no rotation) — and removes it.
 
 ```bash
-SRC="qa-fo-dis-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"$SRC\",\"fallback_models\":[],\"enabled\":false}" \
-  | jq -e --arg s "$SRC" '
-      .primary_model == $s
-      and .enabled == false
-      and ((.fallback_models // []) | length) == 0
-    ' >/dev/null
-curl -fsS "$BASE_URL/admin/failover" \
-  | jq -e --arg s "$SRC" 'any(.[]; .primary_model == $s and .enabled == false)' >/dev/null
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s135.headers.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o /dev/null -X DELETE "$BASE_URL/admin/failover" \
-  -H 'Content-Type: application/json' -d "{\"primary_model\":\"$SRC\"}"
-grep -Eiq '^HTTP/.* 204 ' "$HEADERS_FILE"
-```
-
-### S136 Generate failover suggestions
-
-The generate endpoint proposes dashboard mappings from the live model catalog.
-Suggestions are computed, not persisted, so this scenario is read-only.
-
-```bash
-GEN_FILE="$QA_RUN_DIR/s136.generate.json"
-curl -fsS -X POST "$BASE_URL/admin/failover/generate" > "$GEN_FILE"
-jq 'length' "$GEN_FILE"
-jq -e '
-    type == "array"
-    and length >= 1
-    and all(.[];
-      (.primary_model | type == "string" and length > 0)
-      and (.fallback_models | type == "array" and length >= 1)
-      and .managed_source == "dashboard")
-  ' "$GEN_FILE" >/dev/null
-```
-
-### S137 Reset clears dashboard-managed mappings
-
-Reset removes every dashboard-managed failover mapping. The scenario seeds two
-mappings, confirms they are present, resets, and confirms both are gone.
-
-```bash
-SRC1="qa-fo-rst1-$QA_SUFFIX"
-SRC2="qa-fo-rst2-$QA_SUFFIX"
-for S in "$SRC1" "$SRC2"; do
-  curl -fsS -X PUT "$BASE_URL/admin/failover" -H 'Content-Type: application/json' \
-    -d "{\"primary_model\":\"$S\",\"fallback_models\":[\"groq/groq/compound-mini\"]}" >/dev/null
+NAME="qa-failover-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"gemini/gemini-2.5-flash-lite\"}]}" >/dev/null
+for i in 1 2; do
+  curl -fsS -X POST "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"ping $i\"}],\"max_tokens\":5}" \
+    | jq -e '.model | test("gpt-4.1-nano")' >/dev/null
 done
-curl -fsS "$BASE_URL/admin/failover" \
-  | jq -e --arg a "$SRC1" --arg b "$SRC2" 'any(.[]; .primary_model == $a) and any(.[]; .primary_model == $b)' >/dev/null
-curl -fsS -X POST "$BASE_URL/admin/failover/reset" \
-  | jq -e 'type == "array"' >/dev/null
-curl -fsS "$BASE_URL/admin/failover" \
-  | jq -e --arg a "$SRC1" --arg b "$SRC2" 'all(.[]; .primary_model != $a) and all(.[]; .primary_model != $b)' >/dev/null
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\"}" | grep -q '^204$'
 ```
 
-### S138 Missing `primary_model` is rejected (negative)
+### S135 Failover for a real model by shadowing it
 
-Upserting without a `primary_model` is rejected before storage.
+A redirect whose source is a real model and whose first target is that model
+adds a failover chain to it; the model keeps resolving to itself.
 
 ```bash
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s138.headers.XXXXXX")
-BODY_FILE=$(mktemp "$QA_RUN_DIR/s138.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/failover" \
-  -H 'Content-Type: application/json' \
-  -d '{"fallback_models":["groq/groq/compound-mini"]}'
-sed -n '1,20p' "$HEADERS_FILE"
-jq '.' "$BODY_FILE"
-grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error" and (.error.message | test("primary_model"))' "$BODY_FILE" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d '{"source":"openai/gpt-4.1-nano","strategy":"failover","targets":[{"model":"openai/gpt-4.1-nano"},{"model":"gemini/gemini-2.5-flash-lite"}]}' \
+  | jq -e '.resolved_model == "openai/gpt-4.1-nano" and .valid == true' >/dev/null
+# A redirect made only of its own source is rejected.
+curl -sS -o /dev/null -w '%{http_code}' -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d '{"source":"openai/gpt-4.1-nano","targets":[{"model":"openai/gpt-4.1-nano"}]}' | grep -q '^400$'
+curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d '{"source":"openai/gpt-4.1-nano"}' | grep -q '^204$'
 ```
 
-### S139 Enabled mapping with no targets is rejected (negative)
+### S136 Virtual model admin requires authentication
 
-An enabled mapping must list at least one target. NOTE: the current status code
-is `502 provider_error` ("targets must contain at least one model"); a missing
-`primary_model` on the same endpoint returns `400`, so this is a known
-status-code inconsistency in the failover validation path. This scenario asserts
-the durable invariant (the request is rejected with that message) and pins the
-current code.
+On the auth-enabled gateway the virtual model endpoints are gated behind the
+admin key.
 
 ```bash
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s139.headers.XXXXXX")
-BODY_FILE=$(mktemp "$QA_RUN_DIR/s139.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X PUT "$BASE_URL/admin/failover" \
-  -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"qa-fo-empty-$QA_SUFFIX\",\"fallback_models\":[]}"
-sed -n '1,20p' "$HEADERS_FILE"
-jq '.' "$BODY_FILE"
-grep -Eiq '^HTTP/.* 502 ' "$HEADERS_FILE"
-jq -e '.error.type == "provider_error" and (.error.message | test("at least one"))' "$BODY_FILE" >/dev/null
-```
-
-### S140 Delete a non-existent mapping is not found (negative)
-
-Deleting an unknown primary returns a `404` rather than succeeding silently.
-
-```bash
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s140.headers.XXXXXX")
-BODY_FILE=$(mktemp "$QA_RUN_DIR/s140.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" -X DELETE "$BASE_URL/admin/failover" \
-  -H 'Content-Type: application/json' \
-  -d "{\"primary_model\":\"qa-fo-missing-$QA_SUFFIX\"}"
-sed -n '1,20p' "$HEADERS_FILE"
-jq '.' "$BODY_FILE"
-grep -Eiq '^HTTP/.* 404 ' "$HEADERS_FILE"
-jq -e '.error.type == "not_found_error" and (.error.message | test("not found"))' "$BODY_FILE" >/dev/null
-```
-
-### S141 Failover admin requires authentication
-
-On the auth-enabled gateway the failover admin endpoints are gated behind the
-master key: an unauthenticated read is rejected with `401`, while the same read
-with the admin bearer succeeds and returns the mapping array.
-
-```bash
-curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/failover" \
-  | jq -R -e '. == "401"' >/dev/null
-curl -fsS "$AUTH_BASE_URL/admin/failover" -H "$ADMIN_AUTH_HEADER" \
-  | jq -e 'type == "array"' >/dev/null
-```
-
-### S142 Tagging settings CRUD, canonicalization, and validation negatives
-
-Operator tagging rules are readable and replaceable through the admin API:
-header names are canonicalized, the default delimiter is applied, and
-credential-bearing, duplicate, or malformed headers are rejected with `400`
-without clobbering the saved rule set. The scenario restores an empty operator
-rule set at the end.
-
-```bash
-TAG_HDR_RAW="x-qa-tag-$QA_SUFFIX"
-TAG_HDR="X-Qa-Tag-$QA_SUFFIX"
-curl -fsS "$BASE_URL/admin/tagging/settings" \
-  | jq -e '.editable == true and ((.headers // []) | type == "array")' >/dev/null
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' \
-  -d "{\"headers\":[{\"header\":\"$TAG_HDR_RAW\",\"prefix\":\"qa-\",\"do_not_pass\":true,\"delimiter\":\";\"},{\"header\":\"$TAG_HDR_RAW-b\"}]}" \
-  | jq -e --arg h "$TAG_HDR" '
-      ([.headers[] | select(.managed | not)] | length) == 2
-      and (.headers[0].header | ascii_downcase) == ($h | ascii_downcase)
-      and .headers[0].prefix == "qa-"
-      and .headers[0].do_not_pass == true
-      and .headers[0].delimiter == ";"
-      and (.headers[1].header | ascii_downcase) == (($h + "-b") | ascii_downcase)
-      and .headers[1].delimiter == ","
-      and ((.headers[1].do_not_pass // false) == false)
-    ' >/dev/null
-curl -fsS "$BASE_URL/admin/tagging/settings" \
-  | jq -e --arg h "$TAG_HDR" 'any(.headers[]; (.header | ascii_downcase) == ($h | ascii_downcase) and .do_not_pass == true)' >/dev/null
-for BAD in \
-  '{"headers":[{"header":"Authorization"}]}' \
-  '{"headers":[{"header":"Cookie"}]}' \
-  '{"headers":[{"header":"x-api-key"}]}' \
-  "{\"headers\":[{\"header\":\"$TAG_HDR_RAW\"},{\"header\":\"$TAG_HDR\"}]}" \
-  '{"headers":[{"header":"bad header name"}]}'; do
-  STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$BASE_URL/admin/tagging/settings" \
-    -H 'Content-Type: application/json' -d "$BAD")
-  [ "$STATUS" = "400" ]
-done
-curl -fsS "$BASE_URL/admin/tagging/settings" \
-  | jq -e '([.headers[] | select(.managed | not)] | length) == 2' >/dev/null
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' -d '{"headers":[]}' \
-  | jq -e '((.headers // []) | map(select(.managed | not)) | length) == 0' >/dev/null
-```
-
-### S143 Chat request labels land on the usage entry
-
-Labels are extracted with prefix trimming (values without the prefix are kept
-as-is), custom delimiters, repeated header values, and cross-rule dedupe, and
-are recorded on the usage entry in rule order.
-
-```bash
-TEAM_HDR="X-Qa-Team-$QA_SUFFIX"
-ENV_HDR="X-Qa-Env-$QA_SUFFIX"
-RID="qa-tag-usage-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' \
-  -d "{\"headers\":[{\"header\":\"$TEAM_HDR\",\"prefix\":\"team-\"},{\"header\":\"$ENV_HDR\",\"delimiter\":\";\"}]}" >/dev/null
-curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
-  -H "X-Request-ID: $RID" \
-  -H "$TEAM_HDR: team-alpha, beta ,team-alpha" \
-  -H "$TEAM_HDR: team-gamma" \
-  -H "$ENV_HDR: prod;staging" \
-  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_USAGE_OK"}],"max_tokens":20}' >/dev/null
-USAGE_FILE="$QA_RUN_DIR/s143.usage.json"
-for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
-  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
-    break
-  fi
-  sleep 1
-done
-jq -e --arg r "$RID" '
-  any(.entries[]?; .request_id == $r
-    and .labels == ["alpha","beta","gamma","prod","staging"])
-' "$USAGE_FILE" >/dev/null
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
-```
-
-### S144 Audit log records request labels in `data.labels`
-
-The audit entry for a labelled request carries the extracted labels in
-`data.labels`, with the prefix trimmed.
-
-```bash
-AUD_HDR="X-Qa-Audit-$QA_SUFFIX"
-RID="qa-tag-audit-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' \
-  -d "{\"headers\":[{\"header\":\"$AUD_HDR\",\"prefix\":\"aud-\"}]}" >/dev/null
-curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
-  -H "X-Request-ID: $RID" \
-  -H "$AUD_HDR: aud-billing, aud-experiment" \
-  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_AUDIT_OK"}],"max_tokens":20}' >/dev/null
-AUDIT_FILE="$QA_RUN_DIR/s144.audit.json"
-for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=3" > "$AUDIT_FILE"
-  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r)' "$AUDIT_FILE" >/dev/null; then
-    break
-  fi
-  sleep 1
-done
-jq -e --arg r "$RID" '
-  any(.entries[]?; .request_id == $r and .data.labels == ["billing","experiment"])
-' "$AUDIT_FILE" >/dev/null
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
-```
-
-### S145 Streaming chat records labels on the usage entry
-
-Labels ride the shared stream observers, so a streamed completion records them
-on its usage entry too.
-
-```bash
-STREAM_HDR="X-Qa-Stream-$QA_SUFFIX"
-RID="qa-tag-stream-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' \
-  -d "{\"headers\":[{\"header\":\"$STREAM_HDR\"}]}" >/dev/null
-STREAM_FILE="$QA_RUN_DIR/s145.stream.log"
-curl -fsSN "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
-  -H "X-Request-ID: $RID" \
-  -H "$STREAM_HDR: sse-check" \
-  -d '{"model":"gpt-4.1-nano","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"Reply with exactly QA_TAG_STREAM_OK"}],"max_tokens":20}' \
-  > "$STREAM_FILE"
-grep -qF 'data: [DONE]' "$STREAM_FILE"
-assert_chat_stream_has_usage "$STREAM_FILE"
-USAGE_FILE="$QA_RUN_DIR/s145.usage.json"
-for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
-  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
-    break
-  fi
-  sleep 1
-done
-jq -e --arg r "$RID" '
-  any(.entries[]?; .request_id == $r and .labels == ["sse-check"])
-' "$USAGE_FILE" >/dev/null
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
-```
-
-### S146 Usage labels are recorded on PostgreSQL and MongoDB backends
-
-The tagging settings store and the usage `labels` column exist on all three
-storage backends; this exercises the PostgreSQL and MongoDB gateways.
-
-```bash
-BACKEND_HDR="X-Qa-Backend-$QA_SUFFIX"
-for TARGET in "$PG_BASE_URL|pg" "$MONGO_BASE_URL|mongo"; do
-  URL="${TARGET%%|*}"
-  TAG="${TARGET##*|}"
-  RID="qa-tag-$TAG-$QA_SUFFIX"
-  curl -fsS -X PUT "$URL/admin/tagging/settings" \
-    -H 'Content-Type: application/json' \
-    -d "{\"headers\":[{\"header\":\"$BACKEND_HDR\"}]}" \
-    | jq -e --arg h "$BACKEND_HDR" 'any(.headers[]; (.header | ascii_downcase) == ($h | ascii_downcase))' >/dev/null
-  curl -fsS "$URL/v1/chat/completions" -H 'Content-Type: application/json' \
-    -H "X-Request-ID: $RID" \
-    -H "$BACKEND_HDR: $TAG-check" \
-    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_BACKEND_OK"}],"max_tokens":20}' >/dev/null
-  USAGE_FILE="$QA_RUN_DIR/s146.$TAG.usage.json"
-  for _ in $(seq 1 15); do
-    curl -fsS "$URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
-    if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
-      break
-    fi
-    sleep 1
-  done
-  jq -e --arg r "$RID" --arg l "$TAG-check" '
-    any(.entries[]?; .request_id == $r and .labels == [$l])
-  ' "$USAGE_FILE" >/dev/null
-  curl -fsS -X PUT "$URL/admin/tagging/settings" \
-    -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
-done
-```
-
-### S147 No labels are recorded without a matching rule
-
-With an empty operator rule set, a request carrying would-be label headers
-records a usage entry without any `labels` field.
-
-```bash
-RID="qa-tag-norules-$QA_SUFFIX"
-curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
-  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
-curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
-  -H "X-Request-ID: $RID" \
-  -H "X-Qa-Team-$QA_SUFFIX: team-alpha" \
-  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_NORULES_OK"}],"max_tokens":20}' >/dev/null
-USAGE_FILE="$QA_RUN_DIR/s147.usage.json"
-for _ in $(seq 1 15); do
-  curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
-  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
-    break
-  fi
-  sleep 1
-done
-jq -e --arg r "$RID" '
-  any(.entries[]?; .request_id == $r and (has("labels") | not))
-' "$USAGE_FILE" >/dev/null
-```
-
-### S148 Tagging settings admin requires authentication
-
-On the auth-enabled gateway the tagging settings endpoints are gated behind the
-master key: an unauthenticated read is rejected with `401`, while the same read
-with the admin bearer succeeds.
-
-```bash
-curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/tagging/settings" \
-  | jq -R -e '. == "401"' >/dev/null
-curl -fsS "$AUTH_BASE_URL/admin/tagging/settings" -H "$ADMIN_AUTH_HEADER" \
-  | jq -e '.editable == true and ((.headers // []) | type == "array")' >/dev/null
+curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/virtual-models" | grep -q '^401$'
+curl -fsS "$AUTH_BASE_URL/admin/virtual-models" -H "$ADMIN_AUTH_HEADER" | jq -e 'type == "array"' >/dev/null
 ```
 
 ## 20. Post-v0.1.48 provider regressions

@@ -86,6 +86,12 @@ func WithRequestID(ctx context.Context, requestID string) context.Context {
 	return context.WithValue(ctx, requestIDKey, requestID)
 }
 
+// RequestIDHeader is the request/response header carrying the gateway request
+// id, spelled in canonical textproto form ("X-Request-Id") so Header.Get/Set
+// need not canonicalize (and copy) the key on every call. Clients may send it
+// in any case; lookups are case-insensitive.
+const RequestIDHeader = "X-Request-Id"
+
 // GetRequestID retrieves the request ID from the context.
 // Returns empty string if not found.
 func GetRequestID(ctx context.Context) string {
@@ -129,6 +135,11 @@ func GetWhiteBoxPrompt(ctx context.Context) *WhiteBoxPrompt {
 
 // WithWorkflow returns a new context with the workflow attached.
 func WithWorkflow(ctx context.Context, workflow *Workflow) context.Context {
+	// Idempotent: resolution, preparation and cache setup each attach the
+	// same workflow, so re-wrapping would only add context layers.
+	if GetWorkflow(ctx) == workflow {
+		return ctx
+	}
 	return context.WithValue(ctx, workflowKey, workflow)
 }
 
