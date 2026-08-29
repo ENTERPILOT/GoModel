@@ -896,8 +896,9 @@ export function vmFormHasExtraTargetRows(form) {
 }
 
 // vmFormStrategyPending: the strategy is always shown, so the editor does not
-// change shape as targets come and go; until a second target row exists it
-// explains that the choice applies from the second target on.
+// change shape as targets come and go; until a second target row exists the
+// dropdown is disabled and its help explains that the choice applies from
+// the second target on.
 export function vmFormStrategyPending(form) {
   return !vmFormHasExtraTargetRows(form);
 }

@@ -59,6 +59,7 @@ class VirtualModelsStore {
   vmFormOpen = $state(false);
   vmFormHelpOpen = $state(false);
   vmFormUserPathsHelpOpen = $state(false);
+  vmFormStrategyHelpOpen = $state(false);
   vmFormMode = $state("create");
   vmFormError = $state("");
   vmSubmitting = $state(false);
@@ -565,6 +566,7 @@ class VirtualModelsStore {
     this.vmFormError = "";
     this.vmFormHelpOpen = false;
     this.vmFormUserPathsHelpOpen = false;
+    this.vmFormStrategyHelpOpen = false;
     this.vmSubmitting = false;
     this.vmDeleting = false;
     this.vmFormHasExisting = false;

@@ -605,6 +605,7 @@
   "models_add_target": "Dodaj cel (równoważenie obciążenia)",
   "models_strategy": "Strategia równoważenia obciążenia",
   "models_strategy_pending_hint": "Ma zastosowanie, gdy wskazane są co najmniej dwa cele.",
+  "models_strategy_help_label": "Pomoc: strategia równoważenia obciążenia",
   "models_summary_failover": "Żądania do {source} obsługuje {source}; gdy zawiedzie — {fallbacks}.",
   "models_summary_balanced": "Żądania do {source} są równoważone między {source} i {peers} ({strategy}).",
   "models_summary_replaced": "Żądania trafiają do {target}. Dodaj {source} jako cel, jeśli nie chcesz przesłonić modelu źródłowego.",

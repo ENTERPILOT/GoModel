@@ -105,21 +105,30 @@
     </p>
   {/if}
 
-  <FormField id="virtual-model-strategy" label={m.models_strategy()}>
+  <div class="form-field">
+    <InlineHelpSection
+      copyId="virtual-model-strategy-help"
+      label={m.models_strategy_help_label()}
+      bind:open={vm.vmFormStrategyHelpOpen}
+    >
+      {#snippet title()}
+        <label class="form-field-label" for="virtual-model-strategy">{m.models_strategy()}</label>
+      {/snippet}
+      {#snippet help()}
+        {m.models_strategy_pending_hint()}
+      {/snippet}
+    </InlineHelpSection>
     <select
       id="virtual-model-strategy"
       class="form-select"
       bind:value={vm.vmForm.strategy}
-      disabled={vm.vmFormManaged}
+      disabled={vm.vmFormManaged || vm.vmFormStrategyPending()}
     >
       {#each vm.vmStrategyOptions() as option (option.value)}
         <option value={option.value}>{option.label}</option>
       {/each}
     </select>
-    {#if vm.vmFormStrategyPending()}
-      <span class="form-hint">{m.models_strategy_pending_hint()}</span>
-    {/if}
-  </FormField>
+  </div>
   {#if vm.vmFormShowBalancingOptions()}
     <div class="form-field">
       <label class="vm-option-checkbox">
