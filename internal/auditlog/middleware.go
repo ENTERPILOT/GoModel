@@ -15,8 +15,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/goccy/go-json"
-
 	"github.com/andybalholm/brotli"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -172,14 +170,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 						}
 					}
 
-					// Parse JSON to any for native BSON storage in MongoDB
-					var parsed any
-					if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
-						entry.Data.ResponseBody = parsed
-					} else {
-						// Fallback: store as valid UTF-8 string if not valid JSON
-						entry.Data.ResponseBody = toValidUTF8String(bodyBytes)
-					}
+					captureLoggedResponseBody(entry, bodyBytes)
 				}
 			}
 
@@ -241,21 +232,6 @@ func captureLoggedRequestBody(entry *LogEntry, bodyBytes []byte) {
 
 func captureLoggedResponseBody(entry *LogEntry, bodyBytes []byte) {
 	entry.Data.ResponseBody = captureLoggedBody(bodyBytes)
-}
-
-func captureLoggedBody(bodyBytes []byte) any {
-	if len(bodyBytes) == 0 {
-		return nil
-	}
-
-	// Parse JSON to any for native BSON storage in MongoDB
-	var parsed any
-	if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
-		return parsed
-	}
-
-	// Fallback: store as valid UTF-8 string if not valid JSON
-	return toValidUTF8String(bodyBytes)
 }
 
 // responseBodyCapture wraps http.ResponseWriter to capture the response body.
@@ -363,12 +339,6 @@ func hashAPIKey(authHeader string) string {
 
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:APIKeyHashPrefixLength/2])
-}
-
-// CaptureLoggedBody converts raw body bytes into the representation audit
-// entries store: parsed JSON when possible, otherwise a valid-UTF-8 string.
-func CaptureLoggedBody(bodyBytes []byte) any {
-	return captureLoggedBody(bodyBytes)
 }
 
 func auditEnabledForContext(ctx context.Context) bool {

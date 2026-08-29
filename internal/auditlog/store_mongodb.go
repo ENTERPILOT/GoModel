@@ -159,13 +159,15 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) erro
 		return nil
 	}
 
-	// Convert entries to BSON documents
+	// Convert entries to BSON documents. Captured JSON bodies are decoded
+	// here so they land as BSON documents the store can index into
+	// (response id / previous_response_id lookups), not as opaque bytes.
 	docs := make([]any, len(entries))
 	for i, e := range entries {
 		if e != nil && e.Data != nil {
 			e.Data.Attempts = normalizeAttemptSnapshots(e.Data.Attempts)
 		}
-		docs[i] = e
+		docs[i] = e.withBodyDocuments()
 	}
 
 	// Use unordered insert for better performance (continues on errors)

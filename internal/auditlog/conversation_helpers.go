@@ -255,7 +255,7 @@ func extractPreviousResponseID(entry *LogEntry) string {
 }
 
 func extractStringField(v any, key string) string {
-	switch obj := v.(type) {
+	switch obj := BodyDocument(v).(type) {
 	case map[string]any:
 		return extractTrimmedString(obj[key])
 	case bson.M:

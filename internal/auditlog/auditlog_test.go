@@ -487,9 +487,9 @@ func TestMiddleware_UsesIngressFrameRequestBodyWithoutReadingStream(t *testing.T
 		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
 	}
 
-	requestBody, ok := logger.entries[0].Data.RequestBody.(map[string]any)
+	requestBody, ok := BodyDocument(logger.entries[0].Data.RequestBody).(map[string]any)
 	if !ok {
-		t.Fatalf("RequestBody = %T, want map[string]any", logger.entries[0].Data.RequestBody)
+		t.Fatalf("RequestBody = %T, want JSON object", logger.entries[0].Data.RequestBody)
 	}
 	if requestBody["model"] != "from-ingress" {
 		t.Fatalf("RequestBody.model = %#v, want from-ingress", requestBody["model"])
