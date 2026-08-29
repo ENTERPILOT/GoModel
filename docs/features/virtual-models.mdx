@@ -279,8 +279,8 @@ The `owned_by` field still carries the provider name. Requests for a bare model
 ID keep working the same way in both modes.
 
 Caveat: when two providers expose the same model ID (for example `gpt-5` on both
-`openai` and `azure`), only the first registered provider is listed and an
-unqualified request routes there. To pin a name to a specific provider, add a
+`openai` and `azure`), only the provider an unqualified request routes to (the
+first registered one) is listed. To pin a name to a specific provider, add a
 virtual model with that name as its source:
 
 ```yaml
