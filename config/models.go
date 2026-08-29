@@ -14,6 +14,13 @@ type ModelsConfig struct {
 	// Default: false.
 	KeepOnlyAliasesAtModelsEndpoint bool `yaml:"keep_only_aliases_at_models_endpoint" env:"KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT"`
 
+	// UnqualifiedModelIDsAtModelsEndpoint controls whether GET /v1/models
+	// returns bare model IDs (gpt-5) instead of provider-qualified ones
+	// (openai/gpt-5). When two providers expose the same model ID, only the
+	// entry for the provider an unqualified request routes to is listed.
+	// Default: false.
+	UnqualifiedModelIDsAtModelsEndpoint bool `yaml:"unqualified_model_ids_at_models_endpoint" env:"UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT"`
+
 	// ConfiguredProviderModelsMode controls how providers.<name>.models and
 	// provider *_MODELS env vars affect the provider model inventory.
 	// Supported values: "fallback", "allowlist", "merge". Default: "fallback".

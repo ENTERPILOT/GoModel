@@ -88,7 +88,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"DASHBOARD_LIVE_LOGS_REPLAY_LIMIT", "DASHBOARD_LIVE_LOGS_HEARTBEAT_SECONDS",
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
-		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
+		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
 		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
 		"WORKFLOW_REFRESH_INTERVAL",
 	} {
@@ -248,6 +248,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 	if cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
 		t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=false")
+	}
+	if cfg.Models.UnqualifiedModelIDsAtModelsEndpoint {
+		t.Error("expected Models.UnqualifiedModelIDsAtModelsEndpoint=false")
 	}
 	if cfg.Guardrails.EnableForBatchProcessing {
 		t.Error("expected Guardrails.EnableForBatchProcessing=false")
@@ -705,6 +708,7 @@ server:
 models:
   enabled_by_default: false
   keep_only_aliases_at_models_endpoint: true
+  unqualified_model_ids_at_models_endpoint: true
   configured_provider_models_mode: allowlist
 cache:
   model:
@@ -738,6 +742,9 @@ logging:
 		}
 		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
 			t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=true from YAML")
+		}
+		if !cfg.Models.UnqualifiedModelIDsAtModelsEndpoint {
+			t.Error("expected Models.UnqualifiedModelIDsAtModelsEndpoint=true from YAML")
 		}
 		if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeAllowlist {
 			t.Errorf("expected Models.ConfiguredProviderModelsMode=allowlist from YAML, got %q", cfg.Models.ConfiguredProviderModelsMode)
@@ -1422,6 +1429,7 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		t.Setenv("PORT", "5555")
 		t.Setenv("MODELS_ENABLED_BY_DEFAULT", "false")
 		t.Setenv("KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "true")
+		t.Setenv("UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "true")
 		t.Setenv("CONFIGURED_PROVIDER_MODELS_MODE", "allowlist")
 		t.Setenv("USAGE_PRICING_RECALCULATION_ENABLED", "false")
 		t.Setenv("STORAGE_TYPE", "postgresql")
@@ -1442,6 +1450,9 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		}
 		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
 			t.Error("expected aliases-only models endpoint from env")
+		}
+		if !cfg.Models.UnqualifiedModelIDsAtModelsEndpoint {
+			t.Error("expected unqualified model IDs at models endpoint from env")
 		}
 		if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeAllowlist {
 			t.Errorf("expected configured provider models mode allowlist from env, got %q", cfg.Models.ConfiguredProviderModelsMode)

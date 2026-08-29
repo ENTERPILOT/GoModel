@@ -1818,3 +1818,45 @@ func TestRouterPassthrough_UsesProviderRegistryWithoutModels(t *testing.T) {
 		t.Fatal("provider did not receive passthrough request")
 	}
 }
+
+func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
+	registry := newTestRegistryWithModels(
+		registryModelEntry{provider: &mockProvider{}, providerName: "openai", providerType: "openai", modelID: "gpt-5"},
+		registryModelEntry{provider: &mockProvider{}, providerName: "azure", providerType: "azure", modelID: "gpt-5"},
+		registryModelEntry{provider: &mockProvider{}, providerName: "anthropic", providerType: "anthropic", modelID: "claude-sonnet-4-6"},
+	)
+	router, err := NewRouter(registry)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	resp, err := router.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(resp.Data) != 3 {
+		t.Fatalf("expected 3 qualified models by default, got %d", len(resp.Data))
+	}
+
+	router.SetUnqualifiedModelIDs(true)
+	resp, err = router.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 deduplicated models, got %d: %+v", len(resp.Data), resp.Data)
+	}
+	for _, m := range resp.Data {
+		if strings.Contains(m.ID, "/") {
+			t.Errorf("expected bare model ID, got %q", m.ID)
+		}
+	}
+	if resp.Data[0].ID != "claude-sonnet-4-6" || resp.Data[0].OwnedBy != "anthropic" {
+		t.Errorf("unexpected first entry: %+v", resp.Data[0])
+	}
+	// The listed owner must be the provider an unqualified request routes to.
+	want := registry.GetProviderName("gpt-5")
+	if resp.Data[1].ID != "gpt-5" || resp.Data[1].OwnedBy != want {
+		t.Errorf("expected gpt-5 owned by routing winner %q, got %+v", want, resp.Data[1])
+	}
+}

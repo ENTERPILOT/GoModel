@@ -265,6 +265,32 @@ When this is enabled, GoModel returns enabled redirects from `/v1/models`
 instead of the full provider model list. The setting is also listed in
 `.env.template`.
 
+## List bare model IDs
+
+By default `GET /v1/models` returns provider-qualified IDs such as
+`openai/gpt-5`. Some clients validate the model you configure against that list
+and only know plain names, so they never match. To list bare IDs instead, set:
+
+```env
+UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true
+```
+
+The `owned_by` field still carries the provider name. Requests for a bare model
+ID keep working the same way in both modes.
+
+Caveat: when two providers expose the same model ID (for example `gpt-5` on both
+`openai` and `azure`), only the provider an unqualified request routes to (the
+first registered one) is listed. To pin a name to a specific provider, add a
+virtual model with that name as its source:
+
+```yaml
+virtual_models:
+  - source: gpt-5
+    target: azure/gpt-5
+```
+
+The redirect wins over the provider entry in both the model list and routing.
+
 ## Shadow a model
 
 A redirect can "shadow" a model by using the same name as an existing model and

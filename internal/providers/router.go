@@ -23,6 +23,9 @@ var ErrRegistryNotInitialized = fmt.Errorf("model registry has no models: ensure
 type Router struct {
 	lookup       core.ModelLookup
 	cachePlanner *cachePlanner
+	// unqualifiedModelIDs makes ListModels advertise bare model IDs instead of
+	// provider-qualified ones.
+	unqualifiedModelIDs bool
 }
 
 type providerTypeRegistry interface {
@@ -47,6 +50,10 @@ type providerNameLister interface {
 
 type publicModelLister interface {
 	ListPublicModels() []core.Model
+}
+
+type unqualifiedPublicModelLister interface {
+	ListUnqualifiedPublicModels() []core.Model
 }
 
 type modelWithProviderLister interface {
@@ -80,6 +87,12 @@ func NewRouter(lookup core.ModelLookup) (*Router, error) {
 		lookup:       lookup,
 		cachePlanner: newCachePlanner(),
 	}, nil
+}
+
+// SetUnqualifiedModelIDs controls whether ListModels advertises bare model IDs
+// (gpt-5) instead of provider-qualified ones (openai/gpt-5).
+func (r *Router) SetUnqualifiedModelIDs(enabled bool) {
+	r.unqualifiedModelIDs = enabled
 }
 
 // checkReady verifies the lookup has models available.
@@ -704,7 +717,9 @@ func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 		return nil, registryUnavailableError(err)
 	}
 	var models []core.Model
-	if public, ok := r.lookup.(publicModelLister); ok {
+	if unqualified, ok := r.lookup.(unqualifiedPublicModelLister); ok && r.unqualifiedModelIDs {
+		models = unqualified.ListUnqualifiedPublicModels()
+	} else if public, ok := r.lookup.(publicModelLister); ok {
 		models = public.ListPublicModels()
 	} else {
 		models = r.lookup.ListModels()
