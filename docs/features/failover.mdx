@@ -95,6 +95,68 @@ Set `FAILOVER_ENABLED=false` (or `failover.enabled: false`) to switch the
 sweep off globally; a [workflow](/advanced/workflows) can also turn it off for
 its scope. The chosen target is still served, without retries.
 
+## Tune the failover policy
+
+The defaults above fit most deployments. Three settings under `failover`
+(or the matching environment variables) adjust them:
+
+| Setting | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `max_attempts` | `FAILOVER_MAX_ATTEMPTS` | `0` (all remaining targets) | How many failover targets one request may try after its first attempt fails. Targets skipped without a call (a saturated rate limit) do not count. |
+| `retry_on_statuses` | `FAILOVER_RETRY_ON_STATUSES` | `[429, 5xx]` | Upstream HTTP statuses that trigger failover: exact codes (`408`) or a whole class (`5xx`). |
+| `retry_on_errors` | `FAILOVER_RETRY_ON_ERRORS` | see below | Error phrases that trigger failover whatever the status. |
+
+Each list **replaces** its default when set, so repeat the defaults you want
+to keep. In the environment, separate entries with commas.
+
+A `retry_on_errors` phrase matches when every one of its words appears in the
+error code or message (case-insensitive, substring): `model not found`
+matches `The model 'gpt-9' was not found`. A numeric word — `404` or `4xx` —
+constrains the HTTP status instead of the text, so `404 deprecated` matches a
+404 whose message mentions "deprecated" and nothing else. The default list is:
+
+```yaml
+retry_on_errors:
+  - model not found
+  - model does not exist
+  - model unsupported
+  - model unavailable
+  - model not available
+  - model deprecated
+  - model retired
+  - model disabled
+  - upstream failed
+  - upstream error
+  - upstream unavailable
+  - upstream timed out
+  - upstream timeout
+  - 404 unsupported
+  - 404 unavailable
+  - 404 not available
+  - 404 deprecated
+  - 404 retired
+  - 404 disabled
+```
+
+Example: try at most one backup, treat timeouts as failover-eligible but
+keep serving `429` responses to the client, and add a provider-specific
+overload message:
+
+```yaml
+failover:
+  max_attempts: 1
+  retry_on_statuses: [408, 5xx]
+  retry_on_errors:
+    - model not found
+    - model does not exist
+    - upstream failed
+    - overloaded
+```
+
+The client receives the error of the last target tried, so with
+`max_attempts: 1` a request that exhausts its cap reports the backup's
+failure, not the primary's.
+
 ## Migrating from failover rules
 
 Earlier releases managed failover as separate per-model mappings (the shuffle

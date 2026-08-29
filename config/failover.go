@@ -48,6 +48,23 @@ type FailoverConfig struct {
 	// and workflow policy decide whether any request has failover candidates.
 	Enabled bool `yaml:"enabled" env:"FAILOVER_ENABLED"`
 
+	// MaxAttempts caps how many failover targets one request may try after
+	// its primary attempt fails. Zero (the default) sweeps every remaining
+	// target in order.
+	MaxAttempts int `yaml:"max_attempts" env:"FAILOVER_MAX_ATTEMPTS"`
+
+	// RetryOnStatuses lists the upstream HTTP statuses that trigger failover:
+	// exact codes (408) or whole classes (5xx). Setting it replaces the
+	// default DefaultFailoverRetryStatuses; an empty list keeps the default.
+	RetryOnStatuses []string `yaml:"retry_on_statuses" env:"FAILOVER_RETRY_ON_STATUSES"`
+
+	// RetryOnErrors lists phrases that trigger failover regardless of status:
+	// an error qualifies when every word of a phrase appears in its code or
+	// message. A numeric word (404, 4xx) matches the HTTP status instead of
+	// the text. Setting it replaces the default DefaultFailoverRetryErrors; an
+	// empty list keeps the default.
+	RetryOnErrors []string `yaml:"retry_on_errors" env:"FAILOVER_RETRY_ON_ERRORS"`
+
 	// DefaultMode is a deprecated compatibility field. It is accepted from old
 	// config files and FAILOVER_MODE, but runtime failover is manual-only.
 	DefaultMode FailoverMode `yaml:"default_mode" env:"FAILOVER_MODE"`
@@ -79,6 +96,14 @@ type FailoverConfig struct {
 
 	// Disabled holds normalized per-model failover disables.
 	Disabled map[string]bool `yaml:"-"`
+
+	// RetryStatuses is the parsed RetryOnStatuses (or its default): the set of
+	// HTTP statuses that trigger failover.
+	RetryStatuses map[int]bool `yaml:"-"`
+
+	// RetryErrors is the parsed RetryOnErrors (or its default): one lower-cased
+	// word list per phrase.
+	RetryErrors []FailoverErrorPhrase `yaml:"-"`
 }
 
 func loadFailoverConfig(cfg *FailoverConfig) error {
@@ -103,6 +128,25 @@ func loadFailoverConfig(cfg *FailoverConfig) error {
 		return err
 	}
 	cfg.Disabled = disabled
+	return LoadFailoverPolicy(cfg)
+}
+
+// LoadFailoverPolicy validates the retry policy fields of cfg and fills the
+// parsed RetryStatuses and RetryErrors, applying the defaults for empty lists.
+func LoadFailoverPolicy(cfg *FailoverConfig) error {
+	if cfg.MaxAttempts < 0 {
+		return fmt.Errorf("failover.max_attempts: must be zero or positive, got %d", cfg.MaxAttempts)
+	}
+	statuses, err := parseFailoverRetryStatuses(cfg.RetryOnStatuses)
+	if err != nil {
+		return err
+	}
+	cfg.RetryStatuses = statuses
+	phrases, err := parseFailoverRetryErrors(cfg.RetryOnErrors)
+	if err != nil {
+		return err
+	}
+	cfg.RetryErrors = phrases
 	return nil
 }
 
