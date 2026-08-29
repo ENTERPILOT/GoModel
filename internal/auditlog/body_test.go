@@ -80,10 +80,21 @@ func TestWithBodyDocumentsDecodesForDocumentStores(t *testing.T) {
 				{Seq: 1, ResponseBody: json.RawMessage(`{"error":{"code":"overloaded"}}`)},
 				{Seq: 2, ResponseBody: "plain text"},
 			},
+			RequestRevisions: []RequestRevisionSnapshot{
+				{Seq: 1, Rewriter: "compress", Body: json.RawMessage(`{"messages":[]}`)},
+			},
 		},
 	}
 
 	doc := entry.withBodyDocuments()
+
+	revision, ok := doc.Data.RequestRevisions[0].Body.(map[string]any)
+	if !ok || revision["messages"] == nil {
+		t.Fatalf("revision body = %#v, want decoded document", doc.Data.RequestRevisions[0].Body)
+	}
+	if _, ok := entry.Data.RequestRevisions[0].Body.(json.RawMessage); !ok {
+		t.Fatalf("receiver revision body mutated to %T", entry.Data.RequestRevisions[0].Body)
+	}
 
 	req, ok := doc.Data.RequestBody.(map[string]any)
 	if !ok || req["previous_response_id"] != "resp_0" {

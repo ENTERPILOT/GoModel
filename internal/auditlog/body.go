@@ -62,8 +62,9 @@ func BodyDocument(body any) any {
 }
 
 // withBodyDocuments returns a copy of the entry whose captured JSON bodies
-// (request, response, and per-attempt responses) are decoded documents, for
-// stores that need structure. The receiver is left untouched.
+// (request, response, per-attempt responses, and per-revision bodies) are
+// decoded documents, for stores that need structure. The receiver is left
+// untouched.
 func (e *LogEntry) withBodyDocuments() *LogEntry {
 	if e == nil || e.Data == nil {
 		return e
@@ -79,6 +80,14 @@ func (e *LogEntry) withBodyDocuments() *LogEntry {
 			attempts[i] = attempt
 		}
 		data.Attempts = attempts
+	}
+	if len(data.RequestRevisions) > 0 {
+		revisions := make([]RequestRevisionSnapshot, len(data.RequestRevisions))
+		for i, revision := range data.RequestRevisions {
+			revision.Body = BodyDocument(revision.Body)
+			revisions[i] = revision
+		}
+		data.RequestRevisions = revisions
 	}
 	entry.Data = &data
 	return &entry

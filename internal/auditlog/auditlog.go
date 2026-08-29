@@ -169,9 +169,10 @@ type LogData struct {
 	RequestHeaders  map[string]string `json:"request_headers,omitempty" bson:"request_headers,omitempty"`
 	ResponseHeaders map[string]string `json:"response_headers,omitempty" bson:"response_headers,omitempty"`
 
-	// Optional bodies (when LOGGING_LOG_BODIES=true)
-	// Stored as interface{} so MongoDB serializes as native BSON documents (queryable/readable)
-	// instead of BSON Binary (base64 in Compass)
+	// Optional bodies (when LOGGING_LOG_BODIES=true). Captured JSON is kept
+	// as json.RawMessage; other captures (string fallbacks, audio/image logs,
+	// stream-built responses) keep their own types. The MongoDB writer decodes
+	// raw JSON into documents so they stay queryable — see body.go.
 	RequestBody  any `json:"request_body,omitempty" bson:"request_body,omitempty"`
 	ResponseBody any `json:"response_body,omitempty" bson:"response_body,omitempty"`
 
@@ -212,9 +213,9 @@ type RequestRevisionSnapshot struct {
 	// not report savings.
 	TokensSaved int `json:"tokens_saved,omitempty" bson:"tokens_saved,omitempty"`
 
-	// Body is the request body after this revision (parsed JSON, or a string
-	// when not valid JSON). Populated only when body logging is enabled and
-	// the body is within the capture limit.
+	// Body is the request body after this revision (the raw JSON, or a string
+	// when not valid JSON — see body.go). Populated only when body logging is
+	// enabled and the body is within the capture limit.
 	Body any `json:"body,omitempty" bson:"body,omitempty"`
 
 	// Detail is an optional rewriter-provided structured summary of what
