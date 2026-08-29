@@ -121,8 +121,9 @@ func (o *observer) end(ctx context.Context, info llmclient.ResponseInfo) {
 	span := state.span
 	endOptions := []trace.SpanEndOption(nil)
 	if span == nil {
-		// A stream that failed to establish never had a span; synthesize one
-		// covering the measured duration so the failure is still traced.
+		// No span was opened at start (a stream that failed to establish, or
+		// an uncertain passthrough call the response resolved as buffered);
+		// synthesize one covering the measured duration.
 		endTime := time.Now()
 		_, span = o.tracer.Start(ctx, state.spanName,
 			trace.WithSpanKind(trace.SpanKindClient),

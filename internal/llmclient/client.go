@@ -667,11 +667,18 @@ func (c *Client) DoPassthrough(ctx context.Context, req Request) (*http.Response
 			continue
 		}
 
-		c.completeScope(scope, resp.StatusCode, nil, nil)
 		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			// The response settles what a bounded body peek could not: an
+			// uncertain request that came back as JSON completes here as a
+			// buffered call, so hooks see the resolved stream state.
 			responseStream := stream || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
+			scope.requestInfo.Stream = responseStream
+			scope.requestInfo.StreamUncertain = false
+			c.completeScope(scope, resp.StatusCode, nil, nil)
 			c.observeFirstChunk(scope, resp, responseStream)
+			return resp, nil
 		}
+		c.completeScope(scope, resp.StatusCode, nil, nil)
 		return resp, nil
 	}
 

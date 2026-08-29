@@ -110,6 +110,26 @@ func TestObserverDefersTelemetryWhenStreamIntentIsUncertain(t *testing.T) {
 	}
 }
 
+func TestObserverRecordsUncertainCallResolvedAsBuffered(t *testing.T) {
+	hooks, recorder, reader := newTestHooks(t)
+	call := llmclient.RequestInfo{Provider: "openai", Model: "gpt-5", Operation: "chat", StreamUncertain: true}
+	ctx := hooks.OnRequestStart(t.Context(), call)
+	// The passthrough client resolves the intent from the response before End.
+	call.StreamUncertain = false
+	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 300*time.Millisecond, nil))
+
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Name() != "chat gpt-5" || spans[0].Status().Code == codes.Error {
+		t.Fatalf("spans = %+v, want one successful CLIENT span synthesized at completion", spans)
+	}
+	if got := spans[0].EndTime().Sub(spans[0].StartTime()); got < 300*time.Millisecond {
+		t.Fatalf("synthesized span duration = %v, want at least 300ms", got)
+	}
+	if !hasMetric(t, reader, "gen_ai.client.operation.duration") {
+		t.Fatal("duration metric not recorded for a buffered response")
+	}
+}
+
 func TestObserverSkipsNonInferenceCalls(t *testing.T) {
 	hooks, recorder, reader := newTestHooks(t)
 	call := llmclient.RequestInfo{Provider: "openai", Endpoint: "/models"}

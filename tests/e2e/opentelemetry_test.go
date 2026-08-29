@@ -131,7 +131,7 @@ func TestOpenTelemetryExport(t *testing.T) {
 
 	t.Run("passthrough stream keeps GenAI metadata and joins the caller's trace", func(t *testing.T) {
 		secretPrompt := "prompt-secret-never-export"
-		body := fmt.Sprintf(`{"model":"otel-stream","padding":%q,"stream":true}`, secretPrompt+strings.Repeat("x", 70*1024))
+		body := fmt.Sprintf(`{"model":"otel-passthrough","padding":%q,"stream":true}`, secretPrompt+strings.Repeat("x", 70*1024))
 		req, err := http.NewRequest(http.MethodPost, gateway+"/p/vllm/chat/completions", bytes.NewBufferString(body))
 		if err != nil {
 			t.Fatal(err)
@@ -156,7 +156,7 @@ func TestOpenTelemetryExport(t *testing.T) {
 
 		metricAttributes := map[string]any{
 			"gen_ai.operation.name": "chat",
-			"gen_ai.request.model":  "otel-stream",
+			"gen_ai.request.model":  "otel-passthrough",
 			"gen_ai.request.stream": true,
 			"gomodel.provider.name": "vllm-eu",
 		}
@@ -236,7 +236,7 @@ func startOTelGateway(t *testing.T, collectorURL, upstreamURL string) string {
 		"GOMODEL_VERSION_CHECK_ENABLED":   "false",
 		"VLLM_EU_BASE_URL":                upstreamURL,
 		"VLLM_EU_API_KEY":                 "sk-e2e",
-		"VLLM_EU_MODELS":                  "otel-buffered,otel-stream,otel-failure",
+		"VLLM_EU_MODELS":                  "otel-buffered,otel-stream,otel-failure,otel-passthrough",
 		"CONFIGURED_PROVIDER_MODELS_MODE": "allowlist",
 		"RETRY_MAX_RETRIES":               "0",
 		"METRICS_ENABLED":                 "true",

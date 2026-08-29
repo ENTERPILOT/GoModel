@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -107,6 +108,7 @@ func New(ctx context.Context, cfg config.OpenTelemetryConfig, metricsEndpoint st
 		return nil, err
 	}
 
+	warnPlaintextCredentials()
 	slog.Info("opentelemetry enabled",
 		"traces_exporter", exporterName("OTEL_TRACES_EXPORTER"),
 		"metrics_exporter", exporterName("OTEL_METRICS_EXPORTER"),
@@ -123,14 +125,15 @@ func (s *Service) Middleware() echo.MiddlewareFunc { return s.middleware }
 // metrics. Attach them to the provider factory before any provider exists.
 func (s *Service) Hooks() llmclient.Hooks { return s.observer.hooks() }
 
-// Close flushes pending telemetry and releases exporter resources.
+// Close flushes pending telemetry and releases exporter resources. Both
+// providers shut down concurrently so a stalled metric export cannot consume
+// the deadline the final spans need.
 func (s *Service) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), closeTimeout)
 	defer cancel()
-	return errors.Join(
-		s.meterProvider.Shutdown(ctx),
-		s.tracerProvider.Shutdown(ctx),
-	)
+	metricsDone := make(chan error, 1)
+	go func() { metricsDone <- s.meterProvider.Shutdown(ctx) }()
+	return errors.Join(s.tracerProvider.Shutdown(ctx), <-metricsDone)
 }
 
 func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, propagators propagation.TextMapPropagator, metricsEndpoint string) (echo.MiddlewareFunc, error) {
@@ -175,4 +178,24 @@ func filterAttributes(attrs []attribute.KeyValue, excluded map[attribute.Key]str
 		}
 	}
 	return filtered
+}
+
+// warnPlaintextCredentials flags export headers (typically an authorization
+// token) configured together with an http:// collector endpoint: they would
+// cross the network in clear text.
+func warnPlaintextCredentials() {
+	headersSet := false
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS", "OTEL_EXPORTER_OTLP_METRICS_HEADERS"} {
+		headersSet = headersSet || strings.TrimSpace(os.Getenv(key)) != ""
+	}
+	if !headersSet {
+		return
+	}
+	for _, key := range []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"} {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(os.Getenv(key))), "http://") {
+			slog.Warn("opentelemetry export headers are sent over plaintext HTTP; use an https:// collector endpoint for credentials",
+				"environment_variable", key)
+			return
+		}
+	}
 }

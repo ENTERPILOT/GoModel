@@ -5,8 +5,9 @@ icon: "diagram-project"
 keywords: ["OpenTelemetry", "OTLP", "tracing", "traces", "metrics", "observability", "GenAI semantic conventions", "Jaeger", "Grafana Tempo"]
 ---
 
-GoModel exports OpenTelemetry traces and metrics for every inbound HTTP request
-and every outbound model provider call. Provider calls follow the
+GoModel exports OpenTelemetry traces and metrics for inbound HTTP requests
+(except operational endpoints, see below) and every outbound model provider
+call. Provider calls follow the
 [GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
 so a Jaeger, Grafana Tempo, Honeycomb, Datadog, or any other OTLP-compatible
 backend shows which model was called, through which provider, how long it took,
@@ -110,6 +111,13 @@ opentelemetry:
 </CodeGroup>
 
 Sampling only affects traces. Metrics are always complete.
+
+<Warning>
+  Export headers such as `authorization` travel with every export request. Use
+  an `https://` endpoint (or a gRPC endpoint with TLS) whenever headers carry
+  credentials; keep `http://` for a local collector on a protected network.
+  GoModel logs a warning when headers are configured with a plaintext endpoint.
+</Warning>
 
 ## What is exported
 
