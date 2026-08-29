@@ -322,6 +322,20 @@ func ApplyBodySelectorHints(env *WhiteBoxPrompt, model, provider string, stream 
 	}
 }
 
+// ApplyPartialBodyModelHint records a model decoded from an incomplete request
+// body without claiming that the body or its streaming intent was fully parsed.
+func ApplyPartialBodyModelHint(env *WhiteBoxPrompt, model string) {
+	if env == nil || model == "" {
+		return
+	}
+	env.RouteHints.Model = model
+	if passthrough := env.CachedPassthroughRouteInfo(); passthrough != nil {
+		cloned := *passthrough
+		cloned.Model = model
+		CachePassthroughRouteInfo(env, &cloned)
+	}
+}
+
 // MarkPassthroughStreamUncertain records that bounded opaque-body inspection
 // stopped before it could determine explicit streaming intent.
 func MarkPassthroughStreamUncertain(env *WhiteBoxPrompt) {

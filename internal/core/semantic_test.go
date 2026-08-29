@@ -186,6 +186,37 @@ func TestDeriveWhiteBoxPrompt_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *t
 	}
 }
 
+func TestApplyPartialBodyModelHintPreservesParseAndStreamState(t *testing.T) {
+	env := &WhiteBoxPrompt{StreamRequested: true}
+	CachePassthroughRouteInfo(env, &PassthroughRouteInfo{
+		Provider:        "openai",
+		Stream:          true,
+		StreamUncertain: true,
+	})
+
+	ApplyPartialBodyModelHint(env, "gpt-5-mini")
+
+	if env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = true, want false")
+	}
+	if !env.StreamRequested {
+		t.Fatal("StreamRequested = false, want preserved true")
+	}
+	if env.RouteHints.Model != "gpt-5-mini" {
+		t.Fatalf("RouteHints.Model = %q, want gpt-5-mini", env.RouteHints.Model)
+	}
+	info := env.CachedPassthroughRouteInfo()
+	if info == nil {
+		t.Fatal("CachedPassthroughRouteInfo() = nil")
+	}
+	if info.Model != "gpt-5-mini" {
+		t.Fatalf("PassthroughRouteInfo.Model = %q, want gpt-5-mini", info.Model)
+	}
+	if !info.Stream || !info.StreamUncertain {
+		t.Fatalf("stream state = stream %v uncertain %v, want both true", info.Stream, info.StreamUncertain)
+	}
+}
+
 func TestDeriveWhiteBoxPrompt_FilesMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(
 		"GET",

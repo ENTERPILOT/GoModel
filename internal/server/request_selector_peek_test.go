@@ -66,6 +66,35 @@ func TestSeedRequestBodySelectorHintsDoesNotMarkModelOnlyPeekAsParsed(t *testing
 	}
 }
 
+func TestSeedRequestBodySelectorHintsAppliesPartialModelForOpaqueBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	env := &core.WhiteBoxPrompt{}
+	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
+
+	seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
+
+	if env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = true, want false for partial model-only peek")
+	}
+	if env.StreamRequested {
+		t.Fatal("StreamRequested = true, want false until stream is parsed")
+	}
+	if env.RouteHints.Model != "gpt-4o-mini" {
+		t.Fatalf("RouteHints.Model = %q, want gpt-4o-mini", env.RouteHints.Model)
+	}
+	info := env.CachedPassthroughRouteInfo()
+	if info == nil {
+		t.Fatal("CachedPassthroughRouteInfo() = nil")
+	}
+	if info.Model != "gpt-4o-mini" {
+		t.Fatalf("PassthroughRouteInfo.Model = %q, want gpt-4o-mini", info.Model)
+	}
+	if !info.StreamUncertain {
+		t.Fatal("PassthroughRouteInfo.StreamUncertain = false, want true")
+	}
+}
+
 func TestSeedRequestBodySelectorHintsTracksStreamConfidenceIndependently(t *testing.T) {
 	tests := []struct {
 		name          string
