@@ -83,15 +83,16 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 		if rule.ManagedSource != "config" && convertible {
 			existing, exists := taken[rule.Source]
 			switch {
-			case !exists:
+			case !exists, isMigratedFailoverModel(existing, model):
+				// Either a fresh conversion or one a previous start left
+				// behind when it stopped between the upsert and the row
+				// delete; writing the rule's current state covers both,
+				// including an enabled flag changed since that start.
 				if err := store.Upsert(ctx, model); err != nil {
 					return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
 				}
 				taken[rule.Source] = model
 				migrated++
-			case isMigratedFailoverModel(existing, model):
-				// A previous start that stopped between the upsert and the
-				// row delete left its own conversion behind; finish it.
 			case mergeableFailoverPolicy(existing):
 				merged := mergeFailoverPolicy(existing, model)
 				if err := store.Upsert(ctx, merged); err != nil {

@@ -237,7 +237,7 @@ func TestNew_MigratesLegacyFailoverRulesIntoVirtualModels(t *testing.T) {
 	}
 	// A rule switched off in the dashboard keeps its fallbacks as a disabled
 	// virtual model instead of being discarded with the legacy store.
-	if off, ok := result.Service.Get("disabled"); !ok || off.Enabled || off.Strategy != StrategyFailover || len(off.Targets) != 2 {
+	if off, ok := result.Service.Get("disabled"); !ok || off.Enabled || off.Strategy != StrategyFailover || targetModels(off.Targets) != "disabled,groq/llama" {
 		t.Fatalf("disabled rule = %+v, %v; want a disabled failover redirect keeping its fallbacks", off, ok)
 	}
 	for _, source := range []string{"from-config", "self-only"} {
@@ -273,7 +273,7 @@ func TestNew_DisabledModelsMigrateAsDisabledVirtualModels(t *testing.T) {
 	defer result.Close()
 
 	migrated, ok := result.Service.Get("openai/gpt-4o")
-	if !ok || migrated.Enabled || migrated.Strategy != StrategyFailover || len(migrated.Targets) != 2 {
+	if !ok || migrated.Enabled || migrated.Strategy != StrategyFailover || targetModels(migrated.Targets) != "openai/gpt-4o,anthropic/claude" {
 		t.Fatalf("migrated rule = %+v, %v; want a disabled failover redirect keeping its fallbacks", migrated, ok)
 	}
 	if primary, chain := failoverChain(t, result.Service, "openai/gpt-4o"); primary != "openai/gpt-4o" || len(chain) != 0 {
@@ -284,9 +284,18 @@ func TestNew_DisabledModelsMigrateAsDisabledVirtualModels(t *testing.T) {
 	}
 }
 
+func targetModels(targets []Target) string {
+	models := make([]string, len(targets))
+	for i, target := range targets {
+		models[i] = target.Model
+	}
+	return strings.Join(models, ",")
+}
+
 // A start that stopped after writing the converted virtual model but before
 // removing its legacy row must finish the conversion on the next start, not
-// report its own conversion as a collision.
+// report its own conversion as a collision — and must carry over the rule's
+// current state, here a disable applied in the dashboard in between.
 func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
 	ctx := context.Background()
 	conn := newSQLiteStorage(t)
@@ -303,7 +312,7 @@ func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
 	_ = first.Close()
 	for _, stmt := range []string{
 		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
-		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["groq/llama"]', 0, 'dashboard', 0, 0)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -315,8 +324,8 @@ func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	defer result.Close()
-	if vm, ok := result.Service.Get("openai/gpt-4o"); !ok || vm.Strategy != StrategyFailover {
-		t.Fatalf("converted model = %+v, %v", vm, ok)
+	if vm, ok := result.Service.Get("openai/gpt-4o"); !ok || vm.Strategy != StrategyFailover || vm.Enabled {
+		t.Fatalf("converted model = %+v, %v; want the conversion finished as disabled", vm, ok)
 	}
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err == nil {
