@@ -343,12 +343,13 @@ failover:
   # fails. 0 (default) sweeps every remaining target in order.
   # max_attempts: 0 # env: FAILOVER_MAX_ATTEMPTS
   # Upstream HTTP statuses that trigger failover: exact codes or a class such
-  # as 5xx. Listing any replaces the default [429, 5xx] entirely.
+  # as 5xx. A non-empty list replaces the default [429, 5xx] entirely; an
+  # empty list keeps the default.
   # retry_on_statuses: [429, 5xx] # env: FAILOVER_RETRY_ON_STATUSES=429,5xx
   # Error phrases that trigger failover whatever the status: every word must
   # appear in the error code or message (case-insensitive); a numeric word
-  # such as 404 or 4xx constrains the status instead. Listing any replaces the
-  # default, which covers "model not found / unsupported / deprecated" style
+  # such as 404 or 4xx constrains the status instead. A non-empty list replaces
+  # the default (an empty one keeps it), which covers "model not found / unsupported / deprecated" style
   # errors, aggregator "upstream failed" 4xx relays, and retired-model 404s.
   # retry_on_errors: ["model not found", "upstream failed", "404 deprecated"] # env: FAILOVER_RETRY_ON_ERRORS (comma-separated)
   # Deprecated: `rules`, `manual_rules_path`, `rules_json`, and `disabled_models`

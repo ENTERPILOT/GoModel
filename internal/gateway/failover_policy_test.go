@@ -159,3 +159,21 @@ func TestTryFailoverResponseSkipsWhenPolicyDoesNotMatch(t *testing.T) {
 		t.Fatalf("expected the primary 429 to be returned untouched (called=%v didFailover=%v err=%v)", called, didFailover, err)
 	}
 }
+
+// The stream path applies the same gate: a primary failure the policy does
+// not list is returned untouched, without calling any target.
+func TestTryFailoverStreamSkipsWhenPolicyDoesNotMatch(t *testing.T) {
+	o, workflow := threeTargetFixture(loadedFailoverPolicy(t, config.FailoverConfig{RetryOnStatuses: []string{"503"}}))
+	primaryErr := core.NewProviderError("openai", http.StatusTooManyRequests, "slow down", nil)
+	called := false
+	call := func(core.ModelSelector, string, string) (io.ReadCloser, string, string, error) {
+		called = true
+		return nil, "", "", nil
+	}
+
+	stream, _, _, _, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+
+	if called || stream != nil || err != primaryErr {
+		t.Fatalf("expected the primary 429 to be returned untouched (called=%v stream=%v err=%v)", called, stream, err)
+	}
+}

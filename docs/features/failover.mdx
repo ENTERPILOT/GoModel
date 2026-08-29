@@ -106,8 +106,9 @@ The defaults above fit most deployments. Three settings under `failover`
 | `retry_on_statuses` | `FAILOVER_RETRY_ON_STATUSES` | `[429, 5xx]` | Upstream HTTP statuses that trigger failover: exact codes (`408`) or a whole class (`5xx`). |
 | `retry_on_errors` | `FAILOVER_RETRY_ON_ERRORS` | see below | Error phrases that trigger failover whatever the status. |
 
-Each list **replaces** its default when set, so repeat the defaults you want
-to keep. In the environment, separate entries with commas.
+A non-empty list **replaces** its default, so repeat the defaults you want
+to keep; an empty or omitted list keeps the default (use `enabled: false` to
+switch failover off). In the environment, separate entries with commas.
 
 A `retry_on_errors` phrase matches when every one of its words appears in the
 error code or message (case-insensitive, substring): `model not found`
