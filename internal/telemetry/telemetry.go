@@ -24,6 +24,7 @@ import (
 	sdkTrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
@@ -63,11 +64,14 @@ type Service struct {
 }
 
 // New configures OTLP traces and metrics from the standard OpenTelemetry
-// environment variables. Exporters are asynchronous, so the collector does not
-// need to be reachable for this call to succeed. metricsEndpoint is the
-// resolved Prometheus path, excluded from HTTP instrumentation together with
-// the other operational endpoints.
-func New(ctx context.Context, metricsEndpoint string) (*Service, error) {
+// environment variables, after exporting the YAML-configured settings into
+// the environment for the SDK to read. Exporters are asynchronous, so the
+// collector does not need to be reachable for this call to succeed.
+// metricsEndpoint is the resolved Prometheus path, excluded from HTTP
+// instrumentation together with the other operational endpoints.
+func New(ctx context.Context, cfg config.OpenTelemetryConfig, metricsEndpoint string) (*Service, error) {
+	exportEnvironment(cfg.Environment())
+
 	res, err := resource.New(ctx,
 		resource.WithAttributes(semconv.ServiceName(defaultServiceName)),
 		resource.WithTelemetrySDK(),

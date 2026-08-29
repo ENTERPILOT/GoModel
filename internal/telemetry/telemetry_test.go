@@ -12,13 +12,15 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 func TestNewBuildsMiddlewareAndHooksWithoutExporters(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "none")
 	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
-	service, err := New(t.Context(), "/metrics")
+	service, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +34,7 @@ func TestNewBuildsMiddlewareAndHooksWithoutExporters(t *testing.T) {
 
 func TestNewRejectsUnknownExporter(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "zipkin")
-	_, err := New(t.Context(), "/metrics")
+	_, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics")
 	if err == nil || !strings.Contains(err.Error(), "otlp or none") {
 		t.Fatalf("error = %v, want supported-exporter error", err)
 	}

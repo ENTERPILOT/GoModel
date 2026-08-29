@@ -259,10 +259,24 @@ metrics:
   enabled: false
   endpoint: "/metrics"
 
-# OpenTelemetry export (traces and metrics over OTLP). Exporter endpoint,
-# protocol, sampling, and propagation come from the standard OTEL_* env vars.
+# OpenTelemetry export (traces and metrics over OTLP). The settings below
+# mirror the standard OTEL_* environment variables; a variable set in the
+# environment wins over the YAML value. Less common settings (per-signal
+# endpoints, timeouts, compression, …) are available through their OTEL_* variable.
 opentelemetry:
   enabled: false
+  service_name: "gomodel"
+  # resource_attributes:
+  #   deployment.environment: production
+  endpoint: "http://localhost:4318"
+  protocol: "http/protobuf" # or "grpc" (default endpoint localhost:4317)
+  # headers:
+  #   authorization: "Bearer ${OTEL_BACKEND_TOKEN}"
+  traces_exporter: "otlp" # or "none"
+  metrics_exporter: "otlp" # or "none"
+  sampler: "parentbased_always_on" # e.g. "parentbased_traceidratio" with sampler_arg "0.1"
+  # sampler_arg: "0.1"
+  propagators: "tracecontext,baggage" # also b3, b3multi, jaeger, ottrace, none
 
 http:
   timeout: 600 # seconds (10 minutes)

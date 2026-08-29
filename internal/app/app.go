@@ -301,7 +301,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// too must exist before the first provider is constructed.
 	if appCfg.OpenTelemetry.Enabled {
 		metricsEndpoint := config.ResolveMetricsEndpointWithPprof(appCfg.Metrics.Endpoint, appCfg.Server.PprofEnabled)
-		app.telemetry, err = telemetry.New(ctx, metricsEndpoint)
+		app.telemetry, err = telemetry.New(ctx, appCfg.OpenTelemetry, metricsEndpoint)
 		if err != nil {
 			return fail("failed to initialize opentelemetry", err)
 		}

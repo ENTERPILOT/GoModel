@@ -56,29 +56,34 @@ collector is down and retries in the background.
 
 ## Configuration
 
-`OTEL_ENABLED` is the only GoModel-specific switch. It can also be set as
-`opentelemetry.enabled: true` in [`config.yaml`](/advanced/config-yaml).
-Everything else follows the standard
+`OTEL_ENABLED` is the only GoModel-specific switch. Everything else follows
+the standard
 [OpenTelemetry environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/),
-so GoModel is configured exactly like any other instrumented service.
+so GoModel is configured exactly like any other instrumented service. The
+common settings are also available under `opentelemetry:` in
+[`config.yaml`](/advanced/config-yaml); a variable set in the environment
+wins over the YAML value.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OTEL_ENABLED` | `false` | Turn export on. |
-| `OTEL_SERVICE_NAME` | `gomodel` | `service.name` resource attribute. |
-| `OTEL_RESOURCE_ATTRIBUTES` | — | Extra resource attributes, e.g. `deployment.environment=prod,service.namespace=ai`. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | Collector endpoint. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` override it per signal. |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | `http/protobuf` or `grpc`; overridable per signal with `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` and `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`. |
-| `OTEL_EXPORTER_OTLP_HEADERS` | — | Headers such as `authorization=Bearer ...` for hosted backends. |
-| `OTEL_TRACES_EXPORTER` | `otlp` | `otlp` or `none` to switch traces off. |
-| `OTEL_METRICS_EXPORTER` | `otlp` | `otlp` or `none` to switch metrics off. |
-| `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | Sampler, e.g. `parentbased_traceidratio` with `OTEL_TRACES_SAMPLER_ARG=0.1` to keep 10% of new traces. |
-| `OTEL_PROPAGATORS` | `tracecontext,baggage` | Comma-separated: `tracecontext`, `baggage`, `b3`, `b3multi`, `jaeger`, `ottrace`, or `none`. |
-| `OTEL_METRIC_EXPORT_INTERVAL` | `60000` | Metric export interval in milliseconds. |
+| Environment variable | `config.yaml` key | Default | Purpose |
+| --- | --- | --- | --- |
+| `OTEL_ENABLED` | `enabled` | `false` | Turn export on. |
+| `OTEL_SERVICE_NAME` | `service_name` | `gomodel` | `service.name` resource attribute. |
+| `OTEL_RESOURCE_ATTRIBUTES` | `resource_attributes` | — | Extra resource attributes such as `deployment.environment`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `endpoint` | `http://localhost:4318` | Collector endpoint. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` override it per signal. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `protocol` | `http/protobuf` | `http/protobuf` or `grpc`; overridable per signal with `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` and `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `headers` | — | Headers such as `authorization` for hosted backends. |
+| `OTEL_TRACES_EXPORTER` | `traces_exporter` | `otlp` | `otlp` or `none` to switch traces off. |
+| `OTEL_METRICS_EXPORTER` | `metrics_exporter` | `otlp` | `otlp` or `none` to switch metrics off. |
+| `OTEL_TRACES_SAMPLER` | `sampler` | `parentbased_always_on` | Sampler, e.g. `parentbased_traceidratio` to keep a fraction of new traces. |
+| `OTEL_TRACES_SAMPLER_ARG` | `sampler_arg` | — | Sampler argument, e.g. `0.1` for 10%. |
+| `OTEL_PROPAGATORS` | `propagators` | `tracecontext,baggage` | Comma-separated: `tracecontext`, `baggage`, `b3`, `b3multi`, `jaeger`, `ottrace`, or `none`. |
+| `OTEL_METRIC_EXPORT_INTERVAL` | — | `60000` | Metric export interval in milliseconds. |
 
 A typical production setup:
 
-```bash
+<CodeGroup>
+
+```bash Environment
 OTEL_ENABLED=true
 OTEL_SERVICE_NAME=gomodel-production
 OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
@@ -87,6 +92,22 @@ OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=0.1
 ```
+
+```yaml config.yaml
+opentelemetry:
+  enabled: true
+  service_name: gomodel-production
+  resource_attributes:
+    deployment.environment: production
+  endpoint: http://otel-collector:4317
+  protocol: grpc
+  headers:
+    authorization: "Bearer ${OTEL_BACKEND_TOKEN}"
+  sampler: parentbased_traceidratio
+  sampler_arg: "0.1"
+```
+
+</CodeGroup>
 
 Sampling only affects traces. Metrics are always complete.
 
