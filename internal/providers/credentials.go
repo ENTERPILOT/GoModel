@@ -44,7 +44,10 @@ type ManagedProviderCredential struct {
 	ServiceAccountJSON       string
 	ServiceAccountJSONBase64 string
 	GCPScope                 string
-	Models                   []string
+	// ProxyURL is the forward proxy for this provider's upstream requests;
+	// empty means none.
+	ProxyURL string
+	Models   []string
 
 	// Enabled controls whether this credential is applied to the running
 	// registry. Disabling one keeps the row (and its keys) on file without
@@ -76,6 +79,7 @@ func (m ManagedProviderCredential) toRawProviderConfig() config.RawProviderConfi
 		ServiceAccountJSON:       m.ServiceAccountJSON,
 		ServiceAccountJSONBase64: m.ServiceAccountJSONBase64,
 		GCPScope:                 m.GCPScope,
+		ProxyURL:                 m.ProxyURL,
 		Models:                   rawProviderModelsFromIDs(m.Models),
 	}
 	if len(m.APIKeys) > 0 {

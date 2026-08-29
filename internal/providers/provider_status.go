@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // SanitizedRetryConfig exposes effective retry settings without secrets.
@@ -31,13 +33,15 @@ type SanitizedResilienceConfig struct {
 
 // SanitizedProviderConfig is the admin-safe provider configuration view.
 type SanitizedProviderConfig struct {
-	Name              string                    `json:"name"`
-	Type              string                    `json:"type"`
-	BaseURL           string                    `json:"base_url,omitempty"`
-	APIVersion        string                    `json:"api_version,omitempty"`
-	Models            []string                  `json:"models,omitempty"`
-	SessionStickyKeys bool                      `json:"session_sticky_keys"`
-	Resilience        SanitizedResilienceConfig `json:"resilience"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`
+	BaseURL           string   `json:"base_url,omitempty"`
+	APIVersion        string   `json:"api_version,omitempty"`
+	Models            []string `json:"models,omitempty"`
+	SessionStickyKeys bool     `json:"session_sticky_keys"`
+	// ProxyURL is the provider's forward proxy with any password redacted.
+	ProxyURL   string                    `json:"proxy_url,omitempty"`
+	Resilience SanitizedResilienceConfig `json:"resilience"`
 }
 
 // ProviderRuntimeSnapshot describes runtime diagnostics for a configured provider.
@@ -105,6 +109,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 			APIVersion:        strings.TrimSpace(cfg.APIVersion),
 			Models:            models,
 			SessionStickyKeys: cfg.SessionStickyKeys,
+			ProxyURL:          httpclient.RedactProxyURL(cfg.ProxyURL),
 			Resilience: SanitizedResilienceConfig{
 				Retry: SanitizedRetryConfig{
 					MaxRetries:     cfg.Resilience.Retry.MaxRetries,

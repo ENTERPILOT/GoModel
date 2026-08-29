@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
@@ -429,5 +430,80 @@ func TestProviderFactory_Create_PassesConfiguredModels(t *testing.T) {
 	}
 	if receivedOpts.Models[0] != "model-a" || receivedOpts.Models[1] != "model-b" {
 		t.Fatalf("receivedOpts.Models = %v, want [model-a model-b]", receivedOpts.Models)
+	}
+}
+
+func TestProviderFactory_Create_AttachesProxyToRequestContext(t *testing.T) {
+	factory := NewProviderFactory()
+	var captured ProviderOptions
+	factory.Add(Registration{
+		Type: "proxied",
+		New: func(_ ProviderConfig, opts ProviderOptions) core.Provider {
+			captured = opts
+			return &factoryMockProvider{}
+		},
+	})
+
+	if _, err := factory.Create(ProviderConfig{Name: "p", Type: "proxied", ProxyURL: "socks5://user:secret@proxy:1080"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if captured.Hooks.OnRequestStart == nil {
+		t.Fatal("Hooks.OnRequestStart = nil, want a proxy-attaching hook")
+	}
+	ctx := captured.Hooks.OnRequestStart(context.Background(), llmclient.RequestInfo{})
+	proxy := httpclient.ProxyFromContext(ctx)
+	if proxy == nil || proxy.String() != "socks5://user:secret@proxy:1080" {
+		t.Fatalf("request context proxy = %v, want the provider's proxy", proxy)
+	}
+
+	// Without a proxy no hook is installed, so adapters see the same nil
+	// hooks as before.
+	captured = ProviderOptions{}
+	if _, err := factory.Create(ProviderConfig{Name: "p", Type: "proxied"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if captured.Hooks.OnRequestStart != nil {
+		t.Fatal("Hooks.OnRequestStart set without a proxy, want nil")
+	}
+}
+
+func TestProviderFactory_Create_KeepsProxyWithOtherHooks(t *testing.T) {
+	factory := NewProviderFactory()
+	var seenProvider string
+	factory.SetHooks(llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
+			seenProvider = info.Provider
+			return ctx
+		},
+	})
+	var captured ProviderOptions
+	factory.Add(Registration{
+		Type: "proxied",
+		New: func(_ ProviderConfig, opts ProviderOptions) core.Provider {
+			captured = opts
+			return &factoryMockProvider{}
+		},
+	})
+	if _, err := factory.Create(ProviderConfig{Name: "eu", Type: "proxied", ProxyURL: "http://proxy:3128"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	ctx := captured.Hooks.OnRequestStart(context.Background(), llmclient.RequestInfo{})
+	if httpclient.ProxyFromContext(ctx) == nil {
+		t.Fatal("proxy missing from request context when observability hooks are also installed")
+	}
+	if seenProvider != "eu" {
+		t.Fatalf("observability hook saw provider %q, want eu", seenProvider)
+	}
+}
+
+func TestProviderFactory_Create_RejectsInvalidProxyURL(t *testing.T) {
+	factory := NewProviderFactory()
+	factory.Add(Registration{
+		Type: "proxied",
+		New:  func(_ ProviderConfig, _ ProviderOptions) core.Provider { return &factoryMockProvider{} },
+	})
+	_, err := factory.Create(ProviderConfig{Name: "p", Type: "proxied", ProxyURL: "ftp://proxy:21"})
+	if err == nil {
+		t.Fatal("Create() error = nil, want a rejected proxy URL")
 	}
 }

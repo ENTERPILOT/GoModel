@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // CredentialFieldError reports a credential row the operator has to fix,
@@ -28,6 +30,9 @@ func credentialFieldError(field, format string, args ...any) *CredentialFieldErr
 func validateCredential(cred ManagedProviderCredential, schema CredentialSchema) error {
 	if err := validateCredentialAPIKeys(cred, schema); err != nil {
 		return err
+	}
+	if _, err := httpclient.ParseProxyURL(cred.ProxyURL); err != nil {
+		return credentialFieldError(CredentialFieldProxyURL, "%v", err)
 	}
 	// Google's project/service-account auth replaces the "one required field
 	// per row" shape with a choice between several valid combinations, so it

@@ -341,6 +341,11 @@ providers:
     #   - "${OPENAI_API_KEY_3}"
     # Set false for strict per-request round robin (usually worse for prompt caching).
     # session_sticky_keys: false
+    # Send this provider's requests through a forward proxy (optional).
+    # http://, https://, socks5:// and socks5h:// are supported, with optional
+    # user:password@ credentials. Env: OPENAI_PROXY_URL. Default: no proxy
+    # (the HTTP_PROXY / HTTPS_PROXY / NO_PROXY environment still applies).
+    # proxy_url: "socks5://user:password@proxy.internal:1080"
     # Per-provider resilience overrides (optional).
     # Only specified fields override the global defaults above.
     # resilience:

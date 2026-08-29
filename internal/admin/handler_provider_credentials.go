@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -36,7 +37,8 @@ const redactedCredentialValue = "***********"
 // upsertProviderCredentialRequest is the admin upsert contract for one
 // provider credential. A value containing only three or more asterisks in
 // api_keys or the service-account fields preserves the stored value at that
-// position.
+// position; a proxy_url equal to the redacted form the view rendered keeps
+// the stored proxy password.
 type upsertProviderCredentialRequest struct {
 	Name                     string   `json:"name"`
 	Type                     string   `json:"type"`
@@ -53,6 +55,7 @@ type upsertProviderCredentialRequest struct {
 	ServiceAccountJSON       string   `json:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string   `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string   `json:"gcp_scope,omitempty"`
+	ProxyURL                 string   `json:"proxy_url,omitempty"`
 	Models                   []string `json:"models,omitempty"`
 	Enabled                  *bool    `json:"enabled,omitempty"`
 }
@@ -82,8 +85,8 @@ type providerCredentialTypeResponse struct {
 }
 
 // providerCredentialViewResponse is the admin view of one provider
-// credential: its definition (secrets redacted) plus whether it is read-only
-// (config/env-declared).
+// credential: its definition (secrets redacted, proxy_url with any password
+// masked) plus whether it is read-only (config/env-declared).
 type providerCredentialViewResponse struct {
 	Name                     string     `json:"name"`
 	Type                     string     `json:"type"`
@@ -100,6 +103,7 @@ type providerCredentialViewResponse struct {
 	ServiceAccountJSON       string     `json:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string     `json:"service_account_json_base64,omitempty"`
 	GCPScope                 string     `json:"gcp_scope,omitempty"`
+	ProxyURL                 string     `json:"proxy_url,omitempty"`
 	Models                   []string   `json:"models,omitempty"`
 	Enabled                  bool       `json:"enabled"`
 	Managed                  bool       `json:"managed"`
@@ -327,6 +331,7 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		ServiceAccountJSON:       serviceAccountJSON,
 		ServiceAccountJSONBase64: serviceAccountJSONBase64,
 		GCPScope:                 strings.TrimSpace(req.GCPScope),
+		ProxyURL:                 mergeRedactedProxyURL(req.ProxyURL, currentField(current, func(c providers.ManagedProviderCredential) string { return c.ProxyURL })),
 		Models:                   req.Models,
 		Enabled:                  enabled,
 	}
@@ -337,6 +342,17 @@ func (h *Handler) buildProviderCredentialUpsert(ctx context.Context, name string
 		}
 	}
 	return cred, nil
+}
+
+// mergeRedactedProxyURL keeps the stored proxy URL when the client sends back
+// the redacted form the view rendered, so editing any other field never
+// requires re-typing the proxy password.
+func mergeRedactedProxyURL(incoming, stored string) string {
+	incoming = strings.TrimSpace(incoming)
+	if stored != "" && incoming == httpclient.RedactProxyURL(stored) {
+		return stored
+	}
+	return incoming
 }
 
 func currentAPIKeys(current *providers.ManagedProviderCredential) []string {
@@ -414,6 +430,7 @@ func (h *Handler) providerCredentialView(cred providers.ManagedProviderCredentia
 		VertexLocation:     cred.VertexLocation,
 		ServiceAccountFile: cred.ServiceAccountFile,
 		GCPScope:           cred.GCPScope,
+		ProxyURL:           httpclient.RedactProxyURL(cred.ProxyURL),
 		Models:             cred.Models,
 		Enabled:            cred.Enabled,
 		Managed:            h.providerCredentials.IsManaged(cred.Name),
@@ -443,6 +460,7 @@ func (h *Handler) declaredProviderCredentialView(cfg providers.SanitizedProvider
 		APIVersion:        cfg.APIVersion,
 		Models:            cfg.Models,
 		SessionStickyKeys: cfg.SessionStickyKeys,
+		ProxyURL:          cfg.ProxyURL,
 		Enabled:           true,
 		Managed:           true,
 	}
