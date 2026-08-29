@@ -118,6 +118,7 @@
                             "advanced/model-metadata",
                             "advanced/cli",
                             "advanced/api-endpoints",
+                            "advanced/swagger-ui",
                             "advanced/resilience",
                             "advanced/version-awareness",
                             "advanced/responses-api",

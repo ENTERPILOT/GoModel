@@ -1,0 +1,59 @@
+---
+title: "Swagger UI"
+description: "Serve an interactive Swagger UI for GoModel's API from a binary built with the swagger build tag."
+icon: "file-code"
+keywords: ["Swagger", "Swagger UI", "OpenAPI", "build tag", "API explorer"]
+---
+
+GoModel can serve an interactive Swagger UI at `/swagger/index.html`. It is
+opt-in at two levels: the binary must be compiled with the `swagger` build tag,
+and `SWAGGER_ENABLED` must be set at runtime.
+
+## Why it is not in the default build
+
+Release binaries and the official Docker image are built **without** the
+`swagger` tag. The embedded spec and UI assets add over 30 MB to the binary
+(roughly 55 MB to 88 MB on an unstripped build) and therefore to the image, and
+the endpoint is rarely needed in production. Leaving it out keeps the artifacts
+small and the exposed surface minimal.
+
+If you only need the API spec, use the checked-in
+[`docs/openapi.json`](https://github.com/ENTERPILOT/GoModel/blob/main/docs/openapi.json)
+in any OpenAPI viewer instead.
+
+## Build with Swagger
+
+```bash
+go build -tags=swagger -o bin/gomodel ./cmd/gomodel
+```
+
+`make run` builds with the tag and enables the UI automatically for local
+development.
+
+## Enable at runtime
+
+| Setting                  | Default | Description                                    |
+| ------------------------ | ------- | ---------------------------------------------- |
+| `SWAGGER_ENABLED`        | `false` | Expose the Swagger UI at `/swagger/index.html` |
+
+```bash
+SWAGGER_ENABLED=true ./bin/gomodel
+```
+
+Or in `config.yaml`:
+
+```yaml
+server:
+  swagger_enabled: true
+```
+
+The UI is served without authentication and respects `BASE_PATH`. If
+`SWAGGER_ENABLED=true` is set on a binary built without the tag, GoModel logs a
+warning at startup and serves nothing at `/swagger/*`.
+
+## Regenerate the spec
+
+Run `make swagger` after changing API annotations to regenerate the embedded
+docs package and `docs/openapi.json`. See
+[DEVELOPMENT.md](https://github.com/ENTERPILOT/GoModel/blob/main/docs/DEVELOPMENT.md)
+for details.
