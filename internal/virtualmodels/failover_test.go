@@ -235,7 +235,12 @@ func TestNew_MigratesLegacyFailoverRulesIntoVirtualModels(t *testing.T) {
 	if primary != "openai/gpt-4o" || strings.Join(chain, ",") != "groq/llama,anthropic/claude" {
 		t.Fatalf("resolved %q with chain %v; want the shadowed model and its fallbacks", primary, chain)
 	}
-	for _, source := range []string{"disabled", "from-config", "self-only"} {
+	// A rule switched off in the dashboard keeps its fallbacks as a disabled
+	// virtual model instead of being discarded with the legacy store.
+	if off, ok := result.Service.Get("disabled"); !ok || off.Enabled || off.Strategy != StrategyFailover || len(off.Targets) != 2 {
+		t.Fatalf("disabled rule = %+v, %v; want a disabled failover redirect keeping its fallbacks", off, ok)
+	}
+	for _, source := range []string{"from-config", "self-only"} {
 		if _, ok := result.Service.Get(source); ok {
 			t.Fatalf("rule %q must not be migrated", source)
 		}

@@ -54,11 +54,11 @@ func (r legacyFailoverRule) enabled() bool {
 // combine, and the store is kept in place so the fallback list stays readable
 // and the warning repeats on every start until it is resolved. Config-managed
 // rows are skipped — the live configuration still declares them and
-// FailoverConfigModels translates it on every start. A rule whose primary is
-// listed in disabled (FAILOVER_DISABLED_MODELS) used to be switched off by
-// that setting at request time; it is converted as a disabled virtual model,
-// so the fallback list survives without becoming active. Databases that never
-// had the store are a no-op.
+// FailoverConfigModels translates it on every start. A rule switched off in
+// the dashboard, or whose primary is listed in disabled
+// (FAILOVER_DISABLED_MODELS), is converted as a disabled virtual model, so the
+// fallback list survives without becoming active. Databases that never had
+// the store are a no-op.
 func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.Storage, disabled map[string]bool) error {
 	rules, keyColumn, err := readLegacyFailoverRules(ctx, conn)
 	if err != nil {
@@ -79,8 +79,8 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 	migrated, unresolved := 0, 0
 	for _, rule := range rules {
 		model, convertible := failoverModel(rule.Source, rule.fallbacks(), false)
-		model.Enabled = !disabled[rule.Source]
-		if rule.enabled() && rule.ManagedSource != "config" && convertible {
+		model.Enabled = rule.enabled() && !disabled[rule.Source]
+		if rule.ManagedSource != "config" && convertible {
 			existing, exists := taken[rule.Source]
 			switch {
 			case !exists:
