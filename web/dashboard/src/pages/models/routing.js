@@ -36,10 +36,17 @@ function parseWeight(value) {
   return parsed;
 }
 
-// targetEntry builds a {model, weight?} API target, attaching weight only when
-// it parses to a positive number.
-export function targetEntry(model, weightValue) {
-  const entry = { model };
+// targetEntry builds a {provider?, model, weight?} API target from the
+// qualified name the editor shows, attaching weight only when it parses to a
+// positive number. An explicit provider is kept (it pins the target to a
+// concrete model, where a bare name may reach a virtual model) and split off
+// the name again, since the backend stores the two separately.
+export function targetEntry(model, weightValue, provider = "") {
+  const pinned = String(provider || "").trim();
+  const name = String(model || "").trim();
+  const entry = pinned
+    ? { provider: pinned, model: name.startsWith(pinned + "/") ? name.slice(pinned.length + 1) : name }
+    : { model: name };
   const weight = parseWeight(weightValue);
   if (weight !== null) {
     entry.weight = weight;
@@ -55,7 +62,7 @@ export function collectExtraTargets(rows) {
   for (const row of safeRows) {
     const model = String((row && row.model) || "").trim();
     if (model) {
-      targets.push(targetEntry(model, row && row.weight));
+      targets.push(targetEntry(model, row && row.weight, row && row.provider));
     }
   }
   return targets;

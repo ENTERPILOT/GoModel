@@ -442,8 +442,12 @@ test("buildAliasTogglePayload round-trips every target and strategy for a cost a
     user_paths: [],
   });
   // Cost balancers persist weight-less targets, matching the save path, even
-  // though a stored target happened to carry a weight.
-  assert.deepEqual(payload.targets, [{ model: "openai/gpt-4o" }, { model: "groq/llama" }]);
+  // though a stored target happened to carry a weight. An explicit provider
+  // stays explicit, so the toggle never turns a pinned target into a name.
+  assert.deepEqual(payload.targets, [
+    { provider: "openai", model: "gpt-4o" },
+    { provider: "groq", model: "llama" },
+  ]);
   assert.equal(payload.strategy, "cost");
   assert.equal(payload.enabled, false);
 });
@@ -460,10 +464,35 @@ test("buildAliasTogglePayload keeps per-target weights for a round-robin alias",
     user_paths: [],
   });
   assert.deepEqual(payload.targets, [
-    { model: "openai/gpt-4o" },
-    { model: "groq/llama", weight: 2 },
+    { provider: "openai", model: "gpt-4o" },
+    { provider: "groq", model: "llama", weight: 2 },
   ]);
   assert.equal(payload.strategy, "round_robin");
+});
+
+test("buildAliasTogglePayload keeps a by-name target by name", () => {
+  const payload = buildAliasTogglePayload({
+    name: "outer",
+    targets: [{ model: "team/cheap" }, { model: "openai/gpt-4o", weight: 2 }],
+    strategy: "round_robin",
+    enabled: true,
+    user_paths: [],
+  });
+  assert.deepEqual(payload.targets, [
+    { model: "team/cheap" },
+    { model: "openai/gpt-4o", weight: 2 },
+  ]);
+});
+
+test("buildAliasTogglePayload sends a single pinned target through the targets list", () => {
+  const payload = buildAliasTogglePayload({
+    name: "pinned",
+    targets: [{ provider: "openai", model: "gpt-4o" }],
+    enabled: true,
+    user_paths: [],
+  });
+  assert.equal(payload.target_model, undefined);
+  assert.deepEqual(payload.targets, [{ provider: "openai", model: "gpt-4o" }]);
 });
 
 test("save payload sends a redirect body when target_model is filled", () => {
@@ -639,21 +668,24 @@ test("save payload keeps declared order and drops weights for the failover strat
 });
 
 test("editing a weighted redirect preserves the primary target weight", () => {
-  const { primaryModel, primaryWeight, extraTargets } = aliasFormTargets({
-    name: "smart",
-    strategy: "round_robin",
-    enabled: true,
-    targets: [
-      { provider: "openai", model: "gpt-4o", weight: 3 },
-      { provider: "groq", model: "llama", weight: 1 },
-    ],
-  });
+  const { primaryProvider, primaryModel, primaryWeight, extraTargets } =
+    aliasFormTargets({
+      name: "smart",
+      strategy: "round_robin",
+      enabled: true,
+      targets: [
+        { provider: "openai", model: "gpt-4o", weight: 3 },
+        { provider: "groq", model: "llama", weight: 1 },
+      ],
+    });
+  assert.equal(primaryProvider, "openai");
   assert.equal(primaryModel, "openai/gpt-4o");
   assert.equal(primaryWeight, 3);
 
   const { payload } = buildVirtualModelSavePayload(
     {
       source: "smart",
+      target_provider: primaryProvider,
       target_model: primaryModel,
       target_weight: primaryWeight,
       targets: extraTargets,
@@ -663,11 +695,51 @@ test("editing a weighted redirect preserves the primary target weight", () => {
     "smart",
     "edit",
   );
+  // The explicit providers the row was stored with survive the round trip.
   assert.deepEqual(payload.targets, [
-    { model: "openai/gpt-4o", weight: 3 },
-    { model: "groq/llama", weight: 1 },
+    { provider: "openai", model: "gpt-4o", weight: 3 },
+    { provider: "groq", model: "llama", weight: 1 },
   ]);
   assert.equal(payload.strategy, "round_robin");
+});
+
+test("picking another target in the editor drops the stored provider pin", () => {
+  // VmTargetRow clears `provider` on selection; the payload then sends the
+  // chosen name as written, so it may reach a virtual model of that name.
+  const { payload } = buildVirtualModelSavePayload(
+    {
+      source: "smart",
+      target_provider: "",
+      target_model: "team/cheap",
+      target_weight: 1,
+      targets: [{ provider: "groq", model: "groq/llama", weight: 1 }],
+      strategy: "round_robin",
+      enabled: true,
+    },
+    "smart",
+    "edit",
+  );
+  assert.deepEqual(payload.targets, [
+    { model: "team/cheap", weight: 1 },
+    { provider: "groq", model: "llama", weight: 1 },
+  ]);
+});
+
+test("a single pinned target is saved through the targets list", () => {
+  const { payload } = buildVirtualModelSavePayload(
+    {
+      source: "pinned",
+      target_provider: "openai",
+      target_model: "openai/gpt-4o",
+      target_weight: 1,
+      targets: [],
+      enabled: true,
+    },
+    "pinned",
+    "edit",
+  );
+  assert.equal(payload.target_model, undefined);
+  assert.deepEqual(payload.targets, [{ provider: "openai", model: "gpt-4o" }]);
 });
 
 test("editing a redirect preserves a provider prefix on a multi-slash model name", () => {
@@ -684,11 +756,14 @@ test("editing a redirect preserves a provider prefix on a multi-slash model name
   });
   assert.equal(primaryModel, "groq/openai/gpt-oss-120b");
   // Stored targets without an explicit weight surface the neutral default of 1.
-  assert.deepEqual(extraTargets, [{ model: "openrouter/openai/gpt-4o", weight: 1 }]);
+  assert.deepEqual(extraTargets, [
+    { provider: "openrouter", model: "openrouter/openai/gpt-4o", weight: 1 },
+  ]);
 
   const { payload } = buildVirtualModelSavePayload(
     {
       source: "oss",
+      target_provider: "groq",
       target_model: primaryModel,
       target_weight: 1,
       targets: extraTargets,
@@ -698,9 +773,10 @@ test("editing a redirect preserves a provider prefix on a multi-slash model name
     "oss",
     "edit",
   );
+  // Only the provider's own prefix is split back off; the model's slashes stay.
   assert.deepEqual(payload.targets, [
-    { model: "groq/openai/gpt-oss-120b", weight: 1 },
-    { model: "openrouter/openai/gpt-4o", weight: 1 },
+    { provider: "groq", model: "openai/gpt-oss-120b", weight: 1 },
+    { provider: "openrouter", model: "openai/gpt-4o", weight: 1 },
   ]);
 });
 

@@ -10,7 +10,11 @@
   import { Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
+  // provider is the explicit provider a stored target may carry (API- or
+  // config-created); it pins the target to a concrete model. The picker shows
+  // the qualified name, and choosing another value drops the pin.
   let {
+    provider = $bindable(""),
     model = $bindable(""),
     weight = $bindable(),
     id = undefined,
@@ -26,6 +30,9 @@
     class="vm-target-model"
     options={vm.vmTargetOptions()}
     bind:value={model}
+    onchange={() => {
+      provider = "";
+    }}
     {placeholder}
     searchPlaceholder={m.models_target_search_placeholder()}
     ariaLabel={m.models_target_model()}

@@ -51,7 +51,7 @@ class VirtualModelEditorStore {
     if (!Array.isArray(this.vmForm.targets)) {
       this.vmForm.targets = [];
     }
-    this.vmForm.targets.push({ model: "", weight: 1 });
+    this.vmForm.targets.push({ provider: "", model: "", weight: 1 });
   }
 
   removeVmTarget(index) {
@@ -169,10 +169,11 @@ class VirtualModelEditorStore {
     );
     this.vmFormEffectiveEnabled = alias.enabled !== false;
 
-    const { primaryModel, primaryWeight, extraTargets } =
+    const { primaryProvider, primaryModel, primaryWeight, extraTargets } =
       aliasFormTargets(alias);
     this.vmForm = {
       source: alias.name || "",
+      target_provider: primaryProvider,
       target_model: primaryModel,
       target_weight: primaryWeight,
       targets: extraTargets,
@@ -428,14 +429,17 @@ class VirtualModelEditorStore {
     }
   }
 
-  // deleteVirtualModel removes the virtual model for the editor's source.
+  // deleteVirtualModel removes the virtual model the editor was opened on.
+  // The source field may hold an unsaved rename, so the persisted source
+  // wins: deleting by the typed name would miss the row (and a 404 reads as
+  // "already gone").
   async deleteVirtualModel() {
     if (this.vmFormManaged) {
       this.vmFormError = m.models_managed_cannot_remove();
       return;
     }
     const source = String(
-      this.vmForm.source || this.vmFormOriginalSource || "",
+      this.vmFormOriginalSource || this.vmForm.source || "",
     ).trim();
     if (!source || !this.vmFormHasExisting) {
       return;

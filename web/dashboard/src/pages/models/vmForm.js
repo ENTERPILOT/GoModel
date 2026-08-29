@@ -60,6 +60,7 @@ export function virtualModelTargetOptions(models, aliases, source) {
 export function defaultVirtualModelForm() {
   return {
     source: "",
+    target_provider: "",
     target_model: "",
     target_weight: 1,
     targets: [],
@@ -157,7 +158,7 @@ export function vmRoutingSummary(form, sourceIsModel) {
   const primary = String((form && form.target_model) || "").trim();
   if (primary) targets.push(primary);
   targets.push(
-    ...collectExtraTargets(form && form.targets).map((target) => target.model),
+    ...collectExtraTargets(form && form.targets).map(qualifyTarget),
   );
   if (!source || targets.length === 0) return { text: "", replaces: false };
 
@@ -236,29 +237,36 @@ export function removePrimaryTarget(form) {
   const rows = Array.isArray(form.targets) ? form.targets : [];
   if (rows.length > 0) {
     const next = rows.shift();
+    form.target_provider = next.provider || "";
     form.target_model = next.model || "";
     form.target_weight = next.weight || 1;
     return;
   }
+  form.target_provider = "";
   form.target_model = "";
   form.target_weight = 1;
 }
 
 // aliasFormTargets maps a stored alias onto the editor's primary/extra target
 // fields (a stored target with no explicit weight is the neutral default 1).
+// An explicit provider rides along so an edit does not turn a pinned target
+// into a by-name one.
 export function aliasFormTargets(alias) {
   const lbTargets = Array.isArray(alias && alias.targets) ? alias.targets : [];
   if (lbTargets.length > 0) {
     return {
+      primaryProvider: lbTargets[0].provider || "",
       primaryModel: qualifyTarget(lbTargets[0]),
       primaryWeight: lbTargets[0].weight || 1,
       extraTargets: lbTargets.slice(1).map((target) => ({
+        provider: target.provider || "",
         model: qualifyTarget(target),
         weight: target.weight || 1,
       })),
     };
   }
   return {
+    primaryProvider: (alias && alias.target_provider) || "",
     primaryModel:
       alias && alias.target_provider
         ? alias.target_provider + "/" + alias.target_model
@@ -266,6 +274,14 @@ export function aliasFormTargets(alias) {
     primaryWeight: 1,
     extraTargets: [],
   };
+}
+
+// weightless strips the weight from an API target for strategies that ignore
+// it, so a value with no effect is not persisted.
+function weightless(target) {
+  return target.provider
+    ? { provider: target.provider, model: target.model }
+    : { model: target.model };
 }
 
 export function normalizeUserPaths(raw) {
@@ -309,7 +325,9 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
   if (isRedirect) {
     const targets = [];
     if (primaryTarget) {
-      targets.push(targetEntry(primaryTarget, form.target_weight));
+      targets.push(
+        targetEntry(primaryTarget, form.target_weight, form.target_provider),
+      );
     }
     targets.push(...extraTargets);
     if (targets.length > 1) {
@@ -318,7 +336,7 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       const strategy = form.strategy || "round_robin";
       payload.targets = strategyUsesWeights(strategy)
         ? targets
-        : targets.map((target) => ({ model: target.model }));
+        : targets.map(weightless);
       payload.strategy = strategy;
       // Affinity defaults to on server-side; only an explicit opt-out is sent.
       if (form && form.session_affinity === false) {
@@ -328,6 +346,9 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
       if (form && form.failover === false) {
         payload.failover = false;
       }
+    } else if (targets[0].provider) {
+      // Only the targets list can carry an explicit provider.
+      payload.targets = [weightless(targets[0])];
     } else {
       // A single target stays a plain alias on the back-compat field.
       payload.target_model = targets[0].model;
@@ -363,11 +384,14 @@ export function buildAliasTogglePayload(alias) {
     }
     // Strategies that ignore weight persist weight-less targets — same
     // contract as the editor save path.
+    const targets = lbTargets.map((target) =>
+      targetEntry(qualifyTarget(target), target.weight, target.provider),
+    );
     payload.targets = strategyUsesWeights(payload.strategy)
-      ? lbTargets.map((target) =>
-          targetEntry(qualifyTarget(target), target.weight),
-        )
-      : lbTargets.map((target) => ({ model: qualifyTarget(target) }));
+      ? targets
+      : targets.map(weightless);
+  } else if (lbTargets.length === 1 && lbTargets[0].provider) {
+    payload.targets = [weightless(targetEntry(qualifyTarget(lbTargets[0]), null, lbTargets[0].provider))];
   } else if (lbTargets.length === 1) {
     payload.target_model = qualifyTarget(lbTargets[0]);
   } else {

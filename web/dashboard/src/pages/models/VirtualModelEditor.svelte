@@ -78,6 +78,7 @@
     <span class="form-field-label">{m.models_targets()}</span>
     <VmTargetRow
       id="virtual-model-target"
+      bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
       showRemove={vmFormHasPrimaryTarget(vm.vmForm)}
@@ -86,6 +87,7 @@
     {#each vm.vmForm.targets as target, index (index)}
       <VmTargetRow
         placeholder="groq/llama"
+        bind:provider={target.provider}
         bind:model={target.model}
         bind:weight={target.weight}
         onremove={() => vm.removeVmTarget(index)}
@@ -141,7 +143,7 @@
         <input
           type="checkbox"
           bind:checked={vm.vmForm.session_affinity}
-          disabled={vm.vmFormManaged}
+          disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
         />
         <span>{m.models_session_keeping()}</span>
       </label>
@@ -151,7 +153,7 @@
         <input
           type="checkbox"
           bind:checked={vm.vmForm.failover}
-          disabled={vm.vmFormManaged}
+          disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
         />
         <span>{m.models_failover_option()}</span>
       </label>
