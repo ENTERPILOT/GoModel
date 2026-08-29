@@ -58,7 +58,7 @@ func Middleware(logger LoggerInterface) echo.MiddlewareFunc {
 			req := c.Request()
 
 			// Read request ID (always set by the request ID middleware in http.go)
-			requestID := req.Header.Get("X-Request-ID")
+			requestID := req.Header.Get(core.RequestIDHeader)
 			userPath := core.UserPathFromContext(req.Context())
 			if userPath == "" {
 				userPath = "/"
@@ -334,20 +334,21 @@ func isEventStreamContentType(contentType string) bool {
 	if contentType == "" {
 		return false
 	}
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	return mediaType == "text/event-stream"
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	return strings.EqualFold(strings.TrimSpace(mediaType), "text/event-stream")
 }
 
 // extractHeaders extracts headers from a map[string][]string (http.Header or echo headers),
-// taking the first value for each key and redacting sensitive headers.
+// taking the first value for each key and redacting sensitive headers in the
+// same pass (the same rules as RedactHeaders).
 func extractHeaders(headers map[string][]string) map[string]string {
 	result := make(map[string]string, len(headers))
 	for key, values := range headers {
 		if len(values) > 0 {
-			result[key] = values[0]
+			result[key] = redactHeaderValue(key, values[0])
 		}
 	}
-	return RedactHeaders(result)
+	return result
 }
 
 // hashAPIKey creates a short hash of the API key for identification.
@@ -361,7 +362,7 @@ func hashAPIKey(authHeader string) string {
 	}
 
 	hash := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(hash[:])[:APIKeyHashPrefixLength]
+	return hex.EncodeToString(hash[:APIKeyHashPrefixLength/2])
 }
 
 // CaptureLoggedBody converts raw body bytes into the representation audit

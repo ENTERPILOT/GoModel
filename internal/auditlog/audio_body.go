@@ -31,8 +31,9 @@ type AudioBodyLog struct {
 
 // IsAudioContentType reports whether a Content-Type denotes an audio payload.
 func IsAudioContentType(contentType string) bool {
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	return strings.HasPrefix(mediaType, "audio/")
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	mediaType = strings.TrimSpace(mediaType)
+	return len(mediaType) >= 6 && strings.EqualFold(mediaType[:6], "audio/")
 }
 
 // BuildAudioResponseBody builds the audit value for a binary audio response.

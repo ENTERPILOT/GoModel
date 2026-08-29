@@ -141,8 +141,8 @@ func isEventStreamContentType(contentType string) bool {
 	if contentType == "" {
 		return false
 	}
-	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
-	return mediaType == "text/event-stream"
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	return strings.EqualFold(strings.TrimSpace(mediaType), "text/event-stream")
 }
 
 func writeCachedResponse(c *echo.Context, path string, requestBody, cached []byte, cacheType string) error {

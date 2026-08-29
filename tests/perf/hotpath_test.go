@@ -389,8 +389,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 108,   // baseline 106 (goccy response serializer + single ensureRequestID)
-			maxBytes:  14080, // baseline ~13.5 KB (incl. per-attempt response body/header capture fields)
+			maxAllocs: 88,    // baseline 85 (single-alloc body reader, lazy unknown-field buffer, no context re-wraps)
+			maxBytes:  13440, // baseline ~12.9 KB (incl. per-attempt response body/header capture fields)
 		},
 		{
 			// Production-shaped path: request resolves through a real Router +
@@ -400,8 +400,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 128,   // baseline 126 (goccy response serializer + single ensureRequestID)
-			maxBytes:  14656, // baseline ~14.0 KB
+			maxAllocs: 102,   // baseline 99 (see the bare case; plus strings.Cut selector parsing)
+			maxBytes:  13888, // baseline ~13.3 KB
 		},
 		{
 			// Default-deployment shape: auth + audit (bodies/headers) + usage +
@@ -411,8 +411,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 306,   // baseline 300
-			maxBytes:  26496, // baseline ~25.1 KB
+			maxAllocs: 234,   // baseline 228 (tree-walking session canonicalizer, single-pass header redaction, canonical header keys)
+			maxBytes:  23040, // baseline ~22.3 KB
 		},
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a
