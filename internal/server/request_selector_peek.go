@@ -32,8 +32,12 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		// A partial selector must not become authoritative because a duplicate
 		// field beyond the peek boundary could change what the provider executes.
 		if hints.model != "" {
-			if completeHints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit); completeHints.complete {
+			completeHints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
+			if completeHints.complete {
 				hints = completeHints
+			} else if completeHints.streamParsed {
+				hints.stream = completeHints.stream
+				hints.streamParsed = true
 			}
 		}
 		if hints.complete {
@@ -126,6 +130,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 
 	var hints requestBodySelectorHints
 	var modelSeen, providerSeen, streamSeen bool
+	var modelAmbiguous, providerAmbiguous, streamAmbiguous bool
 	for dec.More() {
 		keyToken, err := dec.Token()
 		if err != nil {
@@ -139,7 +144,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 		switch key {
 		case "model":
 			if requireComplete && modelSeen {
-				return requestBodySelectorHints{}
+				modelAmbiguous = true
 			}
 			modelSeen = true
 			model, ok, err := readOptionalJSONString(dec)
@@ -156,7 +161,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			}
 		case "provider":
 			if requireComplete && providerSeen {
-				return requestBodySelectorHints{}
+				providerAmbiguous = true
 			}
 			providerSeen = true
 			provider, ok, err := readOptionalJSONString(dec)
@@ -170,7 +175,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			}
 		case "stream":
 			if requireComplete && streamSeen {
-				return requestBodySelectorHints{}
+				streamAmbiguous = true
 			}
 			streamSeen = true
 			stream, ok, err := readOptionalJSONBool(dec)
@@ -192,6 +197,14 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 		}
 		if _, err := dec.Token(); err != io.EOF {
 			return requestBodySelectorHints{}
+		}
+		if streamAmbiguous {
+			return requestBodySelectorHints{}
+		}
+		if modelAmbiguous || providerAmbiguous {
+			hints.model = ""
+			hints.provider = ""
+			return hints
 		}
 	}
 

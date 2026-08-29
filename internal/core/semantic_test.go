@@ -187,6 +187,8 @@ func TestDeriveWhiteBoxPrompt_SkipsBodyParsingWhenIngressBodyWasNotCaptured(t *t
 }
 
 func TestApplyBodyStreamHintPreservesSelectorConfidence(t *testing.T) {
+	ApplyBodyStreamHint(nil, true)
+
 	env := &WhiteBoxPrompt{RouteHints: RouteHints{Model: "existing-model", Provider: "openai"}}
 	CachePassthroughRouteInfo(env, &PassthroughRouteInfo{
 		Provider:        "openai",

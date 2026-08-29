@@ -146,7 +146,7 @@ func TestSeedRequestBodySelectorHintsRejectsIncompleteOpaqueModel(t *testing.T) 
 }
 
 func TestSeedRequestBodySelectorHintsRejectsDuplicateOpaqueModel(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"allowed-model","model":"restricted-model"}`))
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"allowed-model","stream":true,"model":"restricted-model"}`))
 	req.ContentLength = -1
 	req.Header.Set("Content-Type", "application/json")
 	env := &core.WhiteBoxPrompt{}
@@ -159,6 +159,16 @@ func TestSeedRequestBodySelectorHintsRejectsDuplicateOpaqueModel(t *testing.T) {
 	}
 	if env.RouteHints.Model != "" {
 		t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
+	}
+	if !env.StreamRequested {
+		t.Fatal("StreamRequested = false, want true from unique stream field")
+	}
+	info := env.CachedPassthroughRouteInfo()
+	if info == nil {
+		t.Fatal("CachedPassthroughRouteInfo() = nil")
+	}
+	if !info.Stream || info.StreamUncertain {
+		t.Fatalf("stream state = stream %v uncertain %v, want true and false", info.Stream, info.StreamUncertain)
 	}
 }
 
