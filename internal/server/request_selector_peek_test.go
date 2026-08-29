@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -112,10 +113,10 @@ func TestSeedRequestBodySelectorHintsRejectsIncompleteOpaqueModel(t *testing.T) 
 		knownLength   bool
 	}{
 		{name: "model first", prefix: `{"model":"allowed-model","padding":"`, wantUncertain: true},
-		{name: "stream first", prefix: `{"stream":true,"model":"allowed-model","padding":"`, wantStream: true},
-		{name: "model before stream", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true},
-		{name: "model before stream with known length", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true, knownLength: true},
-		{name: "stream before oversized value", prefix: `{"stream":true,"padding":"`, wantStream: true},
+		{name: "stream first", prefix: `{"stream":true,"model":"allowed-model","padding":"`, wantStream: true, wantUncertain: true},
+		{name: "model before stream", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true, wantUncertain: true},
+		{name: "model before stream with known length", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true, wantUncertain: true, knownLength: true},
+		{name: "stream before oversized value", prefix: `{"stream":true,"padding":"`, wantStream: true, wantUncertain: true},
 	}
 
 	for _, test := range tests {
@@ -170,6 +171,44 @@ func TestSeedRequestBodySelectorHintsRejectsAmbiguousStreamBeforePeekLimit(t *te
 	}
 	if info.Stream || !info.StreamUncertain {
 		t.Fatalf("stream state = stream %v uncertain %v, want false and true", info.Stream, info.StreamUncertain)
+	}
+}
+
+func TestSeedRequestBodySelectorHintsMarksStreamBeyondPeekBoundaryUncertain(t *testing.T) {
+	body := `{"stream":true,"padding":"` + strings.Repeat("x", int(requestSelectorPeekLimit)) + `","stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	env := &core.WhiteBoxPrompt{}
+	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
+
+	seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
+
+	if !env.StreamRequested {
+		t.Fatal("StreamRequested = false, want observed prefix hint retained")
+	}
+	info := env.CachedPassthroughRouteInfo()
+	if info == nil {
+		t.Fatal("CachedPassthroughRouteInfo() = nil")
+	}
+	if !info.Stream || !info.StreamUncertain {
+		t.Fatalf("stream state = stream %v uncertain %v, want true and true", info.Stream, info.StreamUncertain)
+	}
+	restored, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("read restored body: %v", err)
+	}
+	if string(restored) != body {
+		t.Fatal("restored body differs from original")
+	}
+	var forwarded struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(restored, &forwarded); err != nil {
+		t.Fatalf("decode restored body: %v", err)
+	}
+	if forwarded.Stream {
+		t.Fatal("forwarded stream = true, want last duplicate false to demonstrate uncertainty")
 	}
 }
 

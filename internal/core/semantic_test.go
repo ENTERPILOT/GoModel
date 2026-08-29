@@ -216,6 +216,35 @@ func TestApplyBodyStreamHintPreservesSelectorConfidence(t *testing.T) {
 	}
 }
 
+func TestApplyPartialBodyStreamHintPreservesUncertainty(t *testing.T) {
+	ApplyPartialBodyStreamHint(nil, true)
+
+	env := &WhiteBoxPrompt{RouteHints: RouteHints{Model: "existing-model", Provider: "openai"}}
+	CachePassthroughRouteInfo(env, &PassthroughRouteInfo{
+		Provider: "openai",
+		Model:    "existing-model",
+	})
+
+	ApplyPartialBodyStreamHint(env, true)
+
+	if env.JSONBodyParsed {
+		t.Fatal("JSONBodyParsed = true, want false")
+	}
+	if !env.StreamRequested {
+		t.Fatal("StreamRequested = false, want observed true hint")
+	}
+	if env.RouteHints.Model != "existing-model" || env.RouteHints.Provider != "openai" {
+		t.Fatalf("RouteHints = %+v, want existing selector preserved", env.RouteHints)
+	}
+	info := env.CachedPassthroughRouteInfo()
+	if info == nil {
+		t.Fatal("CachedPassthroughRouteInfo() = nil")
+	}
+	if info.Model != "existing-model" || !info.Stream || !info.StreamUncertain {
+		t.Fatalf("PassthroughRouteInfo = %+v, want model preserved and stream uncertain", info)
+	}
+}
+
 func TestDeriveWhiteBoxPrompt_FilesMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(
 		"GET",

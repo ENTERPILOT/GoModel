@@ -14,12 +14,13 @@ import (
 const requestSelectorPeekLimit int64 = 64 * 1024
 
 type requestBodySelectorHints struct {
-	model        string
-	provider     string
-	stream       bool
-	streamParsed bool
-	parsed       bool
-	complete     bool
+	model          string
+	provider       string
+	stream         bool
+	streamParsed   bool
+	streamVerified bool
+	parsed         bool
+	complete       bool
 }
 
 func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) {
@@ -32,7 +33,11 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		if hints.complete {
 			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 		} else if hints.streamParsed {
-			core.ApplyBodyStreamHint(env, hints.stream)
+			if hints.streamVerified {
+				core.ApplyBodyStreamHint(env, hints.stream)
+			} else {
+				core.ApplyPartialBodyStreamHint(env, hints.stream)
+			}
 		}
 		if !hints.streamParsed {
 			core.MarkPassthroughStreamUncertain(env)
@@ -219,6 +224,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 		if streamAmbiguous {
 			return requestBodySelectorHints{}
 		}
+		hints.streamVerified = hints.streamParsed
 		if modelAmbiguous || providerAmbiguous {
 			hints.model = ""
 			hints.provider = ""
