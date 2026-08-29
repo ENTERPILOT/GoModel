@@ -23,6 +23,7 @@ func TestBuildUsageInsert(t *testing.T) {
 			Provider:               "openai",
 			ProviderName:           "primary-openai",
 			Endpoint:               "/v1/chat/completions",
+			UserID:                 "user-1",
 			SessionID:              "session-1",
 			CacheType:              CacheTypeExact,
 			Labels:                 []string{"alpha", "prod"},
@@ -78,6 +79,9 @@ func TestBuildUsageInsert(t *testing.T) {
 	}
 	if got := args[24]; got != "usage-2" {
 		t.Fatalf("args[24] = %v, want usage-2", got)
+	}
+	if got := args[9]; got != "user-1" {
+		t.Fatalf("args[9] = %v, want user-1", got)
 	}
 	if got := args[10]; got != "session-1" {
 		t.Fatalf("args[10] = %v, want session-1", got)

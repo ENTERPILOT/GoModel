@@ -38,6 +38,13 @@ type Store interface {
 	Close() error
 }
 
+// GroupMover is an optional Store capability: writing a group and the member
+// path rewrites its move causes as one atomic operation, so a failed cascade
+// never persists a moved group alongside stale user paths.
+type GroupMover interface {
+	ApplyGroupMove(ctx context.Context, group Group, rewrites []User) error
+}
+
 // NormalizeGroupName canonicalizes one group name. Names are verbatim,
 // case-sensitive identifiers; "/" is rejected so a group can never be
 // mistaken for a user path, and "," so names survive comma-separated lists.

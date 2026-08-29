@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
@@ -130,6 +131,36 @@ func TestServiceGroupTreeValidation(t *testing.T) {
 		// Moving "a" under its own descendant "c" would create a cycle.
 		if _, err := svc.UpsertGroup(ctx, UpsertGroupInput{Name: "a", Parent: "c"}); !IsValidationError(err) {
 			t.Fatalf("UpsertGroup(cycle) error = %v, want validation error", err)
+		}
+	})
+}
+
+func TestServiceUpsertGroupTerminatesOnStoredCycle(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		store, err := NewSQLStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+		// Write a parent cycle directly, bypassing service validation, the
+		// way out-of-band database edits can.
+		now := time.Now().UTC().Truncate(time.Second)
+		for name, parent := range map[string]string{"a": "b", "b": "a"} {
+			if err := store.UpsertGroup(ctx, Group{Name: name, Parent: parent, CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatalf("UpsertGroup(%s) error = %v", name, err)
+			}
+		}
+		svc, err := NewService(store)
+		if err != nil {
+			t.Fatalf("NewService: %v", err)
+		}
+		if err := svc.Refresh(ctx); err != nil {
+			t.Fatalf("Refresh: %v", err)
+		}
+		// The ancestor walk from "a" must fail on the stored cycle instead of
+		// looping forever.
+		if _, err := svc.UpsertGroup(ctx, UpsertGroupInput{Name: "c", Parent: "a"}); !IsValidationError(err) {
+			t.Fatalf("UpsertGroup(parent in stored cycle) error = %v, want validation error", err)
 		}
 	})
 }

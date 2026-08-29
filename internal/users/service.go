@@ -373,8 +373,15 @@ func (s *Service) UpsertGroup(ctx context.Context, input UpsertGroupInput) (Grou
 			return Group{}, newValidationError("unknown parent group: "+parent, nil)
 		}
 		// Reject a parent that sits below this group: the chain from the new
-		// parent to the root must not pass through the group itself.
+		// parent to the root must not pass through the group itself. The walk
+		// tracks visited names so a cycle written out of band terminates with
+		// an error instead of looping while writeMu is held.
+		visited := make(map[string]bool)
 		for cursor := parent; cursor != ""; {
+			if visited[cursor] {
+				return Group{}, newValidationError("group hierarchy contains a cycle at "+cursor, nil)
+			}
+			visited[cursor] = true
 			group, ok := snap.groups[cursor]
 			if !ok {
 				break
@@ -408,10 +415,10 @@ func (s *Service) UpsertGroup(ctx context.Context, input UpsertGroupInput) (Grou
 		return Group{}, err
 	}
 
-	if err := s.store.UpsertGroup(ctx, group); err != nil {
-		return Group{}, err
+	for i := range rewrites {
+		rewrites[i].UpdatedAt = now
 	}
-	if err := s.applyUserPathRewrites(ctx, rewrites, now); err != nil {
+	if err := s.persistGroupMove(ctx, group, rewrites); err != nil {
 		return Group{}, err
 	}
 	if err := s.Refresh(ctx); err != nil {
@@ -466,13 +473,19 @@ func planUserPathRewrites(snap snapshot, nextGroups map[string]Group) ([]User, e
 	return rewrites, nil
 }
 
-// applyUserPathRewrites writes through the users whose derived path changed.
-func (s *Service) applyUserPathRewrites(ctx context.Context, rewrites []User, now time.Time) error {
+// persistGroupMove writes the group and the member path rewrites it causes.
+// A store that supports GroupMover applies both atomically; otherwise the
+// writes run sequentially and a mid-cascade failure reloads the snapshot so
+// it reflects the partially applied state.
+func (s *Service) persistGroupMove(ctx context.Context, group Group, rewrites []User) error {
+	if mover, ok := s.store.(GroupMover); ok {
+		return mover.ApplyGroupMove(ctx, group, rewrites)
+	}
+	if err := s.store.UpsertGroup(ctx, group); err != nil {
+		return err
+	}
 	for _, user := range rewrites {
-		user.UpdatedAt = now
 		if err := s.store.UpsertUser(ctx, user); err != nil {
-			// Reload before surfacing the error so the snapshot reflects the
-			// partially applied cascade.
 			_ = s.Refresh(ctx)
 			return err
 		}

@@ -11492,6 +11492,9 @@
       },
       "admin.deleteGroupRequest": {
         "type": "object",
+        "required": [
+          "name"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -11528,6 +11531,9 @@
       },
       "admin.deleteUserRequest": {
         "type": "object",
+        "required": [
+          "id"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -12045,6 +12051,9 @@
       },
       "admin.upsertGroupRequest": {
         "type": "object",
+        "required": [
+          "name"
+        ],
         "properties": {
           "description": {
             "type": "string"
@@ -12212,6 +12221,9 @@
       },
       "admin.upsertUserRequest": {
         "type": "object",
+        "required": [
+          "name"
+        ],
         "properties": {
           "description": {
             "type": "string"

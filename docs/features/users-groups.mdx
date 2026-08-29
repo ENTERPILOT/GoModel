@@ -100,6 +100,16 @@ virtual_models:
 
 `groups` applies to access policies only, not redirects.
 
+<Warning>
+Both `user_paths` and `groups` match against the request's effective user
+path. For a key bound to a user (`user_id`), GoModel resolves that path
+itself and ignores the header, so the restriction is enforceable. For other
+callers — the master key, unbound keys, or requests when authentication is
+disabled — the path comes from the `X-GoModel-User-Path` header the caller
+sets, so these policies organize access rather than enforce it. Bind keys to
+users when model access must hold against the caller.
+</Warning>
+
 The easiest way to manage this is the **Model access** action on a user or
 group row: check the models the subject should have, and GoModel updates the
 underlying access policies. The editor shows each model's effective state —

@@ -1548,8 +1548,36 @@
   "users_access_status_blocked": "No access",
   "users_access_status_disabled": "Disabled",
   "users_access_managed": "managed by config",
-  "users_access_restrict_warning": "{count} model(s) are currently open to everyone; granting them here restricts them to the listed subjects only.",
-  "users_access_reopen_warning": "{count} model(s) lose their last subject; their policy is removed and they reopen for every caller.",
+  "users_access_restrict_warning": [
+    {
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
+      "match": {
+        "count_plural=one": "{count} model is currently open to everyone; granting it here restricts it to the listed subjects only.",
+        "count_plural=*": "{count} models are currently open to everyone; granting them here restricts them to the listed subjects only."
+      }
+    }
+  ],
+  "users_access_reopen_warning": [
+    {
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
+      "match": {
+        "count_plural=one": "{count} model loses its last subject; its policy is removed and it reopens for every caller.",
+        "count_plural=*": "{count} models lose their last subject; their policies are removed and they reopen for every caller."
+      }
+    }
+  ],
   "users_access_load_failed": "Unable to load models or access policies.",
   "users_access_save_failed": "Unable to update model access.",
   "users_access_saved": "Model access updated.",

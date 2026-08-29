@@ -93,6 +93,57 @@ func TestSQLStoreUserPathUnique(t *testing.T) {
 	})
 }
 
+func TestSQLStoreApplyGroupMoveIsAtomic(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+		now := time.Now().UTC().Truncate(time.Second)
+		group := Group{Name: "team", CreatedAt: now, UpdatedAt: now}
+		if err := store.UpsertGroup(ctx, group); err != nil {
+			t.Fatalf("UpsertGroup() error = %v", err)
+		}
+		member := User{ID: "u1", UserPath: "/team/anna", Name: "anna", Group: "team", CreatedAt: now, UpdatedAt: now}
+		blocker := User{ID: "u2", UserPath: "/org/team/anna", CreatedAt: now, UpdatedAt: now}
+		for _, user := range []User{member, blocker} {
+			if err := store.UpsertUser(ctx, user); err != nil {
+				t.Fatalf("UpsertUser(%s) error = %v", user.ID, err)
+			}
+		}
+
+		// A rewrite that violates the unique path index rolls back the whole
+		// move: the group keeps its old parent.
+		moved := group
+		moved.Parent = "org"
+		rewrite := member
+		rewrite.UserPath = "/org/team/anna"
+		if err := store.ApplyGroupMove(ctx, moved, []User{rewrite}); err == nil {
+			t.Fatalf("ApplyGroupMove(conflicting rewrite) error = nil, want unique violation")
+		}
+		groups, err := store.ListGroups(ctx)
+		if err != nil {
+			t.Fatalf("ListGroups() error = %v", err)
+		}
+		if len(groups) != 1 || groups[0].Parent != "" {
+			t.Fatalf("ListGroups() after failed move = %+v, want unmoved group", groups)
+		}
+
+		// Without the conflict the group and the rewrite land together.
+		if err := store.DeleteUser(ctx, "u2"); err != nil {
+			t.Fatalf("DeleteUser(blocker) error = %v", err)
+		}
+		if err := store.ApplyGroupMove(ctx, moved, []User{rewrite}); err != nil {
+			t.Fatalf("ApplyGroupMove() error = %v", err)
+		}
+		groups, _ = store.ListGroups(ctx)
+		users, _ := store.ListUsers(ctx)
+		if len(groups) != 1 || groups[0].Parent != "org" {
+			t.Fatalf("ListGroups() after move = %+v", groups)
+		}
+		if len(users) != 1 || users[0].UserPath != "/org/team/anna" {
+			t.Fatalf("ListUsers() after move = %+v", users)
+		}
+	})
+}
+
 func TestSQLStoreMigratesPreTreeSchema(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()

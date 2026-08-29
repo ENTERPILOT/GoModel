@@ -2,7 +2,10 @@ package users
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -154,6 +157,53 @@ func (s *MongoDBStore) UpsertGroup(ctx context.Context, group Group) error {
 		return wrapStoreErr("upsert group", err)
 	}
 	return nil
+}
+
+// ApplyGroupMove writes the group and the member path rewrites in one MongoDB
+// transaction when the deployment supports transactions (replica set or
+// mongos), falling back to sequential writes on standalone servers.
+func (s *MongoDBStore) ApplyGroupMove(ctx context.Context, group Group, rewrites []User) error {
+	session, err := s.groups.Database().Client().StartSession()
+	if err != nil {
+		return s.applyGroupMoveWrites(ctx, group, rewrites)
+	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(txCtx context.Context) (any, error) {
+		return nil, s.applyGroupMoveWrites(txCtx, group, rewrites)
+	})
+	if err != nil && isMongoTransactionCapabilityError(err) {
+		slog.Warn("MongoDB transactions unavailable for group move; falling back to sequential writes", "error", err)
+		return s.applyGroupMoveWrites(ctx, group, rewrites)
+	}
+	return err
+}
+
+func (s *MongoDBStore) applyGroupMoveWrites(ctx context.Context, group Group, rewrites []User) error {
+	if err := s.UpsertGroup(ctx, group); err != nil {
+		return err
+	}
+	for _, user := range rewrites {
+		if err := s.UpsertUser(ctx, user); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// isMongoTransactionCapabilityError reports whether err means the server
+// cannot run transactions at all (error code 20 IllegalOperation, or the
+// standalone-server complaint), as opposed to a transaction that failed.
+func isMongoTransactionCapabilityError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var commandErr mongo.CommandError
+	if errors.As(err, &commandErr) && commandErr.HasErrorCode(20) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()),
+		"transaction numbers are only allowed on a replica set member or mongos")
 }
 
 func (s *MongoDBStore) DeleteGroup(ctx context.Context, name string) error {

@@ -1576,8 +1576,40 @@
   "users_access_status_blocked": "Brak dostępu",
   "users_access_status_disabled": "Wyłączony",
   "users_access_managed": "zarządzany z konfiguracji",
-  "users_access_restrict_warning": "{count} model(e) są obecnie otwarte dla wszystkich; nadanie ich tutaj ograniczy je wyłącznie do wskazanych podmiotów.",
-  "users_access_reopen_warning": "{count} model(e) tracą ostatni podmiot; ich polityka zostanie usunięta i staną się otwarte dla wszystkich.",
+  "users_access_restrict_warning": [
+    {
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
+      "match": {
+        "count_plural=one": "{count} model jest obecnie otwarty dla wszystkich; nadanie go tutaj ograniczy go wyłącznie do wskazanych podmiotów.",
+        "count_plural=few": "{count} modele są obecnie otwarte dla wszystkich; nadanie ich tutaj ograniczy je wyłącznie do wskazanych podmiotów.",
+        "count_plural=many": "{count} modeli jest obecnie otwartych dla wszystkich; nadanie ich tutaj ograniczy je wyłącznie do wskazanych podmiotów.",
+        "count_plural=*": "{count} modelu jest obecnie otwarte dla wszystkich; nadanie ich tutaj ograniczy je wyłącznie do wskazanych podmiotów."
+      }
+    }
+  ],
+  "users_access_reopen_warning": [
+    {
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
+      "match": {
+        "count_plural=one": "{count} model traci ostatni podmiot; jego polityka zostanie usunięta i stanie się otwarty dla wszystkich.",
+        "count_plural=few": "{count} modele tracą ostatni podmiot; ich polityki zostaną usunięte i staną się otwarte dla wszystkich.",
+        "count_plural=many": "{count} modeli traci ostatni podmiot; ich polityki zostaną usunięte i staną się otwarte dla wszystkich.",
+        "count_plural=*": "{count} modelu traci ostatni podmiot; jego polityka zostanie usunięta i stanie się otwarte dla wszystkich."
+      }
+    }
+  ],
   "users_access_load_failed": "Nie udało się wczytać modeli lub polityk dostępu.",
   "users_access_save_failed": "Nie udało się zaktualizować dostępu do modeli.",
   "users_access_saved": "Zaktualizowano dostęp do modeli.",

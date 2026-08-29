@@ -17,23 +17,23 @@ import (
 // set directly.
 type upsertUserRequest struct {
 	ID          string `json:"id,omitempty"`
-	Name        string `json:"name"`
+	Name        string `json:"name" binding:"required"`
 	Description string `json:"description,omitempty"`
 	Group       string `json:"group,omitempty"`
 }
 
 type deleteUserRequest struct {
-	ID string `json:"id"`
+	ID string `json:"id" binding:"required"`
 }
 
 type upsertGroupRequest struct {
-	Name        string `json:"name"`
+	Name        string `json:"name" binding:"required"`
 	Description string `json:"description,omitempty"`
 	Parent      string `json:"parent,omitempty"`
 }
 
 type deleteGroupRequest struct {
-	Name string `json:"name"`
+	Name string `json:"name" binding:"required"`
 }
 
 // ListUsers handles GET /admin/users.

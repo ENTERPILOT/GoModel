@@ -215,8 +215,12 @@ func TestSQLStoreAuthKeyUserIDRoundTrip(t *testing.T) {
 		if got := byID["key-bound"]; got.UserID != "user-1" || got.UserPath != "/team/alpha" {
 			t.Fatalf("bound key = %+v, want user-1 at /team/alpha", got)
 		}
-		if got := byID["key-unbound"]; got.UserID != "" {
-			t.Fatalf("unbound key UserID = %q, want empty", got.UserID)
+		unbound, ok := byID["key-unbound"]
+		if !ok {
+			t.Fatalf("List() did not return key-unbound, got %d keys", len(keys))
+		}
+		if unbound.UserID != "" {
+			t.Fatalf("unbound key UserID = %q, want empty", unbound.UserID)
 		}
 	})
 }

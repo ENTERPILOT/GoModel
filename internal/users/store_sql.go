@@ -82,7 +82,11 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]User, error) {
 }
 
 func (s *SQLStore) UpsertUser(ctx context.Context, user User) error {
-	_, err := s.db.Exec(ctx, `
+	return upsertSQLUser(ctx, s.db, user)
+}
+
+func upsertSQLUser(ctx context.Context, q sqlx.Querier, user User) error {
+	_, err := q.Exec(ctx, `
 		INSERT INTO users (id, user_path, name, description, user_group, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
@@ -128,7 +132,11 @@ func (s *SQLStore) ListGroups(ctx context.Context) ([]Group, error) {
 }
 
 func (s *SQLStore) UpsertGroup(ctx context.Context, group Group) error {
-	_, err := s.db.Exec(ctx, `
+	return upsertSQLGroup(ctx, s.db, group)
+}
+
+func upsertSQLGroup(ctx context.Context, q sqlx.Querier, group Group) error {
+	_, err := q.Exec(ctx, `
 		INSERT INTO user_groups (name, description, parent, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
@@ -140,6 +148,23 @@ func (s *SQLStore) UpsertGroup(ctx context.Context, group Group) error {
 		return wrapStoreErr("upsert group", err)
 	}
 	return nil
+}
+
+// ApplyGroupMove writes the group and the member path rewrites in one
+// transaction, so an interrupted cascade rolls back instead of persisting a
+// moved group alongside stale user paths.
+func (s *SQLStore) ApplyGroupMove(ctx context.Context, group Group, rewrites []User) error {
+	return s.db.InTx(ctx, func(q sqlx.Querier) error {
+		if err := upsertSQLGroup(ctx, q, group); err != nil {
+			return err
+		}
+		for _, user := range rewrites {
+			if err := upsertSQLUser(ctx, q, user); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *SQLStore) DeleteGroup(ctx context.Context, name string) error {

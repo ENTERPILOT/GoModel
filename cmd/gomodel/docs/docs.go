@@ -7797,6 +7797,9 @@ const docTemplate = `{
         },
         "admin.deleteGroupRequest": {
             "type": "object",
+            "required": [
+                "name"
+            ],
             "properties": {
                 "name": {
                     "type": "string"
@@ -7830,6 +7833,9 @@ const docTemplate = `{
         },
         "admin.deleteUserRequest": {
             "type": "object",
+            "required": [
+                "id"
+            ],
             "properties": {
                 "id": {
                     "type": "string"
@@ -8340,6 +8346,9 @@ const docTemplate = `{
         },
         "admin.upsertGroupRequest": {
             "type": "object",
+            "required": [
+                "name"
+            ],
             "properties": {
                 "description": {
                     "type": "string"
@@ -8503,6 +8512,9 @@ const docTemplate = `{
         },
         "admin.upsertUserRequest": {
             "type": "object",
+            "required": [
+                "name"
+            ],
             "properties": {
                 "description": {
                     "type": "string"

@@ -264,17 +264,21 @@ class UsersStore {
     if (views.status === "ok") {
       this.policyViews = views.items;
     }
-    const models_ = models.status === "ok" ? models.items : [];
+    if (views.status !== "ok" || models.status !== "ok") {
+      // Without both inventories the diff base is unknown; leave the editor
+      // rowless (nothing to submit) instead of building rows against stale
+      // policy state.
+      this.accessEditor.loading = false;
+      this.accessEditor.error = m.users_access_load_failed();
+      return;
+    }
     this.accessEditor.rows = buildAccessRows({
-      models: models_,
+      models: models.items,
       views: this.policyViews,
       subject,
       groups: this.groups,
     });
     this.accessEditor.loading = false;
-    if (views.status !== "ok" || models.status !== "ok") {
-      this.accessEditor.error = m.users_access_load_failed();
-    }
   }
 
   closeAccessEditor() {
