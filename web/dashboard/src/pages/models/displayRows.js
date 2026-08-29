@@ -457,12 +457,13 @@ export function rowRedirectCanRemove(row) {
   );
 }
 
+// rowAnchorID gives an alias row a DOM id unique to its name. The name is
+// percent-encoded rather than squashed to hyphens, so distinct names such as
+// "foo/bar" and "foo-bar" never share an id.
 export function rowAnchorID(row) {
   if (!row) return "";
   if (row.is_alias && row.alias && row.alias.name) {
-    return (
-      "alias-row-" + String(row.alias.name).replace(/[^a-zA-Z0-9_-]+/g, "-")
-    );
+    return "alias-row-" + encodeURIComponent(String(row.alias.name));
   }
   return "";
 }

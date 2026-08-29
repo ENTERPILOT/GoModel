@@ -13,6 +13,7 @@ import {
   groupDisplayModels,
   rowIsManaged,
   rowRedirectCanRemove,
+  rowAnchorID,
 } from "../src/pages/models/displayRows.js";
 import {
   qualifiedModelName,
@@ -1058,4 +1059,11 @@ test("maskingRoutingKind tells failover, balancing, and true redirects apart", (
   assert.equal(maskingRoutingKind(over([azure, gemini], { strategy: "cost" })), "redirect");
   // Plain single-target alias fields are honoured too.
   assert.equal(maskingRoutingKind({ name: "openai/gpt-4o", target_provider: "azure", target_model: "gpt-4o" }), "redirect");
+});
+
+test("rowAnchorID keeps distinct alias names on distinct DOM ids", () => {
+  const id = (name) => rowAnchorID({ is_alias: true, alias: { name } });
+  assert.notEqual(id("foo/bar"), id("foo-bar"));
+  assert.match(id("team/cheap"), /^alias-row-[A-Za-z0-9%._~-]+$/);
+  assert.equal(rowAnchorID({ is_alias: false, alias: { name: "x" } }), "");
 });
