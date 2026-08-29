@@ -93,6 +93,62 @@ func TestSQLStoreUserPathUnique(t *testing.T) {
 	})
 }
 
+func TestSQLStoreMigratesPreTreeSchema(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		ctx := context.Background()
+		// The schema before paths were derived from the group tree: a JSON
+		// membership column on users, no parent on groups.
+		err := db.Schema(ctx,
+			`CREATE TABLE users (
+				id TEXT PRIMARY KEY,
+				user_path TEXT NOT NULL UNIQUE,
+				name TEXT NOT NULL DEFAULT '',
+				description TEXT NOT NULL DEFAULT '',
+				user_groups `+sqlx.TypeJSON+`,
+				created_at `+sqlx.TypeInt64+` NOT NULL,
+				updated_at `+sqlx.TypeInt64+` NOT NULL
+			)`,
+			`CREATE TABLE user_groups (
+				name TEXT PRIMARY KEY,
+				description TEXT NOT NULL DEFAULT '',
+				created_at `+sqlx.TypeInt64+` NOT NULL,
+				updated_at `+sqlx.TypeInt64+` NOT NULL
+			)`,
+		)
+		if err != nil {
+			t.Fatalf("create old schema: %v", err)
+		}
+
+		store, err := NewSQLStore(ctx, db)
+		if err != nil {
+			t.Fatalf("NewSQLStore: %v", err)
+		}
+		now := time.Now().UTC().Truncate(time.Second)
+		user := User{ID: "u1", UserPath: "/team/anna", Name: "anna", Group: "team", CreatedAt: now, UpdatedAt: now}
+		if err := store.UpsertUser(ctx, user); err != nil {
+			t.Fatalf("UpsertUser() error = %v", err)
+		}
+		group := Group{Name: "team", Parent: "org", CreatedAt: now, UpdatedAt: now}
+		if err := store.UpsertGroup(ctx, group); err != nil {
+			t.Fatalf("UpsertGroup() error = %v", err)
+		}
+		listedUsers, err := store.ListUsers(ctx)
+		if err != nil {
+			t.Fatalf("ListUsers() error = %v", err)
+		}
+		if len(listedUsers) != 1 || !reflect.DeepEqual(listedUsers[0], user) {
+			t.Fatalf("ListUsers() = %+v, want [%+v]", listedUsers, user)
+		}
+		listedGroups, err := store.ListGroups(ctx)
+		if err != nil {
+			t.Fatalf("ListGroups() error = %v", err)
+		}
+		if len(listedGroups) != 1 || !reflect.DeepEqual(listedGroups[0], group) {
+			t.Fatalf("ListGroups() = %+v, want [%+v]", listedGroups, group)
+		}
+	})
+}
+
 func TestSQLStoreGroupRoundTrip(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()

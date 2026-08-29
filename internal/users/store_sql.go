@@ -39,6 +39,14 @@ var sqlIndexes = []string{
 	`CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC)`,
 }
 
+// sqlMigrations backfill columns on tables created before paths became
+// derived from the group tree (the earlier schema kept a JSON membership
+// column on users and no parent on groups).
+var sqlMigrations = []string{
+	`ALTER TABLE users ADD COLUMN user_group TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE user_groups ADD COLUMN parent TEXT NOT NULL DEFAULT ''`,
+}
+
 // NewSQLStore creates the users and user_groups tables if needed.
 func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	if db == nil {
@@ -46,6 +54,9 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := db.Schema(ctx, sqlTables...); err != nil {
 		return nil, fmt.Errorf("failed to create users tables: %w", err)
+	}
+	if err := sqlx.AddColumns(ctx, db, sqlMigrations...); err != nil {
+		return nil, err
 	}
 	if err := db.Schema(ctx, sqlIndexes...); err != nil {
 		return nil, fmt.Errorf("failed to create users index: %w", err)
