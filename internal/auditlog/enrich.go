@@ -388,6 +388,21 @@ func EnrichEntryWithUserPath(c *echo.Context, userPath string) {
 	publishLiveAuditUpdate(c, entry)
 }
 
+// EnrichEntryWithUserID attaches the registered user id bound to the
+// authenticated key to the live audit entry.
+func EnrichEntryWithUserID(c *echo.Context, userID string) {
+	entry := entryFromContext(c)
+	if entry == nil {
+		return
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	ensureLogData(entry).UserID = userID
+	publishLiveAuditUpdate(c, entry)
+}
+
 // EnrichLogEntryWithRequestContext attaches auth and effective user-path
 // metadata from context directly to an existing log entry.
 func EnrichLogEntryWithRequestContext(entry *LogEntry, ctx context.Context) {

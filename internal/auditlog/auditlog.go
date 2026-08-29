@@ -122,6 +122,9 @@ type LogData struct {
 	// Identity
 	UserAgent  string `json:"user_agent,omitempty" bson:"user_agent,omitempty"`
 	APIKeyHash string `json:"api_key_hash,omitempty" bson:"api_key_hash,omitempty"`
+	// UserID is the registered user bound to the authenticated key. Unlike
+	// UserPath it survives moving the user in the hierarchy.
+	UserID string `json:"user_id,omitempty" bson:"user_id,omitempty"`
 	// EventType identifies non-request security lifecycle entries written
 	// through the extension authentication event recorder.
 	EventType string `json:"event_type,omitempty" bson:"event_type,omitempty"`

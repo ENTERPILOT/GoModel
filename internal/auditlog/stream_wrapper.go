@@ -258,6 +258,7 @@ func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 		entryCopy.Data = &LogData{
 			UserAgent:                 baseEntry.Data.UserAgent,
 			APIKeyHash:                baseEntry.Data.APIKeyHash,
+			UserID:                    baseEntry.Data.UserID,
 			EventType:                 baseEntry.Data.EventType,
 			Labels:                    baseEntry.Data.Labels,
 			Temperature:               baseEntry.Data.Temperature,

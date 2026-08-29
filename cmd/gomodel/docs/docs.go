@@ -9092,6 +9092,10 @@ const docTemplate = `{
                     "description": "Identity",
                     "type": "string"
                 },
+                "user_id": {
+                    "description": "UserID is the registered user bound to the authenticated key. Unlike\nUserPath it survives moving the user in the hierarchy.",
+                    "type": "string"
+                },
                 "workflow_features": {
                     "description": "WorkflowFeatures captures the request-time effective workflow features\nafter runtime caps were applied. This keeps audit views historically accurate\neven if the active process config changes later.",
                     "allOf": [

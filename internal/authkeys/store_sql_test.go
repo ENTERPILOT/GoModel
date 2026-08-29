@@ -174,3 +174,49 @@ func TestSQLStoreAuthKeyDashboardAccessRoundTrip(t *testing.T) {
 		assertAccess(map[string]bool{"key-admin": false, "key-plain": true})
 	})
 }
+
+func TestSQLStoreAuthKeyUserIDRoundTrip(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
+		now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+		ctx := context.Background()
+		if err := store.Create(ctx, AuthKey{
+			ID:            "key-bound",
+			Name:          "bound",
+			UserPath:      "/team/alpha",
+			UserID:        "user-1",
+			RedactedValue: TokenPrefix + "...bnd1",
+			SecretHash:    "hash-bound",
+			Enabled:       true,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}); err != nil {
+			t.Fatalf("Create(bound): %v", err)
+		}
+		if err := store.Create(ctx, AuthKey{
+			ID:            "key-unbound",
+			Name:          "unbound",
+			RedactedValue: TokenPrefix + "...ubd1",
+			SecretHash:    "hash-unbound",
+			Enabled:       true,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}); err != nil {
+			t.Fatalf("Create(unbound): %v", err)
+		}
+
+		keys, err := store.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		byID := map[string]AuthKey{}
+		for _, key := range keys {
+			byID[key.ID] = key
+		}
+		if got := byID["key-bound"]; got.UserID != "user-1" || got.UserPath != "/team/alpha" {
+			t.Fatalf("bound key = %+v, want user-1 at /team/alpha", got)
+		}
+		if got := byID["key-unbound"]; got.UserID != "" {
+			t.Fatalf("unbound key UserID = %q, want empty", got.UserID)
+		}
+	})
+}

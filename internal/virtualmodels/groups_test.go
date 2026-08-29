@@ -2,6 +2,7 @@ package virtualmodels
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -18,10 +19,8 @@ func TestService_PolicyGroupsGateAccess(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, ancestor := range core.UserPathAncestors(path) {
-			if ancestor == "/team/alpha" {
-				return []string{"beta-testers"}
-			}
+		if slices.Contains(core.UserPathAncestors(path), "/team/alpha") {
+			return []string{"beta-testers"}
 		}
 		return nil
 	})

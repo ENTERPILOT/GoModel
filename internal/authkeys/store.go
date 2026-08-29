@@ -56,8 +56,12 @@ type authKeyRows interface {
 func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Description = strings.TrimSpace(input.Description)
+	input.UserID = strings.TrimSpace(input.UserID)
 	if input.Name == "" {
 		return CreateInput{}, newValidationError("name is required", nil)
+	}
+	if input.UserID != "" && strings.TrimSpace(input.UserPath) != "" {
+		return CreateInput{}, newValidationError("user_path is derived from user_id; provide only one", nil)
 	}
 	userPath, err := core.NormalizeUserPath(input.UserPath)
 	if err != nil {

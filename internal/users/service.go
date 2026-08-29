@@ -197,6 +197,42 @@ func (s *Service) GroupsForPath(userPath string) []string {
 	return slices.Compact(merged)
 }
 
+// UserByID returns the user with the given id from the current snapshot.
+func (s *Service) UserByID(id string) (User, bool) {
+	if s == nil {
+		return User{}, false
+	}
+	user, ok := s.current().byID[strings.TrimSpace(id)]
+	if !ok {
+		return User{}, false
+	}
+	return user.clone(), true
+}
+
+// UserIDForPath resolves the registered user that owns a request path: the
+// user registered at the path itself, or at its deepest registered ancestor,
+// so requests from /team/alpha/service attribute to the user at /team/alpha.
+// Unknown paths yield "".
+func (s *Service) UserIDForPath(userPath string) string {
+	if s == nil {
+		return ""
+	}
+	userPath, err := core.NormalizeUserPath(userPath)
+	if err != nil || userPath == "" {
+		return ""
+	}
+	snap := s.current()
+	if len(snap.byPath) == 0 {
+		return ""
+	}
+	for _, ancestor := range core.UserPathAncestors(userPath) {
+		if user, ok := snap.byPath[ancestor]; ok {
+			return user.ID
+		}
+	}
+	return ""
+}
+
 // UpsertUser creates a new user (empty input ID) or updates an existing one.
 func (s *Service) UpsertUser(ctx context.Context, input UpsertUserInput) (User, error) {
 	if s == nil {

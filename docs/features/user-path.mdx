@@ -32,6 +32,10 @@ labels, so you can confirm which subtree a key resolves to at a glance.
 When a request uses that key, GoModel treats the key's `user_path` as the
 effective user path for the request.
 
+A key can also bind to a registered user (`user_id`) instead of a raw path;
+the key then follows the user's current path even after the user moves in the
+hierarchy. See [Users & Groups](/features/users-groups).
+
 ## HTTP header
 
 Clients can also send a user path directly:

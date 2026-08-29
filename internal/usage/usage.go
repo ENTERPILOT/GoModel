@@ -54,8 +54,12 @@ type UsageEntry struct {
 	ProviderName string `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
 	Endpoint     string `json:"endpoint" bson:"endpoint"`
 	UserPath     string `json:"user_path,omitempty" bson:"user_path,omitempty"`
-	SessionID    string `json:"session_id,omitempty" bson:"session_id,omitempty"`
-	CacheType    string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
+	// UserID attributes the row to a registered user. It survives moving the
+	// user's path in the hierarchy, while UserPath keeps the placement the
+	// request was actually made under.
+	UserID    string `json:"user_id,omitempty" bson:"user_id,omitempty"`
+	SessionID string `json:"session_id,omitempty" bson:"session_id,omitempty"`
+	CacheType string `json:"cache_type,omitempty" bson:"cache_type,omitempty"`
 
 	// Labels are request labels extracted from configured tagging headers.
 	Labels []string `json:"labels,omitempty" bson:"labels,omitempty"`

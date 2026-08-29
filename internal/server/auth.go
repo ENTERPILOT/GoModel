@@ -269,6 +269,10 @@ func interactionContinuationAllowed(ctx context.Context) bool {
 // authenticated managed key's identity, labels, and bound user path.
 func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResult, userPathHeaderName string) {
 	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
+	if userID := strings.TrimSpace(authResult.UserID); userID != "" {
+		ctx = core.WithUserID(ctx, userID)
+		auditlog.EnrichEntryWithUserID(c, userID)
+	}
 	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
 	if len(authResult.Labels) > 0 {

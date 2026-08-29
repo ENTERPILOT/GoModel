@@ -15,6 +15,7 @@ type mongoAuthKeyDocument struct {
 	Name            string     `bson:"name"`
 	Description     string     `bson:"description,omitempty"`
 	UserPath        string     `bson:"user_path,omitempty"`
+	UserID          string     `bson:"user_id,omitempty"`
 	Labels          []string   `bson:"labels,omitempty"`
 	DashboardAccess bool       `bson:"dashboard_access,omitempty"`
 	RedactedValue   string     `bson:"redacted_value"`
@@ -82,6 +83,7 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		Name:            key.Name,
 		Description:     key.Description,
 		UserPath:        key.UserPath,
+		UserID:          key.UserID,
 		Labels:          key.Labels,
 		DashboardAccess: key.DashboardAccess,
 		RedactedValue:   key.RedactedValue,
@@ -165,6 +167,7 @@ func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 		Name:            doc.Name,
 		Description:     doc.Description,
 		UserPath:        doc.UserPath,
+		UserID:          doc.UserID,
 		Labels:          doc.Labels,
 		DashboardAccess: doc.DashboardAccess,
 		RedactedValue:   doc.RedactedValue,

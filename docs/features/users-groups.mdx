@@ -36,6 +36,30 @@ Descendant paths inherit from their ancestors: a request under
 `/engineering/team-a/service` carries the groups of the user registered at
 `/engineering/team-a` (and of any deeper registered ancestor).
 
+## Bind API keys to a user
+
+Instead of typing a raw path, an API key can bind to a registered user by id:
+
+```http
+POST /admin/auth-keys
+{"name": "team-a key", "user_id": "<user id>"}
+```
+
+A user-bound key follows the user's **current** path: authentication resolves
+the path from the user registry on every request, so moving the user to a new
+path re-scopes all of its keys instantly — budgets, model access, workflows,
+and usage tracking follow along without touching a single key. The user's path
+at creation time is stored on the key as a fallback and is only used if the
+user is later deleted.
+
+`user_id` and `user_path` are mutually exclusive on key creation; path-bound
+keys keep working unchanged.
+
+Usage rows record the owning user's `user_id` alongside `user_path`: the path
+preserves where the request was made (historic attribution), while the id
+identifies the user across renames. A row is attributed to the user registered
+at the request path or at its deepest registered ancestor.
+
 ## Groups
 
 Create a group with `Users -> New group`. The group name is its identity —

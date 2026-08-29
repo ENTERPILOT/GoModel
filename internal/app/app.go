@@ -658,6 +658,19 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// Group-scoped access policies resolve a caller's groups from its user
 	// path through the users registry.
 	vm.SetGroupResolver(usersResult.Service.GroupsForPath)
+	// A user-bound auth key follows the user's current path at authentication
+	// time, so renaming a user re-scopes its keys without touching them.
+	authKeyResult.Service.SetUserResolver(func(id string) (string, bool) {
+		user, ok := usersResult.Service.UserByID(id)
+		return user.UserPath, ok
+	})
+	// Usage rows carry the owning registered user's id alongside the path, so
+	// per-user reporting survives path renames.
+	if logger, ok := usageResult.Logger.(interface {
+		SetUserIDResolver(func(string) string)
+	}); ok {
+		logger.SetUserIDResolver(usersResult.Service.UserIDForPath)
+	}
 
 	// Log configuration status after auth has been initialized so the startup
 	// message reflects both bootstrap and managed auth modes.

@@ -10,11 +10,16 @@ const (
 
 // AuthKey is the persisted auth key record.
 type AuthKey struct {
-	ID          string   `json:"id" bson:"_id"`
-	Name        string   `json:"name" bson:"name"`
-	Description string   `json:"description,omitempty" bson:"description,omitempty"`
-	UserPath    string   `json:"user_path,omitempty" bson:"user_path,omitempty"`
-	Labels      []string `json:"labels,omitempty" bson:"labels,omitempty"`
+	ID          string `json:"id" bson:"_id"`
+	Name        string `json:"name" bson:"name"`
+	Description string `json:"description,omitempty" bson:"description,omitempty"`
+	UserPath    string `json:"user_path,omitempty" bson:"user_path,omitempty"`
+	// UserID binds the key to a registered user. When set, UserPath holds a
+	// snapshot of the user's path at creation time; authentication resolves
+	// the user's current path instead, so renaming the user re-scopes every
+	// bound key without touching it.
+	UserID string   `json:"user_id,omitempty" bson:"user_id,omitempty"`
+	Labels []string `json:"labels,omitempty" bson:"labels,omitempty"`
 	// DashboardAccess grants the key access to the admin API and dashboard.
 	// Keys without it can still call every model endpoint and /v1/usage.
 	DashboardAccess bool       `json:"dashboard_access" bson:"dashboard_access,omitempty"`
@@ -44,6 +49,7 @@ type CreateInput struct {
 	Name            string
 	Description     string
 	UserPath        string
+	UserID          string
 	Labels          []string
 	DashboardAccess bool
 	ExpiresAt       *time.Time

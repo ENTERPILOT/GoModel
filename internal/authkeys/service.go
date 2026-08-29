@@ -33,6 +33,7 @@ type snapshot struct {
 type AuthenticationResult struct {
 	ID              string
 	UserPath        string
+	UserID          string
 	Labels          []string
 	DashboardAccess bool
 }
@@ -41,8 +42,32 @@ type AuthenticationResult struct {
 type Service struct {
 	store Store
 
+	// userResolver returns the current user path of a registered user id.
+	// Installed at startup from the users registry; nil when the registry is
+	// unavailable, in which case user-bound keys fall back to the path
+	// snapshot stored on the key.
+	userResolver func(userID string) (string, bool)
+
 	mu       sync.RWMutex
 	snapshot snapshot
+}
+
+// SetUserResolver installs the lookup that maps a registered user id to the
+// user's current path. Call once during startup, before serving requests.
+func (s *Service) SetUserResolver(resolver func(userID string) (string, bool)) {
+	if s == nil {
+		return
+	}
+	s.userResolver = resolver
+}
+
+// resolveUserPath returns the live path of a user-bound key, or "", false when
+// no resolver is installed or the user is gone.
+func (s *Service) resolveUserPath(userID string) (string, bool) {
+	if s == nil || s.userResolver == nil || userID == "" {
+		return "", false
+	}
+	return s.userResolver(userID)
 }
 
 // NewService creates a managed auth key service backed by storage.
@@ -149,6 +174,9 @@ func (s *Service) ListViews() []View {
 	result := make([]View, 0, len(s.snapshot.order))
 	for _, id := range s.snapshot.order {
 		key := s.snapshot.byID[id]
+		if path, ok := s.resolveUserPath(key.UserID); ok {
+			key.UserPath = path
+		}
 		result = append(result, View{
 			AuthKey: key,
 			Active:  key.Active(now),
@@ -168,6 +196,15 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 	if err != nil {
 		return nil, err
 	}
+	if normalized.UserID != "" {
+		path, ok := s.resolveUserPath(normalized.UserID)
+		if !ok {
+			return nil, newValidationError("unknown user_id: "+normalized.UserID, nil)
+		}
+		// Snapshot the current path so the key keeps a usable scope if the
+		// user registry is ever unavailable or the user is deleted.
+		normalized.UserPath = path
+	}
 
 	value, redactedValue, secretHash, err := generateTokenMaterial()
 	if err != nil {
@@ -180,6 +217,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		Name:            normalized.Name,
 		Description:     normalized.Description,
 		UserPath:        normalized.UserPath,
+		UserID:          normalized.UserID,
 		Labels:          normalized.Labels,
 		DashboardAccess: normalized.DashboardAccess,
 		RedactedValue:   redactedValue,
@@ -308,14 +346,14 @@ func (s *Service) Authenticate(_ context.Context, token string) (AuthenticationR
 	active, ok := s.snapshot.activeByHash[secretHash]
 	if ok {
 		s.mu.RUnlock()
-		return authenticateKey(active, now)
+		return s.authenticateKey(active, now)
 	}
 	key, exists := s.snapshot.bySecretHash[secretHash]
 	s.mu.RUnlock()
 	if !exists {
 		return AuthenticationResult{}, ErrInvalidToken
 	}
-	return authenticateKey(key, now)
+	return s.authenticateKey(key, now)
 }
 
 // StartBackgroundRefresh periodically reloads auth keys from storage until stopped.
@@ -352,7 +390,7 @@ func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	}
 }
 
-func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
+func (s *Service) authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 	if !key.Enabled || key.DeactivatedAt != nil {
 		return AuthenticationResult{}, ErrInactive
 	}
@@ -362,9 +400,17 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 	if strings.TrimSpace(key.ID) == "" {
 		return AuthenticationResult{}, ErrInvalidToken
 	}
+	userPath := strings.TrimSpace(key.UserPath)
+	if path, ok := s.resolveUserPath(key.UserID); ok {
+		// A user-bound key follows the user's current path, so renaming the
+		// user re-scopes the key immediately. The stored path is only the
+		// fallback for a missing user or registry.
+		userPath = path
+	}
 	return AuthenticationResult{
 		ID:              key.ID,
-		UserPath:        strings.TrimSpace(key.UserPath),
+		UserPath:        userPath,
+		UserID:          key.UserID,
 		Labels:          key.Labels,
 		DashboardAccess: key.DashboardAccess,
 	}, nil

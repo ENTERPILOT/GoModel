@@ -16,9 +16,12 @@ import (
 )
 
 type createAuthKeyRequest struct {
-	Name            string     `json:"name"`
-	Description     string     `json:"description,omitempty"`
-	UserPath        string     `json:"user_path,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	UserPath    string `json:"user_path,omitempty"`
+	// UserID binds the key to a registered user; the key then follows the
+	// user's current path. Mutually exclusive with UserPath.
+	UserID          string     `json:"user_id,omitempty"`
 	Labels          []string   `json:"labels,omitempty"`
 	DashboardAccess bool       `json:"dashboard_access,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
@@ -55,6 +58,7 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		Name:            req.Name,
 		Description:     req.Description,
 		UserPath:        userPath,
+		UserID:          req.UserID,
 		Labels:          req.Labels,
 		DashboardAccess: req.DashboardAccess,
 		ExpiresAt:       req.ExpiresAt,

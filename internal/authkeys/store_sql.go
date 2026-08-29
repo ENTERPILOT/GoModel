@@ -23,6 +23,7 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS auth_keys (
 		name TEXT NOT NULL,
 		description TEXT NOT NULL DEFAULT '',
 		user_path TEXT,
+		user_id TEXT,
 		labels ` + sqlx.TypeJSON + `,
 		dashboard_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		redacted_value TEXT NOT NULL,
@@ -44,10 +45,11 @@ var sqlMigrations = []string{
 	`ALTER TABLE auth_keys ADD COLUMN user_path TEXT`,
 	`ALTER TABLE auth_keys ADD COLUMN labels ` + sqlx.TypeJSON,
 	`ALTER TABLE auth_keys ADD COLUMN dashboard_access ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE`,
+	`ALTER TABLE auth_keys ADD COLUMN user_id TEXT`,
 }
 
 const selectAuthKeyColumns = `
-	SELECT id, name, description, user_path, labels, dashboard_access,
+	SELECT id, name, description, user_path, user_id, labels, dashboard_access,
 		redacted_value, secret_hash, enabled, expires_at, deactivated_at,
 		created_at, updated_at
 	FROM auth_keys
@@ -88,13 +90,14 @@ func (s *SQLStore) List(ctx context.Context) ([]AuthKey, error) {
 func (s *SQLStore) Create(ctx context.Context, key AuthKey) error {
 	_, err := s.db.Exec(ctx, `
 		INSERT INTO auth_keys (
-			id, name, description, user_path, labels, dashboard_access,
+			id, name, description, user_path, user_id, labels, dashboard_access,
 			redacted_value, secret_hash, enabled, expires_at, deactivated_at,
 			created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, key.ID, key.Name, key.Description,
-		sqlutil.NullableString(key.UserPath), sqlutil.NullableJSONStrings(key.Labels, key.ID),
+		sqlutil.NullableString(key.UserPath), sqlutil.NullableString(key.UserID),
+		sqlutil.NullableJSONStrings(key.Labels, key.ID),
 		key.DashboardAccess, key.RedactedValue, key.SecretHash, key.Enabled,
 		sqlutil.UnixOrNil(key.ExpiresAt), sqlutil.UnixOrNil(key.DeactivatedAt),
 		key.CreatedAt.Unix(), key.UpdatedAt.Unix())
@@ -159,7 +162,7 @@ func (s *SQLStore) Close() error {
 
 func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	var key AuthKey
-	var userPath, labelsJSON *string
+	var userPath, userID, labelsJSON *string
 	var expiresAt, deactivatedAt *int64
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
@@ -167,6 +170,7 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		&key.Name,
 		&key.Description,
 		&userPath,
+		&userID,
 		&labelsJSON,
 		&key.DashboardAccess,
 		&key.RedactedValue,
@@ -183,6 +187,7 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 		return AuthKey{}, err
 	}
 	key.UserPath = sqlutil.DerefTrimmed(userPath)
+	key.UserID = sqlutil.DerefTrimmed(userID)
 	if labelsJSON != nil {
 		key.Labels = sqlutil.StringsFromJSON(*labelsJSON, key.ID)
 	}

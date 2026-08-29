@@ -16,6 +16,9 @@ const (
 	workflowKey contextKey = "workflow"
 	// authKeyIDKey stores the internal managed auth key id for the request.
 	authKeyIDKey contextKey = "auth-key-id"
+
+	// userIDKey stores the registered user id bound to the authenticated key.
+	userIDKey contextKey = "user-id"
 	// effectiveUserPathKey stores a request-scoped user path override applied
 	// after ingress capture, for example from a managed auth key.
 	effectiveUserPathKey contextKey = "effective-user-path"
@@ -196,6 +199,23 @@ func WithAuthKeyID(ctx context.Context, id string) context.Context {
 // GetAuthKeyID retrieves the managed auth key id from the context.
 func GetAuthKeyID(ctx context.Context) string {
 	if v := ctx.Value(authKeyIDKey); v != nil {
+		if id, ok := v.(string); ok {
+			return id
+		}
+	}
+	return ""
+}
+
+// WithUserID returns a new context with the registered user id attached. The
+// id identifies the user across path renames; the effective user path stays
+// the placement/scoping value.
+func WithUserID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, userIDKey, id)
+}
+
+// GetUserID retrieves the registered user id from the context.
+func GetUserID(ctx context.Context) string {
+	if v := ctx.Value(userIDKey); v != nil {
 		if id, ok := v.(string); ok {
 			return id
 		}

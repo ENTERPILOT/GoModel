@@ -180,3 +180,45 @@ func TestNormalizeGroupNames(t *testing.T) {
 		t.Fatalf("NormalizeGroupNames(comma) error = nil, want validation error")
 	}
 }
+
+func TestServiceUserByIDAndUserIDForPath(t *testing.T) {
+	runServiceTest(t, func(t *testing.T, svc *Service) {
+		ctx := context.Background()
+
+		team, err := svc.UpsertUser(ctx, UpsertUserInput{UserPath: "/team/alpha", Name: "Alpha"})
+		if err != nil {
+			t.Fatalf("UpsertUser(team) error = %v", err)
+		}
+		service, err := svc.UpsertUser(ctx, UpsertUserInput{UserPath: "/team/alpha/service", Name: "Service"})
+		if err != nil {
+			t.Fatalf("UpsertUser(service) error = %v", err)
+		}
+
+		got, ok := svc.UserByID(team.ID)
+		if !ok || got.UserPath != "/team/alpha" {
+			t.Fatalf("UserByID(%q) = %+v, %v", team.ID, got, ok)
+		}
+		if _, ok := svc.UserByID("missing"); ok {
+			t.Fatalf("UserByID(missing) = _, true, want false")
+		}
+
+		// Exact path match wins over the ancestor.
+		if id := svc.UserIDForPath("/team/alpha/service"); id != service.ID {
+			t.Fatalf("UserIDForPath(exact) = %q, want %q", id, service.ID)
+		}
+		// A descendant path attributes to its deepest registered ancestor.
+		if id := svc.UserIDForPath("/team/alpha/service/worker"); id != service.ID {
+			t.Fatalf("UserIDForPath(descendant) = %q, want %q", id, service.ID)
+		}
+		if id := svc.UserIDForPath("/team/alpha/other"); id != team.ID {
+			t.Fatalf("UserIDForPath(sibling under team) = %q, want %q", id, team.ID)
+		}
+		// Unrelated and empty paths resolve to nobody.
+		if id := svc.UserIDForPath("/sales"); id != "" {
+			t.Fatalf("UserIDForPath(unrelated) = %q, want empty", id)
+		}
+		if id := svc.UserIDForPath(""); id != "" {
+			t.Fatalf("UserIDForPath(empty) = %q, want empty", id)
+		}
+	})
+}

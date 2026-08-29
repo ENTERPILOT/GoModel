@@ -22,6 +22,33 @@ type Logger struct {
 	closed        atomic.Bool
 	liveMu        sync.RWMutex
 	livePublisher LiveEventPublisher
+
+	resolverMu     sync.RWMutex
+	userIDResolver func(userPath string) string
+}
+
+// SetUserIDResolver installs a lookup that attributes usage rows to a
+// registered user id by the entry's user path. Rows written before the
+// resolver is installed keep an empty user id.
+func (l *Logger) SetUserIDResolver(resolver func(userPath string) string) {
+	l.resolverMu.Lock()
+	l.userIDResolver = resolver
+	l.resolverMu.Unlock()
+}
+
+// stampUserID fills in the entry's user id from its user path when the entry
+// does not already carry one.
+func (l *Logger) stampUserID(entry *UsageEntry) {
+	if entry.UserID != "" || entry.UserPath == "" {
+		return
+	}
+	l.resolverMu.RLock()
+	resolver := l.userIDResolver
+	l.resolverMu.RUnlock()
+	if resolver == nil {
+		return
+	}
+	entry.UserID = resolver(entry.UserPath)
 }
 
 // NewLogger creates a new async buffered Logger.
@@ -70,6 +97,7 @@ func (l *Logger) Write(entry *UsageEntry) {
 		return
 	}
 
+	l.stampUserID(entry)
 	l.publishLiveEvent(LiveEventUsageCompleted, entry)
 	select {
 	case l.buffer <- entry:

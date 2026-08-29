@@ -36,6 +36,7 @@ type mockAuthenticator struct {
 	enabled        bool
 	tokenToID      map[string]string
 	tokenPath      map[string]string
+	tokenUserID    map[string]string
 	tokenLabels    map[string][]string
 	tokenDashboard map[string]bool
 	err            error
@@ -56,6 +57,7 @@ func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authke
 	return authkeys.AuthenticationResult{
 		ID:              id,
 		UserPath:        m.tokenPath[token],
+		UserID:          m.tokenUserID[token],
 		Labels:          m.tokenLabels[token],
 		DashboardAccess: m.tokenDashboard[token],
 	}, nil
@@ -260,6 +262,43 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "ok", rec.Body.String())
+}
+
+func TestAuthMiddlewareWithAuthenticator_UserBoundKeyEnrichesContextAndAudit(t *testing.T) {
+	e := echo.New()
+	testHandler := func(c *echo.Context) error {
+		if got := core.GetUserID(c.Request().Context()); got != "user-1" {
+			t.Fatalf("user id in context = %q, want user-1", got)
+		}
+		if got := core.UserPathFromContext(c.Request().Context()); got != "/team/alpha" {
+			t.Fatalf("user path in context = %q, want /team/alpha", got)
+		}
+		entry, ok := c.Get(string(auditlog.LogEntryKey)).(*auditlog.LogEntry)
+		if !ok || entry == nil {
+			t.Fatal("audit log entry missing from context")
+		}
+		if entry.Data == nil || entry.Data.UserID != "user-1" {
+			t.Fatalf("audit entry user id = %+v, want user-1", entry.Data)
+		}
+		return c.String(http.StatusOK, "ok")
+	}
+
+	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:     true,
+		tokenToID:   map[string]string{"sk_gom_token": "key-123"},
+		tokenPath:   map[string]string{"sk_gom_token": "/team/alpha"},
+		tokenUserID: map[string]string{"sk_gom_token": "user-1"},
+	}, nil)(testHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+
+	err := handler(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
