@@ -217,6 +217,16 @@ func TestApplyPartialBodyModelHintPreservesParseAndStreamState(t *testing.T) {
 	}
 }
 
+func TestApplyPartialBodyModelHintIgnoresMissingInput(t *testing.T) {
+	ApplyPartialBodyModelHint(nil, "gpt-5-mini")
+
+	env := &WhiteBoxPrompt{RouteHints: RouteHints{Model: "existing-model"}}
+	ApplyPartialBodyModelHint(env, "")
+	if env.RouteHints.Model != "existing-model" {
+		t.Fatalf("RouteHints.Model = %q, want existing-model", env.RouteHints.Model)
+	}
+}
+
 func TestDeriveWhiteBoxPrompt_FilesMetadata(t *testing.T) {
 	frame := NewRequestSnapshot(
 		"GET",
