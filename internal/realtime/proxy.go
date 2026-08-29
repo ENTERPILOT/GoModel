@@ -213,8 +213,7 @@ func observe(tap func([]byte)) func([]byte) []byte {
 func closeBoth(client, upstream *websocket.Conn, cause error) {
 	status := websocket.StatusNormalClosure
 	reason := ""
-	var ce websocket.CloseError
-	if errors.As(cause, &ce) {
+	if ce, ok := errors.AsType[websocket.CloseError](cause); ok {
 		status = ce.Code
 		reason = ce.Reason
 	}
@@ -229,8 +228,7 @@ func normalizeCloseError(err error) error {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return nil
 	}
-	var ce websocket.CloseError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[websocket.CloseError](err); ok {
 		switch ce.Code {
 		case websocket.StatusNormalClosure, websocket.StatusGoingAway:
 			return nil

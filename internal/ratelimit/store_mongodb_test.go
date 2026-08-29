@@ -23,7 +23,7 @@ func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
 			name: "single duplicate key write error",
 			err: mongo.BulkWriteException{
 				WriteErrors: []mongo.BulkWriteError{
-					{WriteError: mongo.WriteError{Code: 11000, Message: "E11000 duplicate key error"}},
+					{Code: 11000, Message: "E11000 duplicate key error"},
 				},
 			},
 			want: true,
@@ -32,8 +32,8 @@ func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
 			name: "all duplicate key write errors",
 			err: mongo.BulkWriteException{
 				WriteErrors: []mongo.BulkWriteError{
-					{WriteError: mongo.WriteError{Code: 11000}},
-					{WriteError: mongo.WriteError{Code: 11000}},
+					{Code: 11000},
+					{Code: 11000},
 				},
 			},
 			want: true,
@@ -42,8 +42,8 @@ func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
 			name: "mixed write errors keep failing",
 			err: mongo.BulkWriteException{
 				WriteErrors: []mongo.BulkWriteError{
-					{WriteError: mongo.WriteError{Code: 11000}},
-					{WriteError: mongo.WriteError{Code: 121, Message: "document validation failure"}},
+					{Code: 11000},
+					{Code: 121, Message: "document validation failure"},
 				},
 			},
 			want: false,
@@ -52,7 +52,7 @@ func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
 			name: "write concern error keeps failing",
 			err: mongo.BulkWriteException{
 				WriteErrors: []mongo.BulkWriteError{
-					{WriteError: mongo.WriteError{Code: 11000}},
+					{Code: 11000},
 				},
 				WriteConcernError: &mongo.WriteConcernError{Code: 64},
 			},
@@ -85,7 +85,7 @@ func TestDuplicateKeyErrorsOnConfigRulesOnly(t *testing.T) {
 		exc := mongo.BulkWriteException{}
 		for _, index := range indexes {
 			exc.WriteErrors = append(exc.WriteErrors, mongo.BulkWriteError{
-				WriteError: mongo.WriteError{Index: index, Code: 11000},
+				Index: index, Code: 11000,
 			})
 		}
 		return exc
@@ -123,7 +123,7 @@ func TestDuplicateKeyErrorsOnConfigRulesOnly(t *testing.T) {
 		},
 		{
 			name:  "non duplicate-key code keeps failing",
-			err:   mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{{WriteError: mongo.WriteError{Index: 0, Code: 121}}}},
+			err:   mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{{Index: 0, Code: 121}}},
 			rules: []Rule{configRule},
 			want:  false,
 		},
@@ -152,7 +152,7 @@ func TestClassifyBulkWriteError(t *testing.T) {
 	manualRule := Rule{Scope: ScopeUserPath, Subject: "/manual", PeriodSeconds: PeriodMinuteSeconds, Source: SourceManual}
 	dup := func(index int) mongo.BulkWriteException {
 		return mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{
-			{WriteError: mongo.WriteError{Index: index, Code: 11000}},
+			{Index: index, Code: 11000},
 		}}
 	}
 
@@ -166,7 +166,7 @@ func TestClassifyBulkWriteError(t *testing.T) {
 		{"config duplicate is shadowing", dup(0), []Rule{configRule}, bulkWriteShadowedByManual},
 		{"manual duplicate is a race worth retrying", dup(1), []Rule{configRule, manualRule}, bulkWriteRetryManualRace},
 		{"non-duplicate error fails", mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{
-			{WriteError: mongo.WriteError{Index: 0, Code: 121}},
+			{Index: 0, Code: 121},
 		}}, []Rule{manualRule}, bulkWriteFailed},
 		{"unrelated error fails", errors.New("network down"), []Rule{manualRule}, bulkWriteFailed},
 	}

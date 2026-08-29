@@ -240,8 +240,7 @@ func applyRewriteResponseHeaders(c *echo.Context, headers http.Header) {
 // Only the rewriter name and error are logged — never request bodies or
 // headers.
 func rewriterGatewayError(name string, err error) error {
-	var rejection *ext.RejectionError
-	if errors.As(err, &rejection) {
+	if rejection, ok := errors.AsType[*ext.RejectionError](err); ok {
 		status := rejection.Status
 		if status < http.StatusBadRequest || status > 599 {
 			status = http.StatusBadRequest

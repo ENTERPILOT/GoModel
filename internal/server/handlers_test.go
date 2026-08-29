@@ -1205,19 +1205,17 @@ func TestChatCompletion(t *testing.T) {
 
 func TestChatCompletion_BindsMultimodalContent(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-			response: &core.ChatResponse{
-				ID:      "chatcmpl-123",
-				Object:  "chat.completion",
-				Created: 1234567890,
-				Model:   "gpt-4o-mini",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
-						FinishReason: "stop",
-					},
+		supportedModels: []string{"gpt-4o-mini"},
+		response: &core.ChatResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-4o-mini",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
 				},
 			},
 		},
@@ -1260,19 +1258,17 @@ func TestChatCompletion_BindsMultimodalContent(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-mini"},
-			response: &core.ChatResponse{
-				ID:      "chatcmpl-123",
-				Object:  "chat.completion",
-				Created: 1234567890,
-				Model:   "gpt-5-mini",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
-						FinishReason: "stop",
-					},
+		supportedModels: []string{"gpt-5-mini"},
+		response: &core.ChatResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-5-mini",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
 				},
 			},
 		},
@@ -1318,19 +1314,17 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 
 func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-mini"},
-			response: &core.ChatResponse{
-				ID:      "chatcmpl-123",
-				Object:  "chat.completion",
-				Created: 1234567890,
-				Model:   "gpt-5-mini",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
-						FinishReason: "stop",
-					},
+		supportedModels: []string{"gpt-5-mini"},
+		response: &core.ChatResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-5-mini",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
 				},
 			},
 		},
@@ -1387,19 +1381,17 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 
 func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-mini"},
-			response: &core.ChatResponse{
-				ID:      "chatcmpl-123",
-				Object:  "chat.completion",
-				Created: 1234567890,
-				Model:   "gpt-5-mini",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
-						FinishReason: "stop",
-					},
+		supportedModels: []string{"gpt-5-mini"},
+		response: &core.ChatResponse{
+			ID:      "chatcmpl-123",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-5-mini",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
 				},
 			},
 		},
@@ -1459,20 +1451,18 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 
 func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-mini"},
-			response: &core.ChatResponse{
-				ID:     "chatcmpl_123",
-				Object: "chat.completion",
-				Model:  "gpt-5-mini",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						FinishReason: "stop",
-						Message: core.ResponseMessage{
-							Role:    "assistant",
-							Content: "ok",
-						},
+		supportedModels: []string{"gpt-5-mini"},
+		response: &core.ChatResponse{
+			ID:     "chatcmpl_123",
+			Object: "chat.completion",
+			Model:  "gpt-5-mini",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "ok",
 					},
 				},
 			},
@@ -1562,24 +1552,22 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 	}
 
 	inner := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-nano"},
-			providerTypes: map[string]string{
-				"openai/gpt-5-nano": "openai",
-			},
-			response: &core.ChatResponse{
-				ID:       "chatcmpl_alias_resolver_123",
-				Object:   "chat.completion",
-				Model:    "gpt-5-nano",
-				Provider: "openai",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						FinishReason: "stop",
-						Message: core.ResponseMessage{
-							Role:    "assistant",
-							Content: "ok",
-						},
+		supportedModels: []string{"gpt-5-nano"},
+		providerTypes: map[string]string{
+			"openai/gpt-5-nano": "openai",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl_alias_resolver_123",
+			Object:   "chat.completion",
+			Model:    "gpt-5-nano",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "ok",
 					},
 				},
 			},
@@ -1651,24 +1639,22 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 	pipeline.Add(systemPrompt, 0)
 
 	inner := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-nano"},
-			providerTypes: map[string]string{
-				"gpt-5-nano": "mock",
-			},
-			response: &core.ChatResponse{
-				ID:       "chatcmpl_guardrail_123",
-				Object:   "chat.completion",
-				Model:    "gpt-5-nano",
-				Provider: "mock",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						FinishReason: "stop",
-						Message: core.ResponseMessage{
-							Role:    "assistant",
-							Content: "ok",
-						},
+		supportedModels: []string{"gpt-5-nano"},
+		providerTypes: map[string]string{
+			"gpt-5-nano": "mock",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl_guardrail_123",
+			Object:   "chat.completion",
+			Model:    "gpt-5-nano",
+			Provider: "mock",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "ok",
 					},
 				},
 			},
@@ -1794,15 +1780,13 @@ func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
 
 func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-mini"},
-			responsesResponse: &core.ResponsesResponse{
-				ID:        "resp_123",
-				Object:    "response",
-				CreatedAt: 1234567890,
-				Model:     "gpt-5-mini",
-				Status:    "completed",
-			},
+		supportedModels: []string{"gpt-5-mini"},
+		responsesResponse: &core.ResponsesResponse{
+			ID:        "resp_123",
+			Object:    "response",
+			CreatedAt: 1234567890,
+			Model:     "gpt-5-mini",
+			Status:    "completed",
 		},
 	}
 
@@ -1861,14 +1845,12 @@ func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 
 func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"text-embedding-3-large"},
-			embeddingResponse: &core.EmbeddingResponse{
-				Object: "list",
-				Model:  "text-embedding-3-large",
-				Data: []core.EmbeddingData{
-					{Object: "embedding", Embedding: json.RawMessage(`[0.1,0.2]`), Index: 0},
-				},
+		supportedModels: []string{"text-embedding-3-large"},
+		embeddingResponse: &core.EmbeddingResponse{
+			Object: "list",
+			Model:  "text-embedding-3-large",
+			Data: []core.EmbeddingData{
+				{Object: "embedding", Embedding: json.RawMessage(`[0.1,0.2]`), Index: 0},
 			},
 		},
 	}
@@ -2268,19 +2250,17 @@ func TestChatCompletionStreaming_FastPathUsageCarriesResolvedProviderName(t *tes
 func TestChatCompletionStreaming_FastPathSkipsQualifiedModelRewrite(t *testing.T) {
 	streamData := "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n"
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-			providerTypes: map[string]string{
-				"gpt-4o-mini": "openai",
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini": "openai",
+		},
+		streamData: streamData,
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"text/event-stream"},
 			},
-			streamData: streamData,
-			passthroughResponse: &core.PassthroughResponse{
-				StatusCode: http.StatusOK,
-				Headers: map[string][]string{
-					"Content-Type": {"text/event-stream"},
-				},
-				Body: io.NopCloser(strings.NewReader("data: should-not-be-used\n\n")),
-			},
+			Body: io.NopCloser(strings.NewReader("data: should-not-be-used\n\n")),
 		},
 	}
 
@@ -2318,19 +2298,17 @@ func TestChatCompletionStreaming_FastPathSkipsQualifiedModelRewrite(t *testing.T
 func TestChatCompletionStreaming_FastPathSkipsProviderFieldRewrite(t *testing.T) {
 	streamData := "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n"
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-			providerTypes: map[string]string{
-				"openai/gpt-4o-mini": "openai",
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o-mini": "openai",
+		},
+		streamData: streamData,
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers: map[string][]string{
+				"Content-Type": {"text/event-stream"},
 			},
-			streamData: streamData,
-			passthroughResponse: &core.PassthroughResponse{
-				StatusCode: http.StatusOK,
-				Headers: map[string][]string{
-					"Content-Type": {"text/event-stream"},
-				},
-				Body: io.NopCloser(strings.NewReader("data: should-not-be-used\n\n")),
-			},
+			Body: io.NopCloser(strings.NewReader("data: should-not-be-used\n\n")),
 		},
 	}
 
@@ -2672,9 +2650,7 @@ func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
 	releaseSecondChunk := make(chan struct{})
 
 	provider := &streamingProviderWithCustomReader{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-		},
+		supportedModels: []string{"gpt-4o-mini"},
 		reader: &delayedChunkReadCloser{
 			chunks: []delayedChunk{
 				{data: []byte("data: {\"id\":\"1\"}\n\n")},
@@ -3351,9 +3327,7 @@ func TestChatCompletion_InvalidJSON(t *testing.T) {
 
 func TestChatCompletion_InvalidContentType(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-		},
+		supportedModels: []string{"gpt-4o-mini"},
 	}
 
 	e := echo.New()
@@ -5568,13 +5542,9 @@ func TestStreamingResponses_ChatBackedProviderInjectsUsageWhenEnforced(t *testin
 		"",
 	}, "\n\n")
 	provider := &chatBackedResponsesProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"gpt-4o-mini"},
-				streamData:      streamData,
-			},
-		},
-		providerName: "gemini",
+		supportedModels: []string{"gpt-4o-mini"},
+		streamData:      streamData,
+		providerName:    "gemini",
 	}
 
 	usageLog := &mockUsageLogger{
@@ -5615,13 +5585,9 @@ func TestStreamingResponses_ChatBackedProviderInjectsUsageWhenEnforced(t *testin
 
 func TestStreamingResponses_ChatBackedProviderDoesNotInjectUsageWhenDisabled(t *testing.T) {
 	provider := &chatBackedResponsesProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"gpt-4o-mini"},
-				streamData:      "data: [DONE]\n\n",
-			},
-		},
-		providerName: "gemini",
+		supportedModels: []string{"gpt-4o-mini"},
+		streamData:      "data: [DONE]\n\n",
+		providerName:    "gemini",
 	}
 
 	usageLog := &mockUsageLogger{
@@ -5654,10 +5620,8 @@ func TestStreamingResponses_ChatBackedProviderDoesNotInjectUsageWhenDisabled(t *
 func TestStreamingResponses_NativeProviderRequestRemainsUnchanged(t *testing.T) {
 	streamData := "data: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-			streamData:      streamData,
-		},
+		supportedModels: []string{"gpt-4o-mini"},
+		streamData:      streamData,
 	}
 
 	usageLog := &mockUsageLogger{
@@ -5698,13 +5662,9 @@ func TestStreamingResponses_ChatBackedProviderWritesExactlyOneUsageEntry(t *test
 		"",
 	}, "\n\n")
 	provider := &chatBackedResponsesProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"gemini-2.0-flash"},
-				streamData:      streamData,
-			},
-		},
-		providerName: "gemini",
+		supportedModels: []string{"gemini-2.0-flash"},
+		streamData:      streamData,
+		providerName:    "gemini",
 	}
 	usageLog := &collectingUsageLogger{
 		config: usage.Config{
@@ -5746,23 +5706,21 @@ func TestStreamingResponses_ChatBackedProviderWritesExactlyOneUsageEntry(t *test
 
 func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-5-mini"},
-			responsesResponse: &core.ResponsesResponse{
-				ID:        "resp_123",
-				Object:    "response",
-				CreatedAt: 1234567890,
-				Model:     "gpt-5-mini",
-				Status:    "completed",
-				Output: []core.ResponsesOutputItem{
-					{
-						ID:     "msg_123",
-						Type:   "message",
-						Role:   "assistant",
-						Status: "completed",
-						Content: []core.ResponsesContentItem{
-							{Type: "output_text", Text: "ok"},
-						},
+		supportedModels: []string{"gpt-5-mini"},
+		responsesResponse: &core.ResponsesResponse{
+			ID:        "resp_123",
+			Object:    "response",
+			CreatedAt: 1234567890,
+			Model:     "gpt-5-mini",
+			Status:    "completed",
+			Output: []core.ResponsesOutputItem{
+				{
+					ID:     "msg_123",
+					Type:   "message",
+					Role:   "assistant",
+					Status: "completed",
+					Content: []core.ResponsesContentItem{
+						{Type: "output_text", Text: "ok"},
 					},
 				},
 			},
@@ -5815,13 +5773,11 @@ func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 func TestStreamingChatCompletion_InjectsStreamOptions(t *testing.T) {
 	streamData := "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n"
 	provider := &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-			providerTypes: map[string]string{
-				"gpt-4o-mini": "openai",
-			},
-			streamData: streamData,
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"gpt-4o-mini": "openai",
 		},
+		streamData: streamData,
 	}
 
 	usageLog := &mockUsageLogger{

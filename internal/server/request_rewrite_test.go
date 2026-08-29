@@ -63,19 +63,17 @@ func replaceBodyRewriter(name, old, new string) *stubRewriter {
 
 func newRewriteTestProvider() *capturingProvider {
 	return &capturingProvider{
-		mockProvider: mockProvider{
-			supportedModels: []string{"gpt-4o-mini"},
-			response: &core.ChatResponse{
-				ID:      "chatcmpl-rewrite",
-				Object:  "chat.completion",
-				Created: 1234567890,
-				Model:   "gpt-4o-mini",
-				Choices: []core.Choice{
-					{
-						Index:        0,
-						Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
-						FinishReason: "stop",
-					},
+		supportedModels: []string{"gpt-4o-mini"},
+		response: &core.ChatResponse{
+			ID:      "chatcmpl-rewrite",
+			Object:  "chat.completion",
+			Created: 1234567890,
+			Model:   "gpt-4o-mini",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					Message:      core.ResponseMessage{Role: "assistant", Content: "ok"},
+					FinishReason: "stop",
 				},
 			},
 		},
@@ -144,7 +142,7 @@ func TestRequestRewriteMiddlewareDeliversProviderFeedback(t *testing.T) {
 		PromptTokens:        2048,
 		PromptTokensDetails: &core.PromptTokensDetails{CachedTokens: 1536},
 	}
-	rewriter := &feedbackRewriter{stubRewriter: stubRewriter{name: "feedback"}}
+	rewriter := &feedbackRewriter{name: "feedback"}
 	srv := New(provider, &Config{
 		RequestRewriters: []ext.RequestRewriter{rewriter},
 		SessionDetector:  session.NewDetector(session.BuiltinRules(), false),
@@ -173,8 +171,8 @@ func TestRequestRewriteMiddlewareDeliversProviderFeedback(t *testing.T) {
 func TestRequestRewriteMiddlewareHonorsResponseFeedbackFilter(t *testing.T) {
 	for _, want := range []bool{false, true} {
 		rewriter := &filteredFeedbackRewriter{
-			feedbackRewriter: feedbackRewriter{stubRewriter: stubRewriter{name: "filtered"}},
-			want:             want,
+			name: "filtered",
+			want: want,
 		}
 		var attached bool
 		next := func(c *echo.Context) error {
@@ -197,8 +195,8 @@ func TestRequestRewriteMiddlewareHonorsResponseFeedbackFilter(t *testing.T) {
 func TestRequestRewriteMiddlewareIsolatesResponseFeedbackFilterPanic(t *testing.T) {
 	provider := newRewriteTestProvider()
 	rewriter := &filteredFeedbackRewriter{
-		feedbackRewriter: feedbackRewriter{stubRewriter: stubRewriter{name: "panicking-filter"}},
-		panicFilter:      true,
+		name:        "panicking-filter",
+		panicFilter: true,
 	}
 	srv := New(provider, &Config{RequestRewriters: []ext.RequestRewriter{rewriter}})
 

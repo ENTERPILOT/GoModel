@@ -181,10 +181,10 @@ func TestClient_Do_ErrorParsing(t *testing.T) {
 }
 
 func TestClient_Do_Retries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count < 3 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"message":"Rate limited"}}`))
@@ -215,16 +215,16 @@ func TestClient_Do_Retries(t *testing.T) {
 	if !result.Success {
 		t.Error("expected success to be true")
 	}
-	if atomic.LoadInt32(&attempts) != 3 {
-		t.Errorf("expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
 	}
 }
 
 func TestClient_Do_RetriesContinueAfterCircuitTrips(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count < 3 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"error":{"message":"temporary failure"}}`))
@@ -263,16 +263,16 @@ func TestClient_Do_RetriesContinueAfterCircuitTrips(t *testing.T) {
 	if !result.Success {
 		t.Fatal("expected success response after retries")
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Fatalf("expected request to use full retry budget after circuit trips, got %d attempts", got)
 	}
 }
 
 func TestClient_Do_RetriesExhausted(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"Rate limited"}}`))
 	}))
@@ -293,8 +293,8 @@ func TestClient_Do_RetriesExhausted(t *testing.T) {
 		t.Fatal("expected error after retries exhausted")
 	}
 	// 1 initial + 2 retries = 3 attempts
-	if atomic.LoadInt32(&attempts) != 3 {
-		t.Errorf("expected 3 attempts, got %d", atomic.LoadInt32(&attempts))
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts.Load())
 	}
 }
 
@@ -364,10 +364,10 @@ func TestClient_DoRaw_Error(t *testing.T) {
 
 // TestClient_DoRaw_WithRetries tests that DoRaw properly handles retries
 func TestClient_DoRaw_WithRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count < 2 {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{"error":{"message":"Service unavailable"}}`))
@@ -395,16 +395,16 @@ func TestClient_DoRaw_WithRetries(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected status 200, got %d", resp.StatusCode)
 	}
-	if atomic.LoadInt32(&attempts) != 2 {
-		t.Errorf("expected 2 attempts, got %d", atomic.LoadInt32(&attempts))
+	if attempts.Load() != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempts.Load())
 	}
 }
 
 func TestClient_DoRaw_DoesNotRetryRawBodyReader(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":{"message":"retryable"}}`))
 	}))
@@ -430,16 +430,16 @@ func TestClient_DoRaw_DoesNotRetryRawBodyReader(t *testing.T) {
 	if resp != nil {
 		t.Fatalf("expected nil response, got %+v", resp)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("attempts = %d, want 1", got)
 	}
 }
 
 func TestClient_DoPassthrough_WithRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count < 3 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
@@ -475,16 +475,16 @@ func TestClient_DoPassthrough_WithRetries(t *testing.T) {
 	if got := string(body); got != `{"ok":true}` {
 		t.Fatalf("body = %q, want success response", got)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Fatalf("attempts = %d, want 3", got)
 	}
 }
 
 func TestClient_DoPassthrough_ReturnsLastRetryableResponseAfterRetries(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"attempt":` + strconv.FormatInt(int64(count), 10) + `}`))
@@ -518,16 +518,16 @@ func TestClient_DoPassthrough_ReturnsLastRetryableResponseAfterRetries(t *testin
 	if got := string(body); got != `{"attempt":3}` {
 		t.Fatalf("body = %q, want final retry response", got)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Fatalf("attempts = %d, want 3", got)
 	}
 }
 
 func TestClient_DoPassthrough_HTTPTimeoutDoesNotRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		time.Sleep(200 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
@@ -565,7 +565,7 @@ func TestClient_DoPassthrough_HTTPTimeoutDoesNotRetry(t *testing.T) {
 	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("upstream attempts = %d, want 1 for client-side timeout", got)
 	}
 	if state := client.circuitBreaker.State(); state != "closed" {
@@ -574,10 +574,10 @@ func TestClient_DoPassthrough_HTTPTimeoutDoesNotRetry(t *testing.T) {
 }
 
 func TestClient_DoPassthrough_DoesNotRetryNonReplaySafeMethod(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
@@ -606,16 +606,16 @@ func TestClient_DoPassthrough_DoesNotRetryNonReplaySafeMethod(t *testing.T) {
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429", resp.StatusCode)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("attempts = %d, want 1", got)
 	}
 }
 
 func TestClient_DoPassthrough_RetriesWhenIdempotencyKeyPresent(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&attempts, 1)
+		count := attempts.Add(1)
 		if count < 3 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -652,7 +652,7 @@ func TestClient_DoPassthrough_RetriesWhenIdempotencyKeyPresent(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Fatalf("attempts = %d, want 3", got)
 	}
 }
@@ -934,9 +934,9 @@ func TestClient_BuildErrorDoesNotRetryOrChargeBreaker(t *testing.T) {
 	for _, st := range states {
 		for _, e := range entries {
 			t.Run(st.name+"/"+e.name, func(t *testing.T) {
-				var attempts int32
+				var attempts atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					atomic.AddInt32(&attempts, 1)
+					attempts.Add(1)
 				}))
 				defer server.Close()
 
@@ -964,7 +964,7 @@ func TestClient_BuildErrorDoesNotRetryOrChargeBreaker(t *testing.T) {
 				if gwErr.Type != core.ErrorTypeInvalidRequest {
 					t.Errorf("error type = %s, want %s", gwErr.Type, core.ErrorTypeInvalidRequest)
 				}
-				if got := atomic.LoadInt32(&attempts); got != 0 {
+				if got := attempts.Load(); got != 0 {
 					t.Errorf("server received %d attempts; want 0 (build errors must not be retried)", got)
 				}
 				if state := client.circuitBreaker.State(); state != st.wantState {
@@ -1044,10 +1044,10 @@ func TestRequest_Validation(t *testing.T) {
 }
 
 func TestCircuitBreaker_OpensAfterFailures(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":{"message":"Server error"}}`))
 	}))
@@ -1092,17 +1092,17 @@ func TestCircuitBreaker_OpensAfterFailures(t *testing.T) {
 	}
 
 	// Should have made exactly 3 requests (threshold)
-	if atomic.LoadInt32(&attempts) != 3 {
-		t.Errorf("expected 3 attempts before circuit opened, got %d", atomic.LoadInt32(&attempts))
+	if attempts.Load() != 3 {
+		t.Errorf("expected 3 attempts before circuit opened, got %d", attempts.Load())
 	}
 }
 
 func TestCircuitBreaker_ClosesAfterTimeout(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	var shouldSucceed atomic.Bool
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		if shouldSucceed.Load() {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"success":true}`))
@@ -1166,10 +1166,10 @@ func TestCircuitBreaker_ClosesAfterTimeout(t *testing.T) {
 // TestCircuitBreaker_HalfOpenPreventsThunderingHerd tests that only one request
 // is allowed through in half-open state to prevent thundering herd
 func TestCircuitBreaker_HalfOpenPreventsThunderingHerd(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		time.Sleep(50 * time.Millisecond) // Simulate slow response
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"success":true}`))
@@ -1247,10 +1247,10 @@ func TestCircuitBreaker_HalfOpenPreventsThunderingHerd(t *testing.T) {
 }
 
 func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":{"message":"temporary failure"}}`))
 	}))
@@ -1296,7 +1296,7 @@ func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
 	if strings.Contains(gatewayErr.Message, "circuit breaker is open") {
 		t.Fatalf("expected original upstream error, got circuit breaker error: %s", gatewayErr.Message)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 upstream attempt in half-open state, got %d", got)
 	}
 	if state := client.circuitBreaker.State(); state != "open" {
@@ -1318,16 +1318,16 @@ func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
 	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
 		t.Fatalf("expected circuit breaker error after failed half-open probe, got %s", gatewayErr.Message)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("expected follow-up request to be blocked without another upstream attempt, got %d attempts", got)
 	}
 }
 
 func TestCircuitBreaker_HalfOpenProbeResolvesOnClientError(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
 	}))
@@ -1368,7 +1368,7 @@ func TestCircuitBreaker_HalfOpenProbeResolvesOnClientError(t *testing.T) {
 	if state := client.circuitBreaker.State(); state != "closed" {
 		t.Fatalf("expected circuit to close after non-retryable probe, got %q", state)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("expected 1 upstream attempt, got %d", got)
 	}
 
@@ -1379,16 +1379,16 @@ func TestCircuitBreaker_HalfOpenProbeResolvesOnClientError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected provider error on follow-up request")
 	}
-	if got := atomic.LoadInt32(&attempts); got != 2 {
+	if got := attempts.Load(); got != 2 {
 		t.Fatalf("expected follow-up request to reach upstream, got %d attempts", got)
 	}
 }
 
 func TestCircuitBreaker_RateLimitDoesNotOpenCircuit(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"rate limit exceeded"}}`))
 	}))
@@ -1425,16 +1425,16 @@ func TestCircuitBreaker_RateLimitDoesNotOpenCircuit(t *testing.T) {
 	if state := client.circuitBreaker.State(); state != "closed" {
 		t.Fatalf("expected circuit to remain closed after rate limits, got %q", state)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 2 {
+	if got := attempts.Load(); got != 2 {
 		t.Fatalf("expected both requests to reach upstream, got %d attempts", got)
 	}
 }
 
 func TestCircuitBreaker_HalfOpenProbeReopensOnRateLimit(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"rate limit exceeded"}}`))
 	}))
@@ -1490,7 +1490,7 @@ func TestCircuitBreaker_HalfOpenProbeReopensOnRateLimit(t *testing.T) {
 	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
 		t.Fatalf("expected circuit breaker error after rate-limited half-open probe, got %s", gatewayErr.Message)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("expected follow-up request to be blocked without another upstream attempt, got %d attempts", got)
 	}
 }
@@ -1760,10 +1760,10 @@ func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
 }
 
 func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		time.Sleep(200 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
@@ -1799,7 +1799,7 @@ func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
 	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Fatalf("upstream attempts = %d, want 1 for client-side timeout", got)
 	}
 	if state := client.circuitBreaker.State(); state != "closed" {
@@ -1808,10 +1808,10 @@ func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
 }
 
 func TestCircuitBreakerCountsRetriedRequestOnce(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":{"message":"temporary failure"}}`))
 	}))
@@ -1848,7 +1848,7 @@ func TestCircuitBreakerCountsRetriedRequestOnce(t *testing.T) {
 		}
 
 		wantAttempts := int32((i + 1) * (cfg.Retry.MaxRetries + 1))
-		if got := atomic.LoadInt32(&attempts); got != wantAttempts {
+		if got := attempts.Load(); got != wantAttempts {
 			t.Fatalf("request %d: upstream attempts = %d, want %d", i+1, got, wantAttempts)
 		}
 	}
@@ -1867,7 +1867,7 @@ func TestCircuitBreakerCountsRetriedRequestOnce(t *testing.T) {
 	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
 		t.Fatalf("expected circuit breaker error, got %s", gatewayErr.Message)
 	}
-	if got, want := atomic.LoadInt32(&attempts), int32(2*(cfg.Retry.MaxRetries+1)); got != want {
+	if got, want := attempts.Load(), int32(2*(cfg.Retry.MaxRetries+1)); got != want {
 		t.Fatalf("upstream attempts after circuit rejection = %d, want %d", got, want)
 	}
 }
@@ -1973,10 +1973,10 @@ func TestClient_SetBaseURL_Concurrent(t *testing.T) {
 }
 
 func TestClient_NonRetryableErrors(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"Bad request"}}`))
 	}))
@@ -1995,8 +1995,8 @@ func TestClient_NonRetryableErrors(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	// Should NOT retry on 400 errors
-	if atomic.LoadInt32(&attempts) != 1 {
-		t.Errorf("expected 1 attempt (no retries on 400), got %d", atomic.LoadInt32(&attempts))
+	if attempts.Load() != 1 {
+		t.Errorf("expected 1 attempt (no retries on 400), got %d", attempts.Load())
 	}
 }
 

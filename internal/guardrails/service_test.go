@@ -292,8 +292,7 @@ func TestServiceRefresh_ReturnsGatewayErrorOnStoreFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Refresh() error = nil, want gateway error")
 	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 		t.Fatalf("Refresh() error = %T, want *core.GatewayError", err)
 	}
 }
@@ -305,8 +304,7 @@ func TestServiceBuildPipeline_ReturnsGatewayErrorWhenCatalogMissing(t *testing.T
 	if err == nil {
 		t.Fatal("BuildPipeline() error = nil, want gateway error")
 	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 		t.Fatalf("BuildPipeline() error = %T, want *core.GatewayError", err)
 	}
 }

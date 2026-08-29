@@ -9,6 +9,7 @@ import (
 	"hash"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -324,8 +325,8 @@ func conversationInvariantFingerprint(body []byte, excludeSystem bool) (fingerpr
 	}
 
 	lastUser := -1
-	for i := len(included) - 1; i >= 0; i-- {
-		if included[i].role == "user" {
+	for i, part := range slices.Backward(included) {
+		if part.role == "user" {
 			lastUser = i
 			break
 		}

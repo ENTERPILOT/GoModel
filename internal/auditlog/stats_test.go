@@ -44,10 +44,10 @@ func TestFoldRequestStats_HourInterval(t *testing.T) {
 	}
 
 	stats := foldRequestStats(rows, RequestStatsParams{
-		QueryParams: QueryParams{StartDate: day, EndDate: day},
-		Interval:    StatsIntervalHour,
-		Location:    time.UTC,
-		Now:         day.Add(12*time.Hour + 30*time.Minute),
+		StartDate: day, EndDate: day,
+		Interval: StatsIntervalHour,
+		Location: time.UTC,
+		Now:      day.Add(12*time.Hour + 30*time.Minute),
 	})
 
 	if stats.Interval != StatsIntervalHour {
@@ -129,10 +129,10 @@ func TestFoldRequestStats_DayIntervalFoldsHoursIntoLocalDays(t *testing.T) {
 	start := time.Date(2026, 1, 16, 0, 0, 0, 0, location)
 	end := time.Date(2026, 1, 17, 0, 0, 0, 0, location)
 	stats := foldRequestStats(rows, RequestStatsParams{
-		QueryParams: QueryParams{StartDate: start, EndDate: end},
-		Interval:    StatsIntervalDay,
-		Location:    location,
-		Now:         time.Date(2026, 1, 18, 12, 0, 0, 0, location),
+		StartDate: start, EndDate: end,
+		Interval: StatsIntervalDay,
+		Location: location,
+		Now:      time.Date(2026, 1, 18, 12, 0, 0, 0, location),
 	})
 
 	if len(stats.Buckets) != 2 {
@@ -155,10 +155,10 @@ func TestFoldRequestStats_ZeroFillStopsAtNow(t *testing.T) {
 	end := time.Date(2026, 1, 20, 0, 0, 0, 0, location)
 
 	stats := foldRequestStats(nil, RequestStatsParams{
-		QueryParams: QueryParams{StartDate: start, EndDate: end},
-		Interval:    StatsIntervalDay,
-		Location:    location,
-		Now:         time.Date(2026, 1, 12, 15, 0, 0, 0, location),
+		StartDate: start, EndDate: end,
+		Interval: StatsIntervalDay,
+		Location: location,
+		Now:      time.Date(2026, 1, 12, 15, 0, 0, 0, location),
 	})
 
 	if len(stats.Buckets) != 3 {
@@ -203,10 +203,10 @@ func TestSQLReaderGetRequestStats(t *testing.T) {
 		}
 
 		stats, err := reader.GetRequestStats(context.Background(), RequestStatsParams{
-			QueryParams: QueryParams{StartDate: day, EndDate: day},
-			Interval:    StatsIntervalHour,
-			Location:    time.UTC,
-			Now:         day.Add(23 * time.Hour),
+			StartDate: day, EndDate: day,
+			Interval: StatsIntervalHour,
+			Location: time.UTC,
+			Now:      day.Add(23 * time.Hour),
 		})
 		if err != nil {
 			t.Fatalf("GetRequestStats failed: %v", err)

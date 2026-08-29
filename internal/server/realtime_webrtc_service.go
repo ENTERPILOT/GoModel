@@ -318,8 +318,7 @@ func (s *realtimeService) observeCall(ctx context.Context, route realtimeRoute, 
 		obsCtx, cancel := context.WithTimeout(context.Background(), realtime.DefaultCallTTL)
 		defer cancel()
 		err := realtime.Observe(obsCtx, t, tap)
-		var de *realtime.DialError
-		if errors.As(err, &de) {
+		if de, ok := errors.AsType[*realtime.DialError](err); ok {
 			slog.Warn("realtime call observer failed to attach; usage will not be recorded",
 				"request_id", route.requestID, "call_id", callID, "error", de.Err)
 			return

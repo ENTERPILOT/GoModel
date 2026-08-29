@@ -61,7 +61,7 @@ func TestMongoDBStoreRecalculatePricingTransactionFlow(t *testing.T) {
 	}
 
 	result, err := store.RecalculatePricing(context.Background(), RecalculatePricingParams{
-		UsageQueryParams: UsageQueryParams{Model: " gpt-4o ", Provider: " primary-openai "},
+		Model: " gpt-4o ", Provider: " primary-openai ",
 	}, staticTestPricingResolver{})
 	if err != nil {
 		t.Fatalf("RecalculatePricing() error = %v", err)
@@ -184,7 +184,7 @@ func TestMongoDBStoreRecalculatePricingUsesProviderNameForPricing(t *testing.T) 
 	}
 
 	result, err := store.RecalculatePricing(context.Background(), RecalculatePricingParams{
-		UsageQueryParams: UsageQueryParams{Model: "gpt-4o", Provider: " primary-openai "},
+		Model: "gpt-4o", Provider: " primary-openai ",
 	}, resolver)
 	if err != nil {
 		t.Fatalf("RecalculatePricing() error = %v", err)
