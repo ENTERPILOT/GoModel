@@ -116,10 +116,10 @@
 
   .audit-filter-row-search :global(.filter-input-wrap) {
     grid-column: span 8;
-    max-width: none;
+    max-width: 560px;
   }
 
-  .audit-filter-field { grid-column: span 4; width: 100%; }
+  .audit-filter-field { grid-column: span 4; width: 100%; max-width: 280px; }
 
   .audit-filter-row-controls .audit-filter-select {
     grid-column: span 2;

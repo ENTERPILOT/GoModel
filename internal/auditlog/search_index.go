@@ -18,6 +18,7 @@ var searchColumns = []string{
 }
 
 const trigramSearchIndex = "idx_audit_search_trgm"
+const userPathTrigramSearchIndex = "idx_audit_user_path_trgm"
 
 // minTrigramSearchLength is the shortest term, in characters, that yields a
 // trigram.
@@ -70,6 +71,7 @@ func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage stri
 		}
 	}
 	if hasTrigramSearchIndex(ctx, db) {
+		ensureUserPathTrigramSearchIndex(ctx, db, schema)
 		return
 	}
 	statement := fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON audit_logs USING GIN (%s %s.gin_trgm_ops)`,
@@ -80,6 +82,25 @@ func ensureTrigramSearchIndex(ctx context.Context, db sqlx.DB, errorMessage stri
 		return
 	}
 	slog.Info("auditlog: built trigram search index", "duration", time.Since(started).Round(time.Millisecond))
+	ensureUserPathTrigramSearchIndex(ctx, db, schema)
+}
+
+func ensureUserPathTrigramSearchIndex(ctx context.Context, db sqlx.DB, schema string) {
+	var valid *bool
+	if err := db.QueryRow(ctx, `SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, userPathTrigramSearchIndex).Scan(&valid); err == nil && valid != nil && !*valid {
+		slog.Warn("auditlog: rebuilding interrupted user path trigram index")
+		if _, err := db.Exec(ctx, "DROP INDEX "+userPathTrigramSearchIndex); err != nil {
+			slog.Warn("auditlog: failed to drop invalid user path trigram index", "error", err)
+			return
+		}
+	}
+	if hasUserPathTrigramSearchIndex(ctx, db) {
+		return
+	}
+	statement := fmt.Sprintf("CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON audit_logs USING GIN (user_path %s.gin_trgm_ops)", userPathTrigramSearchIndex, `"`+strings.ReplaceAll(schema, `"`, `""`)+`"`)
+	if _, err := db.Exec(ctx, statement); err != nil {
+		slog.Warn("auditlog: failed to create user path trigram index", "error", err)
+	}
 }
 
 // hasTrigramSearchIndex reports whether the trigram index exists and is
@@ -90,5 +111,14 @@ func hasTrigramSearchIndex(ctx context.Context, db sqlx.DB) bool {
 	}
 	var valid bool
 	err := db.QueryRow(ctx, `SELECT COALESCE(i.indisvalid, FALSE) FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, trigramSearchIndex).Scan(&valid)
+	return err == nil && valid
+}
+
+func hasUserPathTrigramSearchIndex(ctx context.Context, db sqlx.DB) bool {
+	if db.Dialect() != sqlx.PostgreSQL {
+		return false
+	}
+	var valid bool
+	err := db.QueryRow(ctx, `SELECT COALESCE(i.indisvalid, FALSE) FROM pg_index i WHERE i.indexrelid = to_regclass(?)`, userPathTrigramSearchIndex).Scan(&valid)
 	return err == nil && valid
 }

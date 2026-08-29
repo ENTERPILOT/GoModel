@@ -26,6 +26,9 @@ func requireTrigramIndex(t *testing.T, db sqlx.DB) (*SQLStore, *SQLReader) {
 	if !hasTrigramSearchIndex(ctx, db) {
 		t.Skip("pg_trgm could not be installed on the test server")
 	}
+	if !hasUserPathTrigramSearchIndex(ctx, db) {
+		t.Fatal("user path trigram index was not created")
+	}
 	reader, err := NewSQLReader(db)
 	if err != nil {
 		t.Fatalf("failed to create reader: %v", err)
