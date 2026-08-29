@@ -31,9 +31,8 @@ import {
   splitVirtualModelViews,
   vmFormHasPrimaryTarget,
   vmFormIsRedirect,
-  vmFormShowStrategy,
-  vmFormShowSessionAffinity,
-  vmFormShowFailover,
+  vmFormShowBalancingOptions,
+  vmRoutingSummary,
   vmFormSelfOnly,
   vmFormStrategyPending,
   virtualModelTargetOptions,
@@ -138,7 +137,7 @@ test("mapRedirectView keeps load-balanced targets, strategy, and labels them", (
   assert.equal(alias.targets.length, 2);
   assert.equal(alias.targets[1].weight, 2);
   assert.equal(alias.strategy, "round_robin");
-  assert.equal(aliasTargetLabel(alias), "openai/gpt-4o, groq/llama · round robin");
+  assert.equal(aliasTargetLabel(alias), "openai/gpt-4o, groq/llama · Round-robin");
 });
 
 test("buildDisplayModels combines source-backed redirects with the concrete model row", () => {
@@ -738,15 +737,11 @@ test("removePrimaryTarget clears the primary when it is the only target", () => 
   assert.equal(vmFormIsRedirect(form), false);
 });
 
-test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targets", () => {
-  // Single target: the strategy is already offered (with a pending hint) so
-  // the user sees how the next target will be used, but nothing balances yet.
+test("strategy is always shown; weights and balancing options follow targets and strategy", () => {
+  // Single target: nothing balances yet, so the strategy carries a hint.
   let form = { target_model: "openai/gpt-4o", targets: [], strategy: "round_robin" };
-  assert.equal(vmFormShowStrategy(form), true);
   assert.equal(vmFormStrategyPending(form), true);
   assert.equal(vmFormShowWeights(form), false);
-  // A policy form has no routing to configure.
-  assert.equal(vmFormShowStrategy({ target_model: "", targets: [] }), false);
 
   // Two targets under round-robin: weights are meaningful.
   form = {
@@ -754,29 +749,63 @@ test("vmFormShowWeights hides weight inputs unless round-robin balances 2+ targe
     targets: [{ model: "groq/llama", weight: "" }],
     strategy: "round_robin",
   };
-  assert.equal(vmFormShowStrategy(form), true);
+  assert.equal(vmFormStrategyPending(form), false);
   assert.equal(vmFormShowWeights(form), true);
+  assert.equal(vmFormShowBalancingOptions(form), true);
 
-  // Same targets under cost: the strategy selector stays, weights disappear.
+  // Cost: weights disappear, the balancing options stay.
   form.strategy = "cost";
-  assert.equal(vmFormShowStrategy(form), true);
   assert.equal(vmFormShowWeights(form), false);
-  assert.equal(vmFormShowSessionAffinity(form), true);
-  assert.equal(vmFormShowFailover(form), true);
+  assert.equal(vmFormShowBalancingOptions(form), true);
 
-  // Failover is a priority list: no weights, and no session keeping since the
-  // primary is always retried first.
+  // Failover is a priority list: no weights, no session keeping (the primary
+  // is always retried first) and no failover opt-out (it always fails over).
   form.strategy = "failover";
-  assert.equal(vmFormShowStrategy(form), true);
   assert.equal(vmFormShowWeights(form), false);
-  assert.equal(vmFormShowSessionAffinity(form), false);
-  // ...and it always fails over, so the opt-out is not offered either.
-  assert.equal(vmFormShowFailover(form), false);
+  assert.equal(vmFormShowBalancingOptions(form), false);
 
-  // A second target row appears in the strategy check even when still blank.
+  // A blank second row already counts as a second target for the hint.
   const blank = defaultVirtualModelForm();
   blank.targets = [{ model: "", weight: 1 }];
-  assert.equal(vmFormShowStrategy(blank), true);
+  assert.equal(vmFormStrategyPending(blank), false);
+});
+
+test("vmRoutingSummary spells out the effect on the source, warning when a real model is replaced", () => {
+  const form = (source, target_model, targets, strategy) => ({
+    ...defaultVirtualModelForm(),
+    source,
+    target_model,
+    targets: targets.map((model) => ({ model, weight: 1 })),
+    strategy,
+  });
+  const me = "openai/gpt-4o";
+
+  // Real model kept as its own first target: a safety net, never a warning.
+  let s = vmRoutingSummary(form(me, me, ["azure/gpt-4o", "gemini/g"], "failover"), true);
+  assert.equal(s.text, "Requests for openai/gpt-4o are served by openai/gpt-4o; if it fails, by azure/gpt-4o → gemini/g.");
+  assert.equal(s.replaces, false);
+  s = vmRoutingSummary(form(me, me, ["azure/gpt-4o"], "round_robin"), true);
+  assert.equal(s.text, "Requests for openai/gpt-4o are balanced across openai/gpt-4o and azure/gpt-4o (Round-robin).");
+  assert.equal(s.replaces, false);
+  // Only itself: a plain policy, nothing to say.
+  assert.equal(vmRoutingSummary(form(me, me, [], "failover"), true).text, "");
+
+  // Real model missing from its own targets: replaced, and flagged.
+  s = vmRoutingSummary(form(me, "azure/gpt-4o", [], "failover"), true);
+  assert.equal(s.text, "Requests for openai/gpt-4o are routed to azure/gpt-4o instead of openai/gpt-4o.");
+  assert.equal(s.replaces, true);
+  s = vmRoutingSummary(form(me, "azure/gpt-4o", ["gemini/g"], "failover"), true);
+  assert.equal(s.text, "Requests for openai/gpt-4o are routed to azure/gpt-4o instead of openai/gpt-4o; if it fails, to gemini/g.");
+  assert.equal(s.replaces, true);
+  s = vmRoutingSummary(form(me, "azure/gpt-4o", ["gemini/g"], "cost"), true);
+  assert.equal(s.replaces, true);
+
+  // Named virtual models: plain wording, never a warning.
+  s = vmRoutingSummary(form("smart", "openai/gpt-4o", ["groq/llama"], "failover"), false);
+  assert.equal(s.text, "Requests for smart go to openai/gpt-4o; if it fails, to groq/llama.");
+  assert.equal(s.replaces, false);
+  assert.equal(vmRoutingSummary(form("smart", "openai/gpt-4o", [], "round_robin"), false).text, "Requests for smart go to openai/gpt-4o.");
+  assert.equal(vmRoutingSummary(form("smart", "", [], "round_robin"), false).text, "");
 });
 
 test("managed rows are read-only: rowIsManaged and can-remove predicates", () => {
@@ -935,7 +964,7 @@ test("maskingRoutingKind tells failover, balancing, and true redirects apart", (
   // Round-robin including the model: balanced; the flag decides retries.
   const balanced = over([self, azure], { strategy: "round_robin" });
   assert.equal(maskingRoutingKind(balanced), "balanced");
-  assert.equal(maskingRoutingLabel(balanced, "balanced"), "azure/gpt-4o · round robin");
+  assert.equal(maskingRoutingLabel(balanced, "balanced"), "azure/gpt-4o · Round-robin");
   assert.equal(maskingFailsOver(balanced), true);
   assert.equal(maskingFailsOver(over([self, azure], { strategy: "round_robin", failover: false })), false);
 

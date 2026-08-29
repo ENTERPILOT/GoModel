@@ -98,46 +98,49 @@
     </div>
   </div>
 
-  {#if vm.vmFormShowStrategy()}
-    <FormField id="virtual-model-strategy" label={m.models_strategy()}>
-      <select
-        id="virtual-model-strategy"
-        class="form-select"
-        bind:value={vm.vmForm.strategy}
-        disabled={vm.vmFormManaged}
-      >
-        {#each vm.vmStrategyOptions() as option (option.value)}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
-      {#if vm.vmFormStrategyPending()}
-        <span class="form-hint">{m.models_strategy_pending_hint()}</span>
-      {/if}
-    </FormField>
-    {#if vm.vmFormShowSessionAffinity()}
-      <div class="form-field">
-        <label class="vm-option-checkbox">
-          <input
-            type="checkbox"
-            bind:checked={vm.vmForm.session_affinity}
-            disabled={vm.vmFormManaged}
-          />
-          <span>{m.models_session_keeping()}</span>
-        </label>
-      </div>
+  {@const summary = vm.vmRoutingSummary()}
+  {#if summary.text}
+    <p class="form-hint vm-routing-summary" class:vm-routing-replaces={summary.replaces} role="status">
+      {summary.text}
+    </p>
+  {/if}
+
+  <FormField id="virtual-model-strategy" label={m.models_strategy()}>
+    <select
+      id="virtual-model-strategy"
+      class="form-select"
+      bind:value={vm.vmForm.strategy}
+      disabled={vm.vmFormManaged}
+    >
+      {#each vm.vmStrategyOptions() as option (option.value)}
+        <option value={option.value}>{option.label}</option>
+      {/each}
+    </select>
+    {#if vm.vmFormStrategyPending()}
+      <span class="form-hint">{m.models_strategy_pending_hint()}</span>
     {/if}
-    {#if vm.vmFormShowFailover()}
-      <div class="form-field">
-        <label class="vm-option-checkbox">
-          <input
-            type="checkbox"
-            bind:checked={vm.vmForm.failover}
-            disabled={vm.vmFormManaged}
-          />
-          <span>{m.models_failover_option()}</span>
-        </label>
-      </div>
-    {/if}
+  </FormField>
+  {#if vm.vmFormShowBalancingOptions()}
+    <div class="form-field">
+      <label class="vm-option-checkbox">
+        <input
+          type="checkbox"
+          bind:checked={vm.vmForm.session_affinity}
+          disabled={vm.vmFormManaged}
+        />
+        <span>{m.models_session_keeping()}</span>
+      </label>
+    </div>
+    <div class="form-field">
+      <label class="vm-option-checkbox">
+        <input
+          type="checkbox"
+          bind:checked={vm.vmForm.failover}
+          disabled={vm.vmFormManaged}
+        />
+        <span>{m.models_failover_option()}</span>
+      </label>
+    </div>
   {/if}
 
   <div class="form-field">
@@ -244,5 +247,13 @@
   .vm-option-checkbox input {
     accent-color: var(--accent);
     cursor: pointer;
+  }
+
+  .vm-routing-summary {
+    margin: 0;
+  }
+
+  .vm-routing-replaces {
+    color: var(--warning);
   }
 </style>

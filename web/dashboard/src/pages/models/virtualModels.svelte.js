@@ -31,11 +31,10 @@ import {
   splitVirtualModelViews,
   strategyOptions,
   vmFormHasPrimaryTarget,
-  vmFormShowSessionAffinity,
-  vmFormShowFailover,
+  vmFormShowBalancingOptions,
   vmFormStrategyPending,
+  vmRoutingSummary,
   virtualModelTargetOptions,
-  vmFormShowStrategy,
   vmFormShowWeights,
   vmFormSupportsSlowdown,
   modelAccessUserPathsRestrict,
@@ -510,10 +509,6 @@ class VirtualModelsStore {
     return vmFormHasPrimaryTarget(this.vmForm);
   }
 
-  vmFormShowStrategy() {
-    return vmFormShowStrategy(this.vmForm);
-  }
-
   // vmStrategyOptions builds the strategy dropdown from the strategies this
   // deployment supports (server-driven), keeping the edited row's current
   // value selectable even when the deployment no longer offers it.
@@ -525,12 +520,16 @@ class VirtualModelsStore {
     return vmFormShowWeights(this.vmForm);
   }
 
-  vmFormShowSessionAffinity() {
-    return vmFormShowSessionAffinity(this.vmForm);
+  vmFormShowBalancingOptions() {
+    return vmFormShowBalancingOptions(this.vmForm);
   }
 
-  vmFormShowFailover() {
-    return vmFormShowFailover(this.vmForm);
+  // vmRoutingSummary describes the form's effect; whether the source names a
+  // catalog model decides between "replaced" and plain alias wording.
+  vmRoutingSummary() {
+    const source = String(this.vmForm.source || "").trim();
+    const sourceIsModel = modelsStore.models.some((model) => qualifiedModelName(model) === source);
+    return vmRoutingSummary(this.vmForm, sourceIsModel);
   }
 
   vmFormStrategyPending() {

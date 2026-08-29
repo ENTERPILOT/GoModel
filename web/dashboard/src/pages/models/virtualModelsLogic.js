@@ -155,15 +155,19 @@ function collectExtraTargets(rows) {
   return targets;
 }
 
+// strategyLabel is the short strategy name used in list cells and summaries
+// (the editor dropdown carries the long, explanatory labels).
 function strategyLabel(strategy) {
   switch (String(strategy || "").toLowerCase()) {
     case "cost":
-      return "lowest cost";
+      return m.models_strategy_name_cost();
     case "failover":
-      return m.models_strategy_failover();
+      return m.models_strategy_name_failover();
+    case "adaptive":
+      return m.models_strategy_name_adaptive();
     case "round_robin":
     case "":
-      return "round robin";
+      return m.models_strategy_name_round_robin();
     default:
       return strategy;
   }
@@ -891,18 +895,11 @@ export function vmFormHasExtraTargetRows(form) {
   return Boolean(form) && Array.isArray(form.targets) && form.targets.length > 0;
 }
 
-// vmFormShowStrategy: the strategy is shown as soon as the form has a target,
-// so the user sees how added targets will be used before adding them — with
-// a pinned real model, that "Failover" is what turns the next row into a
-// fallback. A policy form (no target) has no routing to configure.
-export function vmFormShowStrategy(form) {
-  return vmFormHasPrimaryTarget(form) || vmFormHasExtraTargetRows(form);
-}
-
-// vmFormStrategyPending: the strategy is visible but has nothing to balance
-// yet, so the editor explains that it applies from the second target on.
+// vmFormStrategyPending: the strategy is always shown, so the editor does not
+// change shape as targets come and go; until a second target row exists it
+// explains that the choice applies from the second target on.
 export function vmFormStrategyPending(form) {
-  return vmFormShowStrategy(form) && !vmFormHasExtraTargetRows(form);
+  return !vmFormHasExtraTargetRows(form);
 }
 
 // vmFormShowWeights: weights are hidden for strategies that ignore them, to
@@ -912,16 +909,61 @@ export function vmFormShowWeights(form) {
   return vmFormHasExtraTargetRows(form) && strategyUsesWeights(form && form.strategy);
 }
 
-// vmFormShowSessionAffinity: failover always retries the primary target first,
-// so there is no session to keep on another target and the control is hidden.
-export function vmFormShowSessionAffinity(form) {
-  return vmFormShowStrategy(form) && !isFailoverStrategy(form && form.strategy);
+// vmFormShowBalancingOptions: session keeping and the failover opt-out only
+// mean something for strategies that spread requests. The failover strategy
+// always retries its primary first (nothing to pin) and always fails over
+// (nothing to opt out of), so both checkboxes are hidden for it.
+export function vmFormShowBalancingOptions(form) {
+  return !isFailoverStrategy(form && form.strategy);
 }
 
-// vmFormShowFailover: the failover strategy is a priority list and always
-// fails over, so the opt-out checkbox is only offered to the other strategies.
-export function vmFormShowFailover(form) {
-  return vmFormShowStrategy(form) && !isFailoverStrategy(form && form.strategy);
+// vmRoutingSummary spells out, in one sentence, what saving the form does to
+// requests for its source, so the effect is visible before it is saved —
+// above all that a real model listed without itself as a target is replaced,
+// not backed up. It returns "" for a form with no target (an access policy)
+// and flags the replacement case so the editor can make it stand out.
+export function vmRoutingSummary(form, sourceIsModel) {
+  const source = String((form && form.source) || "").trim();
+  const targets = [];
+  const primary = String((form && form.target_model) || "").trim();
+  if (primary) targets.push(primary);
+  targets.push(...collectExtraTargets(form && form.targets).map((target) => target.model));
+  if (!source || targets.length === 0) return { text: "", replaces: false };
+
+  const strategy = strategyLabel(form.strategy);
+  const failover = isFailoverStrategy(form && form.strategy);
+  const others = targets.filter((target) => target !== source);
+  const selfFirst = targets[0] === source;
+
+  if (sourceIsModel && others.length < targets.length) {
+    if (others.length === 0) return { text: "", replaces: false };
+    if (failover && selfFirst) {
+      return { text: m.models_summary_failover({ source, fallbacks: others.join(" → ") }), replaces: false };
+    }
+    return { text: m.models_summary_balanced({ source, peers: others.join(", "), strategy }), replaces: false };
+  }
+  if (targets.length === 1) {
+    return {
+      text: sourceIsModel
+        ? m.models_summary_replaced({ source, target: targets[0] })
+        : m.models_summary_alias({ source, target: targets[0] }),
+      replaces: sourceIsModel,
+    };
+  }
+  if (failover) {
+    return {
+      text: sourceIsModel
+        ? m.models_summary_replaced_failover({ source, first: targets[0], rest: targets.slice(1).join(" → ") })
+        : m.models_summary_alias_failover({ source, first: targets[0], rest: targets.slice(1).join(" → ") }),
+      replaces: sourceIsModel,
+    };
+  }
+  return {
+    text: sourceIsModel
+      ? m.models_summary_replaced_balanced({ source, targets: targets.join(", "), strategy })
+      : m.models_summary_alias_balanced({ source, targets: targets.join(", "), strategy }),
+    replaces: sourceIsModel,
+  };
 }
 
 function isFailoverStrategy(strategy) {
