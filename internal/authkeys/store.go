@@ -39,6 +39,7 @@ type Store interface {
 	Create(ctx context.Context, key AuthKey) error
 	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
 	UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error
+	UpdateUserBinding(ctx context.Context, id string, userID, userPath string, now time.Time) error
 	Deactivate(ctx context.Context, id string, now time.Time) error
 	Close() error
 }

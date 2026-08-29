@@ -64,6 +64,18 @@ func (s *testStore) UpdateDashboardAccess(_ context.Context, id string, allowed 
 	return nil
 }
 
+func (s *testStore) UpdateUserBinding(_ context.Context, id string, userID, userPath string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	key.UserID = userID
+	key.UserPath = userPath
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *testStore) Deactivate(_ context.Context, id string, now time.Time) error {
 	if s.deactivateErr != nil {
 		return s.deactivateErr

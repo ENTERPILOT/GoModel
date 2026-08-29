@@ -19,8 +19,15 @@ function emptyLabelsEditor() {
   return { open: false, id: "", name: "", value: "", submitting: false, error: "" };
 }
 
+function emptyUserEditor() {
+  return { open: false, id: "", name: "", userId: "", submitting: false, error: "" };
+}
+
 class AuthKeysStore {
   keys = $state([]);
+  // Registered users, for binding keys; empty when the users feature is
+  // unavailable, which hides the binding UI.
+  users = $state([]);
   available = $state(true);
   loading = $state(false);
   // Load and in-form errors only; row-action feedback goes through the
@@ -45,6 +52,7 @@ class AuthKeysStore {
   dashboardAccessID = $state("");
   form = $state(defaultAuthKeyForm());
   labelsEditor = $state(emptyLabelsEditor());
+  userEditor = $state(emptyUserEditor());
 
   copyState = createCopyState({ logPrefix: "Failed to copy auth key:" });
 
@@ -52,10 +60,13 @@ class AuthKeysStore {
     this.loading = true;
     this.error = "";
     try {
-      const outcome = await loadAdminList("/admin/auth-keys", {
-        label: "auth keys",
-        errorFallback: m.api_keys_load_failed(),
-      });
+      const [outcome] = await Promise.all([
+        loadAdminList("/admin/auth-keys", {
+          label: "auth keys",
+          errorFallback: m.api_keys_load_failed(),
+        }),
+        this.fetchUsers(),
+      ]);
       if (outcome.status === "stale") {
         return;
       }
@@ -77,6 +88,15 @@ class AuthKeysStore {
       this.keys = outcome.items;
     } finally {
       this.loading = false;
+    }
+  }
+
+  // The registered-user inventory enriches the page (key binding); its
+  // failure stays silent so keys still work without the users feature.
+  async fetchUsers() {
+    const outcome = await loadAdminList("/admin/users", { label: "users" });
+    if (outcome.status === "ok") {
+      this.users = outcome.items;
     }
   }
 
@@ -216,6 +236,70 @@ class AuthKeysStore {
       flash.success(m.api_keys_labels_updated({ name: editor.name }));
       editor.submitting = false;
       this.closeLabelsEditor();
+      void this.fetchKeys();
+    } finally {
+      editor.submitting = false;
+    }
+  }
+
+  openUserEditor(key) {
+    if (!key || this.userEditor.submitting) {
+      return;
+    }
+    this.userEditor = {
+      open: true,
+      id: key.id,
+      name: key.name || "",
+      userId: key.user_id || "",
+      submitting: false,
+      error: "",
+    };
+  }
+
+  closeUserEditor() {
+    if (!this.userEditor.open || this.userEditor.submitting) {
+      return;
+    }
+    this.userEditor = emptyUserEditor();
+  }
+
+  async submitUserEditor() {
+    const editor = this.userEditor;
+    if (!editor.open || editor.submitting || !editor.id) {
+      return;
+    }
+    editor.submitting = true;
+    editor.error = "";
+
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/auth-keys/" + encodeURIComponent(editor.id) + "/user",
+        "PUT",
+        { user_id: editor.userId },
+        {
+          label: "update API key user",
+          errorFallback: m.api_keys_user_update_failed(),
+          unavailableMessage: m.api_keys_feature_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        editor.error = outcome.error;
+        return;
+      }
+      if (outcome.status === "error") {
+        editor.error = outcome.error;
+        if (outcome.result && outcome.result.status !== 401) {
+          console.error("Failed to update auth key user:", outcome.result.status, editor.error);
+        }
+        return;
+      }
+      flash.success(m.api_keys_user_updated({ name: editor.name }));
+      editor.submitting = false;
+      this.closeUserEditor();
       void this.fetchKeys();
     } finally {
       editor.submitting = false;

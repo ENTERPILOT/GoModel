@@ -63,6 +63,18 @@ user is later deleted.
 `user_id` and `user_path` are mutually exclusive on key creation; path-bound
 keys keep working unchanged.
 
+Existing keys can be rebound at any time:
+
+```http
+PUT /admin/auth-keys/{id}/user
+{"user_id": "<user id>"}
+```
+
+Passing an empty `user_id` unbinds the key and freezes it at the path it
+currently resolves to. The dashboard exposes both flows: pick a user when
+creating a key on the **API Keys** page, or use a key's **Assign user**
+action to bind or unbind it later.
+
 Usage rows record the owning user's `user_id` alongside `user_path`: the path
 preserves where the request was made (historic attribution), while the id
 identifies the user across renames. A row is attributed to the user registered

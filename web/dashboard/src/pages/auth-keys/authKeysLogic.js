@@ -6,11 +6,22 @@ export function defaultAuthKeyForm() {
   return {
     name: "",
     description: "",
+    user_id: "",
     user_path: "",
     labels: "",
     dashboard_access: false,
     expires_at: "",
   };
+}
+
+// authKeyUserOptions maps registered users to select options, sorted by
+// their derived path so the list mirrors the group tree.
+export function authKeyUserOptions(users) {
+  const list = Array.isArray(users) ? users : [];
+  return list
+    .filter((user) => user && user.id)
+    .map((user) => ({ id: user.id, label: user.user_path || user.name || user.id }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 // parseAuthKeyLabels splits a comma-separated label string into a trimmed,
@@ -84,15 +95,22 @@ export function buildCreateAuthKeyPayload(form) {
   if (!name) {
     return { error: m.api_keys_name_required() };
   }
-  const userPathError = authKeyUserPathValidationError(source.user_path);
-  if (userPathError) {
-    return { error: userPathError };
+  // A key bound to a registered user derives its path from that user; a
+  // free-form path only applies to unbound keys (the API rejects both).
+  const userID = String(source.user_id || "").trim();
+  let userPath = "";
+  if (!userID) {
+    const userPathError = authKeyUserPathValidationError(source.user_path);
+    if (userPathError) {
+      return { error: userPathError };
+    }
+    userPath = normalizeAuthKeyUserPath(source.user_path);
   }
-  const userPath = normalizeAuthKeyUserPath(source.user_path);
   const labels = parseAuthKeyLabels(source.labels);
   const payload = {
     name,
     description: String(source.description || "").trim() || undefined,
+    user_id: userID || undefined,
     user_path: userPath || undefined,
     labels: labels.length ? labels : undefined,
     dashboard_access: source.dashboard_access ? true : undefined,

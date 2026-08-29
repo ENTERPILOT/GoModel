@@ -2,6 +2,7 @@ package authkeys
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -107,5 +108,83 @@ func TestServiceCreateUserBoundKeyWithoutResolverRejected(t *testing.T) {
 	}
 	if _, err := service.Create(context.Background(), CreateInput{Name: "bound", UserID: "user-1"}); !IsValidationError(err) {
 		t.Fatalf("Create(no resolver) error = %v, want validation error", err)
+	}
+}
+
+func TestServiceUpdateUserBindingBindsExistingKey(t *testing.T) {
+	users := map[string]string{"user-1": "/team/alpha"}
+	service := newUserBoundService(t, users)
+
+	issued, err := service.Create(context.Background(), CreateInput{Name: "plain", UserPath: "/legacy"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	view, err := service.UpdateUserBinding(context.Background(), issued.ID, "user-1")
+	if err != nil {
+		t.Fatalf("UpdateUserBinding() error = %v", err)
+	}
+	if view.UserID != "user-1" || view.UserPath != "/team/alpha" {
+		t.Fatalf("bound view = %+v, want user-1 at /team/alpha", view.AuthKey)
+	}
+
+	// The bound key now authenticates with the user's live path.
+	users["user-1"] = "/org/beta"
+	result, err := service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if result.UserPath != "/org/beta" || result.UserID != "user-1" {
+		t.Fatalf("Authenticate() = %+v, want live /org/beta for user-1", result)
+	}
+}
+
+func TestServiceUpdateUserBindingUnbindFreezesCurrentPath(t *testing.T) {
+	users := map[string]string{"user-1": "/team/alpha"}
+	service := newUserBoundService(t, users)
+
+	issued, err := service.Create(context.Background(), CreateInput{Name: "bound", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// The user moved after creation; unbinding freezes the key at the
+	// current path, not the creation-time snapshot.
+	users["user-1"] = "/org/beta"
+	view, err := service.UpdateUserBinding(context.Background(), issued.ID, "")
+	if err != nil {
+		t.Fatalf("UpdateUserBinding(unbind) error = %v", err)
+	}
+	if view.UserID != "" || view.UserPath != "/org/beta" {
+		t.Fatalf("unbound view = %+v, want frozen path /org/beta", view.AuthKey)
+	}
+
+	// Later user moves no longer affect the key.
+	users["user-1"] = "/elsewhere"
+	result, err := service.Authenticate(context.Background(), issued.Value)
+	if err != nil {
+		t.Fatalf("Authenticate() error = %v", err)
+	}
+	if result.UserPath != "/org/beta" {
+		t.Fatalf("Authenticate().UserPath = %q, want frozen /org/beta", result.UserPath)
+	}
+}
+
+func TestServiceUpdateUserBindingRejectsUnknownUser(t *testing.T) {
+	service := newUserBoundService(t, map[string]string{})
+
+	issued, err := service.Create(context.Background(), CreateInput{Name: "plain"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if _, err := service.UpdateUserBinding(context.Background(), issued.ID, "ghost"); !IsValidationError(err) {
+		t.Fatalf("UpdateUserBinding(unknown user) error = %v, want validation error", err)
+	}
+}
+
+func TestServiceUpdateUserBindingUnknownKeyReturnsNotFound(t *testing.T) {
+	service := newUserBoundService(t, map[string]string{"user-1": "/team/alpha"})
+	if _, err := service.UpdateUserBinding(context.Background(), "missing", "user-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateUserBinding(missing key) error = %v, want ErrNotFound", err)
 	}
 }

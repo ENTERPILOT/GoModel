@@ -6,6 +6,7 @@ import {
   authKeyDeactivated,
   authKeyExpired,
   authKeyUserPathValidationError,
+  authKeyUserOptions,
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,
   defaultAuthKeyForm,
@@ -64,6 +65,35 @@ test("buildCreateAuthKeyPayload sends dashboard_access only when granted", () =>
     name: "ci-deploy",
   });
   assert.equal(denied.payload.dashboard_access, undefined);
+});
+
+test("buildCreateAuthKeyPayload sends user_id and drops the path when a user is selected", () => {
+  const { payload, error } = buildCreateAuthKeyPayload({
+    name: "bound",
+    user_id: "user-1",
+    user_path: "/ignored",
+  });
+  assert.equal(error, undefined);
+  assert.equal(payload.user_id, "user-1");
+  assert.equal(payload.user_path, undefined);
+});
+
+test("buildCreateAuthKeyPayload omits user_id when no user is selected", () => {
+  const { payload } = buildCreateAuthKeyPayload({ name: "plain", user_path: "/team" });
+  assert.equal(payload.user_id, undefined);
+  assert.equal(payload.user_path, "/team");
+});
+
+test("authKeyUserOptions sorts registered users by derived path", () => {
+  const options = authKeyUserOptions([
+    { id: "u2", name: "zoe", user_path: "/ops/zoe" },
+    { id: "u1", name: "anna", user_path: "/engineering/anna" },
+    { name: "no-id-skipped" },
+  ]);
+  assert.deepEqual(options, [
+    { id: "u1", label: "/engineering/anna" },
+    { id: "u2", label: "/ops/zoe" },
+  ]);
 });
 
 test("buildCreateAuthKeyPayload normalizes user paths before sending them", () => {

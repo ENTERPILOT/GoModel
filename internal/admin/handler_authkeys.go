@@ -109,6 +109,25 @@ func (h *Handler) UpdateAuthKeyDashboardAccess(c *echo.Context) error {
 	})
 }
 
+type updateAuthKeyUserRequest struct {
+	// Pointer so an omitted field is rejected; an empty string unbinds the
+	// key from its user.
+	UserID *string `json:"user_id"`
+}
+
+// UpdateAuthKeyUser handles PUT /admin/auth-keys/:id/user. It binds the key
+// to a registered user (the key then follows the user's current derived
+// path), or unbinds it when user_id is empty.
+func (h *Handler) UpdateAuthKeyUser(c *echo.Context) error {
+	var req updateAuthKeyUserRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		if req.UserID == nil {
+			return nil, validation.NewError("user_id is required", nil)
+		}
+		return h.authKeys.UpdateUserBinding(ctx, id, *req.UserID)
+	})
+}
+
 // updateAuthKey handles the shared shape of the PUT /admin/auth-keys/:id/*
 // endpoints: bind the request into req, run the update, and render the
 // updated view.

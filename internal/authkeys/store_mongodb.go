@@ -136,6 +136,35 @@ func (s *MongoDBStore) UpdateDashboardAccess(ctx context.Context, id string, all
 	return nil
 }
 
+func (s *MongoDBStore) UpdateUserBinding(ctx context.Context, id string, userID, userPath string, now time.Time) error {
+	set := bson.D{{Key: "updated_at", Value: now.UTC()}}
+	var unset bson.D
+	if userID != "" {
+		set = append(set, bson.E{Key: "user_id", Value: userID})
+	} else {
+		unset = append(unset, bson.E{Key: "user_id", Value: ""})
+	}
+	if userPath != "" {
+		set = append(set, bson.E{Key: "user_path", Value: userPath})
+	} else {
+		unset = append(unset, bson.E{Key: "user_path", Value: ""})
+	}
+	update := bson.D{{Key: "$set", Value: set}}
+	if len(unset) > 0 {
+		// Clearing removes the fields entirely, matching the insert path's
+		// omitempty behavior, instead of storing null.
+		update = append(update, bson.E{Key: "$unset", Value: unset})
+	}
+	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
+	if err != nil {
+		return fmt.Errorf("update auth key user binding: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *MongoDBStore) Deactivate(ctx context.Context, id string, now time.Time) error {
 	now = now.UTC()
 	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, mongo.Pipeline{

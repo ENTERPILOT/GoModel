@@ -294,6 +294,53 @@ func (s *Service) UpdateDashboardAccess(ctx context.Context, id string, allowed 
 	return s.viewByID(id)
 }
 
+// UpdateUserBinding binds a managed auth key to a registered user, or unbinds
+// it when userID is empty. Binding snapshots the user's current derived path;
+// unbinding freezes the key at the path it currently resolves to, so its
+// scope stays put instead of snapping back to a stale snapshot.
+func (s *Service) UpdateUserBinding(ctx context.Context, id, userID string) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	id = normalizeID(id)
+	if id == "" {
+		return nil, newValidationError("auth key id is required", nil)
+	}
+	userID = strings.TrimSpace(userID)
+
+	var userPath string
+	if userID != "" {
+		path, ok := s.resolveUserPath(userID)
+		if !ok {
+			return nil, newValidationError("unknown user_id: "+userID, nil)
+		}
+		userPath = path
+	} else {
+		view, err := s.viewByID(id)
+		if err != nil {
+			return nil, err
+		}
+		userPath = view.UserPath
+		if path, ok := s.resolveUserPath(view.UserID); ok {
+			userPath = path
+		}
+	}
+
+	now := time.Now().UTC()
+	if err := s.store.UpdateUserBinding(ctx, id, userID, userPath, now); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update auth key user binding: %w", err)
+	}
+	s.applyKeyUpdate(id, now, func(key *AuthKey) {
+		key.UserID = userID
+		key.UserPath = userPath
+	})
+	s.refreshBestEffort(ctx, "update-user-binding")
+	return s.viewByID(id)
+}
+
 // viewByID returns the admin-facing view of one cached key.
 func (s *Service) viewByID(id string) (*View, error) {
 	s.mu.RLock()

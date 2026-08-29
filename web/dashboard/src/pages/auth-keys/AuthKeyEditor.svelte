@@ -7,8 +7,11 @@
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { authKeysStore as store } from "./authKeys.svelte.js";
+  import { authKeyUserOptions } from "./authKeysLogic.js";
   import { Check, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
+
+  const userOptions = $derived(authKeyUserOptions(store.users));
 </script>
 
 <EditorDialog
@@ -67,6 +70,28 @@
           <input id="auth-key-expires" type="date" bind:value={store.form.expires_at} />
         </div>
       </div>
+      {#if userOptions.length > 0}
+        <div class="form-field">
+          <InlineHelpSection copyId="auth-key-user-help-copy" label={m.api_keys_user_help_label()}>
+            {#snippet title()}
+              <label class="form-field-label" for="auth-key-user">{m.api_keys_user()}</label>
+            {/snippet}
+            {#snippet help()}
+              {m.api_keys_user_help()}
+            {/snippet}
+          </InlineHelpSection>
+          <select
+            id="auth-key-user"
+            aria-describedby="auth-key-user-help-copy"
+            bind:value={store.form.user_id}
+          >
+            <option value="">{m.api_keys_user_none()}</option>
+            {#each userOptions as option (option.id)}
+              <option value={option.id}>{option.label}</option>
+            {/each}
+          </select>
+        </div>
+      {/if}
       <div class="form-field">
         <InlineHelpSection copyId="auth-key-user-path-help-copy" label={m.api_keys_user_path_help_label()}>
           {#snippet title()}
@@ -81,8 +106,12 @@
           type="text"
           placeholder="ex. /department1/team-a"
           aria-describedby="auth-key-user-path-help-copy"
+          disabled={Boolean(store.form.user_id)}
           bind:value={store.form.user_path}
         />
+        {#if store.form.user_id}
+          <p class="form-hint">{m.api_keys_user_path_derived()}</p>
+        {/if}
       </div>
       <div class="form-field">
         <InlineHelpSection copyId="auth-key-labels-help-copy" label={m.api_keys_labels_help_label()}>

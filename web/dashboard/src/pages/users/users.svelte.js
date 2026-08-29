@@ -40,6 +40,10 @@ class UsersStore {
   userEditor = $state({ open: false, mode: "create", submitting: false, error: "", form: defaultUserForm() });
   groupEditor = $state({ open: false, mode: "create", submitting: false, error: "", form: defaultGroupForm() });
   accessEditor = $state(emptyAccessEditor());
+  // Plain counter (not $state): identifies the in-flight openAccessEditor
+  // load so a close-and-reopen invalidates the stale one. The subject object
+  // itself can't be compared — $state proxies it, so `subject !== subject`.
+  accessRequest = 0;
   deletingID = $state("");
   deletingGroup = $state("");
 
@@ -254,13 +258,14 @@ class UsersStore {
 
   async openAccessEditor(subject) {
     if (this.accessEditor.submitting) return;
+    const request = ++this.accessRequest;
     this.accessEditor = { ...emptyAccessEditor(), open: true, subject, loading: true };
     // Refresh the policy views so the editor diffs against current state.
     const [views, models] = await Promise.all([
       loadAdminList("/admin/virtual-models", { label: "virtual models" }),
       loadAdminList("/admin/models", { label: "models" }),
     ]);
-    if (!this.accessEditor.open || this.accessEditor.subject !== subject) return;
+    if (!this.accessEditor.open || request !== this.accessRequest) return;
     if (views.status === "ok") {
       this.policyViews = views.items;
     }

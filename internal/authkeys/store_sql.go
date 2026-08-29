@@ -139,6 +139,23 @@ func (s *SQLStore) UpdateDashboardAccess(ctx context.Context, id string, allowed
 	return nil
 }
 
+func (s *SQLStore) UpdateUserBinding(ctx context.Context, id string, userID, userPath string, now time.Time) error {
+	affected, err := s.db.Exec(ctx, `
+		UPDATE auth_keys
+		SET user_id = ?,
+			user_path = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, sqlutil.NullableString(userID), sqlutil.NullableString(userPath), now.Unix(), normalizeID(id))
+	if err != nil {
+		return fmt.Errorf("update auth key user binding: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *SQLStore) Deactivate(ctx context.Context, id string, now time.Time) error {
 	affected, err := s.db.Exec(ctx, `
 		UPDATE auth_keys

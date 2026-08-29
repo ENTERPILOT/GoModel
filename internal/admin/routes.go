@@ -91,6 +91,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.POST("/auth-keys", h.CreateAuthKey)
 	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
 	g.PUT("/auth-keys/:id/dashboard-access", h.UpdateAuthKeyDashboardAccess)
+	g.PUT("/auth-keys/:id/user", h.UpdateAuthKeyUser)
 	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)
 
 	g.GET("/guardrails/types", h.ListGuardrailTypes)

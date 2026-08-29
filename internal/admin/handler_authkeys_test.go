@@ -62,6 +62,18 @@ func (s *authKeyTestStore) UpdateDashboardAccess(_ context.Context, id string, a
 	return nil
 }
 
+func (s *authKeyTestStore) UpdateUserBinding(_ context.Context, id string, userID, userPath string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return authkeys.ErrNotFound
+	}
+	key.UserID = userID
+	key.UserPath = userPath
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *authKeyTestStore) Deactivate(_ context.Context, id string, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {

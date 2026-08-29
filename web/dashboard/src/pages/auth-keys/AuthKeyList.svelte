@@ -6,7 +6,7 @@
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
-  import { Info, Pencil, Power, ShieldCheck, ShieldOff } from "lucide";
+  import { Info, Pencil, Power, ShieldCheck, ShieldOff, UserRound } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -38,7 +38,16 @@
         <tr class:auth-key-row-deactivated={authKeyDeactivated(key)}>
           <td>{key.name}</td>
           <td class="auth-key-description">{key.description || "—"}</td>
-          <td>{key.user_path || "—"}</td>
+          <td>
+            {#if key.user_id}
+              <span class="auth-key-bound-user" title={m.api_keys_user_bound()}>
+                <Icon icon={UserRound} width="13" height="13" />
+                <span>{key.user_path || "—"}</span>
+              </span>
+            {:else}
+              {key.user_path || "—"}
+            {/if}
+          </td>
           <td>
             {#if (key.labels || []).length > 0}
               <div class="usage-label-chips">
@@ -87,6 +96,15 @@
                 >
                   <Icon icon={key.dashboard_access ? ShieldOff : ShieldCheck} class="table-icon-svg" />
                 </TableActionButton>
+                {#if store.users.length > 0 || key.user_id}
+                  <TableActionButton
+                    label={m.api_keys_assign_user_action({ name: key.name })}
+                    class="table-icon-btn"
+                    onclick={() => store.openUserEditor(key)}
+                  >
+                    <Icon icon={UserRound} class="table-icon-svg" />
+                  </TableActionButton>
+                {/if}
                 <TableActionButton
                   label={m.api_keys_edit_labels_action({ name: key.name })}
                   class="table-icon-btn"
@@ -125,6 +143,13 @@
   .usage-label-chip-static, .usage-label-chip-static:hover {
     cursor: default;
     background: color-mix(in srgb, var(--label-color, var(--accent)) 14%, var(--bg));
+  }
+
+  .auth-key-bound-user {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
   }
 
   .auth-key-redacted {
