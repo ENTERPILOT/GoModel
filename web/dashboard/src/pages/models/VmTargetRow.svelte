@@ -5,7 +5,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
-  import { virtualModels as vm } from "./virtualModels.svelte.js";
+  import { virtualModelEditor as vm } from "./virtualModelEditor.svelte.js";
   import { vmFormShowWeights } from "./vmForm.js";
   import { Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";

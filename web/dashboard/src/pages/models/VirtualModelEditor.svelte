@@ -7,7 +7,7 @@
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
-  import { virtualModels } from "./virtualModels.svelte.js";
+  import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import {
     vmFormHasPrimaryTarget,
     vmFormShowBalancingOptions,
@@ -18,7 +18,7 @@
   import { Plus, Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
-  const vm = virtualModels;
+  const vm = virtualModelEditor;
 
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
   // sure the runtime config is loaded by the time the editor shows it.

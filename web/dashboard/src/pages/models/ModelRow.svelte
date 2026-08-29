@@ -4,6 +4,7 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
+  import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
   import {
@@ -168,7 +169,7 @@ import {
           <TableActionButton
             label={m.models_edit_alias({ name: row.alias.name })}
             class="table-icon-btn table-action-btn-active"
-            onclick={() => virtualModels.openVirtualModelEditAlias(row.alias)}
+            onclick={() => virtualModelEditor.openVirtualModelEditAlias(row.alias)}
           >
             <Icon icon={Pencil} class="table-icon-svg" />
           </TableActionButton>
@@ -199,7 +200,7 @@ import {
           <TableActionButton
             label={routingEditLabel}
             class="table-icon-btn table-action-btn-active"
-            onclick={() => virtualModels.openVirtualModelEditAlias(row.masking_alias)}
+            onclick={() => virtualModelEditor.openVirtualModelEditAlias(row.masking_alias)}
           >
             <Icon icon={Pencil} class="table-icon-svg" />
           </TableActionButton>
@@ -208,7 +209,7 @@ import {
           <TableActionButton
             label={modelOverrideEditButtonLabel(m.models_model_settings_for({ name: row.display_name }), hasAccessOverride(row.access))}
             class="table-icon-btn {modelOverrideEditButtonClass(hasAccessOverride(row.access))}"
-            onclick={() => virtualModels.openVirtualModelEditModel(row)}
+            onclick={() => virtualModelEditor.openVirtualModelEditModel(row)}
           >
             <Icon icon={Pencil} class="table-icon-svg" />
           </TableActionButton>

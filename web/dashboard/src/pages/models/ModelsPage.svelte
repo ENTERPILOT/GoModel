@@ -12,6 +12,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
+  import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import ModelTable from "./ModelTable.svelte";
   import VirtualModelEditor from "./VirtualModelEditor.svelte";
@@ -126,7 +127,7 @@
             class="btn btn-primary btn-with-icon alias-create-btn"
             aria-label={m.models_new_virtual_label()}
             title={m.models_alias()}
-            onclick={() => virtualModels.openVirtualModelCreate()}
+            onclick={() => virtualModelEditor.openVirtualModelCreate()}
           >
             <Icon icon={Plus} class="alias-create-icon" />
             <span>{m.models_new_virtual()}</span>
