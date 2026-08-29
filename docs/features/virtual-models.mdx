@@ -165,6 +165,12 @@ keeping pins at every level, so a session stays on the same concrete model.
 - `/v1/models` lists a chained redirect with the metadata of its first
   available concrete model.
 
+A target written as one name is matched by name wherever it is declared —
+`config.yaml`, the dashboard, or the admin API — so `team/cheap` reaches the
+virtual model of that name even though it looks like `provider/model`. Set
+`provider` explicitly (`{ provider: groq, model: llama-3.3-70b }`) to pin a
+target to a concrete model regardless of any virtual model sharing the name.
+
 Chains must be acyclic (`a -> b -> a` is rejected, with the cycle spelled out)
 and at most 8 virtual models deep. Both rules are enforced when saving from the
 dashboard and at startup for declarative entries. A target must exist when it is
