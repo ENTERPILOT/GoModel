@@ -47,9 +47,16 @@ server:
   swagger_enabled: true
 ```
 
-The UI is served without authentication and respects `BASE_PATH`. If
-`SWAGGER_ENABLED=true` is set on a binary built without the tag, GoModel logs a
-warning at startup and serves nothing at `/swagger/*`.
+<Warning>
+`/swagger/*` bypasses `GOMODEL_MASTER_KEY` and gateway API key authentication,
+so enabling it publishes interactive API documentation to anyone who can reach
+the server. Enable it only in development or trusted environments, or restrict
+the path at the network layer.
+</Warning>
+
+The UI respects `BASE_PATH`. If `SWAGGER_ENABLED=true` is set on a binary built
+without the tag, GoModel logs a warning at startup and serves nothing at
+`/swagger/*`.
 
 ## Regenerate the spec
 
