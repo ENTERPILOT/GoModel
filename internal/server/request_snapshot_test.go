@@ -378,6 +378,8 @@ func TestRequestSnapshotCapture_GeneratesRequestIDWhenMissing(t *testing.T) {
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
+	// A caller-supplied ID that is not a plain token is replaced, not echoed.
+	req.Header.Set(core.RequestIDHeader, "req 123\x1b[31m")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 

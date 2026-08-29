@@ -69,7 +69,7 @@ test("no icon binding is assigned a name string", () => {
 
   for (const file of sourceFiles(SRC)) {
     const source = readFileSync(file, "utf8");
-    for (const [match, prop, value] of source.matchAll(binding)) {
+    for (const [match, , value] of source.matchAll(binding)) {
       const produced = value.startsWith("{")
         ? value.slice(1, -1).split(/\?|:/).slice(1).join(" ") // ternary branches only
         : value;

@@ -1,9 +1,11 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -106,6 +108,30 @@ func TestNewLogHandlerUsesConfiguredLevel(t *testing.T) {
 			}
 			if !handler.Enabled(ctx, slog.LevelError) {
 				t.Fatal("handler.Enabled(error) = false, want true")
+			}
+		})
+	}
+}
+
+// Request-derived values (request IDs, paths, model names, error text) are
+// logged as slog attributes. Both handlers must quote control characters so a
+// caller cannot forge log lines or terminal escapes through them.
+func TestNewLogHandlerEscapesAttrValues(t *testing.T) {
+	t.Parallel()
+
+	const hostile = "a\nINFO forged\x1b[31m"
+
+	for _, format := range []string{"json", "text"} {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+			logger := slog.New(newLogHandler(&buf, false, format, slog.LevelInfo))
+			logger.Info("request failed", "request_id", hostile)
+
+			out := buf.String()
+			if strings.Count(out, "\n") != 1 || strings.Contains(out, "\x1b") {
+				t.Fatalf("%s handler leaked control characters: %q", format, out)
 			}
 		})
 	}
