@@ -330,6 +330,9 @@ if the file size matters.
   Prometheus metrics at `METRICS_ENDPOINT` (`/metrics`). The endpoint is
   unauthenticated, so keep it inside your perimeter. See the
   [Prometheus guide](/guides/prometheus-metrics).
+- **OpenTelemetry export is off by default.** Set `OTEL_ENABLED=true` and
+  `OTEL_EXPORTER_OTLP_ENDPOINT` to send traces and GenAI metrics to your
+  collector. See the [OpenTelemetry guide](/guides/opentelemetry).
 - **Logs are JSON automatically when stdout is not a TTY**, so containers get
   structured logs with no configuration. Set `LOG_FORMAT` explicitly to override.
   `LOG_LEVEL` defaults to `info`; an invalid value fails startup.

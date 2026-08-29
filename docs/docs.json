@@ -159,7 +159,8 @@
                     "guides/cursor",
                     "guides/kimi-code-cli",
                     "guides/opencode-and-other-agents",
-                    "guides/prometheus-metrics"
+                    "guides/prometheus-metrics",
+                    "guides/opentelemetry"
                 ]
             },
             {
