@@ -57,7 +57,7 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err := rejectUnmigratedLegacyData(ctx, store, shared); err != nil {
 		return nil, err
 	}
-	if err := importLegacyFailoverRules(ctx, store, shared); err != nil {
+	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover.Disabled); err != nil {
 		return nil, err
 	}
 

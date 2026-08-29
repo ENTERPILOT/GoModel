@@ -54,9 +54,12 @@ func (r legacyFailoverRule) enabled() bool {
 // combine, and the store is kept in place so the fallback list stays readable
 // and the warning repeats on every start until it is resolved. Config-managed
 // rows are skipped — the live configuration still declares them and
-// FailoverConfigModels translates it on every start. Databases that never had
-// the store are a no-op.
-func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.Storage) error {
+// FailoverConfigModels translates it on every start. A rule whose primary is
+// listed in disabled (FAILOVER_DISABLED_MODELS) used to be switched off by
+// that setting at request time; it is converted as a disabled virtual model,
+// so the fallback list survives without becoming active. Databases that never
+// had the store are a no-op.
+func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.Storage, disabled map[string]bool) error {
 	rules, keyColumn, err := readLegacyFailoverRules(ctx, conn)
 	if err != nil {
 		return fmt.Errorf("read legacy failover rules: %w", err)
@@ -76,6 +79,7 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 	migrated, unresolved := 0, 0
 	for _, rule := range rules {
 		model, convertible := failoverModel(rule.Source, rule.fallbacks(), false)
+		model.Enabled = !disabled[rule.Source]
 		if rule.enabled() && rule.ManagedSource != "config" && convertible {
 			existing, exists := taken[rule.Source]
 			switch {
@@ -149,7 +153,8 @@ func readLegacySQLFailoverRules(ctx context.Context, db sqlx.DB) ([]legacyFailov
 		return nil, "", err
 	}
 	// Read each value from whichever column this database still has,
-	// defaulting the ones a very old table never had.
+	// defaulting the ones a very old table never had. The defaults are typed
+	// literals: PostgreSQL refuses to scan an integer 1 into *bool.
 	pick := func(preferred, legacy, missing string) string {
 		switch {
 		case columns[preferred]:
@@ -166,7 +171,7 @@ func readLegacySQLFailoverRules(ctx context.Context, db sqlx.DB) ([]legacyFailov
 	query := fmt.Sprintf("SELECT TRIM(%s), %s, %s, %s FROM %s",
 		keyColumn,
 		pick("fallback_models", "targets", "'[]'"),
-		pick("enabled", "", "1"),
+		pick("enabled", "", "TRUE"),
 		pick("managed_source", "", "'dashboard'"),
 		legacyFailoverTable)
 	rows, err := db.Query(ctx, query)
