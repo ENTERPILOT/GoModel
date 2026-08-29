@@ -45,12 +45,9 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 // Message.MarshalJSON emits validated chat request message content, preserves
 // null handling, and includes unknown JSON members from ExtraFields.
 func (m Message) MarshalJSON() ([]byte, error) {
-	content := any(nil)
-	var err error
-	switch {
-	case m.ContentNull && isNullEquivalentContent(m.Content):
-		content = nil
-	default:
+	var content any
+	if !m.ContentNull || !isNullEquivalentContent(m.Content) {
+		var err error
 		content, err = marshalMessageContent(m.Content, m.ToolCalls)
 		if err != nil {
 			return nil, err
