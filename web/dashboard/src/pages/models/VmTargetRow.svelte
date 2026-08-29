@@ -6,6 +6,7 @@
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels as vm } from "./virtualModels.svelte.js";
+  import { vmFormShowWeights } from "./vmForm.js";
   import { Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -32,7 +33,7 @@
     allowCustom
     mono
   />
-  {#if vm.vmFormShowWeights()}
+  {#if vmFormShowWeights(vm.vmForm)}
     <input
       type="number"
       min="1"

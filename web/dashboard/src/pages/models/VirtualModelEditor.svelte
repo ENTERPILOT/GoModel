@@ -8,6 +8,12 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { virtualModels } from "./virtualModels.svelte.js";
+  import {
+    vmFormHasPrimaryTarget,
+    vmFormShowBalancingOptions,
+    vmFormStrategyPending,
+    vmFormSupportsSlowdown,
+  } from "./vmForm.js";
   import VmTargetRow from "./VmTargetRow.svelte";
   import { Plus, Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -74,7 +80,7 @@
       id="virtual-model-target"
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
-      showRemove={vm.vmFormHasPrimaryTarget()}
+      showRemove={vmFormHasPrimaryTarget(vm.vmForm)}
       onremove={() => vm.removePrimaryTarget()}
     />
     {#each vm.vmForm.targets as target, index (index)}
@@ -122,14 +128,14 @@
       id="virtual-model-strategy"
       class="form-select"
       bind:value={vm.vmForm.strategy}
-      disabled={vm.vmFormManaged || vm.vmFormStrategyPending()}
+      disabled={vm.vmFormManaged || vmFormStrategyPending(vm.vmForm)}
     >
       {#each vm.vmStrategyOptions() as option (option.value)}
         <option value={option.value}>{option.label}</option>
       {/each}
     </select>
   </div>
-  {#if vm.vmFormShowBalancingOptions()}
+  {#if vmFormShowBalancingOptions(vm.vmForm)}
     <div class="form-field">
       <label class="vm-option-checkbox">
         <input
@@ -185,7 +191,7 @@
     ></textarea>
   </FormField>
 
-  {#if vm.vmFormSupportsSlowdown()}
+  {#if vmFormSupportsSlowdown(vm.vmForm)}
     <FormField id="virtual-model-slowdown" label={m.models_slowdown_field()}>
       <input
         id="virtual-model-slowdown"

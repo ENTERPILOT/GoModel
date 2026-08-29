@@ -41,11 +41,6 @@ import {
   normalizeUserPaths,
   removePrimaryTarget as removePrimaryTargetPure,
   virtualModelTargetOptions,
-  vmFormHasPrimaryTarget,
-  vmFormShowBalancingOptions,
-  vmFormShowWeights,
-  vmFormStrategyPending,
-  vmFormSupportsSlowdown,
   vmRoutingSummary,
 } from "./vmForm.js";
 
@@ -514,23 +509,11 @@ class VirtualModelsStore {
     removePrimaryTargetPure(this.vmForm);
   }
 
-  vmFormHasPrimaryTarget() {
-    return vmFormHasPrimaryTarget(this.vmForm);
-  }
-
   // vmStrategyOptions builds the strategy dropdown from the strategies this
   // deployment supports (server-driven), keeping the edited row's current
   // value selectable even when the deployment no longer offers it.
   vmStrategyOptions() {
     return strategyOptions(runtimeConfig.virtualModelStrategies(), this.vmForm.strategy);
-  }
-
-  vmFormShowWeights() {
-    return vmFormShowWeights(this.vmForm);
-  }
-
-  vmFormShowBalancingOptions() {
-    return vmFormShowBalancingOptions(this.vmForm);
   }
 
   // vmRoutingSummary describes the form's effect; whether the source names a
@@ -541,16 +524,8 @@ class VirtualModelsStore {
     return vmRoutingSummary(this.vmForm, sourceIsModel);
   }
 
-  vmFormStrategyPending() {
-    return vmFormStrategyPending(this.vmForm);
-  }
-
   vmTargetOptions() {
     return virtualModelTargetOptions(modelsStore.models, this.aliases, this.vmForm.source);
-  }
-
-  vmFormSupportsSlowdown() {
-    return vmFormSupportsSlowdown(this.vmForm);
   }
 
   // The edit-modal status switch reuses the same .alias-toggle component and
