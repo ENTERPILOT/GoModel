@@ -183,6 +183,7 @@ func Init(ctx context.Context, result *config.LoadResult, factory *ProviderFacto
 		modelCache.Close()
 		return nil, fmt.Errorf("failed to create router: %w", err)
 	}
+	router.SetUnqualifiedModelIDs(result.Config.Models.UnqualifiedModelIDsAtModelsEndpoint)
 
 	return &InitResult{
 		ConfiguredProviders:         SanitizeProviderConfigs(providerMap),

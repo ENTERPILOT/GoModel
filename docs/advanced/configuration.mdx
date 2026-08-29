@@ -324,6 +324,16 @@ providers that define a list and skip their upstream `/models` calls. YAML
 `providers.<name>.models` provides the same model-list input for named provider
 blocks.
 
+`GET /v1/models` lists provider-qualified IDs (`openai/gpt-5`) by default. Set
+`UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:
+`models.unqualified_model_ids_at_models_endpoint`) to list bare model IDs
+(`gpt-5`) instead, for clients that validate the requested model against the
+list and only know plain names. Caveat: when two providers expose the same
+model ID, only the first provider is listed and an unqualified request routes
+there. Pin a name to a specific provider with a
+[virtual model](/features/virtual-models#list-bare-model-ids), for example
+`source: gpt-5` with `target: azure/gpt-5`.
+
 To narrow a provider's inventory instead of listing it model by model, use
 `<PROVIDER>_MODEL_FILTER_INCLUDE`, `<PROVIDER>_MODEL_FILTER_EXCLUDE`, and
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
@@ -510,6 +520,10 @@ models:
   # configured models on top of the discovered inventory (models a provider
   # serves but does not list).
   configured_provider_models_mode: fallback
+  # List bare model IDs (gpt-5) from GET /v1/models instead of provider-qualified
+  # ones (openai/gpt-5). When two providers expose the same ID only the first
+  # provider is listed; pin a name with a virtual model (source gpt-5 -> target azure/gpt-5).
+  unqualified_model_ids_at_models_endpoint: false
 
 providers:
   # Override OpenAI base URL
