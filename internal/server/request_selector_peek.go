@@ -131,10 +131,19 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 	var hints requestBodySelectorHints
 	var modelSeen, providerSeen, streamSeen bool
 	var modelAmbiguous, providerAmbiguous, streamAmbiguous bool
+	partialHints := func() requestBodySelectorHints {
+		if requireComplete || !hints.streamParsed || streamAmbiguous {
+			return requestBodySelectorHints{}
+		}
+		return requestBodySelectorHints{
+			stream:       hints.stream,
+			streamParsed: true,
+		}
+	}
 	for dec.More() {
 		keyToken, err := dec.Token()
 		if err != nil {
-			return requestBodySelectorHints{}
+			return partialHints()
 		}
 		key, ok := keyToken.(string)
 		if !ok {
@@ -174,7 +183,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 				return hints
 			}
 		case "stream":
-			if requireComplete && streamSeen {
+			if streamSeen {
 				streamAmbiguous = true
 			}
 			streamSeen = true
@@ -186,7 +195,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			hints.streamParsed = true
 		default:
 			if err := skipJSONValue(dec); err != nil {
-				return requestBodySelectorHints{}
+				return partialHints()
 			}
 		}
 	}
