@@ -1,40 +1,48 @@
 ---
 title: "Users & Groups"
-description: "Register users for your user paths, organize them into groups, and grant model access per user or per group."
+description: "Organize callers into a group tree with derived user paths, and grant model access per user or per group."
 icon: "users-round"
 keywords: ["users", "groups", "user_path", "access control", "model access", "multi-tenancy"]
 ---
 
 ## Overview
 
-The user registry gives [user paths](/features/user-path) an identity: a
-**user** binds one unique `user_path` to a display name, a description, and
-group memberships. A **group** is a named, cross-cutting set of users that
-model access policies can target — for example `beta-testers` spanning teams
-from different parts of the hierarchy.
+The user registry organizes callers into a **group tree**: each group has at
+most one parent, and each user belongs to at most one group. A user's
+[`user_path`](/features/user-path) is **derived** — the group chain plus the
+user's name — so the path hierarchy always mirrors the tree:
+
+- group `engineering` → `/engineering`
+- group `platform` under `engineering` → `/engineering/platform`
+- user `anna` in `platform` → `/engineering/platform/anna`
+
+Identity is the stable user id; the path is placement. Moving a group or a
+user recomputes every affected path automatically, and user-bound API keys,
+model access, and budgets follow along.
 
 Requests keep authenticating and being accounted by `user_path`; the registry
-is metadata on top. Nothing changes for existing deployments until you create
-users or groups.
+is metadata on top. Paths sent from outside the registry — the
+`X-GoModel-User-Path` header, external auth, environment-configured budgets —
+stay free-form and keep working unchanged.
 
-Manage both on the **Users** page of the dashboard.
+Manage the tree on the **Users** page of the dashboard.
 
 ## Users
 
 Create a user with `Users -> New user`:
 
-- **User path** (required, unique) — the hierarchy path this user owns, for
-  example `/engineering/team-a`. API keys bound to that path act as this user.
-- **Name, description** — display metadata.
-- **Groups** — memberships used by group-scoped access policies.
+- **Name** (required) — the last segment of the derived path. Cannot contain
+  `/`.
+- **Group** — the owning group; empty puts the user at the root (`/name`).
+- **Description** — display metadata.
 
-The Users page lays users out as a tree following their paths, with the
-active API keys bound to each path. One user can have any number of API keys;
-create them on the **API Keys** page with the user's path.
+The Users page lays the tree out with each group's member users beneath it,
+along with the active API keys bound to each user. One user can have any
+number of API keys.
 
 Descendant paths inherit from their ancestors: a request under
-`/engineering/team-a/service` carries the groups of the user registered at
-`/engineering/team-a` (and of any deeper registered ancestor).
+`/engineering/platform/anna/service` is attributed to `anna` and carries the
+`platform` and `engineering` groups.
 
 ## Bind API keys to a user
 
@@ -63,16 +71,25 @@ at the request path or at its deepest registered ancestor.
 ## Groups
 
 Create a group with `Users -> New group`. The group name is its identity —
-it cannot contain `/` or `,` and cannot be renamed later.
+globally unique, it cannot contain `/` or `,`, and cannot be renamed later.
+The optional **parent** places the group in the tree.
 
-Deleting a group removes the membership from every user. Access policies that
-reference the deleted group keep the name but no longer match anyone.
+Changing a group's parent moves the whole subtree: every member's derived
+path is rewritten in one step, and keys bound to those users follow
+immediately. A move that would collide with an existing path is rejected
+before anything changes.
+
+Deleting a group requires it to be empty — move or delete its member users
+and subgroups first. Access policies that reference a deleted group keep the
+name but no longer match anyone.
 
 ## Model access
 
 Access policies (virtual models without a target) can scope a model by
 `user_paths`, by `groups`, or both. A caller is allowed when its user path
-matches `user_paths` **or** it carries one of the `groups`:
+matches `user_paths` **or** it carries one of the `groups`. A caller carries
+every group along its path's chain, so granting a parent group covers all of
+its subgroups and their members:
 
 ```yaml
 virtual_models:
@@ -99,13 +116,14 @@ group sees the models granted to that group.
 
 ```http
 GET    /admin/users
-PUT    /admin/users          {"user_path": "/team/a", "name": "Team A", "groups": ["beta-testers"]}
+PUT    /admin/users          {"name": "anna", "group": "platform"}
 DELETE /admin/users          {"id": "..."}
 
 GET    /admin/user-groups
-PUT    /admin/user-groups    {"name": "beta-testers", "description": "Early access"}
-DELETE /admin/user-groups    {"name": "beta-testers"}
+PUT    /admin/user-groups    {"name": "platform", "parent": "engineering"}
+DELETE /admin/user-groups    {"name": "platform"}
 ```
 
 Passing an existing `id` to `PUT /admin/users` updates that user (including
-moving it to a new path); omitting it creates a new user.
+moving it to another group); omitting it creates a new user. The response
+carries the derived `user_path`. Groups return their derived `path` too.

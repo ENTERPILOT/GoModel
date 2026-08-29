@@ -13,12 +13,13 @@ import (
 )
 
 // upsertUserRequest creates a user (empty id) or updates an existing one.
+// The user_path is derived from the group chain plus the name and cannot be
+// set directly.
 type upsertUserRequest struct {
-	ID          string   `json:"id,omitempty"`
-	UserPath    string   `json:"user_path"`
-	Name        string   `json:"name,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Groups      []string `json:"groups,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Group       string `json:"group,omitempty"`
 }
 
 type deleteUserRequest struct {
@@ -28,6 +29,7 @@ type deleteUserRequest struct {
 type upsertGroupRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	Parent      string `json:"parent,omitempty"`
 }
 
 type deleteGroupRequest struct {
@@ -81,10 +83,9 @@ func (h *Handler) UpsertUser(c *echo.Context) error {
 
 	user, err := h.users.UpsertUser(c.Request().Context(), users.UpsertUserInput{
 		ID:          req.ID,
-		UserPath:    req.UserPath,
 		Name:        req.Name,
 		Description: req.Description,
-		Groups:      req.Groups,
+		Group:       req.Group,
 	})
 	if err != nil {
 		if errors.Is(err, users.ErrUserNotFound) {
@@ -190,6 +191,7 @@ func (h *Handler) UpsertUserGroup(c *echo.Context) error {
 	group, err := h.users.UpsertGroup(c.Request().Context(), users.UpsertGroupInput{
 		Name:        req.Name,
 		Description: req.Description,
+		Parent:      req.Parent,
 	})
 	if err != nil {
 		return handleError(c, usersWriteError(err))
@@ -197,8 +199,8 @@ func (h *Handler) UpsertUserGroup(c *echo.Context) error {
 	return c.JSON(http.StatusOK, group)
 }
 
-// DeleteUserGroup handles DELETE /admin/user-groups. Deleting a group removes
-// the membership from every user that carries it.
+// DeleteUserGroup handles DELETE /admin/user-groups. A group that still has
+// member users or child groups is refused with a validation error.
 //
 // @Summary      Delete one user group
 // @Tags         admin

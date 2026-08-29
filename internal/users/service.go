@@ -3,6 +3,7 @@ package users
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -17,21 +18,53 @@ import (
 const defaultRefreshInterval = time.Minute
 
 type snapshot struct {
-	userOrder  []string // user IDs sorted by user_path
-	byID       map[string]User
-	byPath     map[string]User
-	groupOrder []string // group names sorted
-	groups     map[string]Group
+	userOrder   []string // user IDs sorted by user_path
+	byID        map[string]User
+	byPath      map[string]User
+	groupOrder  []string         // group names sorted
+	groups      map[string]Group // Path filled from the tree
+	groupByPath map[string]string
 }
 
 func emptySnapshot() snapshot {
 	return snapshot{
-		userOrder:  []string{},
-		byID:       map[string]User{},
-		byPath:     map[string]User{},
-		groupOrder: []string{},
-		groups:     map[string]Group{},
+		userOrder:   []string{},
+		byID:        map[string]User{},
+		byPath:      map[string]User{},
+		groupOrder:  []string{},
+		groups:      map[string]Group{},
+		groupByPath: map[string]string{},
 	}
+}
+
+// computeGroupPaths derives every group's hierarchy path from the parent
+// tree. A missing parent or a cycle degrades to treating the group as a root
+// rather than failing the load.
+func computeGroupPaths(groups map[string]Group) map[string]string {
+	paths := make(map[string]string, len(groups))
+	var resolve func(name string, trail map[string]bool) string
+	resolve = func(name string, trail map[string]bool) string {
+		if path, done := paths[name]; done {
+			return path
+		}
+		group, ok := groups[name]
+		if !ok {
+			return ""
+		}
+		path := "/" + group.Name
+		if group.Parent != "" && !trail[group.Parent] {
+			trail[name] = true
+			if parentPath := resolve(group.Parent, trail); parentPath != "" {
+				path = parentPath + "/" + group.Name
+			}
+		}
+		paths[name] = path
+		return path
+	}
+	for name := range groups {
+		resolve(name, map[string]bool{name: true})
+	}
+	return paths
 }
 
 // Service keeps users and groups cached in memory. Mutations write through the
@@ -65,11 +98,12 @@ func (s *Service) Refresh(ctx context.Context) error {
 	}
 
 	next := snapshot{
-		userOrder:  make([]string, 0, len(users)),
-		byID:       make(map[string]User, len(users)),
-		byPath:     make(map[string]User, len(users)),
-		groupOrder: make([]string, 0, len(groups)),
-		groups:     make(map[string]Group, len(groups)),
+		userOrder:   make([]string, 0, len(users)),
+		byID:        make(map[string]User, len(users)),
+		byPath:      make(map[string]User, len(users)),
+		groupOrder:  make([]string, 0, len(groups)),
+		groups:      make(map[string]Group, len(groups)),
+		groupByPath: make(map[string]string, len(groups)),
 	}
 	for _, user := range users {
 		user.ID = normalizeID(user.ID)
@@ -92,6 +126,12 @@ func (s *Service) Refresh(ctx context.Context) error {
 		next.groups[group.Name] = group
 	}
 	sort.Strings(next.groupOrder)
+	for name, path := range computeGroupPaths(next.groups) {
+		group := next.groups[name]
+		group.Path = path
+		next.groups[name] = group
+		next.groupByPath[path] = name
+	}
 
 	s.mu.Lock()
 	s.snapshot = next
@@ -147,7 +187,7 @@ func (s *Service) ListUsers() []User {
 	snap := s.current()
 	result := make([]User, 0, len(snap.userOrder))
 	for _, id := range snap.userOrder {
-		result = append(result, snap.byID[id].clone())
+		result = append(result, snap.byID[id])
 	}
 	return result
 }
@@ -165,10 +205,12 @@ func (s *Service) ListGroups() []Group {
 	return result
 }
 
-// GroupsForPath resolves the groups carried by a user path: the union of the
-// memberships of every user along the path's ancestor chain, so a user at
-// /team/alpha passes its groups on to /team/alpha/service. The result is
-// sorted and deduplicated; an unknown path yields nil.
+// GroupsForPath resolves the groups carried by a user path. Because user
+// paths mirror the group tree, membership is path-prefix matching: the caller
+// carries every group whose derived path is the caller path or one of its
+// ancestors, so a request under /engineering/platform/anna carries both
+// "platform" and "engineering". The result is sorted; an unknown path yields
+// nil.
 func (s *Service) GroupsForPath(userPath string) []string {
 	if s == nil {
 		return nil
@@ -178,17 +220,15 @@ func (s *Service) GroupsForPath(userPath string) []string {
 		return nil
 	}
 	snap := s.current()
-	if len(snap.byPath) == 0 {
+	if len(snap.groupByPath) == 0 {
 		return nil
 	}
 
 	var merged []string
 	for _, ancestor := range core.UserPathAncestors(userPath) {
-		user, ok := snap.byPath[ancestor]
-		if !ok {
-			continue
+		if name, ok := snap.groupByPath[ancestor]; ok {
+			merged = append(merged, name)
 		}
-		merged = append(merged, user.Groups...)
 	}
 	if len(merged) == 0 {
 		return nil
@@ -206,7 +246,7 @@ func (s *Service) UserByID(id string) (User, bool) {
 	if !ok {
 		return User{}, false
 	}
-	return user.clone(), true
+	return user, true
 }
 
 // UserIDForPath resolves the registered user that owns a request path: the
@@ -241,29 +281,33 @@ func (s *Service) UpsertUser(ctx context.Context, input UpsertUserInput) (User, 
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	userPath, err := normalizeUserPath(input.UserPath)
+	name, err := normalizeUserName(input.Name)
 	if err != nil {
 		return User{}, err
 	}
-	groups, err := NormalizeGroupNames(input.Groups)
-	if err != nil {
-		return User{}, err
-	}
+	groupName := trimmed(input.Group)
 
 	snap := s.current()
-	for _, name := range groups {
-		if _, ok := snap.groups[name]; !ok {
-			return User{}, newValidationError("unknown group: "+name, nil)
+	groupPath := ""
+	if groupName != "" {
+		group, ok := snap.groups[groupName]
+		if !ok {
+			return User{}, newValidationError("unknown group: "+groupName, nil)
 		}
+		groupPath = group.Path
+	}
+	userPath, err := derivedPath(groupPath, name)
+	if err != nil {
+		return User{}, err
 	}
 
 	now := time.Now().UTC().Truncate(time.Second)
 	user := User{
 		ID:          normalizeID(input.ID),
 		UserPath:    userPath,
-		Name:        trimmed(input.Name),
+		Name:        name,
 		Description: trimmed(input.Description),
-		Groups:      groups,
+		Group:       groupName,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -277,7 +321,10 @@ func (s *Service) UpsertUser(ctx context.Context, input UpsertUserInput) (User, 
 		user.CreatedAt = existing.CreatedAt
 	}
 	if other, ok := snap.byPath[userPath]; ok && other.ID != user.ID {
-		return User{}, newValidationError("a user with user_path "+userPath+" already exists", nil)
+		return User{}, newValidationError("a user at "+userPath+" already exists", nil)
+	}
+	if _, ok := snap.groupByPath[userPath]; ok {
+		return User{}, newValidationError("a group already owns the path "+userPath, nil)
 	}
 
 	if err := s.store.UpsertUser(ctx, user); err != nil {
@@ -286,7 +333,7 @@ func (s *Service) UpsertUser(ctx context.Context, input UpsertUserInput) (User, 
 	if err := s.Refresh(ctx); err != nil {
 		return User{}, err
 	}
-	return user.clone(), nil
+	return user, nil
 }
 
 // DeleteUser removes one user by ID.
@@ -315,29 +362,127 @@ func (s *Service) UpsertGroup(ctx context.Context, input UpsertGroupInput) (Grou
 	if err != nil {
 		return Group{}, err
 	}
+	parent := trimmed(input.Parent)
+
+	snap := s.current()
+	if parent != "" {
+		if parent == name {
+			return Group{}, newValidationError("a group cannot be its own parent", nil)
+		}
+		if _, ok := snap.groups[parent]; !ok {
+			return Group{}, newValidationError("unknown parent group: "+parent, nil)
+		}
+		// Reject a parent that sits below this group: the chain from the new
+		// parent to the root must not pass through the group itself.
+		for cursor := parent; cursor != ""; {
+			group, ok := snap.groups[cursor]
+			if !ok {
+				break
+			}
+			if group.Parent == name {
+				return Group{}, newValidationError("cannot move group under its own descendant "+parent, nil)
+			}
+			cursor = group.Parent
+		}
+	}
+
 	now := time.Now().UTC().Truncate(time.Second)
 	group := Group{
 		Name:        name,
 		Description: trimmed(input.Description),
+		Parent:      parent,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if existing, ok := s.current().groups[name]; ok {
+	if existing, ok := snap.groups[name]; ok {
 		group.CreatedAt = existing.CreatedAt
+	}
+
+	// Derive every path against the prospective tree so a move that would
+	// collide is rejected before anything is written.
+	nextGroups := make(map[string]Group, len(snap.groups)+1)
+	maps.Copy(nextGroups, snap.groups)
+	nextGroups[name] = group
+	rewrites, err := planUserPathRewrites(snap, nextGroups)
+	if err != nil {
+		return Group{}, err
 	}
 
 	if err := s.store.UpsertGroup(ctx, group); err != nil {
 		return Group{}, err
 	}
+	if err := s.applyUserPathRewrites(ctx, rewrites, now); err != nil {
+		return Group{}, err
+	}
 	if err := s.Refresh(ctx); err != nil {
 		return Group{}, err
+	}
+	if refreshed, ok := s.current().groups[name]; ok {
+		return refreshed, nil
 	}
 	return group, nil
 }
 
-// DeleteGroup removes one group and cascades the membership out of every user
-// that carries it. Access policies referencing the group keep the name but no
-// request can carry it any more.
+// planUserPathRewrites derives every user's path against a prospective group
+// tree and returns the users whose stored path changes. It fails when two
+// derived paths collide or a derived path collides with a group path.
+func planUserPathRewrites(snap snapshot, nextGroups map[string]Group) ([]User, error) {
+	paths := computeGroupPaths(nextGroups)
+	groupPathSet := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		groupPathSet[path] = true
+	}
+
+	var rewrites []User
+	seen := make(map[string]string, len(snap.userOrder))
+	for _, id := range snap.userOrder {
+		user := snap.byID[id]
+		parentPath := ""
+		if user.Group != "" {
+			// A user whose group is gone keeps its stored path; deletion is
+			// guarded separately, so this only covers out-of-band drift.
+			path, ok := paths[user.Group]
+			if !ok {
+				continue
+			}
+			parentPath = path
+		}
+		derived, err := derivedPath(parentPath, user.Name)
+		if err != nil {
+			return nil, err
+		}
+		if owner, dup := seen[derived]; dup {
+			return nil, newValidationError("the move would collide user paths at "+derived+" (users "+owner+" and "+user.ID+")", nil)
+		}
+		seen[derived] = user.ID
+		if groupPathSet[derived] {
+			return nil, newValidationError("the move would collide user and group paths at "+derived, nil)
+		}
+		if derived != user.UserPath {
+			user.UserPath = derived
+			rewrites = append(rewrites, user)
+		}
+	}
+	return rewrites, nil
+}
+
+// applyUserPathRewrites writes through the users whose derived path changed.
+func (s *Service) applyUserPathRewrites(ctx context.Context, rewrites []User, now time.Time) error {
+	for _, user := range rewrites {
+		user.UpdatedAt = now
+		if err := s.store.UpsertUser(ctx, user); err != nil {
+			// Reload before surfacing the error so the snapshot reflects the
+			// partially applied cascade.
+			_ = s.Refresh(ctx)
+			return err
+		}
+	}
+	return nil
+}
+
+// DeleteGroup removes one empty group. A group that still has member users or
+// child groups is refused: deleting it would silently rewrite their derived
+// paths, so the members must be moved or deleted first.
 func (s *Service) DeleteGroup(ctx context.Context, name string) error {
 	if s == nil {
 		return fmt.Errorf("users service is required")
@@ -349,29 +494,19 @@ func (s *Service) DeleteGroup(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	snap := s.current()
+	for _, groupName := range snap.groupOrder {
+		if snap.groups[groupName].Parent == name {
+			return newValidationError("group "+name+" still has subgroup "+groupName+"; move or delete it first", nil)
+		}
+	}
+	for _, id := range snap.userOrder {
+		if snap.byID[id].Group == name {
+			return newValidationError("group "+name+" still has members; move or delete them first", nil)
+		}
+	}
 	if err := s.store.DeleteGroup(ctx, name); err != nil {
 		return err
-	}
-
-	now := time.Now().UTC().Truncate(time.Second)
-	snap := s.current()
-	for _, id := range snap.userOrder {
-		user := snap.byID[id]
-		if !slices.Contains(user.Groups, name) {
-			continue
-		}
-		user = user.clone()
-		user.Groups = slices.DeleteFunc(user.Groups, func(g string) bool { return g == name })
-		if len(user.Groups) == 0 {
-			user.Groups = nil
-		}
-		user.UpdatedAt = now
-		if err := s.store.UpsertUser(ctx, user); err != nil {
-			// Reload before surfacing the error so the snapshot reflects the
-			// partially applied cascade.
-			_ = s.Refresh(ctx)
-			return err
-		}
 	}
 	return s.Refresh(ctx)
 }

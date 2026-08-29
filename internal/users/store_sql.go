@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -14,21 +13,23 @@ type SQLStore struct {
 	db sqlx.DB
 }
 
-// The group membership column is named user_groups (not "groups"): GROUPS is
-// a window-frame keyword in PostgreSQL 11+ and would need quoting everywhere.
+// The membership column is named user_group (not "group"): GROUP is a SQL
+// keyword and would need quoting everywhere; the groups table is user_groups
+// for the same reason (GROUPS is a window-frame keyword in PostgreSQL 11+).
 var sqlTables = []string{
 	`CREATE TABLE IF NOT EXISTS users (
 		id TEXT PRIMARY KEY,
 		user_path TEXT NOT NULL UNIQUE,
 		name TEXT NOT NULL DEFAULT '',
 		description TEXT NOT NULL DEFAULT '',
-		user_groups ` + sqlx.TypeJSON + `,
+		user_group TEXT NOT NULL DEFAULT '',
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
 	)`,
 	`CREATE TABLE IF NOT EXISTS user_groups (
 		name TEXT PRIMARY KEY,
 		description TEXT NOT NULL DEFAULT '',
+		parent TEXT NOT NULL DEFAULT '',
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
 	)`,
@@ -54,7 +55,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 
 func (s *SQLStore) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, user_path, name, description, user_groups, created_at, updated_at
+		SELECT id, user_path, name, description, user_group, created_at, updated_at
 		FROM users
 		ORDER BY user_path ASC, id ASC
 	`)
@@ -71,16 +72,15 @@ func (s *SQLStore) ListUsers(ctx context.Context) ([]User, error) {
 
 func (s *SQLStore) UpsertUser(ctx context.Context, user User) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO users (id, user_path, name, description, user_groups, created_at, updated_at)
+		INSERT INTO users (id, user_path, name, description, user_group, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			user_path = excluded.user_path,
 			name = excluded.name,
 			description = excluded.description,
-			user_groups = excluded.user_groups,
+			user_group = excluded.user_group,
 			updated_at = excluded.updated_at
-	`, user.ID, user.UserPath, user.Name, user.Description,
-		sqlutil.NullableJSONStrings(user.Groups, user.ID),
+	`, user.ID, user.UserPath, user.Name, user.Description, user.Group,
 		user.CreatedAt.Unix(), user.UpdatedAt.Unix())
 	if err != nil {
 		return wrapStoreErr("upsert user", err)
@@ -101,7 +101,7 @@ func (s *SQLStore) DeleteUser(ctx context.Context, id string) error {
 
 func (s *SQLStore) ListGroups(ctx context.Context) ([]Group, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT name, description, created_at, updated_at
+		SELECT name, description, parent, created_at, updated_at
 		FROM user_groups
 		ORDER BY name ASC
 	`)
@@ -118,12 +118,13 @@ func (s *SQLStore) ListGroups(ctx context.Context) ([]Group, error) {
 
 func (s *SQLStore) UpsertGroup(ctx context.Context, group Group) error {
 	_, err := s.db.Exec(ctx, `
-		INSERT INTO user_groups (name, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO user_groups (name, description, parent, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			description = excluded.description,
+			parent = excluded.parent,
 			updated_at = excluded.updated_at
-	`, group.Name, group.Description, group.CreatedAt.Unix(), group.UpdatedAt.Unix())
+	`, group.Name, group.Description, group.Parent, group.CreatedAt.Unix(), group.UpdatedAt.Unix())
 	if err != nil {
 		return wrapStoreErr("upsert group", err)
 	}
@@ -147,21 +148,17 @@ func (s *SQLStore) Close() error {
 
 func scanSQLUser(scanner userScanner) (User, error) {
 	var user User
-	var groupsJSON *string
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&user.ID,
 		&user.UserPath,
 		&user.Name,
 		&user.Description,
-		&groupsJSON,
+		&user.Group,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
 		return User{}, err
-	}
-	if groupsJSON != nil {
-		user.Groups = sqlutil.StringsFromJSON(*groupsJSON, user.ID)
 	}
 	user.CreatedAt = time.Unix(createdAt, 0).UTC()
 	user.UpdatedAt = time.Unix(updatedAt, 0).UTC()
@@ -171,7 +168,7 @@ func scanSQLUser(scanner userScanner) (User, error) {
 func scanSQLGroup(scanner userScanner) (Group, error) {
 	var group Group
 	var createdAt, updatedAt int64
-	if err := scanner.Scan(&group.Name, &group.Description, &createdAt, &updatedAt); err != nil {
+	if err := scanner.Scan(&group.Name, &group.Description, &group.Parent, &createdAt, &updatedAt); err != nil {
 		return Group{}, err
 	}
 	group.CreatedAt = time.Unix(createdAt, 0).UTC()

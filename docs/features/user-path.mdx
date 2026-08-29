@@ -33,8 +33,8 @@ When a request uses that key, GoModel treats the key's `user_path` as the
 effective user path for the request.
 
 A key can also bind to a registered user (`user_id`) instead of a raw path;
-the key then follows the user's current path even after the user moves in the
-hierarchy. See [Users & Groups](/features/users-groups).
+the key then follows the user's current derived path even after the user or
+its group moves in the tree. See [Users & Groups](/features/users-groups).
 
 ## HTTP header
 
@@ -70,10 +70,9 @@ For example:
 
 This allows `/team/alpha` and its descendants, such as `/team/alpha/service`.
 
-Policies can also use `groups` to allow members of a named user group,
-regardless of where their paths live in the hierarchy. See
-[Users & Groups](/features/users-groups) for the registry and the per-user /
-per-group access editor.
+Policies can also use `groups` to allow a registered group and everything
+beneath it in the group tree. See [Users & Groups](/features/users-groups)
+for the registry and the per-user / per-group access editor.
 
 Use `Models -> New virtual model` in the dashboard to manage these rules: leave
 **Target model** empty to create an access policy on the **Source** selector.

@@ -1,6 +1,7 @@
 <script>
-  // Users page: the user-path tree with group memberships and API key counts,
-  // the groups registry, and the per-user / per-group model access editor.
+  // Users page: the group tree with member users and API key counts, plus
+  // the per-user / per-group model access editor. User paths are derived
+  // from the tree.
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
@@ -8,7 +9,6 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { usersStore as store } from "./users.svelte.js";
   import UserList from "./UserList.svelte";
-  import GroupList from "./GroupList.svelte";
   import UserEditor from "./UserEditor.svelte";
   import GroupEditor from "./GroupEditor.svelte";
   import AccessEditor from "./AccessEditor.svelte";
@@ -69,7 +69,7 @@
   {/if}
 
   {#if store.available && !auth.authError}
-    {#if store.users.length > 0}
+    {#if store.users.length > 0 || store.groups.length > 0}
       <div class="table-toolbar">
         <div class="table-toolbar-main">
           <FilterInput
@@ -83,22 +83,11 @@
     {:else if !store.loading && !store.error}
       <p class="empty-state">{m.users_empty()}</p>
     {/if}
-
-    <h3 class="users-groups-heading">{m.groups_title()}</h3>
-    {#if store.groups.length > 0}
-      <GroupList />
-    {:else if !store.loading && !store.error}
-      <p class="empty-state">{m.groups_empty()}</p>
-    {/if}
   {/if}
 </div>
 
 <style>
   .users-help-notice {
     margin-bottom: 20px;
-  }
-
-  .users-groups-heading {
-    margin: 28px 0 12px;
   }
 </style>

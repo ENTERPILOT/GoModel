@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -127,14 +126,14 @@ func TestUserAndGroupCRUDFlow(t *testing.T) {
 
 	// User with an unknown group is rejected.
 	rec = usersJSONRequest(t, h.UpsertUser, http.MethodPut, "/admin/users",
-		`{"user_path":"/team/alpha","groups":["nope"]}`)
+		`{"name":"alpha","group":"nope"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("UpsertUser(unknown group) status = %d, want 400", rec.Code)
 	}
 
-	// Create a user.
+	// Create a user; the path is derived from the group chain and the name.
 	rec = usersJSONRequest(t, h.UpsertUser, http.MethodPut, "/admin/users",
-		`{"user_path":"team/alpha","name":"Alpha","groups":["beta-testers"]}`)
+		`{"name":"alpha","group":"beta-testers"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("UpsertUser status = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -142,14 +141,14 @@ func TestUserAndGroupCRUDFlow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created user: %v", err)
 	}
-	if created.ID == "" || created.UserPath != "/team/alpha" || !slices.Contains(created.Groups, "beta-testers") {
+	if created.ID == "" || created.UserPath != "/beta-testers/alpha" || created.Group != "beta-testers" {
 		t.Fatalf("created user = %+v", created)
 	}
 
-	// Missing user_path is a validation error.
-	rec = usersJSONRequest(t, h.UpsertUser, http.MethodPut, "/admin/users", `{"name":"x"}`)
+	// Missing name is a validation error.
+	rec = usersJSONRequest(t, h.UpsertUser, http.MethodPut, "/admin/users", `{"description":"x"}`)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("UpsertUser(no path) status = %d, want 400", rec.Code)
+		t.Fatalf("UpsertUser(no name) status = %d, want 400", rec.Code)
 	}
 
 	// List includes the created user.
@@ -165,18 +164,10 @@ func TestUserAndGroupCRUDFlow(t *testing.T) {
 		t.Fatalf("ListUsers = %+v", listed)
 	}
 
-	// Deleting the group cascades the membership away.
+	// Deleting a group that still has members is refused.
 	rec = usersJSONRequest(t, h.DeleteUserGroup, http.MethodDelete, "/admin/user-groups", `{"name":"beta-testers"}`)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("DeleteUserGroup status = %d", rec.Code)
-	}
-	rec = usersJSONRequest(t, h.ListUsers, http.MethodGet, "/admin/users", "")
-	listed = nil
-	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode users list: %v", err)
-	}
-	if len(listed) != 1 || len(listed[0].Groups) != 0 {
-		t.Fatalf("ListUsers after group delete = %+v", listed)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("DeleteUserGroup(with member) status = %d, want 400", rec.Code)
 	}
 
 	// Delete the user; a second delete is a 404.
@@ -187,5 +178,11 @@ func TestUserAndGroupCRUDFlow(t *testing.T) {
 	rec = usersJSONRequest(t, h.DeleteUser, http.MethodDelete, "/admin/users", `{"id":"`+created.ID+`"}`)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("DeleteUser(gone) status = %d, want 404", rec.Code)
+	}
+
+	// With the member gone, deleting the group succeeds.
+	rec = usersJSONRequest(t, h.DeleteUserGroup, http.MethodDelete, "/admin/user-groups", `{"name":"beta-testers"}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("DeleteUserGroup(emptied) status = %d", rec.Code)
 	}
 }

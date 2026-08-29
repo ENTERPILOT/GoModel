@@ -1,12 +1,17 @@
 <script>
   // Create/edit group modal. The group name is its identity, so it stays
-  // read-only when editing (delete + recreate to rename).
+  // read-only when editing (delete + recreate to rename). Changing the
+  // parent moves the whole subtree: every member's derived path follows.
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import { usersStore as store } from "./users.svelte.js";
+  import { groupPathByName, parentGroupOptions } from "./usersLogic.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const editor = $derived(store.groupEditor);
+  const groupPaths = $derived(groupPathByName(store.groups));
+  // A group cannot be moved under itself or one of its descendants.
+  const parentOptions = $derived(parentGroupOptions(store.groups, editor.form.original));
 </script>
 
 <EditorDialog
@@ -24,7 +29,7 @@
       <input
         id="group-editor-name"
         type="text"
-        placeholder="ex. beta-testers"
+        placeholder="ex. engineering"
         autocomplete="off"
         data-modal-autofocus
         disabled={editor.mode === "edit"}
@@ -32,6 +37,17 @@
       />
       {#if editor.mode === "create"}
         <p class="form-hint">{m.groups_name_hint()}</p>
+      {/if}
+    </FormField>
+    <FormField id="group-editor-parent" label={m.groups_field_parent()}>
+      <select id="group-editor-parent" bind:value={editor.form.parent}>
+        <option value="">{m.users_group_root()}</option>
+        {#each parentOptions as group (group.name)}
+          <option value={group.name}>{groupPaths.get(group.name) || group.name}</option>
+        {/each}
+      </select>
+      {#if editor.mode === "edit"}
+        <p class="form-hint">{m.groups_parent_move_hint()}</p>
       {/if}
     </FormField>
     <FormField id="group-editor-description" label={m.users_field_description()}>

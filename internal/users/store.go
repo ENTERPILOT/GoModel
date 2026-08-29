@@ -81,13 +81,25 @@ func NormalizeGroupNames(names []string) ([]string, error) {
 	return normalized, nil
 }
 
-func normalizeUserPath(raw string) (string, error) {
-	path, err := core.NormalizeUserPath(raw)
-	if err != nil {
-		return "", newValidationError("invalid user_path", err)
+// normalizeUserName validates a user name as a path segment: the derived
+// user_path is the group path plus this name.
+func normalizeUserName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", newValidationError("name is required", nil)
 	}
-	if path == "" {
-		return "", newValidationError("user_path is required", nil)
+	if strings.Contains(name, "/") {
+		return "", newValidationError("name cannot contain '/'", nil)
+	}
+	return name, nil
+}
+
+// derivedPath joins a parent hierarchy path and one segment. An empty parent
+// means the root.
+func derivedPath(parentPath, segment string) (string, error) {
+	path, err := core.NormalizeUserPath(parentPath + "/" + segment)
+	if err != nil {
+		return "", newValidationError("invalid name "+segment, err)
 	}
 	return path, nil
 }

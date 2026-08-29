@@ -8346,6 +8346,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "parent": {
+                    "type": "string"
                 }
             }
         },
@@ -8504,19 +8507,13 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
-                "groups": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "group": {
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "user_path": {
                     "type": "string"
                 }
             }
@@ -11989,6 +11986,14 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "parent": {
+                    "description": "Parent names the parent group; empty means a root group.",
+                    "type": "string"
+                },
+                "path": {
+                    "description": "Path is the derived hierarchy path (/parent/.../name). Computed from\nthe tree on load, never stored.",
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 }
@@ -12003,11 +12008,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
-                "groups": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "group": {
+                    "description": "Group names the owning group; empty means the user sits at the root.",
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"

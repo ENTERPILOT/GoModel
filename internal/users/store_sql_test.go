@@ -31,7 +31,7 @@ func TestSQLStoreUserRoundTrip(t *testing.T) {
 			UserPath:    "/team/alpha",
 			Name:        "Team Alpha",
 			Description: "alpha service account",
-			Groups:      []string{"beta-testers", "premium"},
+			Group:       "team",
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
@@ -53,13 +53,13 @@ func TestSQLStoreUserRoundTrip(t *testing.T) {
 		if !reflect.DeepEqual(listed[0], user) {
 			t.Fatalf("ListUsers()[0] = %+v, want %+v", listed[0], user)
 		}
-		if listed[1].Groups != nil {
-			t.Fatalf("ListUsers()[1].Groups = %v, want nil", listed[1].Groups)
+		if listed[1].Group != "" {
+			t.Fatalf("ListUsers()[1].Group = %q, want empty", listed[1].Group)
 		}
 
 		// Update in place keeps the row count and changes fields.
 		user.Name = "Alpha"
-		user.Groups = nil
+		user.Group = ""
 		if err := store.UpsertUser(ctx, user); err != nil {
 			t.Fatalf("UpsertUser(update) error = %v", err)
 		}
@@ -67,7 +67,7 @@ func TestSQLStoreUserRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListUsers() error = %v", err)
 		}
-		if len(listed) != 2 || listed[0].Name != "Alpha" || listed[0].Groups != nil {
+		if len(listed) != 2 || listed[0].Name != "Alpha" || listed[0].Group != "" {
 			t.Fatalf("ListUsers() after update = %+v", listed)
 		}
 
@@ -97,7 +97,7 @@ func TestSQLStoreGroupRoundTrip(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
 		now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
-		group := Group{Name: "beta-testers", Description: "early access", CreatedAt: now, UpdatedAt: now}
+		group := Group{Name: "beta-testers", Description: "early access", Parent: "engineering", CreatedAt: now, UpdatedAt: now}
 		if err := store.UpsertGroup(ctx, group); err != nil {
 			t.Fatalf("UpsertGroup() error = %v", err)
 		}

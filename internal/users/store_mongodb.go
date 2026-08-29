@@ -15,7 +15,7 @@ type mongoUserDocument struct {
 	UserPath    string    `bson:"user_path"`
 	Name        string    `bson:"name,omitempty"`
 	Description string    `bson:"description,omitempty"`
-	Groups      []string  `bson:"groups,omitempty"`
+	Group       string    `bson:"group,omitempty"`
 	CreatedAt   time.Time `bson:"created_at"`
 	UpdatedAt   time.Time `bson:"updated_at"`
 }
@@ -23,6 +23,7 @@ type mongoUserDocument struct {
 type mongoGroupDocument struct {
 	Name        string    `bson:"_id"`
 	Description string    `bson:"description,omitempty"`
+	Parent      string    `bson:"parent,omitempty"`
 	CreatedAt   time.Time `bson:"created_at"`
 	UpdatedAt   time.Time `bson:"updated_at"`
 }
@@ -74,7 +75,7 @@ func (s *MongoDBStore) ListUsers(ctx context.Context) ([]User, error) {
 			UserPath:    doc.UserPath,
 			Name:        doc.Name,
 			Description: doc.Description,
-			Groups:      doc.Groups,
+			Group:       doc.Group,
 			CreatedAt:   doc.CreatedAt.UTC(),
 			UpdatedAt:   doc.UpdatedAt.UTC(),
 		})
@@ -91,7 +92,7 @@ func (s *MongoDBStore) UpsertUser(ctx context.Context, user User) error {
 		UserPath:    user.UserPath,
 		Name:        user.Name,
 		Description: user.Description,
-		Groups:      user.Groups,
+		Group:       user.Group,
 		CreatedAt:   user.CreatedAt.UTC(),
 		UpdatedAt:   user.UpdatedAt.UTC(),
 	}
@@ -129,6 +130,7 @@ func (s *MongoDBStore) ListGroups(ctx context.Context) ([]Group, error) {
 		result = append(result, Group{
 			Name:        doc.Name,
 			Description: doc.Description,
+			Parent:      doc.Parent,
 			CreatedAt:   doc.CreatedAt.UTC(),
 			UpdatedAt:   doc.UpdatedAt.UTC(),
 		})
@@ -143,6 +145,7 @@ func (s *MongoDBStore) UpsertGroup(ctx context.Context, group Group) error {
 	doc := mongoGroupDocument{
 		Name:        group.Name,
 		Description: group.Description,
+		Parent:      group.Parent,
 		CreatedAt:   group.CreatedAt.UTC(),
 		UpdatedAt:   group.UpdatedAt.UTC(),
 	}

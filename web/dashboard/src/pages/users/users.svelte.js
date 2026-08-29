@@ -9,8 +9,8 @@ import {
   buildAccessRows,
   buildAccessSavePlan,
   buildGroupPayload,
+  buildRegistryTree,
   buildUserPayload,
-  buildUserTree,
   defaultGroupForm,
   defaultUserForm,
   filterTreeRows,
@@ -33,7 +33,7 @@ class UsersStore {
   error = $state("");
   filter = $state("");
 
-  treeRows = $derived(filterTreeRows(buildUserTree(this.users), this.filter));
+  treeRows = $derived(filterTreeRows(buildRegistryTree(this.groups, this.users), this.filter));
   keyCounts = $derived(keyCountsByPath(this.authKeys));
   memberCounts = $derived(groupMemberCounts(this.users));
 
@@ -105,9 +105,11 @@ class UsersStore {
     };
   }
 
-  openUserEditorForPath(path) {
+  // openUserEditorForGroup pre-selects the owning group when adding a user
+  // from a group row.
+  openUserEditorForGroup(name) {
     this.openUserEditor();
-    this.userEditor.form.user_path = path;
+    this.userEditor.form.group = name;
   }
 
   closeUserEditor() {
@@ -115,22 +117,12 @@ class UsersStore {
     this.userEditor = { open: false, mode: "create", submitting: false, error: "", form: defaultUserForm() };
   }
 
-  toggleUserFormGroup(name) {
-    const groups = this.userEditor.form.groups;
-    const index = groups.indexOf(name);
-    if (index >= 0) {
-      groups.splice(index, 1);
-    } else {
-      groups.push(name);
-    }
-  }
-
   async submitUserEditor() {
     const editor = this.userEditor;
     if (!editor.open || editor.submitting) return;
     const built = buildUserPayload(editor.form);
     if (built.error) {
-      editor.error = m.users_path_required();
+      editor.error = built.error === "name_invalid" ? m.users_name_invalid() : m.users_name_required();
       return;
     }
     editor.submitting = true;
@@ -147,7 +139,7 @@ class UsersStore {
         editor.error = outcome.error;
         return;
       }
-      flash.success(m.users_saved({ path: built.payload.user_path }));
+      flash.success(m.users_saved({ name: built.payload.name }));
       editor.submitting = false;
       this.closeUserEditor();
       void this.fetchAll();
@@ -158,7 +150,7 @@ class UsersStore {
 
   async deleteUser(user) {
     if (!user || this.deletingID) return;
-    if (!window.confirm(m.users_delete_confirm({ path: user.user_path }))) return;
+    if (!window.confirm(m.users_delete_confirm({ name: user.name || user.user_path }))) return;
     this.deletingID = user.id;
     try {
       const outcome = await sendAdminMutation("/admin/users", "DELETE", { id: user.id }, {
@@ -172,7 +164,7 @@ class UsersStore {
         flash.error(outcome.error);
         return;
       }
-      flash.success(m.users_deleted({ path: user.user_path }));
+      flash.success(m.users_deleted({ name: user.name || user.user_path }));
       void this.fetchAll();
     } finally {
       this.deletingID = "";
@@ -189,7 +181,7 @@ class UsersStore {
       submitting: false,
       error: "",
       form: group
-        ? { name: group.name, original: group.name, description: group.description || "" }
+        ? { name: group.name, original: group.name, description: group.description || "", parent: group.parent || "" }
         : defaultGroupForm(),
     };
   }
@@ -204,7 +196,12 @@ class UsersStore {
     if (!editor.open || editor.submitting) return;
     const built = buildGroupPayload(editor.form);
     if (built.error) {
-      editor.error = built.error === "name_invalid" ? m.groups_name_invalid() : m.groups_name_required();
+      editor.error =
+        built.error === "name_invalid"
+          ? m.groups_name_invalid()
+          : built.error === "parent_invalid"
+            ? m.groups_parent_invalid()
+            : m.groups_name_required();
       return;
     }
     editor.submitting = true;
@@ -272,7 +269,7 @@ class UsersStore {
       models: models_,
       views: this.policyViews,
       subject,
-      users: this.users,
+      groups: this.groups,
     });
     this.accessEditor.loading = false;
     if (views.status !== "ok" || models.status !== "ok") {
