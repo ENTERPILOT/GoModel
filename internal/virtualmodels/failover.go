@@ -16,14 +16,16 @@ import (
 // chooses that first target; every other available target is a failover leg,
 // so a load balancer and a priority list fail over the same way. A redirect
 // with failover switched off, and requests that did not go through a redirect,
-// have no chain.
+// have no chain — except a request that named its provider explicitly for a
+// model shadowed by a redirect listing that model among its targets (see
+// snapshot.failoverEntry).
 func (s *Service) ResolveFailovers(resolution *core.RequestModelResolution, _ core.Operation) []core.ModelSelector {
-	if s == nil || resolution == nil || !resolution.AliasApplied || resolution.Requested.ExplicitProvider {
+	if s == nil || resolution == nil {
 		return nil
 	}
 	snap := s.snapshot()
-	entry, ok := snap.redirects[strings.TrimSpace(resolution.Requested.Model)]
-	if !ok || !entry.vm.Enabled || !entry.failover() || len(entry.targets) < 2 {
+	entry, ok := snap.failoverEntry(resolution)
+	if !ok || !entry.failover() || len(entry.targets) < 2 {
 		return nil
 	}
 	seen := map[string]struct{}{resolution.ResolvedQualifiedModel(): {}}
@@ -36,6 +38,27 @@ func (s *Service) ResolveFailovers(resolution *core.RequestModelResolution, _ co
 		chain = append(chain, leaf.selector)
 	}
 	return chain
+}
+
+// failoverEntry returns the enabled redirect whose targets back a request's
+// failover chain. Normally that is the redirect the request resolved through.
+// A request that names its provider explicitly bypasses redirects and reaches
+// the concrete model directly; when a redirect shadows exactly that model and
+// keeps it among its targets, the redirect adds failover to the model rather
+// than replacing it, so the explicit request keeps the chain — which is what
+// a legacy failover rule on a provider model promised. A redirect that
+// replaces the model (no self target) is deliberately bypassed by such a
+// request and contributes nothing.
+func (s *snapshot) failoverEntry(resolution *core.RequestModelResolution) (*redirectEntry, bool) {
+	if resolution.Requested.ExplicitProvider {
+		entry, ok := s.redirects[resolution.RequestedQualifiedModel()]
+		return entry, ok && entry.vm.Enabled && entry.shadowsSource()
+	}
+	if !resolution.AliasApplied {
+		return nil, false
+	}
+	entry, ok := s.redirects[strings.TrimSpace(resolution.Requested.Model)]
+	return entry, ok && entry.vm.Enabled
 }
 
 // FailoverConfigModels translates the deprecated `failover` rules block

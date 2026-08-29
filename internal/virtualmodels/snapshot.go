@@ -42,6 +42,18 @@ func (e redirectEntry) failover() bool {
 	return e.vm.Failover == nil || *e.vm.Failover || normalizeStrategy(e.strategy) == StrategyFailover
 }
 
+// shadowsSource reports whether the redirect lists its own source among its
+// targets: it then covers the concrete model of that name (adding failover or
+// balancing to it) instead of replacing it.
+func (e *redirectEntry) shadowsSource() bool {
+	for _, target := range e.targets {
+		if target.qualified == e.vm.Source {
+			return true
+		}
+	}
+	return false
+}
+
 // snapshot is the immutable in-memory projection of all virtual models. It
 // indexes redirect rows by source and policy rows by scope, and keeps every row
 // in bySource for Get and admin listing.

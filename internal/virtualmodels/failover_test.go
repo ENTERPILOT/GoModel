@@ -128,6 +128,38 @@ func TestFailover_SelfTargetShadowsConcreteModel(t *testing.T) {
 	}
 }
 
+// A request that names its provider explicitly bypasses redirects, but keeps
+// the chain of a redirect that shadows exactly that model with itself as a
+// target — a migrated legacy rule on a provider model. A redirect that
+// replaces the model is bypassed entirely.
+func TestFailover_ExplicitProviderRequestKeepsShadowingChain(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	explicitChain := func() (string, []string) {
+		requested := core.NewRequestedModelSelector("gpt-4o", "openai")
+		resolved, applied, err := svc.ResolveModel(requested)
+		if err != nil || applied {
+			t.Fatalf("ResolveModel(explicit) = %v, %v, %v; want the concrete model untouched", resolved, applied, err)
+		}
+		resolution := &core.RequestModelResolution{Requested: requested, ResolvedSelector: resolved}
+		var chain []string
+		for _, selector := range svc.ResolveFailovers(resolution, core.OperationChatCompletions) {
+			chain = append(chain, selector.QualifiedModel())
+		}
+		return resolved.QualifiedModel(), chain
+	}
+
+	upsertRedirect(t, svc, "openai/gpt-4o", StrategyFailover, "openai/gpt-4o", "anthropic/claude")
+	if primary, chain := explicitChain(); primary != "openai/gpt-4o" || strings.Join(chain, ",") != "anthropic/claude" {
+		t.Fatalf("resolved %q with chain %v; want the concrete model backed by its shadowing redirect", primary, chain)
+	}
+
+	upsertRedirect(t, svc, "openai/gpt-4o", StrategyFailover, "anthropic/claude", "groq/llama")
+	if _, chain := explicitChain(); len(chain) != 0 {
+		t.Fatalf("chain = %v, want none: an explicit request bypasses a replacing redirect", chain)
+	}
+}
+
 func TestFailoverConfigModels_TranslatesLegacyRules(t *testing.T) {
 	t.Parallel()
 	cfg := config.FailoverConfig{
@@ -216,6 +248,34 @@ func TestNew_MigratesLegacyFailoverRulesIntoVirtualModels(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err == nil {
 		t.Fatalf("failover_rules still exists with %d rows, want it dropped", count)
+	}
+}
+
+// A dashboard mapping whose primary is listed in disabled_models used to be
+// switched off by that setting at request time; it converts as a disabled
+// virtual model so the fallbacks are kept but stay inactive.
+func TestNew_DisabledModelsMigrateAsDisabledVirtualModels(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	if _, err := conn.DB().Exec(`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL); INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["anthropic/claude"]', 1, 'dashboard', 0, 0)`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	cfg := &config.Config{Failover: config.FailoverConfig{Disabled: map[string]bool{"openai/gpt-4o": true}}}
+	result, err := New(ctx, cfg, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer result.Close()
+
+	migrated, ok := result.Service.Get("openai/gpt-4o")
+	if !ok || migrated.Enabled || migrated.Strategy != StrategyFailover || len(migrated.Targets) != 2 {
+		t.Fatalf("migrated rule = %+v, %v; want a disabled failover redirect keeping its fallbacks", migrated, ok)
+	}
+	if primary, chain := failoverChain(t, result.Service, "openai/gpt-4o"); primary != "openai/gpt-4o" || len(chain) != 0 {
+		t.Fatalf("resolved %q with chain %v; want the concrete model with no failover", primary, chain)
+	}
+	if err := conn.DB().QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(new(int)); err == nil {
+		t.Fatal("failover_rules still exists, want it dropped")
 	}
 }
 
