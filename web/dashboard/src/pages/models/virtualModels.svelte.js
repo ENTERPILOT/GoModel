@@ -7,39 +7,47 @@ import * as m from "$lib/paraglide/messages.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import {
-  GLOBAL_OVERRIDE_SELECTOR,
-  aliasFormTargets,
-  buildAliasTogglePayload,
   buildDisplayModels,
   buildGlobalScopeRow,
-  buildModelTogglePayload,
-  buildVirtualModelSavePayload,
-  computeRenderStep,
-  defaultVirtualModelForm,
   filterDisplayModels,
   findModelOverrideView,
   groupDisplayModels,
-  initialRenderStep,
-  modelAccessStateClass,
-  modelKeys,
   modelOverridesDefaultEnabled,
-  normalizeUserPaths,
-  normalizedAliasName,
-  qualifiedModelName,
   rowAccessSelector,
   rowIsManaged,
+} from "./displayRows.js";
+import {
+  GLOBAL_OVERRIDE_SELECTOR,
+  modelKeys,
+  normalizedAliasName,
+  qualifiedModelName,
+} from "./modelIdentity.js";
+import {
+  computeRenderStep,
+  initialRenderStep,
+} from "./renderBatching.js";
+import {
+  modelAccessStateClass,
+  modelAccessUserPathsRestrict,
   splitVirtualModelViews,
   strategyOptions,
+} from "./routing.js";
+import {
+  aliasFormTargets,
+  buildAliasTogglePayload,
+  buildModelTogglePayload,
+  buildVirtualModelSavePayload,
+  defaultVirtualModelForm,
+  normalizeUserPaths,
+  removePrimaryTarget as removePrimaryTargetPure,
+  virtualModelTargetOptions,
   vmFormHasPrimaryTarget,
   vmFormShowBalancingOptions,
-  vmFormStrategyPending,
-  vmRoutingSummary,
-  virtualModelTargetOptions,
   vmFormShowWeights,
+  vmFormStrategyPending,
   vmFormSupportsSlowdown,
-  modelAccessUserPathsRestrict,
-  removePrimaryTarget as removePrimaryTargetPure,
-} from "./virtualModelsLogic.js";
+  vmRoutingSummary,
+} from "./vmForm.js";
 
 class VirtualModelsStore {
   virtualModelsAvailable = $state(true);

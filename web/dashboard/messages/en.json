@@ -1195,7 +1195,6 @@
       }
     }
   ],
-  "models_column_modes": "Modes",
   "models_column_input_output": "Input / Output ($/MTok)",
   "models_column_cached": "Cached $/MTok",
   "models_column_input": "Input",

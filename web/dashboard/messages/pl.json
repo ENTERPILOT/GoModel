@@ -1223,7 +1223,6 @@
       }
     }
   ],
-  "models_column_modes": "Tryby",
   "models_column_input_output": "Wejście / wyjście ($/MTok)",
   "models_column_cached": "Cache $/MTok",
   "models_column_input": "Wejście",

@@ -8,10 +8,10 @@
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
   import {
-    hasAccessOverride,
-    modelOverrideEditButtonClass,
-    modelOverrideEditButtonLabel,
-  } from "./virtualModelsLogic.js";
+  hasAccessOverride,
+  modelOverrideEditButtonClass,
+  modelOverrideEditButtonLabel,
+} from "./displayRows.js";
   import AccessToggle from "./AccessToggle.svelte";
   import ModelGlobalActions from "./ModelGlobalActions.svelte";
   import ModelRow from "./ModelRow.svelte";

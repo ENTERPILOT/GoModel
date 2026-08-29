@@ -5,9 +5,9 @@
   import { virtualModels } from "./virtualModels.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import {
-    modelOverrideEditButtonClass,
-    modelOverrideEditButtonLabel,
-  } from "./virtualModelsLogic.js";
+  modelOverrideEditButtonClass,
+  modelOverrideEditButtonLabel,
+} from "./displayRows.js";
   import AccessToggle from "./AccessToggle.svelte";
   import { CircleDollarSign, Pencil } from "lucide";
   import * as m from "$lib/paraglide/messages.js";

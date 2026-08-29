@@ -1,44 +1,52 @@
 // Ported pure-logic cases from the legacy
 // internal/admin/dashboard/static/js/modules/virtual-models.test.cjs,
-// exercising web/dashboard/src/pages/models/virtualModelsLogic.js.
+// exercising the pure modules under web/dashboard/src/pages/models/.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  aliasFormTargets,
   aliasRowCanRemove,
-  aliasTargetLabel,
-  maskingFailsOver,
-  maskingRoutingKind,
-  maskingRoutingLabel,
-  buildAliasTogglePayload,
   buildDisplayModels,
-  buildModelTogglePayload,
-  buildVirtualModelSavePayload,
-  computeRenderStep,
-  defaultVirtualModelForm,
   displayRowClass,
   filterDisplayModels,
   groupDisplayModels,
-  initialRenderStep,
-  mapRedirectView,
-  qualifiedModelName,
-  removePrimaryTarget,
-  strategyOptions,
   rowIsManaged,
   rowRedirectCanRemove,
+} from "../src/pages/models/displayRows.js";
+import {
+  qualifiedModelName,
+} from "../src/pages/models/modelIdentity.js";
+import {
+  computeRenderStep,
+  initialRenderStep,
+} from "../src/pages/models/renderBatching.js";
+import {
+  aliasTargetLabel,
+  mapRedirectView,
+  maskingFailsOver,
+  maskingRoutingKind,
+  maskingRoutingLabel,
   splitVirtualModelViews,
+  strategyOptions,
+} from "../src/pages/models/routing.js";
+import {
+  aliasFormTargets,
+  buildAliasTogglePayload,
+  buildModelTogglePayload,
+  buildVirtualModelSavePayload,
+  defaultVirtualModelForm,
+  removePrimaryTarget,
+  virtualModelTargetOptions,
   vmFormHasPrimaryTarget,
   vmFormIsRedirect,
-  vmFormShowBalancingOptions,
-  vmRoutingSummary,
   vmFormSelfOnly,
-  vmFormStrategyPending,
-  virtualModelTargetOptions,
+  vmFormShowBalancingOptions,
   vmFormShowWeights,
+  vmFormStrategyPending,
   vmFormSupportsSlowdown,
-} from "../src/pages/models/virtualModelsLogic.js";
+  vmRoutingSummary,
+} from "../src/pages/models/vmForm.js";
 
 function display(models, aliases, { available = true, activeCategory = "" } = {}) {
   return buildDisplayModels({

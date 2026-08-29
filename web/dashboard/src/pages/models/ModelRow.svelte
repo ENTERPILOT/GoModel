@@ -7,18 +7,20 @@
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import { rateLimits } from "$pages/rate-limits/rateLimits.svelte.js";
   import {
-    aliasRowCanRemove,
-    maskingFailsOver,
-    maskingRoutingKind,
-    maskingRoutingLabel,
-    displayRowClass,
-    hasAccessOverride,
-    modelOverrideEditButtonClass,
-    modelOverrideEditButtonLabel,
-    rowAnchorID,
-    rowIsManaged,
-    rowRedirectCanRemove,
-  } from "./virtualModelsLogic.js";
+  aliasRowCanRemove,
+  displayRowClass,
+  hasAccessOverride,
+  modelOverrideEditButtonClass,
+  modelOverrideEditButtonLabel,
+  rowAnchorID,
+  rowIsManaged,
+  rowRedirectCanRemove,
+} from "./displayRows.js";
+import {
+  maskingFailsOver,
+  maskingRoutingKind,
+  maskingRoutingLabel,
+} from "./routing.js";
   import AccessToggle from "./AccessToggle.svelte";
   import { CircleDollarSign, Gauge, Pencil, ShieldCheck, Split, Trash2 } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
