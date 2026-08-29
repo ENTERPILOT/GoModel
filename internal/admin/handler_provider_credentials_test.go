@@ -608,3 +608,66 @@ func TestUpsertProviderCredential_BubblesProviderErrorOnStoreFailure(t *testing.
 		t.Fatalf("status = %d, want 502 body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestProviderCredentials_ProxyURLPasswordIsRedactedAndPreserved(t *testing.T) {
+	fake := newProviderCredentialsAdminFake()
+	fake.rows["proxied"] = providers.ManagedProviderCredential{
+		Name:     "proxied",
+		Type:     "openai",
+		APIKeys:  []string{"sk-one"},
+		ProxyURL: "socks5://user:proxy-secret@proxy.internal:1080",
+		Enabled:  true,
+	}
+	h := newProviderCredentialsHandler(fake)
+
+	c, rec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials", "")
+	if err := h.ListProviderCredentials(c); err != nil {
+		t.Fatalf("ListProviderCredentials() error = %v", err)
+	}
+	if containsString(rec.Body.String(), "proxy-secret") {
+		t.Fatalf("response leaked the proxy password: %s", rec.Body.String())
+	}
+	var body []providerCredentialViewResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(body) != 1 || body[0].ProxyURL != "socks5://user:xxxxx@proxy.internal:1080" {
+		t.Fatalf("view = %+v, want the proxy URL with its password redacted", body)
+	}
+
+	// Sending the redacted form back (as the dashboard does on every edit)
+	// keeps the stored password.
+	c, rec = newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials",
+		`{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"socks5://user:xxxxx@proxy.internal:1080","base_url":"https://api.openai.com/v2"}`)
+	if err := h.UpsertProviderCredential(c); err != nil {
+		t.Fatalf("UpsertProviderCredential() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	stored := fake.rows["proxied"]
+	if stored.ProxyURL != "socks5://user:proxy-secret@proxy.internal:1080" {
+		t.Fatalf("stored.ProxyURL = %q, want the original password preserved", stored.ProxyURL)
+	}
+	if stored.BaseURL != "https://api.openai.com/v2" {
+		t.Fatalf("stored.BaseURL = %q, want the edit applied", stored.BaseURL)
+	}
+
+	// A new real value replaces it, and an empty one clears it.
+	c, _ = newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials",
+		`{"name":"proxied","type":"openai","api_keys":["***"],"proxy_url":"http://other-proxy:3128"}`)
+	if err := h.UpsertProviderCredential(c); err != nil {
+		t.Fatalf("UpsertProviderCredential() error = %v", err)
+	}
+	if got := fake.rows["proxied"].ProxyURL; got != "http://other-proxy:3128" {
+		t.Fatalf("stored.ProxyURL = %q, want the replacement", got)
+	}
+	c, _ = newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials",
+		`{"name":"proxied","type":"openai","api_keys":["***"]}`)
+	if err := h.UpsertProviderCredential(c); err != nil {
+		t.Fatalf("UpsertProviderCredential() error = %v", err)
+	}
+	if got := fake.rows["proxied"].ProxyURL; got != "" {
+		t.Fatalf("stored.ProxyURL = %q, want cleared", got)
+	}
+}

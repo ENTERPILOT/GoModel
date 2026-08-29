@@ -266,9 +266,14 @@ func TestBuildProviderConfig_PreservesFields(t *testing.T) {
 		VertexLocation:     "us-central1",
 		ServiceAccountFile: "/secrets/vertex.json",
 		GCPScope:           "scope-a",
+		ProxyURL:           " socks5://proxy.internal:1080 ",
 		Models:             []config.RawProviderModel{{ID: "gpt-4"}, {ID: "gpt-3.5-turbo"}},
 	}
 	got := buildProviderConfig(raw, globalResilience)
+
+	if got.ProxyURL != "socks5://proxy.internal:1080" {
+		t.Errorf("ProxyURL = %q, want the trimmed socks5 URL", got.ProxyURL)
+	}
 
 	if got.APIKey != "sk-key" {
 		t.Errorf("APIKey = %q, want sk-key", got.APIKey)
@@ -532,6 +537,29 @@ func TestFilterEmptyProviders_LLMDRequiresBaseURLButNotAPIKey(t *testing.T) {
 }
 
 // --- applyProviderEnvVars ---
+
+func TestApplyProviderEnvVars_ProxyURL(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-from-env")
+	t.Setenv("OPENAI_PROXY_URL", "http://user:pass@proxy.internal:3128")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	if p := got["openai"]; p.ProxyURL != "http://user:pass@proxy.internal:3128" {
+		t.Errorf("openai.ProxyURL = %q, want the env proxy", p.ProxyURL)
+	}
+}
+
+func TestApplyProviderEnvVars_ProxyURLOverlaysYAML(t *testing.T) {
+	t.Setenv("OPENAI_EU_PROXY_URL", "socks5://eu-proxy:1080")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{
+		"openai-eu": {Type: "openai", APIKey: "sk-yaml", ProxyURL: "http://yaml-proxy:3128"},
+	}, testDiscoveryConfigs)
+
+	if p := got["openai-eu"]; p.ProxyURL != "socks5://eu-proxy:1080" || p.APIKey != "sk-yaml" {
+		t.Errorf("openai-eu = %+v, want the env proxy over the YAML key", p)
+	}
+}
 
 func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-from-env")

@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net/url"
 	"sort"
 	"sync"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
@@ -132,16 +134,36 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.Type)
 	}
 
+	proxy, err := httpclient.ParseProxyURL(cfg.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("provider %s: %w", cfg.Name, err)
+	}
+
 	// One Keyring per provider instance: every client this provider builds
 	// shares session affinity and the sessionless round-robin sequence.
 	opts := ProviderOptions{
-		Hooks:      hooksWithProviderIdentity(hooks, cfg.Name, cfg.Type),
+		Hooks:      hooksWithProxy(hooksWithProviderIdentity(hooks, cfg.Name, cfg.Type), proxy),
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
 		Keys:       NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...),
 	}
 
 	return builder(cfg, opts), nil
+}
+
+// hooksWithProxy attaches proxy to the context of every request the provider
+// makes, so the shared httpclient transport routes it through that proxy.
+// Hooks are the one place the factory reaches into every adapter's request
+// path, which keeps proxy support out of the adapters themselves.
+func hooksWithProxy(hooks llmclient.Hooks, proxy *url.URL) llmclient.Hooks {
+	if proxy == nil {
+		return hooks
+	}
+	return llmclient.JoinHooks(llmclient.Hooks{
+		OnRequestStart: func(ctx context.Context, _ llmclient.RequestInfo) context.Context {
+			return httpclient.ContextWithProxy(ctx, proxy)
+		},
+	}, hooks)
 }
 
 func hooksWithProviderIdentity(hooks llmclient.Hooks, providerName, providerType string) llmclient.Hooks {

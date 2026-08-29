@@ -559,3 +559,38 @@ test("splitCommaList trims and drops empties", () => {
   );
   assert.deepEqual(splitCommaList(""), []);
 });
+
+test("proxy_url round-trips through the form and is validated for a proxy scheme", () => {
+  const schema = {
+    ...OPENAI_SCHEMA,
+    fields: [...OPENAI_SCHEMA.fields, { name: "proxy_url", required: false, advanced: true }],
+  };
+  const row = {
+    name: "my-openai",
+    type: "openai",
+    api_keys: ["***********"],
+    proxy_url: "socks5://user:xxxxx@proxy.internal:1080",
+  };
+  const form = providerCredentialRowToForm(row);
+  assert.equal(form.proxy_url, row.proxy_url);
+  assert.equal(defaultProviderCredentialForm().proxy_url, "");
+
+  // The redacted form the gateway rendered goes back verbatim so the stored
+  // password is kept.
+  assert.deepEqual(validateProviderCredentialForm(form, "edit", [], schema), {});
+  assert.equal(buildProviderCredentialPayload(form, schema).proxy_url, row.proxy_url);
+
+  const { advanced } = providerCredentialFormFields(schema);
+  const field = advanced.find((entry) => entry.name === "proxy_url");
+  assert.equal(field.label, "Proxy URL");
+  assert.equal(field.control, "text");
+
+  for (const value of ["proxy.internal:1080", "ftp://proxy:21"]) {
+    const errors = validateProviderCredentialForm({ ...form, proxy_url: value }, "edit", [], schema);
+    assert.ok(errors.proxy_url, `expected a proxy_url error for ${value}`);
+  }
+  for (const value of ["", "http://proxy:3128", "HTTPS://proxy:443", "socks5h://proxy:1080"]) {
+    const errors = validateProviderCredentialForm({ ...form, proxy_url: value }, "edit", [], schema);
+    assert.equal(errors.proxy_url, undefined, `unexpected proxy_url error for ${value}`);
+  }
+});

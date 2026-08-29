@@ -25,6 +25,11 @@ type RawProviderConfig struct {
 	ServiceAccountJSON       string `yaml:"service_account_json"`
 	ServiceAccountJSONBase64 string `yaml:"service_account_json_base64"`
 	GCPScope                 string `yaml:"gcp_scope"`
+	// ProxyURL routes this provider's upstream requests through a forward
+	// proxy: http://, https://, socks5:// or socks5h://, optionally with
+	// user:password@ credentials. Empty (the default) uses the HTTP_PROXY /
+	// HTTPS_PROXY / NO_PROXY environment, if any.
+	ProxyURL string `yaml:"proxy_url"`
 	// InferenceObjective is the trusted llm-d InferenceObjective name injected
 	// into outbound requests. It is ignored by provider types other than llmd.
 	InferenceObjective string `yaml:"inference_objective"`

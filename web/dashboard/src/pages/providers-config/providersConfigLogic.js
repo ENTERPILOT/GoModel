@@ -18,6 +18,7 @@ export const FIELD_API_KEYS = "api_keys";
 export const FIELD_SESSION_STICKY_KEYS = "session_sticky_keys";
 export const FIELD_BASE_URL = "base_url";
 export const FIELD_SERVICE_ACCOUNT_JSON = "service_account_json";
+export const FIELD_PROXY_URL = "proxy_url";
 export const FIELD_MODELS = "models";
 
 // Resolve translated metadata on access so locale changes cannot leave stale
@@ -40,6 +41,7 @@ const PROVIDER_CREDENTIAL_FIELD_NAMES = [
   FIELD_SERVICE_ACCOUNT_JSON,
   "service_account_json_base64",
   "gcp_scope",
+  FIELD_PROXY_URL,
   FIELD_MODELS,
 ];
 
@@ -112,6 +114,12 @@ function providerCredentialFields() {
       control: "text",
       placeholder: "https://www.googleapis.com/auth/cloud-platform",
     },
+    [FIELD_PROXY_URL]: {
+      label: m.providers_proxy_url(),
+      control: "text",
+      placeholder: "socks5://user:password@proxy.internal:1080",
+      hint: m.providers_proxy_url_hint(),
+    },
     [FIELD_MODELS]: {
       label: m.providers_models_field(),
       control: "text",
@@ -158,6 +166,7 @@ export function defaultProviderCredentialForm() {
     service_account_json: "",
     service_account_json_base64: "",
     gcp_scope: "",
+    proxy_url: "",
     models: "",
     enabled: true,
   };
@@ -366,6 +375,7 @@ export function providerCredentialRowToForm(row) {
       (row && row.service_account_json_base64) || "",
     ),
     gcp_scope: String((row && row.gcp_scope) || ""),
+    proxy_url: String((row && row.proxy_url) || ""),
     models: (Array.isArray(row && row.models) ? row.models : []).join(", "),
     enabled: !row || row.enabled !== false,
   };
@@ -439,6 +449,9 @@ function validateProviderCredentialField(form, field) {
   }
   if (field.name === FIELD_BASE_URL && !value.includes("://") && /[./]/.test(value)) {
     return m.providers_url_scheme({ value });
+  }
+  if (field.name === FIELD_PROXY_URL && !/^(https?|socks5h?):\/\//i.test(value)) {
+    return m.providers_proxy_url_scheme();
   }
   if (field.name === FIELD_SERVICE_ACCOUNT_JSON && !isRedactedCredentialValue(value)) {
     try {

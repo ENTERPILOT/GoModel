@@ -32,6 +32,7 @@ func TestSQLCredentialStoreRoundTrip(t *testing.T) {
 			SessionStickyKeys: &sessionStickyKeys,
 			BaseURL:           "https://api.openai.com/v1",
 			APIVersion:        "2024-01-01",
+			ProxyURL:          "socks5://user:secret@proxy.internal:1080",
 			Models:            []string{"gpt-4o", "gpt-4o-mini"},
 			Enabled:           true,
 		}
@@ -45,6 +46,9 @@ func TestSQLCredentialStoreRoundTrip(t *testing.T) {
 		}
 		if got.Type != "openai" || got.BaseURL != cred.BaseURL || !got.Enabled {
 			t.Fatalf("Get() = %+v, want round-tripped row", got)
+		}
+		if got.ProxyURL != cred.ProxyURL {
+			t.Fatalf("Get().ProxyURL = %q, want %q", got.ProxyURL, cred.ProxyURL)
 		}
 		if len(got.APIKeys) != 2 || got.APIKeys[0] != "sk-one" || got.APIKeys[1] != "sk-two" {
 			t.Fatalf("Get().APIKeys = %v, want [sk-one sk-two]", got.APIKeys)

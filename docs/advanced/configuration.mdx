@@ -287,6 +287,12 @@ These control timeouts for upstream API requests to LLM providers.
 | `HTTP_TIMEOUT`                 | Overall request timeout in seconds           | `600` (10 min) |
 | `HTTP_RESPONSE_HEADER_TIMEOUT` | Time to wait for response headers in seconds | `600` (10 min) |
 
+Upstream requests honour the standard `HTTP_PROXY`, `HTTPS_PROXY` and
+`NO_PROXY` variables for the whole process. To send a single provider through
+its own HTTP or SOCKS5 proxy, set `<PROVIDER>[_SUFFIX]_PROXY_URL` or
+`proxy_url` on that provider — see
+[Routing a provider through a proxy](/providers/overview#routing-a-provider-through-a-proxy).
+
 #### Provider API Keys
 
 Set these to automatically register providers. No YAML configuration required.
@@ -481,7 +487,8 @@ export OPENAI_WEST_BASE_URL="https://west.example.com/v1"
 ```
 
 The same pattern works for every registered provider type:
-`<PROVIDER>_<SUFFIX>_API_KEY`, `<PROVIDER>_<SUFFIX>_BASE_URL`, and
+`<PROVIDER>_<SUFFIX>_API_KEY`, `<PROVIDER>_<SUFFIX>_BASE_URL`,
+`<PROVIDER>_<SUFFIX>_PROXY_URL`, and
 `<PROVIDER>_<SUFFIX>_MODELS`. Azure also supports
 `<PROVIDER>_<SUFFIX>_API_VERSION`. Azure and Oracle still require their
 suffixed `BASE_URL` values because their endpoints are deployment- or

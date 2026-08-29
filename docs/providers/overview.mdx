@@ -32,6 +32,43 @@ didn't change, and the gateway keeps the stored value. Disabling a provider
 configuration on file. The same multi-key rotation env vars support
 (`api_keys`, an ordered list) is available from the dashboard form.
 
+## Routing a provider through a proxy
+
+Each provider can send its upstream requests through its own forward proxy.
+Set `proxy_url` on the provider (or `<PROVIDER>[_SUFFIX]_PROXY_URL` as an env
+var, or the **Proxy URL** field under *Advanced settings* in the dashboard's
+Providers page). `http://`, `https://`, `socks5://` and `socks5h://` proxies
+are supported, with optional `user:password@` credentials:
+
+```yaml
+providers:
+  openai:
+    type: openai
+    api_key: "${OPENAI_API_KEY}"
+    proxy_url: "socks5://user:password@proxy.internal:1080"
+
+  openai-direct:
+    type: openai
+    api_key: "${OPENAI_API_KEY_DIRECT}"
+```
+
+```bash
+export OPENAI_PROXY_URL="http://proxy.internal:3128"
+export OPENAI_EU_PROXY_URL="socks5h://eu-proxy.internal:1080"
+```
+
+The default is no proxy: providers connect directly, or through whatever
+`HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` say for the whole process. A
+per-provider `proxy_url` takes precedence over those variables for that
+provider only, so a proxied and a direct instance of the same provider type can
+run side by side — use separate provider names when different API keys need
+different proxies. Every request the provider makes goes through it, including
+model discovery, so an unreachable proxy shows up as an unhealthy provider on
+the status page. The proxy password is never returned by the admin API or the
+status endpoint (`socks5://user:xxxxx@...`); re-sending that masked form on an
+edit keeps the stored password. Google service-account token exchange for
+Vertex-backed providers is not routed through the provider proxy.
+
 ## Supported providers
 
 Example model identifiers are illustrative and subject to change; consult

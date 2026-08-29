@@ -19,6 +19,7 @@ const (
 	CredentialFieldServiceAccountJSON       = "service_account_json"
 	CredentialFieldServiceAccountJSONBase64 = "service_account_json_base64"
 	CredentialFieldGCPScope                 = "gcp_scope"
+	CredentialFieldProxyURL                 = "proxy_url"
 	CredentialFieldModels                   = "models"
 )
 
@@ -89,14 +90,14 @@ func (f *ProviderFactory) CredentialSchemas() []CredentialSchema {
 
 // credentialSchema builds one provider type's credential form: the fields the
 // registration declares, or the plain API-key shape derived from its discovery
-// flags, plus the model list every provider type accepts.
+// flags, plus the proxy URL and model list every provider type accepts.
 func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchema {
 	fields := spec.CredentialFields
 	if len(fields) == 0 {
 		fields = defaultCredentialFields(spec)
 	}
 	schema := CredentialSchema{Type: providerType, DefaultBaseURL: spec.DefaultBaseURL,
-		Fields: make([]CredentialField, 0, len(fields)+2)}
+		Fields: make([]CredentialField, 0, len(fields)+3)}
 	schema.Fields = append(schema.Fields, fields...)
 	for _, field := range fields {
 		if field.Name == CredentialFieldAPIKeys {
@@ -104,7 +105,10 @@ func credentialSchema(providerType string, spec DiscoveryConfig) CredentialSchem
 			break
 		}
 	}
-	schema.Fields = append(schema.Fields, CredentialField{Name: CredentialFieldModels, Advanced: true})
+	schema.Fields = append(schema.Fields,
+		CredentialField{Name: CredentialFieldProxyURL, Advanced: true},
+		CredentialField{Name: CredentialFieldModels, Advanced: true},
+	)
 	return schema
 }
 
@@ -157,6 +161,8 @@ func credentialFieldValue(cred ManagedProviderCredential, name string) string {
 		return cred.ServiceAccountJSONBase64
 	case CredentialFieldGCPScope:
 		return cred.GCPScope
+	case CredentialFieldProxyURL:
+		return cred.ProxyURL
 	case CredentialFieldModels:
 		if len(cred.Models) == 0 {
 			return ""

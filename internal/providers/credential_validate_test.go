@@ -61,6 +61,17 @@ func TestValidateCredential_RequiredFields(t *testing.T) {
 			cred:   ManagedProviderCredential{Name: "p", Type: "keyed", APIKeys: []string{"sk-real"}},
 			schema: keyed,
 		},
+		{
+			name:   "proxy URL with an unsupported scheme",
+			cred:   ManagedProviderCredential{Name: "p", Type: "keyed", APIKeys: []string{"sk-real"}, ProxyURL: "ftp://proxy:21"},
+			schema: keyed,
+			field:  CredentialFieldProxyURL,
+		},
+		{
+			name:   "socks5 proxy URL",
+			cred:   ManagedProviderCredential{Name: "p", Type: "keyed", APIKeys: []string{"sk-real"}, ProxyURL: "socks5://user:pass@proxy:1080"},
+			schema: keyed,
+		},
 	}
 
 	for _, tt := range tests {

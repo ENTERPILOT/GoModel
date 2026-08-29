@@ -26,6 +26,7 @@ type mongoCredentialDocument struct {
 	ServiceAccountJSON       string    `bson:"service_account_json,omitempty"`
 	ServiceAccountJSONBase64 string    `bson:"service_account_json_base64,omitempty"`
 	GCPScope                 string    `bson:"gcp_scope,omitempty"`
+	ProxyURL                 string    `bson:"proxy_url,omitempty"`
 	Models                   []string  `bson:"models,omitempty"`
 	SessionStickyKeys        *bool     `bson:"session_sticky_keys,omitempty"`
 	Enabled                  bool      `bson:"enabled"`
@@ -113,6 +114,7 @@ func (s *MongoDBCredentialStore) Upsert(ctx context.Context, cred ManagedProvide
 			"service_account_json":        cred.ServiceAccountJSON,
 			"service_account_json_base64": cred.ServiceAccountJSONBase64,
 			"gcp_scope":                   cred.GCPScope,
+			"proxy_url":                   cred.ProxyURL,
 			"models":                      cred.Models,
 			"session_sticky_keys":         sessionStickyKeysEnabled(cred.SessionStickyKeys),
 			"enabled":                     cred.Enabled,
@@ -159,6 +161,7 @@ func credentialFromMongo(doc mongoCredentialDocument) ManagedProviderCredential 
 		ServiceAccountJSON:       doc.ServiceAccountJSON,
 		ServiceAccountJSONBase64: doc.ServiceAccountJSONBase64,
 		GCPScope:                 doc.GCPScope,
+		ProxyURL:                 doc.ProxyURL,
 		SessionStickyKeys:        doc.SessionStickyKeys,
 		Enabled:                  doc.Enabled,
 		CreatedAt:                doc.CreatedAt.UTC(),

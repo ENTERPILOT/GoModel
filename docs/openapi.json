@@ -11277,6 +11277,9 @@
           "name": {
             "type": "string"
           },
+          "proxy_url": {
+            "type": "string"
+          },
           "service_account_file": {
             "type": "string"
           },
@@ -11679,6 +11682,9 @@
             }
           },
           "name": {
+            "type": "string"
+          },
+          "proxy_url": {
             "type": "string"
           },
           "service_account_file": {

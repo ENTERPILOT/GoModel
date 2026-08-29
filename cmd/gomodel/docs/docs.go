@@ -7699,6 +7699,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "proxy_url": {
+                    "type": "string"
+                },
                 "service_account_file": {
                     "type": "string"
                 },
@@ -8090,6 +8093,9 @@ const docTemplate = `{
                     }
                 },
                 "name": {
+                    "type": "string"
+                },
+                "proxy_url": {
                     "type": "string"
                 },
                 "service_account_file": {
