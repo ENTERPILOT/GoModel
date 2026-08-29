@@ -792,10 +792,10 @@ test("vmRoutingSummary spells out the effect on the source, warning when a real 
 
   // Real model missing from its own targets: replaced, and flagged.
   s = vmRoutingSummary(form(me, "azure/gpt-4o", [], "failover"), true);
-  assert.equal(s.text, "Requests for openai/gpt-4o are routed to azure/gpt-4o instead of openai/gpt-4o.");
+  assert.equal(s.text, "Requests are routed to azure/gpt-4o. Add openai/gpt-4o as a target if you don't want to shadow the source model.");
   assert.equal(s.replaces, true);
   s = vmRoutingSummary(form(me, "azure/gpt-4o", ["gemini/g"], "failover"), true);
-  assert.equal(s.text, "Requests for openai/gpt-4o are routed to azure/gpt-4o instead of openai/gpt-4o; if it fails, to gemini/g.");
+  assert.equal(s.text, "Requests are routed to azure/gpt-4o; if it fails, to gemini/g. Add openai/gpt-4o as a target if you don't want to shadow the source model.");
   assert.equal(s.replaces, true);
   s = vmRoutingSummary(form(me, "azure/gpt-4o", ["gemini/g"], "cost"), true);
   assert.equal(s.replaces, true);
