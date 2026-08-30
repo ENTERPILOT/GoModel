@@ -27,6 +27,10 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			c.Response().Header().Set(core.RequestIDHeader, requestID)
 			desc := core.DescribeEndpoint(req.Method, req.URL.Path)
 			if !desc.IngressManaged {
+				// The configured header name must reach every handler that
+				// reads the user path itself (GET /v1/models), not only the
+				// model-interaction endpoints below.
+				req = req.WithContext(core.WithUserPathHeaderName(req.Context(), userPathHeaderName))
 				// Model endpoints that own their transport (MCP, realtime,
 				// audio) take no snapshot, but their identity must still reach
 				// the context: rate limits, budgets, session binding, and
@@ -40,8 +44,7 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 					}
 					if userPath != "" {
 						req.Header.Set(userPathHeaderName, userPath)
-						ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
-						req = req.WithContext(core.WithEffectiveUserPath(ctx, userPath))
+						req = req.WithContext(core.WithEffectiveUserPath(req.Context(), userPath))
 					}
 				}
 				c.SetRequest(req)
