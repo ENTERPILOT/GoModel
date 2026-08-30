@@ -145,7 +145,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 }
 
 func hooksWithProviderIdentity(hooks llmclient.Hooks, providerName, providerType string) llmclient.Hooks {
-	if hooks.OnRequestStart == nil && hooks.OnRequestEnd == nil && hooks.OnStreamFirstChunk == nil {
+	if hooks.OnRequestStart == nil && hooks.OnRequestEnd == nil && hooks.OnStreamFirstChunk == nil && hooks.OnStreamEmpty == nil {
 		return hooks
 	}
 	setIdentity := func(provider *string, implementation *string) {
@@ -171,6 +171,12 @@ func hooksWithProviderIdentity(hooks llmclient.Hooks, providerName, providerType
 		typed.OnStreamFirstChunk = func(ctx context.Context, info llmclient.ResponseInfo) {
 			setIdentity(&info.Provider, &info.ProviderType)
 			hooks.OnStreamFirstChunk(ctx, info)
+		}
+	}
+	if hooks.OnStreamEmpty != nil {
+		typed.OnStreamEmpty = func(ctx context.Context, info llmclient.ResponseInfo) {
+			setIdentity(&info.Provider, &info.ProviderType)
+			hooks.OnStreamEmpty(ctx, info)
 		}
 	}
 	return typed

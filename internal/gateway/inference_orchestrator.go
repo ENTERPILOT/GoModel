@@ -24,6 +24,7 @@ type InferenceConfig struct {
 	ModelAuthorizer          ModelAuthorizer
 	WorkflowPolicyResolver   WorkflowPolicyResolver
 	FailoverResolver         FailoverResolver
+	FailoverPolicy           *FailoverPolicy // Optional: nil applies the default failover policy
 	TranslatedRequestPatcher TranslatedRequestPatcher
 	UsageLogger              usage.LoggerInterface
 	PricingResolver          usage.PricingResolver
@@ -39,6 +40,7 @@ type InferenceOrchestrator struct {
 	modelAuthorizer          ModelAuthorizer
 	workflowPolicyResolver   WorkflowPolicyResolver
 	failoverResolver         FailoverResolver
+	failoverPolicy           *FailoverPolicy
 	translatedRequestPatcher TranslatedRequestPatcher
 	usageLogger              usage.LoggerInterface
 	pricingResolver          usage.PricingResolver
@@ -54,6 +56,7 @@ func NewInferenceOrchestrator(cfg InferenceConfig) *InferenceOrchestrator {
 		modelAuthorizer:          cfg.ModelAuthorizer,
 		workflowPolicyResolver:   cfg.WorkflowPolicyResolver,
 		failoverResolver:         cfg.FailoverResolver,
+		failoverPolicy:           cfg.FailoverPolicy,
 		translatedRequestPatcher: cfg.TranslatedRequestPatcher,
 		usageLogger:              cfg.UsageLogger,
 		pricingResolver:          cfg.PricingResolver,

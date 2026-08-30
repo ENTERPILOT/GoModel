@@ -1,9 +1,11 @@
 // Package dashboard provides the embedded admin dashboard UI for GoModel.
 //
 // The UI is a Svelte single-page app built from web/dashboard into
-// static/dist (see `make frontend`). This handler serves the built
-// index.html — with runtime globals (base path, version, demo mode) injected
-// — and the hashed static assets under /admin/static/.
+// static/dist by `make frontend` (locally) or the CI `frontend` job. The
+// build output is not committed; see docs/adr/0010-dashboard-built-in-ci.md.
+// This handler serves the built index.html — with runtime globals (base path,
+// version, demo mode) injected — and the hashed static assets under
+// /admin/static/.
 package dashboard
 
 import (
@@ -21,7 +23,10 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-//go:embed all:static/dist
+// static/ holds a committed placeholder so the embed compiles on a clean
+// checkout; static/dist is produced by the dashboard build and never committed.
+//
+//go:embed all:static
 var content embed.FS
 
 // Handler serves the admin dashboard UI.
@@ -41,7 +46,7 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 	basePath = config.NormalizeBasePath(basePath)
 
-	indexHTML, err := buildIndexHTML(basePath, demoMode)
+	indexHTML, err := buildIndexHTML(content, basePath, demoMode)
 	if err != nil {
 		return nil, err
 	}
@@ -61,11 +66,12 @@ func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 	}, nil
 }
 
-// buildIndexHTML loads the built SPA entry point, injects the runtime
-// globals the app reads on boot, and rewrites asset URLs when the app is
-// mounted under a base path.
-func buildIndexHTML(basePath string, demoMode bool) ([]byte, error) {
-	raw, err := content.ReadFile("static/dist/index.html")
+// buildIndexHTML loads the built SPA entry point from assets, injects the
+// runtime globals the app reads on boot, and rewrites asset URLs when the app
+// is mounted under a base path. It fails when the dashboard has not been
+// built: static/dist is generated, not committed.
+func buildIndexHTML(assets fs.FS, basePath string, demoMode bool) ([]byte, error) {
+	raw, err := fs.ReadFile(assets, "static/dist/index.html")
 	if err != nil {
 		return nil, fmt.Errorf(
 			"dashboard assets missing (run `make frontend` to build web/dashboard): %w",

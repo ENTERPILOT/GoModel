@@ -231,7 +231,7 @@ GoModel is configured through environment variables and an optional `config.yaml
 - [Passthrough API](https://gomodel.enterpilot.io/docs/features/passthrough-api?utm_source=readme) - provider-native APIs under `/p/{provider}/...`, with GoModel auth and tracking
 - [Guardrails](https://gomodel.enterpilot.io/docs/advanced/guardrails?utm_source=readme) - request and response policies enforced at the gateway
 - [Provider key rotation](https://gomodel.enterpilot.io/docs/providers/key-rotation?utm_source=readme) - round-robin over multiple API keys to lift per-key rate limits
-- [Observability](https://gomodel.enterpilot.io/docs/guides/prometheus-metrics?utm_source=readme) - Prometheus metrics, audit logs, and live request streaming in the dashboard
+- [Observability](https://gomodel.enterpilot.io/docs/guides/prometheus-metrics?utm_source=readme) - Prometheus metrics, [OpenTelemetry](https://gomodel.enterpilot.io/docs/guides/opentelemetry?utm_source=readme) traces, audit logs, and live request streaming in the dashboard
 
 ## Roadmap
 

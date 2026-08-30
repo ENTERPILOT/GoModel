@@ -38,7 +38,7 @@ export function formatJSON(v) {
 }
 
 export function formatNumber(n) {
-  if (n == null || n === undefined) return "-";
+  if (n == null) return "-";
   return n.toLocaleString();
 }
 
@@ -51,12 +51,12 @@ export function formatCost(v) {
 }
 
 export function formatPrice(v) {
-  if (v == null || v === undefined) return "—";
+  if (v == null) return "—";
   return "$" + v.toFixed(2);
 }
 
 export function formatPriceFine(v) {
-  if (v == null || v === undefined) return "—";
+  if (v == null) return "—";
   if (v < 0.01) return "$" + v.toFixed(6);
   return "$" + v.toFixed(4);
 }

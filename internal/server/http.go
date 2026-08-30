@@ -25,6 +25,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
@@ -83,6 +84,7 @@ type Config struct {
 	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
 	WorkflowPolicyResolver          RequestWorkflowPolicyResolver          // Optional: persisted workflow resolver used during workflow resolution
 	FailoverResolver                RequestFailoverResolver                // Optional: translated-route failover resolver
+	FailoverPolicy                  *gateway.FailoverPolicy                // Optional: which errors trigger failover and how many targets to try; nil applies the defaults
 	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
@@ -183,6 +185,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, failoverResolver, translatedRequestPatcher)
 	handler.budgetChecker = budgetChecker
 	if cfg != nil {
+		handler.failoverPolicy = cfg.FailoverPolicy
 		handler.rateLimiter = cfg.RateLimiter
 		handler.usageSummarizer = cfg.UsageSummarizer
 	}

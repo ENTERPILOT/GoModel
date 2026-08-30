@@ -26,6 +26,7 @@ type InternalChatCompletionExecutorConfig struct {
 	ModelAuthorizer        RequestModelAuthorizer
 	WorkflowPolicyResolver RequestWorkflowPolicyResolver
 	FailoverResolver       RequestFailoverResolver
+	FailoverPolicy         *gateway.FailoverPolicy
 	AuditLogger            auditlog.LoggerInterface
 	UsageLogger            usage.LoggerInterface
 	PricingResolver        usage.PricingResolver
@@ -60,6 +61,7 @@ func NewInternalChatCompletionExecutor(provider core.RoutableProvider, cfg Inter
 			ModelAuthorizer:          cfg.ModelAuthorizer,
 			WorkflowPolicyResolver:   cfg.WorkflowPolicyResolver,
 			FailoverResolver:         cfg.FailoverResolver,
+			FailoverPolicy:           cfg.FailoverPolicy,
 			UsageLogger:              cfg.UsageLogger,
 			PricingResolver:          cfg.PricingResolver,
 			TranslatedRequestPatcher: nil,

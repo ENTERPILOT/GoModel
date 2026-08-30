@@ -105,7 +105,7 @@ func ensureRequestID(req *http.Request) (*http.Request, string) {
 	}
 	requestID := strings.TrimSpace(core.GetRequestID(req.Context()))
 	if requestID == "" {
-		requestID = strings.TrimSpace(req.Header.Get(core.RequestIDHeader))
+		requestID = clientRequestID(req.Header)
 	}
 	if requestID == "" {
 		requestID = uuid.NewString()

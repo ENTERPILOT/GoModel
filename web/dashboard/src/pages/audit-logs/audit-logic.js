@@ -22,12 +22,7 @@ function auditErrorMessageFromField(value) {
 }
 
 function auditEntryStatusCodeValue(entry, data) {
-  const candidates = [
-    entry && entry.status_code,
-    entry && entry.status,
-    data && data.status_code,
-    data && data.status,
-  ];
+  const candidates = [entry.status_code, entry.status, data.status_code, data.status];
 
   for (let i = 0; i < candidates.length; i++) {
     const parsed = Number(candidates[i]);
@@ -65,7 +60,7 @@ function hasTopLevelAuditErrorShape(value) {
 function shouldInspectAuditResponseBody(entry, data) {
   const statusCode = auditEntryStatusCodeValue(entry, data);
   if (statusCode !== null && statusCode >= 400) return true;
-  return hasTopLevelAuditErrorShape(data && data.response_body);
+  return hasTopLevelAuditErrorShape(data.response_body);
 }
 
 export function auditEntryErrorMessage(entry) {

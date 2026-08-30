@@ -411,8 +411,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 234,   // baseline 228 (tree-walking session canonicalizer, single-pass header redaction, canonical header keys)
-			maxBytes:  23040, // baseline ~22.3 KB
+			maxAllocs: 160,   // baseline 156 (audit bodies kept as raw JSON instead of decoded into maps)
+			maxBytes:  19968, // baseline ~19.3 KB
 		},
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a

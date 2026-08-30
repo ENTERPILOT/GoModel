@@ -119,6 +119,7 @@
                             "advanced/model-metadata",
                             "advanced/cli",
                             "advanced/api-endpoints",
+                            "advanced/swagger-ui",
                             "advanced/resilience",
                             "advanced/version-awareness",
                             "advanced/responses-api",
@@ -160,7 +161,8 @@
                     "guides/cursor",
                     "guides/kimi-code-cli",
                     "guides/opencode-and-other-agents",
-                    "guides/prometheus-metrics"
+                    "guides/prometheus-metrics",
+                    "guides/opentelemetry"
                 ]
             },
             {

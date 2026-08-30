@@ -2115,3 +2115,80 @@ func TestPreTransportErrorsCloseRawBodyReader(t *testing.T) {
 		}
 	})
 }
+
+func TestClient_DoPassthrough_ResolvesUncertainStreamIntentFromResponse(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		wantStream  bool
+	}{
+		{name: "buffered JSON response", contentType: "application/json", wantStream: false},
+		{name: "SSE response", contentType: "text/event-stream", wantStream: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				_, _ = w.Write([]byte("data"))
+			}))
+			defer server.Close()
+
+			var ends []ResponseInfo
+			config := DefaultConfig("test", server.URL)
+			config.Retry.MaxRetries = 0
+			config.Hooks = Hooks{OnRequestEnd: func(_ context.Context, info ResponseInfo) { ends = append(ends, info) }}
+			client := New(config, nil)
+
+			resp, err := client.DoPassthrough(context.Background(), Request{
+				Method: http.MethodPost, Endpoint: "/chat/completions", Operation: OperationChat, StreamUncertain: true,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			_ = resp.Body.Close()
+
+			if len(ends) != 1 {
+				t.Fatalf("OnRequestEnd fired %d times, want 1", len(ends))
+			}
+			if ends[0].StreamUncertain || ends[0].Stream != tt.wantStream {
+				t.Fatalf("OnRequestEnd stream state = (stream=%v, uncertain=%v), want (stream=%v, uncertain=false)",
+					ends[0].Stream, ends[0].StreamUncertain, tt.wantStream)
+			}
+		})
+	}
+}
+
+func TestClient_DoPassthrough_ReportsStreamThatEndsBeforeFirstChunk(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	var firstChunks, empties []ResponseInfo
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 0
+	config.Hooks = Hooks{
+		OnStreamFirstChunk: func(_ context.Context, info ResponseInfo) { firstChunks = append(firstChunks, info) },
+		OnStreamEmpty:      func(_ context.Context, info ResponseInfo) { empties = append(empties, info) },
+	}
+	client := New(config, nil)
+
+	resp, err := client.DoPassthrough(context.Background(), Request{
+		Method: http.MethodPost, Endpoint: "/chat/completions", Operation: OperationChat, Stream: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if len(firstChunks) != 0 {
+		t.Fatalf("OnStreamFirstChunk fired for an empty stream: %+v", firstChunks)
+	}
+	if len(empties) != 1 || !empties[0].Stream || empties[0].StatusCode != http.StatusOK || !errors.Is(empties[0].Error, io.EOF) {
+		t.Fatalf("OnStreamEmpty = %+v, want one successful-status EOF report", empties)
+	}
+}

@@ -36,6 +36,7 @@ type translatedInferenceService struct {
 	modelAuthorizer          RequestModelAuthorizer
 	workflowPolicyResolver   RequestWorkflowPolicyResolver
 	failoverResolver         RequestFailoverResolver
+	failoverPolicy           *gateway.FailoverPolicy
 	translatedRequestPatcher TranslatedRequestPatcher
 	logger                   auditlog.LoggerInterface
 	usageLogger              usage.LoggerInterface
@@ -79,6 +80,7 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		ModelAuthorizer:          s.modelAuthorizer,
 		WorkflowPolicyResolver:   s.workflowPolicyResolver,
 		FailoverResolver:         s.failoverResolver,
+		FailoverPolicy:           s.failoverPolicy,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
 		UsageLogger:              s.usageLogger,
 		PricingResolver:          s.pricingResolver,

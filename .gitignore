@@ -38,5 +38,7 @@
 # Superpower design docs and plans (never commit)
 /docs/superpowers/
 
-# Dashboard frontend
+# Dashboard frontend. The Vite build output is produced by `make frontend`
+# locally and by the CI `frontend` job; see docs/adr/0010-dashboard-built-in-ci.md.
 /web/dashboard/node_modules/
+/internal/admin/dashboard/static/dist/

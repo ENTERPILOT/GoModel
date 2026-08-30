@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,91 +27,6 @@ import (
 
 type routeObservationSelector struct {
 	outcome ext.RouteOutcome
-}
-
-type upstreamObservation struct {
-	call       ext.UpstreamCall
-	result     ext.UpstreamResult
-	firstChunk ext.UpstreamResult
-}
-
-func (*upstreamObservation) Name() string { return "test" }
-func (o *upstreamObservation) Start(ctx context.Context, call ext.UpstreamCall) context.Context {
-	o.call = call
-	return context.WithValue(ctx, upstreamContextKey{}, "derived")
-}
-func (o *upstreamObservation) End(_ context.Context, result ext.UpstreamResult) {
-	o.result = result
-}
-func (o *upstreamObservation) FirstResponseChunk(_ context.Context, result ext.UpstreamResult) {
-	o.firstChunk = result
-}
-
-type upstreamContextKey struct{}
-
-func TestUpstreamObserverHooksExposeProviderCall(t *testing.T) {
-	observer := &upstreamObservation{}
-	hooks := upstreamObserverHooks(observer)
-	ctx := hooks.OnRequestStart(t.Context(), llmclient.RequestInfo{
-		Provider: "openai-eu", ProviderType: "openai", Model: "gpt-5", Operation: llmclient.OperationChat, Endpoint: "/chat/completions", Method: http.MethodPost, Stream: true,
-	})
-	if got := ctx.Value(upstreamContextKey{}); got != "derived" {
-		t.Fatalf("derived context value = %v, want derived", got)
-	}
-	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{
-		Provider: "openai-eu", ProviderType: "openai", Model: "gpt-5", Operation: llmclient.OperationChat, Endpoint: "/chat/completions",
-		Method: http.MethodPost, StatusCode: http.StatusOK, Duration: time.Second, Stream: true,
-	})
-	hooks.OnStreamFirstChunk(ctx, llmclient.ResponseInfo{
-		Provider: "openai-eu", ProviderType: "openai", Model: "gpt-5", Operation: llmclient.OperationChat,
-		Endpoint: "/chat/completions", Method: http.MethodPost, StatusCode: http.StatusOK, Duration: 2 * time.Second, Stream: true,
-	})
-
-	if observer.call.ProviderType != "openai" || observer.call.Method != http.MethodPost || !observer.call.Stream {
-		t.Fatalf("call = %+v, want POST streaming call", observer.call)
-	}
-	if observer.result.StatusCode != http.StatusOK || observer.result.Duration != time.Second || !observer.result.Stream {
-		t.Fatalf("result = %+v, want successful one-second streaming result", observer.result)
-	}
-	if observer.call.Operation != llmclient.OperationChat || observer.firstChunk.Duration != 2*time.Second {
-		t.Fatalf("operation/first chunk = %q/%v, want chat/2s", observer.call.Operation, observer.firstChunk.Duration)
-	}
-}
-
-func TestUpstreamObserverHooksExposeUncertainStreamIntent(t *testing.T) {
-	observer := &upstreamObservation{}
-	hooks := upstreamObserverHooks(observer)
-	ctx := hooks.OnRequestStart(t.Context(), llmclient.RequestInfo{
-		Provider: "openai", Operation: llmclient.OperationChat, StreamUncertain: true,
-	})
-	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{
-		Provider: "openai", Operation: llmclient.OperationChat, StreamUncertain: true,
-	})
-
-	if !observer.call.StreamUncertain || !observer.result.StreamUncertain {
-		t.Fatalf("stream uncertainty was not propagated: call=%+v result=%+v", observer.call, observer.result)
-	}
-}
-
-type panickingUpstreamObserver struct{}
-
-func (*panickingUpstreamObserver) Name() string { panic("name") }
-func (*panickingUpstreamObserver) Start(context.Context, ext.UpstreamCall) context.Context {
-	panic("start")
-}
-func (*panickingUpstreamObserver) End(context.Context, ext.UpstreamResult) { panic("end") }
-func (*panickingUpstreamObserver) FirstResponseChunk(context.Context, ext.UpstreamResult) {
-	panic("first chunk")
-}
-
-func TestUpstreamObserverHooksContainExtensionPanics(t *testing.T) {
-	hooks := upstreamObserverHooks(&panickingUpstreamObserver{})
-	ctx := t.Context()
-	if got := hooks.OnRequestStart(ctx, llmclient.RequestInfo{}); got != ctx {
-		t.Fatal("panicking observer must preserve the original context")
-	}
-	hooks.OnRequestEnd(ctx, llmclient.ResponseInfo{})
-	hooks.OnStreamFirstChunk(ctx, llmclient.ResponseInfo{})
 }
 
 func (*routeObservationSelector) Name() string                           { return "observer" }
@@ -784,32 +698,19 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 	reg := &ext.Registry{}
 	reg.RegisterRewriter(&staticRewriter{name: "r1"})
 	reg.UseOuterMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
-	var factoryMetricsEndpoints []string
-	reg.UseOuterMiddlewareFactory(func(cfg ext.HTTPServerConfig) (echo.MiddlewareFunc, error) {
-		factoryMetricsEndpoints = append(factoryMetricsEndpoints, cfg.MetricsEndpoint)
-		return func(next echo.HandlerFunc) echo.HandlerFunc { return next }, nil
-	})
 	reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 	reg.RegisterRoutes(func(_ *echo.Echo) {})
 	reg.AddPublicPaths("/sso/callback", "/sso/*")
 	reg.RegisterAuthenticator(&appTestAuthenticator{})
 
-	serverCfg := &server.Config{MetricsEndpoint: "/monitoring/metrics"}
-	if err := applyExtensions(serverCfg, reg); err != nil {
-		t.Fatal(err)
-	}
+	serverCfg := &server.Config{}
+	applyExtensions(serverCfg, reg)
 
 	if len(serverCfg.RequestRewriters) != 1 || serverCfg.RequestRewriters[0].Name() != "r1" {
 		t.Errorf("RequestRewriters not copied: %+v", serverCfg.RequestRewriters)
 	}
-	if len(serverCfg.OuterMiddleware) != 2 {
+	if len(serverCfg.OuterMiddleware) != 1 {
 		t.Errorf("OuterMiddleware not copied: %d entries", len(serverCfg.OuterMiddleware))
-	}
-	if !slices.Equal(factoryMetricsEndpoints, []string{"/monitoring/metrics"}) {
-		t.Errorf("factory MetricsEndpoints = %q", factoryMetricsEndpoints)
-	}
-	if serverCfg.MetricsEndpoint != "/monitoring/metrics" {
-		t.Errorf("server MetricsEndpoint = %q, want /monitoring/metrics", serverCfg.MetricsEndpoint)
 	}
 	if len(serverCfg.ExtraMiddleware) != 1 {
 		t.Errorf("ExtraMiddleware not copied: %d entries", len(serverCfg.ExtraMiddleware))
@@ -824,52 +725,11 @@ func TestApplyExtensionsSnapshotsRegistryIntoServerConfig(t *testing.T) {
 		t.Errorf("RequestAuthenticators not copied: %v", serverCfg.RequestAuthenticators)
 	}
 
-	endpointTests := []struct {
-		name         string
-		endpoint     string
-		pprofEnabled bool
-		want         string
-	}{
-		{name: "reload endpoint", endpoint: "/new/metrics", want: "/new/metrics"},
-		{name: "default endpoint", want: "/metrics"},
-		{name: "custom endpoint without leading slash", endpoint: "monitoring/custom", want: "/monitoring/custom"},
-		{name: "API route conflict", endpoint: "/v1", want: "/metrics"},
-		{name: "pprof conflict", endpoint: "/debug/pprof", pprofEnabled: true, want: "/metrics"},
-	}
-	for _, test := range endpointTests {
-		t.Run(test.name, func(t *testing.T) {
-			cfg := &server.Config{MetricsEndpoint: test.endpoint, PprofEnabled: test.pprofEnabled}
-			if err := applyExtensions(cfg, reg); err != nil {
-				t.Fatal(err)
-			}
-			if got := factoryMetricsEndpoints[len(factoryMetricsEndpoints)-1]; got != test.want {
-				t.Errorf("factory MetricsEndpoint = %q, want %q", got, test.want)
-			}
-			if cfg.MetricsEndpoint != test.want {
-				t.Errorf("server MetricsEndpoint = %q, want %q", cfg.MetricsEndpoint, test.want)
-			}
-		})
-	}
-
 	// A nil registry must leave the config untouched.
 	empty := &server.Config{}
-	if err := applyExtensions(empty, nil); err != nil {
-		t.Fatal(err)
-	}
+	applyExtensions(empty, nil)
 	if empty.RequestRewriters != nil || empty.OuterMiddleware != nil || empty.ExtraMiddleware != nil || empty.ExtraRoutes != nil || empty.ExtraAuthSkipPaths != nil || empty.RequestAuthenticators != nil {
 		t.Error("nil registry must not modify server config")
-	}
-}
-
-func TestApplyExtensionsReturnsOuterMiddlewareFactoryError(t *testing.T) {
-	reg := &ext.Registry{}
-	reg.UseOuterMiddlewareFactory(func(ext.HTTPServerConfig) (echo.MiddlewareFunc, error) {
-		return nil, errors.New("factory failed")
-	})
-
-	err := applyExtensions(&server.Config{}, reg)
-	if err == nil || !strings.Contains(err.Error(), "factory failed") {
-		t.Fatalf("applyExtensions() error = %v", err)
 	}
 }
 
