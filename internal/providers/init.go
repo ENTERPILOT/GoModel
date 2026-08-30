@@ -273,32 +273,68 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 	}
 	sort.Strings(names)
 
+	type initializedProvider struct {
+		name            string
+		config          ProviderConfig
+		provider        core.Provider
+		createErr       error
+		availabilityErr error
+	}
+	results := make([]initializedProvider, len(names))
+	const maxConcurrentInitializations = 8
+	sem := make(chan struct{}, maxConcurrentInitializations)
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			pCfg := providerMap[name]
+			p, err := factory.Create(pCfg)
+			if err != nil {
+				results[i] = initializedProvider{name: name, config: pCfg, createErr: err}
+				return
+			}
+
+			var availabilityErr error
+			if checker, ok := p.(core.AvailabilityChecker); ok {
+				probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				availabilityErr = checker.CheckAvailability(probeCtx)
+				cancel()
+			}
+			results[i] = initializedProvider{
+				name:            name,
+				config:          pCfg,
+				provider:        p,
+				availabilityErr: availabilityErr,
+			}
+		}(i, name)
+	}
+	wg.Wait()
+
 	var count int
-	for _, name := range names {
-		pCfg := providerMap[name]
-		p, err := factory.Create(pCfg)
-		if err != nil {
+	for _, result := range results {
+		name, pCfg, p := result.name, result.config, result.provider
+		if result.createErr != nil {
 			slog.Error("failed to initialize provider",
 				"name", name,
 				"type", pCfg.Type,
-				"error", err)
+				"error", result.createErr)
 			continue
 		}
 
-		// Availability checks are diagnostics only. Providers stay registered so
-		// async initialization and periodic refresh can discover them later.
-		if checker, ok := p.(core.AvailabilityChecker); ok {
-			probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			if err := checker.CheckAvailability(probeCtx); err != nil {
-				registry.RecordAvailabilityCheck(name, err)
+		if _, ok := p.(core.AvailabilityChecker); ok {
+			if result.availabilityErr != nil {
+				registry.RecordAvailabilityCheck(name, result.availabilityErr)
 				slog.Warn("provider unavailable at startup; keeping registered for refresh",
 					"name", name,
 					"type", pCfg.Type,
-					"reason", err.Error())
+					"reason", result.availabilityErr.Error())
 			} else {
 				registry.RecordAvailabilityCheck(name, nil)
 			}
-			cancel()
 		}
 
 		registry.RegisterProviderWithNameAndType(p, name, pCfg.Type)
