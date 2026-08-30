@@ -92,7 +92,10 @@ being recreated, and replicas sharing one database report as one deployment.
 An `install-id` file from an earlier release is adopted unchanged the first time
 the gateway starts with this one, unless the database already holds an id — for
 instance because another replica sharing it started first — in which case the
-database's id wins and the file is rewritten to match.
+database's id wins and the file is rewritten to match. If the database cannot
+be reached at startup, the gateway uses the file (or the fallback below) until
+it can, and switches to the database's id on a later check rather than keeping
+a provisional one for the life of the process.
 
 When neither copy exists — a container recreated without a volume, running
 SQLite — the identifier is derived from `GOMODEL_MASTER_KEY` with HMAC-SHA256,
