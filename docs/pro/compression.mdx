@@ -1,0 +1,107 @@
+---
+title: "Prompt Compression"
+description: "Reduce repeated and structural context in inference requests before they reach the provider, without changing the request's structure."
+icon: "package-minus"
+tag: "Pro"
+keywords: ["GoModel Pro", "prompt compression", "token savings", "deduplication", "prompt cache"]
+---
+
+<Frame caption="Dashboard Usage page: Pro savings over seven days of production traffic.">
+  <img src="/pro/pro-saved.webp" alt="Usage Analytics showing $268.63 estimated cost and $45.17 Pro saved, 14.4% less" />
+</Frame>
+
+## Proven in production
+
+Prompt compression has been exercised on billions of production tokens across
+agentic coding, chat, and tool-heavy workloads.
+
+- **Lossless.** Compression only replaces content the model has already seen
+  in the same request with a reference to it, or re-encodes structured data
+  reversibly. The model receives the same information; nothing is summarized
+  or dropped. The single lossy option, tool-result pruning, is a separate
+  policy that is off by default.
+- **No prompt-cache degradation.** Because the previously sent prefix of a
+  session is replayed byte-for-byte and only new messages are rewritten,
+  provider prompt caches keep hitting across turns. Testers actually noticed
+  about a 2% *increase* in prompt-cache hits, since shorter, more stable
+  requests fit the cache better — which adds savings on top of the compression
+  itself.
+- **Real savings of 5%–15%** for our testers, depending on the use case.
+  Agents that re-read files, replay tool output, or carry long histories sit
+  at the top of that range; short, non-repetitive chat sits at the bottom,
+  where the compressor simply forwards requests unchanged.
+- **Full control.** Choose the level per gateway or per request, exclude
+  models by glob, protect pre-existing history with `new_messages_only`, keep
+  source code verbatim, and inspect every rewrite through response headers,
+  audit revisions, and metrics.
+
+## Overview
+
+Prompt compression rewrites supported inference requests before they reach the
+provider. It reduces repeated or structural context while preserving the
+request's non-text structure.
+
+It supports `POST /v1/chat/completions`, `POST /v1/messages`, and
+`POST /v1/responses`. Tool-call arguments, non-text parts, and unknown JSON
+fields are left intact. Responses reasoning items are always replayed
+unchanged, because the Responses API can require them alongside function calls.
+
+The default `high` policy combines line-run deduplication with normalization:
+
+- file-read line-number gutters become a compact range header
+- replayed chat-completions reasoning is removed when it is safe to do so
+- known tool-result envelopes, search results, logs, JSON, and unified diffs
+  use content-aware normalization
+- profitable homogeneous JSON arrays and structured logs use reversible,
+  self-describing encodings
+
+The compressor is deterministic and fails open. It forwards a request
+unchanged when a rewrite is below the saving threshold or would exceed its work
+budget. Source code is preserved by default; enable code deduplication only
+when the extra saving is worth replacing exact repeated source with references.
+
+For a detected session, the gateway retains the exact body it previously sent
+upstream and replays that prefix byte-for-byte on later turns. This protects a
+provider prompt-cache prefix while allowing new messages to reference repeated
+history. Use `new_messages_only` when the gateway may join a conversation whose
+prefix it did not observe.
+
+## Configure compression
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PRO_COMPRESSION_LEVEL` | `high` | Select `none`, `low`, `medium`, or `high`. An explicit value makes the Dashboard setting read-only. |
+| `PRO_COMPRESSION_SCOPE` | `full_history` | Use `new_messages_only` to protect pre-existing conversation history. |
+| `PRO_COMPRESSION_EXCLUDE_MODELS` | — | Comma-separated requested-model globs to skip, such as `ollama/*`. |
+| `PRO_COMPRESSION_MIN_BLOCK_CHARS` | `128` | Minimum repeated line-run size under the high preset. |
+| `PRO_COMPRESSION_MIN_SAVINGS_TOKENS` | `32` | Minimum estimated net saving under the high preset. |
+| `PRO_COMPRESSION_DEDUPLICATE_CODE` | `false` | Permit repeated source-code runs to be replaced with references. |
+| `PRO_COMPRESSION_NORMALIZE` | `true` | Enable content normalization and tool-schema stabilization. |
+| `PRO_COMPRESSION_COMPRESS_JSON_STRUCTURE` | high preset | Enable reversible JSON-table encoding. |
+| `PRO_COMPRESSION_COMPRESS_LOG_STRUCTURE` | high preset | Enable reversible structured-log encoding. |
+
+Set `PRO_COMPRESSION_LEVEL=none` to disable compression for the whole
+gateway. For one request, send:
+
+```http
+X-GoModel-Compression: off
+```
+
+The per-request opt-out and the `none` level bypass request-body parsing, so
+the request is forwarded unchanged.
+
+## Inspect compression
+
+Compressed responses include estimated savings and the number of replaced
+duplicate blocks:
+
+```http
+X-GoModel-Pro-Tokens-Saved: 1843
+X-GoModel-Pro-Compression-Blocks: 12
+```
+
+Audit logs retain the original request and a revision for each rewriter. The
+revision records its byte sizes and compression detail; the rewritten body is
+also retained when `LOGGING_LOG_BODIES=true`. Prometheus metrics use the
+`gomodel_pro_compression_` prefix, and the Dashboard Usage page reports Pro
+savings in tokens or cost.

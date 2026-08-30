@@ -33,7 +33,7 @@ of existing API keys; add a policy to a node only when you want to restrict it.
 the same picture the gateway enforces.
 
 Requests authenticated by other means follow the same path rules: an
-[OIDC SSO](/pro#oidc-single-sign-on) session or a request carrying only the
+[OIDC SSO](/pro/sso) session or a request carrying only the
 user-path header is limited by the policies on its `user_path`; only managed
 API keys additionally carry a per-key allowlist. The master key has no bound
 user path: without the header it is unrestricted, with the header it is

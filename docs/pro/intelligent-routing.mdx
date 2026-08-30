@@ -1,0 +1,172 @@
+---
+title: "Intelligent Routing"
+description: "Route each request to an easy or hard model tier by its content, then pick the healthiest and cheapest provider inside that tier."
+icon: "route"
+tag: "Pro · Beta"
+keywords: ["GoModel Pro", "intelligent routing", "smart routing", "model tiers", "adaptive routing", "load balancing", "cost optimization"]
+---
+
+<Warning>
+  Intelligent routing is in beta. The scoring signals, defaults, and
+  configuration surface may change between releases; the response headers
+  and metrics let you verify every decision it makes.
+</Warning>
+
+## Overview
+
+Intelligent routing has two licensed extensions that compose with Core
+[virtual models](/features/virtual-models):
+
+- **Smart tier routing** answers *which quality tier does this request
+  deserve?* It classifies a configured model alias into an `easy` or `hard`
+  tier before provider selection, so short chat goes to a cheap model and
+  reasoning-heavy, code-heavy, or tool-heavy work goes to a strong one.
+- **Adaptive routing** answers *which provider inside that tier?* It selects
+  an upstream target from a virtual model's pool using observed latency,
+  errors, cooldowns, and the configured cost or latency objective.
+
+The two stack: a request for `model: "normal"` is rewritten to `normal-easy` or
+`normal-hard`, and if either of those is a virtual model using the `adaptive`
+strategy, the selector then picks the best provider for it.
+
+## Smart tier routing
+
+Configure a tiered alias with ordinary GoModel model names. The tier targets can
+be concrete models or virtual models:
+
+```bash
+PRO_SMART_ROUTING_ROUTES='{"normal":{"easy":"normal-easy","hard":"normal-hard"}}'
+```
+
+Only aliases listed in `PRO_SMART_ROUTING_ROUTES` are rewritten; every other
+model name passes through untouched. With no routes configured the feature is
+idle and startup logs a hint.
+
+### How a request is scored
+
+Classification is deterministic, runs in-process, and makes no model call. A
+request that explicitly asks for reasoning (`reasoning_effort` of medium or
+higher, or an Anthropic `thinking` block) goes straight to the hard tier.
+Otherwise the request accumulates points, and a score at or above
+`PRO_SMART_ROUTING_THRESHOLD` (default `4`) selects the hard tier:
+
+| Signal | Points |
+| --- | --- |
+| Effort keywords in the latest user message (`think hard`, `step by step`, `root cause`, …) | +4 |
+| Code or diagnostics (fenced code, `diff --git`, tracebacks, `panic:`) | +3 |
+| Tools declared | +2, and +2 more at 5 or more tools |
+| Structured output (JSON schema / response format) | +2 |
+| Attachments (images, files) | +2 |
+| Context size | +1 at 2k chars, +2 more at 8k, +3 more at 32k |
+| Thread depth of 7 or more messages | +1 |
+
+With the defaults, a short code snippet alone (3) stays on the easy tier, while
+code plus 2k characters of context (4) escalates. Lower the threshold to send
+more traffic to the hard tier, or raise it to protect the cheap tier.
+
+### Session pinning
+
+The selected tier is pinned per routed alias and detected session (see
+[Session Keeping](/features/session-keeping)). The pin is **escalation-only**:
+a conversation can move from easy to hard while the pin is active, but it never
+silently downgrades, so a follow-up such as "thanks!" cannot bounce a hard
+conversation to the cheap tier or invalidate its provider prompt cache. The
+pin expires after `PRO_SMART_ROUTING_SESSION_TTL` of inactivity.
+
+### Configure smart tier routing
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PRO_SMART_ROUTING_ENABLED` | `true` | Enable smart tier routing. |
+| `PRO_SMART_ROUTING_ROUTES` | — | JSON map from requested aliases to `easy` and `hard` models. No routes leaves the feature idle. |
+| `PRO_SMART_ROUTING_THRESHOLD` | `4` | Score at or above this value selects the hard tier. |
+| `PRO_SMART_ROUTING_SESSION_TTL` | `30m` | Sliding lifetime of an escalation-only session pin. |
+
+### Override and inspect a decision
+
+Send `X-GoModel-Smart-Routing: off` to bypass classification for one request,
+or `X-GoModel-Tier: easy` or `X-GoModel-Tier: hard` to force its tier without
+changing the session pin.
+
+Every routed response reports the decision:
+
+```http
+X-GoModel-Pro-Tier: hard
+X-GoModel-Pro-Tier-Target: normal-hard
+X-GoModel-Pro-Tier-Score: 5
+```
+
+The same verdict and its reasons are recorded in the audit revision detail.
+Prometheus exposes request, escalation, and score metrics under the
+`gomodel_pro_smartroute_` prefix; the score histogram is the tool for tuning
+the threshold against real traffic.
+
+## Adaptive routing
+
+Adaptive routing replaces the Core `round_robin` and `cost` strategies with a
+health-aware selector. It is registered once at startup for the whole
+gateway, but **only virtual models configured with `strategy: adaptive` use
+it** — every other virtual model keeps the strategy it has.
+
+```yaml
+virtual_models:
+  - source: normal-hard
+    strategy: adaptive
+    targets:
+      - { model: anthropic/claude-opus-4-6 }
+      - { model: bedrock/anthropic.claude-opus-4-6 }
+      - { model: vertex/claude-opus-4-6 }
+```
+
+In the Dashboard, `adaptive` appears in the virtual-model strategy dropdown
+only when a Pro build with the `routing` entitlement is running. On an
+open-source build a `strategy: adaptive` virtual model falls back to
+round-robin.
+
+### How a target is chosen
+
+Selection is power-of-two-choices: two candidates are drawn in proportion to
+their weights, and the one with the lower instantaneous load (latency estimate
+× in-flight requests) wins. Weights are recomputed per request from in-process
+state — there is no external store on the request path.
+
+- **Latency** — each target keeps a peak-EWMA latency estimate (time to first
+  byte for streams) fed by every upstream attempt, including retries and
+  failovers.
+- **Cooldowns** — a `429` starts a cooldown of `PRO_ROUTING_COOLDOWN_BASE`
+  that doubles on each consecutive trigger up to `PRO_ROUTING_COOLDOWN_MAX`;
+  `401`, `403`, and `404` cool down for the maximum immediately; repeated 5xx
+  or network failures cool down after three in a row. Cooling targets are
+  skipped while any other target is available.
+- **Weight floor** — every non-cooling target keeps at least
+  `PRO_ROUTING_MIN_WEIGHT_FRACTION` of the heaviest candidate's weight, so a
+  slow or recovering target still receives a trickle of traffic and its
+  recovery is proven on real requests.
+- **Prompt-cache warmth** — the provider that served a detected session last
+  is boosted by `PRO_ROUTING_WARM_CACHE_WEIGHT` for `PRO_ROUTING_WARM_CACHE_TTL`,
+  so a conversation stays on the same credential, endpoint, and region while
+  its prompt cache is likely warm. A cooling target loses the boost.
+
+The objective decides how price enters the weight:
+
+| `PRO_ROUTING_OBJECTIVE` | Behaviour |
+| --- | --- |
+| `latency` | Weigh targets by observed latency and health only. |
+| `cost` | Additionally weigh by inverse-square price: a target at twice the cheapest price receives a quarter of its share. Unlike the Core `cost` strategy, an unhealthy cheap target still sheds traffic. |
+| `balanced` | Blend latency and price weighting. The default. |
+
+### Configure adaptive routing
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PRO_ROUTING_ENABLED` | `true` | Register the adaptive selector. |
+| `PRO_ROUTING_OBJECTIVE` | `balanced` | `latency`, `cost`, or `balanced`. |
+| `PRO_ROUTING_MIN_WEIGHT_FRACTION` | `0.05` | Weight floor for non-cooling targets, as a fraction of the heaviest candidate (`0`–`0.5`). |
+| `PRO_ROUTING_COOLDOWN_BASE` | `30s` | First cooldown after a `429` or repeated upstream failures; doubles on consecutive triggers. |
+| `PRO_ROUTING_COOLDOWN_MAX` | `5m` | Cooldown ceiling; also the immediate cooldown for `401`, `403`, and `404`. |
+| `PRO_ROUTING_WARM_CACHE_WEIGHT` | `8` | Weight multiplier for the provider that last served a session. |
+| `PRO_ROUTING_WARM_CACHE_TTL` | `10m` | How long prompt-cache warmth is assumed for a session. |
+
+Prometheus metrics use the `gomodel_pro_routing_` prefix (selections,
+declines, outcomes, cooldowns, and a latency-estimate gauge). Scoring state is
+per node; replicas learn independently and share nothing.

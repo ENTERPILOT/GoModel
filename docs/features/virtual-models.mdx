@@ -91,6 +91,11 @@ them. Add more than one target in the editor (**Add target**) and pick a
   order listed: the targets form a priority list, and lower entries serve only
   while every entry above them is unavailable or fails. Weights and session
   keeping do not apply.
+- **Adaptive** (GoModel Pro) picks the target with the best observed latency,
+  error rate, and price, backs off rate-limited or failing targets, and keeps
+  a session on the provider whose prompt cache is warm. See
+  [Intelligent Routing](/pro/intelligent-routing). On an open-source build the
+  strategy falls back to round-robin.
 
 Targets that the gateway cannot currently serve (unknown model, provider down)
 are skipped automatically, so a redirect keeps working as long as one target is
