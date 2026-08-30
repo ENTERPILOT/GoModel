@@ -11,6 +11,7 @@ import {
   userPathDepth,
   userPathLeaf,
   userPathValidationError,
+  userSelectorOptions,
 } from "../src/pages/users/usersLogic.js";
 import {
   displayModelSelector,
@@ -111,4 +112,20 @@ test("buildUpsertUserPayload prefixes the slash, parses selectors, and drops an 
     description: undefined,
   });
   assert.ok(buildUpsertUserPayload({ ...defaultUserForm(), user_path: "" }).error);
+});
+
+test("userSelectorOptions lists provider wildcards first, then concrete selectors, de-duplicated", () => {
+  const options = userSelectorOptions([
+    { provider_name: "openai", access: { selector: "openai/gpt-4o" } },
+    { provider_name: "anthropic", access: { selector: "anthropic/claude-sonnet-4-6" } },
+    { provider_name: "openai", access: { selector: "openai/gpt-4o" } },
+    { provider_name: "", selector: "" },
+  ]);
+  assert.deepEqual(
+    options.map((option) => option.value),
+    ["anthropic/*", "openai/*", "anthropic/claude-sonnet-4-6", "openai/gpt-4o"],
+  );
+  assert.ok(options[0].description.includes("anthropic"));
+  assert.equal(options[2].description, "");
+  assert.deepEqual(userSelectorOptions(undefined), []);
 });

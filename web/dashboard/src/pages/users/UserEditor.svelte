@@ -1,30 +1,18 @@
 <script>
   // Create/edit modal for one user-path policy (EditorDialog shell). The
-  // allowlist is free text; the quick-add select appends a provider wildcard
-  // or a concrete model from the shared inventory.
+  // allowlist is free text; the quick-add picker (the shared SearchSelect)
+  // appends a provider wildcard or a concrete model from the inventory. Its
+  // value is deliberately not bound so it reads "Quick add…" after each pick.
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { usersStore as store } from "./users.svelte.js";
+  import { userSelectorOptions } from "./usersLogic.js";
   import * as m from "$lib/paraglide/messages.js";
 
-  const providerNames = $derived(
-    [...new Set(modelsStore.models.map((entry) => entry.provider_name).filter(Boolean))].sort(),
-  );
-  const modelSelectors = $derived(
-    [...new Set(modelsStore.models.map((entry) => entry.access?.selector || entry.selector).filter(Boolean))].sort(),
-  );
-
-  let quickAdd = $state("");
-
-  function applyQuickAdd(event) {
-    const value = event.currentTarget.value;
-    if (value) {
-      store.appendSelector(value);
-    }
-    quickAdd = "";
-  }
+  const selectorOptions = $derived(userSelectorOptions(modelsStore.models));
 </script>
 
 <EditorDialog
@@ -77,29 +65,20 @@
       data-modal-autofocus={store.editingPath ? true : undefined}
       bind:value={store.form.allowed_models}
     ></textarea>
-    {#if providerNames.length > 0 || modelSelectors.length > 0}
-      <select
-        class="user-quick-add"
-        aria-label={m.users_quick_add()}
-        bind:value={quickAdd}
-        onchange={applyQuickAdd}
-      >
-        <option value="">{m.users_quick_add()}</option>
-        {#if providerNames.length > 0}
-          <optgroup label={m.users_quick_add_providers()}>
-            {#each providerNames as name (name)}
-              <option value={name + "/*"}>{name}/*</option>
-            {/each}
-          </optgroup>
-        {/if}
-        {#if modelSelectors.length > 0}
-          <optgroup label={m.users_quick_add_models()}>
-            {#each modelSelectors as selector (selector)}
-              <option value={selector}>{selector}</option>
-            {/each}
-          </optgroup>
-        {/if}
-      </select>
+    {#if selectorOptions.length > 0}
+      <div class="user-quick-add">
+        <SearchSelect
+          id="user-allowed-models-quick-add"
+          options={selectorOptions}
+          value=""
+          onchange={(value) => store.appendSelector(value)}
+          placeholder={m.users_quick_add()}
+          searchPlaceholder={m.users_quick_add_search()}
+          ariaLabel={m.users_quick_add()}
+          allowCustom
+          mono
+        />
+      </div>
     {/if}
   </div>
 
@@ -116,6 +95,5 @@
 <style>
   .user-quick-add {
     margin-top: 8px;
-    max-width: 100%;
   }
 </style>

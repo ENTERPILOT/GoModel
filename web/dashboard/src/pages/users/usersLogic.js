@@ -52,6 +52,25 @@ export function userNodeKind(node, nodes) {
   return hasChildren ? "group" : "user";
 }
 
+// userSelectorOptions builds the quick-add picker from the shared model
+// inventory: one provider-wide wildcard per provider, then every concrete
+// model selector, both sorted. Options carry the SearchSelect shape.
+export function userSelectorOptions(models) {
+  const list = Array.isArray(models) ? models : [];
+  const providers = [...new Set(list.map((entry) => entry?.provider_name).filter(Boolean))].sort();
+  const selectors = [
+    ...new Set(list.map((entry) => entry?.access?.selector || entry?.selector).filter(Boolean)),
+  ].sort();
+  return [
+    ...providers.map((name) => ({
+      value: name + "/*",
+      label: name + "/*",
+      description: m.users_quick_add_provider_all({ name }),
+    })),
+    ...selectors.map((selector) => ({ value: selector, label: selector, description: "" })),
+  ];
+}
+
 // filterUserNodes applies the toolbar query against the path, description,
 // and selectors.
 export function filterUserNodes(nodes, query) {
