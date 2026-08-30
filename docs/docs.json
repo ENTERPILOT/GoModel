@@ -112,8 +112,8 @@
                         "pages": [
                             "pro/overview",
                             "pro/compression",
-                            "pro/intelligent-routing",
-                            "pro/sso"
+                            "pro/sso",
+                            "pro/intelligent-routing"
                         ]
                     },
                     {
