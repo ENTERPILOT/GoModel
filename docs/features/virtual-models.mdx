@@ -171,13 +171,17 @@ virtual model of that name even though it looks like `provider/model`. Set
 `provider` explicitly (`{ provider: groq, model: llama-3.3-70b }`) to pin a
 target to a concrete model regardless of any virtual model sharing the name.
 
-One exception: a redirect that [shadows a real model](#shadow-a-model) and
-lists that model among its own targets (the shape the Models page creates when
-you add fallbacks to a model) adds failover to the model rather than replacing
-it. Other redirects that name the model reach the model itself, not the
-shadow's fallback list, so two models can fall back to each other without
-forming a cycle. A shadow that does *not* list its source replaces the model
-and is chained through like any other virtual model.
+A redirect that [shadows a real model](#shadow-a-model) and lists that model
+among its own targets (the shape the Models page creates when you add
+fallbacks or balancing to a model) covers the model rather than replacing it.
+An alias or any other redirect that names the model chains into that cover, so
+it gets the same balancing and failover a direct request gets — with one
+exception: the fallback reference of one such cover to another covered model
+reaches the model itself, not the other cover's fallback list. That is what
+lets two models protect each other without forming a cycle, and keeps a
+fallback from sweeping the fallbacks of the fallback. A shadow that does *not*
+list its source replaces the model and is chained through like any other
+virtual model.
 
 Chains must be acyclic (`a -> b -> a` is rejected, with the cycle spelled out)
 and at most 8 virtual models deep. Both rules are enforced when saving from the

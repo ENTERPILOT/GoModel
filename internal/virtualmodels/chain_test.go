@@ -247,10 +247,11 @@ func TestChain_SlashNamedVirtualModelIsChained(t *testing.T) {
 	}
 }
 
-// A redirect that shadows its own source adds failover to a real model rather
-// than replacing it, so other redirects that name the model reach the model —
-// not the shadow's fallback list. Two models protecting each other is the
-// common legacy failover-rule shape and must not read as a cycle.
+// A redirect that shadows its own source covers a real model rather than
+// replacing it. Two such chains referencing each other reach each other's
+// concrete model — mutual protection, the common legacy failover-rule shape,
+// must not read as a cycle — while any other reference still chains into the
+// shadow so it gets the same balancing and failover a direct request gets.
 func TestChain_SelfShadowingRedirectIsNotAChainLeg(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)
@@ -266,8 +267,9 @@ func TestChain_SelfShadowingRedirectIsNotAChainLeg(t *testing.T) {
 		}
 	}
 
-	// An alias on a shadowed model resolves to the concrete model, not through
-	// the shadow's fallbacks, and does not pin the shadow in place.
+	// An alias on a shadowed model chains into the shadow (a failover shadow
+	// serves its primary first), and does not pin the shadow in place: the
+	// alias reverts to the concrete model when the shadow is deleted.
 	upsertRedirect(t, svc, "prod", "", "openai/gpt-4o")
 	sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
 	if err != nil || sel.QualifiedModel() != "openai/gpt-4o" {
@@ -276,8 +278,17 @@ func TestChain_SelfShadowingRedirectIsNotAChainLeg(t *testing.T) {
 	if err := svc.Delete(ctx, "openai/gpt-4o"); err != nil {
 		t.Fatalf("Delete(self-shadow referenced by prod) error = %v, want success", err)
 	}
+	sel, _, err = svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
+	if err != nil || sel.QualifiedModel() != "openai/gpt-4o" {
+		t.Fatalf("ResolveModel(prod) after shadow delete = %v, %v; want openai/gpt-4o", sel, err)
+	}
 
 	// A redirect that replaces the model (no self target) is still a chain leg.
+	// The groq/llama self-shadow must go first: its fallback reference to
+	// openai/gpt-4o would chain into the replacing shadow and genuinely cycle.
+	if err := svc.Delete(ctx, "groq/llama"); err != nil {
+		t.Fatalf("Delete(groq/llama shadow) error = %v", err)
+	}
 	upsertRedirect(t, svc, "openai/gpt-4o", "", "groq/llama")
 	sel, _, err = svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
 	if err != nil || sel.QualifiedModel() != "groq/llama" {
@@ -286,6 +297,33 @@ func TestChain_SelfShadowingRedirectIsNotAChainLeg(t *testing.T) {
 	if err := svc.Delete(ctx, "openai/gpt-4o"); err == nil || !IsValidationError(err) {
 		t.Fatalf("Delete(replacing shadow referenced by prod) error = %v, want validation error", err)
 	}
+}
+
+// A load-balanced shadow (source enlisted among its targets) balances the
+// same way for a direct request and for an alias that names the model, and
+// two balanced shadows may reference each other without forming a cycle.
+func TestChain_SelfShadowingRedirectBalancesForReferences(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertRedirect(t, svc, "openai/gpt-4o", StrategyRoundRobin, "openai/gpt-4o", "groq/llama")
+	upsertRedirect(t, svc, "prod", "", "openai/gpt-4o")
+
+	direct := map[string]bool{}
+	for _, got := range resolvedModels(t, svc, "openai/gpt-4o", 8) {
+		direct[got] = true
+	}
+	viaAlias := map[string]bool{}
+	for _, got := range resolvedModels(t, svc, "prod", 8) {
+		viaAlias[got] = true
+	}
+	for _, want := range []string{"openai/gpt-4o", "groq/llama"} {
+		if !direct[want] || !viaAlias[want] {
+			t.Fatalf("rotation: direct=%v viaAlias=%v; want both to include %s", direct, viaAlias, want)
+		}
+	}
+
+	// Mutual balanced shadows load like mutual failover shadows.
+	upsertRedirect(t, svc, "groq/llama", StrategyRoundRobin, "groq/llama", "openai/gpt-4o")
 }
 
 // Legacy failover rules that fall back to each other migrate into a set of

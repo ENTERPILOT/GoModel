@@ -16,19 +16,27 @@ const MaxChainDepth = 8
 // slash-named sources such as "team/cheap", which parse like a provider
 // prefix but were not declared as one. A target naming owner itself is not a
 // chain: it stands for the concrete model the redirect shadows. Neither is a
-// target naming a redirect that shadows its own source (a failover chain
-// added to a real model): that redirect covers the concrete model rather than
-// replacing it, so other redirects reach the model itself — which keeps two
-// models that fall back to each other from forming a cycle, and keeps a
-// fallback from sweeping the fallbacks of the fallback. Disabled redirects
-// are returned too: the caller decides whether that makes the leg unavailable.
+// target of one self-shadowing redirect naming another self-shadowing
+// redirect: each of those covers its concrete model rather than replacing it,
+// so one chain's fallback reference reaches the other model itself — which
+// keeps two models that protect each other from forming a cycle, and keeps a
+// fallback from sweeping the fallbacks of the fallback. Every other reference
+// to a self-shadowing redirect still chains, so an alias to a shadowed model
+// gets the same balancing and failover a direct request gets. Disabled
+// redirects are returned too: the caller decides whether that makes the leg
+// unavailable.
 func (s *snapshot) chained(owner string, target resolvedTarget) (*redirectEntry, bool) {
 	if target.explicitProvider || target.qualified == owner {
 		return nil, false
 	}
 	entry, ok := s.redirects[target.qualified]
-	if !ok || entry.shadowsSource() {
+	if !ok {
 		return nil, false
+	}
+	if entry.shadowsSource() {
+		if ownerEntry, ok := s.redirects[owner]; ok && ownerEntry.shadowsSource() {
+			return nil, false
+		}
 	}
 	return entry, true
 }
@@ -124,7 +132,12 @@ func (s *snapshot) representativeLeaf(entry *redirectEntry) (resolvedTarget, boo
 }
 
 // dependents lists the redirects that chain through source, sorted by source.
+// A self-shadowing redirect has none: a bare reference to it names the model
+// it covers, and simply reverts to the concrete model when it is deleted.
 func (s *snapshot) dependents(source string) []string {
+	if entry, ok := s.redirects[source]; ok && entry.shadowsSource() {
+		return nil
+	}
 	var out []string
 	for _, name := range s.order {
 		if name == source {
