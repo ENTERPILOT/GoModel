@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -27,12 +28,14 @@ const InstallIDKey = "install_id"
 // so the same secret used for anything else yields an unrelated value.
 const derivedIDPurpose = "gomodel install identifier v1"
 
-// Store is the durable key/value the identifier is kept in. It matches
-// runtimesettings.Store: the identifier is per-deployment state exactly like
-// a runtime setting, so it shares the table.
+// Store is the durable key/value the identifier is kept in. It is satisfied
+// by runtimesettings.Store: the identifier is per-deployment state exactly
+// like a runtime setting, so it shares the table.
 type Store interface {
 	Get(ctx context.Context, key string) (value string, found bool, err error)
-	Set(ctx context.Context, key, value string) error
+	// SetDefault stores value only when key has no value yet, and returns
+	// whatever is stored afterwards. It must be atomic across instances.
+	SetDefault(ctx context.Context, key, value string) (string, error)
 }
 
 // InstallIDSource names where a resolved identifier came from, for the
@@ -51,10 +54,10 @@ const (
 	SourceGenerated InstallIDSource = "generated"
 )
 
-// ResolveInstallID returns the stable, anonymous identifier for this
-// deployment, creating one on first use. It is a random UUID that encodes
-// nothing about the host, the operator, or the configuration, and only ever
-// leaves the process on an update check.
+// Identity resolves and remembers the stable, anonymous identifier for this
+// deployment. It is a UUID that encodes nothing about the host, the
+// operator, or the configuration, and only ever leaves the process on an
+// update check.
 //
 // "This deployment" is defined by whatever survives longest, in this order:
 //
@@ -69,55 +72,121 @@ const (
 //     configuration did, and the same configuration is the same deployment.
 //  4. A random UUID.
 //
-// Whichever step wins is written back to the database and the file, so the
-// copies converge and the next start takes the shortest path. When the
-// database and the file disagree, the database wins: the file is the copy that
-// gets recreated by accident, the database the one that gets migrated on
-// purpose.
+// Whichever step wins is written to the database and the file, so the copies
+// converge and the next start takes the shortest path. The database write is
+// insert-if-absent: when two replicas initialise at once, or the file and
+// the database disagree, the database's value wins for everyone. The file is
+// the copy that gets recreated by accident, the database the one that gets
+// migrated on purpose.
 //
-// A store that errors is not a store that is empty. The lookup falls through
-// to the file and the write-back is skipped, so a database that is briefly
-// unreachable at startup can never mint a new identity.
+// A store that errors is not a store that is empty. The candidate from the
+// file or the fallbacks is used for now, and the database is asked again on
+// the next call, so an outage at startup can never mint a new identity or
+// hide the real one for the life of the process.
+type Identity struct {
+	store  Store
+	secret string
+
+	mu       sync.Mutex
+	id       string
+	source   InstallIDSource
+	settled  bool // the database has confirmed id, or there is no database
+	warnedDB bool // the outage has been logged once; retries stay quiet
+}
+
+// NewIdentity prepares a resolver. store may be nil (no database) and secret
+// may be empty (no derived fallback). Nothing is read until Resolve or ID.
+func NewIdentity(store Store, secret string) *Identity {
+	return &Identity{store: store, secret: secret}
+}
+
+// ResolveInstallID resolves the identifier once. It is Identity for callers
+// that do not need to keep retrying the database.
 func ResolveInstallID(ctx context.Context, store Store, secret string) (string, InstallIDSource) {
+	return NewIdentity(store, secret).Resolve(ctx)
+}
+
+// ID returns the identifier for a request, resolving it on first use.
+func (i *Identity) ID(ctx context.Context) string {
+	id, _ := i.Resolve(ctx)
+	return id
+}
+
+// Resolve returns the identifier and where it came from. Once the database
+// has confirmed the value (or there is no database to ask) the answer is
+// fixed; until then each call asks again, but keeps returning the same
+// provisional value rather than minting another.
+func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.settled {
+		return i.id, i.source
+	}
+
 	path := platformdir.DataFile(installIDFile)
 	fileID := readInstallIDFile(path)
 
-	storeUsable := store != nil
+	storeUsable := i.store != nil
 	if storeUsable {
-		id, found, err := store.Get(ctx, InstallIDKey)
+		stored, found, err := i.store.Get(ctx, InstallIDKey)
 		switch {
 		case err != nil:
-			slog.Warn("install id store unavailable; using the local copy and retrying next start", "error", err)
+			i.warnStoreOnce("install id database unavailable; using the local copy until it answers", err)
 			storeUsable = false
-		case found && strings.TrimSpace(id) != "":
-			id = strings.TrimSpace(id)
-			if id != fileID {
-				writeInstallIDFile(path, id)
+		case found && strings.TrimSpace(stored) != "":
+			i.adopt(strings.TrimSpace(stored), SourceDatabase, true)
+			if i.id != fileID {
+				writeInstallIDFile(path, i.id)
 			}
-			return id, SourceDatabase
+			return i.id, i.source
 		}
 	}
 
-	var id string
-	source := SourceFile
-	switch {
-	case fileID != "":
-		id = fileID
-	case secret != "":
-		id, source = deriveInstallID(secret), SourceDerived
-	default:
-		id, source = uuid.NewString(), SourceGenerated
+	// The provisional id from an earlier call is kept: a database that is
+	// still down must not cause a second fresh id.
+	if i.id == "" {
+		switch {
+		case fileID != "":
+			i.adopt(fileID, SourceFile, false)
+		case i.secret != "":
+			i.adopt(deriveInstallID(i.secret), SourceDerived, false)
+		default:
+			i.adopt(uuid.NewString(), SourceGenerated, false)
+		}
 	}
 
 	if storeUsable {
-		if err := store.Set(ctx, InstallIDKey, id); err != nil {
-			slog.Warn("install id could not be saved to the database; it stays in the data directory", "error", err)
+		stored, err := i.store.SetDefault(ctx, InstallIDKey, i.id)
+		switch {
+		case err != nil:
+			i.warnStoreOnce("install id could not be saved to the database; it stays in the data directory until it can", err)
+		case stored != i.id:
+			// Another replica initialised first, or the database already
+			// had an id the Get above missed: theirs is the deployment's.
+			i.adopt(stored, SourceDatabase, true)
+		default:
+			i.settled = true
 		}
+	} else if i.store == nil {
+		i.settled = true
 	}
-	if id != fileID {
-		writeInstallIDFile(path, id)
+
+	if i.id != fileID {
+		writeInstallIDFile(path, i.id)
 	}
-	return id, source
+	return i.id, i.source
+}
+
+func (i *Identity) adopt(id string, source InstallIDSource, settled bool) {
+	i.id, i.source, i.settled = id, source, settled
+}
+
+func (i *Identity) warnStoreOnce(msg string, err error) {
+	if i.warnedDB {
+		return
+	}
+	i.warnedDB = true
+	slog.Warn(msg, "error", err)
 }
 
 func readInstallIDFile(path string) string {

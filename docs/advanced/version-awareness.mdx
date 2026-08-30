@@ -80,10 +80,10 @@ personal data. Neither is ever sent.
 
 ### The install identifier
 
-A random UUID created on first use. It encodes nothing about your host, your
-organization, or your configuration; it exists only so repeated checks from one
-deployment count as one deployment. Disabling the check means it is never
-created.
+A UUID chosen on first use: a random one, or one derived from your master key
+as described below. It encodes nothing about your host, your organization, or
+your configuration; it exists only so repeated checks from one deployment count
+as one deployment. Disabling the check means it is never created.
 
 It is kept in the deployment's database, under the `install_id` key in the
 `runtime_settings` table (or collection), and mirrored to `install-id` in the

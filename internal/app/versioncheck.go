@@ -41,11 +41,15 @@ func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backe
 				store = s
 			}
 		}
-		var source versioncheck.InstallIDSource
-		checkerCfg.InstallID, source = versioncheck.ResolveInstallID(ctx, store, masterKey)
+		identity := versioncheck.NewIdentity(store, masterKey)
+		id, source := identity.Resolve(ctx)
 		if source == versioncheck.SourceGenerated || source == versioncheck.SourceDerived {
 			slog.Info("install id created", "source", string(source))
 		}
+		// Resolved again per check rather than fixed here: if the database
+		// was unreachable just now, a later check picks up the id it holds.
+		checkerCfg.InstallID = id
+		checkerCfg.InstallIDFunc = identity.ID
 		if versioncheck.LeaksQueryInCleartext(cfg.URL) {
 			slog.Warn("version check URL sends its query string unencrypted; use https if it carries a credential",
 				"host", versioncheck.SafeURL(cfg.URL))

@@ -81,6 +81,16 @@ func (s *stubStore) Get(_ context.Context, key string) (string, bool, error) {
 	return value, found, nil
 }
 
+func (s *stubStore) SetDefault(ctx context.Context, key, value string) (string, error) {
+	if stored, found, err := s.Get(ctx, key); err != nil || found {
+		return stored, err
+	}
+	if err := s.Set(ctx, key, value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
 func (s *stubStore) Set(_ context.Context, key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
