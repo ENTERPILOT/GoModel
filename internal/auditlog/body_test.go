@@ -43,6 +43,10 @@ func TestCaptureLoggedBody(t *testing.T) {
 		if got := captureLoggedBody([]byte("bad \xff utf8")); got != "bad � utf8" {
 			t.Fatalf("invalid utf-8 = %#v", got)
 		}
+		// encoding/json.Valid accepts invalid UTF-8 inside strings; stores do not.
+		if got := captureLoggedBody([]byte("{\"text\":\"\xff\"}")); got != "{\"text\":\"�\"}" {
+			t.Fatalf("json with invalid utf-8 = %#v, want coerced string", got)
+		}
 	})
 
 	t.Run("empty is nil", func(t *testing.T) {

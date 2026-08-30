@@ -3,6 +3,7 @@ package auditlog
 import (
 	"bytes"
 	encjson "encoding/json"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 )
@@ -30,9 +31,10 @@ func captureLoggedBody(bodyBytes []byte) any {
 	}
 	// encoding/json's validator is a strict, allocation-free scan; goccy's
 	// Valid decodes the document to check it, which is the cost this type
-	// exists to avoid. Strict validation also guarantees every store's
-	// encoder accepts the bytes later.
-	if encjson.Valid(bodyBytes) {
+	// exists to avoid. It does not check UTF-8 inside strings, so that is
+	// checked separately: stores reject invalid UTF-8 (BSON, Postgres jsonb),
+	// and such bodies take the coerced-string fallback exactly as before.
+	if utf8.Valid(bodyBytes) && encjson.Valid(bodyBytes) {
 		return json.RawMessage(bytes.Clone(bodyBytes))
 	}
 	return toValidUTF8String(bodyBytes)
