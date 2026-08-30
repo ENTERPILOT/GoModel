@@ -12,6 +12,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/admin"
 	"github.com/enterpilot/gomodel/internal/admin/dashboard"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -1221,4 +1223,49 @@ func TestProviderPassthroughRoute_DisabledRequiresAuthBefore404(t *testing.T) {
 	if mock.lastPassthroughProvider != "" || mock.lastPassthroughReq != nil {
 		t.Fatal("passthrough handler should not be invoked when provider passthrough is disabled")
 	}
+}
+
+// A deployment with a custom user-path header must scope GET /v1/models by
+// that header through the full middleware chain, not only by the default one.
+func TestServerListModelsScopesByConfiguredUserPathHeader(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"},
+				{ID: "anthropic/claude-sonnet-4-6", Object: "model", OwnedBy: "anthropic"},
+			},
+		},
+	}
+	authorizer := &userPathModelAuthorizer{allowedUnder: map[string]string{"/acme/eng": "anthropic"}}
+	srv := New(mock, &Config{
+		UserPathHeader:  "X-Tenant-Path",
+		ModelAuthorizer: authorizer,
+	})
+
+	list := func(header, value string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		if header != "" {
+			req.Header.Set(header, value)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+
+	code, body := list("X-Tenant-Path", "/acme/eng/alice")
+	require.Equal(t, http.StatusOK, code)
+	require.NotContains(t, body, `"id":"openai/gpt-4o"`)
+	require.Contains(t, body, `"id":"anthropic/claude-sonnet-4-6"`)
+	require.Equal(t, "/acme/eng/alice", authorizer.lastUserPath)
+
+	// The default header is not the configured one, so it carries no identity.
+	code, body = list(core.UserPathHeader, "/acme/eng/alice")
+	require.Equal(t, http.StatusOK, code)
+	require.Contains(t, body, `"id":"openai/gpt-4o"`)
+	require.Equal(t, "", authorizer.lastUserPath)
+
+	code, body = list("X-Tenant-Path", "/acme/../eng")
+	require.Equal(t, http.StatusBadRequest, code)
+	require.Contains(t, body, "invalid X-Tenant-Path header")
 }
