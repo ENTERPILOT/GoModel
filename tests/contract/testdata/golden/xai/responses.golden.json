@@ -19,6 +19,7 @@
     {
       "content": [
         {
+          "annotations": [],
           "text": "Hello, World!",
           "type": "output_text"
         }
