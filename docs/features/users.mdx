@@ -60,7 +60,7 @@ flowchart TD
     eng --> alice
     alice -.-> key
 
-    result_sales(["/acme/sales → openai/* ∩ anthropic/*"])
+    result_sales(["/acme/sales → openai/* or anthropic/*"])
     result_alice(["/acme/eng/alice → anthropic/*"])
     result_key(["request with the key → claude-sonnet-4-6 only"])
 

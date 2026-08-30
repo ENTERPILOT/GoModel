@@ -649,6 +649,7 @@
   "api_keys_filter_placeholder": "Filter by name, description, user path, label, or token...",
   "api_keys_filter_label": "Filter API keys by name, description, user path, label, or token",
   "api_keys_show_inactive": "Show inactive",
+  "api_keys_path_filter_clear": "Clear the user path filter",
   "api_keys_no_match": "No API keys match the current filter.",
   "api_keys_hidden": "{count} inactive keys are hidden.",
   "api_keys_empty": "No API keys yet. Issue a key to get started.",

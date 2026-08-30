@@ -166,15 +166,33 @@ function authKeySearchText(key) {
     .toLowerCase();
 }
 
+// authKeyUnderPath reports whether a key is bound to `userPath` or to a path
+// beneath it — a segment-boundary match, so "/acme" never matches "/acme-old".
+export function authKeyUnderPath(key, userPath) {
+  const base = normalizeAuthKeyUserPath(userPath);
+  if (!base) {
+    return true;
+  }
+  const path = normalizeAuthKeyUserPath(key && key.user_path);
+  if (!path) {
+    return false;
+  }
+  return path === base || path.startsWith(base === "/" ? "/" : base + "/");
+}
+
 // filterAuthKeys applies the API Keys toolbar: inactive keys (deactivated or
-// expired) are hidden unless `showInactive`, and `query` matches the name,
-// description, user path, labels, or redacted token.
+// expired) are hidden unless `showInactive`, `query` matches the name,
+// description, user path, labels, or redacted token, and `userPath` keeps
+// only keys bound at or beneath that path.
 export function filterAuthKeys(keys, options = {}) {
-  const { query = "", showInactive = false, now = Date.now() } = options;
+  const { query = "", showInactive = false, userPath = "", now = Date.now() } = options;
   const needle = String(query || "").trim().toLowerCase();
   const list = Array.isArray(keys) ? keys : [];
   return list.filter((key) => {
     if (!showInactive && !authKeyActive(key, now)) {
+      return false;
+    }
+    if (!authKeyUnderPath(key, userPath)) {
       return false;
     }
     return !needle || authKeySearchText(key).includes(needle);

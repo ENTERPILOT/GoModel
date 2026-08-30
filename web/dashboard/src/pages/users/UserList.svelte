@@ -25,7 +25,7 @@
     <tbody>
       {#each store.visibleNodes as node (node.user_path)}
         {@const kind = userNodeKind(node, store.nodes)}
-        {@const copied = store.copiedPath === node.user_path && store.copyState.copied}
+        {@const copied = store.copiedPath === node.user_path}
         <tr class:user-row-implied={!node.configured}>
           <td>
             <span

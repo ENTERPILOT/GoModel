@@ -37,10 +37,17 @@ class AuthKeysStore {
   // Toolbar: inactive keys (deactivated or expired) are hidden by default.
   filter = $state("");
   showInactive = $state(false);
+  // userPathFilter narrows the table to one user path and its subtree; it is
+  // set when arriving from the Users page and cleared from the toolbar chip.
+  userPathFilter = $state("");
 
   visibleKeys = $derived(
     sortAuthKeys(
-      filterAuthKeys(this.keys, { query: this.filter, showInactive: this.showInactive }),
+      filterAuthKeys(this.keys, {
+        query: this.filter,
+        showInactive: this.showInactive,
+        userPath: this.userPathFilter,
+      }),
     ),
   );
   inactiveCount = $derived(countInactiveAuthKeys(this.keys));
@@ -92,9 +99,14 @@ class AuthKeysStore {
   // filtered to one user path (its subtree, since the filter is a substring
   // match) or with the create form open and that path prefilled.
   showForUserPath(userPath) {
-    this.filter = String(userPath || "").trim();
+    this.userPathFilter = String(userPath || "").trim();
+    this.filter = "";
     this.showInactive = false;
     router.navigate("auth-keys");
+  }
+
+  clearUserPathFilter() {
+    this.userPathFilter = "";
   }
 
   openFormForUserPath(userPath) {

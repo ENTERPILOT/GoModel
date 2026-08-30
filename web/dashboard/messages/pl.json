@@ -657,6 +657,7 @@
   "api_keys_filter_placeholder": "Filtruj według nazwy, opisu, User Path, etykiety lub tokenu...",
   "api_keys_filter_label": "Filtruj klucze API według nazwy, opisu, User Path, etykiety lub tokenu",
   "api_keys_show_inactive": "Pokaż nieaktywne",
+  "api_keys_path_filter_clear": "Wyczyść filtr User Path",
   "api_keys_no_match": "Żaden klucz API nie pasuje do bieżącego filtra.",
   "api_keys_hidden": "Ukryte nieaktywne klucze: {count}.",
   "api_keys_empty": "Nie ma jeszcze kluczy API. Utwórz klucz, aby rozpocząć.",

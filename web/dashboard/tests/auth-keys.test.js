@@ -5,6 +5,7 @@ import {
   authKeyActive,
   authKeyDeactivated,
   authKeyExpired,
+  authKeyUnderPath,
   authKeyUserPathValidationError,
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,
@@ -283,4 +284,19 @@ test("filterAuthKeys matches allowed model selectors", () => {
     authKey({ id: "k2", name: "b" }),
   ];
   assert.deepEqual(filterAuthKeys(keys, { query: "anthropic" }).map((k) => k.id), ["k1"]);
+});
+
+test("filterAuthKeys userPath keeps the path and its subtree on segment boundaries", () => {
+  const keys = [
+    authKey({ id: "root", user_path: "/acme" }),
+    authKey({ id: "child", user_path: "/acme/eng/alice" }),
+    authKey({ id: "sibling", user_path: "/acme-old" }),
+    authKey({ id: "elsewhere", user_path: "/other/acme", description: "acme" }),
+    authKey({ id: "unbound", user_path: "" }),
+  ];
+  assert.deepEqual(filterAuthKeys(keys, { userPath: "/acme" }).map((k) => k.id), ["root", "child"]);
+  assert.deepEqual(filterAuthKeys(keys, { userPath: "acme/eng" }).map((k) => k.id), ["child"]);
+  assert.equal(filterAuthKeys(keys, { userPath: "" }).length, 5);
+  assert.equal(authKeyUnderPath(authKey({ user_path: "/x" }), "/"), true);
+  assert.equal(authKeyUnderPath(authKey({ user_path: "" }), "/acme"), false);
 });
