@@ -179,9 +179,12 @@ it gets the same balancing and failover a direct request gets — with one
 exception: the fallback reference of one such cover to another covered model
 reaches the model itself, not the other cover's fallback list. That is what
 lets two models protect each other without forming a cycle, and keeps a
-fallback from sweeping the fallbacks of the fallback. A shadow that does *not*
-list its source replaces the model and is chained through like any other
-virtual model.
+fallback from sweeping the fallbacks of the fallback. Because a bare
+reference to a covered model names the model rather than the cover, the cover
+can be deleted while such references exist — they simply revert to the
+concrete model. A shadow that does *not* list its source replaces the model
+and is chained through like any other virtual model: references chain into
+its targets, and it cannot be deleted or renamed until they are repointed.
 
 Chains must be acyclic (`a -> b -> a` is rejected, with the cycle spelled out)
 and at most 8 virtual models deep. Both rules are enforced when saving from the
