@@ -6,6 +6,32 @@ tag: "Pro"
 keywords: ["GoModel Pro", "prompt compression", "token savings", "deduplication", "prompt cache"]
 ---
 
+<Frame caption="Dashboard Usage page: Pro savings over seven days of production traffic.">
+  <img src="/pro/pro-saved.webp" alt="Usage Analytics showing $268.63 estimated cost and $45.17 Pro saved, 14.4% less" />
+</Frame>
+
+## Proven in production
+
+Prompt compression has been exercised on billions of production tokens across
+agentic coding, chat, and tool-heavy workloads.
+
+- **Lossless.** Compression only replaces content the model has already seen
+  in the same request with a reference to it, or re-encodes structured data
+  reversibly. The model receives the same information; nothing is summarized
+  or dropped. The single lossy option, tool-result pruning, is a separate
+  policy that is off by default.
+- **No prompt-cache degradation observed.** Because the previously sent
+  prefix of a session is replayed byte-for-byte and only new messages are
+  rewritten, provider prompt caches keep hitting across turns.
+- **Real savings of 2%–20%**, depending on the use case. Agents that re-read
+  files, replay tool output, or carry long histories sit at the top of that
+  range; short, non-repetitive chat sits at the bottom, where the compressor
+  simply forwards requests unchanged.
+- **Full control.** Choose the level per gateway or per request, exclude
+  models by glob, protect pre-existing history with `new_messages_only`, keep
+  source code verbatim, and inspect every rewrite through response headers,
+  audit revisions, and metrics.
+
 ## Overview
 
 Prompt compression rewrites supported inference requests before they reach the
@@ -36,28 +62,6 @@ upstream and replays that prefix byte-for-byte on later turns. This protects a
 provider prompt-cache prefix while allowing new messages to reference repeated
 history. Use `new_messages_only` when the gateway may join a conversation whose
 prefix it did not observe.
-
-## Proven in production
-
-Prompt compression has been exercised on billions of production tokens across
-agentic coding, chat, and tool-heavy workloads.
-
-- **Lossless.** Compression only replaces content the model has already seen
-  in the same request with a reference to it, or re-encodes structured data
-  reversibly. The model receives the same information; nothing is summarized
-  or dropped. The single lossy option, tool-result pruning, is a separate
-  policy that is off by default.
-- **No prompt-cache degradation observed.** Because the previously sent
-  prefix of a session is replayed byte-for-byte and only new messages are
-  rewritten, provider prompt caches keep hitting across turns.
-- **Real savings of 2%–20%**, depending on the use case. Agents that re-read
-  files, replay tool output, or carry long histories sit at the top of that
-  range; short, non-repetitive chat sits at the bottom, where the compressor
-  simply forwards requests unchanged.
-- **Full control.** Choose the level per gateway or per request, exclude
-  models by glob, protect pre-existing history with `new_messages_only`, keep
-  source code verbatim, and inspect every rewrite through response headers,
-  audit revisions, and metrics.
 
 ## Configure compression
 
