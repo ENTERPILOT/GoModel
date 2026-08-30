@@ -29,8 +29,9 @@ builds it into `internal/admin/dashboard/static/dist/`, which the Go binary
 embeds. The build output is not committed — CI builds it in a secretless job
 and feeds the result to the tests and release builds (see
 [ADR-0010](docs/adr/0010-dashboard-built-in-ci.md)). On a fresh clone, run
-`make frontend` once (requires Node 22+) before starting the gateway with the
-UI enabled; `make build` does this for you.
+`make frontend` once (requires Node 22+) before `make test` or starting the
+gateway with the UI enabled; `make build` does this for you, and the test
+targets stop with a hint if the build is missing.
 
 Dashboard translations are welcome; see the
 [translation guide](web/dashboard/src/lib/i18n/README.md).

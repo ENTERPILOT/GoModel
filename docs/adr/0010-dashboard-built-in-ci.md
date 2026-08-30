@@ -43,8 +43,8 @@ dedicated `frontend` job in GitHub Actions:
   downloaded `dist`, and the image never runs Node.
 - A committed placeholder in `static/` keeps the `//go:embed` compiling on a
   clean checkout (Vite empties `dist/` on every build, so it lives one level
-  up). A binary built without the dashboard fails at
-  startup when the UI is enabled, with a message pointing at `make frontend`.
+  up). A binary built without the dashboard starts, keeps the gateway and the
+  admin API, and logs an error that the UI is disabled and how to build it.
   It does not serve a half-working dashboard.
 - Locally, `make frontend` builds the dashboard once; `make build` and
   `make image` depend on it.
@@ -61,11 +61,13 @@ attention as changes to `go.sum`.
   longer conflict with each other over build output, and the review diff is
   the actual change.
 - `go install github.com/enterpilot/gomodel/cmd/gomodel@latest` produces a
-  binary without the dashboard. This path was never documented; supported
-  installs (`install.sh`, Docker, GitHub releases) all go through CI.
-- A fresh clone needs Node once (`make frontend`) before `go run` with the UI
-  enabled. Backend-only work with `ADMIN_UI_ENABLED=false` still needs no
-  Node.
+  binary without the dashboard: the gateway and admin API work, the UI is
+  disabled with an error in the log. This path was never documented;
+  supported installs (`install.sh`, Docker, GitHub releases) all go through
+  CI.
+- A fresh clone needs Node once (`make frontend`) before `make test` or
+  running with the UI; the test targets check for the build and say so.
+  Backend-only work with `ADMIN_UI_ENABLED=false` still needs no Node.
 - CI gains one job that the Go jobs wait on, roughly a minute of added
   latency. Node dependencies install once per workflow run instead of once per
   dashboard job.

@@ -46,7 +46,7 @@ func NewWithBasePath(basePath string) (*Handler, error) {
 func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 	basePath = config.NormalizeBasePath(basePath)
 
-	indexHTML, err := buildIndexHTML(basePath, demoMode)
+	indexHTML, err := buildIndexHTML(content, basePath, demoMode)
 	if err != nil {
 		return nil, err
 	}
@@ -66,11 +66,12 @@ func NewWithDemoMode(basePath string, demoMode bool) (*Handler, error) {
 	}, nil
 }
 
-// buildIndexHTML loads the built SPA entry point, injects the runtime
-// globals the app reads on boot, and rewrites asset URLs when the app is
-// mounted under a base path.
-func buildIndexHTML(basePath string, demoMode bool) ([]byte, error) {
-	raw, err := content.ReadFile("static/dist/index.html")
+// buildIndexHTML loads the built SPA entry point from assets, injects the
+// runtime globals the app reads on boot, and rewrites asset URLs when the app
+// is mounted under a base path. It fails when the dashboard has not been
+// built: static/dist is generated, not committed.
+func buildIndexHTML(assets fs.FS, basePath string, demoMode bool) ([]byte, error) {
+	raw, err := fs.ReadFile(assets, "static/dist/index.html")
 	if err != nil {
 		return nil, fmt.Errorf(
 			"dashboard assets missing (run `make frontend` to build web/dashboard): %w",

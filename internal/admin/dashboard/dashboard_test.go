@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/labstack/echo/v5"
 )
@@ -18,6 +19,50 @@ func TestNew(t *testing.T) {
 	}
 	if h == nil {
 		t.Fatalf("NewWithBasePath() returned nil handler")
+	}
+}
+
+// A clean checkout compiles (static/ holds a committed placeholder) but has
+// no built dashboard. The constructor must say so rather than serve a broken
+// page.
+func TestBuildIndexHTML_MissingBuild(t *testing.T) {
+	tests := []struct {
+		name   string
+		assets fstest.MapFS
+	}{
+		{name: "placeholder only", assets: fstest.MapFS{"static/.gitkeep": {}}},
+		{name: "assets without index", assets: fstest.MapFS{"static/dist/assets/index-abc.js": {Data: []byte("//")}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := buildIndexHTML(tt.assets, "/", false)
+			if err == nil {
+				t.Fatalf("expected error for missing dashboard build")
+			}
+			if !strings.Contains(err.Error(), "make frontend") {
+				t.Errorf("error should tell the user how to build the dashboard, got %q", err)
+			}
+		})
+	}
+}
+
+func TestBuildIndexHTML_InjectsGlobalsAndBasePath(t *testing.T) {
+	assets := fstest.MapFS{
+		"static/dist/index.html": {Data: []byte(`<html><head><script src="/admin/static/assets/index-abc.js"></script></head><body></body></html>`)},
+	}
+	got, err := buildIndexHTML(assets, "/gateway", true)
+	if err != nil {
+		t.Fatalf("buildIndexHTML() returned error: %v", err)
+	}
+	html := string(got)
+	for _, want := range []string{
+		`src="/gateway/admin/static/assets/index-abc.js"`,
+		`window.GOMODEL_BASE_PATH="/gateway"`,
+		`window.GOMODEL_DEMO_MODE=true`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("expected %q in rendered index.html:\n%s", want, html)
+		}
 	}
 }
 
