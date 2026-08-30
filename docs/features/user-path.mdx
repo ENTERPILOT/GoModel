@@ -70,6 +70,11 @@ Use `Models -> New virtual model` in the dashboard to manage these rules: leave
 **Target model** empty to create an access policy on the **Source** selector.
 See [Virtual Models](/features/virtual-models) for redirects (aliases).
 
+The **Users** page answers the same question from the other side: which models
+may a group, user, or API key call. Each user path node and each key carries an
+optional `allowed_models` list; lists intersect down the tree, so a child can
+only narrow what its group allows. See [Users](/features/users).
+
 ## Exposed models
 
 `GET /v1/models` uses the effective `user_path` too.

@@ -41,10 +41,29 @@ type Service struct {
 	routeSelector     ext.RouteSelector
 	routeSelectorName string
 
+	// accessPolicy optionally narrows model access per request from the
+	// subject side (auth key and user-path allowlists). It is consulted after
+	// the model-side policy rows. Set once during startup, before serving.
+	accessPolicy AccessPolicy
+
 	balancer  roundRobin
 	sticky    stickySessions
 	current   atomic.Value // snapshot
 	refreshMu sync.Mutex
+}
+
+// AccessPolicy narrows model access per request from the subject side.
+type AccessPolicy interface {
+	AllowsModel(ctx context.Context, selector core.ModelSelector) bool
+}
+
+// SetAccessPolicy installs the subject-side access policy consulted by
+// AllowsModel and ValidateModelAccess. Must be called before serving.
+func (s *Service) SetAccessPolicy(policy AccessPolicy) {
+	if s == nil {
+		return
+	}
+	s.accessPolicy = policy
 }
 
 // SetTargetCapacity installs the rate-limit capacity probe consulted by load

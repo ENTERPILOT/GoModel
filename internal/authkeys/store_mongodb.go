@@ -16,6 +16,7 @@ type mongoAuthKeyDocument struct {
 	Description     string     `bson:"description,omitempty"`
 	UserPath        string     `bson:"user_path,omitempty"`
 	Labels          []string   `bson:"labels,omitempty"`
+	AllowedModels   []string   `bson:"allowed_models,omitempty"`
 	DashboardAccess bool       `bson:"dashboard_access,omitempty"`
 	RedactedValue   string     `bson:"redacted_value"`
 	SecretHash      string     `bson:"secret_hash"`
@@ -83,6 +84,7 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 		Description:     key.Description,
 		UserPath:        key.UserPath,
 		Labels:          key.Labels,
+		AllowedModels:   key.AllowedModels,
 		DashboardAccess: key.DashboardAccess,
 		RedactedValue:   key.RedactedValue,
 		SecretHash:      key.SecretHash,
@@ -99,19 +101,34 @@ func (s *MongoDBStore) Create(ctx context.Context, key AuthKey) error {
 }
 
 func (s *MongoDBStore) UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error {
+	if err := s.updateStringList(ctx, id, "labels", labels, now); err != nil {
+		return fmt.Errorf("update auth key labels: %w", err)
+	}
+	return nil
+}
+
+func (s *MongoDBStore) UpdateAllowedModels(ctx context.Context, id string, allowedModels []string, now time.Time) error {
+	if err := s.updateStringList(ctx, id, "allowed_models", allowedModels, now); err != nil {
+		return fmt.Errorf("update auth key allowed models: %w", err)
+	}
+	return nil
+}
+
+// updateStringList replaces one list field. Clearing removes the field
+// entirely, matching the insert path's omitempty behavior, instead of storing
+// null.
+func (s *MongoDBStore) updateStringList(ctx context.Context, id, field string, values []string, now time.Time) error {
 	set := bson.D{{Key: "updated_at", Value: now.UTC()}}
-	if len(labels) > 0 {
-		set = append(set, bson.E{Key: "labels", Value: labels})
+	if len(values) > 0 {
+		set = append(set, bson.E{Key: field, Value: values})
 	}
 	update := bson.D{{Key: "$set", Value: set}}
-	if len(labels) == 0 {
-		// Clearing removes the field entirely, matching the insert path's
-		// omitempty behavior, instead of storing null.
-		update = append(update, bson.E{Key: "$unset", Value: bson.D{{Key: "labels", Value: ""}}})
+	if len(values) == 0 {
+		update = append(update, bson.E{Key: "$unset", Value: bson.D{{Key: field, Value: ""}}})
 	}
 	result, err := s.collection.UpdateOne(ctx, mongoAuthKeyIDFilter{ID: normalizeID(id)}, update)
 	if err != nil {
-		return fmt.Errorf("update auth key labels: %w", err)
+		return err
 	}
 	if result.MatchedCount == 0 {
 		return ErrNotFound
@@ -166,6 +183,7 @@ func authKeyFromMongo(doc mongoAuthKeyDocument) AuthKey {
 		Description:     doc.Description,
 		UserPath:        doc.UserPath,
 		Labels:          doc.Labels,
+		AllowedModels:   doc.AllowedModels,
 		DashboardAccess: doc.DashboardAccess,
 		RedactedValue:   doc.RedactedValue,
 		SecretHash:      doc.SecretHash,

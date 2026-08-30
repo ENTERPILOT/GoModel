@@ -23,6 +23,7 @@ import {
   ServerCog,
   Settings,
   ShieldCheck,
+  Users,
   Wallet,
   Workflow,
 } from "lucide";
@@ -47,6 +48,7 @@ export const NAV_ITEMS = [
     visible: () => runtimeConfig.rateLimitsVisible(),
   },
   { page: "auth-keys", label: m.navigation_api_keys, icon: KeyRound },
+  { page: "users", label: m.navigation_users, icon: Users },
   { page: "workflows", label: m.navigation_workflows, icon: Workflow },
   {
     page: "guardrails",

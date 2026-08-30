@@ -13,6 +13,7 @@ import {
   labelChipStyle,
   labelColor,
   normalizeAuthKeyUserPath,
+  parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
   sortAuthKeys,
 } from "../src/pages/auth-keys/authKeysLogic.js";
@@ -259,4 +260,25 @@ test("labelColor is deterministic and feeds the chip style custom property", () 
   assert.equal(labelColor("team-a"), labelColor("team-a"));
   assert.match(labelColor("team-a"), /^#[0-9a-f]{6}$/);
   assert.equal(labelChipStyle("x"), "--label-color: " + labelColor("x"));
+});
+
+test("buildCreateAuthKeyPayload sends allowed_models only when the field lists selectors", () => {
+  const empty = buildCreateAuthKeyPayload({ ...defaultAuthKeyForm(), name: "ci" });
+  assert.equal(empty.payload.allowed_models, undefined);
+
+  const restricted = buildCreateAuthKeyPayload({
+    ...defaultAuthKeyForm(),
+    name: "ci",
+    allowed_models: "anthropic/*, openai/gpt-4o\nanthropic/*",
+  });
+  assert.deepEqual(restricted.payload.allowed_models, ["anthropic/*", "openai/gpt-4o"]);
+  assert.deepEqual(parseAuthKeyAllowedModels(""), []);
+});
+
+test("filterAuthKeys matches allowed model selectors", () => {
+  const keys = [
+    authKey({ id: "k1", name: "a", allowed_models: ["anthropic/"] }),
+    authKey({ id: "k2", name: "b" }),
+  ];
+  assert.deepEqual(filterAuthKeys(keys, { query: "anthropic" }).map((k) => k.id), ["k1"]);
 });

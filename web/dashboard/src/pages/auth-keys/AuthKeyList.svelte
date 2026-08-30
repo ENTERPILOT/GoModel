@@ -4,9 +4,10 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
+  import { displayModelSelector } from "$lib/utils/modelSelectors.js";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
-  import { Info, Pencil, Power, ShieldCheck, ShieldOff } from "lucide";
+  import { Boxes, Info, Pencil, Power, ShieldCheck, ShieldOff } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -18,6 +19,7 @@
         <th>{m.api_keys_column_description()}</th>
         <th>{m.api_keys_column_user_path()}</th>
         <th>{m.api_keys_column_labels()}</th>
+        <th>{m.api_keys_column_allowed_models()}</th>
         <th>{m.api_keys_column_token()}</th>
         <th>
           <span
@@ -51,6 +53,17 @@
               </div>
             {:else}
               <span>&mdash;</span>
+            {/if}
+          </td>
+          <td>
+            {#if (key.allowed_models || []).length > 0}
+              <div class="auth-key-selector-list">
+                {#each key.allowed_models || [] as selector (selector)}
+                  <code class="auth-key-selector">{displayModelSelector(selector)}</code>
+                {/each}
+              </div>
+            {:else}
+              <span class="auth-key-unrestricted">{m.api_keys_allowed_models_all()}</span>
             {/if}
           </td>
           <td><code class="auth-key-redacted">{key.redacted_value}</code></td>
@@ -95,6 +108,13 @@
                   <Icon icon={Pencil} class="table-icon-svg" />
                 </TableActionButton>
                 <TableActionButton
+                  label={m.api_keys_edit_allowed_models_action({ name: key.name })}
+                  class="table-icon-btn"
+                  onclick={() => store.openAllowedModelsEditor(key)}
+                >
+                  <Icon icon={Boxes} class="table-icon-svg" />
+                </TableActionButton>
+                <TableActionButton
                   label={store.deactivatingID === key.id
                     ? m.api_keys_deactivating_action({ name: key.name })
                     : m.api_keys_deactivate_action({ name: key.name })}
@@ -128,6 +148,25 @@
   }
 
   .auth-key-redacted {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .auth-key-selector-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .auth-key-selector {
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+    white-space: nowrap;
+  }
+
+  .auth-key-unrestricted {
     color: var(--text-muted);
     font-size: 13px;
   }

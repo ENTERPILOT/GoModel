@@ -174,3 +174,44 @@ func TestSQLStoreAuthKeyDashboardAccessRoundTrip(t *testing.T) {
 		assertAccess(map[string]bool{"key-admin": false, "key-plain": true})
 	})
 }
+
+func TestSQLStoreAuthKeyAllowedModelsRoundTrip(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, db sqlx.DB) {
+		now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+		ctx := context.Background()
+		key := AuthKey{
+			ID:            "key-restricted",
+			Name:          "restricted",
+			AllowedModels: []string{"anthropic/", "openai/gpt-4o"},
+			RedactedValue: TokenPrefix + "...abcd",
+			SecretHash:    "hash-restricted",
+			Enabled:       true,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		if err := store.Create(ctx, key); err != nil {
+			t.Fatalf("Create() error = %v", err)
+		}
+		keys, err := store.List(ctx)
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		if len(keys) != 1 || !reflect.DeepEqual(keys[0].AllowedModels, key.AllowedModels) {
+			t.Fatalf("List() = %#v, want allowed models %v", keys, key.AllowedModels)
+		}
+
+		if err := store.UpdateAllowedModels(ctx, key.ID, nil, now.Add(time.Hour)); err != nil {
+			t.Fatalf("UpdateAllowedModels(clear) error = %v", err)
+		}
+		keys, err = store.List(ctx)
+		if err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+		if keys[0].AllowedModels != nil || !keys[0].UpdatedAt.Equal(now.Add(time.Hour)) {
+			t.Fatalf("cleared key = %#v, want nil allowed models and bumped updated_at", keys[0])
+		}
+		if err := store.UpdateAllowedModels(ctx, "missing", []string{"openai/"}, now); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("UpdateAllowedModels(missing) error = %v, want ErrNotFound", err)
+		}
+	})
+}

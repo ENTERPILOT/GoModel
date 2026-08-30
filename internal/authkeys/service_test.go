@@ -53,6 +53,17 @@ func (s *testStore) UpdateLabels(_ context.Context, id string, labels []string, 
 	return nil
 }
 
+func (s *testStore) UpdateAllowedModels(_ context.Context, id string, allowedModels []string, now time.Time) error {
+	key, ok := s.keys[id]
+	if !ok {
+		return ErrNotFound
+	}
+	key.AllowedModels = allowedModels
+	key.UpdatedAt = now.UTC()
+	s.keys[id] = key
+	return nil
+}
+
 func (s *testStore) UpdateDashboardAccess(_ context.Context, id string, allowed bool, now time.Time) error {
 	key, ok := s.keys[id]
 	if !ok {

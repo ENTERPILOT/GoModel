@@ -45,6 +45,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/versioncheck"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/internal/workflows"
@@ -69,6 +70,7 @@ type App struct {
 	providerCredentials *providers.CredentialsResult
 	pricingOverrides    *pricingoverrides.Result
 	authKeys            *authkeys.Result
+	users               *users.Result
 	guardrails          *guardrails.Result
 	workflows           *workflows.Result
 	live                *live.Broker
@@ -572,6 +574,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		vm.SetRouteSelector(routeSelector)
 	}
 
+	// Subject-side model access: auth key and user-path allowlists narrow what
+	// the model-side policy rows expose, so one authorizer answers both.
+	var usersResult *users.Result
+	usersResult, err = users.New(ctx, appCfg, sharedStorage, providerResult.Registry, declaredProviders)
+	if err != nil {
+		return fail("failed to initialize users", err)
+	}
+	app.users = usersResult
+	app.register(subsystemUsers, ownedByShutdown, app.users.Close)
+	vm.SetAccessPolicy(usersResult.Service)
+
 	var taggingResult *tagging.Result
 	taggingResult, err = tagging.New(ctx, appCfg, sharedStorage)
 	if err != nil {
@@ -804,6 +817,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			providerResult.Registry,
 			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
+			usersResult.Service,
 			vm,
 			app.pricingOverrides.Service,
 			workflowResult.Service,
@@ -1239,6 +1253,7 @@ func initAdmin(
 	registry *providers.ModelRegistry,
 	configuredProviders []providers.SanitizedProviderConfig,
 	authKeyService *authkeys.Service,
+	userService *users.Service,
 	virtualModelService *virtualmodels.Service,
 	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
@@ -1301,6 +1316,7 @@ func initAdmin(
 		admin.WithPricingResolver(pricingOverrideService),
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
+		admin.WithUsers(userService),
 		admin.WithVirtualModels(virtualModelService),
 		admin.WithPricingOverrides(pricingOverrideService),
 		admin.WithWorkflows(workflowService),

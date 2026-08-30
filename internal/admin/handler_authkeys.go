@@ -20,6 +20,7 @@ type createAuthKeyRequest struct {
 	Description     string     `json:"description,omitempty"`
 	UserPath        string     `json:"user_path,omitempty"`
 	Labels          []string   `json:"labels,omitempty"`
+	AllowedModels   []string   `json:"allowed_models,omitempty"`
 	DashboardAccess bool       `json:"dashboard_access,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
@@ -51,11 +52,17 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
+	allowedModels, err := h.normalizeAllowedModels(req.AllowedModels)
+	if err != nil {
+		return handleError(c, err)
+	}
+
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
 		Name:            req.Name,
 		Description:     req.Description,
 		UserPath:        userPath,
 		Labels:          req.Labels,
+		AllowedModels:   allowedModels,
 		DashboardAccess: req.DashboardAccess,
 		ExpiresAt:       req.ExpiresAt,
 	})
@@ -85,6 +92,37 @@ func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
 	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
 		return h.authKeys.UpdateLabels(ctx, id, req.Labels)
 	})
+}
+
+type updateAuthKeyAllowedModelsRequest struct {
+	AllowedModels []string `json:"allowed_models"`
+}
+
+// UpdateAuthKeyAllowedModels handles PUT /admin/auth-keys/:id/allowed-models.
+// The request selectors replace the key's model allowlist; an empty list
+// lifts the key-level restriction (user-path policies still apply).
+func (h *Handler) UpdateAuthKeyAllowedModels(c *echo.Context) error {
+	var req updateAuthKeyAllowedModelsRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		allowedModels, err := h.normalizeAllowedModels(req.AllowedModels)
+		if err != nil {
+			return nil, err
+		}
+		return h.authKeys.UpdateAllowedModels(ctx, id, allowedModels)
+	})
+}
+
+// normalizeAllowedModels canonicalizes model selectors against the provider
+// catalog when the users service is available, and syntactically otherwise.
+func (h *Handler) normalizeAllowedModels(raw []string) ([]string, error) {
+	if h.users == nil {
+		return authkeys.NormalizeAllowedModels(raw), nil
+	}
+	allowed, err := h.users.NormalizeAllowedModels(raw)
+	if err != nil {
+		return nil, core.NewInvalidRequestError(err.Error(), err)
+	}
+	return allowed, nil
 }
 
 type updateAuthKeyDashboardAccessRequest struct {

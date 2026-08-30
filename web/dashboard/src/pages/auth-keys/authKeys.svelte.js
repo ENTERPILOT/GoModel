@@ -6,16 +6,22 @@ import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
+import { formatModelSelectors } from "$lib/utils/modelSelectors.js";
 import {
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,
   defaultAuthKeyForm,
   filterAuthKeys,
+  parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
   sortAuthKeys,
 } from "./authKeysLogic.js";
 
 function emptyLabelsEditor() {
+  return { open: false, id: "", name: "", value: "", submitting: false, error: "" };
+}
+
+function emptyAllowedModelsEditor() {
   return { open: false, id: "", name: "", value: "", submitting: false, error: "" };
 }
 
@@ -45,6 +51,7 @@ class AuthKeysStore {
   dashboardAccessID = $state("");
   form = $state(defaultAuthKeyForm());
   labelsEditor = $state(emptyLabelsEditor());
+  allowedModelsEditor = $state(emptyAllowedModelsEditor());
 
   copyState = createCopyState({ logPrefix: "Failed to copy auth key:" });
 
@@ -216,6 +223,71 @@ class AuthKeysStore {
       flash.success(m.api_keys_labels_updated({ name: editor.name }));
       editor.submitting = false;
       this.closeLabelsEditor();
+      void this.fetchKeys();
+    } finally {
+      editor.submitting = false;
+    }
+  }
+
+  openAllowedModelsEditor(key) {
+    if (!key || this.allowedModelsEditor.submitting) {
+      return;
+    }
+    this.allowedModelsEditor = {
+      open: true,
+      id: key.id,
+      name: key.name || "",
+      value: formatModelSelectors(key.allowed_models),
+      submitting: false,
+      error: "",
+    };
+  }
+
+  closeAllowedModelsEditor() {
+    if (!this.allowedModelsEditor.open || this.allowedModelsEditor.submitting) {
+      return;
+    }
+    this.allowedModelsEditor = emptyAllowedModelsEditor();
+  }
+
+  async submitAllowedModelsEditor() {
+    const editor = this.allowedModelsEditor;
+    if (!editor.open || editor.submitting || !editor.id) {
+      return;
+    }
+    editor.submitting = true;
+    editor.error = "";
+    const payload = { allowed_models: parseAuthKeyAllowedModels(editor.value) };
+
+    try {
+      const outcome = await sendAdminMutation(
+        "/admin/auth-keys/" + encodeURIComponent(editor.id) + "/allowed-models",
+        "PUT",
+        payload,
+        {
+          label: "update API key allowed models",
+          errorFallback: m.api_keys_allowed_models_update_failed(),
+          unavailableMessage: m.api_keys_feature_unavailable(),
+        },
+      );
+      if (outcome.status === "stale") {
+        return;
+      }
+      if (outcome.status === "unavailable") {
+        this.available = false;
+        editor.error = outcome.error;
+        return;
+      }
+      if (outcome.status === "error") {
+        editor.error = outcome.error;
+        if (outcome.result && outcome.result.status !== 401) {
+          console.error("Failed to update auth key allowed models:", outcome.result.status, editor.error);
+        }
+        return;
+      }
+      flash.success(m.api_keys_allowed_models_updated({ name: editor.name }));
+      editor.submitting = false;
+      this.closeAllowedModelsEditor();
       void this.fetchKeys();
     } finally {
       editor.submitting = false;

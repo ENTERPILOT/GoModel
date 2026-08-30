@@ -15,6 +15,10 @@ type AuthKey struct {
 	Description string   `json:"description,omitempty" bson:"description,omitempty"`
 	UserPath    string   `json:"user_path,omitempty" bson:"user_path,omitempty"`
 	Labels      []string `json:"labels,omitempty" bson:"labels,omitempty"`
+	// AllowedModels restricts the key to the listed model selectors (exact
+	// "provider/model", provider-wide "provider/", or model-wide "model").
+	// Empty means the key alone imposes no model restriction.
+	AllowedModels []string `json:"allowed_models,omitempty" bson:"allowed_models,omitempty"`
 	// DashboardAccess grants the key access to the admin API and dashboard.
 	// Keys without it can still call every model endpoint and /v1/usage.
 	DashboardAccess bool       `json:"dashboard_access" bson:"dashboard_access,omitempty"`
@@ -45,6 +49,7 @@ type CreateInput struct {
 	Description     string
 	UserPath        string
 	Labels          []string
+	AllowedModels   []string
 	DashboardAccess bool
 	ExpiresAt       *time.Time
 }

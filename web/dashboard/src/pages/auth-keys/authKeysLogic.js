@@ -1,6 +1,7 @@
 // Pure logic for the API Keys page.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { parseModelSelectors } from "../../lib/utils/modelSelectors.js";
 
 export function defaultAuthKeyForm() {
   return {
@@ -8,9 +9,16 @@ export function defaultAuthKeyForm() {
     description: "",
     user_path: "",
     labels: "",
+    allowed_models: "",
     dashboard_access: false,
     expires_at: "",
   };
+}
+
+// parseAuthKeyAllowedModels splits the allowed-models field into the list
+// sent as `allowed_models` (comma- or newline-separated).
+export function parseAuthKeyAllowedModels(value) {
+  return parseModelSelectors(value);
 }
 
 // parseAuthKeyLabels splits a comma-separated label string into a trimmed,
@@ -90,11 +98,13 @@ export function buildCreateAuthKeyPayload(form) {
   }
   const userPath = normalizeAuthKeyUserPath(source.user_path);
   const labels = parseAuthKeyLabels(source.labels);
+  const allowedModels = parseAuthKeyAllowedModels(source.allowed_models);
   const payload = {
     name,
     description: String(source.description || "").trim() || undefined,
     user_path: userPath || undefined,
     labels: labels.length ? labels : undefined,
+    allowed_models: allowedModels.length ? allowedModels : undefined,
     dashboard_access: source.dashboard_access ? true : undefined,
   };
   if (source.expires_at) {
@@ -143,6 +153,7 @@ function authKeySearchText(key) {
     key.user_path,
     key.redacted_value,
     ...(key.labels || []),
+    ...(key.allowed_models || []),
   ]
     .filter(Boolean)
     .join(" ")

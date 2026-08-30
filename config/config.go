@@ -51,6 +51,10 @@ type Config struct {
 	// VirtualModels declares redirects, load balancers, and access policies as
 	// infrastructure-as-code. They override admin-store rows of the same source.
 	VirtualModels []VirtualModelConfig `yaml:"virtual_models"`
+
+	// Users declares per-user-path model access policies as
+	// infrastructure-as-code. They shadow admin-store rows of the same path.
+	Users []UserConfig `yaml:"users"`
 }
 
 // LoadResult is returned by Load and bundles the application config with the raw
@@ -241,6 +245,9 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	if err := applyVirtualModelsEnv(cfg, strict); err != nil {
+		return nil, err
+	}
+	if err := applyUsersEnv(cfg, strict); err != nil {
 		return nil, err
 	}
 	if err := applyTaggingEnv(cfg); err != nil {

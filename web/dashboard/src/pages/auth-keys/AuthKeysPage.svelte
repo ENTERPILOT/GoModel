@@ -9,6 +9,7 @@
   import { authKeysStore as store } from "./authKeys.svelte.js";
   import AuthKeyEditor from "./AuthKeyEditor.svelte";
   import AuthKeyLabelsEditor from "./AuthKeyLabelsEditor.svelte";
+  import AuthKeyAllowedModelsEditor from "./AuthKeyAllowedModelsEditor.svelte";
   import AuthKeyList from "./AuthKeyList.svelte";
   import { Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -57,6 +58,7 @@
 
   <AuthKeyEditor />
   <AuthKeyLabelsEditor />
+  <AuthKeyAllowedModelsEditor />
 
   {#if store.loading && store.keys.length === 0}
     <LoadingState label={m.api_keys_loading()} />

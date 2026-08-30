@@ -1,0 +1,158 @@
+<script>
+  // Users table: one row per tree node, indented by depth.
+  import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
+  import Icon from "$lib/components/atoms/Icon.svelte";
+  import { displayModelSelector } from "$lib/utils/modelSelectors.js";
+  import { usersStore as store } from "./users.svelte.js";
+  import { userNodeKind, userPathDepth, userPathLeaf } from "./usersLogic.js";
+  import { Folder, Pencil, Trash2, User } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
+</script>
+
+<div class="table-wrapper">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>{m.users_column_path()}</th>
+        <th>{m.users_column_allowed_models()}</th>
+        <th>{m.users_column_inherited()}</th>
+        <th>{m.users_column_keys()}</th>
+        <th>{m.users_column_description()}</th>
+        <th aria-label={m.users_actions()}></th>
+      </tr>
+    </thead>
+    <tbody>
+      {#each store.visibleNodes as node (node.user_path)}
+        {@const kind = userNodeKind(node, store.nodes)}
+        <tr class:user-row-implied={!node.configured}>
+          <td>
+            <span
+              class="user-path-cell"
+              style={`--user-depth: ${userPathDepth(node.user_path)}`}
+              title={node.user_path}
+            >
+              <Icon
+                icon={kind === "user" ? User : Folder}
+                class="table-icon-svg user-kind-icon"
+              />
+              <span class="user-path-leaf">{userPathLeaf(node.user_path)}</span>
+              <span class="user-path-full">{node.user_path}</span>
+              {#if node.managed}
+                <span class="auth-key-status-badge auth-key-status-inactive">{m.users_managed()}</span>
+              {/if}
+            </span>
+          </td>
+          <td>
+            {#if (node.allowed_models || []).length > 0}
+              <div class="user-selector-list">
+                {#each node.allowed_models as selector (selector)}
+                  <code class="user-selector">{displayModelSelector(selector)}</code>
+                {/each}
+              </div>
+            {:else}
+              <span class="user-muted">{m.users_no_restriction()}</span>
+            {/if}
+          </td>
+          <td>
+            {#if (node.inherited_from || []).length > 0}
+              <div class="user-selector-list">
+                {#each node.inherited_from as ancestor (ancestor)}
+                  <code class="user-selector user-selector-inherited">{ancestor}</code>
+                {/each}
+              </div>
+            {:else}
+              <span class="user-muted">&mdash;</span>
+            {/if}
+          </td>
+          <td>{node.key_count || 0}</td>
+          <td class="user-description">{node.description || "—"}</td>
+          <td class="user-actions-cell">
+            <div class="user-row-actions">
+              {#if !node.managed}
+                <TableActionButton
+                  label={m.users_edit_action({ path: node.user_path })}
+                  class="table-icon-btn"
+                  onclick={() => store.openForm(node)}
+                >
+                  <Icon icon={Pencil} class="table-icon-svg" />
+                </TableActionButton>
+              {/if}
+              {#if node.configured && !node.managed}
+                <TableActionButton
+                  label={m.users_delete_action({ path: node.user_path })}
+                  class="table-action-btn-danger table-icon-btn"
+                  onclick={() => store.deleteUser(node)}
+                  disabled={store.deletingPath === node.user_path}
+                >
+                  <Icon icon={Trash2} class="table-icon-svg" />
+                </TableActionButton>
+              {/if}
+            </div>
+          </td>
+        </tr>
+      {/each}
+    </tbody>
+  </table>
+</div>
+
+<style>
+  .user-path-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-left: calc(var(--user-depth, 0) * 18px);
+    white-space: nowrap;
+  }
+
+  .user-path-cell :global(.user-kind-icon) {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .user-path-leaf {
+    font-weight: 600;
+  }
+
+  .user-path-full {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* Implied nodes exist only because a key or a descendant refers to them. */
+  .user-row-implied .user-path-leaf {
+    font-weight: 500;
+  }
+
+  .user-selector-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .user-selector {
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+    white-space: nowrap;
+  }
+
+  .user-selector-inherited {
+    background: color-mix(in srgb, var(--text-muted) 12%, var(--bg));
+  }
+
+  .user-muted {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .user-actions-cell {
+    white-space: nowrap;
+  }
+
+  .user-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+</style>

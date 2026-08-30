@@ -104,6 +104,25 @@
         />
       </div>
       <div class="form-field">
+        <InlineHelpSection copyId="auth-key-allowed-models-help-copy" label={m.api_keys_allowed_models_help_label()}>
+          {#snippet title()}
+            <label class="form-field-label" for="auth-key-allowed-models">
+              {m.api_keys_allowed_models()}
+            </label>
+          {/snippet}
+          {#snippet help()}
+            {m.api_keys_allowed_models_help()}
+          {/snippet}
+        </InlineHelpSection>
+        <textarea
+          id="auth-key-allowed-models"
+          rows="2"
+          placeholder="ex. anthropic/*, openai/gpt-4o"
+          aria-describedby="auth-key-allowed-models-help-copy"
+          bind:value={store.form.allowed_models}
+        ></textarea>
+      </div>
+      <div class="form-field">
         <InlineHelpSection copyId="auth-key-dashboard-access-help-copy" label={m.api_keys_dashboard_help_label()}>
           {#snippet title()}
             <label class="form-field-label" for="auth-key-dashboard-access">{m.api_keys_dashboard_access()}</label>
