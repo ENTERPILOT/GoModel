@@ -90,7 +90,9 @@ It is kept in the deployment's database, under the `install_id` key in the
 data directory. The database copy is authoritative: it survives a container
 being recreated, and replicas sharing one database report as one deployment.
 An `install-id` file from an earlier release is adopted unchanged the first time
-the gateway starts with this one.
+the gateway starts with this one, unless the database already holds an id — for
+instance because another replica sharing it started first — in which case the
+database's id wins and the file is rewritten to match.
 
 When neither copy exists — a container recreated without a volume, running
 SQLite — the identifier is derived from `GOMODEL_MASTER_KEY` with HMAC-SHA256,
