@@ -26,6 +26,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/runtimesettings"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 	"github.com/enterpilot/gomodel/internal/workflows"
 )
@@ -38,6 +39,7 @@ type Handler struct {
 	registry            *providers.ModelRegistry
 	pricingResolver     usage.PricingResolver
 	authKeys            *authkeys.Service
+	users               *users.Service
 	virtualModels       *virtualmodels.Service
 	mcpServers          MCPServerAdmin
 	pricingOverrides    *pricingoverrides.Service
@@ -264,6 +266,13 @@ func WithProviderCredentials(service ProviderCredentialsAdmin) Option {
 func WithAuthKeys(service *authkeys.Service) Option {
 	return func(h *Handler) {
 		h.authKeys = service
+	}
+}
+
+// WithUsers enables user (user-path) access policy administration endpoints.
+func WithUsers(service *users.Service) Option {
+	return func(h *Handler) {
+		h.users = service
 	}
 }
 

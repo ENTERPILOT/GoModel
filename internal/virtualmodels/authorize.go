@@ -27,10 +27,19 @@ func (s *Service) AllowsModel(ctx context.Context, selector core.ModelSelector) 
 	if !state.Enabled {
 		return false
 	}
-	if len(state.UserPaths) == 0 {
+	if len(state.UserPaths) > 0 && !userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths) {
+		return false
+	}
+	return s.subjectAllows(ctx, selector)
+}
+
+// subjectAllows applies the optional subject-side policy (auth key and
+// user-path allowlists) after the model-side rows have passed.
+func (s *Service) subjectAllows(ctx context.Context, selector core.ModelSelector) bool {
+	if s == nil || s.accessPolicy == nil {
 		return true
 	}
-	return userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths)
+	return s.accessPolicy.AllowsModel(ctx, selector)
 }
 
 // ValidateModelAccess returns a typed request error when selector is not available.
@@ -43,11 +52,10 @@ func (s *Service) ValidateModelAccess(ctx context.Context, selector core.ModelSe
 			nil,
 		).WithCode("model_access_denied")
 	}
-	if len(state.UserPaths) == 0 {
-		return nil
-	}
-	if userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths) {
-		return nil
+	if len(state.UserPaths) == 0 || userPathAllowed(core.UserPathFromContext(ctx), state.UserPaths) {
+		if s.subjectAllows(ctx, selector) {
+			return nil
+		}
 	}
 	return core.NewInvalidRequestErrorWithStatus(
 		http.StatusBadRequest,

@@ -20,8 +20,21 @@ type createAuthKeyRequest struct {
 	Description     string     `json:"description,omitempty"`
 	UserPath        string     `json:"user_path,omitempty"`
 	Labels          []string   `json:"labels,omitempty"`
+	AllowedModels   []string   `json:"allowed_models,omitempty"`
 	DashboardAccess bool       `json:"dashboard_access,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
+}
+
+// authKeyResponse is one API key row plus the model access it resolves to.
+type authKeyResponse struct {
+	authkeys.View
+	// Restricted reports whether the key's own allowlist or a user-path policy
+	// narrows the key.
+	Restricted bool `json:"restricted"`
+	// EffectiveModels lists the catalog models a request with this key may
+	// use — its user path, its allowlist, and the model-side policies applied
+	// through the same authorizer inference uses. Nil without a catalog.
+	EffectiveModels []string `json:"effective_models"`
 }
 
 func (h *Handler) ListAuthKeys(c *echo.Context) error {
@@ -29,10 +42,21 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
 	}
 	views := h.authKeys.ListViews()
-	if views == nil {
-		views = []authkeys.View{}
+	catalog := h.userCatalog()
+	response := make([]authKeyResponse, 0, len(views))
+	for _, view := range views {
+		row := authKeyResponse{View: view, Restricted: len(view.AllowedModels) > 0}
+		ctx := core.WithEffectiveUserPath(context.Background(), view.UserPath)
+		if len(view.AllowedModels) > 0 {
+			ctx = core.WithCredentialAllowedModels(ctx, view.AllowedModels)
+		}
+		if h.users != nil && len(h.users.Constraints(view.UserPath)) > 0 {
+			row.Restricted = true
+		}
+		row.EffectiveModels = h.effectiveModels(ctx, catalog)
+		response = append(response, row)
 	}
-	return c.JSON(http.StatusOK, views)
+	return c.JSON(http.StatusOK, response)
 }
 
 // CreateAuthKey handles POST /admin/auth-keys
@@ -51,11 +75,17 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
+	allowedModels, err := h.normalizeAllowedModels(req.AllowedModels)
+	if err != nil {
+		return handleError(c, err)
+	}
+
 	issued, err := h.authKeys.Create(c.Request().Context(), authkeys.CreateInput{
 		Name:            req.Name,
 		Description:     req.Description,
 		UserPath:        userPath,
 		Labels:          req.Labels,
+		AllowedModels:   allowedModels,
 		DashboardAccess: req.DashboardAccess,
 		ExpiresAt:       req.ExpiresAt,
 	})
@@ -85,6 +115,42 @@ func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
 	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
 		return h.authKeys.UpdateLabels(ctx, id, req.Labels)
 	})
+}
+
+type updateAuthKeyAllowedModelsRequest struct {
+	// Pointer so an omitted or null value is rejected instead of being
+	// treated as an implicit clear of a restricted key.
+	AllowedModels *[]string `json:"allowed_models"`
+}
+
+// UpdateAuthKeyAllowedModels handles PUT /admin/auth-keys/:id/allowed-models.
+// The request selectors replace the key's model allowlist; an explicit empty
+// list lifts the key-level restriction (user-path policies still apply).
+func (h *Handler) UpdateAuthKeyAllowedModels(c *echo.Context) error {
+	var req updateAuthKeyAllowedModelsRequest
+	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
+		if req.AllowedModels == nil {
+			return nil, validation.NewError("allowed_models is required", nil)
+		}
+		allowedModels, err := h.normalizeAllowedModels(*req.AllowedModels)
+		if err != nil {
+			return nil, err
+		}
+		return h.authKeys.UpdateAllowedModels(ctx, id, allowedModels)
+	})
+}
+
+// normalizeAllowedModels canonicalizes model selectors against the provider
+// catalog when the users service is available, and syntactically otherwise.
+func (h *Handler) normalizeAllowedModels(raw []string) ([]string, error) {
+	if h.users == nil {
+		return authkeys.NormalizeAllowedModels(raw), nil
+	}
+	allowed, err := h.users.NormalizeAllowedModels(raw)
+	if err != nil {
+		return nil, core.NewInvalidRequestError(err.Error(), err)
+	}
+	return allowed, nil
 }
 
 type updateAuthKeyDashboardAccessRequest struct {

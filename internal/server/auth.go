@@ -73,6 +73,7 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 				setAuthenticationUserHeader(c, "")
 				ctx := ext.WithoutAuthentication(c.Request().Context())
 				ctx = core.WithEffectiveUserPath(ctx, "")
+				ctx = core.WithCredentialAllowedModels(ctx, nil)
 				c.SetRequest(c.Request().WithContext(ctx))
 				if tokenErr != "" {
 					authErr := authenticationError(c, tokenErr)
@@ -271,6 +272,9 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
 	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
+	if len(authResult.AllowedModels) > 0 {
+		ctx = core.WithCredentialAllowedModels(ctx, authResult.AllowedModels)
+	}
 	if len(authResult.Labels) > 0 {
 		// Key labels join any labels the tagging middleware already
 		// extracted from request headers; duplicates collapse.

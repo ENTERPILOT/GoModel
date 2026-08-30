@@ -120,6 +120,17 @@ console.log(authKey);
 
 </CodeGroup>
 
+`GET /admin/auth-keys` rows carry `restricted` and `effective_models` — the
+catalog models a request with that key can actually call, with its user path
+policies, its own allowlist, and model-side policies applied.
+
+Restrict a key to specific models with the optional `allowed_models` on
+`POST /admin/auth-keys` (omitted means no key-level restriction, like every
+other optional creation field) or later with
+`PUT /admin/auth-keys/<key-id>/allowed-models` (`{"allowed_models": ["anthropic/*", "openai/gpt-4o"]}`;
+an explicit empty list lifts the key-level restriction; omitting the field is rejected). Group- and user-level
+allowlists are managed through the [user endpoints](#user-endpoints).
+
 Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key.
 
 The dashboard UI pages (`/admin/dashboard`) and static assets (`/admin/static/*`) **skip authentication** so the dashboard shell is accessible without configuring API keys in the browser — the data it loads still requires a key with dashboard access.
@@ -335,6 +346,59 @@ These operations are not global per period. For the path-scoped `PUT` and
 the request shape.
 
 See [Budgets](/features/budgets) for request examples and enforcement behavior.
+
+### User endpoints
+
+| Method   | Endpoint                             | Description                                   |
+| -------- | ------------------------------------ | --------------------------------------------- |
+| `GET`    | `/admin/users`                       | The user-path tree with model allowlists      |
+| `PUT`    | `/admin/users`                       | Create or replace one node's policy           |
+| `DELETE` | `/admin/users?user_path=<path>`      | Remove one node's policy                      |
+
+`GET /admin/users` returns every node the gateway knows about — stored
+policies, the user paths of managed API keys, and their ancestors — sorted by
+path:
+
+```json
+{
+  "users": [
+    {
+      "user_path": "/acme",
+      "allowed_models": ["openai/", "anthropic/"],
+      "configured": true,
+      "key_count": 0,
+      "inherited_from": [],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"],
+      "created_at": "2026-08-30T10:00:00Z",
+      "updated_at": "2026-08-30T10:00:00Z"
+    },
+    {
+      "user_path": "/acme/eng/alice",
+      "allowed_models": [],
+      "configured": false,
+      "key_count": 2,
+      "inherited_from": ["/acme"],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"]
+    }
+  ]
+}
+```
+
+`allowed_models` is the node's own list in canonical form (`anthropic/` for a
+provider wildcard, `/` for everything); `inherited_from` lists the ancestors
+whose lists also apply. `effective_models` is the path-level result — the node's list, its ancestors'
+lists, and the model-side virtual-model policies — evaluated through the same
+authorizer inference uses; a managed API key's own `allowed_models` may narrow
+a request further. An empty list with `restricted: true` means the node's
+lists intersect to nothing. `configured` is `false` for nodes implied only by keys
+or descendants; `managed: true` marks policies declared in configuration,
+which are read-only here (`409`, code `user_managed`).
+
+`PUT /admin/users` takes `{"user_path": "/acme/eng", "allowed_models": ["anthropic/*"], "description": "..."}`
+and returns the updated tree. Selectors are validated against the configured
+providers. See [Users](/features/users) for the matching rules.
 
 ### GET /admin/models
 

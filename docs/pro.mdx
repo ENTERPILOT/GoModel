@@ -160,6 +160,11 @@ Successful logins, rejected policies, and logouts are recorded as sanitized
 audit events. Tokens, authorization codes, cookies, raw claims, and provider
 error details are not stored.
 
+An SSO session carries a `user_path` like a managed API key does, so the
+group- and user-level model allowlists on the [Users](/features/users) page
+apply to requests made through it. Per-key `allowed_models` are a managed
+API key setting and do not apply to SSO sessions.
+
 ## Quota templates
 
 Per-child quota templates let one `user_path` budget definition apply

@@ -73,3 +73,42 @@ export function moveActiveIndex(index, delta, length) {
   if (index < 0) return delta >= 0 ? 0 : length - 1;
   return (((index + delta) % length) + length) % length;
 }
+
+/**
+ * Split a typed multi-select entry into trimmed, de-duplicated values:
+ * "anthropic/, openai/gpt-5" -> ["anthropic/", "openai/gpt-5"].
+ */
+export function splitSearchValues(query) {
+  const values = [];
+  for (const piece of String(query || "").split(/[,\n]/)) {
+    const value = piece.trim();
+    if (value && !values.includes(value)) values.push(value);
+  }
+  return values;
+}
+
+/**
+ * Toggle `value` in a multi-select's values (append when absent, remove when
+ * present). Returns a new array; the input is never mutated.
+ */
+export function toggleSearchValue(values, value) {
+  const list = Array.isArray(values) ? values : [];
+  const next = String(value ?? "");
+  if (!next) return list.slice();
+  return list.includes(next) ? list.filter((item) => item !== next) : list.concat(next);
+}
+
+/**
+ * Order a multi-select's (already filtered) options with the selected ones
+ * first, sorted by label, so they can be unchecked without scrolling; the
+ * rest keep their order. Returns a new array.
+ */
+export function selectedFirst(options, values) {
+  const list = Array.isArray(options) ? options : [];
+  const chosen = new Set(Array.isArray(values) ? values : []);
+  const selected = list
+    .filter((option) => option && chosen.has(option.value))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const rest = list.filter((option) => option && !chosen.has(option.value));
+  return selected.concat(rest);
+}

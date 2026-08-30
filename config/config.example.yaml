@@ -87,6 +87,19 @@ models:
 #       - { model: azure/gpt-4o }
 #       - { model: gemini/gemini-2.5-pro }
 
+# Users as infrastructure-as-code: per user-path model allowlists (groups and
+# users are the user paths behind your API keys). A node with no allowed_models
+# keeps every model available; once a node lists models, requests under it are
+# limited to that list and to the lists of every parent. These shadow dashboard
+# rows with the same path and are read-only in the dashboard. The USERS env var
+# (a JSON array) merges over this list and wins per path.
+# users:
+#   - path: /acme
+#     allowed_models: [openai/*, anthropic/*]
+#   - path: /acme/eng
+#     allowed_models: [anthropic/*] # provider wildcard, provider/model, or bare model id
+#     description: Engineering only ships on Claude
+
 # MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the
 # authenticated /mcp endpoint. Tools/prompts are namespaced as {server}_{name};
 # /mcp/{server} exposes one upstream with original names. Servers declared here or

@@ -37,6 +37,7 @@ type mockAuthenticator struct {
 	tokenToID      map[string]string
 	tokenPath      map[string]string
 	tokenLabels    map[string][]string
+	tokenAllowed   map[string][]string
 	tokenDashboard map[string]bool
 	err            error
 }
@@ -57,8 +58,48 @@ func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authke
 		ID:              id,
 		UserPath:        m.tokenPath[token],
 		Labels:          m.tokenLabels[token],
+		AllowedModels:   m.tokenAllowed[token],
 		DashboardAccess: m.tokenDashboard[token],
 	}, nil
+}
+
+func TestAuthMiddlewareWithAuthenticator_ManagedKeyAllowedModelsReachContext(t *testing.T) {
+	e := echo.New()
+	testHandler := func(c *echo.Context) error {
+		got := core.GetCredentialAllowedModels(c.Request().Context())
+		assert.Equal(t, []string{"anthropic/", "openai/gpt-4o"}, got)
+		return c.String(http.StatusOK, "ok")
+	}
+	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:      true,
+		tokenToID:    map[string]string{"sk_gom_token": "key-123"},
+		tokenAllowed: map[string][]string{"sk_gom_token": {"anthropic/", "openai/gpt-4o"}},
+	}, nil)(testHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	rec := httptest.NewRecorder()
+	// An outer layer must never leak an allowlist into a request authenticated
+	// by an explicit credential without one.
+	req = req.WithContext(core.WithCredentialAllowedModels(req.Context(), []string{"stale/"}))
+	c := e.NewContext(req, rec)
+	require.NoError(t, handler(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	unrestricted := func(c *echo.Context) error {
+		assert.Nil(t, core.GetCredentialAllowedModels(c.Request().Context()))
+		return c.String(http.StatusOK, "ok")
+	}
+	handler = AuthMiddlewareWithAuthenticator("", mockAuthenticator{
+		enabled:   true,
+		tokenToID: map[string]string{"sk_gom_token": "key-123"},
+	}, nil)(unrestricted)
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	req = req.WithContext(core.WithCredentialAllowedModels(req.Context(), []string{"stale/"}))
+	rec = httptest.NewRecorder()
+	require.NoError(t, handler(e.NewContext(req, rec)))
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestAuthMiddleware(t *testing.T) {

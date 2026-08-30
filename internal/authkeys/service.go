@@ -34,6 +34,7 @@ type AuthenticationResult struct {
 	ID              string
 	UserPath        string
 	Labels          []string
+	AllowedModels   []string
 	DashboardAccess bool
 }
 
@@ -181,6 +182,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*IssuedKey, er
 		Description:     normalized.Description,
 		UserPath:        normalized.UserPath,
 		Labels:          normalized.Labels,
+		AllowedModels:   normalized.AllowedModels,
 		DashboardAccess: normalized.DashboardAccess,
 		RedactedValue:   redactedValue,
 		SecretHash:      secretHash,
@@ -227,6 +229,34 @@ func (s *Service) UpdateLabels(ctx context.Context, id string, labels []string) 
 		key.Labels = labels
 	})
 	s.refreshBestEffort(ctx, "update-labels")
+	return s.viewByID(id)
+}
+
+// UpdateAllowedModels replaces a managed auth key's model allowlist, updates
+// the in-memory snapshot immediately, best-effort reconciles from storage, and
+// returns the updated admin-facing view. Passing no selectors lifts the
+// key-level restriction.
+func (s *Service) UpdateAllowedModels(ctx context.Context, id string, allowedModels []string) (*View, error) {
+	if s == nil {
+		return nil, fmt.Errorf("auth key service is required")
+	}
+	id = normalizeID(id)
+	if id == "" {
+		return nil, newValidationError("auth key id is required", nil)
+	}
+	allowedModels = NormalizeAllowedModels(allowedModels)
+
+	now := time.Now().UTC()
+	if err := s.store.UpdateAllowedModels(ctx, id, allowedModels, now); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("update auth key allowed models: %w", err)
+	}
+	s.applyKeyUpdate(id, now, func(key *AuthKey) {
+		key.AllowedModels = allowedModels
+	})
+	s.refreshBestEffort(ctx, "update-allowed-models")
 	return s.viewByID(id)
 }
 
@@ -366,6 +396,7 @@ func authenticateKey(key AuthKey, now time.Time) (AuthenticationResult, error) {
 		ID:              key.ID,
 		UserPath:        strings.TrimSpace(key.UserPath),
 		Labels:          key.Labels,
+		AllowedModels:   key.AllowedModels,
 		DashboardAccess: key.DashboardAccess,
 	}, nil
 }

@@ -6,9 +6,14 @@
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
+  import { authKeySelectorOptions } from "./authKeysLogic.js";
   import { Check, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
+
+  const selectorOptions = $derived(authKeySelectorOptions(modelsStore.models));
 </script>
 
 <EditorDialog
@@ -104,6 +109,31 @@
         />
       </div>
       <div class="form-field">
+        <InlineHelpSection copyId="auth-key-allowed-models-help-copy" label={m.api_keys_allowed_models_help_label()}>
+          {#snippet title()}
+            <label class="form-field-label" for="auth-key-allowed-models">
+              {m.api_keys_allowed_models()}
+            </label>
+          {/snippet}
+          {#snippet help()}
+            {m.api_keys_allowed_models_help()}
+          {/snippet}
+        </InlineHelpSection>
+        <div class="auth-key-allowed-models-select">
+          <SearchSelect
+            id="auth-key-allowed-models"
+            options={selectorOptions}
+            multiple
+            bind:values={store.form.allowed_models}
+            placeholder={m.model_selectors_placeholder()}
+            searchPlaceholder={m.model_selectors_search()}
+            ariaLabel={m.api_keys_allowed_models()}
+            allowCustom
+            mono
+          />
+        </div>
+      </div>
+      <div class="form-field">
         <InlineHelpSection copyId="auth-key-dashboard-access-help-copy" label={m.api_keys_dashboard_help_label()}>
           {#snippet title()}
             <label class="form-field-label" for="auth-key-dashboard-access">{m.api_keys_dashboard_access()}</label>
@@ -137,6 +167,11 @@
 <style>
   .auth-key-form-fields > :global(.form-field) {
     margin-bottom: 4px;
+  }
+
+  .auth-key-allowed-models-select :global(.search-select) {
+    display: flex;
+    width: 100%;
   }
 
   .auth-key-dashboard-toggle {

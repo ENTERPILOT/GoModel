@@ -9,8 +9,9 @@
   import { authKeysStore as store } from "./authKeys.svelte.js";
   import AuthKeyEditor from "./AuthKeyEditor.svelte";
   import AuthKeyLabelsEditor from "./AuthKeyLabelsEditor.svelte";
+  import AuthKeyAllowedModelsEditor from "./AuthKeyAllowedModelsEditor.svelte";
   import AuthKeyList from "./AuthKeyList.svelte";
-  import { Plus } from "lucide";
+  import { Plus, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 
   const PAGE = "auth-keys";
@@ -57,6 +58,7 @@
 
   <AuthKeyEditor />
   <AuthKeyLabelsEditor />
+  <AuthKeyAllowedModelsEditor />
 
   {#if store.loading && store.keys.length === 0}
     <LoadingState label={m.api_keys_loading()} />
@@ -72,6 +74,20 @@
         />
       </div>
       <div class="table-toolbar-actions">
+        {#if store.userPathFilter}
+          <span class="auth-keys-path-chip">
+            <code>{store.userPathFilter}</code>
+            <button
+              type="button"
+              class="auth-keys-path-chip-clear"
+              aria-label={m.api_keys_path_filter_clear()}
+              title={m.api_keys_path_filter_clear()}
+              onclick={() => store.clearUserPathFilter()}
+            >
+              <Icon icon={X} width="12" height="12" />
+            </button>
+          </span>
+        {/if}
         <label class="auth-keys-inactive-toggle">
           <input type="checkbox" bind:checked={store.showInactive} />
           <span>
@@ -115,6 +131,30 @@
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+}
+
+.auth-keys-path-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  font-size: 12px;
+}
+
+.auth-keys-path-chip-clear {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.auth-keys-path-chip-clear:hover {
+  color: var(--text);
 }
 
 .auth-keys-inactive-toggle input {

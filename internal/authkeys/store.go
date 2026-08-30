@@ -38,6 +38,7 @@ type Store interface {
 	List(ctx context.Context) ([]AuthKey, error)
 	Create(ctx context.Context, key AuthKey) error
 	UpdateLabels(ctx context.Context, id string, labels []string, now time.Time) error
+	UpdateAllowedModels(ctx context.Context, id string, allowedModels []string, now time.Time) error
 	UpdateDashboardAccess(ctx context.Context, id string, allowed bool, now time.Time) error
 	Deactivate(ctx context.Context, id string, now time.Time) error
 	Close() error
@@ -65,6 +66,7 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 	}
 	input.UserPath = userPath
 	input.Labels = core.MergeLabels(input.Labels)
+	input.AllowedModels = NormalizeAllowedModels(input.AllowedModels)
 	if input.ExpiresAt != nil {
 		expiresAt := input.ExpiresAt.UTC()
 		now := time.Now().UTC()
@@ -74,6 +76,32 @@ func normalizeCreateInput(input CreateInput) (CreateInput, error) {
 		input.ExpiresAt = &expiresAt
 	}
 	return input, nil
+}
+
+// NormalizeAllowedModels trims, drops empty entries, and de-duplicates model
+// selectors while preserving order. Selector syntax is validated by the caller
+// that owns the provider catalog.
+func NormalizeAllowedModels(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, dup := seen[value]; dup {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func normalizeID(id string) string {

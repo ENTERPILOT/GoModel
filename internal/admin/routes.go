@@ -83,8 +83,13 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.GET("/auth-keys", h.ListAuthKeys)
 	g.POST("/auth-keys", h.CreateAuthKey)
 	g.PUT("/auth-keys/:id/labels", h.UpdateAuthKeyLabels)
+	g.PUT("/auth-keys/:id/allowed-models", h.UpdateAuthKeyAllowedModels)
 	g.PUT("/auth-keys/:id/dashboard-access", h.UpdateAuthKeyDashboardAccess)
 	g.POST("/auth-keys/:id/deactivate", h.DeactivateAuthKey)
+
+	g.GET("/users", h.ListUsers)
+	g.PUT("/users", h.UpsertUser)
+	g.DELETE("/users", h.DeleteUser)
 
 	g.GET("/guardrails/types", h.ListGuardrailTypes)
 	g.GET("/guardrails", h.ListGuardrails)

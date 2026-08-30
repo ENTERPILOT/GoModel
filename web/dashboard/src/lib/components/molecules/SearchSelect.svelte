@@ -10,6 +10,12 @@
   //   placeholder  trigger text when nothing is selected
   //   searchPlaceholder, ariaLabel, id
   //   allowCustom  offer "Use “<typed text>”" so free-form values still work
+  //   multiple     multi-select: `values` (bindable array) replaces `value`,
+  //                picks toggle membership and keep the list open, the trigger
+  //                lists the selection comma-separated, a typed custom entry
+  //                may hold several comma-separated values, and Backspace in
+  //                an empty search removes the last value
+  //   values       selected values in multiple mode (bindable)
   //   disabled, mono (monospace option values), class (trigger wrapper)
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { closeOnScroll, dismissOnOutside, marqueeOnOverflow } from "$lib/utils/attachments.js";
@@ -21,6 +27,9 @@
     filterSearchOptions,
     moveActiveIndex,
     normalizeSearchOption,
+    selectedFirst,
+    splitSearchValues,
+    toggleSearchValue,
   } from "./searchSelectLogic.js";
 
   let {
@@ -32,6 +41,8 @@
     ariaLabel = "",
     id = undefined,
     allowCustom = false,
+    multiple = false,
+    values = $bindable([]),
     disabled = false,
     mono = false,
     class: className = "",
@@ -50,7 +61,11 @@
   // is never clipped by a scrolling ancestor such as an editor dialog.
   let popoverStyle = $state("");
 
-  const filtered = $derived(filterSearchOptions(options, query));
+  // Multi-select rows list the current selection first so it can be
+  // unchecked without hunting through the list.
+  const filtered = $derived(
+    multiple ? selectedFirst(filterSearchOptions(options, query), values) : filterSearchOptions(options, query),
+  );
   const customValue = $derived(customSearchValue(options, query, allowCustom));
   // Rows in keyboard order: the custom suggestion first, then matches.
   const rowCount = $derived(filtered.length + (customValue ? 1 : 0));
@@ -58,6 +73,33 @@
     options.map(normalizeSearchOption).find((option) => option && option.value === value) ||
       (value ? { value, label: value, description: "" } : null),
   );
+  // In multiple mode the trigger lists every selected value; an option's
+  // label is used when one exists, the raw value otherwise.
+  const selectedList = $derived(
+    multiple
+      ? values.map((item) => {
+          const option = options.map(normalizeSearchOption).find((entry) => entry && entry.value === item);
+          return option ? option.label : item;
+        })
+      : [],
+  );
+  const hasSelection = $derived(multiple ? selectedList.length > 0 : Boolean(selected));
+  const triggerText = $derived(
+    multiple ? (selectedList.length ? selectedList.join(", ") : placeholder) : selected ? selected.label : placeholder,
+  );
+  const triggerTitle = $derived(
+    multiple
+      ? selectedList.length
+        ? selectedList.join(", ")
+        : undefined
+      : selected
+        ? [selected.label, selected.description].filter(Boolean).join(" — ")
+        : undefined,
+  );
+
+  function isChosen(optionValue) {
+    return multiple ? values.includes(optionValue) : optionValue === value;
+  }
 
   function rowValue(index) {
     if (customValue) return index === 0 ? customValue : filtered[index - 1]?.value;
@@ -92,7 +134,7 @@
     placePopover();
     open = true;
     query = "";
-    const current = filtered.findIndex((option) => option.value === value);
+    const current = multiple ? -1 : filtered.findIndex((option) => option.value === value);
     activeIndex = current >= 0 ? current : -1;
     await tick();
     searchEl?.focus();
@@ -110,11 +152,31 @@
     else openList();
   }
 
-  function choose(next) {
+  async function choose(next) {
     if (next === undefined || next === null) return;
+    if (multiple) {
+      // A custom entry may carry several comma-separated values; each one
+      // toggles on its own. The list stays open for further picks.
+      const pieces = customValue && String(next) === customValue ? splitSearchValues(next) : [String(next)];
+      let updated = values;
+      for (const piece of pieces) updated = toggleSearchValue(updated, piece);
+      values = updated;
+      onchange?.(values);
+      query = "";
+      await tick();
+      placePopover();
+      searchEl?.focus();
+      return;
+    }
     value = String(next);
     onchange?.(value);
     close();
+  }
+
+  function removeLast() {
+    if (!multiple || !values.length) return;
+    values = values.slice(0, -1);
+    onchange?.(values);
   }
 
   function scrollActiveIntoView() {
@@ -135,6 +197,12 @@
         event.preventDefault();
         if (activeIndex >= 0) choose(rowValue(activeIndex));
         else if (rowCount > 0) choose(rowValue(0));
+        break;
+      case "Backspace":
+        if (multiple && !query) {
+          event.preventDefault();
+          removeLast();
+        }
         break;
       case "Tab":
         close();
@@ -170,6 +238,7 @@
     {id}
     class="search-select-trigger"
     class:mono
+    class:search-select-trigger-multiple={multiple}
     aria-haspopup="listbox"
     aria-expanded={open}
     aria-controls={open ? listID : undefined}
@@ -184,12 +253,14 @@
     }}
   >
     <span
-      class="search-select-value search-select-clip"
-      class:search-select-placeholder={!selected}
-      title={selected ? [selected.label, selected.description].filter(Boolean).join(" — ") : undefined}
-      {@attach marqueeOnOverflow()}
+      class="search-select-value"
+      class:search-select-clip={!multiple}
+      class:search-select-wrap={multiple}
+      class:search-select-placeholder={!hasSelection}
+      title={triggerTitle}
+      {@attach multiple ? undefined : marqueeOnOverflow()}
     >
-      <span class="search-select-text">{selected ? selected.label : placeholder}</span>
+      <span class="search-select-text">{triggerText}</span>
     </span>
     <Icon icon={ChevronDown} class="search-select-chevron" />
   </button>
@@ -215,7 +286,13 @@
           onkeydown={onSearchKeydown}
         />
       </div>
-      <ul class="search-select-list" id={listID} role="listbox" bind:this={listEl}>
+      <ul
+        class="search-select-list"
+        id={listID}
+        role="listbox"
+        aria-multiselectable={multiple || undefined}
+        bind:this={listEl}
+      >
         {#if customValue}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <li
@@ -240,10 +317,10 @@
             id={listID + "-" + row}
             class="search-select-option"
             class:mono
-            class:search-select-option-current={option.value === value}
+            class:search-select-option-current={isChosen(option.value)}
             class:search-select-option-active={activeIndex === row}
             role="option"
-            aria-selected={option.value === value}
+            aria-selected={isChosen(option.value)}
             onmouseenter={() => (activeIndex = row)}
             onclick={() => choose(option.value)}
           >
@@ -257,7 +334,7 @@
             {#if option.description}
               <span class="search-select-option-description">{option.description}</span>
             {/if}
-            {#if option.value === value}
+            {#if isChosen(option.value)}
               <Icon icon={Check} class="search-select-check" />
             {/if}
           </li>
@@ -313,6 +390,20 @@
   .search-select-value {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  /* Multi-select triggers grow with the selection so every value stays
+     readable instead of clipping to one line. */
+  .search-select-trigger-multiple {
+    align-items: flex-start;
+    height: auto;
+  }
+
+  .search-select-wrap {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
   }
 
   /* Clipped labels show an ellipsis at rest; on hover marqueeOnOverflow

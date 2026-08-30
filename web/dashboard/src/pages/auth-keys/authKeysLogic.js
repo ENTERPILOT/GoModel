@@ -1,6 +1,7 @@
 // Pure logic for the API Keys page.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { modelSelectorOptions, parseModelSelectors } from "../../lib/utils/modelSelectors.js";
 
 export function defaultAuthKeyForm() {
   return {
@@ -8,9 +9,22 @@ export function defaultAuthKeyForm() {
     description: "",
     user_path: "",
     labels: "",
+    allowed_models: [],
     dashboard_access: false,
     expires_at: "",
   };
+}
+
+// parseAuthKeyAllowedModels turns the allowed-models field (a list from the
+// multi-select, or comma/newline-separated text) into the `allowed_models`
+// payload.
+export function parseAuthKeyAllowedModels(value) {
+  return parseModelSelectors(value);
+}
+
+// authKeySelectorOptions builds the allowed-models picker from the inventory.
+export function authKeySelectorOptions(models) {
+  return modelSelectorOptions(models, (name) => m.model_selectors_provider_all({ name }));
 }
 
 // parseAuthKeyLabels splits a comma-separated label string into a trimmed,
@@ -90,11 +104,13 @@ export function buildCreateAuthKeyPayload(form) {
   }
   const userPath = normalizeAuthKeyUserPath(source.user_path);
   const labels = parseAuthKeyLabels(source.labels);
+  const allowedModels = parseAuthKeyAllowedModels(source.allowed_models);
   const payload = {
     name,
     description: String(source.description || "").trim() || undefined,
     user_path: userPath || undefined,
     labels: labels.length ? labels : undefined,
+    allowed_models: allowedModels.length ? allowedModels : undefined,
     dashboard_access: source.dashboard_access ? true : undefined,
   };
   if (source.expires_at) {
@@ -143,21 +159,40 @@ function authKeySearchText(key) {
     key.user_path,
     key.redacted_value,
     ...(key.labels || []),
+    ...(key.allowed_models || []),
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 }
 
+// authKeyUnderPath reports whether a key is bound to `userPath` or to a path
+// beneath it — a segment-boundary match, so "/acme" never matches "/acme-old".
+export function authKeyUnderPath(key, userPath) {
+  const base = normalizeAuthKeyUserPath(userPath);
+  if (!base) {
+    return true;
+  }
+  const path = normalizeAuthKeyUserPath(key && key.user_path);
+  if (!path) {
+    return false;
+  }
+  return path === base || path.startsWith(base === "/" ? "/" : base + "/");
+}
+
 // filterAuthKeys applies the API Keys toolbar: inactive keys (deactivated or
-// expired) are hidden unless `showInactive`, and `query` matches the name,
-// description, user path, labels, or redacted token.
+// expired) are hidden unless `showInactive`, `query` matches the name,
+// description, user path, labels, or redacted token, and `userPath` keeps
+// only keys bound at or beneath that path.
 export function filterAuthKeys(keys, options = {}) {
-  const { query = "", showInactive = false, now = Date.now() } = options;
+  const { query = "", showInactive = false, userPath = "", now = Date.now() } = options;
   const needle = String(query || "").trim().toLowerCase();
   const list = Array.isArray(keys) ? keys : [];
   return list.filter((key) => {
     if (!showInactive && !authKeyActive(key, now)) {
+      return false;
+    }
+    if (!authKeyUnderPath(key, userPath)) {
       return false;
     }
     return !needle || authKeySearchText(key).includes(needle);

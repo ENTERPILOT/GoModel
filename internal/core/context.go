@@ -65,6 +65,10 @@ const (
 	// request rewriters estimate they removed from the request body. Usage
 	// recording folds it into the request's usage entry as rewrite savings.
 	rewriteTokensSavedKey contextKey = "rewrite-tokens-saved"
+
+	// credentialAllowedModelsKey stores the model allowlist bound to the
+	// authenticated credential (a managed auth key). Empty means unrestricted.
+	credentialAllowedModelsKey contextKey = "credential-allowed-models"
 )
 
 // RequestOrigin identifies whether a request came from an external caller or an
@@ -201,6 +205,26 @@ func GetAuthKeyID(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// WithCredentialAllowedModels returns a new context carrying the model
+// allowlist bound to the authenticated credential. An empty list clears it.
+func WithCredentialAllowedModels(ctx context.Context, allowed []string) context.Context {
+	if len(allowed) == 0 {
+		return context.WithValue(ctx, credentialAllowedModelsKey, []string(nil))
+	}
+	return context.WithValue(ctx, credentialAllowedModelsKey, allowed)
+}
+
+// GetCredentialAllowedModels retrieves the credential-bound model allowlist.
+// Nil means the credential does not restrict models.
+func GetCredentialAllowedModels(ctx context.Context) []string {
+	if v := ctx.Value(credentialAllowedModelsKey); v != nil {
+		if allowed, ok := v.([]string); ok {
+			return allowed
+		}
+	}
+	return nil
 }
 
 // WithEffectiveUserPath returns a new context with an effective user path override attached.

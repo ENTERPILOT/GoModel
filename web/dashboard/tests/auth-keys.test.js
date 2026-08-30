@@ -5,6 +5,7 @@ import {
   authKeyActive,
   authKeyDeactivated,
   authKeyExpired,
+  authKeyUnderPath,
   authKeyUserPathValidationError,
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,
@@ -13,6 +14,7 @@ import {
   labelChipStyle,
   labelColor,
   normalizeAuthKeyUserPath,
+  parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
   sortAuthKeys,
 } from "../src/pages/auth-keys/authKeysLogic.js";
@@ -259,4 +261,42 @@ test("labelColor is deterministic and feeds the chip style custom property", () 
   assert.equal(labelColor("team-a"), labelColor("team-a"));
   assert.match(labelColor("team-a"), /^#[0-9a-f]{6}$/);
   assert.equal(labelChipStyle("x"), "--label-color: " + labelColor("x"));
+});
+
+test("buildCreateAuthKeyPayload sends allowed_models only when the field lists selectors", () => {
+  const empty = buildCreateAuthKeyPayload({ ...defaultAuthKeyForm(), name: "ci" });
+  assert.equal(empty.payload.allowed_models, undefined);
+
+  const restricted = buildCreateAuthKeyPayload({
+    ...defaultAuthKeyForm(),
+    name: "ci",
+    allowed_models: "anthropic/*, openai/gpt-4o\nanthropic/*",
+  });
+  assert.deepEqual(restricted.payload.allowed_models, ["anthropic/*", "openai/gpt-4o"]);
+  assert.deepEqual(parseAuthKeyAllowedModels(""), []);
+  assert.deepEqual(defaultAuthKeyForm().allowed_models, []);
+  assert.deepEqual(parseAuthKeyAllowedModels(["anthropic/*", "openai/gpt-4o, gpt-4o"]), ["anthropic/*", "openai/gpt-4o", "gpt-4o"]);
+});
+
+test("filterAuthKeys matches allowed model selectors", () => {
+  const keys = [
+    authKey({ id: "k1", name: "a", allowed_models: ["anthropic/"] }),
+    authKey({ id: "k2", name: "b" }),
+  ];
+  assert.deepEqual(filterAuthKeys(keys, { query: "anthropic" }).map((k) => k.id), ["k1"]);
+});
+
+test("filterAuthKeys userPath keeps the path and its subtree on segment boundaries", () => {
+  const keys = [
+    authKey({ id: "root", user_path: "/acme" }),
+    authKey({ id: "child", user_path: "/acme/eng/alice" }),
+    authKey({ id: "sibling", user_path: "/acme-old" }),
+    authKey({ id: "elsewhere", user_path: "/other/acme", description: "acme" }),
+    authKey({ id: "unbound", user_path: "" }),
+  ];
+  assert.deepEqual(filterAuthKeys(keys, { userPath: "/acme" }).map((k) => k.id), ["root", "child"]);
+  assert.deepEqual(filterAuthKeys(keys, { userPath: "acme/eng" }).map((k) => k.id), ["child"]);
+  assert.equal(filterAuthKeys(keys, { userPath: "" }).length, 5);
+  assert.equal(authKeyUnderPath(authKey({ user_path: "/x" }), "/"), true);
+  assert.equal(authKeyUnderPath(authKey({ user_path: "" }), "/acme"), false);
 });
