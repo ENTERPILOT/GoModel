@@ -20,7 +20,7 @@ func TestNewBuildsMiddlewareAndHooksWithoutExporters(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "none")
 	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
-	service, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics")
+	service, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestNewBuildsMiddlewareAndHooksWithoutExporters(t *testing.T) {
 
 func TestNewRejectsUnknownExporter(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "zipkin")
-	_, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics")
+	_, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics", "")
 	if err == nil || !strings.Contains(err.Error(), "otlp or none") {
 		t.Fatalf("error = %v, want supported-exporter error", err)
 	}
@@ -196,5 +196,45 @@ func TestPlaintextCredentialSignals(t *testing.T) {
 				t.Fatalf("plaintextCredentialSignals() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNewResourceServiceName(t *testing.T) {
+	t.Setenv("OTEL_SERVICE_NAME", "")
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "")
+	serviceName := func(t *testing.T, res *resource.Resource) string {
+		t.Helper()
+		for _, attr := range res.Attributes() {
+			if attr.Key == semconv.ServiceNameKey {
+				return attr.Value.AsString()
+			}
+		}
+		t.Fatal("resource has no service.name")
+		return ""
+	}
+
+	res, err := newResource(t.Context(), "gomodel-pro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := serviceName(t, res); got != "gomodel-pro" {
+		t.Fatalf("service.name = %q, want the product name", got)
+	}
+
+	res, err = newResource(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := serviceName(t, res); got != "gomodel" {
+		t.Fatalf("service.name = %q, want the gomodel default", got)
+	}
+
+	t.Setenv("OTEL_SERVICE_NAME", "from-env")
+	res, err = newResource(t.Context(), "gomodel-pro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := serviceName(t, res); got != "from-env" {
+		t.Fatalf("service.name = %q, want OTEL_SERVICE_NAME to override the product name", got)
 	}
 }

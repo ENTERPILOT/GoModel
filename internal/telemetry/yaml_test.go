@@ -35,7 +35,7 @@ func TestNewAppliesYAMLSettingsToExporter(t *testing.T) {
 		Protocol:        "http/protobuf",
 		Headers:         map[string]string{"authorization": "Bearer top secret"},
 		MetricsExporter: "none",
-	}, "/metrics")
+	}, "/metrics", "")
 	if err != nil {
 		t.Fatal(err)
 	}

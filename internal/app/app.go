@@ -117,6 +117,11 @@ type Config struct {
 	// DemoMode exposes a prominent dashboard warning for public demo instances.
 	// It does not change persistence or security behavior.
 	DemoMode bool
+
+	// ProductName names the running distribution (for example "gomodel-pro")
+	// and becomes the default OpenTelemetry service.name. Empty means
+	// "gomodel".
+	ProductName string
 }
 
 // applyExtensions snapshots a registered extension set into the server
@@ -304,7 +309,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// too must exist before the first provider is constructed.
 	if appCfg.OpenTelemetry.Enabled {
 		metricsEndpoint := config.ResolveMetricsEndpointWithPprof(appCfg.Metrics.Endpoint, appCfg.Server.PprofEnabled)
-		app.telemetry, err = telemetry.New(ctx, appCfg.OpenTelemetry, metricsEndpoint)
+		app.telemetry, err = telemetry.New(ctx, appCfg.OpenTelemetry, metricsEndpoint, cfg.ProductName)
 		if err != nil {
 			return fail("failed to initialize opentelemetry", err)
 		}

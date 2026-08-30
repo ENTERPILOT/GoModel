@@ -69,14 +69,13 @@ type Service struct {
 // collector does not need to be reachable for this call to succeed.
 // metricsEndpoint is the resolved Prometheus path, excluded from HTTP
 // instrumentation together with the other operational endpoints.
-func New(ctx context.Context, cfg config.OpenTelemetryConfig, metricsEndpoint string) (*Service, error) {
+// serviceName is the default service.name resource attribute — the product
+// name of the running distribution — used unless OTEL_SERVICE_NAME or the
+// YAML service_name overrides it. Empty falls back to "gomodel".
+func New(ctx context.Context, cfg config.OpenTelemetryConfig, metricsEndpoint, serviceName string) (*Service, error) {
 	exportEnvironment(cfg.Environment())
 
-	res, err := resource.New(ctx,
-		resource.WithAttributes(semconv.ServiceName(defaultServiceName)),
-		resource.WithTelemetrySDK(),
-		resource.WithFromEnv(),
-	)
+	res, err := newResource(ctx, serviceName)
 	if err != nil {
 		return nil, fmt.Errorf("detect OpenTelemetry resource: %w", err)
 	}
@@ -136,6 +135,20 @@ func (s *Service) Close() error {
 	metricsDone := make(chan error, 1)
 	go func() { metricsDone <- s.meterProvider.Shutdown(ctx) }()
 	return errors.Join(s.tracerProvider.Shutdown(ctx), <-metricsDone)
+}
+
+// newResource describes this process to the telemetry backend. Environment
+// detection runs last so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES
+// (including their YAML-exported values) override the built-in defaults.
+func newResource(ctx context.Context, serviceName string) (*resource.Resource, error) {
+	if serviceName == "" {
+		serviceName = defaultServiceName
+	}
+	return resource.New(ctx,
+		resource.WithAttributes(semconv.ServiceName(serviceName)),
+		resource.WithTelemetrySDK(),
+		resource.WithFromEnv(),
+	)
 }
 
 func newMiddleware(tp *sdkTrace.TracerProvider, mp *sdkMetric.MeterProvider, propagators propagation.TextMapPropagator, metricsEndpoint string) (echo.MiddlewareFunc, error) {

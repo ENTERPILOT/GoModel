@@ -68,7 +68,7 @@ wins over the YAML value.
 | Environment variable | `config.yaml` key | Default | Purpose |
 | --- | --- | --- | --- |
 | `OTEL_ENABLED` | `enabled` | `false` | Turn export on. |
-| `OTEL_SERVICE_NAME` | `service_name` | `gomodel` | `service.name` resource attribute. |
+| `OTEL_SERVICE_NAME` | `service_name` | product name (`gomodel`; `gomodel-pro` in Pro) | `service.name` resource attribute. |
 | `OTEL_RESOURCE_ATTRIBUTES` | `resource_attributes` | — | Extra resource attributes such as `deployment.environment`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `endpoint` | `http://localhost:4318` | Collector endpoint. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` override it per signal. |
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `protocol` | `http/protobuf` | `http/protobuf` or `grpc`; overridable per signal with `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` and `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`. |
