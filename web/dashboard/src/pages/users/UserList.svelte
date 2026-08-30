@@ -24,6 +24,7 @@
     <tbody>
       {#each store.visibleNodes as node (node.user_path)}
         {@const kind = userNodeKind(node, store.nodes)}
+        {@const copied = store.copiedPath === node.user_path && store.copyState.copied}
         <tr class:user-row-implied={!node.configured}>
           <td>
             <span
@@ -39,7 +40,6 @@
               {#if node.managed}
                 <span class="auth-key-status-badge auth-key-status-inactive">{m.users_managed()}</span>
               {/if}
-              {@const copied = store.copiedPath === node.user_path && store.copyState.copied}
               <TableActionButton
                 label={copied ? m.users_path_copied() : m.users_copy_path({ path: node.user_path })}
                 class="table-icon-btn user-copy-btn"
