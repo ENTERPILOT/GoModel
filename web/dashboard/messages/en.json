@@ -1073,6 +1073,8 @@
   "users_column_keys": "API keys",
   "users_column_description": "Description",
   "users_actions": "Actions",
+  "users_view_keys_action": "Show API keys under {path}",
+  "users_add_key_action": "Add API key for {path}",
   "users_copy_path": "Copy user path {path}",
   "users_path_copied": "Copied",
   "users_managed": "Config",

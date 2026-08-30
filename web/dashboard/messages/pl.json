@@ -1093,6 +1093,8 @@
   "users_column_keys": "Klucze API",
   "users_column_description": "Opis",
   "users_actions": "Akcje",
+  "users_view_keys_action": "Pokaż klucze API pod {path}",
+  "users_add_key_action": "Dodaj klucz API dla {path}",
   "users_copy_path": "Kopiuj User Path {path}",
   "users_path_copied": "Skopiowano",
   "users_managed": "Konfiguracja",

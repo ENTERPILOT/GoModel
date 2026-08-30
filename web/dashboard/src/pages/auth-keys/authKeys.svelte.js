@@ -4,6 +4,7 @@
 
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
+import { router } from "$lib/stores/router.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import { displayModelSelector } from "$lib/utils/modelSelectors.js";
@@ -85,6 +86,23 @@ class AuthKeysStore {
     } finally {
       this.loading = false;
     }
+  }
+
+  // Cross-page entry points used by the Users page: land on API Keys either
+  // filtered to one user path (its subtree, since the filter is a substring
+  // match) or with the create form open and that path prefilled.
+  showForUserPath(userPath) {
+    this.filter = String(userPath || "").trim();
+    this.showInactive = false;
+    router.navigate("auth-keys");
+  }
+
+  openFormForUserPath(userPath) {
+    router.navigate("auth-keys");
+    this.issuedValue = "";
+    this.formOpen = false;
+    this.openForm();
+    this.form.user_path = String(userPath || "").trim();
   }
 
   openForm() {

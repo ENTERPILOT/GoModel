@@ -3,9 +3,10 @@
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
+  import { authKeysStore } from "$pages/auth-keys/authKeys.svelte.js";
   import { usersStore as store } from "./users.svelte.js";
   import { userNodeKind, userPathDepth, userPathLeaf } from "./usersLogic.js";
-  import { CircleCheck, Copy, Folder, Pencil, Trash2, TriangleAlert, User } from "lucide";
+  import { CircleCheck, Copy, Folder, KeyRound, Pencil, Trash2, TriangleAlert, User } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -81,10 +82,28 @@
               </span>
             {/if}
           </td>
-          <td>{node.key_count || 0}</td>
+          <td>
+            {#if node.key_count > 0}
+              <button
+                type="button"
+                class="user-keys-link"
+                title={m.users_view_keys_action({ path: node.user_path })}
+                onclick={() => authKeysStore.showForUserPath(node.user_path)}
+              >{node.key_count}</button>
+            {:else}
+              0
+            {/if}
+          </td>
           <td class="user-description">{node.description || "—"}</td>
           <td class="user-actions-cell">
             <div class="user-row-actions">
+              <TableActionButton
+                label={m.users_add_key_action({ path: node.user_path })}
+                class="table-icon-btn"
+                onclick={() => authKeysStore.openFormForUserPath(node.user_path)}
+              >
+                <Icon icon={KeyRound} class="table-icon-svg" />
+              </TableActionButton>
               {#if !node.managed}
                 <TableActionButton
                   label={m.users_edit_action({ path: node.user_path })}
@@ -188,6 +207,17 @@
 
   .user-actions-cell {
     white-space: nowrap;
+  }
+
+  .user-keys-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .user-row-actions {
