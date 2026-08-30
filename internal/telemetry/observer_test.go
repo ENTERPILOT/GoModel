@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -127,6 +128,28 @@ func TestObserverRecordsUncertainCallResolvedAsBuffered(t *testing.T) {
 	}
 	if !hasMetric(t, reader, "gen_ai.client.operation.duration") {
 		t.Fatal("duration metric not recorded for a buffered response")
+	}
+}
+
+func TestObserverRecordsStreamThatEndsBeforeFirstChunkAsFailure(t *testing.T) {
+	hooks, recorder, reader := newTestHooks(t)
+	call := llmclient.RequestInfo{Provider: "openai", Model: "gpt-5", Operation: "chat", Stream: true}
+	ctx := hooks.OnRequestStart(t.Context(), call)
+	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 80*time.Millisecond, nil))
+	hooks.OnStreamEmpty(ctx, response(call, http.StatusOK, 120*time.Millisecond, io.EOF))
+
+	spans := recorder.Ended()
+	if len(spans) != 1 || spans[0].Status().Code != codes.Error {
+		t.Fatalf("spans = %+v, want one failed CLIENT span", spans)
+	}
+	if got := attributeMap(spans[0].Attributes())["error.type"]; got != "empty_stream" {
+		t.Fatalf("span error.type = %q, want empty_stream", got)
+	}
+	if !metricHasAttribute(t, reader, "gen_ai.client.operation.duration", "error.type", "empty_stream") {
+		t.Fatal("duration metric missing error.type=empty_stream")
+	}
+	if hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk") {
+		t.Fatal("empty stream must not record time-to-first-chunk")
 	}
 }
 

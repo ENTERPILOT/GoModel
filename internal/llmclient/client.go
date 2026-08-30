@@ -74,6 +74,12 @@ type Hooks struct {
 	// OnStreamFirstChunk is called once when a successful streaming response
 	// body first returns bytes. It is not called for empty or unread streams.
 	OnStreamFirstChunk func(ctx context.Context, info ResponseInfo)
+
+	// OnStreamEmpty is called once when a successful streaming response body
+	// ends (EOF or read error) before returning any bytes: the stream was
+	// established but never delivered. OnStreamFirstChunk is not called for
+	// it. Error carries the read error, io.EOF for a clean empty stream.
+	OnStreamEmpty func(ctx context.Context, info ResponseInfo)
 }
 
 // Config holds configuration for the LLM client
@@ -292,6 +298,24 @@ func (c *Client) finishStreamFirstChunk(scope requestScope, statusCode int) {
 	})
 }
 
+func (c *Client) finishStreamEmpty(scope requestScope, statusCode int, err error) {
+	if c.config.Hooks.OnStreamEmpty == nil {
+		return
+	}
+	c.config.Hooks.OnStreamEmpty(scope.ctx, ResponseInfo{
+		Provider:     c.config.ProviderName,
+		ProviderType: scope.requestInfo.ProviderType,
+		Model:        scope.requestInfo.Model,
+		Operation:    scope.requestInfo.Operation,
+		Endpoint:     scope.requestInfo.Endpoint,
+		Method:       scope.requestInfo.Method,
+		StatusCode:   statusCode,
+		Duration:     time.Since(scope.startedAt),
+		Stream:       true,
+		Error:        err,
+	})
+}
+
 func (c *Client) observeFirstChunk(scope requestScope, resp *http.Response, stream bool) {
 	if resp == nil || resp.Body == nil || !stream {
 		return
@@ -301,19 +325,28 @@ func (c *Client) observeFirstChunk(scope requestScope, resp *http.Response, stre
 		onFirstChunk: func() {
 			c.finishStreamFirstChunk(scope, resp.StatusCode)
 		},
+		onEmpty: func(err error) {
+			c.finishStreamEmpty(scope, resp.StatusCode, err)
+		},
 	}
 }
 
+// firstChunkReadCloser reports the first moment a stream body delivers bytes,
+// or that it ended before delivering any. Exactly one of the two fires.
 type firstChunkReadCloser struct {
 	io.ReadCloser
 	once         sync.Once
 	onFirstChunk func()
+	onEmpty      func(err error)
 }
 
 func (r *firstChunkReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
-	if n > 0 {
+	switch {
+	case n > 0:
 		r.once.Do(r.onFirstChunk)
+	case err != nil:
+		r.once.Do(func() { r.onEmpty(err) })
 	}
 	return n, err
 }

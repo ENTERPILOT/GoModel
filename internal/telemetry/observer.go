@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -26,8 +27,9 @@ var durationBuckets = []float64{0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 
 // Buffered calls get a CLIENT span opened at request start and closed at
 // completion. Streaming calls intentionally get no span at stream
 // establishment — the client only knows that response headers arrived — and
-// record time to first chunk instead; a stream that fails to establish still
-// gets a retrospective failure span so the error is traced.
+// record time to first chunk instead; a stream that fails to establish, or
+// ends before its first byte, still gets a retrospective failure span so the
+// error is traced.
 type observer struct {
 	tracer           trace.Tracer
 	duration         apiMetric.Float64Histogram
@@ -74,6 +76,7 @@ func (o *observer) hooks() llmclient.Hooks {
 		OnRequestStart:     o.start,
 		OnRequestEnd:       o.end,
 		OnStreamFirstChunk: o.firstChunk,
+		OnStreamEmpty:      o.streamEmpty,
 	}
 }
 
@@ -152,6 +155,20 @@ func (o *observer) firstChunk(ctx context.Context, info llmclient.ResponseInfo) 
 	o.timeToFirstChunk.Record(ctx, info.Duration.Seconds(), apiMetric.WithAttributes(state.attrs...))
 }
 
+// errEmptyStream classifies a stream that was established but ended before
+// its first byte. It is a failure from the caller's point of view.
+var errEmptyStream = errors.New("stream ended before its first chunk")
+
+// streamEmpty completes a stream that never delivered as a failed call: the
+// duration metric and a retrospective span carry error.type=empty_stream (or
+// the transport error class when the read failed outright).
+func (o *observer) streamEmpty(ctx context.Context, info llmclient.ResponseInfo) {
+	if info.Error == nil || errors.Is(info.Error, io.EOF) {
+		info.Error = errEmptyStream
+	}
+	o.end(ctx, info)
+}
+
 func callAttributes(info llmclient.RequestInfo, operation string) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		attribute.String("gen_ai.operation.name", operation),
@@ -225,6 +242,8 @@ func resultErrorType(info llmclient.ResponseInfo) string {
 		return ""
 	case errors.Is(info.Error, context.DeadlineExceeded):
 		return "timeout"
+	case errors.Is(info.Error, errEmptyStream):
+		return "empty_stream"
 	default:
 		return "network_error"
 	}

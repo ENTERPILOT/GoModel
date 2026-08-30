@@ -192,6 +192,42 @@ func TestOpenTelemetryExport(t *testing.T) {
 		}
 	})
 
+	t.Run("stream that ends before its first chunk is exported as a failure", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodPost, gateway+"/p/vllm/chat/completions", strings.NewReader(`{"model":"otel-empty-stream","stream":true}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("send passthrough stream: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("empty stream returned %d: %s", resp.StatusCode, body)
+		}
+
+		expected := map[string]any{
+			"error.type":            "empty_stream",
+			"gen_ai.operation.name": "chat",
+			"gen_ai.request.model":  "otel-empty-stream",
+			"gomodel.provider.name": "vllm-eu",
+		}
+		if !collector.waitFor(5*time.Second, func() bool {
+			return collector.hasHistogramPoint("gen_ai.client.operation.duration", expected)
+		}) {
+			t.Fatal("empty stream did not export a failed duration metric")
+		}
+		if !collector.waitFor(5*time.Second, func() bool {
+			return collector.findSpan(func(span *tracepb.Span) bool {
+				return span.Name == "chat otel-empty-stream" && attributesContain(span.Attributes, expected)
+			}) != nil
+		}) {
+			t.Fatal("empty stream did not export a failure span")
+		}
+	})
+
 	t.Run("operational endpoints are excluded", func(t *testing.T) {
 		for _, path := range []string{"/health", "/health/ready", "/monitoring/metrics", "/debug/pprof/"} {
 			resp, err := http.Get(gateway + path)
@@ -236,7 +272,7 @@ func startOTelGateway(t *testing.T, collectorURL, upstreamURL string) string {
 		"GOMODEL_VERSION_CHECK_ENABLED":   "false",
 		"VLLM_EU_BASE_URL":                upstreamURL,
 		"VLLM_EU_API_KEY":                 "sk-e2e",
-		"VLLM_EU_MODELS":                  "otel-buffered,otel-stream,otel-failure,otel-passthrough",
+		"VLLM_EU_MODELS":                  "otel-buffered,otel-stream,otel-failure,otel-passthrough,otel-empty-stream",
 		"CONFIGURED_PROVIDER_MODELS_MODE": "allowlist",
 		"RETRY_MAX_RETRIES":               "0",
 		"METRICS_ENABLED":                 "true",
@@ -293,6 +329,11 @@ func otelStubUpstream(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			fmt.Fprint(w, `{"error":{"message":"upstream-secret-never-export","type":"rate_limit_error"}}`)
+			return
+		}
+		if request.Model == "otel-empty-stream" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 		if request.Stream {

@@ -55,6 +55,13 @@ func (o callObservation) firstResponseChunk() {
 	o.hooks.OnStreamFirstChunk(o.ctx, o.responseInfo(http.StatusOK, nil))
 }
 
+func (o callObservation) streamEmpty(err error) {
+	if o.hooks.OnStreamEmpty == nil {
+		return
+	}
+	o.hooks.OnStreamEmpty(o.ctx, o.responseInfo(http.StatusOK, err))
+}
+
 func (o callObservation) responseInfo(statusCode int, err error) llmclient.ResponseInfo {
 	return llmclient.ResponseInfo{
 		Provider:   o.info.Provider,
@@ -73,19 +80,26 @@ func observedStream(body io.ReadCloser, observation callObservation) io.ReadClos
 	return &observedReadCloser{
 		ReadCloser:  body,
 		onFirstRead: observation.firstResponseChunk,
+		onEmpty:     observation.streamEmpty,
 	}
 }
 
+// observedReadCloser reports the first delivered bytes, or that the stream
+// ended before delivering any. Exactly one of the two fires.
 type observedReadCloser struct {
 	io.ReadCloser
 	once        sync.Once
 	onFirstRead func()
+	onEmpty     func(err error)
 }
 
 func (r *observedReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
-	if n > 0 {
+	switch {
+	case n > 0:
 		r.once.Do(r.onFirstRead)
+	case err != nil:
+		r.once.Do(func() { r.onEmpty(err) })
 	}
 	return n, err
 }

@@ -148,14 +148,14 @@ Each logical call to a model provider is instrumented with:
 | `gen_ai.provider.name` | `openai` | Semantic provider name: `openai`, `anthropic`, `aws.bedrock`, `gcp.vertex_ai`, `gcp.gemini`, `azure.ai.openai`, `x_ai`, … or `unknown`. |
 | `gomodel.provider.name` | `openai-eu` | The exact provider name from your GoModel configuration. |
 | `gen_ai.request.stream` | `true` | Present only on streaming calls. |
-| `error.type` | `429`, `timeout`, `network_error` | Present only on failures. |
+| `error.type` | `429`, `timeout`, `network_error`, `empty_stream` | Present only on failures; `empty_stream` marks a stream that ended before its first chunk. |
 | `http.response.status_code` | `200` | Upstream status. |
 
 Metrics are histograms in seconds, carrying the same attributes:
 
 | Metric | Recorded for |
 | --- | --- |
-| `gen_ai.client.operation.duration` | Every buffered call, and every streaming call that fails before the stream is established. |
+| `gen_ai.client.operation.duration` | Every buffered call, and every streaming call that fails before the stream is established or ends before its first chunk. |
 | `gen_ai.client.operation.time_to_first_chunk` | Every successful streaming call, measured until the first response bytes arrive. |
 
 A buffered call produces a `CLIENT` span named `<operation> <model>`, such as
@@ -167,7 +167,8 @@ Streaming calls do not get a client span: the gateway can only observe when
 the stream was established, not when the model finished, and a span ending at
 the headers would misreport latency. The enclosing HTTP server span still
 covers the full stream lifetime as seen by the client. A stream that fails to
-establish gets a retrospective failure span, so errors are always traced.
+establish, or ends before delivering its first chunk, gets a retrospective
+failure span, so errors are always traced.
 
 ## Privacy
 
