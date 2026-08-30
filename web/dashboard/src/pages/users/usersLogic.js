@@ -5,7 +5,7 @@ import * as m from "../../lib/paraglide/messages.js";
 import { parseModelSelectors } from "../../lib/utils/modelSelectors.js";
 
 export function defaultUserForm() {
-  return { user_path: "", allowed_models: "", description: "" };
+  return { user_path: "", allowed_models: [], description: "" };
 }
 
 // userPathDepth counts the segments of a canonical path ("/" is 0).

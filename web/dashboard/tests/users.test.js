@@ -33,6 +33,10 @@ function node(overrides) {
   };
 }
 
+test("parseModelSelectors accepts an array of entries", () => {
+  assert.deepEqual(parseModelSelectors(["anthropic/*", " gpt-4o, anthropic/*"]), ["anthropic/*", "gpt-4o"]);
+});
+
 test("parseModelSelectors splits on commas and newlines, trims, and de-duplicates", () => {
   assert.deepEqual(
     parseModelSelectors(" anthropic/* ,openai/gpt-4o\n\n gpt-4o, anthropic/*"),
@@ -102,10 +106,11 @@ test("userPathValidationError mirrors the backend rules", () => {
 });
 
 test("buildUpsertUserPayload prefixes the slash, parses selectors, and drops an empty description", () => {
+  assert.deepEqual(defaultUserForm().allowed_models, []);
   const { payload, error } = buildUpsertUserPayload({
     ...defaultUserForm(),
     user_path: "acme/eng",
-    allowed_models: "anthropic/*\nopenai/gpt-4o",
+    allowed_models: ["anthropic/*", "openai/gpt-4o, anthropic/*"],
     description: "  ",
   });
   assert.equal(error, undefined);

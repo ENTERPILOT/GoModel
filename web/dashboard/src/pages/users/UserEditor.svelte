@@ -1,8 +1,8 @@
 <script>
   // Create/edit modal for one user-path policy (EditorDialog shell). The
-  // allowlist is free text; the quick-add picker (the shared SearchSelect)
-  // appends a provider wildcard or a concrete model from the inventory. Its
-  // value is deliberately not bound so it reads "Quick add…" after each pick.
+  // allowlist is a multi-select over the shared model inventory (provider
+  // wildcards first, then concrete models); custom selectors can be typed
+  // into its search box, comma-separated.
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
@@ -68,31 +68,21 @@
         {m.users_allowed_models_help()}
       {/snippet}
     </InlineHelpSection>
-    <textarea
-      id="user-allowed-models"
-      rows="5"
-      placeholder={"anthropic/*\nopenai/gpt-4o"}
-      aria-describedby="user-allowed-models-help-copy"
-      data-modal-autofocus={store.editingPath ? true : undefined}
-      bind:value={store.form.allowed_models}
-    ></textarea>
+    <div class="user-allowed-models-select">
+      <SearchSelect
+        id="user-allowed-models"
+        options={selectorOptions}
+        multiple
+        bind:values={store.form.allowed_models}
+        placeholder={m.users_quick_add()}
+        searchPlaceholder={m.users_quick_add_search()}
+        ariaLabel={m.users_allowed_models()}
+        allowCustom
+        mono
+      />
+    </div>
     {#if noModelsRemain}
       <p class="form-error user-no-models-warning" role="alert">{m.users_no_models_warning()}</p>
-    {/if}
-    {#if selectorOptions.length > 0}
-      <div class="user-quick-add">
-        <SearchSelect
-          id="user-allowed-models-quick-add"
-          options={selectorOptions}
-          value=""
-          onchange={(value) => store.appendSelector(value)}
-          placeholder={m.users_quick_add()}
-          searchPlaceholder={m.users_quick_add_search()}
-          ariaLabel={m.users_quick_add()}
-          allowCustom
-          mono
-        />
-      </div>
     {/if}
   </div>
 
@@ -107,8 +97,9 @@
 </EditorDialog>
 
 <style>
-  .user-quick-add {
-    margin-top: 8px;
+  .user-allowed-models-select :global(.search-select) {
+    display: flex;
+    width: 100%;
   }
 
   .user-no-models-warning {

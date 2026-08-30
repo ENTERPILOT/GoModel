@@ -3,11 +3,13 @@
 // to the backend as an array; the backend canonicalizes "anthropic/*" to
 // "anthropic/" and "*" to "/", so the UI shows the wildcard forms back.
 
-// parseModelSelectors splits free text into a trimmed, de-duplicated list
-// (order preserved).
+// parseModelSelectors splits free text (or an array of entries, each of
+// which may itself hold comma-separated values) into a trimmed,
+// de-duplicated list (order preserved).
 export function parseModelSelectors(value) {
+  const text = Array.isArray(value) ? value.join(",") : String(value || "");
   const selectors = [];
-  for (const piece of String(value || "").split(/[,\n]/)) {
+  for (const piece of text.split(/[,\n]/)) {
     const selector = piece.trim();
     if (selector && !selectors.includes(selector)) {
       selectors.push(selector);

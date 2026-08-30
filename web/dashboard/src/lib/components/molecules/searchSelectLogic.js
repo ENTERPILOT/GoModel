@@ -73,3 +73,27 @@ export function moveActiveIndex(index, delta, length) {
   if (index < 0) return delta >= 0 ? 0 : length - 1;
   return (((index + delta) % length) + length) % length;
 }
+
+/**
+ * Split a typed multi-select entry into trimmed, de-duplicated values:
+ * "anthropic/, openai/gpt-5" -> ["anthropic/", "openai/gpt-5"].
+ */
+export function splitSearchValues(query) {
+  const values = [];
+  for (const piece of String(query || "").split(/[,\n]/)) {
+    const value = piece.trim();
+    if (value && !values.includes(value)) values.push(value);
+  }
+  return values;
+}
+
+/**
+ * Toggle `value` in a multi-select's values (append when absent, remove when
+ * present). Returns a new array; the input is never mutated.
+ */
+export function toggleSearchValue(values, value) {
+  const list = Array.isArray(values) ? values : [];
+  const next = String(value ?? "");
+  if (!next) return list.slice();
+  return list.includes(next) ? list.filter((item) => item !== next) : list.concat(next);
+}

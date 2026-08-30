@@ -6,6 +6,8 @@ import {
   filterSearchOptions,
   moveActiveIndex,
   normalizeSearchOption,
+  splitSearchValues,
+  toggleSearchValue,
 } from "../src/lib/components/molecules/searchSelectLogic.js";
 import { marqueeDuration } from "../src/lib/utils/attachments.js";
 
@@ -79,4 +81,17 @@ test("moveActiveIndex wraps around and enters from either end", () => {
   assert.equal(moveActiveIndex(0, -1, 3), 2);
   assert.equal(moveActiveIndex(1, 1, 3), 2);
   assert.equal(moveActiveIndex(0, 1, 0), -1);
+});
+
+test("splitSearchValues splits a typed multi-select entry on commas and newlines", () => {
+  assert.deepEqual(splitSearchValues(" anthropic/, openai/gpt-5\nanthropic/ "), ["anthropic/", "openai/gpt-5"]);
+  assert.deepEqual(splitSearchValues(""), []);
+});
+
+test("toggleSearchValue appends absent values and removes present ones without mutating", () => {
+  const values = ["a"];
+  assert.deepEqual(toggleSearchValue(values, "b"), ["a", "b"]);
+  assert.deepEqual(toggleSearchValue(values, "a"), []);
+  assert.deepEqual(toggleSearchValue(values, ""), ["a"]);
+  assert.deepEqual(values, ["a"]);
 });
