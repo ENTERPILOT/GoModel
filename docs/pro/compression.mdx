@@ -20,13 +20,16 @@ agentic coding, chat, and tool-heavy workloads.
   reversibly. The model receives the same information; nothing is summarized
   or dropped. The single lossy option, tool-result pruning, is a separate
   policy that is off by default.
-- **No prompt-cache degradation observed.** Because the previously sent
-  prefix of a session is replayed byte-for-byte and only new messages are
-  rewritten, provider prompt caches keep hitting across turns.
-- **Real savings of 2%–20%**, depending on the use case. Agents that re-read
-  files, replay tool output, or carry long histories sit at the top of that
-  range; short, non-repetitive chat sits at the bottom, where the compressor
-  simply forwards requests unchanged.
+- **No prompt-cache degradation.** Because the previously sent prefix of a
+  session is replayed byte-for-byte and only new messages are rewritten,
+  provider prompt caches keep hitting across turns. Testers actually noticed
+  about a 2% *increase* in prompt-cache hits, since shorter, more stable
+  requests fit the cache better — which adds savings on top of the compression
+  itself.
+- **Real savings of 5%–15%** for our testers, depending on the use case.
+  Agents that re-read files, replay tool output, or carry long histories sit
+  at the top of that range; short, non-repetitive chat sits at the bottom,
+  where the compressor simply forwards requests unchanged.
 - **Full control.** Choose the level per gateway or per request, exclude
   models by glob, protect pre-existing history with `new_messages_only`, keep
   source code verbatim, and inspect every rewrite through response headers,
