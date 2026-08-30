@@ -132,6 +132,10 @@ sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN labels JSON;" 2>/dev/null |
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN dashboard_access INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE audit_logs ADD COLUMN session_id TEXT;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN source TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN last_reset_at INTEGER;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN per_child INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN allowed_models JSON;" 2>/dev/null || true
 
 # make demo seeds before app startup, so migrate the rate-limit table here
 # when the database predates scoped user-path/provider/model rules.
@@ -162,6 +166,38 @@ SELECT
 FROM rate_limits_pre_scope;
 DROP TABLE rate_limits_pre_scope;
 DROP INDEX IF EXISTS idx_rate_limits_user_path;
+COMMIT;
+SQL
+fi
+
+# Keep demo seeding compatible with databases created before budget scopes.
+# The application performs the same upgrade during startup, but the seeder can
+# be run before the gateway starts.
+has_budget_subject="$(sqlite3 "$db_path" "SELECT count(*) FROM pragma_table_info('budgets') WHERE name = 'subject';")"
+has_budget_user_path="$(sqlite3 "$db_path" "SELECT count(*) FROM pragma_table_info('budgets') WHERE name = 'user_path';")"
+if [[ "$has_budget_subject" == "0" && "$has_budget_user_path" == "1" ]]; then
+  sqlite3 "$db_path" <<'SQL'
+.bail on
+.timeout 10000
+BEGIN IMMEDIATE;
+ALTER TABLE budgets RENAME TO budgets_pre_scope;
+CREATE TABLE budgets (
+  scope TEXT NOT NULL DEFAULT 'user_path',
+  subject TEXT NOT NULL,
+  per_child INTEGER NOT NULL DEFAULT 0,
+  period_seconds INTEGER NOT NULL,
+  amount REAL NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  last_reset_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (scope, subject, period_seconds)
+);
+INSERT INTO budgets (scope, subject, period_seconds, amount, source, last_reset_at, created_at, updated_at)
+SELECT 'user_path', user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at
+FROM budgets_pre_scope;
+DROP TABLE budgets_pre_scope;
+DROP INDEX IF EXISTS idx_budgets_user_path;
 COMMIT;
 SQL
 fi
@@ -244,14 +280,16 @@ CREATE TABLE IF NOT EXISTS audit_log_attempts (
 );
 
 CREATE TABLE IF NOT EXISTS budgets (
-  user_path TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'user_path',
+  subject TEXT NOT NULL,
+  per_child INTEGER NOT NULL DEFAULT 0,
   period_seconds INTEGER NOT NULL,
   amount REAL NOT NULL,
   source TEXT NOT NULL DEFAULT '',
   last_reset_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  PRIMARY KEY (user_path, period_seconds)
+  PRIMARY KEY (scope, subject, period_seconds)
 );
 
 CREATE TABLE IF NOT EXISTS budget_settings (
@@ -294,12 +332,21 @@ CREATE TABLE IF NOT EXISTS auth_keys (
   description TEXT NOT NULL DEFAULT '',
   user_path TEXT,
   labels JSON,
+  allowed_models JSON,
   dashboard_access INTEGER NOT NULL DEFAULT 0,
   redacted_value TEXT NOT NULL,
   secret_hash TEXT NOT NULL UNIQUE,
   enabled INTEGER NOT NULL DEFAULT 1,
   expires_at INTEGER,
   deactivated_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  user_path TEXT PRIMARY KEY,
+  allowed_models TEXT NOT NULL DEFAULT '[]',
+  description TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -339,7 +386,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_user_path ON audit_logs(user_path);
 CREATE INDEX IF NOT EXISTS idx_audit_cache_type ON audit_logs(cache_type);
 CREATE INDEX IF NOT EXISTS idx_audit_session_timestamp ON audit_logs(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_attempts_log_seq ON audit_log_attempts(audit_log_id, seq);
-CREATE INDEX IF NOT EXISTS idx_budgets_user_path ON budgets(user_path);
+CREATE INDEX IF NOT EXISTS idx_budgets_subject ON budgets(scope, subject);
 CREATE INDEX IF NOT EXISTS idx_budgets_period_seconds ON budgets(period_seconds);
 CREATE INDEX IF NOT EXISTS idx_rate_limits_subject ON rate_limits(scope, subject);
 CREATE INDEX IF NOT EXISTS idx_mcp_servers_enabled ON mcp_servers(enabled);
@@ -358,6 +405,7 @@ DELETE FROM budgets WHERE source = '${prefix}';
 DELETE FROM rate_limits WHERE source = '${prefix}';
 DELETE FROM auth_keys WHERE id GLOB '${prefix}-key-*';
 DELETE FROM virtual_models WHERE description GLOB '${prefix}:*';
+DELETE FROM users WHERE description GLOB '${prefix}:*';
 
 DROP TABLE IF EXISTS temp.demo_days;
 CREATE TEMP TABLE demo_days AS
@@ -538,15 +586,29 @@ prompt_parts AS (
     END AS prompt_cache_write_tokens
   FROM rewrite_decisions
 ),
--- Requests in the same 3-hour window on the same day, user path, and template
--- share one session key, so audit entries group into multi-turn threads of
--- organic sizes. The key stays below 2^31 so the hex mixing below cannot
--- overflow SQLite's 64-bit integer arithmetic.
+-- Conversational requests in the same six-hour window on the same day, user
+-- path, and endpoint share a session key. Grouping by endpoint (rather than
+-- provider/model) lets a conversation retain its thread when a virtual model
+-- routes a later turn elsewhere. The key stays below 2^31 so the hex mixing
+-- below cannot overflow SQLite's 64-bit integer arithmetic.
 session_keys AS (
   SELECT
     *,
-    (((day_idx * 13 + (second_of_day / 10800)) * 131071 + path_min) * 8191 + template_min) % 2147483647 AS session_key
+    (((day_idx * 7 + (second_of_day / 21600)) * 131071 + path_min) * 8191 +
+      CASE endpoint
+        WHEN '/v1/chat/completions' THEN 1
+        WHEN '/v1/responses' THEN 2
+        WHEN '/v1/messages' THEN 3
+        ELSE 0
+      END) % 2147483647 AS session_key
   FROM prompt_parts
+),
+session_turns AS (
+  SELECT
+    *,
+    row_number() OVER (PARTITION BY session_key ORDER BY second_of_day, slot_idx) AS session_turn,
+    lag(slot_idx) OVER (PARTITION BY session_key ORDER BY second_of_day, slot_idx) AS previous_session_slot_idx
+  FROM session_keys
 )
 SELECT
   *,
@@ -555,9 +617,9 @@ SELECT
     WHEN rewrite_hit = 1 THEN CAST(input_tokens * (8 + ((token_noise / 17) % 23)) / 100 AS INTEGER)
     ELSE 0
   END AS rewrite_tokens_saved,
-  -- Session ids mirror the detector's real formats: chat and responses traffic
-  -- always carries a content-derived auto id, most /v1/messages traffic sends
-  -- a client id that arrives path-scoped, and the rest stays sessionless.
+  -- Session ids use the detector's supported explicit body signal. Chat and
+  -- Responses traffic always participates; most /v1/messages traffic carries
+  -- a path-scoped client id, and the rest stays sessionless.
   CASE
     WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses') THEN
       'auto-' || printf('%08x%08x%08x%08x',
@@ -578,7 +640,7 @@ SELECT
   '${prefix}-audit-' || day_idx || '-' || slot_idx AS audit_id,
   '${prefix}-req-' || day_idx || '-' || slot_idx AS request_id,
   '${prefix}-provider-' || day_idx || '-' || slot_idx AS provider_id
-FROM session_keys;
+FROM session_turns;
 
 INSERT INTO usage (
   id, request_id, provider_id, timestamp, model, provider, provider_name,
@@ -760,11 +822,12 @@ SELECT
     'request_body', json(CASE
       WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian') THEN json_object(
         'model', provider_name || '/' || model,
+        'session_id', session_id,
         'messages', json_array(
           json_object('role', 'system', 'content', 'You are a concise assistant for internal demo traffic. Respect the user path and return actionable JSON when useful.'),
           json_object('role', 'user', 'content', 'Summarize daily gateway usage for ' || user_path || ' and call out cache savings, error spikes, and next actions.'),
           json_object('role', 'assistant', 'content', 'I will compare current traffic against the recent baseline and identify cost or latency anomalies.'),
-          json_object('role', 'user', 'content', 'Use request id ' || request_id || ' and include provider ' || provider_name || '.')
+          json_object('role', 'user', 'content', 'Continue session turn ' || session_turn || ' for ' || user_path || '; include provider ' || provider_name || '.')
         ),
         'temperature', round(0.15 + ((token_noise % 70) / 100.0), 2),
         'max_tokens', output_tokens,
@@ -777,21 +840,26 @@ SELECT
       )
       WHEN label = 'responses' THEN json_object(
         'model', provider_name || '/' || model,
+        'session_id', session_id,
         'input', json_array(
           json_object('role', 'system', 'content', 'You are GoModel demo analysis worker.'),
-          json_object('role', 'user', 'content', 'Create a short incident-style report for ' || user_path || ' using token totals and cache telemetry.')
+          json_object('role', 'user', 'content', 'Create a short incident-style report for ' || user_path || ' on session turn ' || session_turn || ' using token totals and cache telemetry.')
         ),
         'instructions', 'Return sections named summary, observations, and recommendation.',
-        'previous_response_id', CASE WHEN slot_idx > 0 AND slot_idx % 7 = 0 THEN '${prefix}-response-' || day_idx || '-' || (slot_idx - 1) ELSE NULL END,
+        'previous_response_id', CASE
+          WHEN previous_session_slot_idx IS NOT NULL THEN '${prefix}-response-' || day_idx || '-' || previous_session_slot_idx
+          ELSE NULL
+        END,
         'max_output_tokens', output_tokens,
         'metadata', json_object('demo', json('true'), 'request_id', request_id)
       )
       WHEN label = 'messages' THEN json_object(
         'model', provider_name || '/' || model,
+        'session_id', session_id,
         'system', 'You help the engineering and sales teams reason about AI gateway telemetry.',
         'messages', json_array(
           json_object('role', 'user', 'content', json_array(
-            json_object('type', 'text', 'text', 'Draft a weekly update for ' || user_path || ' with token volume, model mix, cache behavior, and budget risk.')
+            json_object('type', 'text', 'text', 'Continue weekly update turn ' || session_turn || ' for ' || user_path || ' with token volume, model mix, cache behavior, and budget risk.')
           ))
         ),
         'max_tokens', output_tokens,
@@ -857,7 +925,7 @@ SELECT
           'finish_reason', 'stop',
           'message', json_object(
             'role', 'assistant',
-            'content', 'Usage for ' || user_path || ' is healthy. Total tokens were ' || total_tokens || ', with cache mode ' || coalesce(cache_type, CASE WHEN prompt_cache_hit = 1 THEN 'prompt-cache' ELSE 'uncached' END) || '.'
+            'content', 'Session turn ' || session_turn || ' for ' || user_path || ' is healthy. Total tokens were ' || total_tokens || ', with cache mode ' || coalesce(cache_type, CASE WHEN prompt_cache_hit = 1 THEN 'prompt-cache' ELSE 'uncached' END) || '.'
           )
         )),
         'usage', json_object(
@@ -878,7 +946,7 @@ SELECT
           'role', 'assistant',
           'content', json_array(json_object(
             'type', 'output_text',
-            'text', 'Summary: ' || user_path || ' generated ' || total_tokens || ' tokens. Observation: cache savings were ' || CASE WHEN cache_type IS NOT NULL OR prompt_cache_hit = 1 THEN 'visible' ELSE 'not present' END || '. Recommendation: keep monitoring budget drift.'
+            'text', 'Turn ' || session_turn || ': ' || user_path || ' generated ' || total_tokens || ' tokens. Observation: cache savings were ' || CASE WHEN cache_type IS NOT NULL OR prompt_cache_hit = 1 THEN 'visible' ELSE 'not present' END || '. Recommendation: keep monitoring budget drift.'
           ))
         )),
         'usage', json_object(
@@ -895,7 +963,7 @@ SELECT
         'model', provider_name || '/' || model,
         'content', json_array(json_object(
           'type', 'text',
-          'text', 'Weekly update for ' || user_path || ': model usage is balanced, semantic cache checks are active, and budget burn is within demo limits.'
+          'text', 'Weekly update turn ' || session_turn || ' for ' || user_path || ': model usage is balanced, semantic cache checks are active, and budget burn is within demo limits.'
         )),
         'stop_reason', 'end_turn',
         'usage', json_object(
@@ -1027,9 +1095,11 @@ WITH budget_rows AS (
   UNION ALL
   SELECT user_path, 2592000 AS period_seconds, monthly_amount AS amount FROM demo_budget_paths
 )
-INSERT INTO budgets (user_path, period_seconds, amount, source, last_reset_at, created_at, updated_at)
+INSERT INTO budgets (scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at)
 SELECT
+  'user_path',
   user_path,
+  0,
   period_seconds,
   amount,
   '${prefix}',
@@ -1041,7 +1111,30 @@ SELECT
   ${seed_utc_epoch}
 FROM budget_rows
 WHERE true
-ON CONFLICT(user_path, period_seconds) DO UPDATE SET
+ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
+  per_child = excluded.per_child,
+  amount = excluded.amount,
+  source = excluded.source,
+  last_reset_at = excluded.last_reset_at,
+  updated_at = excluded.updated_at;
+
+-- Label-scoped budgets cap spend for one request label (as seeded on usage
+-- rows) across all user paths. Per-child quota templates are not seeded: they
+-- require a GoModel Pro entitlement, and the gateway refuses to start when a
+-- per-child budget exists without it.
+INSERT INTO budgets (scope, subject, per_child, period_seconds, amount, source, last_reset_at, created_at, updated_at)
+VALUES
+  ('label', 'env:prod', 0, 86400, 260.00, '${prefix}',
+    strftime('%s', CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE date('${end_date}') END),
+    ${seed_utc_epoch}, ${seed_utc_epoch}),
+  ('label', 'env:prod', 0, 2592000, 6800.00, '${prefix}',
+    strftime('%s', CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE date('${end_date}') END),
+    ${seed_utc_epoch}, ${seed_utc_epoch}),
+  ('label', 'experiment:rag-v2', 0, 604800, 120.00, '${prefix}',
+    strftime('%s', CASE WHEN '${end_date}' = '' THEN date(${seed_utc_epoch}, 'unixepoch') ELSE date('${end_date}') END),
+    ${seed_utc_epoch}, ${seed_utc_epoch})
+ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
+  per_child = excluded.per_child,
   amount = excluded.amount,
   source = excluded.source,
   last_reset_at = excluded.last_reset_at,
@@ -1146,10 +1239,11 @@ VALUES
 -- Active keys use fresh random secrets on every seed. Their plaintext values
 -- are printed once below, matching the admin API's issue-once behavior. The
 -- engineering key carries dashboard_access so the per-key admin-API toggle
--- shows both states.
+-- shows both states, and the sales key carries a model allowlist so the
+-- per-key access controls show a restricted key next to unrestricted ones.
 INSERT INTO auth_keys (
-  id, name, description, user_path, labels, dashboard_access, redacted_value,
-  secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
+  id, name, description, user_path, labels, allowed_models, dashboard_access,
+  redacted_value, secret_hash, enabled, expires_at, deactivated_at, created_at, updated_at
 )
 VALUES
   (
@@ -1158,6 +1252,7 @@ VALUES
     'Demo key for interactive agent and research requests.',
     '/agents/team1',
     json_array('env:demo', 'team:agents-1'),
+    NULL,
     0,
     '${demo_key_redacted_team1}',
     '${demo_key_hash_team1}',
@@ -1170,6 +1265,7 @@ VALUES
     'Demo key for engineering evaluations and automated jobs.',
     '/engineering/ai',
     json_array('env:demo', 'team:engineering', 'priority:high'),
+    NULL,
     1,
     '${demo_key_redacted_engineering}',
     '${demo_key_hash_engineering}',
@@ -1182,10 +1278,50 @@ VALUES
     'Demo key for CRM summaries and sales-assistant traffic.',
     '/sales/john',
     json_array('env:demo', 'team:sales'),
+    json_array('openai/'),
     0,
     '${demo_key_redacted_sales}',
     '${demo_key_hash_sales}',
     1, NULL, NULL,
+    strftime('%s', 'now'), strftime('%s', 'now')
+  );
+
+-- Per-user-path access policies (the Users page). A node's non-empty allowlist
+-- bounds its whole subtree: children and keys can narrow but never widen it.
+-- Selectors show every canonical form: provider-wide "provider/", exact
+-- "provider/model", and model-wide "model". An empty list keeps the node
+-- unrestricted while still carrying a description. INSERT OR IGNORE leaves
+-- operator-created policies for the same path untouched.
+INSERT OR IGNORE INTO users (user_path, allowed_models, description, created_at, updated_at)
+VALUES
+  (
+    '/agents',
+    json_array('openai/', 'groq/', 'gemini/', 'bailian/'),
+    '${prefix}: agent teams stay on fast, low-cost chat providers',
+    strftime('%s', 'now'), strftime('%s', 'now')
+  ),
+  (
+    '/agents/team1/research',
+    json_array('gemini/', 'openai/gpt-5-nano-2025-08-07'),
+    '${prefix}: research narrows its group allowlist to evaluation models',
+    strftime('%s', 'now'), strftime('%s', 'now')
+  ),
+  (
+    '/engineering',
+    '[]',
+    '${prefix}: engineering group node without model restrictions',
+    strftime('%s', 'now'), strftime('%s', 'now')
+  ),
+  (
+    '/engineering/ai/bot/batch',
+    json_array('groq/llama-3.1-8b-instant', 'qwen-flash'),
+    '${prefix}: batch jobs are pinned to the cheapest chat models',
+    strftime('%s', 'now'), strftime('%s', 'now')
+  ),
+  (
+    '/sales',
+    json_array('openai/', 'anthropic/claude-haiku-4-5-20251001'),
+    '${prefix}: sales uses OpenAI plus Claude Haiku for summaries',
     strftime('%s', 'now'), strftime('%s', 'now')
   );
 
@@ -1297,7 +1433,10 @@ FROM (
 );
 SELECT 'attempt_rows', count(*) FROM audit_log_attempts WHERE audit_log_id GLOB '${prefix}-*';
 SELECT 'budget_rows', count(*) FROM budgets WHERE source = '${prefix}';
+SELECT 'budget_scope_mix', scope, count(*)
+FROM budgets WHERE source = '${prefix}' GROUP BY 2 ORDER BY 2;
 SELECT 'rate_limit_rows', count(*) FROM rate_limits WHERE source = '${prefix}';
+SELECT 'user_policy_rows', count(*) FROM users WHERE description GLOB '${prefix}:*';
 SELECT 'mcp_server_rows', count(*) FROM mcp_servers
 WHERE name GLOB 'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-*';
 SELECT 'auth_key_rows', count(*) FROM auth_keys WHERE id GLOB '${prefix}-key-*';
@@ -1350,6 +1489,12 @@ datasets side by side, use a different DEMO_SEED_PREFIX.
 Audit entries carry session ids, so the Audit Logs page groups them into
 threads by default ("Group by session"); failed and retried requests carry
 attempt trails visible in the request drawer.
+
+The Users page shows per-user-path model allowlists (groups bound their
+subtrees; /agents/team1/research and /engineering/ai/bot/batch narrow their
+groups), and the Sales key carries a per-key allowlist on top of the /sales
+policy. Budgets include label-scoped examples (env:prod, experiment:rag-v2)
+next to plain user-path limits.
 
 Rate-limit counters are live process state and start at zero when GoModel starts.
 Use the generated API keys to make requests and populate those counters.
