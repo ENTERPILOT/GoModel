@@ -97,3 +97,18 @@ export function toggleSearchValue(values, value) {
   if (!next) return list.slice();
   return list.includes(next) ? list.filter((item) => item !== next) : list.concat(next);
 }
+
+/**
+ * Order a multi-select's (already filtered) options with the selected ones
+ * first, sorted by label, so they can be unchecked without scrolling; the
+ * rest keep their order. Returns a new array.
+ */
+export function selectedFirst(options, values) {
+  const list = Array.isArray(options) ? options : [];
+  const chosen = new Set(Array.isArray(values) ? values : []);
+  const selected = list
+    .filter((option) => option && chosen.has(option.value))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const rest = list.filter((option) => option && !chosen.has(option.value));
+  return selected.concat(rest);
+}

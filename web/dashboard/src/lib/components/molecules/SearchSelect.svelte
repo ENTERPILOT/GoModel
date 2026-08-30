@@ -27,6 +27,7 @@
     filterSearchOptions,
     moveActiveIndex,
     normalizeSearchOption,
+    selectedFirst,
     splitSearchValues,
     toggleSearchValue,
   } from "./searchSelectLogic.js";
@@ -60,7 +61,11 @@
   // is never clipped by a scrolling ancestor such as an editor dialog.
   let popoverStyle = $state("");
 
-  const filtered = $derived(filterSearchOptions(options, query));
+  // Multi-select rows list the current selection first so it can be
+  // unchecked without hunting through the list.
+  const filtered = $derived(
+    multiple ? selectedFirst(filterSearchOptions(options, query), values) : filterSearchOptions(options, query),
+  );
   const customValue = $derived(customSearchValue(options, query, allowCustom));
   // Rows in keyboard order: the custom suggestion first, then matches.
   const rowCount = $derived(filtered.length + (customValue ? 1 : 0));

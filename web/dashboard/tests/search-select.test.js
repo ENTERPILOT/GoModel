@@ -6,6 +6,7 @@ import {
   filterSearchOptions,
   moveActiveIndex,
   normalizeSearchOption,
+  selectedFirst,
   splitSearchValues,
   toggleSearchValue,
 } from "../src/lib/components/molecules/searchSelectLogic.js";
@@ -94,4 +95,14 @@ test("toggleSearchValue appends absent values and removes present ones without m
   assert.deepEqual(toggleSearchValue(values, "a"), []);
   assert.deepEqual(toggleSearchValue(values, ""), ["a"]);
   assert.deepEqual(values, ["a"]);
+});
+
+test("selectedFirst lists selected options first, sorted by label, and keeps the rest in order", () => {
+  const rows = filterSearchOptions(options, "");
+  const ordered = selectedFirst(rows, ["plain", "openai/gpt-4o"]);
+  assert.deepEqual(
+    ordered.map((option) => option.value),
+    ["openai/gpt-4o", "plain", "anthropic/claude-sonnet", "ollama/qwen2.5:0.5b"],
+  );
+  assert.deepEqual(selectedFirst(rows, []).map((o) => o.value), rows.map((o) => o.value));
 });
