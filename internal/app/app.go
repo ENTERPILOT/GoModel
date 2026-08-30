@@ -577,7 +577,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// Subject-side model access: auth key and user-path allowlists narrow what
 	// the model-side policy rows expose, so one authorizer answers both.
 	var usersResult *users.Result
-	usersResult, err = users.New(ctx, appCfg, sharedStorage, providerResult.Registry, declaredProviders)
+	usersResult, err = users.New(ctx, appCfg, sharedStorage, providerResult.Registry, managedProviderNames)
 	if err != nil {
 		return fail("failed to initialize users", err)
 	}

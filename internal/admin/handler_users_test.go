@@ -231,6 +231,17 @@ func TestAuthKeyAllowedModelsCreateAndUpdate(t *testing.T) {
 		t.Fatalf("cleared view.AllowedModels = %v, want empty", view.AllowedModels)
 	}
 
+	for _, body := range []string{`{}`, `{"allowed_models":null}`} {
+		c, rec = jsonRequest(http.MethodPut, "/admin/auth-keys/"+issued.ID+"/allowed-models", body)
+		c.SetPathValues(echo.PathValues{{Name: "id", Value: issued.ID}})
+		if err := h.UpdateAuthKeyAllowedModels(c); err != nil {
+			t.Fatalf("UpdateAuthKeyAllowedModels(%s) error = %v", body, err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("UpdateAuthKeyAllowedModels(%s) status = %d, want 400", body, rec.Code)
+		}
+	}
+
 	c, rec = jsonRequest(http.MethodPut, "/admin/auth-keys/missing/allowed-models", `{"allowed_models":["openai/*"]}`)
 	c.SetPathValues(echo.PathValues{{Name: "id", Value: "missing"}})
 	if err := h.UpdateAuthKeyAllowedModels(c); err != nil {

@@ -142,6 +142,56 @@ func TestService_UpsertValidatesAndDeleteRemoves(t *testing.T) {
 	}
 }
 
+// flakyStore persists writes but can be told to fail List after the initial
+// snapshot, so a failed post-write refresh is observable.
+type flakyStore struct {
+	Store
+	failList bool
+}
+
+func (s *flakyStore) List(ctx context.Context) ([]User, error) {
+	if s.failList {
+		return nil, errors.New("list unavailable")
+	}
+	return s.Store.List(ctx)
+}
+
+func TestService_FailedRefreshStillAppliesMutation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	inner, err := NewSQLStore(ctx, sqlxtest.NewSQLite(t))
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	store := &flakyStore{Store: inner}
+	svc, err := NewService(store, testCatalog{"openai", "anthropic"})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"openai/*"}}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	gpt := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
+	claude := core.ModelSelector{Provider: "anthropic", Model: "claude-sonnet-4-6"}
+
+	store.failList = true
+	if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"anthropic/*"}}); err != nil {
+		t.Fatalf("Upsert with failing refresh: %v", err)
+	}
+	if svc.AllowsModel(requestCtx("/acme"), gpt) || !svc.AllowsModel(requestCtx("/acme"), claude) {
+		t.Fatal("restrictive upsert not enforced after failed refresh")
+	}
+	if err := svc.Delete(ctx, "/acme"); err != nil {
+		t.Fatalf("Delete with failing refresh: %v", err)
+	}
+	if !svc.AllowsModel(requestCtx("/acme"), gpt) {
+		t.Fatal("deleted restriction still enforced after failed refresh")
+	}
+	if got := svc.List(); len(got) != 0 {
+		t.Fatalf("List after delete = %#v, want empty", got)
+	}
+}
+
 func TestService_ConfigUsersShadowStoreAndAreReadOnly(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)

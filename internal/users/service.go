@@ -222,9 +222,11 @@ func (s *Service) Upsert(ctx context.Context, user User) (User, error) {
 	if err := s.store.Upsert(ctx, row); err != nil {
 		return User{}, err
 	}
-	if err := s.Refresh(ctx); err != nil {
-		return User{}, err
-	}
+	// The persisted policy is applied to the live snapshot immediately, then
+	// reconciled from storage best-effort: a failed post-write read must not
+	// leave request authorization on the superseded policy.
+	s.applyUpsert(row)
+	s.refreshBestEffort(ctx, "upsert")
 	stored, _ := s.Get(userPath)
 	return stored, nil
 }
@@ -247,7 +249,42 @@ func (s *Service) Delete(ctx context.Context, userPath string) error {
 	if err := s.store.Delete(ctx, userPath); err != nil {
 		return err
 	}
-	return s.Refresh(ctx)
+	s.applyDelete(userPath)
+	s.refreshBestEffort(ctx, "delete")
+	return nil
+}
+
+func (s *Service) refreshBestEffort(ctx context.Context, operation string) {
+	if err := s.Refresh(ctx); err != nil {
+		slog.Warn("user policy snapshot reconciliation failed", "operation", operation, "error", err)
+	}
+}
+
+// applyUpsert swaps in a snapshot with row replacing any policy of the same path.
+func (s *Service) applyUpsert(row User) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	rows := make([]User, 0, len(s.snapshot().byPath)+1)
+	for _, existing := range s.snapshot().byPath {
+		if existing.UserPath != row.UserPath && !existing.Managed {
+			rows = append(rows, existing)
+		}
+	}
+	rows = append(rows, row)
+	s.current.Store(buildSnapshot(s.mergeConfigUsers(rows)))
+}
+
+// applyDelete swaps in a snapshot without the policy at userPath.
+func (s *Service) applyDelete(userPath string) {
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	rows := make([]User, 0, len(s.snapshot().byPath))
+	for _, existing := range s.snapshot().byPath {
+		if existing.UserPath != userPath && !existing.Managed {
+			rows = append(rows, existing)
+		}
+	}
+	s.current.Store(buildSnapshot(s.mergeConfigUsers(rows)))
 }
 
 // NormalizeAllowedModels canonicalizes an allowlist against the live catalog.

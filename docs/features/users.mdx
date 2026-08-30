@@ -35,8 +35,9 @@ the same picture the gateway enforces.
 Requests authenticated by other means follow the same path rules: an
 [OIDC SSO](/pro#oidc-single-sign-on) session or a request carrying only the
 user-path header is limited by the policies on its `user_path`; only managed
-API keys additionally carry a per-key allowlist. The master key has no user
-path and is never restricted.
+API keys additionally carry a per-key allowlist. The master key has no bound
+user path: without the header it is unrestricted, with the header it is
+scoped like any other request on that path.
 
 ## Selectors
 
@@ -47,7 +48,7 @@ Each entry in an allowlist is one selector:
 | `anthropic/*`      | every model of the `anthropic` provider             |
 | `openai/gpt-4o`    | one model on one provider                           |
 | `gpt-4o`           | that model ID on any provider                       |
-| `*`                | everything (useful only to override a stricter parent — it cannot; see rule 3) |
+| `*`                | every model; redundant unless you want an explicit row, and it never widens a parent's list (rule 3) |
 
 Provider names must match a configured provider; unknown names are rejected
 when the policy is saved. Virtual model aliases resolve to their target before

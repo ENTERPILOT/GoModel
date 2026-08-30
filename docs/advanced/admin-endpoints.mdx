@@ -122,7 +122,7 @@ console.log(authKey);
 
 Restrict a key to specific models with `allowed_models` on `POST /admin/auth-keys`
 or `PUT /admin/auth-keys/<key-id>/allowed-models` (`{"allowed_models": ["anthropic/*", "openai/gpt-4o"]}`;
-an empty list lifts the key-level restriction). Group- and user-level
+an explicit empty list lifts the key-level restriction; omitting the field is rejected). Group- and user-level
 allowlists are managed through the [user endpoints](#user-endpoints).
 
 Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key.

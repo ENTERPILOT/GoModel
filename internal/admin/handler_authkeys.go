@@ -95,16 +95,21 @@ func (h *Handler) UpdateAuthKeyLabels(c *echo.Context) error {
 }
 
 type updateAuthKeyAllowedModelsRequest struct {
-	AllowedModels []string `json:"allowed_models"`
+	// Pointer so an omitted or null value is rejected instead of being
+	// treated as an implicit clear of a restricted key.
+	AllowedModels *[]string `json:"allowed_models"`
 }
 
 // UpdateAuthKeyAllowedModels handles PUT /admin/auth-keys/:id/allowed-models.
-// The request selectors replace the key's model allowlist; an empty list
-// lifts the key-level restriction (user-path policies still apply).
+// The request selectors replace the key's model allowlist; an explicit empty
+// list lifts the key-level restriction (user-path policies still apply).
 func (h *Handler) UpdateAuthKeyAllowedModels(c *echo.Context) error {
 	var req updateAuthKeyAllowedModelsRequest
 	return h.updateAuthKey(c, &req, func(ctx context.Context, id string) (*authkeys.View, error) {
-		allowedModels, err := h.normalizeAllowedModels(req.AllowedModels)
+		if req.AllowedModels == nil {
+			return nil, validation.NewError("allowed_models is required", nil)
+		}
+		allowedModels, err := h.normalizeAllowedModels(*req.AllowedModels)
 		if err != nil {
 			return nil, err
 		}
