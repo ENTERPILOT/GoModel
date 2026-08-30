@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -123,7 +124,8 @@ func buildSnapshot(rows []User) *snapshot {
 	for _, row := range rows {
 		userPath, err := core.NormalizeUserPath(row.UserPath)
 		if err != nil || userPath == "" {
-			slog.Warn("skipping user policy with invalid path", "user_path", row.UserPath)
+			// Quoted: the value originates from admin input and is logged as-is otherwise.
+			slog.Warn("skipping user policy with invalid path", "user_path", strconv.Quote(row.UserPath))
 			continue
 		}
 		row.UserPath = userPath
