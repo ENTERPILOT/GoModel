@@ -68,10 +68,12 @@ virtual_models:
 A target may also name another virtual model
 ([chaining](/features/virtual-models#chain-virtual-models)); the sweep then
 tries every concrete model behind it. One exception keeps mutual protection
-possible: when one failover chain lists a model that is protected by its own
-chain, that fallback reaches the model only — its fallbacks are not swept in
-turn — which is what lets `gpt-4o` fall back to `claude-sonnet-4-6` while
-`claude-sonnet-4-6` falls back to `gpt-4o`.
+possible: when a chain that shadows a real model lists another model that is
+shadowed the same way, that fallback reaches the model only — its fallbacks
+are not swept in turn — which is what lets `gpt-4o` fall back to
+`claude-sonnet-4-6` while `claude-sonnet-4-6` falls back to `gpt-4o`. Any
+other redirect (an alias, a virtual model under a new name) that lists a
+protected model does sweep that model's fallbacks.
 
 ## When it runs
 
