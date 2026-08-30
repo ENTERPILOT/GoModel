@@ -118,17 +118,22 @@ func (h *Handler) userCatalog() []core.ModelSelector {
 	return catalog
 }
 
-// effectiveModels evaluates the catalog for a request on userPath through the
-// virtual-models authorizer when wired (model-side rows plus user policies),
-// falling back to the user policies alone.
-func (h *Handler) effectiveModels(userPath string, catalog []core.ModelSelector) []string {
+// effectiveModels evaluates the catalog for a request carrying ctx (user path
+// and, for a key, its allowlist) through the virtual-models authorizer when
+// wired (model-side rows plus user policies), falling back to the user
+// policies alone. Nil without a catalog or any authorizer.
+func (h *Handler) effectiveModels(ctx context.Context, catalog []core.ModelSelector) []string {
 	if catalog == nil {
 		return nil
 	}
-	ctx := core.WithEffectiveUserPath(context.Background(), userPath)
-	allows := h.users.AllowsModel
-	if h.virtualModels != nil {
+	var allows func(context.Context, core.ModelSelector) bool
+	switch {
+	case h.virtualModels != nil:
 		allows = h.virtualModels.AllowsModel
+	case h.users != nil:
+		allows = h.users.AllowsModel
+	default:
+		return nil
 	}
 	result := make([]string, 0, len(catalog))
 	for _, selector := range catalog {
@@ -202,7 +207,7 @@ func (h *Handler) userNodes() []userNodeResponse {
 				node.InheritedFrom = append(node.InheritedFrom, constraint.UserPath)
 			}
 		}
-		node.EffectiveModels = h.effectiveModels(userPath, catalog)
+		node.EffectiveModels = h.effectiveModels(core.WithEffectiveUserPath(context.Background(), userPath), catalog)
 		result = append(result, *node)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].UserPath < result[j].UserPath })

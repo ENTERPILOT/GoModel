@@ -218,6 +218,63 @@ func TestUsersTreeReportsEffectiveModels(t *testing.T) {
 	}
 }
 
+func TestListAuthKeysReportsEffectiveModels(t *testing.T) {
+	ctx := context.Background()
+	registry := newVMModelRegistry(t) // openai/gpt-4o only
+	store, err := users.NewSQLStore(ctx, sqlxtest.NewSQLite(t))
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	userService, err := users.NewService(store, registry)
+	if err != nil {
+		t.Fatalf("users.NewService: %v", err)
+	}
+	if err := userService.Refresh(ctx); err != nil {
+		t.Fatalf("users.Refresh: %v", err)
+	}
+	vmService := newVMServiceForRegistry(t, registry, true)
+	vmService.SetAccessPolicy(userService)
+	now := time.Now().UTC()
+	keyService, err := authkeys.NewService(newAuthKeyTestStore(
+		authkeys.AuthKey{ID: "open", Name: "open", UserPath: "/acme", SecretHash: "h1", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		authkeys.AuthKey{ID: "narrow", Name: "narrow", UserPath: "/acme", AllowedModels: []string{"anthropic/"}, SecretHash: "h2", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		authkeys.AuthKey{ID: "path", Name: "path", UserPath: "/sales", SecretHash: "h3", Enabled: true, CreatedAt: now, UpdatedAt: now},
+	))
+	if err != nil {
+		t.Fatalf("authkeys.NewService: %v", err)
+	}
+	if err := keyService.Refresh(ctx); err != nil {
+		t.Fatalf("authkeys.Refresh: %v", err)
+	}
+	if _, err := userService.Upsert(ctx, users.User{UserPath: "/sales", AllowedModels: []string{"gpt-4o"}}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	h := NewHandler(nil, registry, WithUsers(userService), WithAuthKeys(keyService), WithVirtualModels(vmService))
+
+	c, rec := jsonRequest(http.MethodGet, "/admin/auth-keys", "")
+	if err := h.ListAuthKeys(c); err != nil {
+		t.Fatalf("ListAuthKeys error = %v", err)
+	}
+	var rows []authKeyResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("unmarshal: %v (%s)", err, rec.Body.String())
+	}
+	byID := map[string]authKeyResponse{}
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	if r := byID["open"]; r.Restricted || !reflect.DeepEqual(r.EffectiveModels, []string{"openai/gpt-4o"}) {
+		t.Fatalf("open = %#v", r)
+	}
+	if r := byID["narrow"]; !r.Restricted || len(r.EffectiveModels) != 0 || r.EffectiveModels == nil {
+		t.Fatalf("narrow = %#v", r)
+	}
+	// Restricted by the path policy only; its selector still admits gpt-4o.
+	if r := byID["path"]; !r.Restricted || !reflect.DeepEqual(r.EffectiveModels, []string{"openai/gpt-4o"}) {
+		t.Fatalf("path = %#v", r)
+	}
+}
+
 func TestUpsertUserRejectsUnknownProvider(t *testing.T) {
 	h := newUsersHandler(t)
 	c, rec := jsonRequest(http.MethodPut, "/admin/users", `{"user_path":"/acme","allowed_models":["nope/*"]}`)

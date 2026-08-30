@@ -25,15 +25,38 @@ type createAuthKeyRequest struct {
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 }
 
+// authKeyResponse is one API key row plus the model access it resolves to.
+type authKeyResponse struct {
+	authkeys.View
+	// Restricted reports whether the key's own allowlist or a user-path policy
+	// narrows the key.
+	Restricted bool `json:"restricted"`
+	// EffectiveModels lists the catalog models a request with this key may
+	// use — its user path, its allowlist, and the model-side policies applied
+	// through the same authorizer inference uses. Nil without a catalog.
+	EffectiveModels []string `json:"effective_models"`
+}
+
 func (h *Handler) ListAuthKeys(c *echo.Context) error {
 	if h.authKeys == nil {
 		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
 	}
 	views := h.authKeys.ListViews()
-	if views == nil {
-		views = []authkeys.View{}
+	catalog := h.userCatalog()
+	response := make([]authKeyResponse, 0, len(views))
+	for _, view := range views {
+		row := authKeyResponse{View: view, Restricted: len(view.AllowedModels) > 0}
+		ctx := core.WithEffectiveUserPath(context.Background(), view.UserPath)
+		if len(view.AllowedModels) > 0 {
+			ctx = core.WithCredentialAllowedModels(ctx, view.AllowedModels)
+		}
+		if h.users != nil && len(h.users.Constraints(view.UserPath)) > 0 {
+			row.Restricted = true
+		}
+		row.EffectiveModels = h.effectiveModels(ctx, catalog)
+		response = append(response, row)
 	}
-	return c.JSON(http.StatusOK, views)
+	return c.JSON(http.StatusOK, response)
 }
 
 // CreateAuthKey handles POST /admin/auth-keys

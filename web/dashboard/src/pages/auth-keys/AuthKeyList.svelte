@@ -7,7 +7,7 @@
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
   import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
-  import { Boxes, Info, Pencil, Power, ShieldCheck, ShieldOff } from "lucide";
+  import { Boxes, Info, Pencil, Power, ShieldCheck, ShieldOff, TriangleAlert } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -20,6 +20,12 @@
         <th>{m.api_keys_column_user_path()}</th>
         <th>{m.api_keys_column_labels()}</th>
         <th>{m.api_keys_column_allowed_models()}</th>
+        <th>
+          <span class="auth-key-th-help" title={m.api_keys_effective_models_help()}>
+            {m.api_keys_column_effective_models()}
+            <Icon icon={Info} width="13" height="13" />
+          </span>
+        </th>
         <th>{m.api_keys_column_token()}</th>
         <th>
           <span
@@ -64,6 +70,22 @@
               </div>
             {:else}
               <span class="auth-key-unrestricted">{m.api_keys_allowed_models_all()}</span>
+            {/if}
+          </td>
+          <td>
+            {#if !key.restricted}
+              <span class="auth-key-unrestricted">{m.api_keys_effective_all()}</span>
+            {:else if !Array.isArray(key.effective_models)}
+              <span class="auth-key-unrestricted">&mdash;</span>
+            {:else if key.effective_models.length === 0}
+              <span class="auth-key-effective-none">
+                <Icon icon={TriangleAlert} class="table-icon-svg" />
+                {m.api_keys_effective_none()}
+              </span>
+            {:else}
+              <span class="auth-key-effective" title={key.effective_models.join("\n")}>
+                {m.api_keys_effective_count({ count: key.effective_models.length })}
+              </span>
             {/if}
           </td>
           <td><code class="auth-key-redacted">{key.redacted_value}</code></td>
@@ -169,6 +191,20 @@
   .auth-key-unrestricted {
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  .auth-key-effective {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+  }
+
+  .auth-key-effective-none {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--danger, #c0392b);
+    font-weight: 600;
   }
 
   .auth-key-actions-cell {
