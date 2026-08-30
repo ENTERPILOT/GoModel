@@ -1,0 +1,62 @@
+---
+title: "OIDC Single Sign-On"
+sidebarTitle: "OIDC SSO"
+description: "Protect the GoModel Dashboard with your OIDC identity provider using Authorization Code flow with PKCE."
+icon: "key-round"
+tag: "Pro"
+keywords: ["GoModel Pro", "OIDC", "SSO", "single sign-on", "PKCE", "dashboard authentication"]
+---
+
+<Info>
+  OIDC SSO is a [GoModel Pro](/pro/overview) feature and requires a license
+  with the `sso` entitlement.
+</Info>
+
+## Overview
+
+OIDC SSO protects the Dashboard and supports Authorization Code flow with
+PKCE, state and nonce validation, discovery, and signed `HttpOnly`,
+`SameSite=Lax` sessions.
+
+Unlike other Pro features, an explicitly enabled SSO configuration fails
+closed: startup aborts when the `sso` entitlement is missing or the
+configuration is invalid, so an authentication boundary cannot disappear
+silently.
+
+## Configure SSO
+
+Configure it under `extensions.sso` in the main GoModel YAML configuration:
+
+```yaml
+extensions:
+  sso:
+    enabled: true
+    issuer_url: https://login.example.com
+    client_id: gomodel
+    client_secret: ${PRO_SSO_CLIENT_SECRET}
+    redirect_url: https://gomodel.example.com/sso/callback
+    session_secret: ${PRO_SSO_SESSION_SECRET}
+    admin_groups: [gomodel-admins]
+```
+
+`PRO_SSO_*` environment variables override the YAML values. The redirect URL
+must end in `/sso/callback` (including any configured `BASE_PATH`), and HTTPS
+is required except for loopback development URLs. By default, at least one
+administrator group is required; set `PRO_SSO_ALLOW_ALL_ADMINS=true` only for
+an intentionally unrestricted OIDC client.
+
+<Warning>
+  SSO session revocation is process-local. Deploy SSO on exactly one active
+  GoModel Pro replica until a shared session or revocation store is available.
+</Warning>
+
+## Audit and access control
+
+Successful logins, rejected policies, and logouts are recorded as sanitized
+audit events. Tokens, authorization codes, cookies, raw claims, and provider
+error details are not stored.
+
+An SSO session carries a `user_path` like a managed API key does, so the
+group- and user-level model allowlists on the [Users](/features/users) page
+apply to requests made through it. Per-key `allowed_models` are a managed
+API key setting and do not apply to SSO sessions.

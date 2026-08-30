@@ -1,0 +1,56 @@
+---
+title: "GoModel Pro"
+sidebarTitle: "Overview"
+description: "GoModel Pro adds licensed prompt compression, intelligent routing, and OIDC SSO to the GoModel gateway."
+icon: "gem"
+tag: "Pro"
+keywords: ["GoModel Pro", "prompt compression", "intelligent routing", "OIDC", "SSO", "quota templates", "license"]
+---
+
+## What Pro is
+
+GoModel Pro is the commercial distribution of GoModel. It uses the same
+gateway, configuration, providers, dashboard, and APIs as open-source
+GoModel, with licensed extensions for prompt compression, intelligent routing,
+OIDC single sign-on, and per-child quota templates.
+
+Without a valid license, the Pro binary starts as the open-source gateway and
+does not block traffic. An explicitly enabled SSO configuration is the
+exception: startup fails closed when its SSO entitlement or configuration is
+invalid, so an authentication boundary cannot disappear silently.
+
+<CardGroup cols={3}>
+  <Card title="Prompt compression" icon="package-minus" href="/pro/compression">
+    Deterministic, fail-open request rewriting that removes repeated context
+    before it reaches the provider.
+  </Card>
+  <Card title="Intelligent routing" icon="route" href="/pro/intelligent-routing">
+    Easy/hard tier classification per request plus adaptive, health-aware
+    provider selection inside a virtual model.
+  </Card>
+  <Card title="OIDC single sign-on" icon="key-round" href="/pro/sso">
+    Protect the Dashboard with your identity provider using Authorization Code
+    flow with PKCE.
+  </Card>
+</CardGroup>
+
+## Quota templates
+
+Per-child quota templates let one `user_path` budget definition apply
+independently to each direct child path instead of one shared subtree budget.
+Set `per_child: true` on a `budgets.user_paths` entry — see
+[Budgets](/features/budgets#dynamic-per-child-budgets) for YAML and
+environment-variable examples and matching rules. Without the
+`quota_templates` entitlement, `per_child: true` in configuration aborts
+startup and admin API writes are rejected with 403
+`quota_templates_not_entitled`.
+
+## Licensing
+
+Pro features are granted by an offline Ed25519-signed token in
+`GOMODEL_PRO_LICENSE`. Validation requires no network access and works in
+air-gapped environments. A license can independently grant `compression`,
+`routing`, `sso`, and `quota_templates`.
+
+Use the separate `gomodel-pro` distribution and its documentation for
+installation, production build, and license-issuance instructions.

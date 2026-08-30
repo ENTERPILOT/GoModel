@@ -52,6 +52,10 @@
         {
             "source": "/features/aliases",
             "destination": "/features/virtual-models"
+        },
+        {
+            "source": "/pro",
+            "destination": "/pro/overview"
         }
     ],
     "navbar": {
@@ -100,6 +104,16 @@
                             "features/labelling",
                             "features/cache",
                             "features/failover"
+                        ]
+                    },
+                    {
+                        "group": "Pro features",
+                        "icon": "gem",
+                        "pages": [
+                            "pro/overview",
+                            "pro/compression",
+                            "pro/intelligent-routing",
+                            "pro/sso"
                         ]
                     },
                     {
