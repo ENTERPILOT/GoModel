@@ -46,7 +46,8 @@ const (
 // gateway on os.Args.
 type Options struct {
 	// ProductName names the binary in CLI usage output, the startup log line,
-	// and --version output. Default: "gomodel".
+	// --version output, and the default OpenTelemetry service.name. Default:
+	// "gomodel".
 	ProductName string
 	// AppName names the distribution in the X-GoModel-App header and decides
 	// which release manifest the update check reads ("core.txt" or
@@ -233,10 +234,11 @@ func Run(ctx context.Context, opts Options) error {
 		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 
 		application, err := app.New(ctx, app.Config{
-			AppConfig:  result,
-			Factory:    defaultProviderFactory(result.Config),
-			Extensions: opts.Extensions,
-			DemoMode:   demoMode,
+			AppConfig:   result,
+			Factory:     defaultProviderFactory(result.Config),
+			Extensions:  opts.Extensions,
+			DemoMode:    demoMode,
+			ProductName: opts.ProductName,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize application: %w", err)
