@@ -744,7 +744,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),
 				"legacy_alias", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"),
 				"legacy_sunset", "2026-08-09")
-			if adminCfg.UIEnabled {
+			if adminCfg.UIEnabled && dashHandler != nil {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler
 				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s%s", appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
@@ -1142,7 +1142,8 @@ func nilInterface(value any) bool {
 }
 
 // initAdmin creates the admin API handler and optionally the dashboard handler.
-// Returns nil dashboard handler if uiEnabled is false.
+// Returns nil dashboard handler if uiEnabled is false or the dashboard build
+// is missing from the binary.
 func initAdmin(
 	reader usage.UsageReader,
 	usageReadStorage storage.Storage,
@@ -1231,10 +1232,14 @@ func initAdmin(
 
 	var dashHandler *dashboard.Handler
 	if uiEnabled {
-		var err error
-		dashHandler, err = dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
+		h, err := dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
+			// The dashboard build is generated, not committed (see
+			// docs/adr/0010-dashboard-built-in-ci.md). A binary built without
+			// it keeps the gateway and admin API; only the UI is unavailable.
+			slog.Error("admin UI disabled: dashboard assets missing from this build", "error", err)
+		} else {
+			dashHandler = h
 		}
 	}
 
