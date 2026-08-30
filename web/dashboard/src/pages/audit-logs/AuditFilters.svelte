@@ -22,6 +22,8 @@
       oninput={onSearchInput}
       loading={auditList.loading}
     />
+  </div>
+  <div class="audit-filter-row audit-filter-row-controls">
     <select
       id="audit-filter-field"
       aria-label={m.audit_filter_field_label()}
@@ -29,16 +31,14 @@
       bind:value={auditList.auditField}
       onchange={() => auditList.fetchAuditLog(true)}
     >
+      <option value="search">{m.audit_filter_field_search()}</option>
       <option value="user_path">{m.audit_filter_field_user_path()}</option>
       <option value="request_id">{m.audit_filter_field_request_id()}</option>
       <option value="model">{m.audit_filter_field_model()}</option>
       <option value="provider">{m.audit_filter_field_provider()}</option>
       <option value="session_id">{m.audit_filter_field_session_id()}</option>
       <option value="error_type">{m.audit_filter_field_error_type()}</option>
-      <option value="search">{m.audit_filter_field_search()}</option>
     </select>
-  </div>
-  <div class="audit-filter-row audit-filter-row-controls">
     <select
       id="audit-filter-method"
       aria-label={m.audit_filter_method_label()}
@@ -115,15 +115,15 @@
   }
 
   .audit-filter-row-search :global(.filter-input-wrap) {
-    grid-column: span 8;
-    width: min(100%, 480px);
-    max-width: 480px;
+    grid-column: 1 / -1;
   }
-
-  .audit-filter-field { grid-column: span 4; width: min(100%, 240px); max-width: 240px; }
 
   .audit-filter-row-controls .audit-filter-select {
     grid-column: span 2;
+  }
+
+  .audit-filter-row-controls .audit-filter-field {
+    grid-column: span 4;
   }
 
   .audit-filter-row-controls :global(.btn) {
@@ -159,14 +159,9 @@
         grid-template-columns: 1fr;
       }
 
-    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn) {
+    .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn), .audit-filter-row-controls .audit-filter-field {
         grid-column: auto;
+        width: 100%;
       }
-
-    .audit-filter-row-search :global(.filter-input-wrap),
-    .audit-filter-field {
-      width: 100%;
-      max-width: none;
-    }
   }
 </style>
