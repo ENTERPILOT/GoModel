@@ -5,7 +5,7 @@
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
   import { usersStore as store } from "./users.svelte.js";
   import { userNodeKind, userPathDepth, userPathLeaf } from "./usersLogic.js";
-  import { Folder, Pencil, Trash2, TriangleAlert, User } from "lucide";
+  import { CircleCheck, Copy, Folder, Pencil, Trash2, TriangleAlert, User } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -39,6 +39,14 @@
               {#if node.managed}
                 <span class="auth-key-status-badge auth-key-status-inactive">{m.users_managed()}</span>
               {/if}
+              {@const copied = store.copiedPath === node.user_path && store.copyState.copied}
+              <TableActionButton
+                label={copied ? m.users_path_copied() : m.users_copy_path({ path: node.user_path })}
+                class="table-icon-btn user-copy-btn"
+                onclick={() => store.copyPath(node)}
+              >
+                <Icon icon={copied ? CircleCheck : Copy} class="table-icon-svg" />
+              </TableActionButton>
             </span>
           </td>
           <td>
@@ -120,6 +128,17 @@
 
   .user-path-leaf {
     font-weight: 600;
+  }
+
+  /* The copy affordance stays quiet until the row is hovered or focused. */
+  .user-path-cell :global(.user-copy-btn) {
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  tr:hover .user-path-cell :global(.user-copy-btn),
+  .user-path-cell :global(.user-copy-btn:focus-visible) {
+    opacity: 1;
   }
 
   /* Implied nodes exist only because a key or a descendant refers to them. */

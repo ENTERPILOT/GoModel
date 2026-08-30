@@ -1073,6 +1073,8 @@
   "users_column_keys": "API keys",
   "users_column_description": "Description",
   "users_actions": "Actions",
+  "users_copy_path": "Copy user path {path}",
+  "users_path_copied": "Copied",
   "users_managed": "Config",
   "users_no_restriction": "No restriction",
   "users_path": "User path",

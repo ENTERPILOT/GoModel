@@ -5,6 +5,7 @@
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
+import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import { formatModelSelectors } from "$lib/utils/modelSelectors.js";
 import {
   buildUpsertUserPayload,
@@ -28,6 +29,19 @@ class UsersStore {
   editingPath = $state("");
   form = $state(defaultUserForm());
   deletingPath = $state("");
+
+  // One clipboard state for the whole table; copiedPath says which row it
+  // belongs to so only that row shows the check mark.
+  copyState = createCopyState({ logPrefix: "Failed to copy user path:" });
+  copiedPath = $state("");
+
+  async copyPath(node) {
+    if (!node || !node.user_path) {
+      return;
+    }
+    this.copiedPath = node.user_path;
+    await this.copyState.copy(node.user_path);
+  }
 
   applyList(outcome) {
     if (outcome.status === "stale") {
