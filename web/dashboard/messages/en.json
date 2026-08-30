@@ -1055,6 +1055,7 @@
   "users_save": "Save",
   "users_saving": "Saving...",
   "users_unavailable": "User management is unavailable.",
+  "users_help_label": "Users help",
   "users_help": "Groups and users are the user paths behind your API keys (/acme/eng is a group, /acme/eng/alice a user). A node with no allowed models keeps every model available. Once a node lists models, requests under it are limited to that list — and to every list on its parents, so a child can only narrow what its group allows.",
   "users_loading": "Loading users",
   "users_filter_placeholder": "Filter by path, description, or model...",

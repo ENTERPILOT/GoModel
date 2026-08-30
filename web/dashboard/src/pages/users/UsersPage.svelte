@@ -4,6 +4,7 @@
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { usersStore as store } from "./users.svelte.js";
@@ -23,7 +24,14 @@
 
 <div>
   <div class="page-header">
-    <h2>{m.users_title()}</h2>
+    <div>
+      <InlineHelpSection copyId="users-help-copy" label={m.users_help_label()}>
+        {#snippet title()}<h2>{m.users_title()}</h2>{/snippet}
+        {#snippet help()}
+          {m.users_help()}
+        {/snippet}
+      </InlineHelpSection>
+    </div>
     <div class="page-header-controls">
       {#if store.available && !auth.authError}
         <button
@@ -44,10 +52,6 @@
   {/if}
   {#if store.error && !auth.authError && !store.formOpen}
     <p class="form-error" role="alert" aria-live="assertive">{store.error}</p>
-  {/if}
-
-  {#if store.available && !auth.authError}
-    <p class="form-hint users-help-notice">{m.users_help()}</p>
   {/if}
 
   <UserEditor />
@@ -80,9 +84,3 @@
     <p class="empty-state">{m.users_empty()}</p>
   {/if}
 </div>
-
-<style>
-  .users-help-notice {
-    margin-bottom: 20px;
-  }
-</style>

@@ -1075,6 +1075,7 @@
   "users_save": "Zapisz",
   "users_saving": "Zapisywanie...",
   "users_unavailable": "Zarządzanie użytkownikami jest niedostępne.",
+  "users_help_label": "Pomoc dotycząca użytkowników",
   "users_help": "Grupy i użytkownicy to User Path stojące za kluczami API (/acme/eng to grupa, /acme/eng/alice to użytkownik). Węzeł bez dozwolonych modeli zachowuje dostęp do wszystkich modeli. Gdy węzeł wskaże modele, Request'y pod nim są ograniczone do tej listy — oraz do list jego rodziców, więc dziecko może tylko zawęzić to, na co pozwala grupa.",
   "users_loading": "Wczytywanie użytkowników",
   "users_filter_placeholder": "Filtruj po ścieżce, opisie lub modelu...",
