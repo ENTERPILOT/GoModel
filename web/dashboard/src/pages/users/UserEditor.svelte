@@ -9,10 +9,21 @@
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import { modelsStore } from "$lib/stores/models.svelte.js";
   import { usersStore as store } from "./users.svelte.js";
-  import { userSelectorOptions } from "./usersLogic.js";
+  import { parseModelSelectors } from "$lib/utils/modelSelectors.js";
+  import { parentEffectiveModels, previewEffectiveModels, userSelectorOptions } from "./usersLogic.js";
   import * as m from "$lib/paraglide/messages.js";
 
   const selectorOptions = $derived(userSelectorOptions(modelsStore.models));
+
+  // Warn while typing when the list would leave no model available under the
+  // parents' effective access; unknown parents (no catalog) stay silent.
+  const typedSelectors = $derived(parseModelSelectors(store.form.allowed_models));
+  const parentModels = $derived(parentEffectiveModels(store.nodes, store.form.user_path));
+  const noModelsRemain = $derived(
+    typedSelectors.length > 0 &&
+      parentModels !== null &&
+      previewEffectiveModels(parentModels, typedSelectors).length === 0,
+  );
 </script>
 
 <EditorDialog
@@ -65,6 +76,9 @@
       data-modal-autofocus={store.editingPath ? true : undefined}
       bind:value={store.form.allowed_models}
     ></textarea>
+    {#if noModelsRemain}
+      <p class="form-error user-no-models-warning" role="alert">{m.users_no_models_warning()}</p>
+    {/if}
     {#if selectorOptions.length > 0}
       <div class="user-quick-add">
         <SearchSelect
@@ -95,5 +109,9 @@
 <style>
   .user-quick-add {
     margin-top: 8px;
+  }
+
+  .user-no-models-warning {
+    margin-top: 6px;
   }
 </style>

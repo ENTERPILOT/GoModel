@@ -362,6 +362,8 @@ path:
       "configured": true,
       "key_count": 0,
       "inherited_from": [],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"],
       "created_at": "2026-08-30T10:00:00Z",
       "updated_at": "2026-08-30T10:00:00Z"
     },
@@ -370,7 +372,9 @@ path:
       "allowed_models": [],
       "configured": false,
       "key_count": 2,
-      "inherited_from": ["/acme"]
+      "inherited_from": ["/acme"],
+      "restricted": true,
+      "effective_models": ["openai/gpt-4o", "anthropic/claude-sonnet-4-6"]
     }
   ]
 }
@@ -378,7 +382,10 @@ path:
 
 `allowed_models` is the node's own list in canonical form (`anthropic/` for a
 provider wildcard, `/` for everything); `inherited_from` lists the ancestors
-whose lists also apply. `configured` is `false` for nodes implied only by keys
+whose lists also apply. `effective_models` is what a request on that path may
+actually call, evaluated through the same authorizer inference uses (so
+model-side virtual-model policies count too); an empty list with
+`restricted: true` means the node's lists intersect to nothing. `configured` is `false` for nodes implied only by keys
 or descendants; `managed: true` marks policies declared in configuration,
 which are read-only here (`409`, code `user_managed`).
 

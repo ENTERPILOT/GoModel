@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/enterpilot/gomodel/internal/users"
+	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
 type userTestCatalog []string
@@ -162,6 +163,58 @@ func TestUsersTreeDerivesFromPoliciesAndKeys(t *testing.T) {
 	}
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("DeleteUser(missing) status = %d, want 404", rec.Code)
+	}
+}
+
+func TestUsersTreeReportsEffectiveModels(t *testing.T) {
+	ctx := context.Background()
+	registry := newVMModelRegistry(t) // openai/gpt-4o only
+	store, err := users.NewSQLStore(ctx, sqlxtest.NewSQLite(t))
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	userService, err := users.NewService(store, registry)
+	if err != nil {
+		t.Fatalf("users.NewService: %v", err)
+	}
+	if err := userService.Refresh(ctx); err != nil {
+		t.Fatalf("users.Refresh: %v", err)
+	}
+	vmService := newVMServiceForRegistry(t, registry, true, virtualmodels.VirtualModel{
+		Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", UserPaths: []string{"/acme"}, Enabled: true,
+	})
+	vmService.SetAccessPolicy(userService)
+	h := NewHandler(nil, registry, WithUsers(userService), WithVirtualModels(vmService))
+
+	c, _ := jsonRequest(http.MethodPut, "/admin/users", `{"user_path":"/acme/eng","allowed_models":["gpt-4o"]}`)
+	if err := h.UpsertUser(c); err != nil {
+		t.Fatalf("UpsertUser error = %v", err)
+	}
+	c, _ = jsonRequest(http.MethodPut, "/admin/users", `{"user_path":"/acme/eng/bob","allowed_models":["openai/gpt-5"]}`)
+	if err := h.UpsertUser(c); err != nil {
+		t.Fatalf("UpsertUser(bob) error = %v", err)
+	}
+	c, rec := jsonRequest(http.MethodPut, "/admin/users", `{"user_path":"/other","allowed_models":["openai/*"]}`)
+	if err := h.UpsertUser(c); err != nil {
+		t.Fatalf("UpsertUser(other) error = %v", err)
+	}
+	nodes := decodeUsers(t, rec)
+
+	// /acme: unrestricted on the user side, model-side row allows gpt-4o here.
+	if n := nodes["/acme"]; n.Restricted || !reflect.DeepEqual(n.EffectiveModels, []string{"openai/gpt-4o"}) {
+		t.Fatalf("/acme = %#v", n)
+	}
+	// /acme/eng: own model-wide selector keeps gpt-4o.
+	if n := nodes["/acme/eng"]; !n.Restricted || !reflect.DeepEqual(n.EffectiveModels, []string{"openai/gpt-4o"}) {
+		t.Fatalf("/acme/eng = %#v", n)
+	}
+	// /acme/eng/bob: intersection with eng is empty.
+	if n := nodes["/acme/eng/bob"]; !n.Restricted || len(n.EffectiveModels) != 0 || n.EffectiveModels == nil {
+		t.Fatalf("/acme/eng/bob = %#v", n)
+	}
+	// /other: user side allows openai, but the model-side row scopes gpt-4o to /acme.
+	if n := nodes["/other"]; !n.Restricted || len(n.EffectiveModels) != 0 {
+		t.Fatalf("/other = %#v", n)
 	}
 }
 

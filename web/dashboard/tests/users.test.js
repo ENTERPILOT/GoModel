@@ -5,6 +5,9 @@ import {
   buildUpsertUserPayload,
   defaultUserForm,
   filterUserNodes,
+  parentEffectiveModels,
+  previewEffectiveModels,
+  selectorMatchesModel,
   sortUserNodes,
   userNodeKind,
   userNodeRestricted,
@@ -128,4 +131,35 @@ test("userSelectorOptions lists provider wildcards first, then concrete selector
   assert.ok(options[0].description.includes("anthropic"));
   assert.equal(options[2].description, "");
   assert.deepEqual(userSelectorOptions(undefined), []);
+});
+
+test("selectorMatchesModel mirrors the backend matcher", () => {
+  assert.equal(selectorMatchesModel("*", "openai/gpt-4o"), true);
+  assert.equal(selectorMatchesModel("openai/*", "openai/gpt-4o"), true);
+  assert.equal(selectorMatchesModel("openai/", "openai/gpt-4o"), true);
+  assert.equal(selectorMatchesModel("openai/*", "anthropic/claude"), false);
+  assert.equal(selectorMatchesModel("openai/gpt-4o", "openai/gpt-4o"), true);
+  assert.equal(selectorMatchesModel("openai/gpt-4o", "openai/gpt-4o-mini"), false);
+  assert.equal(selectorMatchesModel("gpt-4o", "azure/gpt-4o"), true);
+  assert.equal(selectorMatchesModel("gpt-4o", "openai/gpt-4o-mini"), false);
+  assert.equal(selectorMatchesModel("", "openai/gpt-4o"), false);
+});
+
+test("parentEffectiveModels finds the nearest ancestor with a computed list", () => {
+  const nodes = [
+    node({ user_path: "/", effective_models: ["openai/gpt-4o", "anthropic/claude"] }),
+    node({ user_path: "/sales", effective_models: ["anthropic/claude"] }),
+    node({ user_path: "/sales/john", effective_models: [] }),
+  ];
+  assert.deepEqual(parentEffectiveModels(nodes, "/sales/john"), ["anthropic/claude"]);
+  assert.deepEqual(parentEffectiveModels(nodes, "sales/new"), ["anthropic/claude"]);
+  assert.deepEqual(parentEffectiveModels(nodes, "/eng/alice"), ["openai/gpt-4o", "anthropic/claude"]);
+  assert.equal(parentEffectiveModels([], "/sales/john"), null);
+});
+
+test("previewEffectiveModels intersects the parent's models with the typed selectors", () => {
+  const parent = ["anthropic/claude", "anthropic/opus"];
+  assert.deepEqual(previewEffectiveModels(parent, ["openai/*"]), []);
+  assert.deepEqual(previewEffectiveModels(parent, ["anthropic/opus"]), ["anthropic/opus"]);
+  assert.deepEqual(previewEffectiveModels(parent, []), parent);
 });

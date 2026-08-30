@@ -81,8 +81,11 @@ A denied request receives `400` with code `model_access_denied`.
 
 ### Dashboard
 
-`Users` lists every node with its own allowlist, the ancestors it inherits
-limits from, and how many API keys are bound to it. Add or edit a node to
+`Users` lists every node with its own allowlist, its **effective models** —
+what a request on that path can actually call once every parent's list is
+applied (a red **None** flags a node whose lists intersect to nothing) — and
+how many API keys are bound to it. The editor warns while you type when the
+list would leave no model available. Add or edit a node to
 set its models; remove the policy to fall back to the parents' limits.
 
 Per-key allowlists live on the **API Keys** page: set `Allowed models` when

@@ -5,7 +5,7 @@
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
   import { usersStore as store } from "./users.svelte.js";
   import { userNodeKind, userPathDepth, userPathLeaf } from "./usersLogic.js";
-  import { Folder, Pencil, Trash2, User } from "lucide";
+  import { Folder, Pencil, Trash2, TriangleAlert, User } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -15,7 +15,7 @@
       <tr>
         <th>{m.users_column_path()}</th>
         <th>{m.users_column_allowed_models()}</th>
-        <th>{m.users_column_inherited()}</th>
+        <th>{m.users_column_effective()}</th>
         <th>{m.users_column_keys()}</th>
         <th>{m.users_column_description()}</th>
         <th aria-label={m.users_actions()}></th>
@@ -53,14 +53,24 @@
             {/if}
           </td>
           <td>
-            {#if (node.inherited_from || []).length > 0}
-              <div class="user-selector-list">
-                {#each node.inherited_from as ancestor (ancestor)}
-                  <code class="user-selector user-selector-inherited">{ancestor}</code>
-                {/each}
-              </div>
-            {:else}
+            {#if !node.restricted}
+              <span class="user-muted">{m.users_effective_all()}</span>
+            {:else if !Array.isArray(node.effective_models)}
               <span class="user-muted">&mdash;</span>
+            {:else if node.effective_models.length === 0}
+              <span class="user-effective-none">
+                <Icon icon={TriangleAlert} class="table-icon-svg" />
+                {m.users_effective_none()}
+              </span>
+            {:else}
+              <span class="user-effective" title={node.effective_models.join("\n")}>
+                {m.users_effective_count({ count: node.effective_models.length })}
+              </span>
+            {/if}
+            {#if (node.inherited_from || []).length > 0}
+              <span class="user-effective-via" title={node.inherited_from.join("\n")}>
+                {m.users_effective_via({ path: node.inherited_from[node.inherited_from.length - 1] })}
+              </span>
             {/if}
           </td>
           <td>{node.key_count || 0}</td>
@@ -131,8 +141,25 @@
     white-space: nowrap;
   }
 
-  .user-selector-inherited {
-    background: color-mix(in srgb, var(--text-muted) 12%, var(--bg));
+  .user-effective {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+  }
+
+  .user-effective-none {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--danger, #c0392b);
+    font-weight: 600;
+  }
+
+  .user-effective-via {
+    display: block;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: help;
   }
 
   .user-muted {

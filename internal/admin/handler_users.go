@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sort"
@@ -29,9 +30,15 @@ type userNodeResponse struct {
 	KeyCount int `json:"key_count"`
 	// InheritedFrom lists ancestor paths whose allowlists also apply here,
 	// root first.
-	InheritedFrom []string   `json:"inherited_from"`
-	CreatedAt     *time.Time `json:"created_at,omitempty"`
-	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
+	InheritedFrom []string `json:"inherited_from"`
+	// Restricted reports whether any allowlist (own or inherited) applies.
+	Restricted bool `json:"restricted"`
+	// EffectiveModels lists the catalog models a request on this path may use,
+	// evaluated through the same authorizer inference uses. Nil when no model
+	// catalog is available.
+	EffectiveModels []string   `json:"effective_models"`
+	CreatedAt       *time.Time `json:"created_at,omitempty"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
 }
 
 type userListResponse struct {
@@ -95,6 +102,43 @@ func (h *Handler) DeleteUser(c *echo.Context) error {
 	return c.JSON(http.StatusOK, userListResponse{Users: h.userNodes()})
 }
 
+// userCatalog lists every registered model as a selector, or nil without a registry.
+func (h *Handler) userCatalog() []core.ModelSelector {
+	if h.registry == nil {
+		return nil
+	}
+	models := h.registry.ListModelsWithProvider()
+	catalog := make([]core.ModelSelector, 0, len(models))
+	for _, model := range models {
+		catalog = append(catalog, core.ModelSelector{
+			Provider: strings.TrimSpace(model.ProviderName),
+			Model:    strings.TrimSpace(model.Model.ID),
+		})
+	}
+	return catalog
+}
+
+// effectiveModels evaluates the catalog for a request on userPath through the
+// virtual-models authorizer when wired (model-side rows plus user policies),
+// falling back to the user policies alone.
+func (h *Handler) effectiveModels(userPath string, catalog []core.ModelSelector) []string {
+	if catalog == nil {
+		return nil
+	}
+	ctx := core.WithEffectiveUserPath(context.Background(), userPath)
+	allows := h.users.AllowsModel
+	if h.virtualModels != nil {
+		allows = h.virtualModels.AllowsModel
+	}
+	result := make([]string, 0, len(catalog))
+	for _, selector := range catalog {
+		if allows(ctx, selector) {
+			result = append(result, selector.QualifiedModel())
+		}
+	}
+	return result
+}
+
 func userWriteError(err error) error {
 	if err == nil {
 		return nil
@@ -148,13 +192,17 @@ func (h *Handler) userNodes() []userNodeResponse {
 		}
 	}
 
+	catalog := h.userCatalog()
 	result := make([]userNodeResponse, 0, len(nodes))
 	for userPath, node := range nodes {
-		for _, constraint := range h.users.Constraints(userPath) {
+		constraints := h.users.Constraints(userPath)
+		node.Restricted = len(constraints) > 0
+		for _, constraint := range constraints {
 			if constraint.UserPath != userPath {
 				node.InheritedFrom = append(node.InheritedFrom, constraint.UserPath)
 			}
 		}
+		node.EffectiveModels = h.effectiveModels(userPath, catalog)
 		result = append(result, *node)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].UserPath < result[j].UserPath })
