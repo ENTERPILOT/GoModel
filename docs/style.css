@@ -86,17 +86,3 @@ html.dark #navigation-items .nav-anchor[href="https://discord.gg/gaEB9BQSPH"]::b
     rotate: 0deg;
   }
 }
-
-/* "Pro" sidebar tag in GoModel blue. */
-#sidebar-content a[href*="/pro/"] [data-badge],
-#sidebar-content a[href*="/pro/"] .nav-tag-pill {
-  background-color: #2563eb !important;
-  border-color: #2563eb !important;
-  color: #ffffff !important;
-}
-
-html.dark #sidebar-content a[href*="/pro/"] [data-badge],
-html.dark #sidebar-content a[href*="/pro/"] .nav-tag-pill {
-  background-color: #1d4ed8 !important;
-  border-color: #1d4ed8 !important;
-}
