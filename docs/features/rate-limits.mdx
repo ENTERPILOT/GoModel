@@ -202,11 +202,11 @@ A saturated provider or model behaves like one with stale inventory:
   the client gets the honest `429` with `Retry-After` (or failover takes
   over) rather than an unavailable-model error, and the alias stays listed
   in `/v1/models` throughout.
-- **Failover rules** take over for a saturated primary route: the primary
+- **The failover chain** takes over for a saturated primary route: the primary
   provider is never called (it would happily serve the request and defeat the
-  limit), the sweep starts immediately, and rate-saturated candidates are
-  skipped along the way.
-- **Direct requests** with no failover configured receive `429` with an
+  limit), the sweep over the redirect's remaining targets starts immediately,
+  and rate-saturated candidates are skipped along the way.
+- **Direct requests** with no virtual model receive `429` with an
   honest `Retry-After` — the same answer the provider itself would eventually
   give, minus the wasted upstream call. Consumer (user path) breaches always
   return `429`: switching targets cannot relieve them.

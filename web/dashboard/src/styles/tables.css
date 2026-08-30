@@ -216,17 +216,6 @@ td.col-price {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface-hover));
 }
 
-.table-action-btn-failover-active {
-  position: relative;
-  color: var(--info);
-  background: color-mix(in srgb, var(--cache-meter-prompt) 35%, var(--bg));
-  border-color: color-mix(in srgb, var(--info) 45%, var(--border));
-}
-
-.table-action-btn-failover-active:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--cache-meter-prompt) 45%, var(--bg-surface-hover));
-}
-
 .table-icon-btn {
   width: 32px;
   min-width: 32px;
@@ -235,7 +224,7 @@ td.col-price {
   gap: 0;
   /* Rounded-square, matching .table-action-btn's own radius, so every
      icon-only action button (row actions, remove-row buttons in MCP
-     servers/Providers/Virtual Models/Failover forms, ...) reads as the same
+     servers/Providers/Virtual Models forms, ...) reads as the same
      shape as Budgets' label-expanding action buttons instead of a circle. */
   border-radius: 6px;
 }
@@ -256,17 +245,6 @@ td.col-price {
   box-shadow: 0 0 0 2px var(--bg-surface);
 }
 
-.table-icon-btn.table-action-btn-failover-active::after {
-  content: "";
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--info);
-  box-shadow: 0 0 0 2px var(--bg-surface);
-}
 
 .table-icon-svg {
   width: 14px;

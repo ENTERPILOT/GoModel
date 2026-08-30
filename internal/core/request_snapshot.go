@@ -224,15 +224,22 @@ func cloneMultiMap(src map[string][]string) map[string][]string {
 	if len(src) == 0 {
 		return nil
 	}
+	// One backing array for every value slice (the http.Header.Clone trick):
+	// two allocations per snapshot instead of one per header.
+	total := 0
+	for _, values := range src {
+		total += len(values)
+	}
+	backing := make([]string, total)
 	dst := make(map[string][]string, len(src))
 	for key, values := range src {
 		if len(values) == 0 {
 			dst[key] = nil
 			continue
 		}
-		cloned := make([]string, len(values))
-		copy(cloned, values)
-		dst[key] = cloned
+		n := copy(backing, values)
+		dst[key] = backing[:n:n]
+		backing = backing[n:]
 	}
 	return dst
 }

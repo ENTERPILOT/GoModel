@@ -145,13 +145,11 @@ function workflowQualifiedSelectorParts(selector) {
 }
 
 function workflowPrimaryRouteFromEntry(entry, source) {
-  const requestedModel = String(
-    (entry && (entry.requested_model || entry.model)) || "",
-  ).trim();
+  const requestedModel = String(entry.requested_model || entry.model || "").trim();
   const failover = workflowEntryFailover(entry);
   if (!(failover && failover.targetModel)) {
     return {
-      provider: String((entry && entry.provider) || "").trim() || null,
+      provider: String(entry.provider || "").trim() || null,
       model: requestedModel || null,
     };
   }

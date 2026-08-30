@@ -16,7 +16,7 @@ type clearedAuthentication struct{}
 const (
 	AuthenticationLoginHeader  = "X-GoModel-Auth-Login"
 	AuthenticationLogoutHeader = "X-GoModel-Auth-Logout"
-	AuthenticationUserHeader   = "X-GoModel-Auth-User"
+	AuthenticationUserHeader   = "X-Gomodel-Auth-User" // canonical textproto spelling; header names are case-insensitive
 )
 
 // Authentication describes an identity established by an extension.

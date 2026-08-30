@@ -24,7 +24,7 @@ func (s *appendFailingConversationStore) AppendItems(context.Context, string, []
 
 func conversationTestProvider(t *testing.T) *capturingProvider {
 	t.Helper()
-	return &capturingProvider{mockProvider: mockProvider{
+	return &capturingProvider{
 		supportedModels: []string{"gpt-5-mini"},
 		providerTypes:   map[string]string{"gpt-5-mini": "mock"},
 		responsesResponse: &core.ResponsesResponse{
@@ -42,8 +42,7 @@ func conversationTestProvider(t *testing.T) *capturingProvider {
 					},
 				},
 			},
-		},
-	}}
+		}}
 }
 
 func createTestConversation(t *testing.T, srv http.Handler, body string) string {

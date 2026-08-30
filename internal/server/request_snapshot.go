@@ -24,7 +24,7 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req, requestID := ensureRequestID(c.Request())
-			c.Response().Header().Set("X-Request-ID", requestID)
+			c.Response().Header().Set(core.RequestIDHeader, requestID)
 			desc := core.DescribeEndpoint(req.Method, req.URL.Path)
 			if !desc.IngressManaged {
 				// Model endpoints that own their transport (MCP, realtime,
@@ -105,13 +105,13 @@ func ensureRequestID(req *http.Request) (*http.Request, string) {
 	}
 	requestID := strings.TrimSpace(core.GetRequestID(req.Context()))
 	if requestID == "" {
-		requestID = strings.TrimSpace(req.Header.Get("X-Request-ID"))
+		requestID = clientRequestID(req.Header)
 	}
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
 
-	req.Header.Set("X-Request-ID", requestID)
+	req.Header.Set(core.RequestIDHeader, requestID)
 	if current := strings.TrimSpace(core.GetRequestID(req.Context())); current != requestID {
 		req = req.WithContext(core.WithRequestID(req.Context(), requestID))
 	}
@@ -172,9 +172,19 @@ func captureSmallRequestBodyForSnapshot(req *http.Request, bodyMode core.BodyMod
 	if bodyBytes == nil {
 		bodyBytes = []byte{}
 	}
-	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	body := &bytesReadCloser{}
+	body.Reset(bodyBytes)
+	req.Body = body
 	return bodyBytes, false, true, nil
 }
+
+// bytesReadCloser is io.NopCloser(bytes.NewReader(b)) in one allocation
+// instead of two; it keeps bytes.Reader's WriteTo for efficient copies.
+type bytesReadCloser struct {
+	bytes.Reader
+}
+
+func (*bytesReadCloser) Close() error { return nil }
 
 func shouldCaptureSmallRequestBody(req *http.Request, bodyMode core.BodyMode) bool {
 	if req == nil || req.Body == nil {

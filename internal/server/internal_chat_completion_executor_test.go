@@ -30,26 +30,22 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 		config: auditlog.Config{Enabled: true},
 	}
 	provider := &contextCapturingProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"rewrite-model"},
-				providerTypes: map[string]string{
-					"rewrite-model": "openai",
-				},
-				response: &core.ChatResponse{
-					ID:       "chatcmpl-internal-1",
-					Object:   "chat.completion",
-					Model:    "rewrite-model",
-					Provider: "openai",
-					Choices: []core.Choice{
-						{
-							Index:        0,
-							FinishReason: "stop",
-							Message: core.ResponseMessage{
-								Role:    "assistant",
-								Content: "rewritten",
-							},
-						},
+		supportedModels: []string{"rewrite-model"},
+		providerTypes: map[string]string{
+			"rewrite-model": "openai",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl-internal-1",
+			Object:   "chat.completion",
+			Model:    "rewrite-model",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "rewritten",
 					},
 				},
 			},
@@ -131,26 +127,22 @@ func TestInternalChatCompletionExecutor_DoesNotReuseParentWorkflowResolution(t *
 		config: auditlog.Config{Enabled: true},
 	}
 	provider := &contextCapturingProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"gpt-4o-mini"},
-				providerTypes: map[string]string{
-					"openai/gpt-4o-mini": "openai",
-				},
-				response: &core.ChatResponse{
-					ID:       "chatcmpl-internal-2",
-					Object:   "chat.completion",
-					Model:    "gpt-4o-mini",
-					Provider: "openai",
-					Choices: []core.Choice{
-						{
-							Index:        0,
-							FinishReason: "stop",
-							Message: core.ResponseMessage{
-								Role:    "assistant",
-								Content: "rewritten",
-							},
-						},
+		supportedModels: []string{"gpt-4o-mini"},
+		providerTypes: map[string]string{
+			"openai/gpt-4o-mini": "openai",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl-internal-2",
+			Object:   "chat.completion",
+			Model:    "gpt-4o-mini",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "rewritten",
 					},
 				},
 			},
@@ -216,26 +208,22 @@ func TestInternalChatCompletionExecutor_PreservesBoundedAuditCapture(t *testing.
 	bigPrompt := strings.Repeat("x", auditlog.MaxBodyCapture+2048)
 	bigResponse := strings.Repeat("y", auditlog.MaxBodyCapture+2048)
 	provider := &contextCapturingProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"rewrite-model"},
-				providerTypes: map[string]string{
-					"rewrite-model": "openai",
-				},
-				response: &core.ChatResponse{
-					ID:       "chatcmpl-internal-3",
-					Object:   "chat.completion",
-					Model:    "rewrite-model",
-					Provider: "openai",
-					Choices: []core.Choice{
-						{
-							Index:        0,
-							FinishReason: "stop",
-							Message: core.ResponseMessage{
-								Role:    "assistant",
-								Content: bigResponse,
-							},
-						},
+		supportedModels: []string{"rewrite-model"},
+		providerTypes: map[string]string{
+			"rewrite-model": "openai",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl-internal-3",
+			Object:   "chat.completion",
+			Model:    "rewrite-model",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: bigResponse,
 					},
 				},
 			},
@@ -308,26 +296,22 @@ func TestInternalChatCompletionExecutor_RoutesThroughResponseCache(t *testing.T)
 
 	rcm := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	provider := &contextCapturingProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"rewrite-model"},
-				providerTypes: map[string]string{
-					"rewrite-model": "openai",
-				},
-				response: &core.ChatResponse{
-					ID:       "chatcmpl-internal-cache",
-					Object:   "chat.completion",
-					Model:    "rewrite-model",
-					Provider: "openai",
-					Choices: []core.Choice{
-						{
-							Index:        0,
-							FinishReason: "stop",
-							Message: core.ResponseMessage{
-								Role:    "assistant",
-								Content: "rewritten",
-							},
-						},
+		supportedModels: []string{"rewrite-model"},
+		providerTypes: map[string]string{
+			"rewrite-model": "openai",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl-internal-cache",
+			Object:   "chat.completion",
+			Model:    "rewrite-model",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "rewritten",
 					},
 				},
 			},
@@ -372,26 +356,22 @@ func TestInternalChatCompletionExecutor_CachedNilWorkflowDoesNotPanic(t *testing
 
 	rcm := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	provider := &contextCapturingProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"rewrite-model"},
-				providerTypes: map[string]string{
-					"rewrite-model": "openai",
-				},
-				response: &core.ChatResponse{
-					ID:       "chatcmpl-internal-cache-nil-workflow",
-					Object:   "chat.completion",
-					Model:    "rewrite-model",
-					Provider: "openai",
-					Choices: []core.Choice{
-						{
-							Index:        0,
-							FinishReason: "stop",
-							Message: core.ResponseMessage{
-								Role:    "assistant",
-								Content: "rewritten",
-							},
-						},
+		supportedModels: []string{"rewrite-model"},
+		providerTypes: map[string]string{
+			"rewrite-model": "openai",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl-internal-cache-nil-workflow",
+			Object:   "chat.completion",
+			Model:    "rewrite-model",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "rewritten",
 					},
 				},
 			},
@@ -446,26 +426,22 @@ func TestInternalChatCompletionExecutor_MarshalFailureFallsBackToNoCacheDispatch
 
 	rcm := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	provider := &contextCapturingProvider{
-		capturingProvider: capturingProvider{
-			mockProvider: mockProvider{
-				supportedModels: []string{"rewrite-model"},
-				providerTypes: map[string]string{
-					"rewrite-model": "openai",
-				},
-				response: &core.ChatResponse{
-					ID:       "chatcmpl-internal-marshal-fallback",
-					Object:   "chat.completion",
-					Model:    "rewrite-model",
-					Provider: "openai",
-					Choices: []core.Choice{
-						{
-							Index:        0,
-							FinishReason: "stop",
-							Message: core.ResponseMessage{
-								Role:    "assistant",
-								Content: "rewritten",
-							},
-						},
+		supportedModels: []string{"rewrite-model"},
+		providerTypes: map[string]string{
+			"rewrite-model": "openai",
+		},
+		response: &core.ChatResponse{
+			ID:       "chatcmpl-internal-marshal-fallback",
+			Object:   "chat.completion",
+			Model:    "rewrite-model",
+			Provider: "openai",
+			Choices: []core.Choice{
+				{
+					Index:        0,
+					FinishReason: "stop",
+					Message: core.ResponseMessage{
+						Role:    "assistant",
+						Content: "rewritten",
 					},
 				},
 			},

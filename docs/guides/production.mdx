@@ -247,9 +247,9 @@ own refresh cadence, and two of them have none.
 | --- | --- |
 | Budget definitions | **Restart only** |
 | Rate limit rules | **Restart only** |
-| Virtual models | Up to `CACHE_REFRESH_INTERVAL` (1 hour by default) |
+| Virtual models (including failover chains) | Up to `CACHE_REFRESH_INTERVAL` (1 hour by default) |
 | Managed API keys | Up to 60 seconds |
-| Guardrails, workflows, failover, pricing overrides | About 60 seconds |
+| Guardrails, workflows, pricing overrides | About 60 seconds |
 
 <Warning>
   Two of these matter operationally. **Revoking a managed API key can take up to

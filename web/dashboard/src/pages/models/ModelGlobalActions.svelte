@@ -3,11 +3,12 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { virtualModels } from "./virtualModels.svelte.js";
+  import { virtualModelEditor } from "./virtualModelEditor.svelte.js";
   import { pricingOverrides } from "./pricingOverrides.svelte.js";
   import {
-    modelOverrideEditButtonClass,
-    modelOverrideEditButtonLabel,
-  } from "./virtualModelsLogic.js";
+  modelOverrideEditButtonClass,
+  modelOverrideEditButtonLabel,
+} from "./displayRows.js";
   import AccessToggle from "./AccessToggle.svelte";
   import { CircleDollarSign, Pencil } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
@@ -30,7 +31,7 @@
     <TableActionButton
       label={modelOverrideEditButtonLabel(m.models_global_access(), virtualModels.hasGlobalModelOverride())}
       class="table-icon-btn {modelOverrideEditButtonClass(virtualModels.hasGlobalModelOverride())}"
-      onclick={() => virtualModels.openGlobalModelOverrideEdit()}
+      onclick={() => virtualModelEditor.openGlobalModelOverrideEdit()}
     >
       <Icon icon={Pencil} class="table-icon-svg" />
     </TableActionButton>

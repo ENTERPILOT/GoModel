@@ -58,12 +58,12 @@ func ParseModelSelector(model, provider string) (ModelSelector, error) {
 }
 
 func splitQualifiedModel(model string) (prefix, rest string, ok bool) {
-	parts := strings.SplitN(model, "/", 2)
-	if len(parts) != 2 {
+	prefix, rest, ok = strings.Cut(model, "/")
+	if !ok {
 		return "", "", false
 	}
-	prefix = strings.TrimSpace(parts[0])
-	rest = strings.TrimSpace(parts[1])
+	prefix = strings.TrimSpace(prefix)
+	rest = strings.TrimSpace(rest)
 	if prefix == "" || rest == "" {
 		return "", "", false
 	}

@@ -47,6 +47,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `GOMODEL_DEMO_MODE`  | Enable public demo warnings in logs and the dashboard  | `false`                |
 | `BODY_SIZE_LIMIT`    | Max request body size (e.g., `10M`, `1024K`, `500KB`) | _(no limit)_           |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
+| `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |
 
 Set `GOMODEL_DEMO_MODE=true` for a public or shared demonstration instance.
@@ -324,6 +325,16 @@ providers that define a list and skip their upstream `/models` calls. YAML
 `providers.<name>.models` provides the same model-list input for named provider
 blocks.
 
+`GET /v1/models` lists provider-qualified IDs (`openai/gpt-5`) by default. Set
+`UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true` (YAML:
+`models.unqualified_model_ids_at_models_endpoint`) to list bare model IDs
+(`gpt-5`) instead, for clients that validate the requested model against the
+list and only know plain names. Caveat: when two providers expose the same
+model ID, only the provider an unqualified request routes to (the first
+registered one) is listed. Pin a name to a specific provider with a
+[virtual model](/features/virtual-models#list-bare-model-ids), for example
+`source: gpt-5` with `target: azure/gpt-5`.
+
 To narrow a provider's inventory instead of listing it model by model, use
 `<PROVIDER>_MODEL_FILTER_INCLUDE`, `<PROVIDER>_MODEL_FILTER_EXCLUDE`, and
 `<PROVIDER>_MODEL_FILTER_MAX_PRICE_PER_MTOK` (YAML:
@@ -510,6 +521,11 @@ models:
   # configured models on top of the discovered inventory (models a provider
   # serves but does not list).
   configured_provider_models_mode: fallback
+  # List bare model IDs (gpt-5) from GET /v1/models instead of provider-qualified
+  # ones (openai/gpt-5). When two providers expose the same ID only the provider an
+  # unqualified request routes to (the first registered one) is listed; pin a name
+  # with a virtual model (source gpt-5 -> target azure/gpt-5).
+  unqualified_model_ids_at_models_endpoint: false
 
 providers:
   # Override OpenAI base URL

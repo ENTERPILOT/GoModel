@@ -14,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/realtime"
@@ -29,6 +30,7 @@ type Handler struct {
 	modelResolver                   RequestModelResolver
 	modelAuthorizer                 RequestModelAuthorizer
 	failoverResolver                RequestFailoverResolver
+	failoverPolicy                  *gateway.FailoverPolicy
 	workflowPolicyResolver          RequestWorkflowPolicyResolver
 	translatedRequestPatcher        TranslatedRequestPatcher
 	batchRequestPreparer            BatchRequestPreparer
@@ -155,6 +157,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			modelAuthorizer:          h.modelAuthorizer,
 			workflowPolicyResolver:   h.workflowPolicyResolver,
 			failoverResolver:         h.failoverResolver,
+			failoverPolicy:           h.failoverPolicy,
 			translatedRequestPatcher: h.translatedRequestPatcher,
 			logger:                   h.logger,
 			usageLogger:              h.usageLogger,
@@ -588,7 +591,7 @@ func (h *Handler) Health(c *echo.Context) error {
 // @Router       /v1/models [get]
 func (h *Handler) ListModels(c *echo.Context) error {
 	// Create context with request ID for provider
-	requestID := c.Request().Header.Get("X-Request-ID")
+	requestID := c.Request().Header.Get(core.RequestIDHeader)
 	ctx := core.WithRequestID(c.Request().Context(), requestID)
 
 	resp, err := h.provider.ListModels(ctx)

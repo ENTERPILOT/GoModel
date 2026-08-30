@@ -25,6 +25,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
@@ -83,6 +84,7 @@ type Config struct {
 	ModelAuthorizer                 RequestModelAuthorizer                 // Optional: request-scoped concrete model access controller
 	WorkflowPolicyResolver          RequestWorkflowPolicyResolver          // Optional: persisted workflow resolver used during workflow resolution
 	FailoverResolver                RequestFailoverResolver                // Optional: translated-route failover resolver
+	FailoverPolicy                  *gateway.FailoverPolicy                // Optional: which errors trigger failover and how many targets to try; nil applies the defaults
 	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
@@ -183,6 +185,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	handler := newHandlerWithAuthorizer(provider, auditLogger, usageLogger, pricingResolver, modelResolver, modelAuthorizer, workflowPolicyResolver, failoverResolver, translatedRequestPatcher)
 	handler.budgetChecker = budgetChecker
 	if cfg != nil {
+		handler.failoverPolicy = cfg.FailoverPolicy
 		handler.rateLimiter = cfg.RateLimiter
 		handler.usageSummarizer = cfg.UsageSummarizer
 	}
@@ -291,18 +294,20 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			LogRequestID:     true,
 			LogContentLength: true,
 			LogResponseSize:  true,
+			// LogAttrs with typed attrs: slog.Info's variadic ...any would box
+			// every value (an allocation each) on every model request.
 			LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
-				slog.Info("REQUEST",
-					"method", v.Method,
-					"uri", v.URI,
-					"status", v.Status,
-					"latency", v.Latency.String(),
-					"host", v.Host,
-					"bytes_in", v.ContentLength,
-					"bytes_out", v.ResponseSize,
-					"user_agent", v.UserAgent,
-					"remote_ip", v.RemoteIP,
-					"request_id", v.RequestID,
+				slog.LogAttrs(context.Background(), slog.LevelInfo, "REQUEST",
+					slog.String("method", v.Method),
+					slog.String("uri", v.URI),
+					slog.Int("status", v.Status),
+					slog.String("latency", v.Latency.String()),
+					slog.String("host", v.Host),
+					slog.String("bytes_in", v.ContentLength),
+					slog.Int64("bytes_out", v.ResponseSize),
+					slog.String("user_agent", v.UserAgent),
+					slog.String("remote_ip", v.RemoteIP),
+					slog.String("request_id", v.RequestID),
 				)
 				return nil
 			},

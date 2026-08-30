@@ -2,10 +2,8 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -57,16 +55,18 @@ func tryFailoverResponse[T any](
 	}
 
 	failovers := o.FailoverSelectors(workflow)
-	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
+	if len(failovers) == 0 || !o.failoverPolicy.ShouldRetry(primaryErr) {
 		return zero, "", "", "", false, primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
+	attempts := 0
 	for _, selector := range failovers {
-		// Stop sweeping if the client disconnected mid-failover.
-		if ctx.Err() != nil {
+		// Stop sweeping if the client disconnected mid-failover or the policy
+		// cap on failover attempts is reached.
+		if ctx.Err() != nil || o.failoverPolicy.attemptsExhausted(attempts) {
 			break
 		}
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
@@ -92,6 +92,7 @@ func tryFailoverResponse[T any](
 		)
 
 		started := time.Now()
+		attempts++
 		resp, resolvedProviderType, err := call(selector, providerType, providerName)
 		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
@@ -178,16 +179,18 @@ func tryFailoverStream(
 	}
 
 	failovers := o.FailoverSelectors(workflow)
-	if len(failovers) == 0 || !ShouldAttemptFailover(primaryErr) {
+	if len(failovers) == 0 || !o.failoverPolicy.ShouldRetry(primaryErr) {
 		return nil, "", "", "", "", primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
 	primaryModel := currentSelectorForWorkflow(workflow, model, provider)
 	lastErr := primaryErr
+	attempts := 0
 	for _, selector := range failovers {
-		// Stop sweeping if the client disconnected mid-failover.
-		if ctx.Err() != nil {
+		// Stop sweeping if the client disconnected mid-failover or the policy
+		// cap on failover attempts is reached.
+		if ctx.Err() != nil || o.failoverPolicy.attemptsExhausted(attempts) {
 			break
 		}
 		if o.modelAuthorizer != nil && !o.modelAuthorizer.AllowsModel(ctx, selector) {
@@ -213,6 +216,7 @@ func tryFailoverStream(
 		)
 
 		started := time.Now()
+		attempts++
 		stream, resolvedProviderType, usageModel, err := call(selector, providerType, providerName)
 		recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindFailover, firstNonEmptyString(resolvedProviderType, providerType), providerName, qualified, started, err))
 		if err == nil {
@@ -228,90 +232,6 @@ func tryFailoverStream(
 	}
 
 	return nil, "", "", "", "", lastErr
-}
-
-// Message fragments that mark an error as failover-eligible when they appear
-// alongside the anchor word checked in ShouldAttemptFailover.
-var (
-	// modelUnavailableFragments signal the model itself is gone or refused,
-	// regardless of the status code the provider chose.
-	modelUnavailableFragments = []string{
-		"not found",
-		"does not exist",
-		"unsupported",
-		"unavailable",
-		"not available",
-		"deprecated",
-		"retired",
-		"disabled",
-	}
-	// upstreamFailureFragments signal an aggregator-style provider (OpenCode
-	// Zen, OpenRouter) relaying a transient failure of *its* upstream, e.g.
-	// OpenCode's 400 "Upstream request failed". These are server-side
-	// failures wearing a client-error status, so a failover target may still
-	// succeed.
-	upstreamFailureFragments = []string{
-		"failed",
-		"error",
-		"unavailable",
-		"timed out",
-		"timeout",
-	}
-	// retiredModel404Fragments cover 404s with availability phrasing but no
-	// literal "model": providers report retired models this way. Plain
-	// endpoint 404s must not match — those are genuine routing misses.
-	retiredModel404Fragments = []string{
-		"unsupported",
-		"unavailable",
-		"not available",
-		"deprecated",
-		"retired",
-		"disabled",
-	}
-)
-
-func containsAny(message string, fragments []string) bool {
-	for _, fragment := range fragments {
-		if strings.Contains(message, fragment) {
-			return true
-		}
-	}
-	return false
-}
-
-// ShouldAttemptFailover reports whether err should trigger translated failover.
-func ShouldAttemptFailover(err error) bool {
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr == nil {
-		return false
-	}
-
-	status := gatewayErr.HTTPStatusCode()
-	if status >= http.StatusInternalServerError || status == http.StatusTooManyRequests {
-		return true
-	}
-
-	code := ""
-	if gatewayErr.Code != nil {
-		code = strings.ToLower(strings.TrimSpace(*gatewayErr.Code))
-	}
-	if code != "" && strings.Contains(code, "model") &&
-		(strings.Contains(code, "not_found") || strings.Contains(code, "unsupported") || strings.Contains(code, "unavailable")) {
-		return true
-	}
-
-	message := strings.ToLower(strings.TrimSpace(gatewayErr.Message))
-	if strings.Contains(message, "model") && containsAny(message, modelUnavailableFragments) {
-		return true
-	}
-	if strings.Contains(message, "upstream") && containsAny(message, upstreamFailureFragments) {
-		return true
-	}
-	if status == http.StatusNotFound && containsAny(message, retiredModel404Fragments) {
-		return true
-	}
-
-	return false
 }
 
 func firstNonEmptyString(values ...string) string {

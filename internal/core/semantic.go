@@ -322,6 +322,31 @@ func ApplyBodySelectorHints(env *WhiteBoxPrompt, model, provider string, stream 
 	}
 }
 
+// ApplyBodyStreamHint records independently decoded streaming intent without
+// claiming that the request body or its model selector was fully parsed.
+func ApplyBodyStreamHint(env *WhiteBoxPrompt, stream bool) {
+	applyBodyStreamHint(env, stream, false)
+}
+
+// ApplyPartialBodyStreamHint records streaming intent observed in an incomplete
+// body while preserving that the final value remains uncertain.
+func ApplyPartialBodyStreamHint(env *WhiteBoxPrompt, stream bool) {
+	applyBodyStreamHint(env, stream, true)
+}
+
+func applyBodyStreamHint(env *WhiteBoxPrompt, stream, uncertain bool) {
+	if env == nil {
+		return
+	}
+	env.StreamRequested = stream
+	if passthrough := env.CachedPassthroughRouteInfo(); passthrough != nil {
+		cloned := *passthrough
+		cloned.Stream = stream
+		cloned.StreamUncertain = uncertain
+		CachePassthroughRouteInfo(env, &cloned)
+	}
+}
+
 // MarkPassthroughStreamUncertain records that bounded opaque-body inspection
 // stopped before it could determine explicit streaming intent.
 func MarkPassthroughStreamUncertain(env *WhiteBoxPrompt) {
@@ -369,8 +394,9 @@ func deriveSnapshotSelectorHintsGJSON(body []byte) (model, provider string, stre
 		return "", "", false, false
 	}
 
-	root := gjson.ParseBytes(body)
-	if !root.IsObject() {
+	// GetBytes peeks without gjson.ParseBytes's full copy of the body; the
+	// leading byte is the object check the parse used to make.
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
 		return "", "", false, false
 	}
 
@@ -378,28 +404,28 @@ func deriveSnapshotSelectorHintsGJSON(body []byte) (model, provider string, stre
 	// encoding/json on duplicate keys, but the hot-path speedup is worth it here:
 	// duplicate selector keys are not expected from real clients, and we accept
 	// the first-match behavior to keep ingress peeking cheap.
-	modelResult := root.Get("model")
+	modelResult := gjson.GetBytes(body, "model")
 	if !snapshotSelectorStringAllowed(modelResult) {
 		return "", "", false, false
 	}
-	providerResult := root.Get("provider")
+	providerResult := gjson.GetBytes(body, "provider")
 	if !snapshotSelectorStringAllowed(providerResult) {
 		return "", "", false, false
 	}
-	streamResult := root.Get("stream")
+	streamResult := gjson.GetBytes(body, "stream")
 	if !snapshotSelectorBoolAllowed(streamResult) {
 		return "", "", false, false
 	}
 
-	// Clone the extracted strings: gjson results alias the full parsed body,
-	// and these values land in RouteHints, which lives on the request context
-	// for the whole (possibly streaming) request — without the clone, two
-	// short selector strings pin a request-sized backing string.
+	// GetBytes results own their strings (unlike Parse results, which alias
+	// the body), so these values can land in RouteHints — which lives on the
+	// request context for the whole, possibly streaming, request — without
+	// pinning a request-sized backing string.
 	if modelResult.Type == gjson.String {
-		model = strings.Clone(modelResult.String())
+		model = modelResult.String()
 	}
 	if providerResult.Type == gjson.String {
-		provider = strings.Clone(providerResult.String())
+		provider = providerResult.String()
 	}
 	if streamResult.Type == gjson.True || streamResult.Type == gjson.False {
 		stream = streamResult.Bool()

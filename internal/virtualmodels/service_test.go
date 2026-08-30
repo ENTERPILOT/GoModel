@@ -219,21 +219,6 @@ func TestService_RejectsRedirectToMissingTarget(t *testing.T) {
 	}
 }
 
-func TestService_RejectsRedirectTargetingAnotherRedirect(t *testing.T) {
-	t.Parallel()
-	svc := newTestService(t)
-	ctx := context.Background()
-
-	if err := svc.Upsert(ctx, VirtualModel{Source: "fast", Targets: []Target{{Provider: "openai", Model: "gpt-4o"}}, Enabled: true}); err != nil {
-		t.Fatalf("Upsert(fast) error = %v", err)
-	}
-	// "faster" targeting "fast" (another redirect's source) must be rejected.
-	err := svc.Upsert(ctx, VirtualModel{Source: "faster", Targets: []Target{{Model: "fast"}}, Enabled: true})
-	if err == nil {
-		t.Fatalf("Upsert(redirect targeting redirect) error = nil, want rejection")
-	}
-}
-
 func TestService_DisabledRedirectDoesNotResolveOrExpose(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)

@@ -598,6 +598,30 @@ func (r *ModelRegistry) ListPublicModels() []core.Model {
 	return result
 }
 
+// ListUnqualifiedPublicModels returns advertised models under their bare
+// model IDs, sorted by ID. When several providers expose the same model ID,
+// only the provider an unqualified request resolves to (the global catalog
+// entry, see rebuildGlobalModelMap) is listed, so the response never
+// advertises an ID that would route somewhere else. OwnedBy carries the
+// provider name so callers can still tell which provider serves the model.
+func (r *ModelRegistry) ListUnqualifiedPublicModels() []core.Model {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make([]core.Model, 0, len(r.models))
+	for modelID, info := range r.models {
+		if !r.providerAdvertisedLocked(info.ProviderName) || !providerCanServeModel(info) {
+			continue
+		}
+		model := info.Model
+		model.ID = modelID
+		model.OwnedBy = info.ProviderName
+		result = append(result, model)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
+}
+
 // providerCanServeModel reports whether the owning provider implements the
 // capabilities a model needs. Upstream inventories and the metadata registry
 // can list audio-only (TTS/STT) or image-only models for providers whose

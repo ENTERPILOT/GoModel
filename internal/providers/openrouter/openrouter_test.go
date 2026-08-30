@@ -123,8 +123,7 @@ func TestListModels_UpstreamErrorPropagates(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got response: %+v", resp)
 	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 		t.Fatalf("error type = %T, want *core.GatewayError: %v", err, err)
 	}
 }

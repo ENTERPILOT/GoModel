@@ -87,10 +87,23 @@ them. Add more than one target in the editor (**Add target**) and pick a
   target, ranked by the model registry's input + output per-token price. When a
   target has no registry pricing it is skipped while a priced target exists; if
   none are priced, the first listed target is used.
+- **Failover** always routes to the first currently-available target in the
+  order listed: the targets form a priority list, and lower entries serve only
+  while every entry above them is unavailable or fails. Weights and session
+  keeping do not apply.
 
 Targets that the gateway cannot currently serve (unknown model, provider down)
 are skipped automatically, so a redirect keeps working as long as one target is
 available. A redirect with a single target behaves exactly like a plain alias.
+
+Whatever the strategy, the remaining targets are the redirect's **failover
+chain**: when the chosen target fails with a retryable error, the request is
+retried against the other available targets in the order listed. The editor's
+**Failover** checkbox (on by default; `failover: false` as code) switches that
+off for one redirect, so a failed request is answered with the error instead;
+it can also be switched off globally or by the request's workflow. See
+[Failover](/features/failover) for the errors that trigger a retry and for
+adding a failover chain to a real model by shadowing it.
 
 Requests belonging to one detected client session stick to the target that
 served the session first (**Session keeping**, on by default), so
@@ -109,6 +122,60 @@ restore stateless balancing — see
 For example, point `smart` at both `openai/gpt-4o` and `anthropic/claude-sonnet-4-6`
 with the round-robin strategy to split load, or at a premium and a budget model
 with the cost strategy to always take the cheaper one.
+
+## Chain virtual models
+
+A redirect target can name **another virtual model** instead of a concrete
+model. The inner virtual model is resolved at request time, so its targets,
+weights, and strategy are defined once and reused everywhere it is referenced —
+no duplicated target lists that drift apart.
+
+```yaml
+virtual_models:
+  # Shared base: round-robin over small models.
+  - source: cheap
+    targets:
+      - { model: openai/gpt-4o-mini }
+      - { model: groq/llama-3.3-70b }
+
+  # Layered on top: the cheap pool is one leg next to a premium model.
+  - source: smart-frugal
+    strategy: round_robin
+    targets:
+      - { model: cheap, weight: 3 }
+      - { model: openai/gpt-4o }
+
+  # A plain alias onto the pool.
+  - source: production
+    target: cheap
+```
+
+Resolution composes level by level: the outer strategy picks one of its legs
+(a chained leg counts like any target, honoring its weight), and a chosen
+virtual-model leg then applies its own strategy among its own targets. Session
+keeping pins at every level, so a session stays on the same concrete model.
+
+- The **cost** strategy prices a chained leg at the cheapest concrete model
+  currently available behind it.
+- A chained virtual model that is **disabled**, or has no available target, is
+  skipped like an unavailable provider model.
+- Only the **outer** virtual model's `user_paths` and `slowdown` apply to a
+  request; the inner one's scope is not consulted when it is reached through a
+  chain.
+- `/v1/models` lists a chained redirect with the metadata of its first
+  available concrete model.
+
+A target written as one name is matched by name wherever it is declared —
+`config.yaml`, the dashboard, or the admin API — so `team/cheap` reaches the
+virtual model of that name even though it looks like `provider/model`. Set
+`provider` explicitly (`{ provider: groq, model: llama-3.3-70b }`) to pin a
+target to a concrete model regardless of any virtual model sharing the name.
+
+Chains must be acyclic (`a -> b -> a` is rejected, with the cycle spelled out)
+and at most 8 virtual models deep. Both rules are enforced when saving from the
+dashboard and at startup for declarative entries. A target must exist when it is
+saved — create the inner virtual model first — and a virtual model that others
+chain through cannot be deleted or renamed until they are repointed.
 
 ## Rename or repoint a redirect
 
@@ -163,14 +230,18 @@ VIRTUAL_MODELS=[{"source":"smart","strategy":"cost","targets":[{"model":"openai/
 ```
 
 Each entry accepts `source`, a single `target` (shorthand) or a `targets` list,
-`strategy` (`round_robin` or `cost`), `session_affinity` (default `true`; see
-[Session Keeping](/features/session-keeping)), `user_paths`, `description`,
+`strategy` (`round_robin`, `cost`, or `failover`), `session_affinity` (default `true`; see
+[Session Keeping](/features/session-keeping)), `failover` (default `true`; see
+[Failover](/features/failover)), `user_paths`, `description`,
 `slowdown` (`0` disables inherited slowdown; active factors range from `0.1` to
 `10`), and `enabled`.
+A target `model` may name another declared virtual model (see
+[Chain virtual models](#chain-virtual-models)).
 Leave the targets empty to declare an access policy on the `source` selector. An
-invalid declaration (unknown strategy, missing or self-referential target, or a
-target `provider` that matches no configured provider — a typo) fails startup
-with a clear error listing the registered provider names.
+invalid declaration (unknown strategy, missing or self-referential target, a
+chain cycle or a chain deeper than 8 virtual models, or a target `provider` that
+matches no configured provider — a typo) fails startup with a clear error
+listing the registered provider names.
 
 Two lenient exceptions keep valid setups booting:
 
@@ -193,6 +264,32 @@ KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT=true
 When this is enabled, GoModel returns enabled redirects from `/v1/models`
 instead of the full provider model list. The setting is also listed in
 `.env.template`.
+
+## List bare model IDs
+
+By default `GET /v1/models` returns provider-qualified IDs such as
+`openai/gpt-5`. Some clients validate the model you configure against that list
+and only know plain names, so they never match. To list bare IDs instead, set:
+
+```env
+UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT=true
+```
+
+The `owned_by` field still carries the provider name. Requests for a bare model
+ID keep working the same way in both modes.
+
+Caveat: when two providers expose the same model ID (for example `gpt-5` on both
+`openai` and `azure`), only the provider an unqualified request routes to (the
+first registered one) is listed. To pin a name to a specific provider, add a
+virtual model with that name as its source:
+
+```yaml
+virtual_models:
+  - source: gpt-5
+    target: azure/gpt-5
+```
+
+The redirect wins over the provider entry in both the model list and routing.
 
 ## Shadow a model
 

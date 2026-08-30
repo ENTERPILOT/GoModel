@@ -27,8 +27,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/failover"
 	"github.com/enterpilot/gomodel/internal/filestore"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
@@ -65,7 +65,6 @@ type App struct {
 	responseStore       *responsestore.Result
 	conversations       *conversationstore.Result
 	virtualModels       *virtualmodels.Result
-	failover            *failover.Result
 	tagging             *tagging.Result
 	mcpGateway          *mcpgateway.Result
 	providerCredentials *providers.CredentialsResult
@@ -165,14 +164,14 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			observe("attempt_end", func() {
 				source, sessionID := routeAffinityContext(ctx)
 				selector.OnAttemptEnd(ext.RouteOutcome{
-					RouteTarget: ext.RouteTarget{Provider: info.Provider, Model: info.Model},
-					Source:      source,
-					SessionID:   sessionID,
-					Endpoint:    info.Endpoint,
-					StatusCode:  info.StatusCode,
-					Duration:    info.Duration,
-					Stream:      info.Stream,
-					Err:         info.Error,
+					Provider: info.Provider, Model: info.Model,
+					Source:     source,
+					SessionID:  sessionID,
+					Endpoint:   info.Endpoint,
+					StatusCode: info.StatusCode,
+					Duration:   info.Duration,
+					Stream:     info.Stream,
+					Err:        info.Error,
 				})
 			})
 		},
@@ -574,14 +573,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		vm.SetRouteSelector(routeSelector)
 	}
 
-	var failoverResult *failover.Result
-	failoverResult, err = failover.New(ctx, appCfg, sharedStorage)
-	if err != nil {
-		return fail("failed to initialize failover rules", err)
-	}
-	app.failover = failoverResult
-	app.register(subsystemFailover, ownedByShutdown, app.failover.Close)
-
 	var taggingResult *tagging.Result
 	taggingResult, err = tagging.New(ctx, appCfg, sharedStorage)
 	if err != nil {
@@ -749,7 +740,8 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		PricingResolver:                 pricingResolver,
 		ModelResolver:                   vm,
 		ModelAuthorizer:                 vm,
-		FailoverResolver:                failover.NewResolverWithRuleProvider(appCfg.Failover, providerResult.Registry, failoverResult.Service),
+		FailoverResolver:                failoverResolver(appCfg, vm),
+		FailoverPolicy:                  gateway.NewFailoverPolicy(appCfg.Failover),
 		WorkflowPolicyResolver:          workflowResult.Service,
 		TranslatedRequestPatcher:        translatedRequestPatcher,
 		BatchRequestPreparer:            batchRequestPreparer,
@@ -815,7 +807,6 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 			providerResult.ConfiguredProviders,
 			authKeyResult.Service,
 			vm,
-			failoverResult.Service,
 			app.pricingOverrides.Service,
 			workflowResult.Service,
 			app.guardrails.Service,
@@ -886,6 +877,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		ModelAuthorizer:        vm,
 		WorkflowPolicyResolver: workflowResult.Service,
 		FailoverResolver:       serverCfg.FailoverResolver,
+		FailoverPolicy:         serverCfg.FailoverPolicy,
 		AuditLogger:            auditResult.Logger,
 		// The tapped logger, so guardrail LLM calls count toward the
 		// request's rate limit token windows like any other completion.
@@ -1251,7 +1243,6 @@ func initAdmin(
 	configuredProviders []providers.SanitizedProviderConfig,
 	authKeyService *authkeys.Service,
 	virtualModelService *virtualmodels.Service,
-	failoverService *failover.Service,
 	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
@@ -1314,7 +1305,6 @@ func initAdmin(
 		admin.WithAuditReader(auditReader),
 		admin.WithAuthKeys(authKeyService),
 		admin.WithVirtualModels(virtualModelService),
-		admin.WithFailover(failoverService),
 		admin.WithPricingOverrides(pricingOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
@@ -1473,7 +1463,7 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 // to round robin without a selector), but the UI only advertises it when a
 // route-selector extension is actually registered.
 func dashboardVirtualModelStrategies(adaptiveRouting bool) string {
-	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost}
+	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost, virtualmodels.StrategyFailover}
 	if adaptiveRouting {
 		strategies = append(strategies, virtualmodels.StrategyAdaptive)
 	}
@@ -1552,4 +1542,14 @@ func semanticResponseCacheConfiguredFromResponse(cfg config.ResponseCacheConfig)
 
 func failoverFeatureEnabledGlobally(cfg *config.Config) bool {
 	return cfg != nil && cfg.Failover.Enabled
+}
+
+// failoverResolver returns the virtual models service as the translated-route
+// failover resolver: a redirect's remaining targets are its failover chain.
+// FAILOVER_ENABLED=false switches the sweep off globally.
+func failoverResolver(cfg *config.Config, vm *virtualmodels.Service) server.RequestFailoverResolver {
+	if !failoverFeatureEnabledGlobally(cfg) || vm == nil {
+		return nil
+	}
+	return vm
 }

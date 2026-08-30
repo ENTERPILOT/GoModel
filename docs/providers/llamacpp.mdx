@@ -108,7 +108,7 @@ well-known embedding families (`bge`, `e5`, `gte`, `minilm`) are categorized as
 embedding models, and names containing `rerank` as reranking models — namespaced
 IDs are checked by their final path segment. For anything that stays
 unclassified, declare `modes` under the provider's model metadata. Categories
-only affect dashboard grouping and failover suggestions; `/v1/embeddings` routes
+only affect dashboard grouping; `/v1/embeddings` routes
 to any model the provider serves regardless of category.
 
 ## Beyond chat and embeddings

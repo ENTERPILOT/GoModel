@@ -372,8 +372,8 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 				}
 			}
 		case []any:
-			for j := len(content) - 1; j >= 0; j-- {
-				block, ok := content[j].(map[string]any)
+			for _, c := range slices.Backward(content) {
+				block, ok := c.(map[string]any)
 				if !ok {
 					continue
 				}
@@ -388,11 +388,11 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 				}
 			}
 		case []map[string]any:
-			for j := len(content) - 1; j >= 0; j-- {
-				blockType, _ := content[j]["type"].(string)
+			for _, c := range slices.Backward(content) {
+				blockType, _ := c["type"].(string)
 				if blockType == "text" || blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
-					if _, exists := content[j]["prompt_cache_breakpoint"]; !exists {
-						content[j]["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
+					if _, exists := c["prompt_cache_breakpoint"]; !exists {
+						c["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
 					}
 					items[i].Content = content
 					req.Input = items

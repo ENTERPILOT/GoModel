@@ -324,14 +324,6 @@ CREATE TABLE IF NOT EXISTS tagging_settings (
   updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS failover_rules (
-  primary_model TEXT PRIMARY KEY,
-  fallback_models TEXT NOT NULL DEFAULT '[]',
-  enabled INTEGER NOT NULL DEFAULT 1,
-  managed_source TEXT NOT NULL DEFAULT 'dashboard',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
 
 CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_usage_request_id ON usage(request_id);
@@ -356,8 +348,6 @@ CREATE INDEX IF NOT EXISTS idx_auth_keys_enabled ON auth_keys(enabled);
 CREATE INDEX IF NOT EXISTS idx_auth_keys_created_at ON auth_keys(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_virtual_models_enabled ON virtual_models(enabled);
 CREATE INDEX IF NOT EXISTS idx_virtual_models_updated_at ON virtual_models(updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_failover_rules_enabled ON failover_rules(enabled);
-CREATE INDEX IF NOT EXISTS idx_failover_rules_updated_at ON failover_rules(updated_at DESC);
 
 BEGIN IMMEDIATE;
 
@@ -368,7 +358,6 @@ DELETE FROM budgets WHERE source = '${prefix}';
 DELETE FROM rate_limits WHERE source = '${prefix}';
 DELETE FROM auth_keys WHERE id GLOB '${prefix}-key-*';
 DELETE FROM virtual_models WHERE description GLOB '${prefix}:*';
-DELETE FROM failover_rules WHERE managed_source = '${prefix}';
 
 DROP TABLE IF EXISTS temp.demo_days;
 CREATE TEMP TABLE demo_days AS
@@ -955,7 +944,7 @@ FROM demo_generated;
 
 -- Attempt trails feed the request drawer's failover pips. Failed entries show
 -- a primary attempt plus a cross-provider failover that also failed (the
--- failover order matches the seeded failover_rules); a slice of successful
+-- failover order matches the seeded 'resilient' virtual model); a slice of successful
 -- uncached entries shows a rate-limited primary followed by a clean retry.
 INSERT INTO audit_log_attempts (
   audit_log_id, seq, kind, provider_type, provider_name, model,
@@ -1271,36 +1260,25 @@ VALUES
     1, strftime('%s', 'now'), strftime('%s', 'now')
   );
 
--- Failover order intentionally crosses providers and mirrors the models used
--- by the generated traffic and aliases.
-INSERT OR IGNORE INTO failover_rules (
-  primary_model, fallback_models, enabled, managed_source, created_at, updated_at
+-- A failover-strategy redirect: targets are a priority list, and the order
+-- intentionally crosses providers, mirroring the models used by the generated
+-- traffic. Existing operator-owned virtual models with this name win.
+INSERT OR IGNORE INTO virtual_models (
+  source, targets, strategy, session_affinity, provider_name, model, user_paths,
+  description, enabled, created_at, updated_at
 )
 VALUES
   (
-    'openai/gpt-5-nano-2025-08-07',
-    json_array('groq/llama-3.1-8b-instant', 'gemini/gemini-2.5-flash-lite', 'bailian/qwen-flash'),
-    1, '${prefix}', strftime('%s', 'now'), strftime('%s', 'now')
-  ),
-  (
-    'groq/llama-3.1-8b-instant',
-    json_array('gemini/gemini-2.5-flash-lite', 'bailian/qwen-flash', 'openai/gpt-5-nano-2025-08-07'),
-    1, '${prefix}', strftime('%s', 'now'), strftime('%s', 'now')
-  ),
-  (
-    'gemini/gemini-2.5-flash-lite',
-    json_array('groq/llama-3.1-8b-instant', 'bailian/qwen-flash', 'openai/gpt-5-nano-2025-08-07'),
-    1, '${prefix}', strftime('%s', 'now'), strftime('%s', 'now')
-  ),
-  (
-    'bailian/qwen-flash',
-    json_array('groq/llama-3.1-8b-instant', 'gemini/gemini-2.5-flash-lite', 'openai/gpt-5-nano-2025-08-07'),
-    1, '${prefix}', strftime('%s', 'now'), strftime('%s', 'now')
-  ),
-  (
-    'anthropic/claude-haiku-4-5-20251001',
-    json_array('openai/gpt-5-nano-2025-08-07', 'gemini/gemini-2.5-flash-lite', 'groq/llama-3.1-8b-instant'),
-    1, '${prefix}', strftime('%s', 'now'), strftime('%s', 'now')
+    'resilient',
+    json_array(
+      json_object('provider', 'openai', 'model', 'gpt-5-nano-2025-08-07'),
+      json_object('provider', 'groq', 'model', 'llama-3.1-8b-instant'),
+      json_object('provider', 'gemini', 'model', 'gemini-2.5-flash-lite'),
+      json_object('provider', 'bailian', 'model', 'qwen-flash')
+    ),
+    'failover', '', '', '', '[]',
+    '${prefix}: priority-ordered failover pool',
+    1, strftime('%s', 'now'), strftime('%s', 'now')
   );
 
 COMMIT;
@@ -1324,7 +1302,6 @@ SELECT 'mcp_server_rows', count(*) FROM mcp_servers
 WHERE name GLOB 'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-*';
 SELECT 'auth_key_rows', count(*) FROM auth_keys WHERE id GLOB '${prefix}-key-*';
 SELECT 'virtual_model_rows', count(*) FROM virtual_models WHERE description GLOB '${prefix}:*';
-SELECT 'failover_rows', count(*) FROM failover_rules WHERE managed_source = '${prefix}';
 SELECT 'cache_mix', coalesce(cache_type, CASE
   WHEN coalesce(json_extract(raw_data, '$.prompt_cached_tokens'), 0) > 0
     OR coalesce(json_extract(raw_data, '$.cached_tokens'), 0) > 0

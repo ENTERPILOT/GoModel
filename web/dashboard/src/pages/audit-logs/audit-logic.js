@@ -136,7 +136,7 @@ export function buildAuditLogQuery({
   if (stream) qs += "&stream=" + encodeURIComponent(stream);
   if (fieldValue) {
     const param = {
-      user_path: "user_path_search",
+      user_path: "user_path",
       request_id: "request_id",
       model: "requested_model",
       provider: "provider",

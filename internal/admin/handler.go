@@ -17,7 +17,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/failover"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
@@ -41,7 +40,6 @@ type Handler struct {
 	authKeys            *authkeys.Service
 	virtualModels       *virtualmodels.Service
 	mcpServers          MCPServerAdmin
-	failoverRules       *failover.Service
 	pricingOverrides    *pricingoverrides.Service
 	workflows           *workflows.Service
 	budgets             *budget.Service
@@ -259,13 +257,6 @@ func WithMCPServers(service MCPServerAdmin) Option {
 func WithProviderCredentials(service ProviderCredentialsAdmin) Option {
 	return func(h *Handler) {
 		h.providerCredentials = service
-	}
-}
-
-// WithFailover enables failover rule administration endpoints.
-func WithFailover(service *failover.Service) Option {
-	return func(h *Handler) {
-		h.failoverRules = service
 	}
 }
 
@@ -612,5 +603,5 @@ func requestIDFromAdminContextOrHeader(req *http.Request) string {
 	if requestID := strings.TrimSpace(core.GetRequestID(req.Context())); requestID != "" {
 		return requestID
 	}
-	return strings.TrimSpace(req.Header.Get("X-Request-ID"))
+	return strings.TrimSpace(req.Header.Get(core.RequestIDHeader))
 }

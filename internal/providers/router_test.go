@@ -824,7 +824,7 @@ func TestRouterCreateBatch_AdaptsAnthropicCacheControlAfterRouting(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := &mockBatchProvider{mockProvider: mockProvider{name: tt.providerType}}
+			provider := &mockBatchProvider{name: tt.providerType}
 			lookup := newMockLookup()
 			lookup.addModel("gpt-4o", provider, tt.providerType)
 			router, _ := NewRouter(lookup)
@@ -934,10 +934,8 @@ func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 
 func TestRouterChatCompletion_RefreshesProviderModelsForQualifiedRequest(t *testing.T) {
 	provider := &lazyRefreshProvider{
-		mockProvider: mockProvider{
-			name:         "ollama",
-			chatResponse: &core.ChatResponse{ID: "chatcmpl-later", Model: "later-model"},
-		},
+		name:         "ollama",
+		chatResponse: &core.ChatResponse{ID: "chatcmpl-later", Model: "later-model"},
 		modelsResponse: &core.ModelsResponse{
 			Object: "list",
 			Data: []core.Model{
@@ -980,10 +978,8 @@ func TestRouterChatCompletion_RefreshesMissingProviderWithoutDroppingExistingMod
 		chatResponse: &core.ChatResponse{ID: "openai", Model: "gpt-4o"},
 	}
 	ollama := &lazyRefreshProvider{
-		mockProvider: mockProvider{
-			name:         "ollama",
-			chatResponse: &core.ChatResponse{ID: "ollama", Model: "local-model"},
-		},
+		name:         "ollama",
+		chatResponse: &core.ChatResponse{ID: "ollama", Model: "local-model"},
 		modelsResponse: &core.ModelsResponse{
 			Object: "list",
 			Data: []core.Model{
@@ -1021,10 +1017,8 @@ func TestRouterChatCompletion_RefreshesMissingProviderWithoutDroppingExistingMod
 
 func TestRouterChatCompletion_RequestTimeRefreshUnavailableProvider(t *testing.T) {
 	provider := &lazyRefreshProvider{
-		mockProvider: mockProvider{
-			name:         "ollama",
-			chatResponse: &core.ChatResponse{ID: "should-not-run"},
-		},
+		name:            "ollama",
+		chatResponse:    &core.ChatResponse{ID: "should-not-run"},
 		availabilityErr: errors.New("connection refused"),
 		modelsResponse: &core.ModelsResponse{
 			Object: "list",
@@ -1678,8 +1672,7 @@ func TestRouterEmbeddings_ProviderError(t *testing.T) {
 	if err == nil {
 		t.Error("expected error from provider")
 	}
-	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
+	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 		t.Errorf("expected GatewayError, got %T: %v", err, err)
 	}
 }
@@ -1760,8 +1753,7 @@ func TestRouterPassthrough_ErrorCases(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
+		if _, ok := errors.AsType[*core.GatewayError](err); !ok {
 			t.Fatalf("expected GatewayError, got %T: %v", err, err)
 		}
 	})
@@ -1824,5 +1816,47 @@ func TestRouterPassthrough_UsesProviderRegistryWithoutModels(t *testing.T) {
 
 	if provider.lastPassthrough == nil {
 		t.Fatal("provider did not receive passthrough request")
+	}
+}
+
+func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
+	registry := newTestRegistryWithModels(
+		registryModelEntry{provider: &mockProvider{}, providerName: "openai", providerType: "openai", modelID: "gpt-5"},
+		registryModelEntry{provider: &mockProvider{}, providerName: "azure", providerType: "azure", modelID: "gpt-5"},
+		registryModelEntry{provider: &mockProvider{}, providerName: "anthropic", providerType: "anthropic", modelID: "claude-sonnet-4-6"},
+	)
+	router, err := NewRouter(registry)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	resp, err := router.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(resp.Data) != 3 {
+		t.Fatalf("expected 3 qualified models by default, got %d", len(resp.Data))
+	}
+
+	router.SetUnqualifiedModelIDs(true)
+	resp, err = router.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 deduplicated models, got %d: %+v", len(resp.Data), resp.Data)
+	}
+	for _, m := range resp.Data {
+		if strings.Contains(m.ID, "/") {
+			t.Errorf("expected bare model ID, got %q", m.ID)
+		}
+	}
+	if resp.Data[0].ID != "claude-sonnet-4-6" || resp.Data[0].OwnedBy != "anthropic" {
+		t.Errorf("unexpected first entry: %+v", resp.Data[0])
+	}
+	// The listed owner must be the provider an unqualified request routes to.
+	want := registry.GetProviderName("gpt-5")
+	if resp.Data[1].ID != "gpt-5" || resp.Data[1].OwnedBy != want {
+		t.Errorf("expected gpt-5 owned by routing winner %q, got %+v", want, resp.Data[1])
 	}
 }

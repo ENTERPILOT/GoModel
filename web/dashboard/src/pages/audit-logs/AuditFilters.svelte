@@ -116,10 +116,11 @@
 
   .audit-filter-row-search :global(.filter-input-wrap) {
     grid-column: span 8;
-    max-width: 560px;
+    width: min(100%, 480px);
+    max-width: 480px;
   }
 
-  .audit-filter-field { grid-column: span 4; width: 100%; max-width: 280px; }
+  .audit-filter-field { grid-column: span 4; width: min(100%, 240px); max-width: 240px; }
 
   .audit-filter-row-controls .audit-filter-select {
     grid-column: span 2;
@@ -161,5 +162,11 @@
     .audit-filter-row :global(.filter-input-wrap), .audit-filter-row :global(.filter-input), .audit-filter-select, .audit-filter-row :global(.btn) {
         grid-column: auto;
       }
+
+    .audit-filter-row-search :global(.filter-input-wrap),
+    .audit-filter-field {
+      width: 100%;
+      max-width: none;
+    }
   }
 </style>

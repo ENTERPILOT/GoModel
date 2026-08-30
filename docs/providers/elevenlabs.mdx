@@ -57,7 +57,7 @@ surface via passthrough, not just voice listing — see "Not implemented" below.
 
 `response_format` accepts `mp3` (default), `opus`, `pcm`, and `wav`; each maps
 to a fixed ElevenLabs `output_format` (`mp3_44100_128`, `opus_48000_128`,
-`pcm_44100`, `wav_44100`). `aac` and `flac` are not supported and return
+`pcm_24000`, `wav_44100`). `aac` and `flac` are not supported and return
 `invalid_request_error`. `speed`, when set, is clamped to ElevenLabs' `0.7`-`1.2`
 voice setting range (OpenAI accepts `0.25`-`4.0`); `instructions` is not
 supported.

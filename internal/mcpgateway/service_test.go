@@ -115,9 +115,8 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 			pinned = rest
 		}
 		if err := service.ServeHTTP(w, r, pinned); err != nil {
-			var gatewayErr *core.GatewayError
 			status := http.StatusInternalServerError
-			if errors.As(err, &gatewayErr) {
+			if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
 				status = gatewayErr.HTTPStatusCode()
 			}
 			http.Error(w, err.Error(), status)

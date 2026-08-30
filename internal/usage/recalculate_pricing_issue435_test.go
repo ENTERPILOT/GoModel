@@ -65,11 +65,9 @@ func TestSQLiteStoreRecalculatePricing_CorrectsStaleCachedCosts(t *testing.T) {
 	}
 
 	result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{
-		UsageQueryParams: UsageQueryParams{
-			StartDate: time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
-			EndDate:   time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
-			TimeZone:  "UTC",
-		},
+		StartDate: time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
+		EndDate:   time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
+		TimeZone:  "UTC",
 	}, resolver)
 	if err != nil {
 		t.Fatalf("RecalculatePricing: %v", err)

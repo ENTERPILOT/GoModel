@@ -14,16 +14,34 @@ import (
 const requestSelectorPeekLimit int64 = 64 * 1024
 
 type requestBodySelectorHints struct {
-	model        string
-	provider     string
-	stream       bool
-	streamParsed bool
-	parsed       bool
-	complete     bool
+	model          string
+	provider       string
+	stream         bool
+	streamParsed   bool
+	streamVerified bool
+	parsed         bool
+	complete       bool
 }
 
 func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) {
 	if !shouldPeekRequestBodySelectors(req, bodyMode, env) {
+		return
+	}
+
+	if bodyMode == core.BodyModeOpaque {
+		hints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
+		if hints.complete {
+			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
+		} else if hints.streamParsed {
+			if hints.streamVerified {
+				core.ApplyBodyStreamHint(env, hints.stream)
+			} else {
+				core.ApplyPartialBodyStreamHint(env, hints.stream)
+			}
+		}
+		if !hints.streamParsed {
+			core.MarkPassthroughStreamUncertain(env)
+		}
 		return
 	}
 
@@ -72,7 +90,51 @@ func peekRequestBodySelectorHints(req *http.Request, limit int64) requestBodySel
 	return hints
 }
 
+// peekCompleteRequestBodySelectorHints returns authoritative selector hints
+// only when the entire body fits within limit and has no duplicate selector
+// fields. A unique stream hint may be returned independently from a bounded
+// oversized body. The body is restored before returning so passthrough
+// forwarding remains byte-for-byte unchanged.
+func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) requestBodySelectorHints {
+	if req == nil || req.Body == nil || limit <= 0 {
+		return requestBodySelectorHints{}
+	}
+
+	originalBody := req.Body
+	body, err := io.ReadAll(io.LimitReader(originalBody, limit+1))
+	req.Body = &combinedReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(body), originalBody),
+		rc:     originalBody,
+	}
+	if err != nil {
+		return requestBodySelectorHints{}
+	}
+	if int64(len(body)) > limit {
+		hints := decodeCompleteRequestBodySelectorHints(bytes.NewReader(body[:limit]))
+		return hints.independentStreamHint()
+	}
+	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body))
+}
+
+func (hints requestBodySelectorHints) independentStreamHint() requestBodySelectorHints {
+	if !hints.streamParsed {
+		return requestBodySelectorHints{}
+	}
+	return requestBodySelectorHints{
+		stream:       hints.stream,
+		streamParsed: true,
+	}
+}
+
 func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
+	return decodeRequestBodySelectorHintsWithMode(r, false)
+}
+
+func decodeCompleteRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
+	return decodeRequestBodySelectorHintsWithMode(r, true)
+}
+
+func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) requestBodySelectorHints {
 	dec := json.NewDecoder(r)
 	token, err := dec.Token()
 	if err != nil {
@@ -84,10 +146,18 @@ func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
 	}
 
 	var hints requestBodySelectorHints
+	var modelSeen, providerSeen, streamSeen bool
+	var modelAmbiguous, providerAmbiguous, streamAmbiguous bool
+	partialHints := func() requestBodySelectorHints {
+		if !hints.streamParsed || streamAmbiguous {
+			return requestBodySelectorHints{}
+		}
+		return hints.independentStreamHint()
+	}
 	for dec.More() {
 		keyToken, err := dec.Token()
 		if err != nil {
-			return requestBodySelectorHints{}
+			return partialHints()
 		}
 		key, ok := keyToken.(string)
 		if !ok {
@@ -96,29 +166,41 @@ func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
 
 		switch key {
 		case "model":
+			if requireComplete && modelSeen {
+				modelAmbiguous = true
+			}
+			modelSeen = true
 			model, ok, err := readOptionalJSONString(dec)
 			if err != nil || !ok {
 				return requestBodySelectorHints{}
 			}
 			hints.model = model
-			if model != "" && hints.provider != "" {
+			if !requireComplete && model != "" && hints.provider != "" {
 				hints.parsed = true
 				return hints
 			}
-			if model != "" {
+			if !requireComplete && model != "" {
 				return hints
 			}
 		case "provider":
+			if requireComplete && providerSeen {
+				providerAmbiguous = true
+			}
+			providerSeen = true
 			provider, ok, err := readOptionalJSONString(dec)
 			if err != nil || !ok {
 				return requestBodySelectorHints{}
 			}
 			hints.provider = provider
-			if hints.provider != "" && hints.model != "" {
+			if !requireComplete && hints.provider != "" && hints.model != "" {
 				hints.parsed = true
 				return hints
 			}
 		case "stream":
+			if streamSeen {
+				streamAmbiguous = true
+			}
+			streamSeen = true
 			stream, ok, err := readOptionalJSONBool(dec)
 			if err != nil || !ok {
 				return requestBodySelectorHints{}
@@ -127,8 +209,26 @@ func decodeRequestBodySelectorHints(r io.Reader) requestBodySelectorHints {
 			hints.streamParsed = true
 		default:
 			if err := skipJSONValue(dec); err != nil {
-				return requestBodySelectorHints{}
+				return partialHints()
 			}
+		}
+	}
+	if requireComplete {
+		closing, err := dec.Token()
+		if err != nil || closing != json.Delim('}') {
+			return requestBodySelectorHints{}
+		}
+		if _, err := dec.Token(); err != io.EOF {
+			return requestBodySelectorHints{}
+		}
+		if streamAmbiguous {
+			return requestBodySelectorHints{}
+		}
+		hints.streamVerified = hints.streamParsed
+		if modelAmbiguous || providerAmbiguous {
+			hints.model = ""
+			hints.provider = ""
+			return hints
 		}
 	}
 

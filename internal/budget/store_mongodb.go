@@ -343,8 +343,7 @@ func (e *mongoTransactionFallbackError) Error() string {
 }
 
 func mongoTransactionFallbackCause(err error) error {
-	var fallbackErr *mongoTransactionFallbackError
-	if errors.As(err, &fallbackErr) {
+	if fallbackErr, ok := errors.AsType[*mongoTransactionFallbackError](err); ok {
 		return fallbackErr.err
 	}
 	return nil
