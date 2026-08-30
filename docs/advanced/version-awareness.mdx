@@ -80,10 +80,24 @@ personal data. Neither is ever sent.
 
 ### The install identifier
 
-A random UUID stored in `install-id` in the gateway's data directory, created on
-first use. It encodes nothing about your host, your organization, or your
-configuration; it exists only so repeated checks from one deployment count as
-one deployment. Disabling the check means it is never created.
+A random UUID created on first use. It encodes nothing about your host, your
+organization, or your configuration; it exists only so repeated checks from one
+deployment count as one deployment. Disabling the check means it is never
+created.
+
+It is kept in the deployment's database, under the `install_id` key in the
+`runtime_settings` table (or collection), and mirrored to `install-id` in the
+data directory. The database copy is authoritative: it survives a container
+being recreated, and replicas sharing one database report as one deployment.
+An `install-id` file from an earlier release is adopted unchanged the first time
+the gateway starts with this one.
+
+When neither copy exists — a container recreated without a volume, running
+SQLite — the identifier is derived from `GOMODEL_MASTER_KEY` with HMAC-SHA256,
+so the same configuration keeps the same identity. The key itself is never
+sent and cannot be recovered from the identifier. Rotating the key in that
+situation reads as a new deployment; without a master key a fresh random id
+is generated on every recreate.
 
 ## Turning it off if you don't want to get the updates
 
