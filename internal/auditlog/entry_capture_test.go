@@ -114,7 +114,7 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
 			t.Fatalf("ResponseHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
 		}
-		body, ok := entry.Data.ResponseBody.(map[string]any)
+		body, ok := BodyDocument(entry.Data.ResponseBody).(map[string]any)
 		if !ok {
 			t.Fatalf("ResponseBody = %T, want synthesized error envelope", entry.Data.ResponseBody)
 		}
@@ -149,7 +149,7 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 			LogBodies:  true,
 		})
 
-		body, ok := entry.Data.ResponseBody.(map[string]any)
+		body, ok := BodyDocument(entry.Data.ResponseBody).(map[string]any)
 		if !ok {
 			t.Fatalf("ResponseBody = %T, want synthesized error envelope", entry.Data.ResponseBody)
 		}

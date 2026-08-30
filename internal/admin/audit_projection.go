@@ -82,7 +82,7 @@ func slimAuditListEntry(resp *auditLogEntryResponse) {
 // /v1/messages or provider passthrough): a request shaped like a conversation
 // or a response shaped like model output.
 func hasConversationPayload(requestBody, responseBody any) bool {
-	if req, ok := requestBody.(map[string]any); ok {
+	if req, ok := auditlog.BodyDocument(requestBody).(map[string]any); ok {
 		if _, ok := req["messages"].([]any); ok {
 			return true
 		}
@@ -96,7 +96,7 @@ func hasConversationPayload(requestBody, responseBody any) bool {
 			return true
 		}
 	}
-	if resp, ok := responseBody.(map[string]any); ok {
+	if resp, ok := auditlog.BodyDocument(responseBody).(map[string]any); ok {
 		if _, ok := resp["choices"].([]any); ok {
 			return true
 		}

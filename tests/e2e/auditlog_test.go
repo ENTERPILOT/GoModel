@@ -230,16 +230,16 @@ func TestAuditLogMiddleware(t *testing.T) {
 		require.NotNil(t, entry.Data.RequestBody)
 		require.NotNil(t, entry.Data.ResponseBody)
 
-		// Verify request body contains our message (now stored as interface{})
-		reqBody, ok := entry.Data.RequestBody.(map[string]any)
-		require.True(t, ok, "RequestBody should be a map[string]interface{}, got %T", entry.Data.RequestBody)
+		// In-memory entries hold the raw JSON; decode it to inspect fields.
+		reqBody, ok := auditlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
+		require.True(t, ok, "RequestBody should be a JSON object, got %T", entry.Data.RequestBody)
 		assert.Equal(t, "gpt-4", reqBody["model"])
 
 		// Verify response body captured the upstream chat completion payload, not
 		// just an empty marker — a regression that stored {} but non-nil would
 		// otherwise slip past a NotNil-only check.
-		respBody, ok := entry.Data.ResponseBody.(map[string]any)
-		require.True(t, ok, "ResponseBody should be a map[string]interface{}, got %T", entry.Data.ResponseBody)
+		respBody, ok := auditlog.BodyDocument(entry.Data.ResponseBody).(map[string]any)
+		require.True(t, ok, "ResponseBody should be a JSON object, got %T", entry.Data.ResponseBody)
 		assert.Equal(t, "chat.completion", respBody["object"])
 		assert.Equal(t, "gpt-4", respBody["model"])
 		assert.NotEmpty(t, respBody["id"], "response id should be captured")

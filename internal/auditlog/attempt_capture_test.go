@@ -1,6 +1,8 @@
 package auditlog
 
 import (
+	"github.com/goccy/go-json"
+
 	"net/http"
 	"testing"
 )
@@ -10,9 +12,12 @@ func TestCaptureAttemptResponseBody(t *testing.T) {
 		t.Fatalf("empty body = %#v, want nil", got)
 	}
 
-	parsed, ok := CaptureAttemptResponseBody([]byte(`{"error":{"code":"model_not_found"}}`)).(map[string]any)
-	if !ok {
-		t.Fatalf("json body did not parse to a map: %#v", parsed)
+	captured := CaptureAttemptResponseBody([]byte(`{"error":{"code":"model_not_found"}}`))
+	if _, ok := captured.(json.RawMessage); !ok {
+		t.Fatalf("json body = %T, want json.RawMessage", captured)
+	}
+	if _, ok := BodyDocument(captured).(map[string]any); !ok {
+		t.Fatalf("json body did not decode to a map: %#v", BodyDocument(captured))
 	}
 
 	if got := CaptureAttemptResponseBody([]byte("upstream is down")); got != "upstream is down" {

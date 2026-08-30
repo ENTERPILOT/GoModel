@@ -457,9 +457,9 @@ func TestEnrichMCPAuditEntryCapturesRequestBody(t *testing.T) {
 	if entry.Data == nil || entry.Data.RequestBody == nil {
 		t.Fatalf("request body was not captured on the audit entry")
 	}
-	captured, ok := entry.Data.RequestBody.(map[string]any)
+	captured, ok := auditlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
 	if !ok {
-		t.Fatalf("captured body type = %T, want parsed JSON object", entry.Data.RequestBody)
+		t.Fatalf("captured body type = %T, want JSON object", entry.Data.RequestBody)
 	}
 	if captured["method"] != "tools/call" {
 		t.Fatalf("captured method = %v, want tools/call", captured["method"])
