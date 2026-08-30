@@ -1,0 +1,183 @@
+---
+title: "GoModel & n8n"
+description: "Route every n8n AI Agent, LLM Chain, and OpenAI node call through GoModel with one credential, and get audit logs, cost tracking, and metrics for all of your workflows."
+icon: "workflow"
+keywords: ["n8n", "AI Agent", "OpenAI credential", "base URL", "workflow automation", "LLM observability", "setup guide"]
+---
+
+## Overview
+
+n8n has no built-in trace of what its AI nodes send and receive. Pointing n8n
+at GoModel fixes that without any community node: one **OpenAI** credential
+with GoModel's base URL, and every workflow's model call is logged, priced,
+and exported as metrics. The same credential also lets n8n's OpenAI nodes use
+Anthropic, Gemini, and any other provider configured in GoModel.
+
+Flow:
+
+`n8n workflow -> OpenAI Chat Model / OpenAI node -> GoModel -> OpenAI/Anthropic/Gemini/...`
+
+What you get:
+
+- Full request and response bodies for every AI call in the GoModel audit log.
+- Token usage and cost per model, per API key, and per label.
+- Prometheus metrics and OpenTelemetry traces for AI traffic.
+- Failover, caching, rate limits, and budgets applied to n8n traffic.
+- Non-OpenAI models inside n8n's OpenAI nodes, without extra credentials.
+
+## 1. Run GoModel next to n8n
+
+Run both services on one Docker network so n8n can reach GoModel by container
+name:
+
+```yaml docker-compose.yml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      OPENAI_API_KEY: sk-...
+      ANTHROPIC_API_KEY: sk-ant-...
+    ports:
+      - "8080:8080"
+
+  n8n:
+    image: n8nio/n8n
+    environment:
+      N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:
+```
+
+Confirm GoModel lists your models:
+
+```bash
+curl -s http://localhost:8080/v1/models \
+  -H "Authorization: Bearer change-me"
+```
+
+<Tip>
+  Create a dedicated API key for n8n in the GoModel dashboard
+  (`API Keys -> Create API Key`) instead of using the master key. Keys carry
+  labels, budgets, and rate limits, so n8n's spend shows up separately in the
+  dashboard.
+</Tip>
+
+## 2. Create the OpenAI credential in n8n
+
+In n8n open `Settings -> Credentials -> Add credential -> OpenAI` and fill in:
+
+| Field | Value |
+| --- | --- |
+| API Key | The GoModel API key (or `GOMODEL_MASTER_KEY`) |
+| Organization ID | Leave empty |
+| Base URL | `http://gomodel:8080/v1` |
+| Add Custom Header | Optional, see [Attribute workflows with labels](#attribute-workflows-with-labels) |
+
+n8n tests the credential against `GET /v1/models` when you save it. GoModel
+serves that endpoint, so the test should pass and the model picker in the
+**OpenAI Chat Model** node lists exactly the models GoModel exposes, including
+Anthropic and Gemini models and any [virtual models](/features/virtual-models).
+
+<Note>
+  Use the Docker service name (`gomodel`) when both run in containers.
+  `http://localhost:8080/v1` only works when n8n runs on the host machine.
+</Note>
+
+## 3. Use it in a workflow
+
+Any node that accepts the OpenAI credential now goes through GoModel:
+
+- **AI Agent** and **Basic LLM Chain** with an **OpenAI Chat Model** sub-node.
+- **Embeddings OpenAI** for vector stores.
+- The plain **OpenAI** node (chat, image, audio operations).
+
+Attach the credential to the **OpenAI Chat Model** sub-node and pick a model.
+Because the list comes from GoModel, you can select
+`anthropic/claude-haiku-4-5-20251001` or `gemini/gemini-2.5-flash` in the same
+node that used to be OpenAI-only. Both the provider-prefixed ids from the
+picker and plain ids such as `gpt-5-mini` work. Run the workflow, then open
+the GoModel dashboard: the call appears in the audit log with the full prompt,
+the tool definitions n8n attached, the response, tokens, and cost.
+
+<Note>
+  Verified with n8n 2.36 (AI Agent 3.1 and 2.2, OpenAI Chat Model 1.3) and
+  the Calculator tool against OpenAI, Anthropic, and Gemini models routed
+  through GoModel.
+</Note>
+
+### Chat Completions or Responses API
+
+The **OpenAI Chat Model** node has a **Use Responses API** switch. In n8n 2.x
+it is **on by default** for new nodes. Both paths work through GoModel:
+
+| Setting | GoModel endpoint | Notes |
+| --- | --- | --- |
+| On (n8n default) | `/v1/responses` | Native for OpenAI. Translated for Anthropic and Gemini; `conversation_id` and OpenAI-hosted tools are not available there. |
+| Off | `/v1/chat/completions` | Works with every provider and every GoModel version. |
+
+Tool calling works on both paths for OpenAI, Anthropic, and Gemini models.
+Turn the switch off if you need a Responses-only feature to be rejected
+loudly rather than translated, or if you run a GoModel release older than the
+`annotations` fix described in [Troubleshooting](#troubleshooting). See
+[Responses compatibility](/advanced/responses-compatibility) for the exact
+limits on translated providers.
+
+## Attribute workflows with labels
+
+To tell workflows apart in usage reports, send a tagging header from n8n and
+declare it in GoModel:
+
+1. In GoModel, set `TAGGING_HEADER_1=X-N8N-Workflow` (or add it under
+   `Settings -> Tagging based on headers` in the dashboard).
+2. In the n8n credential, enable **Add Custom Header** with name
+   `X-N8N-Workflow` and a value such as `invoice-triage`.
+
+The header value becomes a label on every usage entry made with that
+credential; the dashboard's usage-by-label view then shows the workflow's
+requests, tokens, and cost. n8n normalises the header name's case
+(`X-N8n-Workflow`); GoModel matches it case-insensitively. Create one
+credential per workflow or team if you want separate labels; they can share the same GoModel API key. See
+[Labelling](/features/labelling) for prefixes, delimiters, and keeping headers
+from reaching the upstream provider.
+
+## Other n8n model nodes
+
+The n8n **Anthropic Chat Model** credential also has a **Base URL** field.
+Point it at `http://gomodel:8080` (no `/v1`) with a GoModel API key to route
+native `/v1/messages` traffic through GoModel; the credential test and AI
+Agent tool calls work (see
+[Anthropic Messages API](/advanced/anthropic-messages-api)). In most workflows
+the single OpenAI credential above is simpler, since it already reaches every
+provider.
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| Credential test fails with a connection error | n8n cannot resolve the base URL. Check the Docker network and use the service name, not `localhost`. |
+| `401 Unauthorized` in GoModel logs | The n8n credential key does not match a GoModel API key or `GOMODEL_MASTER_KEY`. |
+| Model picker is empty | GoModel has no provider configured for that model. Check `GET /v1/models` and provider environment variables. |
+| `Cannot read properties of undefined (reading 'map')` with **Use Responses API** on | GoModel releases before the `annotations` fix omitted `annotations: []` from `output_text` parts, which n8n's OpenAI client requires. Upgrade GoModel, or turn **Use Responses API** off. |
+| Same error persists right after upgrading | GoModel's response cache is replaying a body stored before the upgrade. Change the prompt or clear the cache. |
+| Responses API errors on Anthropic or Gemini | Drop `conversation_id` and hosted tools; those are not translatable. |
+| Model answers look "off" | Check GoModel guardrails; a `system_prompt` guardrail rewrites the prompt n8n sends. |
+
+## Notes
+
+- GoModel [failover](/features/failover) and [caching](/features/cache) apply
+  to n8n traffic automatically; no change in n8n is needed. With the response
+  cache on, repeated identical prompts return cached answers, which is
+  usually what you want for retried workflow runs.
+- Streaming to the n8n chat trigger was not part of the verification run;
+  non-streaming agent runs were.
+- Community nodes such as `n8n-nodes-openai-litellm` exist to add gateway
+  metadata to n8n requests. They are not required with GoModel; the built-in
+  credential and tagging headers cover the same need.
+- For dashboards and alerts, see [Prometheus metrics](/guides/prometheus-metrics)
+  and [OpenTelemetry](/guides/opentelemetry).

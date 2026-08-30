@@ -156,6 +156,7 @@
                     "guides/production",
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
+                    "guides/n8n",
                     "guides/claude-code",
                     "guides/codex",
                     "guides/cursor",
