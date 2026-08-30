@@ -1,0 +1,214 @@
+---
+title: "OpenTelemetry"
+description: "Export GoModel traces and metrics over OTLP with OTEL_ENABLED, configure the collector with standard OTEL_* variables, and see which spans and GenAI metrics are exported."
+icon: "diagram-project"
+keywords: ["OpenTelemetry", "OTLP", "tracing", "traces", "metrics", "observability", "GenAI semantic conventions", "Jaeger", "Grafana Tempo"]
+---
+
+GoModel exports OpenTelemetry traces and metrics for inbound HTTP requests
+(except operational endpoints, see below) and every outbound model provider
+call. Provider calls follow the
+[GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/),
+so a Jaeger, Grafana Tempo, Honeycomb, Datadog, or any other OTLP-compatible
+backend shows which model was called, through which provider, how long it took,
+and whether it failed.
+
+Prompts, responses, credentials, and error messages are never exported. For
+Prometheus scraping, see [Prometheus Metrics](/guides/prometheus-metrics); both
+can run at the same time.
+
+## Quick start
+
+Export is **off by default**. Set `OTEL_ENABLED=true` and point the exporter at
+your collector:
+
+<CodeGroup>
+
+```bash Docker (.env file)
+# Add to your .env file, then:
+# OTEL_ENABLED=true
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+docker run --rm -p 8080:8080 --env-file .env enterpilot/gomodel
+```
+
+```bash Docker (inline -e)
+docker run --rm -p 8080:8080 \
+  -e OTEL_ENABLED=true \
+  -e OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+  enterpilot/gomodel
+```
+
+```bash Binary
+export OTEL_ENABLED=true
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+./bin/gomodel
+```
+
+</CodeGroup>
+
+GoModel logs `opentelemetry enabled` at startup together with the selected
+exporters. Exporters are asynchronous: the gateway starts even when the
+collector is down and retries in the background.
+
+<Note>
+  Without `OTEL_EXPORTER_OTLP_ENDPOINT` the SDK sends to
+  `http://localhost:4318` (`http/protobuf`) or `localhost:4317` (`grpc`).
+</Note>
+
+## Configuration
+
+`OTEL_ENABLED` is the only GoModel-specific switch. Everything else follows
+the standard
+[OpenTelemetry environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/),
+so GoModel is configured exactly like any other instrumented service. The
+common settings are also available under `opentelemetry:` in
+[`config.yaml`](/advanced/config-yaml); a variable set in the environment
+wins over the YAML value.
+
+| Environment variable | `config.yaml` key | Default | Purpose |
+| --- | --- | --- | --- |
+| `OTEL_ENABLED` | `enabled` | `false` | Turn export on. |
+| `OTEL_SERVICE_NAME` | `service_name` | `gomodel` | `service.name` resource attribute. |
+| `OTEL_RESOURCE_ATTRIBUTES` | `resource_attributes` | — | Extra resource attributes such as `deployment.environment`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `endpoint` | `http://localhost:4318` | Collector endpoint. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` override it per signal. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `protocol` | `http/protobuf` | `http/protobuf` or `grpc`; overridable per signal with `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` and `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | `headers` | — | Headers such as `authorization` for hosted backends. |
+| `OTEL_TRACES_EXPORTER` | `traces_exporter` | `otlp` | `otlp` or `none` to switch traces off. |
+| `OTEL_METRICS_EXPORTER` | `metrics_exporter` | `otlp` | `otlp` or `none` to switch metrics off. |
+| `OTEL_TRACES_SAMPLER` | `sampler` | `parentbased_always_on` | Sampler, e.g. `parentbased_traceidratio` to keep a fraction of new traces. |
+| `OTEL_TRACES_SAMPLER_ARG` | `sampler_arg` | — | Sampler argument, e.g. `0.1` for 10%. |
+| `OTEL_PROPAGATORS` | `propagators` | `tracecontext,baggage` | Comma-separated: `tracecontext`, `baggage`, `b3`, `b3multi`, `jaeger`, `ottrace`, or `none`. |
+| `OTEL_METRIC_EXPORT_INTERVAL` | — | `60000` | Metric export interval in milliseconds. |
+
+A typical production setup:
+
+<CodeGroup>
+
+```bash Environment
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=gomodel-production
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+```yaml config.yaml
+opentelemetry:
+  enabled: true
+  service_name: gomodel-production
+  resource_attributes:
+    deployment.environment: production
+  endpoint: http://otel-collector:4317
+  protocol: grpc
+  headers:
+    authorization: "Bearer ${OTEL_BACKEND_TOKEN}"
+  sampler: parentbased_traceidratio
+  sampler_arg: "0.1"
+```
+
+</CodeGroup>
+
+Sampling only affects traces. Metrics are always complete.
+
+<Warning>
+  Export headers such as `authorization` travel with every export request. Use
+  an `https://` endpoint (or a gRPC endpoint with TLS) whenever headers carry
+  credentials; plaintext is acceptable only for a collector on the same host.
+  GoModel logs a warning at startup when headers are configured and the
+  effective endpoint is plaintext (`http://`, or gRPC with
+  `OTEL_EXPORTER_OTLP_INSECURE=true`) and not a loopback address.
+</Warning>
+
+## What is exported
+
+### HTTP server spans and metrics
+
+Every request gets a `SERVER` span named after its route (for example
+`POST /v1/chat/completions`) with the standard `http.request.method`,
+`http.route`, `http.response.status_code`, and `url.scheme` attributes, plus the
+`http.server.request.duration` histogram and the request and response body size
+histograms.
+
+Trace context from the caller is honored, so a gateway span appears as a child
+of the calling application's span whenever the client sends `traceparent` (or
+whichever headers `OTEL_PROPAGATORS` selects).
+
+`/health`, `/health/ready`, the Prometheus endpoint (`METRICS_ENDPOINT`), and
+`/debug/pprof` are excluded: they are polled, and would otherwise dominate the
+trace volume.
+
+### Provider call spans and GenAI metrics
+
+Each logical call to a model provider is instrumented with:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `gen_ai.operation.name` | `chat` | Also `embeddings`, `generate_content`, and others depending on the endpoint. |
+| `gen_ai.request.model` | `gpt-5` | The model sent upstream, after alias and virtual model resolution. |
+| `gen_ai.provider.name` | `openai` | Semantic provider name: `openai`, `anthropic`, `aws.bedrock`, `gcp.vertex_ai`, `gcp.gemini`, `azure.ai.openai`, `x_ai`, … or `unknown`. |
+| `gomodel.provider.name` | `openai-eu` | The exact provider name from your GoModel configuration. |
+| `gen_ai.request.stream` | `true` | Present only on streaming calls. |
+| `error.type` | `429`, `timeout`, `network_error`, `empty_stream` | Present only on failures; `empty_stream` marks a stream that ended before its first chunk. |
+| `http.response.status_code` | `200` | Upstream status. |
+
+Metrics are histograms in seconds, carrying the same attributes:
+
+| Metric | Recorded for |
+| --- | --- |
+| `gen_ai.client.operation.duration` | Every buffered call, and every streaming call that fails before the stream is established or ends before its first chunk. |
+| `gen_ai.client.operation.time_to_first_chunk` | Every successful streaming call, measured until the first response bytes arrive. |
+
+A buffered call produces a `CLIENT` span named `<operation> <model>`, such as
+`chat gpt-5`, nested under the HTTP server span. Retries and failovers to
+another provider are separate calls and therefore separate spans, so a request
+that failed over shows exactly which provider failed and which one answered.
+
+Streaming calls do not get a client span: the gateway can only observe when
+the stream was established, not when the model finished, and a span ending at
+the headers would misreport latency. The enclosing HTTP server span still
+covers the full stream lifetime as seen by the client. A stream that fails to
+establish, or ends before delivering its first chunk, gets a retrospective
+failure span, so errors are always traced.
+
+## Privacy
+
+The exporter is designed so that telemetry can go to a third-party backend
+without leaking what flows through the gateway:
+
+- Request and response bodies, prompts, completions, and tool calls are never
+  attached to spans or metrics.
+- Credentials and upstream error messages are never exported; failures carry
+  only a status code or an error class.
+- `client.address`, `network.peer.*`, `server.address`, `server.port`, and
+  `user_agent.original` are stripped from HTTP spans, and host-derived
+  dimensions are excluded from HTTP metrics so a client cannot inflate metric
+  cardinality through the `Host` header.
+
+## Reloading
+
+`gomodel --reload` (SIGHUP) rebuilds the OpenTelemetry pipeline with the
+current environment, so exporter, sampling, and propagation changes apply
+without a restart. The previous pipeline is flushed before it is discarded.
+
+## Local collector example
+
+A minimal `docker-compose.yml` that shows traces in Jaeger:
+
+```yaml
+services:
+  gomodel:
+    image: enterpilot/gomodel
+    env_file: .env
+    environment:
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_METRICS_EXPORTER: none
+    ports: ["8080:8080"]
+  jaeger:
+    image: jaegertracing/jaeger:2.7.0
+    ports: ["16686:16686"]
+```
+
+Send a request through the gateway and open `http://localhost:16686`.

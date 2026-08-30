@@ -67,6 +67,7 @@ const (
 	subsystemAuthKeys            = "auth keys"
 	subsystemMCPGateway          = "mcp gateway"
 	subsystemResponseCache       = "response cache"
+	subsystemTelemetry           = "opentelemetry"
 )
 
 // registeredSubsystem is one initialized component together with the teardown
@@ -128,6 +129,8 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemRateLimits, close: closerOf(a.rateLimits)},
 		{name: subsystemUsage, close: closerOf(a.usage)},
 		{name: subsystemAudit, close: closerOf(a.audit)},
+		// Flushes the last spans and metric points once nothing else can emit.
+		{name: subsystemTelemetry, close: closerOf(a.telemetry)},
 		{name: subsystemStorage, close: closerOf(a.storage)},
 	}
 }

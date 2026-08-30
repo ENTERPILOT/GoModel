@@ -39,6 +39,9 @@ func newFullyWiredApp(t *testing.T) *App {
 	t.Setenv("USAGE_ENABLED", "true")
 	t.Setenv("BUDGETS_ENABLED", "true")
 	t.Setenv("RATE_LIMITS_ENABLED", "true")
+	t.Setenv("OTEL_ENABLED", "true")
+	t.Setenv("OTEL_TRACES_EXPORTER", "none")
+	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
 	loaded, err := config.Load()
 	if err != nil {

@@ -13,14 +13,6 @@ import (
 
 type namedRewriter struct{ name string }
 
-type namedObserver struct{ name string }
-
-func (o *namedObserver) Name() string { return o.name }
-func (o *namedObserver) Start(ctx context.Context, _ UpstreamCall) context.Context {
-	return ctx
-}
-func (o *namedObserver) End(context.Context, UpstreamResult) {}
-
 type namedAuthenticator struct{ name string }
 
 func (a *namedAuthenticator) Name() string { return a.name }
@@ -99,17 +91,6 @@ func TestRegistryCollectsRequestAuthenticators(t *testing.T) {
 	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
 }
 
-func TestRegistryCollectsUpstreamObservers(t *testing.T) {
-	reg := &Registry{}
-	reg.RegisterUpstreamObserver(&namedObserver{name: "otel"})
-
-	snapshot := reg.UpstreamObservers()
-	require.Len(t, snapshot, 1)
-	assert.Equal(t, "otel", snapshot[0].Name())
-	reg.RegisterUpstreamObserver(&namedObserver{name: "other"})
-	assert.Len(t, snapshot, 1, "earlier snapshot must not grow")
-}
-
 func TestRegistryCollectsRuntimeSettings(t *testing.T) {
 	reg := &Registry{}
 	reg.RegisterSetting(&testRuntimeSetting{value: "high"})
@@ -144,7 +125,6 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 			reg.UseMiddleware(func(next echo.HandlerFunc) echo.HandlerFunc { return next })
 			reg.AddPublicPaths("/p")
 			reg.EnableCapability(CapabilityQuotaTemplates)
-			reg.RegisterUpstreamObserver(&namedObserver{name: "w"})
 			_ = reg.Rewriters()
 			_ = reg.HasCapability(CapabilityQuotaTemplates)
 		})
@@ -155,7 +135,6 @@ func TestRegistryConcurrentRegistration(t *testing.T) {
 	assert.Len(t, reg.OuterMiddleware(), workers)
 	assert.Len(t, reg.Middleware(), workers)
 	assert.Len(t, reg.PublicPaths(), workers)
-	assert.Len(t, reg.UpstreamObservers(), workers)
 	assert.True(t, reg.HasCapability(CapabilityQuotaTemplates))
 }
 

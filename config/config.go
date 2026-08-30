@@ -20,24 +20,25 @@ import (
 
 // Config holds the application configuration.
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Models     ModelsConfig     `yaml:"models"`
-	Cache      CacheConfig      `yaml:"cache"`
-	Storage    StorageConfig    `yaml:"storage"`
-	Logging    LogConfig        `yaml:"logging"`
-	Usage      UsageConfig      `yaml:"usage"`
-	Budgets    BudgetsConfig    `yaml:"budgets"`
-	RateLimits RateLimitsConfig `yaml:"rate_limits"`
-	Metrics    MetricsConfig    `yaml:"metrics"`
-	HTTP       HTTPConfig       `yaml:"http"`
-	Admin      AdminConfig      `yaml:"admin"`
-	Guardrails GuardrailsConfig `yaml:"guardrails"`
-	Failover   FailoverConfig   `yaml:"failover"`
-	Workflows  WorkflowsConfig  `yaml:"workflows"`
-	Resilience ResilienceConfig `yaml:"resilience"`
-	Tagging    TaggingConfig    `yaml:"tagging"`
-	Session    SessionConfig    `yaml:"session"`
-	MCP        MCPConfig        `yaml:"mcp"`
+	Server        ServerConfig        `yaml:"server"`
+	Models        ModelsConfig        `yaml:"models"`
+	Cache         CacheConfig         `yaml:"cache"`
+	Storage       StorageConfig       `yaml:"storage"`
+	Logging       LogConfig           `yaml:"logging"`
+	Usage         UsageConfig         `yaml:"usage"`
+	Budgets       BudgetsConfig       `yaml:"budgets"`
+	RateLimits    RateLimitsConfig    `yaml:"rate_limits"`
+	Metrics       MetricsConfig       `yaml:"metrics"`
+	OpenTelemetry OpenTelemetryConfig `yaml:"opentelemetry"`
+	HTTP          HTTPConfig          `yaml:"http"`
+	Admin         AdminConfig         `yaml:"admin"`
+	Guardrails    GuardrailsConfig    `yaml:"guardrails"`
+	Failover      FailoverConfig      `yaml:"failover"`
+	Workflows     WorkflowsConfig     `yaml:"workflows"`
+	Resilience    ResilienceConfig    `yaml:"resilience"`
+	Tagging       TaggingConfig       `yaml:"tagging"`
+	Session       SessionConfig       `yaml:"session"`
+	MCP           MCPConfig           `yaml:"mcp"`
 
 	// VersionCheck controls the daily update check against the public
 	// release manifest. See VersionCheckConfig for what it sends.
