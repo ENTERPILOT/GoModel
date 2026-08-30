@@ -1,6 +1,6 @@
 .PHONY: all build run demo clean tidy mod-check frontend test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
 
-all: build
+all: frontend build
 
 # Get version info
 VERSION ?= $(shell git describe --tags --always --dirty)
@@ -31,7 +31,9 @@ install-tools:
 	@command -v pre-commit > /dev/null 2>&1 || (echo "Installing pre-commit..." && pip install pre-commit==4.5.1)
 	@echo "All tools are ready"
 
-build:
+# Compiles the gateway. The dashboard must be built first (see `frontend`);
+# the binary embeds internal/admin/dashboard/static/dist.
+build: frontend
 	go build -ldflags '$(LDFLAGS)' -o bin/gomodel ./cmd/gomodel
 # Run the application.
 #
@@ -67,7 +69,7 @@ infra:
 	docker compose up -d
 
 # Docker Compose: full stack (GoModel + Prometheus; builds app image when needed)
-image:
+image: frontend
 	docker compose --profile app up -d
 
 # Seed rolling demo telemetry and dashboard configuration into SQLite.
@@ -83,10 +85,12 @@ test:
 test-race:
 	go test -v -race -coverprofile=coverage.out ./cmd/... ./config/... ./ext/... ./internal/... ./run/...
 
-# Build the Svelte dashboard into internal/admin/dashboard/static/dist
-# (embedded into the Go binary; commit the dist output).
+# Build the Svelte dashboard into internal/admin/dashboard/static/dist, which
+# the Go binary embeds. The output is not committed: CI builds it in a
+# secretless job (docs/adr/0010-dashboard-built-in-ci.md). --ignore-scripts
+# keeps npm lifecycle scripts from running; the build does not need them.
 frontend:
-	cd web/dashboard && npm ci --no-audit --no-fund && npm run build
+	cd web/dashboard && npm ci --no-audit --no-fund --ignore-scripts && npm run build
 
 # Run dashboard JavaScript unit tests
 test-dashboard:

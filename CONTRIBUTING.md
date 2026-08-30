@@ -24,9 +24,13 @@ Allowed types are `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `c
 
 ## Dashboard frontend
 
-The admin dashboard is a Svelte 5 single-page app in `web/dashboard/`. The
-built assets are committed under `internal/admin/dashboard/static/dist/` and
-embedded into the Go binary, so plain `go build` works without Node.
+The admin dashboard is a Svelte 5 single-page app in `web/dashboard/`. Vite
+builds it into `internal/admin/dashboard/static/dist/`, which the Go binary
+embeds. The build output is not committed — CI builds it in a secretless job
+and feeds the result to the tests and release builds (see
+[ADR-0010](docs/adr/0010-dashboard-built-in-ci.md)). On a fresh clone, run
+`make frontend` once (requires Node 22+) before starting the gateway with the
+UI enabled; `make build` does this for you.
 
 Dashboard translations are welcome; see the
 [translation guide](web/dashboard/src/lib/i18n/README.md).
@@ -38,10 +42,11 @@ make frontend        # npm ci + vite build (requires Node 22+)
 make test-dashboard  # frontend unit tests
 ```
 
-Commit the regenerated `static/dist` output together with your source change —
-CI verifies the committed build matches the sources. For live-reload
-development, run the gateway on :8080 and `npm run dev` in `web/dashboard/`
-(the Vite dev server proxies `/admin` and `/v1` API calls to the gateway).
+Commit only the sources. Changes to `web/dashboard/package-lock.json` are
+part of the build's trust chain and get the same review as `go.sum`. For
+live-reload development, run the gateway on :8080 and `npm run dev` in
+`web/dashboard/` (the Vite dev server proxies `/admin` and `/v1` API calls to
+the gateway).
 
 ## Questions
 
