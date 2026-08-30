@@ -246,3 +246,65 @@ func TestChain_SlashNamedVirtualModelIsChained(t *testing.T) {
 		t.Fatalf("Upsert(pinned) error = %v, want unknown provider rejection", err)
 	}
 }
+
+// A redirect that shadows its own source adds failover to a real model rather
+// than replacing it, so other redirects that name the model reach the model —
+// not the shadow's fallback list. Two models protecting each other is the
+// common legacy failover-rule shape and must not read as a cycle.
+func TestChain_SelfShadowingRedirectIsNotAChainLeg(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	ctx := context.Background()
+	upsertRedirect(t, svc, "openai/gpt-4o", StrategyFailover, "openai/gpt-4o", "groq/llama")
+	// Mutual protection: previously rejected as openai/gpt-4o -> groq/llama -> openai/gpt-4o.
+	upsertRedirect(t, svc, "groq/llama", StrategyFailover, "groq/llama", "openai/gpt-4o")
+
+	for _, source := range []string{"openai/gpt-4o", "groq/llama"} {
+		sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector(source, ""))
+		if err != nil || sel.QualifiedModel() != source {
+			t.Fatalf("ResolveModel(%s) = %v, %v; want the model itself", source, sel, err)
+		}
+	}
+
+	// An alias on a shadowed model resolves to the concrete model, not through
+	// the shadow's fallbacks, and does not pin the shadow in place.
+	upsertRedirect(t, svc, "prod", "", "openai/gpt-4o")
+	sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
+	if err != nil || sel.QualifiedModel() != "openai/gpt-4o" {
+		t.Fatalf("ResolveModel(prod) = %v, %v; want openai/gpt-4o", sel, err)
+	}
+	if err := svc.Delete(ctx, "openai/gpt-4o"); err != nil {
+		t.Fatalf("Delete(self-shadow referenced by prod) error = %v, want success", err)
+	}
+
+	// A redirect that replaces the model (no self target) is still a chain leg.
+	upsertRedirect(t, svc, "openai/gpt-4o", "", "groq/llama")
+	sel, _, err = svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
+	if err != nil || sel.QualifiedModel() != "groq/llama" {
+		t.Fatalf("ResolveModel(prod) through replacing shadow = %v, %v; want groq/llama", sel, err)
+	}
+	if err := svc.Delete(ctx, "openai/gpt-4o"); err == nil || !IsValidationError(err) {
+		t.Fatalf("Delete(replacing shadow referenced by prod) error = %v, want validation error", err)
+	}
+}
+
+// Legacy failover rules that fall back to each other migrate into a set of
+// self-shadowing redirects that must load together.
+func TestChain_MutualMigratedFailoverRulesLoad(t *testing.T) {
+	t.Parallel()
+	a, ok := failoverModel("openai/gpt-4o", []string{"groq/llama"}, true)
+	if !ok {
+		t.Fatalf("failoverModel(a) = !ok")
+	}
+	b, ok := failoverModel("groq/llama", []string{"openai/gpt-4o"}, true)
+	if !ok {
+		t.Fatalf("failoverModel(b) = !ok")
+	}
+	if _, err := buildSnapshot([]VirtualModel{a, b}, true); err != nil {
+		t.Fatalf("buildSnapshot(mutual rules) error = %v", err)
+	}
+	snap, _ := buildSnapshot([]VirtualModel{a, b}, true)
+	if err := validateChains(&snap); err != nil {
+		t.Fatalf("validateChains(mutual rules) error = %v, want none", err)
+	}
+}

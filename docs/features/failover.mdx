@@ -67,7 +67,10 @@ virtual_models:
 
 A target may also name another virtual model
 ([chaining](/features/virtual-models#chain-virtual-models)); the sweep then
-tries every concrete model behind it.
+tries every concrete model behind it. A target that names a model protected by
+its own failover chain reaches that model only — its fallbacks are not swept
+in turn, which is what lets `gpt-4o` fall back to `claude-sonnet-4-6` while
+`claude-sonnet-4-6` falls back to `gpt-4o`.
 
 ## When it runs
 

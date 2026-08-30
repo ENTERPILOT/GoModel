@@ -15,15 +15,22 @@ const MaxChainDepth = 8
 // redirect's source is a chain leg rather than a concrete model — including
 // slash-named sources such as "team/cheap", which parse like a provider
 // prefix but were not declared as one. A target naming owner itself is not a
-// chain: it stands for the concrete model the redirect shadows. Disabled
-// redirects are returned too: the caller decides whether that makes the leg
-// unavailable.
+// chain: it stands for the concrete model the redirect shadows. Neither is a
+// target naming a redirect that shadows its own source (a failover chain
+// added to a real model): that redirect covers the concrete model rather than
+// replacing it, so other redirects reach the model itself — which keeps two
+// models that fall back to each other from forming a cycle, and keeps a
+// fallback from sweeping the fallbacks of the fallback. Disabled redirects
+// are returned too: the caller decides whether that makes the leg unavailable.
 func (s *snapshot) chained(owner string, target resolvedTarget) (*redirectEntry, bool) {
 	if target.explicitProvider || target.qualified == owner {
 		return nil, false
 	}
 	entry, ok := s.redirects[target.qualified]
-	return entry, ok
+	if !ok || entry.shadowsSource() {
+		return nil, false
+	}
+	return entry, true
 }
 
 // viableTargets returns entry's direct targets that can currently serve a
@@ -124,7 +131,7 @@ func (s *snapshot) dependents(source string) []string {
 			continue
 		}
 		for _, target := range s.redirects[name].targets {
-			if !target.explicitProvider && target.qualified == source {
+			if inner, ok := s.chained(name, target); ok && inner.vm.Source == source {
 				out = append(out, name)
 				break
 			}
