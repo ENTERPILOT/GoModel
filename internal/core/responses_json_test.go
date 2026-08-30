@@ -1107,6 +1107,8 @@ func TestResponsesContentItemMarshalJSON_Annotations(t *testing.T) {
 		{"output_text empty annotations", ResponsesContentItem{Type: "output_text", Text: "hi", Annotations: []json.RawMessage{}}, `{"type":"output_text","text":"hi","annotations":[]}`},
 		{"output_text with annotations", ResponsesContentItem{Type: "output_text", Text: "hi", Annotations: []json.RawMessage{json.RawMessage(`{"type":"url_citation"}`)}}, `{"type":"output_text","text":"hi","annotations":[{"type":"url_citation"}]}`},
 		{"input_text omits annotations", ResponsesContentItem{Type: "input_text", Text: "hi"}, `{"type":"input_text","text":"hi"}`},
+		{"input_text omits empty annotations", ResponsesContentItem{Type: "input_text", Text: "hi", Annotations: []json.RawMessage{}}, `{"type":"input_text","text":"hi"}`},
+		{"input_text keeps supplied annotations", ResponsesContentItem{Type: "input_text", Text: "hi", Annotations: []json.RawMessage{json.RawMessage(`{"type":"url_citation"}`)}}, `{"type":"input_text","text":"hi","annotations":[{"type":"url_citation"}]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

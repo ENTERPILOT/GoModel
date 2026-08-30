@@ -351,10 +351,10 @@ func (i ResponsesOutputItem) MarshalJSON() ([]byte, error) {
 // when a caller supplied it.
 func (c ResponsesContentItem) MarshalJSON() ([]byte, error) {
 	type alias ResponsesContentItem
+	if c.Type != "output_text" {
+		return json.Marshal(alias(c))
+	}
 	if c.Annotations == nil {
-		if c.Type != "output_text" {
-			return json.Marshal(alias(c))
-		}
 		c.Annotations = []json.RawMessage{}
 	}
 	return json.Marshal(struct {
