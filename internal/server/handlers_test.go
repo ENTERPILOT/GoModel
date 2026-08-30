@@ -7401,3 +7401,85 @@ type staticPipelineResolver struct{ pipeline *guardrails.Pipeline }
 func (s staticPipelineResolver) PipelineForContext(context.Context) *guardrails.Pipeline {
 	return s.pipeline
 }
+
+// A caller that carries only the user-path header (no managed key) must get
+// the same policy-filtered model list that inference enforces for that path.
+func TestListModels_ScopesByUserPathHeader(t *testing.T) {
+	mock := &mockProvider{
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"},
+				{ID: "anthropic/claude-sonnet-4-6", Object: "model", OwnedBy: "anthropic"},
+			},
+		},
+	}
+	authorizer := &userPathModelAuthorizer{allowedUnder: map[string]string{
+		"/acme/eng": "anthropic",
+	}}
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.modelAuthorizer = authorizer
+
+	list := func(headers map[string]string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		require.NoError(t, handler.ListModels(e.NewContext(req, rec)))
+		return rec.Code, rec.Body.String()
+	}
+
+	code, body := list(nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Contains(t, body, `"id":"openai/gpt-4o"`)
+	require.Contains(t, body, `"id":"anthropic/claude-sonnet-4-6"`)
+
+	code, body = list(map[string]string{core.UserPathHeader: "/acme/eng/alice"})
+	require.Equal(t, http.StatusOK, code)
+	require.NotContains(t, body, `"id":"openai/gpt-4o"`)
+	require.Contains(t, body, `"id":"anthropic/claude-sonnet-4-6"`)
+	require.Equal(t, "/acme/eng/alice", authorizer.lastUserPath)
+
+	code, body = list(map[string]string{core.UserPathHeader: "/acme/../eng"})
+	require.Equal(t, http.StatusBadRequest, code)
+	require.Contains(t, body, "invalid "+core.UserPathHeader+" header")
+	require.NotContains(t, body, `"object":"list"`)
+}
+
+// userPathModelAuthorizer allows a provider only under a user-path prefix and
+// records the user path it was consulted with.
+type userPathModelAuthorizer struct {
+	allowedUnder map[string]string
+	lastUserPath string
+}
+
+func (a *userPathModelAuthorizer) ValidateModelAccess(ctx context.Context, selector core.ModelSelector) error {
+	if !a.AllowsModel(ctx, selector) {
+		return core.NewInvalidRequestError("denied", nil)
+	}
+	return nil
+}
+
+func (a *userPathModelAuthorizer) AllowsModel(ctx context.Context, selector core.ModelSelector) bool {
+	a.lastUserPath = core.UserPathFromContext(ctx)
+	for prefix, provider := range a.allowedUnder {
+		if strings.HasPrefix(a.lastUserPath, prefix) {
+			return selector.Provider == provider
+		}
+	}
+	return true
+}
+
+func (a *userPathModelAuthorizer) FilterPublicModels(ctx context.Context, models []core.Model) []core.Model {
+	out := make([]core.Model, 0, len(models))
+	for _, m := range models {
+		selector, err := core.ParseModelSelector(m.ID, "")
+		if err == nil && a.AllowsModel(ctx, selector) {
+			out = append(out, m)
+		}
+	}
+	return out
+}

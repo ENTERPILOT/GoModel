@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -19,6 +20,32 @@ func requestIDFromContextOrHeader(req *http.Request) string {
 		return requestID
 	}
 	return clientRequestID(req.Header)
+}
+
+// applyUserPathHeaderToContext lifts the user-path header into the request
+// context when no user path is bound yet. Endpoints outside the snapshot
+// middleware's model-interaction set (GET /v1/models) use it so header-only
+// callers are scoped like inference requests. An invalid header is rejected
+// with the same 400 the middleware would return; the response is then
+// already written and the handler must stop, which the false return signals.
+func applyUserPathHeaderToContext(c *echo.Context) (bool, error) {
+	req := c.Request()
+	ctx := req.Context()
+	if core.UserPathFromContext(ctx) != "" {
+		return true, nil
+	}
+	headerName := core.UserPathHeaderNameFromContext(ctx)
+	userPath, err := core.NormalizeUserPath(req.Header.Get(headerName))
+	if err != nil {
+		return false, handleError(c, core.NewInvalidRequestError("invalid "+headerName+" header", err))
+	}
+	if userPath == "" {
+		return true, nil
+	}
+	req.Header.Set(headerName, userPath)
+	ctx = core.WithUserPathHeaderName(ctx, headerName)
+	c.SetRequest(req.WithContext(core.WithEffectiveUserPath(ctx, userPath)))
+	return true, nil
 }
 
 // maxClientRequestIDLength bounds the request ID a caller may supply; anything

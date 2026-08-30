@@ -785,7 +785,7 @@ Creates an alias pointing to the newest cheap OpenAI model.
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
   -d "{\"source\":\"$QA_OPENAI_ALIAS\",\"target_model\":\"openai/gpt-4.1-nano\",\"description\":\"QA alias for release e2e\"}" \
-  | jq -e --arg source "$QA_OPENAI_ALIAS" '.source == $source and .kind == "redirect" and .resolved_model == "openai/gpt-4.1-nano" and .provider_type == "openai" and .targets[0].provider == "openai" and .targets[0].model == "gpt-4.1-nano" and .enabled == true' >/dev/null
+  | jq -e --arg source "$QA_OPENAI_ALIAS" '.source == $source and .kind == "redirect" and .resolved_model == "openai/gpt-4.1-nano" and .provider_type == "openai" and .targets[0].model == "openai/gpt-4.1-nano" and .enabled == true' >/dev/null
 ```
 
 ### S14 Create Anthropic alias
@@ -796,7 +796,7 @@ Creates an alias pointing to `claude-sonnet-4-6`.
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
   -d "{\"source\":\"$QA_ANTHROPIC_ALIAS\",\"target_model\":\"anthropic/claude-sonnet-4-6\",\"description\":\"QA alias for anthropic reasoning\"}" \
-  | jq -e --arg source "$QA_ANTHROPIC_ALIAS" '.source == $source and .kind == "redirect" and .resolved_model == "anthropic/claude-sonnet-4-6" and .provider_type == "anthropic" and .targets[0].provider == "anthropic" and .targets[0].model == "claude-sonnet-4-6" and .enabled == true' >/dev/null
+  | jq -e --arg source "$QA_ANTHROPIC_ALIAS" '.source == $source and .kind == "redirect" and .resolved_model == "anthropic/claude-sonnet-4-6" and .provider_type == "anthropic" and .targets[0].model == "anthropic/claude-sonnet-4-6" and .enabled == true' >/dev/null
 ```
 
 ### S15 Verify aliases are exposed in `/v1/models`
@@ -2699,7 +2699,7 @@ curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   | jq -e --arg s "$SRC" '
       .source == $s and .kind == "redirect" and .strategy == "round_robin"
       and (.targets | length) == 2
-      and .targets[0].model == "gpt-4.1-nano" and .targets[1].model == "groq/compound-mini"
+      and .targets[0].model == "openai/gpt-4.1-nano" and .targets[1].model == "groq/groq/compound-mini"
       and .enabled == true
     ' >/dev/null
 curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" \
@@ -3042,7 +3042,7 @@ NAME="qa-failover-$QA_SUFFIX"
 curl -fsS -X PUT "$BASE_URL/admin/virtual-models" \
   -H 'Content-Type: application/json' \
   -d "{\"source\":\"$NAME\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"gemini/gemini-2.5-flash-lite\"}]}" \
-  | jq -e --arg name "$NAME" '.source == $name and .strategy == "failover" and (.targets | map(.model)) == ["gpt-4.1-nano","gemini-2.5-flash-lite"]' >/dev/null
+  | jq -e --arg name "$NAME" '.source == $name and .strategy == "failover" and (.targets | map(.model)) == ["openai/gpt-4.1-nano","gemini/gemini-2.5-flash-lite"]' >/dev/null
 curl -fsS "$BASE_URL/admin/virtual-models" \
   | jq -e --arg name "$NAME" 'map(select(.source == $name)) | length == 1' >/dev/null
 curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \

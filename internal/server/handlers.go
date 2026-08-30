@@ -590,6 +590,15 @@ func (h *Handler) Health(c *echo.Context) error {
 // @Failure      502  {object}  core.OpenAIErrorEnvelope
 // @Router       /v1/models [get]
 func (h *Handler) ListModels(c *echo.Context) error {
+	// /v1/models is not a model-interaction endpoint, so the snapshot
+	// middleware does not lift the user-path header into the context. A
+	// managed key's bound path (set by auth middleware) still wins; the header
+	// only fills in for header-only and master-key callers, so the list is
+	// filtered by the same user-path policies inference enforces.
+	if ok, err := applyUserPathHeaderToContext(c); !ok {
+		return err
+	}
+
 	// Create context with request ID for provider
 	requestID := c.Request().Header.Get(core.RequestIDHeader)
 	ctx := core.WithRequestID(c.Request().Context(), requestID)
