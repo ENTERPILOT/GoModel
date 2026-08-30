@@ -30,17 +30,22 @@ class UsersStore {
   form = $state(defaultUserForm());
   deletingPath = $state("");
 
-  // One clipboard state for the whole table; copiedPath says which row it
-  // belongs to so only that row shows the check mark.
+  // One clipboard state for the whole table; copiedPath names the row whose
+  // copy completed last, so a slower earlier copy can never mark a newer row.
   copyState = createCopyState({ logPrefix: "Failed to copy user path:" });
   copiedPath = $state("");
+  #copySequence = 0;
 
   async copyPath(node) {
     if (!node || !node.user_path) {
       return;
     }
-    this.copiedPath = node.user_path;
+    const sequence = ++this.#copySequence;
+    this.copiedPath = "";
     await this.copyState.copy(node.user_path);
+    if (sequence === this.#copySequence) {
+      this.copiedPath = node.user_path;
+    }
   }
 
   applyList(outcome) {

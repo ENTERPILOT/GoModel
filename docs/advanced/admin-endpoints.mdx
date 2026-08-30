@@ -382,10 +382,11 @@ path:
 
 `allowed_models` is the node's own list in canonical form (`anthropic/` for a
 provider wildcard, `/` for everything); `inherited_from` lists the ancestors
-whose lists also apply. `effective_models` is what a request on that path may
-actually call, evaluated through the same authorizer inference uses (so
-model-side virtual-model policies count too); an empty list with
-`restricted: true` means the node's lists intersect to nothing. `configured` is `false` for nodes implied only by keys
+whose lists also apply. `effective_models` is the path-level result — the node's list, its ancestors'
+lists, and the model-side virtual-model policies — evaluated through the same
+authorizer inference uses; a managed API key's own `allowed_models` may narrow
+a request further. An empty list with `restricted: true` means the node's
+lists intersect to nothing. `configured` is `false` for nodes implied only by keys
 or descendants; `managed: true` marks policies declared in configuration,
 which are read-only here (`409`, code `user_managed`).
 

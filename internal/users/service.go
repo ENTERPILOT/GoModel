@@ -28,6 +28,9 @@ type Service struct {
 	catalog     Catalog
 	configUsers []User
 
+	// writeMu serializes admin writes so a store mutation and the snapshot
+	// update that mirrors it are never interleaved with another writer.
+	writeMu   sync.Mutex
 	refreshMu sync.Mutex
 	current   atomic.Pointer[snapshot]
 }
@@ -208,6 +211,8 @@ func (s *Service) Upsert(ctx context.Context, user User) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	now := time.Now().UTC()
 	row := User{
 		UserPath:      userPath,
@@ -246,6 +251,8 @@ func (s *Service) Delete(ctx context.Context, userPath string) error {
 	if existing, ok := s.snapshot().byPath[userPath]; ok && existing.Managed {
 		return ErrManaged
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	if err := s.store.Delete(ctx, userPath); err != nil {
 		return err
 	}

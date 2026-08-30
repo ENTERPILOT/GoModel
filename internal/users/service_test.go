@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -189,6 +190,51 @@ func TestService_FailedRefreshStillAppliesMutation(t *testing.T) {
 	}
 	if got := svc.List(); len(got) != 0 {
 		t.Fatalf("List after delete = %#v, want empty", got)
+	}
+}
+
+// Concurrent writes to one path, with every post-write refresh failing, must
+// leave the live snapshot equal to what storage holds: the last store write
+// and the last snapshot apply are the same mutation.
+func TestService_ConcurrentWritesKeepSnapshotAndStoreInSync(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	inner, err := NewSQLStore(ctx, sqlxtest.NewSQLite(t))
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	store := &flakyStore{Store: inner, failList: true}
+	svc, err := NewService(store, testCatalog{"openai", "anthropic"})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := range 16 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			allowed := []string{"openai/*"}
+			if i%2 == 1 {
+				allowed = []string{"anthropic/*"}
+			}
+			if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: allowed}); err != nil {
+				t.Errorf("Upsert(%d): %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	rows, err := inner.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("stored rows = %#v, want one", rows)
+	}
+	live, ok := svc.Get("/acme")
+	if !ok || !reflect.DeepEqual(live.AllowedModels, rows[0].AllowedModels) {
+		t.Fatalf("live snapshot %v != stored %v", live.AllowedModels, rows[0].AllowedModels)
 	}
 }
 
