@@ -2,6 +2,11 @@ module github.com/enterpilot/gomodel
 
 go 1.27.0
 
+// Unauthenticated access to the aggregated MCP tool surface via browser DNS
+// rebinding: the /mcp endpoint's origin check could not detect a rebind.
+// Fixed in v0.1.80. See GHSA-2qr4-ww3x-mq4g.
+retract [v0.1.52, v0.1.79]
+
 require (
 	github.com/andybalholm/brotli v1.2.2
 	github.com/aws/aws-sdk-go-v2 v1.43.7
