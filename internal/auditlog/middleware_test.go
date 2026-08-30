@@ -257,9 +257,9 @@ func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) 
 	if updated.eventType != LiveEventAuditUpdated {
 		t.Fatalf("second event type = %q, want %q", updated.eventType, LiveEventAuditUpdated)
 	}
-	body, ok := updated.requestBody.(map[string]any)
+	body, ok := BodyDocument(updated.requestBody).(map[string]any)
 	if !ok {
-		t.Fatalf("request body = %T, want map[string]any", updated.requestBody)
+		t.Fatalf("request body = %T, want JSON object", updated.requestBody)
 	}
 	if got := body["model"]; got != "from-snapshot" {
 		t.Fatalf("request body model = %#v, want from-snapshot", got)

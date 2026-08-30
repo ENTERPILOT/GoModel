@@ -336,9 +336,9 @@ func TestImageGenerations_AuditsRequestBody(t *testing.T) {
 				}
 				return
 			}
-			body, ok := entry.Data.RequestBody.(map[string]any)
+			body, ok := auditlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
 			if !ok {
-				t.Fatalf("request body = %T, want decoded JSON object", entry.Data.RequestBody)
+				t.Fatalf("request body = %T, want JSON object", entry.Data.RequestBody)
 			}
 			if body["prompt"] != "a cat" || body["style"] != "vivid" {
 				t.Errorf("audited request body = %v, want prompt and extra fields", body)

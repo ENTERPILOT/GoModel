@@ -17,6 +17,8 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/labstack/echo/v5"
+
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/admin"
@@ -45,6 +47,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/tagging"
+	"github.com/enterpilot/gomodel/internal/telemetry"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/versioncheck"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -55,6 +58,7 @@ import (
 // It provides centralized lifecycle management for all components.
 type App struct {
 	config              *config.Config
+	telemetry           *telemetry.Service // nil unless OpenTelemetry export is enabled
 	providers           *providers.InitResult
 	audit               *auditlog.Result
 	usage               *usage.Result
@@ -115,24 +119,16 @@ type Config struct {
 
 // applyExtensions snapshots a registered extension set into the server
 // configuration. A nil registry leaves the config untouched.
-func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) error {
+func applyExtensions(serverCfg *server.Config, extensions *ext.Registry) {
 	if extensions == nil {
-		return nil
-	}
-	serverCfg.MetricsEndpoint = config.ResolveMetricsEndpointWithPprof(serverCfg.MetricsEndpoint, serverCfg.PprofEnabled)
-	outerMiddleware, err := extensions.OuterMiddlewareFor(ext.HTTPServerConfig{
-		MetricsEndpoint: serverCfg.MetricsEndpoint,
-	})
-	if err != nil {
-		return err
+		return
 	}
 	serverCfg.RequestRewriters = extensions.Rewriters()
-	serverCfg.OuterMiddleware = outerMiddleware
+	serverCfg.OuterMiddleware = extensions.OuterMiddleware()
 	serverCfg.ExtraMiddleware = extensions.Middleware()
 	serverCfg.ExtraRoutes = extensions.Routes()
 	serverCfg.ExtraAuthSkipPaths = extensions.PublicPaths()
 	serverCfg.RequestAuthenticators = extensions.Authenticators()
-	return nil
 }
 
 // routeSelectorHooks adapts upstream client lifecycle events into route
@@ -176,100 +172,6 @@ func routeSelectorHooks(selector ext.RouteSelector) llmclient.Hooks {
 			})
 		},
 	}
-}
-
-// upstreamObserverHooks adapts the public extension observer contract to the
-// internal provider client hooks. Optional observer code is isolated from the
-// request path: a panic is logged with fixed metadata and the call continues.
-func upstreamObserverHooks(observer ext.UpstreamObserver) llmclient.Hooks {
-	name := upstreamObserverLabel(observer)
-	hooks := llmclient.Hooks{
-		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) (next context.Context) {
-			next = ctx
-			defer func() {
-				if recover() != nil {
-					next = ctx
-					slog.Error("upstream observer panicked during observation",
-						"observer", name, "event", "call_start")
-				}
-			}()
-			if derived := observer.Start(ctx, upstreamCallFromRequest(info)); derived != nil {
-				next = derived
-			}
-			return next
-		},
-		OnRequestEnd: func(ctx context.Context, info llmclient.ResponseInfo) {
-			defer func() {
-				if recover() != nil {
-					slog.Error("upstream observer panicked during observation",
-						"observer", name, "event", "call_end")
-				}
-			}()
-			observer.End(ctx, ext.UpstreamResult{
-				UpstreamCall: upstreamCallFromResponse(info),
-				StatusCode:   info.StatusCode,
-				Duration:     info.Duration,
-				Err:          info.Error,
-			})
-		},
-	}
-	streamObserver, ok := observer.(ext.UpstreamStreamObserver)
-	if !ok {
-		return hooks
-	}
-	hooks.OnStreamFirstChunk = func(ctx context.Context, info llmclient.ResponseInfo) {
-		defer func() {
-			if recover() != nil {
-				slog.Error("upstream observer panicked during observation",
-					"observer", name, "event", "first_response_chunk")
-			}
-		}()
-		streamObserver.FirstResponseChunk(ctx, ext.UpstreamResult{
-			UpstreamCall: upstreamCallFromResponse(info),
-			StatusCode:   info.StatusCode,
-			Duration:     info.Duration,
-			Err:          info.Error,
-		})
-	}
-	return hooks
-}
-
-func upstreamCallFromRequest(info llmclient.RequestInfo) ext.UpstreamCall {
-	return ext.UpstreamCall{
-		Provider:        info.Provider,
-		ProviderType:    info.ProviderType,
-		Model:           info.Model,
-		Operation:       info.Operation,
-		Endpoint:        info.Endpoint,
-		Method:          info.Method,
-		Stream:          info.Stream,
-		StreamUncertain: info.StreamUncertain,
-	}
-}
-
-func upstreamCallFromResponse(info llmclient.ResponseInfo) ext.UpstreamCall {
-	return ext.UpstreamCall{
-		Provider:        info.Provider,
-		ProviderType:    info.ProviderType,
-		Model:           info.Model,
-		Operation:       info.Operation,
-		Endpoint:        info.Endpoint,
-		Method:          info.Method,
-		Stream:          info.Stream,
-		StreamUncertain: info.StreamUncertain,
-	}
-}
-
-func upstreamObserverLabel(observer ext.UpstreamObserver) (name string) {
-	if observer == nil {
-		return "unknown"
-	}
-	defer func() {
-		if recover() != nil || name == "" {
-			name = "unknown"
-		}
-	}()
-	return observer.Name()
 }
 
 func routeAffinityContext(ctx context.Context) (source, sessionID string) {
@@ -396,12 +298,16 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if routeSelector != nil {
 		cfg.Factory.AddHooks(routeSelectorHooks(routeSelector))
 	}
-	if cfg.Extensions != nil {
-		for _, observer := range cfg.Extensions.UpstreamObservers() {
-			if observer != nil {
-				cfg.Factory.AddHooks(upstreamObserverHooks(observer))
-			}
+	// OpenTelemetry instruments provider calls through the same hooks, so it
+	// too must exist before the first provider is constructed.
+	if appCfg.OpenTelemetry.Enabled {
+		metricsEndpoint := config.ResolveMetricsEndpointWithPprof(appCfg.Metrics.Endpoint, appCfg.Server.PprofEnabled)
+		app.telemetry, err = telemetry.New(ctx, appCfg.OpenTelemetry, metricsEndpoint)
+		if err != nil {
+			return fail("failed to initialize opentelemetry", err)
 		}
+		app.register(subsystemTelemetry, ownedByShutdown, app.telemetry.Close)
+		cfg.Factory.AddHooks(app.telemetry.Hooks())
 	}
 
 	providerResult, err := providers.Init(ctx, cfg.AppConfig, cfg.Factory)
@@ -777,8 +683,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 		serverCfg.UsageSummarizer = usageReader
 	}
 
-	if err := applyExtensions(serverCfg, cfg.Extensions); err != nil {
-		return fail("failed to configure extensions", err)
+	applyExtensions(serverCfg, cfg.Extensions)
+	if app.telemetry != nil {
+		// Outermost, so the HTTP server span also covers extension middleware.
+		serverCfg.OuterMiddleware = append([]echo.MiddlewareFunc{app.telemetry.Middleware()}, serverCfg.OuterMiddleware...)
 	}
 
 	// Wire the readiness storage probe. Storage is a required dependency, so a
@@ -836,7 +744,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 				"api", config.JoinBasePath(appCfg.Server.BasePath, "/admin"),
 				"legacy_alias", config.JoinBasePath(appCfg.Server.BasePath, "/admin/api/v1"),
 				"legacy_sunset", "2026-08-09")
-			if adminCfg.UIEnabled {
+			if adminCfg.UIEnabled && dashHandler != nil {
 				serverCfg.AdminUIEnabled = true
 				serverCfg.DashboardHandler = dashHandler
 				slog.Info("admin UI enabled", "url", fmt.Sprintf("http://localhost:%s%s", appCfg.Server.Port, config.JoinBasePath(appCfg.Server.BasePath, "/admin/dashboard")))
@@ -1234,7 +1142,8 @@ func nilInterface(value any) bool {
 }
 
 // initAdmin creates the admin API handler and optionally the dashboard handler.
-// Returns nil dashboard handler if uiEnabled is false.
+// Returns nil dashboard handler if uiEnabled is false or the dashboard build
+// is missing from the binary.
 func initAdmin(
 	reader usage.UsageReader,
 	usageReadStorage storage.Storage,
@@ -1323,10 +1232,14 @@ func initAdmin(
 
 	var dashHandler *dashboard.Handler
 	if uiEnabled {
-		var err error
-		dashHandler, err = dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
+		h, err := dashboard.NewWithDemoMode(basePath, runtimeConfig.DemoMode == "on")
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to initialize dashboard: %w", err)
+			// The dashboard build is generated, not committed (see
+			// docs/adr/0010-dashboard-built-in-ci.md). A binary built without
+			// it keeps the gateway and admin API; only the UI is unavailable.
+			slog.Error("admin UI disabled: dashboard assets missing from this build", "error", err)
+		} else {
+			dashHandler = h
 		}
 	}
 

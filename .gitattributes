@@ -2,5 +2,3 @@
 # Regenerate with `make swagger` / `make docs-openapi`.
 cmd/gomodel/docs/docs.go linguist-generated=true
 docs/openapi.json linguist-generated=true
-# Regenerate with `make frontend` (Vite build of web/dashboard).
-internal/admin/dashboard/static/dist/** linguist-generated=true
