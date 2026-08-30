@@ -39,6 +39,62 @@ API keys additionally carry a per-key allowlist. The master key has no bound
 user path: without the header it is unrestricted, with the header it is
 scoped like any other request on that path.
 
+## How access is resolved
+
+Policies hang off the user-path tree and are combined top-down. Every list on
+the way from the root to the request's path must match, and the API key's own
+list is applied last:
+
+```mermaid
+flowchart TD
+    root["/  (no list → everything)"]
+    acme["/acme<br/>allowed: openai/*, anthropic/*"]
+    eng["/acme/eng<br/>allowed: anthropic/*"]
+    sales["/acme/sales<br/>(no list → inherits /acme)"]
+    alice["/acme/eng/alice<br/>(no list → inherits /acme/eng)"]
+    key["API key bound to /acme/eng/alice<br/>allowed: anthropic/claude-sonnet-4-6"]
+
+    root --> acme
+    acme --> eng
+    acme --> sales
+    eng --> alice
+    alice -.-> key
+
+    result_sales(["/acme/sales → openai/* ∩ anthropic/*"])
+    result_alice(["/acme/eng/alice → anthropic/*"])
+    result_key(["request with the key → claude-sonnet-4-6 only"])
+
+    sales --> result_sales
+    alice --> result_alice
+    key --> result_key
+```
+
+For one request the gateway checks, in order:
+
+```mermaid
+flowchart LR
+    A["Model-side policy<br/>(virtual model user_paths, enabled)"] --> B["API key allowed_models"]
+    B --> C["user path allowed_models"]
+    C --> D["…each ancestor up to /"]
+    D --> E{"all matched?"}
+    E -->|yes| F["request proceeds"]
+    E -->|no| G["400 model_access_denied"]
+```
+
+Where the pieces come from:
+
+| Piece                   | Source                                                       |
+| ----------------------- | ------------------------------------------------------------ |
+| the request's user path | the managed API key's `user_path`, an SSO session, or the `X-GoModel-User-Path` header |
+| the tree                | derived from the user paths of existing API keys — nothing to create |
+| node policies           | the **Users** page, `users:` in `config.yaml`, or the `USERS` env var |
+| key policies            | the **API Keys** page or `allowed_models` on `POST /admin/auth-keys` |
+| model-side policies     | [virtual models](/features/virtual-models) with `user_paths` or `enabled: false` |
+
+A node without a list contributes nothing to the chain; it neither widens nor
+narrows. This is why a new key or a fresh group starts with access to
+everything, and why `/acme/sales` above still sees both providers.
+
 ## Selectors
 
 Each entry in an allowlist is one selector:

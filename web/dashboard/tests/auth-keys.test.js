@@ -273,6 +273,8 @@ test("buildCreateAuthKeyPayload sends allowed_models only when the field lists s
   });
   assert.deepEqual(restricted.payload.allowed_models, ["anthropic/*", "openai/gpt-4o"]);
   assert.deepEqual(parseAuthKeyAllowedModels(""), []);
+  assert.deepEqual(defaultAuthKeyForm().allowed_models, []);
+  assert.deepEqual(parseAuthKeyAllowedModels(["anthropic/*", "openai/gpt-4o, gpt-4o"]), ["anthropic/*", "openai/gpt-4o", "gpt-4o"]);
 });
 
 test("filterAuthKeys matches allowed model selectors", () => {

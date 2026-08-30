@@ -1,7 +1,7 @@
 // Pure logic for the API Keys page.
 
 import * as m from "../../lib/paraglide/messages.js";
-import { parseModelSelectors } from "../../lib/utils/modelSelectors.js";
+import { modelSelectorOptions, parseModelSelectors } from "../../lib/utils/modelSelectors.js";
 
 export function defaultAuthKeyForm() {
   return {
@@ -9,16 +9,22 @@ export function defaultAuthKeyForm() {
     description: "",
     user_path: "",
     labels: "",
-    allowed_models: "",
+    allowed_models: [],
     dashboard_access: false,
     expires_at: "",
   };
 }
 
-// parseAuthKeyAllowedModels splits the allowed-models field into the list
-// sent as `allowed_models` (comma- or newline-separated).
+// parseAuthKeyAllowedModels turns the allowed-models field (a list from the
+// multi-select, or comma/newline-separated text) into the `allowed_models`
+// payload.
 export function parseAuthKeyAllowedModels(value) {
   return parseModelSelectors(value);
+}
+
+// authKeySelectorOptions builds the allowed-models picker from the inventory.
+export function authKeySelectorOptions(models) {
+  return modelSelectorOptions(models, (name) => m.model_selectors_provider_all({ name }));
 }
 
 // parseAuthKeyLabels splits a comma-separated label string into a trimmed,

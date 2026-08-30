@@ -6,7 +6,7 @@ import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
-import { formatModelSelectors } from "$lib/utils/modelSelectors.js";
+import { displayModelSelector } from "$lib/utils/modelSelectors.js";
 import {
   buildCreateAuthKeyPayload,
   countInactiveAuthKeys,
@@ -22,7 +22,7 @@ function emptyLabelsEditor() {
 }
 
 function emptyAllowedModelsEditor() {
-  return { open: false, id: "", name: "", value: "", submitting: false, error: "" };
+  return { open: false, id: "", name: "", value: [], submitting: false, error: "" };
 }
 
 class AuthKeysStore {
@@ -237,7 +237,7 @@ class AuthKeysStore {
       open: true,
       id: key.id,
       name: key.name || "",
-      value: formatModelSelectors(key.allowed_models),
+      value: (key.allowed_models || []).map(displayModelSelector),
       submitting: false,
       error: "",
     };

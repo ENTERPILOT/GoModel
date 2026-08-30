@@ -2,7 +2,7 @@
 // its per-node model allowlists, on top of GET/PUT/DELETE /admin/users.
 
 import * as m from "../../lib/paraglide/messages.js";
-import { parseModelSelectors } from "../../lib/utils/modelSelectors.js";
+import { modelSelectorOptions, parseModelSelectors } from "../../lib/utils/modelSelectors.js";
 
 export function defaultUserForm() {
   return { user_path: "", allowed_models: [], description: "" };
@@ -110,19 +110,7 @@ export function previewEffectiveModels(parentModels, selectors) {
 // inventory: one provider-wide wildcard per provider, then every concrete
 // model selector, both sorted. Options carry the SearchSelect shape.
 export function userSelectorOptions(models) {
-  const list = Array.isArray(models) ? models : [];
-  const providers = [...new Set(list.map((entry) => entry?.provider_name).filter(Boolean))].sort();
-  const selectors = [
-    ...new Set(list.map((entry) => entry?.access?.selector || entry?.selector).filter(Boolean)),
-  ].sort();
-  return [
-    ...providers.map((name) => ({
-      value: name + "/*",
-      label: name + "/*",
-      description: m.users_quick_add_provider_all({ name }),
-    })),
-    ...selectors.map((selector) => ({ value: selector, label: selector, description: "" })),
-  ];
+  return modelSelectorOptions(models, (name) => m.model_selectors_provider_all({ name }));
 }
 
 // filterUserNodes applies the toolbar query against the path, description,

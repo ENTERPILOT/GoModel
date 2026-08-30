@@ -74,8 +74,8 @@
         options={selectorOptions}
         multiple
         bind:values={store.form.allowed_models}
-        placeholder={m.users_quick_add()}
-        searchPlaceholder={m.users_quick_add_search()}
+        placeholder={m.model_selectors_placeholder()}
+        searchPlaceholder={m.model_selectors_search()}
         ariaLabel={m.users_allowed_models()}
         allowCustom
         mono

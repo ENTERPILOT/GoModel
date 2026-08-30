@@ -37,3 +37,19 @@ export function formatModelSelectors(selectors) {
     .map(displayModelSelector)
     .join("\n");
 }
+
+// modelSelectorOptions builds SearchSelect options from the shared model
+// inventory: one provider-wide wildcard per provider first, then every
+// concrete selector, both sorted. `describeProvider(name)` supplies the
+// wildcard's description so this module stays free of message imports.
+export function modelSelectorOptions(models, describeProvider = () => "") {
+  const list = Array.isArray(models) ? models : [];
+  const providers = [...new Set(list.map((entry) => entry?.provider_name).filter(Boolean))].sort();
+  const selectors = [
+    ...new Set(list.map((entry) => entry?.access?.selector || entry?.selector).filter(Boolean)),
+  ].sort();
+  return [
+    ...providers.map((name) => ({ value: name + "/*", label: name + "/*", description: describeProvider(name) })),
+    ...selectors.map((selector) => ({ value: selector, label: selector, description: "" })),
+  ];
+}
