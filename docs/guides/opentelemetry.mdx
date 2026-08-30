@@ -115,8 +115,10 @@ Sampling only affects traces. Metrics are always complete.
 <Warning>
   Export headers such as `authorization` travel with every export request. Use
   an `https://` endpoint (or a gRPC endpoint with TLS) whenever headers carry
-  credentials; keep `http://` for a local collector on a protected network.
-  GoModel logs a warning when headers are configured with a plaintext endpoint.
+  credentials; plaintext is acceptable only for a collector on the same host.
+  GoModel logs a warning at startup when headers are configured and the
+  effective endpoint is plaintext (`http://`, or gRPC with
+  `OTEL_EXPORTER_OTLP_INSECURE=true`) and not a loopback address.
 </Warning>
 
 ## What is exported

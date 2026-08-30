@@ -163,3 +163,37 @@ func assertAttributeKeys(t *testing.T, attrs []attribute.KeyValue, want []attrib
 		t.Fatalf("attribute keys = %v, want %v", got, want)
 	}
 }
+
+func TestPlaintextCredentialSignals(t *testing.T) {
+	otlpVars := []string{
+		"OTEL_TRACES_EXPORTER", "OTEL_METRICS_EXPORTER", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+		"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS", "OTEL_EXPORTER_OTLP_INSECURE", "OTEL_EXPORTER_OTLP_TRACES_INSECURE",
+	}
+	tests := []struct {
+		name string
+		env  map[string]string
+		want []string
+	}{
+		{name: "no headers", env: map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4318"}},
+		{name: "https endpoint", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x", "OTEL_EXPORTER_OTLP_ENDPOINT": "https://collector:4318"}},
+		{name: "http endpoint", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x", "OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4318"}, want: []string{"TRACES", "METRICS"}},
+		{name: "loopback endpoint", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x", "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318"}},
+		{name: "unset endpoint is the localhost default", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x"}},
+		{name: "unset endpoint with only metrics exporting", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x", "OTEL_TRACES_EXPORTER": "none", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": "http://collector:4318"}, want: []string{"METRICS"}},
+		{name: "grpc default is TLS", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc", "OTEL_EXPORTER_OTLP_ENDPOINT": "collector:4317"}},
+		{name: "grpc insecure flag", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc", "OTEL_EXPORTER_OTLP_ENDPOINT": "collector:4317", "OTEL_EXPORTER_OTLP_INSECURE": "true"}, want: []string{"TRACES", "METRICS"}},
+		{name: "grpc http scheme", env: map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "authorization=x", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc", "OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"}, want: []string{"TRACES", "METRICS"}},
+		{name: "per-signal headers and protocol", env: map[string]string{"OTEL_EXPORTER_OTLP_TRACES_HEADERS": "authorization=x", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "grpc", "OTEL_EXPORTER_OTLP_TRACES_INSECURE": "true", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "collector:4317"}, want: []string{"TRACES"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, key := range otlpVars {
+				t.Setenv(key, tt.env[key])
+			}
+			if got := plaintextCredentialSignals(); !slices.Equal(got, tt.want) {
+				t.Fatalf("plaintextCredentialSignals() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -97,4 +98,64 @@ func envValue(key string) string {
 
 func invalidProtocol(protocol string) error {
 	return fmt.Errorf("OTLP protocol %q is unsupported; use grpc or http/protobuf", protocol)
+}
+
+// plaintextCredentialSignals lists the exporting signals ("TRACES",
+// "METRICS") whose effective configuration would send export headers —
+// typically an authorization token — over an unencrypted connection to a
+// non-loopback host. It resolves the same defaults the SDK applies: an unset
+// http/protobuf endpoint is http://localhost:4318, and gRPC is plaintext only
+// with an http:// endpoint or OTEL_EXPORTER_OTLP_INSECURE=true.
+func plaintextCredentialSignals() []string {
+	var signals []string
+	for _, signal := range []string{"TRACES", "METRICS"} {
+		if exporterName("OTEL_"+signal+"_EXPORTER") == "none" || signalEnv(signal, "HEADERS") == "" {
+			continue
+		}
+		endpoint := signalEnv(signal, "ENDPOINT")
+		plaintext := false
+		switch signalProtocol(signal) {
+		case "grpc":
+			plaintext = strings.HasPrefix(endpoint, "http://") ||
+				(!strings.Contains(endpoint, "://") && signalEnv(signal, "INSECURE") == "true")
+		default:
+			plaintext = endpoint == "" || strings.HasPrefix(endpoint, "http://")
+		}
+		if plaintext && !isLoopbackEndpoint(endpoint) {
+			signals = append(signals, signal)
+		}
+	}
+	return signals
+}
+
+// signalEnv reads OTEL_EXPORTER_OTLP_<SIGNAL>_<suffix>, falling back to the
+// generic OTEL_EXPORTER_OTLP_<suffix>, the way the SDK resolves per-signal
+// exporter settings.
+func signalEnv(signal, suffix string) string {
+	if value := envValue("OTEL_EXPORTER_OTLP_" + signal + "_" + suffix); value != "" {
+		return value
+	}
+	return envValue("OTEL_EXPORTER_OTLP_" + suffix)
+}
+
+// isLoopbackEndpoint reports whether endpoint (possibly empty, meaning the
+// SDK's localhost default) targets the local machine, where a plaintext
+// connection never leaves the host.
+func isLoopbackEndpoint(endpoint string) bool {
+	if endpoint == "" {
+		return true
+	}
+	host := strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
