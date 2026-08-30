@@ -36,7 +36,6 @@
                 class="table-icon-svg user-kind-icon"
               />
               <span class="user-path-leaf">{userPathLeaf(node.user_path)}</span>
-              <span class="user-path-full">{node.user_path}</span>
               {#if node.managed}
                 <span class="auth-key-status-badge auth-key-status-inactive">{m.users_managed()}</span>
               {/if}
@@ -111,11 +110,6 @@
 
   .user-path-leaf {
     font-weight: 600;
-  }
-
-  .user-path-full {
-    color: var(--text-muted);
-    font-size: 12px;
   }
 
   /* Implied nodes exist only because a key or a descendant refers to them. */
