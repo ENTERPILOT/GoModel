@@ -77,7 +77,7 @@ docker run --rm -p 8080:8080 \
 
 **Step 2:** Open the dashboard
 
-```
+```text
 http://localhost:8080/admin/dashboard
 ```
 
