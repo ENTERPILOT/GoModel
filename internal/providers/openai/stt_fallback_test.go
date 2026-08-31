@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -32,10 +33,20 @@ func (u *sttUpstream) handler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(u.modelsBody))
 	})
-	mux.HandleFunc("/audio/transcriptions", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/audio/transcriptions", func(w http.ResponseWriter, r *http.Request) {
 		u.probes.Add(1)
+		// The probe contract is a POST with a deliberately empty body; anything
+		// else reaching this handler means the fallback sent a real request.
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":{"message":"probe must be a POST"}}`, http.StatusInternalServerError)
+			return
+		}
+		if body, err := io.ReadAll(r.Body); err != nil || len(body) != 0 {
+			http.Error(w, `{"error":{"message":"probe body must be empty"}}`, http.StatusInternalServerError)
+			return
+		}
 		if u.transcriptionStatus == http.StatusNotFound {
-			http.NotFound(w, nil)
+			http.NotFound(w, r)
 			return
 		}
 		http.Error(w, `{"error":{"message":"file is required"}}`, u.transcriptionStatus)
@@ -61,10 +72,13 @@ func TestListModels_SpeechToTextFallback(t *testing.T) {
 			wantProbes:          1,
 		},
 		{
-			name:                "models endpoint missing, transcriptions requires auth",
+			// Middleware that authenticates before route matching answers 401
+			// for absent routes too, so an auth failure must not count as
+			// proof the transcription endpoint exists.
+			name:                "models endpoint missing, transcriptions behind failing auth",
 			modelsStatus:        http.StatusNotFound,
 			transcriptionStatus: http.StatusUnauthorized,
-			wantFallback:        true,
+			wantErrStatus:       http.StatusNotFound,
 			wantProbes:          1,
 		},
 		{

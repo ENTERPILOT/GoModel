@@ -62,8 +62,11 @@ func (p *CompatibleProvider) speechToTextFallbackModels(ctx context.Context, lis
 // hasTranscriptionEndpoint probes POST /audio/transcriptions with a
 // deliberately empty body: no server transcribes anything from it, but one
 // that implements the endpoint rejects it with a request-level error (missing
-// multipart form, unsupported media type, auth required) rather than the
-// route-level 404/405/501 an absent endpoint produces.
+// multipart form, unsupported media type) rather than the route-level
+// 404/405/501 an absent endpoint produces. Auth failures (401/403) are not
+// accepted as proof: middleware that authenticates before route matching
+// emits them for routes that do not exist, and a provider whose credential
+// cannot pass the endpoint's own auth could not serve transcriptions anyway.
 func (p *CompatibleProvider) hasTranscriptionEndpoint(ctx context.Context) bool {
 	_, err := p.client.DoRaw(ctx, p.prepareRequest(llmclient.Request{
 		Method:   http.MethodPost,
@@ -78,8 +81,6 @@ func (p *CompatibleProvider) hasTranscriptionEndpoint(ctx context.Context) bool 
 	}
 	switch gatewayErr.StatusCode {
 	case http.StatusBadRequest,
-		http.StatusUnauthorized,
-		http.StatusForbidden,
 		http.StatusRequestEntityTooLarge,
 		http.StatusUnsupportedMediaType,
 		http.StatusUnprocessableEntity:
