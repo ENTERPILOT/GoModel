@@ -7,15 +7,16 @@ keywords: ["license", "MIT", "open source", "sustainability"]
 
 ## Summary
 
-GoModel is currently released under the permissive MIT license. We want to keep
-it open and practical for developers, small teams, and independent projects.
+GoModel is released under the permissive MIT license. We want to keep it open
+and practical for developers, small teams, and independent projects.
 
-There are two cases where we may revisit licensing in the future:
+Two qualifications:
 
-1. We may make the license less permissive to protect the project from
-   extraction by large cloud providers.
-2. We may use a different license for enterprise-grade features to keep the
-   project sustainable.
+1. A small commercial distribution, [GoModel Pro](/pro/overview), is coming. It
+   adds OIDC SSO and a couple of other extensions on top of the same
+   open-source gateway; those extensions are licensed separately, not MIT.
+2. We may make the license of the gateway itself less permissive to protect the
+   project from extraction by large cloud providers.
 
 ## Full story
 
@@ -24,10 +25,9 @@ makes and every model it talks to. That kind of component should be something
 you can read, audit, extend, and trust. This is why GoModel is open source
 today.
 
-That said, we want to be upfront about the future. There are two reasons the
-license could change down the road.
+That said, we want to be upfront about the rest of the picture.
 
-### 1. Protecting the project
+### Protecting the project
 
 There is a well-documented pattern where large cloud
 providers take open-source infrastructure, ship it as a managed service, and
@@ -44,12 +44,19 @@ give nothing back. It has forced other projects to react:
 If GoModel grows to a point where this becomes a real risk, we may adjust the
 license to prevent that kind of extraction.
 
-### 2. Sustainability
+### Sustainability
 
-Building GoModel is how we make a living. Right now the project is fully open
-source, and we intend to keep it that way for as long as possible. If licensing
-changes ever happen, they will target companies that profit directly from the
-project, not individual developers or small teams building with it.
+Building GoModel is how we make a living, and so far it has not paid for
+itself. That is why a commercial distribution — [GoModel Pro](/pro/overview),
+with OIDC SSO and a couple of other extensions — is on the way. The gateway is
+MIT-licensed and fully usable without a license; Pro targets companies that
+profit directly from the project, not individual developers or small teams
+building with it.
+
+If a planned Pro feature is one you need and paying for Pro is not an option
+for you, tell us — a cheaper personal-use license, or open-sourcing that
+feature, is negotiable. See the
+[FAQ](/about/faq) for the longer answer.
 
 <Card
   title="Current license"

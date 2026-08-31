@@ -168,6 +168,7 @@
                 "icon": "compass",
                 "pages": [
                     "guides/production",
+                    "guides/updating",
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/n8n",
