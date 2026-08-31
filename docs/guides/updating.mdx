@@ -1,0 +1,193 @@
+---
+title: "Updating GoModel"
+description: "Update GoModel on Docker or the standalone binary, back up your database first, and understand what the automatic schema migrations do."
+icon: "refresh-cw"
+keywords: ["update", "upgrade", "docker", "migration", "backup", "rollback", "version pinning"]
+---
+
+Updating GoModel is a pull and a restart. Schema migrations are built into the
+binary and run automatically on the first start of the new version, so there is
+no separate migration step and no maintenance window beyond the restart.
+
+<Warning>
+  **Back up your database before every update.** GoModel is under active
+  development and ships often. Migrations are additive and designed to be safe,
+  but a copy of the database is the only thing that makes a bad upgrade a
+  five-minute problem instead of a lost audit trail, usage history, and set of
+  managed API keys.
+</Warning>
+
+## 1. Back up the database
+
+<Tabs>
+  <Tab title="SQLite (Docker volume)">
+    Stop the gateway so the file is not written mid-copy, then archive the
+    volume:
+
+    ```bash
+    docker compose stop gomodel
+    docker run --rm \
+      -v gomodel_data:/data -v "$PWD":/backup alpine \
+      tar czf /backup/gomodel-$(date +%F).tar.gz -C /data .
+    ```
+
+    Replace `gomodel_data` with your volume name (`docker volume ls`). If you
+    bind-mount a host directory instead, `cp -a ./data ./data.bak-$(date +%F)`
+    is enough.
+  </Tab>
+  <Tab title="SQLite (binary)">
+    Stop the gateway, then copy the database file printed at startup as
+    `storage configured`:
+
+    ```bash
+    cp -a ~/.local/share/gomodel/gomodel.db gomodel-$(date +%F).db   # Linux
+    ```
+
+    On macOS the default is
+    `~/Library/Application Support/gomodel/gomodel.db`. See
+    [where GoModel stores its data](/about/faq#where-does-gomodel-store-its-data).
+  </Tab>
+  <Tab title="PostgreSQL">
+    ```bash
+    pg_dump "$POSTGRES_URL" > gomodel-$(date +%F).sql
+    ```
+  </Tab>
+  <Tab title="MongoDB">
+    ```bash
+    mongodump --uri="$MONGODB_URL" --out "gomodel-$(date +%F)"
+    ```
+  </Tab>
+</Tabs>
+
+## 2. Update
+
+### Docker Compose
+
+```bash
+docker compose pull gomodel
+docker compose up -d gomodel
+docker compose logs -f gomodel
+```
+
+The logs should show the new version on the first line and a
+`storage configured` line with your database path.
+
+<Warning>
+  **Check that your database is on a volume before you update.** The image
+  declares none, so a container without a mount at `/app/data` keeps its SQLite
+  database in the container's own filesystem — and loses everything the moment
+  the container is replaced by the update. See
+  [production storage](/guides/production#choose-a-storage-backend).
+</Warning>
+
+### docker run
+
+```bash
+docker pull enterpilot/gomodel
+docker rm -f gomodel
+docker run -d --name gomodel -p 8080:8080 \
+  -v gomodel_data:/app/data \
+  --env-file .env \
+  enterpilot/gomodel
+```
+
+### Binary
+
+Re-run the installer. It fetches the latest release and replaces the binary in
+place:
+
+<Tabs>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+Restart the gateway afterwards — there is no in-place hot upgrade.
+
+## 3. Verify
+
+```bash
+gomodel --version
+curl -s http://localhost:8080/version
+```
+
+`GET /version` reports the running version, the latest published release, and
+whether an update is available:
+
+```json
+{
+  "app": "GoModel",
+  "version": "0.1.60",
+  "latest": "0.1.60",
+  "update_available": false,
+  "enabled": true
+}
+```
+
+The dashboard's **Settings** page shows the same result. See
+[Version Awareness](/advanced/version-awareness) for how that check works and
+how to disable it.
+
+## What migrations do
+
+Migrations are additive and idempotent. On startup GoModel creates any missing
+tables and indexes (`CREATE TABLE IF NOT EXISTS`) and adds any missing columns,
+ignoring the "column already exists" error each engine returns. Nothing is
+dropped, renamed, or rewritten, and a partially applied schema is safe to retry
+on the next start.
+
+That is why an update never moves or deletes your database, configuration, or
+cache, and why a rollback across a typical minor version works too: the older
+binary simply ignores tables and columns it does not know about.
+
+## Pinning a version
+
+Updates default to the latest release. To stay on a known version, pin it:
+
+<Tabs>
+  <Tab title="Docker">
+    ```bash
+    docker pull enterpilot/gomodel:X.Y.Z
+    ```
+
+    Use the version tag in your compose file instead of `latest`.
+  </Tab>
+  <Tab title="macOS / Linux">
+    ```bash
+    curl -fsSL https://gomodel.enterpilot.io/install.sh | GOMODEL_VERSION=vX.Y.Z sh
+    ```
+  </Tab>
+  <Tab title="Windows">
+    ```powershell
+    $env:GOMODEL_VERSION = "vX.Y.Z"
+    irm https://gomodel.enterpilot.io/install.ps1 | iex
+    ```
+  </Tab>
+</Tabs>
+
+Replace `X.Y.Z` with a
+[published release](https://github.com/ENTERPILOT/GoModel/releases).
+
+## Rolling back
+
+Install or pull the previous version the same way and restart. If the new
+version wrote data an older binary mishandles, restore the backup from step 1
+before starting the older binary.
+
+## If something goes wrong
+
+| Symptom | Cause |
+| --- | --- |
+| Dashboard is empty after the update: no keys, no usage, no logs | The database was not on a volume, or `SQLITE_PATH` resolved somewhere else. Compare the `storage configured` path before and after. |
+| Gateway will not start after the update | Read the first error line. Configuration that was previously ignored can become validated; the release notes list breaking changes. |
+| The version did not change | The old container is still running (`docker ps`), or a second `gomodel` binary earlier in `PATH` is being launched. |
+
+Still stuck? Ask on [Discord](https://discord.gg/gaEB9BQSPH) or open a
+[GitHub issue](https://github.com/ENTERPILOT/GoModel/issues).

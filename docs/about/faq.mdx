@@ -1,8 +1,8 @@
 ---
 title: "FAQ"
-description: "Updating, pinning, and uninstalling GoModel; where the gateway stores its data and whether updates are safe."
+description: "Updating, pinning, and uninstalling GoModel; where the gateway stores its data, and why part of the project is commercial."
 icon: "lightbulb"
-keywords: ["faq", "update", "uninstall", "data location", "version pinning"]
+keywords: ["faq", "update", "uninstall", "data location", "version pinning", "open source", "license", "pro"]
 ---
 
 ## How do I update GoModel?
@@ -34,7 +34,9 @@ keywords: ["faq", "update", "uninstall", "data location", "version pinning"]
   </Tab>
 </Tabs>
 
-Restart the gateway after updating; there is no in-place hot upgrade.
+Restart the gateway after updating; there is no in-place hot upgrade. Back up
+your database first — see [Updating GoModel](/guides/updating) for backup
+commands, verification, and rollback.
 
 ## How do I check which version I'm running?
 
@@ -62,6 +64,10 @@ Yes. The database schema is migrated additively on startup, and updates never
 move or delete your database, configuration, or cache. Rolling back a version
 is equally safe for typical minor upgrades, though a database written by a
 much newer version may contain tables an older binary simply ignores.
+
+GoModel still ships fast, so keep a database copy before each update anyway —
+[Updating GoModel](/guides/updating#1-back-up-the-database) has the commands
+for each storage backend.
 
 ## Where does GoModel store its data?
 
@@ -94,3 +100,27 @@ rm -rf ~/Library/"Application Support"/gomodel ~/Library/Caches/gomodel   # macO
 On Windows, delete `%LOCALAPPDATA%\Programs\gomodel` (and
 `%LOCALAPPDATA%\gomodel` for data), then remove the folder from your user
 PATH. For Docker, remove the container and image as usual.
+
+## Why isn't GoModel 100% open source?
+
+Almost all of it is. The gateway is MIT-licensed and stays that way. A small
+commercial distribution — [GoModel Pro](/pro/overview), adding OIDC SSO and a
+couple of other extensions — is coming; it accounts for roughly 3% of the
+codebase.
+
+**It may still end up fully open.** A dual license, or something like the BSL,
+would keep the whole codebase readable, auditable, and forkable while still
+protecting it commercially. Opening the project is fairer than closing it, so
+that is the direction we lean.
+
+**But the project has to pay for itself.** After nine months of work, GoModel
+had earned $90 in total (August 2026). That is not a living. Keeping a small
+part commercial asks the companies that profit from a well-built AI gateway to
+pay for it, and leaves it free for everyone else. That seems like the fairest
+trade available.
+
+**Individual features are negotiable.** If something planned for Pro is a
+feature you need as a developer and paying for Pro doesn't make sense for you,
+say so. A cheaper personal-use license — or open-sourcing that particular
+feature — is on the table. Ask on [Discord](https://discord.gg/gaEB9BQSPH) or
+[GitHub](https://github.com/ENTERPILOT/GoModel/issues).
