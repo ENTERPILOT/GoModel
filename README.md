@@ -71,19 +71,17 @@ docker run --rm -p 8080:8080 \
   enterpilot/gomodel
 ```
 
-ℹ️ You can configure GoModel with `.env` variables, a `config.yaml` file, OR directly in the dashboard.
+ℹ️ Configure GoModel with `.env`, a `config.yaml` file, or manage the most important settings directly in the dashboard.
 
-ℹ️ Full list of environment variables (including all available providers): [`.env.template`](./.env.template)
-
-ℹ️ The most secure way in production is to use `.env` to load API keys.
+ℹ️ See [`.env.template`](./.env.template) for the complete list of environment variables, including all available providers.
 
 **Step 2:** Open the dashboard
 
-```
+```text
 http://localhost:8080/admin/dashboard
 ```
 
-**Step 3:** Make your first API call
+**Step 3:** Make an API call
 
 ```bash
 curl http://localhost:8080/v1/responses \
@@ -94,77 +92,50 @@ curl http://localhost:8080/v1/responses \
   }'
 ```
 
-## Using GoModel with official SDKs
+## GoModel and official SDKs
 
-GoModel exposes an OpenAI-compatible API at `/v1` and an Anthropic-compatible
-API at `/v1/messages`, so the official SDKs work unchanged - just point the
-base URL at your GoModel server and use your GoModel key
-(set up with the `GOMODEL_MASTER_KEY` env variable or one generated in the dashboard).
+GoModel accepts requests in two compatible formats:
 
-### OpenAI SDK
+- OpenAI-compatible at `/v1`
+- Anthropic-compatible at `/v1/messages`
 
-**Python**
+The official SDKs therefore work unchanged. Configure their base URLs as follows:
 
-```python
-from openai import OpenAI
+- OpenAI SDK: `http://localhost:8080/v1`
+- Anthropic SDK: `http://localhost:8080` (the SDK appends `/v1/messages`)
 
-client = OpenAI(
-    base_url="http://localhost:8080/v1",  # your GoModel server
-    api_key="your-gomodel-key",
-)
-```
+## List of Supported LLM Providers
 
-**TypeScript / JavaScript**
-
-```typescript
-import OpenAI from "openai";
-
-const client = new OpenAI({
-  baseURL: "http://localhost:8080/v1", // your GoModel server
-  apiKey: "your-gomodel-key",
-});
-```
-
-### Anthropic SDK
-
-The Anthropic SDK authenticates with `x-api-key`, which GoModel accepts
-alongside `Authorization: Bearer`.
-
-**Python**
-
-```python
-from anthropic import Anthropic
-
-client = Anthropic(
-    base_url="http://localhost:8080",  # your GoModel server (no /v1 suffix)
-    api_key="your-gomodel-key",
-)
-```
-
-**TypeScript / JavaScript**
-
-```typescript
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic({
-  baseURL: "http://localhost:8080", // your GoModel server (no /v1 suffix)
-  apiKey: "your-gomodel-key",
-});
-```
-
-## Supported LLM Providers
-
-GoModel supports OpenAI, Anthropic, Cohere, Google Gemini, Vertex AI, DeepSeek,
-Groq, Fireworks AI, Meta (Muse Spark), OpenRouter, Z.ai, xAI (Grok), Alibaba
-Cloud Model Studio (Bailian), Kilo AI, MiniMax, Xiaomi MiMo, OpenCode Go, Azure
-OpenAI, Oracle, Ollama, SGLang, vLLM, llm-d, Amazon Bedrock Runtime, Amazon
-Bedrock Mantle, and all OpenAI-compatible providers. Subscription-billed:
-ChatGPT (the Codex backend) and Claude. Voice: ElevenLabs (text-to-speech and
-speech-to-text).
+- OpenAI
+- Anthropic
+- xAI (Grok)
+- Google Gemini
+- Cohere
+- Vertex AI
+- DeepSeek
+- Groq
+- Fireworks AI
+- Meta (Muse Spark)
+- OpenRouter
+- Z.ai
+- Alibaba Cloud Model Studio (Bailian)
+- Kilo AI
+- MiniMax
+- Xiaomi MiMo
+- OpenCode Go
+- Azure OpenAI
+- Oracle
+- Ollama
+- SGLang
+- vLLM
+- llm-d
+- Amazon Bedrock Runtime and Bedrock Mantle
+- ChatGPT (the Codex backend) and Claude
+- ElevenLabs (text-to-speech and speech-to-text)
+- All OpenAI-compatible providers
 
 See the [Providers Overview](https://gomodel.enterpilot.io/docs/providers/overview?utm_source=readme) for the full
-per-provider feature matrix (chat, `/responses`, embeddings, files, batches,
-passthrough), credentials, and configuration notes.
+per-provider feature matrix.
 
 ---
 
@@ -186,34 +157,24 @@ docker compose --profile app up -d
 # or: make image
 ```
 
-| Service         | URL                   |
-| --------------- | --------------------- |
-| GoModel API     | http://localhost:8080 |
-| Adminer (DB UI) | http://localhost:8081 |
-| Prometheus      | http://localhost:9090 |
-
-### Building the Docker Image Locally
-
-```bash
-docker build -t gomodel .
-docker run --rm -p 8080:8080 --env-file .env gomodel
-```
-
 ---
 
-## API Endpoints
+## API docs
 
-GoModel exposes OpenAI-compatible and Anthropic-compatible APIs, provider-native
-passthrough, and operations routes. See the
-[API Endpoints reference](https://gomodel.enterpilot.io/docs/advanced/api-endpoints?utm_source=readme) for the full
-endpoint tables, and [Admin Endpoints](https://gomodel.enterpilot.io/docs/advanced/admin-endpoints?utm_source=readme) for
-the admin REST API and dashboard.
+- [API Endpoints](https://gomodel.enterpilot.io/docs/advanced/api-endpoints?utm_source=readme)
+- [Admin API Endpoints](https://gomodel.enterpilot.io/docs/advanced/admin-endpoints?utm_source=readme)
 
 ---
 
 ## Gateway Configuration
 
-GoModel is configured through environment variables and an optional `config.yaml`. Environment variables override YAML values. See the [Configuration reference](https://gomodel.enterpilot.io/docs/advanced/configuration?utm_source=readme) for the full list of settings organized by category, along with [`.env.template`](./.env.template) and [`config/config.example.yaml`](./config/config.example.yaml).
+GoModel resolves configuration in the following order, with each source
+overriding those to its left:
+
+[Good defaults](https://gomodel.enterpilot.io/docs/about/technical-philosophy#good-defaults) → [`config.yaml`](./config/config.example.yaml) → [`.env`](./.env.template) → exported environment variables
+
+See the [Configuration reference](https://gomodel.enterpilot.io/docs/advanced/configuration?utm_source=readme)
+for the full list of settings.
 
 ---
 
@@ -233,20 +194,9 @@ GoModel is configured through environment variables and an optional `config.yaml
 - [Provider key rotation](https://gomodel.enterpilot.io/docs/providers/key-rotation?utm_source=readme) - round-robin over multiple API keys to lift per-key rate limits
 - [Observability](https://gomodel.enterpilot.io/docs/guides/prometheus-metrics?utm_source=readme) - Prometheus metrics, [OpenTelemetry](https://gomodel.enterpilot.io/docs/guides/opentelemetry?utm_source=readme) traces, audit logs, and live request streaming in the dashboard
 
-## GoModel Pro
-
-[GoModel Pro](https://gomodel.enterpilot.io/pro?utm_source=readme) is the commercial distribution of GoModel: the same gateway, one binary, with licensed features on top of the same MIT core -
-
-- [Prompt compression](https://gomodel.enterpilot.io/docs/pro/compression?utm_source=readme) - 2-20% fewer input tokens on agentic traffic; nothing summarized, nothing dropped, and prompt caches keep hitting
-- [OIDC single sign-on](https://gomodel.enterpilot.io/docs/pro/sso?utm_source=readme) - Okta, Entra ID, Google, Auth0, or Cognito in front of the dashboard, mapped onto your user-path hierarchy
-- [Per-child quota templates](https://gomodel.enterpilot.io/docs/features/budgets?utm_source=readme) - one budget or rate-limit rule on a parent path, independent counters for every child
-- Intelligent routing (beta) - easy/hard model tiering with adaptive selection
-
-The open-source gateway is not a demo of the paid one: everything in this repository stays MIT-licensed. The Pro license is flat per company - no seat, request, or node counting - validated offline, so it works air-gapped. See [pricing and details](https://gomodel.enterpilot.io/pro?utm_source=readme).
-
 ## Roadmap
 
-See the [Roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=readme) for commercial features and the public 0.2.0 milestone.
+See the [roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=readme) for GoModel Pro and the upcoming 0.2.0 release.
 
 ## Sponsors
 
@@ -254,4 +204,4 @@ See the [Roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=re
 
 ## Community
 
-Join our [Discord](https://discord.gg/gaEB9BQSPH) to connect with other GoModel users.
+We are on [Discord](https://discord.gg/gaEB9BQSPH). Feel free to stop by and tell us what you think about GoModel.
