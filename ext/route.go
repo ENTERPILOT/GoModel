@@ -28,11 +28,21 @@ type RouteCandidate struct {
 type RouteRequest struct {
 	// Source is the virtual model name the request addressed.
 	Source string
-	// SessionID is the detected client session, when present. Session
-	// affinity is enforced by core before the selector runs; the ID is
-	// provided for observability only.
-	SessionID  string
-	Candidates []RouteCandidate
+	// SessionID is the detected client session, when present.
+	SessionID string
+	// SessionTarget is the qualified target that already served this
+	// session, when the redirect keeps session affinity and a pin exists.
+	// It is empty on a session's first request, when affinity is off, and
+	// when the pinned target has left the candidate set.
+	//
+	// Core does not enforce the pin for the adaptive strategy: it hands it
+	// over here and records whatever the selector answers, so a selector
+	// that knows a target is failing can move the session where core —
+	// which only tests candidate membership — would hold it for the pin's
+	// whole lifetime. Honour it while the target is healthy; the operator
+	// asked for affinity, and moving a session costs prompt-cache warmth.
+	SessionTarget string
+	Candidates    []RouteCandidate
 }
 
 // RouteTarget identifies a provider/model pair as seen by the upstream
@@ -73,9 +83,11 @@ type RouteOutcome struct {
 }
 
 // RouteSelector steers load balancing for virtual models using the
-// "adaptive" strategy. Core consults the selector only to pick among
-// currently viable targets; session affinity, rate-limit capacity, failover
-// chains, and retries all remain core's responsibility.
+// "adaptive" strategy. Core consults the selector to pick among currently
+// viable targets and, for a session-affine redirect, to decide whether the
+// session stays on its pinned target (see RouteRequest.SessionTarget);
+// rate-limit capacity, failover chains, and retries remain core's
+// responsibility.
 //
 // Select must be fast and must not block: it runs on the request path before
 // the upstream call. Implementations must be safe for concurrent use. A

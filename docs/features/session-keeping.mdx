@@ -71,6 +71,15 @@ saturated, the strategy picks again and the session re-pins — a session is
 never glued to a dead target, and the all-saturated honest-429 behavior is
 unchanged.
 
+Under the `adaptive` strategy the pin is handed to the route selector, which
+decides on every request whether the session keeps it. "Unavailable" then
+also covers a target the selector has backed off — one serving 429s or
+failing repeatedly — which stays in the target list and so looks fine to the
+checks above. The session moves to a healthy target and re-pins there. A
+target that is merely *slow* still keeps its session: moving it would throw
+away the provider prompt cache the pin exists to protect. See
+[Intelligent Routing](/pro/intelligent-routing).
+
 Affinity is on by default and can be disabled per redirect:
 
 ```yaml

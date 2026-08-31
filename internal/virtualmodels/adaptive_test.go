@@ -199,3 +199,191 @@ func TestBalancer_AdaptiveSingleViableTargetBypassesSelector(t *testing.T) {
 		t.Fatalf("selector saw %d requests, want 0 for a single-target pool", len(seen))
 	}
 }
+
+// steeringSelector answers with whatever target is currently healthy,
+// standing in for a selector that tracks upstream health: it declines a
+// target once it is marked failing, exactly as the adaptive selector's
+// cooldowns do.
+type steeringSelector struct {
+	mu       sync.Mutex
+	failing  map[string]bool
+	order    []string
+	requests []ext.RouteRequest
+}
+
+func newSteeringSelector(order ...string) *steeringSelector {
+	return &steeringSelector{failing: map[string]bool{}, order: order}
+}
+
+func (s *steeringSelector) Name() string { return "steering" }
+
+func (s *steeringSelector) Select(req ext.RouteRequest) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = append(s.requests, req)
+	// Keep the session where it is unless that target has started failing —
+	// the behaviour core must not pre-empt in either direction.
+	if req.SessionTarget != "" && !s.failing[req.SessionTarget] {
+		return req.SessionTarget, true
+	}
+	for _, qualified := range s.order {
+		if !s.failing[qualified] {
+			return qualified, true
+		}
+	}
+	return "", false
+}
+
+func (s *steeringSelector) OnAttemptStart(ext.RouteTarget) {}
+func (s *steeringSelector) OnAttemptEnd(ext.RouteOutcome)  {}
+
+func (s *steeringSelector) fail(qualified string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failing[qualified] = true
+}
+
+func (s *steeringSelector) seen() []ext.RouteRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]ext.RouteRequest(nil), s.requests...)
+}
+
+// A session-affine redirect must still consult the selector on every request:
+// core's pin only tests candidate membership, which a target that is timing
+// out or serving 429s keeps passing, so skipping the selector while a pin
+// exists left an agent session riding a failing target for the pin's whole
+// lifetime.
+func TestSticky_AdaptiveConsultsSelectorOnEveryRequest(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	selector := &scriptedSelector{answer: "groq/llama"}
+	svc.SetRouteSelector(selector)
+	upsertAdaptive(t, svc)
+
+	for i := range 5 {
+		if got := resolveSession(t, svc, "smart", "sess-a"); got != "groq/llama" {
+			t.Fatalf("resolution %d = %q, want selector's choice groq/llama", i, got)
+		}
+	}
+	if got := len(selector.seen()); got != 5 {
+		t.Fatalf("selector saw %d requests, want one per request (5)", got)
+	}
+}
+
+// The pin reaches the selector as SessionTarget, so it can weigh cache
+// warmth against health rather than guessing at the session's history.
+func TestSticky_AdaptiveSelectorReceivesThePin(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	selector := &scriptedSelector{answer: "anthropic/claude"}
+	svc.SetRouteSelector(selector)
+	upsertAdaptive(t, svc)
+
+	for range 3 {
+		resolveSession(t, svc, "smart", "sess-a")
+	}
+	requests := selector.seen()
+	if len(requests) != 3 {
+		t.Fatalf("selector saw %d requests, want 3", len(requests))
+	}
+	if requests[0].SessionTarget != "" {
+		t.Fatalf("first request SessionTarget = %q, want empty for a new session", requests[0].SessionTarget)
+	}
+	for i, req := range requests[1:] {
+		if req.SessionTarget != "anthropic/claude" {
+			t.Fatalf("request %d SessionTarget = %q, want the recorded pin anthropic/claude", i+1, req.SessionTarget)
+		}
+		if req.SessionID != "sess-a" {
+			t.Fatalf("request %d SessionID = %q, want sess-a", i+1, req.SessionID)
+		}
+	}
+}
+
+// The regression that matters: once the selector takes the pinned target out
+// of service the session moves, instead of being held there by core's pin.
+func TestSticky_AdaptiveSelectorMovesSessionOffFailingTarget(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	selector := newSteeringSelector("openai/gpt-4o", "anthropic/claude", "groq/llama")
+	svc.SetRouteSelector(selector)
+	upsertAdaptive(t, svc)
+
+	first := resolveSession(t, svc, "smart", "sess-a")
+	if first != "openai/gpt-4o" {
+		t.Fatalf("first resolution = %q, want openai/gpt-4o", first)
+	}
+	if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
+		t.Fatalf("healthy session moved to %q, want to stay on %q", got, first)
+	}
+
+	selector.fail(first)
+	for i := range 3 {
+		got := resolveSession(t, svc, "smart", "sess-a")
+		if got == first {
+			t.Fatalf("resolution %d stayed on failing target %q", i, got)
+		}
+		if got != "anthropic/claude" {
+			t.Fatalf("resolution %d = %q, want the selector's replacement anthropic/claude", i, got)
+		}
+	}
+
+	// The session re-pinned to the replacement, so the selector sees the new
+	// target as the pin rather than the one it took out of service.
+	requests := selector.seen()
+	if last := requests[len(requests)-1].SessionTarget; last != "anthropic/claude" {
+		t.Fatalf("final SessionTarget = %q, want the re-pinned anthropic/claude", last)
+	}
+}
+
+// A selector that declines must not cost a session its affinity: core's own
+// pin still governs on the round-robin fallback path.
+func TestSticky_AdaptiveDeclineKeepsCoreAffinity(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	selector := &scriptedSelector{decline: true}
+	svc.SetRouteSelector(selector)
+	upsertAdaptive(t, svc)
+
+	first := resolveSession(t, svc, "smart", "sess-a")
+	for i := range 5 {
+		if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
+			t.Fatalf("resolution %d = %q, want pinned %q despite the decline", i, got, first)
+		}
+	}
+}
+
+// With no selector installed the adaptive strategy is plain weighted round
+// robin, and session affinity behaves exactly as it does for the other
+// strategies.
+func TestSticky_AdaptiveWithoutSelectorPinsLikeRoundRobin(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	upsertAdaptive(t, svc)
+
+	first := resolveSession(t, svc, "smart", "sess-a")
+	for i := range 5 {
+		if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
+			t.Fatalf("resolution %d = %q, want pinned %q", i, got, first)
+		}
+	}
+}
+
+// Affinity turned off means no pin reaches the selector at all.
+func TestSticky_AdaptiveAffinityDisabledSendsNoPin(t *testing.T) {
+	t.Parallel()
+	svc := newBalancingService(t)
+	selector := &scriptedSelector{answer: "groq/llama"}
+	svc.SetRouteSelector(selector)
+	off := false
+	upsertBalancedVM(t, svc, StrategyAdaptive, &off)
+
+	for range 3 {
+		resolveSession(t, svc, "smart", "sess-a")
+	}
+	for i, req := range selector.seen() {
+		if req.SessionTarget != "" {
+			t.Fatalf("request %d SessionTarget = %q, want empty with affinity disabled", i, req.SessionTarget)
+		}
+	}
+}

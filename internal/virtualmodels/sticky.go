@@ -82,19 +82,48 @@ func (s *stickySessions) resolve(source, session string, viable func(string) boo
 		delete(s.entries, key)
 	}
 	if candidate != "" {
-		if s.entries == nil {
-			s.entries = make(map[stickyKey]stickyPin)
-		}
-		s.pruneLocked(now)
-		if len(s.entries) >= maxStickySessions {
-			s.evictSoonestLocked()
-		}
-		s.entries[key] = stickyPin{
-			qualified: candidate,
-			expires:   now.Add(stickySessionTTL),
-		}
+		s.setLocked(key, candidate, now)
 	}
 	return candidate
+}
+
+// pin records qualified as the target serving a session, replacing any
+// existing pin. It is for strategies that decide affinity themselves — the
+// adaptive selector is handed the current pin and answers with the target
+// the session should use now — so the record follows the decision instead of
+// overriding it. Core's own pin then still carries the session through a
+// selector that declines, and through a restart that empties the selector's
+// state.
+func (s *stickySessions) pin(source, session, qualified string) {
+	if qualified == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setLocked(stickyKey{source: source, session: session}, qualified, s.clock())
+}
+
+// setLocked writes a pin, making room for it first. The caller holds mu.
+func (s *stickySessions) setLocked(key stickyKey, qualified string, now time.Time) {
+	if _, exists := s.entries[key]; exists {
+		// Overwriting an existing pin needs no room made. Skipping the
+		// sweep matters: the adaptive strategy records its choice on every
+		// request of every pinned session, and a map-wide prune under the
+		// shared lock at that rate is a contention point, not housekeeping.
+		s.entries[key] = stickyPin{qualified: qualified, expires: now.Add(stickySessionTTL)}
+		return
+	}
+	if s.entries == nil {
+		s.entries = make(map[stickyKey]stickyPin)
+	}
+	s.pruneLocked(now)
+	if len(s.entries) >= maxStickySessions {
+		s.evictSoonestLocked()
+	}
+	s.entries[key] = stickyPin{
+		qualified: qualified,
+		expires:   now.Add(stickySessionTTL),
+	}
 }
 
 // prune drops expired pins and pins for redirect sources no longer present in
