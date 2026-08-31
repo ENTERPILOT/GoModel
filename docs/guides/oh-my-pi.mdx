@@ -85,8 +85,10 @@ environment variable (for example `apiKey: GOMODEL_API_KEY`) or a command
 prefixed with `!` whose stdout is the secret (for example
 `apiKey: "!op read op://dev/gomodel/api-key"`).
 
-If GoModel runs on another host, replace `localhost:8080`. Keep `/v1` in the
-base URL.
+If GoModel runs on another host, replace `localhost:8080` with an `https://`
+URL, with TLS terminated at a reverse proxy or load balancer in front of
+GoModel; use plain HTTP only for loopback development. Keep `/v1` in the base
+URL.
 
 ## 4. Choose a model and run omp
 
