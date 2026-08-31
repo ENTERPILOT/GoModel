@@ -1,19 +1,16 @@
 ---
 title: "Roadmap"
-description: "GoModel roadmap, separated into commercial features and the public 0.2.0 milestone."
+description: "GoModel roadmap, separated into commercial features and the public 0.2.0 and 0.3.0 milestones."
 icon: "list-todo"
 keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 ---
 
 ## Commercial features
 
+- [x] Context window compression - cuts repeated input context and typically saves 2% - 20% of input tokens, depending on your prompts and how repetitive your application is
 - [x] Intelligent routing
-- [x] Context window compression
 - [ ] Cluster mode
-- [x] OpenTelemetry (OTel) support
-- [ ] OAuth authentication
 - [x] Single sign-on (SSO)
-- [ ] Dashboard customization
 - [ ] LDAP integration
 - [ ] Secret manager integrations (Vault, AWS Secrets Manager/KMS, Azure Key Vault, GCP Secret Manager)
 - [ ] Managed HTTP/SOCKS5 outbound proxies with per-provider-key assignment
@@ -24,12 +21,12 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 
 ## Roadmap to 0.2.0
 
-- [ ] Broader provider support beyond the current catalog
-- [ ] Workflows rework with better UI/UX and a more flexible design
+- [ ] Plugins - at least for guardrails
 - [ ] Guardrails hardening: better UI, simpler architecture, easier custom guardrails, and response-side guardrails applied before output reaches the client
 - [ ] Provider-native passthrough for all providers, beyond the current beta coverage
 - [ ] Failover for the image endpoints, so image generation and edits can fall back across providers like chat does
 - [ ] Streaming image generation (SSE relay of partial images on `/v1/images/*`)
+- [x] OpenTelemetry (OTel) support
 - [x] Full support for the OpenAI `/conversations` lifecycle
 - [x] Full support for the OpenAI `/responses` lifecycle
 - [x] Anthropic-compatible `/messages` ingress and `/messages/count_tokens`
@@ -39,9 +36,15 @@ keywords: ["roadmap", "milestones", "upcoming features", "releases"]
 - [x] UI visibility for prompt caching and local cache usage
 - [x] Fixed failover charts in the dashboard
 
+## Roadmap to 0.3.0
+
+- [ ] Plugins hardening
+- [ ] Dashboard customization
+- [ ] Workflows rework with better UI/UX and a more flexible design
+
 ## Any suggestions?
 
-The roadmap is shaped by what users actually need — tell us what's missing:
+The roadmap is shaped by what users actually need - tell us what's missing:
 
 - Chat with us on [Discord](https://discord.gg/gaEB9BQSPH)
 - Report an issue or request a feature on [GitHub](https://github.com/ENTERPILOT/GoModel/issues)
