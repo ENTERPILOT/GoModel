@@ -11,10 +11,9 @@ no separate migration step and no maintenance window beyond the restart.
 
 <Warning>
   **Back up your database before every update.** GoModel is under active
-  development and ships often. Migrations are additive and designed to be safe,
-  but a copy of the database is the only thing that makes a bad upgrade a
-  five-minute problem instead of a lost audit trail, usage history, and set of
-  managed API keys.
+  development and ships often, and some upgrades transform stored data. A copy
+  is the only thing that makes a bad upgrade a five-minute problem instead of a
+  lost audit trail, usage history, and set of managed API keys.
 </Warning>
 
 ## 1. Back up the database
@@ -83,23 +82,16 @@ The logs should show the new version on the first line and a
 ### docker run
 
 Recreating the container discards its flags, so read them off the running one
-and pass the same ones back — the example below assumes a `gomodel_data` volume
-and a `.env` file:
+first:
 
 ```bash
 docker inspect gomodel --format '{{json .Mounts}} {{.Config.Env}}'
-docker pull enterpilot/gomodel
-docker rm -f gomodel
-docker run -d --name gomodel -p 8080:8080 \
-  -v gomodel_data:/app/data \
-  --env-file .env \
-  enterpilot/gomodel
 ```
 
-With no mount at `/app/data` the database lives in the container filesystem and
-`docker rm` deletes it. Copy it out *before* removing the container, then seed
-the volume you are about to mount — an empty volume hides the copy, and the
-gateway starts with no keys, usage, or logs:
+If nothing is mounted at `/app/data`, the database lives in the container
+filesystem and `docker rm` deletes it. Copy it out and seed the volume you are
+about to mount, while the old container still exists — an empty volume hides the
+copy, and the gateway starts with no keys, usage, or logs:
 
 ```bash
 docker cp gomodel:/app/data/. ./gomodel-data
@@ -109,6 +101,17 @@ docker run --rm -v gomodel_data:/data -v "$PWD/gomodel-data":/seed alpine \
 
 `65532` is the image's nonroot UID — the gateway cannot write a volume owned by
 anyone else.
+
+Then replace the container, passing the same mount and environment flags back:
+
+```bash
+docker pull enterpilot/gomodel
+docker rm -f gomodel
+docker run -d --name gomodel -p 8080:8080 \
+  -v gomodel_data:/app/data \
+  --env-file .env \
+  enterpilot/gomodel
+```
 
 ### Binary
 
@@ -203,14 +206,13 @@ outside, so **restore the step 1 backup** unless the older version is known to
 start against the migrated database.
 
 Restoring a SQLite volume backup replaces the volume's contents, so stop the
-gateway first:
+gateway first — `docker compose stop gomodel`, or `docker stop gomodel` for a
+standalone container — then unpack the archive and start it again:
 
 ```bash
-docker compose stop gomodel
 docker run --rm -v gomodel_data:/data -v "$PWD":/backup alpine \
   sh -c 'rm -rf /data/* && tar xzf /backup/gomodel-YYYY-MM-DD.tar.gz -C /data \
          && chown -R 65532:65532 /data'
-docker compose up -d gomodel
 ```
 
 ## If something goes wrong
