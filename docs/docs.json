@@ -172,11 +172,18 @@
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/n8n",
-                    "guides/claude-code",
-                    "guides/codex",
-                    "guides/cursor",
-                    "guides/kimi-code-cli",
-                    "guides/opencode-and-other-agents",
+                    {
+                        "group": "AI coding harnesses",
+                        "icon": "terminal",
+                        "pages": [
+                            "guides/claude-code",
+                            "guides/codex",
+                            "guides/cursor",
+                            "guides/kimi-code-cli",
+                            "guides/oh-my-pi",
+                            "guides/opencode-and-other-agents"
+                        ]
+                    },
                     "guides/prometheus-metrics",
                     "guides/opentelemetry"
                 ]
