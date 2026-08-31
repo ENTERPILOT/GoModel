@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -555,5 +556,66 @@ func TestInitializeProviders_ParallelizesProbesAndRegistersDeterministically(t *
 	}
 	if got := registry.providerRuntime["beta"].lastAvailabilityError; got != "beta unavailable" {
 		t.Fatalf("beta availability error = %q, want beta unavailable", got)
+	}
+}
+
+func TestInitializeProviders_DoesNotLaunchUnboundedWorkers(t *testing.T) {
+	const providerCount = 16
+	const maxWorkers = 8
+	started := make(chan struct{}, providerCount)
+	release := make(chan struct{})
+	providers := make(map[string]*initTestProvider, providerCount)
+	for i := range providerCount {
+		name := fmt.Sprintf("provider-%02d", i)
+		providers[name] = &initTestProvider{
+			checkAvailability: func(context.Context) error {
+				started <- struct{}{}
+				<-release
+				return nil
+			},
+		}
+	}
+
+	factory := NewProviderFactory()
+	factory.Add(Registration{
+		Type: "test",
+		New: func(cfg ProviderConfig, _ ProviderOptions) core.Provider {
+			return providers[cfg.Name]
+		},
+	})
+	providerConfigs := make(map[string]ProviderConfig, providerCount)
+	for name := range providers {
+		providerConfigs[name] = ProviderConfig{Name: name, Type: "test"}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = initializeProviders(t.Context(), providerConfigs, factory, NewModelRegistry())
+		close(done)
+	}()
+
+	for range maxWorkers {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("provider initialization did not start all workers")
+		}
+	}
+
+	select {
+	case <-started:
+		t.Fatal("initializeProviders launched more than the worker limit")
+	default:
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("initializeProviders did not finish")
+	}
+
+	if len(started) != providerCount-maxWorkers {
+		t.Fatalf("started channel retained %d providers, want %d", len(started), providerCount-maxWorkers)
 	}
 }

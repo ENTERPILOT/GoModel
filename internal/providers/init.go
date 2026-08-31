@@ -285,10 +285,12 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 	sem := make(chan struct{}, maxConcurrentInitializations)
 	var wg sync.WaitGroup
 	for i, name := range names {
+		// Acquire capacity before launching the worker so configurations with
+		// many providers do not retain one blocked goroutine per provider.
+		sem <- struct{}{}
 		wg.Add(1)
 		go func(i int, name string) {
 			defer wg.Done()
-			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			pCfg := providerMap[name]
