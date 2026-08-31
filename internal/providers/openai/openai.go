@@ -43,6 +43,11 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			ProviderName: "openai",
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
+			// Operator-declared models are authoritative: with the default
+			// configured-models mode (fallback) they only apply when
+			// ListModels fails, so a synthesized STT inventory succeeding
+			// would silently override them.
+			DetectSpeechToText: len(cfg.Models) == 0,
 		}),
 	}
 }
@@ -52,9 +57,10 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	return &Provider{
 		CompatibleProvider: NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, CompatibleProviderConfig{
-			ProviderName: "openai",
-			BaseURL:      defaultBaseURL,
-			SetHeaders:   setHeaders,
+			ProviderName:       "openai",
+			BaseURL:            defaultBaseURL,
+			SetHeaders:         setHeaders,
+			DetectSpeechToText: true,
 		}),
 	}
 }

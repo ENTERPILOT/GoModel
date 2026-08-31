@@ -546,6 +546,15 @@ providers:
   #   base_url: "https://api.example.com/v1"
   #   api_key: "..."
 
+  # Speech-to-text-only servers that expose /v1/audio/transcriptions without
+  # GET /v1/models (whisper.cpp server, faster-whisper wrappers) are detected
+  # automatically and advertise a "whisper-1" transcription model. Declare
+  # `models:` instead when your server requires its own model name.
+  # local-whisper:
+  #   type: openai
+  #   base_url: "http://localhost:8000/v1"
+  #   api_key: "unused"  # any non-empty value if the server ignores auth
+
   # Example: LM Studio. Despite being "Ollama-like", LM Studio speaks the
   # OpenAI-compatible API (/v1/chat/completions, /v1/embeddings) and has NO
   # native Ollama API. Configure it as "openai" (or "vllm"), NOT "ollama" —

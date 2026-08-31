@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/goccy/go-json"
 
@@ -41,6 +42,15 @@ type CompatibleProviderConfig struct {
 	// context and body (e.g. conversation affinity headers). Nil results are
 	// ignored.
 	ChatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
+	// DetectSpeechToText enables the ListModels fallback for STT-only
+	// upstreams: when GET /models is absent or lists nothing, the provider
+	// probes POST /audio/transcriptions and, if the endpoint exists,
+	// advertises a synthesized whisper-1 transcription model (see
+	// stt_fallback.go). Enabled for the generic "openai" type so custom
+	// speech-to-text servers are routable without configuration; other
+	// wrappers leave it off because they either have a reliable catalog or
+	// do not expose the audio surface.
+	DetectSpeechToText bool
 }
 
 // CompatibleProvider is the single transport engine for every
@@ -76,6 +86,10 @@ type CompatibleProvider struct {
 	requestMutator     RequestMutator
 	adaptChatRequest   func(*core.ChatRequest) (*core.ChatRequest, error)
 	chatRequestHeaders func(context.Context, *core.ChatRequest) http.Header
+	detectSpeechToText bool
+	// sttFallbackAnnounced gates the fallback's Info log to the first
+	// detection so periodic registry refreshes do not repeat it.
+	sttFallbackAnnounced atomic.Bool
 }
 
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
@@ -85,6 +99,7 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 		requestMutator:     cfg.RequestMutator,
 		adaptChatRequest:   cfg.AdaptChatRequest,
 		chatRequestHeaders: cfg.ChatRequestHeaders,
+		detectSpeechToText: cfg.DetectSpeechToText,
 	}
 	clientCfg := llmclient.Config{
 		ProviderName:   cfg.ProviderName,
@@ -118,6 +133,7 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 		requestMutator:     cfg.RequestMutator,
 		adaptChatRequest:   cfg.AdaptChatRequest,
 		chatRequestHeaders: cfg.ChatRequestHeaders,
+		detectSpeechToText: cfg.DetectSpeechToText,
 	}
 	clientCfg := llmclient.DefaultConfig(cfg.ProviderName, cfg.BaseURL)
 	clientCfg.Hooks = hooks
@@ -239,9 +255,17 @@ func (p *CompatibleProvider) ListModels(ctx context.Context) (*core.ModelsRespon
 		Endpoint: "/models",
 	}, &resp)
 	if err != nil {
+		if fallback := p.speechToTextFallbackModels(ctx, err); fallback != nil {
+			return fallback, nil
+		}
 		return nil, err
 	}
 	normalizeModelsResponse(&resp)
+	if len(resp.Data) == 0 {
+		if fallback := p.speechToTextFallbackModels(ctx, nil); fallback != nil {
+			return fallback, nil
+		}
+	}
 	return &resp, nil
 }
 

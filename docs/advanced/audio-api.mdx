@@ -152,6 +152,37 @@ JSON object; `text`, `srt`, and `vtt` return a `text/plain` body.
   also accepts the unbracketed `timestamp_granularities` for client compatibility.
 </Tip>
 
+### Speech-to-text-only servers
+
+Some OpenAI-compatible STT servers (whisper.cpp's server, various
+faster-whisper wrappers) serve `/v1/audio/transcriptions` without implementing
+`GET /v1/models`. GoModel detects this automatically for providers of
+`type: openai`: when the upstream has no `/v1/models` endpoint (or lists no
+models) but responds on `/v1/audio/transcriptions`, the provider advertises a
+`whisper-1` transcription model so requests route to it without configuration.
+
+```yaml
+providers:
+  local-whisper:
+    type: openai
+    base_url: "http://localhost:8000/v1"
+    api_key: "unused" # any non-empty value if the server ignores auth
+```
+
+Most such servers accept or ignore the `model` field, so OpenAI SDK clients
+work with their default `whisper-1`. If your server requires its own model
+name, declare it instead and it takes precedence:
+
+```yaml
+providers:
+  local-whisper:
+    type: openai
+    base_url: "http://localhost:8000/v1"
+    api_key: "unused"
+    models:
+      - id: "Systran/faster-whisper-small"
+```
+
 ## Limitations
 
 The audio endpoints are a thin, model-routed pass to the provider and **do not run
