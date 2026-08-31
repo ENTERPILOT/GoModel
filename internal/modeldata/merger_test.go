@@ -718,6 +718,48 @@ func TestResolve_RoutingSuffixDoesNotShadowExplicitEntry(t *testing.T) {
 	}
 }
 
+func TestResolve_UnknownSuffixDoesNotBorrowMetadata(t *testing.T) {
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"anthropic.claude-3-5-haiku-20241022-v1": {
+				DisplayName:   "Claude 3.5 Haiku",
+				ContextWindow: new(200000),
+				Aliases:       []string{"bedrock/anthropic.claude-3-5-haiku-20241022-v1"},
+			},
+		},
+	}
+	list.buildReverseIndex()
+
+	// Bedrock encodes a model version after the colon; ":0" is not a routing
+	// variant, so the fallback must not resolve it to the unsuffixed entry.
+	if meta := Resolve(list, "bedrock", "anthropic.claude-3-5-haiku-20241022-v1:0"); meta != nil {
+		t.Fatalf("Resolve() = %+v, want nil for an unknown suffix", meta)
+	}
+}
+
+func TestResolve_RoutingSuffixComposesWithReleaseDate(t *testing.T) {
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"glm-5.1": {
+				DisplayName:   "GLM-5.1",
+				ContextWindow: new(131072),
+				Aliases:       []string{"z-ai/glm-5.1"},
+			},
+		},
+	}
+	list.buildReverseIndex()
+
+	// The ID carries both a release date and a routing variant; each layer
+	// strips its own and the base entry is still found.
+	meta := Resolve(list, "openrouter", "z-ai/glm-5.1-20260406:free")
+	if meta == nil {
+		t.Fatal("Resolve() = nil, want metadata of the base model")
+	}
+	if meta.DisplayName != "GLM-5.1" {
+		t.Errorf("display name = %q", meta.DisplayName)
+	}
+}
+
 func TestStripRoutingSuffix(t *testing.T) {
 	cases := []struct {
 		modelID string
@@ -731,6 +773,10 @@ func TestStripRoutingSuffix(t *testing.T) {
 		{":floor", "", false},
 		// A colon before a slash belongs to the path, not to a variant.
 		{"host:8080/model", "", false},
+		// Only the known routing variants are stripped: a provider version
+		// such as Bedrock's ":0" or an unlisted variant stays untouched.
+		{"anthropic.claude-3-5-haiku-20241022-v1:0", "", false},
+		{"deepseek/deepseek-r1:thinking", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.modelID, func(t *testing.T) {

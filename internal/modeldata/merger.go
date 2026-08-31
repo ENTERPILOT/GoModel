@@ -51,6 +51,17 @@ func resolveEntries(list *ModelList, providerType string, modelID string) (*Mode
 	return resolveRoutingSuffixAlias(list, providerType, modelID)
 }
 
+// routingSuffixes are the known routing/pricing variants a model ID may carry
+// after a colon. The set is closed on purpose: an arbitrary ":tail" can be
+// provider syntax with a different meaning — Bedrock encodes a model version
+// as "...-v1:0" — and stripping it would attach a neighbouring entry's
+// metadata to a distinct model.
+var routingSuffixes = map[string]struct{}{
+	"floor": {},
+	"free":  {},
+	"nitro": {},
+}
+
 // resolveRoutingSuffixAlias retries the lookup without a trailing routing
 // suffix such as ":floor", ":free" or ":nitro". The suffix picks how a request
 // is routed or billed, not which model answers it, and the registry carries an
@@ -58,7 +69,9 @@ func resolveEntries(list *ModelList, providerType string, modelID string) (*Mode
 // no metadata at all — no display name, no context window, no capabilities —
 // even though the identical unsuffixed ID right next to it is fully described.
 //
-// Runs last so an explicit entry for the suffixed ID always wins.
+// Runs last so an explicit entry for the suffixed ID always wins. The base ID
+// gets the release-date fallback too: an ID like "glm-5.1-20260406:free"
+// carries both a variant and a release date, and each layer strips its own.
 func resolveRoutingSuffixAlias(list *ModelList, providerType string, modelID string) (*ModelEntry, *ProviderModelEntry) {
 	baseID, ok := stripRoutingSuffix(modelID)
 	if !ok {
@@ -70,10 +83,15 @@ func resolveRoutingSuffixAlias(list *ModelList, providerType string, modelID str
 	if model, pm := resolveReverseProviderModelID(list, providerType, baseID); model != nil || pm != nil {
 		return model, pm
 	}
-	return resolveAlias(list, providerType, baseID)
+	if model, pm := resolveAlias(list, providerType, baseID); model != nil || pm != nil {
+		return model, pm
+	}
+	return resolveReleaseDateAlias(list, providerType, baseID)
 }
 
-// stripRoutingSuffix removes one terminal ":variant" segment.
+// stripRoutingSuffix removes one terminal ":variant" segment, and only for
+// the known routing variants: an unrecognized tail is left alone rather than
+// guessed at, so provider version syntax like Bedrock's ":0" never matches.
 //
 // The separator only carries this meaning in the last path element, so an ID
 // whose colon sits before a slash is left alone: provider-qualified IDs like
@@ -84,7 +102,7 @@ func stripRoutingSuffix(modelID string) (string, bool) {
 	if idx <= 0 || idx == len(modelID)-1 {
 		return "", false
 	}
-	if strings.Contains(modelID[idx+1:], "/") {
+	if _, known := routingSuffixes[modelID[idx+1:]]; !known {
 		return "", false
 	}
 	return modelID[:idx], true
