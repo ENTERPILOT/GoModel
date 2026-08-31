@@ -66,29 +66,38 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		return s.concreteTarget(snap, entry, supported[0], sessionID)
 	}
 
+	// selectorChoice consults the route selector, reporting false when there
+	// is nothing to consult or the selector had no usable answer. It is kept
+	// out of pick so the affinity path can tell a decline from an answer: on
+	// a decline core's own pin governs, and the round-robin fallback must not
+	// run — and so must not consume a rotation slot — while a viable pin
+	// exists. A single viable target needs no strategy at all, so an alias
+	// and a one-target-available redirect behave identically with and without
+	// a selector installed.
+	selectorChoice := func(pinned string) (resolvedTarget, bool) {
+		if len(pool) == 1 || normalizeStrategy(entry.strategy) != StrategyAdaptive {
+			return resolvedTarget{}, false
+		}
+		return s.adaptiveTarget(entry, sessionID, pinned, pool)
+	}
+
 	// pick applies the redirect's strategy to the viable pool. A single viable
 	// target needs no strategy and must not advance round-robin state, so an
-	// alias and a one-target-available redirect behave identically. It reports
-	// whether the answer came from the route selector — the one case where the
-	// choice already accounts for the session's pin and so supersedes it.
-	pick := func(pinned string) (resolvedTarget, bool) {
+	// alias and a one-target-available redirect behave identically.
+	pick := func() resolvedTarget {
 		if len(pool) == 1 {
-			return pool[0], false
+			return pool[0]
 		}
 		switch normalizeStrategy(entry.strategy) {
 		case StrategyFailover:
 			// Declared order is priority order: the first viable leg is the
 			// primary; the legs below it are the failover chain.
-			return pool[0], false
+			return pool[0]
 		case StrategyCost:
-			return s.cheapestTarget(snap, entry, pool), false
-		case StrategyAdaptive:
-			if target, ok := s.adaptiveTarget(entry, sessionID, pinned, pool); ok {
-				return target, true
-			}
-			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))], false
-		default: // StrategyRoundRobin
-			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))], false
+			return s.cheapestTarget(snap, entry, pool)
+		default:
+			// Round robin, and adaptive whose selector had no usable answer.
+			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
 		}
 	}
 	// Affinity is keyed to the redirect's CONFIGURED shape, not the targets
@@ -115,27 +124,34 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		// then rides a failing target for the pin's whole lifetime, visible
 		// only as latency and wasted upstream spend because failover still
 		// returns 200s to the client.
-		consultSelector := normalizeStrategy(entry.strategy) == StrategyAdaptive && s.routeSelector != nil
-		if hasPin && !consultSelector {
+		//
+		// Selection may read the model catalog, so it stays outside the
+		// sticky lock; repin then commits against the pin the selector was
+		// shown, so two concurrent requests of one session leave together on
+		// one target instead of each committing its own answer.
+		if choice, ok := selectorChoice(pinned); ok {
+			qualified := s.sticky.repin(entry.vm.Source, sessionID, pinned, choice.qualified)
+			if target, found := poolTarget(pool, qualified); found {
+				return s.concreteTarget(snap, entry, target, sessionID)
+			}
+			return s.concreteTarget(snap, entry, choice, sessionID)
+		}
+
+		// No selector answer — a decline, a panic, an answer outside the pool,
+		// or simply a non-adaptive strategy — so core's own affinity governs.
+		// Returning the pin here rather than below matters: the round-robin
+		// fallback inside pick would advance the shared rotation counter for a
+		// choice that is about to be discarded, quietly changing which target
+		// the next new session receives.
+		if hasPin {
 			if target, found := poolTarget(pool, pinned); found {
 				return s.concreteTarget(snap, entry, target, sessionID)
 			}
 		}
 
-		// Strategy selection may read the model catalog, so keep it outside the
-		// sticky lock. resolve rechecks the pin atomically in case another first
-		// request selected and pinned a target concurrently.
-		choice, bySelector := pick(pinned)
-		if bySelector {
-			// The selector saw the pin and answered anyway, so its answer is
-			// the session's target now. Record it, rather than letting the
-			// pin override the decision it was an input to.
-			s.sticky.pin(entry.vm.Source, sessionID, choice.qualified)
-			return s.concreteTarget(snap, entry, choice, sessionID)
-		}
-		// No selector answer — a decline, or a non-adaptive strategy — so
-		// core's own affinity still governs, and a declining selector does
-		// not cost a session its pin.
+		// resolve rechecks the pin atomically in case another first request
+		// selected and pinned a target concurrently.
+		choice := pick()
 		qualified := s.sticky.resolve(entry.vm.Source, sessionID,
 			viable,
 			choice.qualified,
@@ -145,8 +161,10 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		}
 		return s.concreteTarget(snap, entry, choice, sessionID)
 	}
-	choice, _ := pick("")
-	return s.concreteTarget(snap, entry, choice, sessionID)
+	if choice, ok := selectorChoice(""); ok {
+		return s.concreteTarget(snap, entry, choice, sessionID)
+	}
+	return s.concreteTarget(snap, entry, pick(), sessionID)
 }
 
 // concreteTarget turns a chosen target of entry into the concrete model to

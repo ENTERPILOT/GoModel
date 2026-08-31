@@ -87,20 +87,34 @@ func (s *stickySessions) resolve(source, session string, viable func(string) boo
 	return candidate
 }
 
-// pin records qualified as the target serving a session, replacing any
-// existing pin. It is for strategies that decide affinity themselves — the
-// adaptive selector is handed the current pin and answers with the target
-// the session should use now — so the record follows the decision instead of
-// overriding it. Core's own pin then still carries the session through a
-// selector that declines, and through a restart that empties the selector's
-// state.
-func (s *stickySessions) pin(source, session, qualified string) {
-	if qualified == "" {
-		return
+// repin records chosen as the target serving a session and returns the target
+// the caller must actually use. It is for strategies that decide affinity
+// themselves — the adaptive selector is handed the current pin and answers
+// with the target the session should use now — so the record follows the
+// decision instead of overriding it. Core's own pin then still carries the
+// session through a selector that declines, and through a restart that
+// empties the selector's state.
+//
+// observed is the pin the decision was made against. When another request has
+// pinned something else in the meantime, that pin wins and is returned: two
+// concurrent requests of one session both see the same pin, can be handed
+// different valid answers, and must still leave together on one target rather
+// than each committing its own and splitting the conversation.
+func (s *stickySessions) repin(source, session, observed, chosen string) string {
+	if chosen == "" {
+		return observed
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.setLocked(stickyKey{source: source, session: session}, qualified, s.clock())
+	key := stickyKey{source: source, session: session}
+	now := s.clock()
+	if existing, ok := s.entries[key]; ok && existing.expires.After(now) && existing.qualified != observed {
+		existing.expires = now.Add(stickySessionTTL)
+		s.entries[key] = existing
+		return existing.qualified
+	}
+	s.setLocked(key, chosen, now)
+	return chosen
 }
 
 // setLocked writes a pin, making room for it first. The caller holds mu.

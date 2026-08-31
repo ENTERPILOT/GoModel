@@ -339,16 +339,16 @@ func TestSticky_PinsWhenOnlyOneTargetSupported(t *testing.T) {
 	}
 }
 
-// pin is the entry point the adaptive strategy records its choice through,
+// repin is the entry point the adaptive strategy records its choice through,
 // so it owes the same capacity bound as resolve.
-func TestSticky_PinRespectsCapacity(t *testing.T) {
+func TestSticky_RepinRespectsCapacity(t *testing.T) {
 	t.Parallel()
 	sticky := &stickySessions{}
 	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	sticky.now = func() time.Time { return current }
 
 	for i := range maxStickySessions + 50 {
-		sticky.pin("smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
+		sticky.repin("smart", "sess-"+strconv.Itoa(i), "", "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
 	if len(sticky.entries) != maxStickySessions {
@@ -362,18 +362,18 @@ func TestSticky_PinRespectsCapacity(t *testing.T) {
 // Re-pinning an existing session overwrites in place. Every request of an
 // adaptive session takes this path, so it must neither grow the map nor
 // sweep it.
-func TestSticky_PinOverwritesInPlace(t *testing.T) {
+func TestSticky_RepinOverwritesInPlace(t *testing.T) {
 	t.Parallel()
 	sticky := &stickySessions{}
 	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	sticky.now = func() time.Time { return current }
 
-	sticky.pin("smart", "sess-a", "openai/gpt-4o")
+	sticky.repin("smart", "sess-a", "", "openai/gpt-4o")
 	// A pin for another session expires while sess-a keeps being re-pinned.
-	sticky.pin("smart", "sess-b", "groq/llama")
+	sticky.repin("smart", "sess-b", "", "groq/llama")
 	current = current.Add(stickySessionTTL + time.Minute)
 
-	sticky.pin("smart", "sess-a", "anthropic/claude")
+	sticky.repin("smart", "sess-a", "openai/gpt-4o", "anthropic/claude")
 	if got := stickyProbe(sticky, "smart", "sess-a"); got != "anthropic/claude" {
 		t.Fatalf("re-pinned target = %q, want anthropic/claude", got)
 	}
@@ -389,10 +389,10 @@ func TestSticky_PinOverwritesInPlace(t *testing.T) {
 
 // An empty target is not a pin: the adaptive path must not record one when
 // the strategy could not choose.
-func TestSticky_PinIgnoresEmptyTarget(t *testing.T) {
+func TestSticky_RepinIgnoresEmptyTarget(t *testing.T) {
 	t.Parallel()
 	sticky := &stickySessions{}
-	sticky.pin("smart", "sess-a", "")
+	sticky.repin("smart", "sess-a", "", "")
 	if len(sticky.entries) != 0 {
 		t.Fatalf("entries = %d, want no pin recorded", len(sticky.entries))
 	}

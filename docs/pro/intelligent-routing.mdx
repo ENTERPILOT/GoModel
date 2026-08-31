@@ -171,7 +171,9 @@ The objective decides how price enters the weight:
 
 With [Session keeping](/features/session-keeping) on (the default), the
 gateway hands the selector the target already serving each session and lets
-it decide, request by request, whether the session keeps it. The pin holds
+it decide, request by request, whether the session keeps it — whenever more
+than one target is viable. (With a single viable target there is nothing to
+choose, so the selector is skipped.) The pin holds
 while that target is healthy — moving a session throws away the provider
 prompt cache the pin exists to protect, so even a much cheaper or much faster
 alternative does not take it. A pin is released only when its target enters a
