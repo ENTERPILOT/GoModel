@@ -233,6 +233,17 @@ GoModel is configured through environment variables and an optional `config.yaml
 - [Provider key rotation](https://gomodel.enterpilot.io/docs/providers/key-rotation?utm_source=readme) - round-robin over multiple API keys to lift per-key rate limits
 - [Observability](https://gomodel.enterpilot.io/docs/guides/prometheus-metrics?utm_source=readme) - Prometheus metrics, [OpenTelemetry](https://gomodel.enterpilot.io/docs/guides/opentelemetry?utm_source=readme) traces, audit logs, and live request streaming in the dashboard
 
+## GoModel Pro
+
+[GoModel Pro](https://gomodel.enterpilot.io/pro?utm_source=readme) is the commercial distribution of GoModel: the same gateway, one binary, with licensed features on top of the same MIT core -
+
+- [Prompt compression](https://gomodel.enterpilot.io/docs/pro/compression?utm_source=readme) - 2-20% fewer input tokens on agentic traffic; nothing summarized, nothing dropped, and prompt caches keep hitting
+- [OIDC single sign-on](https://gomodel.enterpilot.io/docs/pro/sso?utm_source=readme) - Okta, Entra ID, Google, Auth0, or Cognito in front of the dashboard, mapped onto your user-path hierarchy
+- [Per-child quota templates](https://gomodel.enterpilot.io/docs/features/budgets?utm_source=readme) - one budget or rate-limit rule on a parent path, independent counters for every child
+- Intelligent routing (beta) - easy/hard model tiering with adaptive selection
+
+The open-source gateway is not a demo of the paid one: everything in this repository stays MIT-licensed. The Pro license is flat per company - no seat, request, or node counting - validated offline, so it works air-gapped. See [pricing and details](https://gomodel.enterpilot.io/pro?utm_source=readme).
+
 ## Roadmap
 
 See the [Roadmap](https://gomodel.enterpilot.io/docs/about/roadmap?utm_source=readme) for commercial features and the public 0.2.0 milestone.
