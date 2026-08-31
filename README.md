@@ -99,8 +99,10 @@ GoModel accepts requests in two compatible formats:
 - OpenAI-compatible at `/v1`
 - Anthropic-compatible at `/v1/messages`
 
-The official SDKs therefore work unchanged. Just point `baseURL` at your
-GoModel instance and voilà!
+The official SDKs therefore work unchanged. Configure their base URLs as follows:
+
+- OpenAI SDK: `http://localhost:8080/v1`
+- Anthropic SDK: `http://localhost:8080` (the SDK appends `/v1/messages`)
 
 ## List of Supported LLM Providers
 
