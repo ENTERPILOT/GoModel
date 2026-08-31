@@ -2,6 +2,7 @@ package modeldata
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -44,7 +45,49 @@ func resolveEntries(list *ModelList, providerType string, modelID string) (*Mode
 	if model, pm := resolveAlias(list, providerType, modelID); model != nil || pm != nil {
 		return model, pm
 	}
-	return resolveReleaseDateAlias(list, providerType, modelID)
+	if model, pm := resolveReleaseDateAlias(list, providerType, modelID); model != nil || pm != nil {
+		return model, pm
+	}
+	return resolveRoutingSuffixAlias(list, providerType, modelID)
+}
+
+// resolveRoutingSuffixAlias retries the lookup without a trailing routing
+// suffix such as ":floor", ":free" or ":nitro". The suffix picks how a request
+// is routed or billed, not which model answers it, and the registry carries an
+// entry for the base ID only. Without this step such a model is published with
+// no metadata at all — no display name, no context window, no capabilities —
+// even though the identical unsuffixed ID right next to it is fully described.
+//
+// Runs last so an explicit entry for the suffixed ID always wins.
+func resolveRoutingSuffixAlias(list *ModelList, providerType string, modelID string) (*ModelEntry, *ProviderModelEntry) {
+	baseID, ok := stripRoutingSuffix(modelID)
+	if !ok {
+		return nil, nil
+	}
+	if model, pm := resolveDirect(list, providerType, baseID); model != nil || pm != nil {
+		return model, pm
+	}
+	if model, pm := resolveReverseProviderModelID(list, providerType, baseID); model != nil || pm != nil {
+		return model, pm
+	}
+	return resolveAlias(list, providerType, baseID)
+}
+
+// stripRoutingSuffix removes one terminal ":variant" segment.
+//
+// The separator only carries this meaning in the last path element, so an ID
+// whose colon sits before a slash is left alone: provider-qualified IDs like
+// "openrouter/openai/gpt-5.6-luna-pro:floor" keep their slashes, and a leading
+// or trailing colon yields no usable base ID.
+func stripRoutingSuffix(modelID string) (string, bool) {
+	idx := strings.LastIndex(modelID, ":")
+	if idx <= 0 || idx == len(modelID)-1 {
+		return "", false
+	}
+	if strings.Contains(modelID[idx+1:], "/") {
+		return "", false
+	}
+	return modelID[:idx], true
 }
 
 func resolveReleaseDateAlias(list *ModelList, providerType string, modelID string) (*ModelEntry, *ProviderModelEntry) {

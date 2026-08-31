@@ -649,3 +649,95 @@ func TestResolve_AmbiguousModelAliasReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil for ambiguous alias, got %+v", meta)
 	}
 }
+
+func TestResolve_RoutingSuffixFallback(t *testing.T) {
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"gpt-5.6-luna-pro": {
+				DisplayName:   "GPT-5.6 Luna Pro",
+				Modes:         []string{"chat"},
+				ContextWindow: new(1050000),
+				Aliases: []string{
+					"openai/gpt-5.6-luna-pro",
+					"openrouter/openai/gpt-5.6-luna-pro",
+				},
+				Pricing: &core.ModelPricing{
+					Currency:      "USD",
+					InputPerMtok:  new(0.20),
+					OutputPerMtok: new(1.20),
+				},
+			},
+		},
+	}
+	list.buildReverseIndex()
+
+	for _, modelID := range []string{
+		"openrouter/openai/gpt-5.6-luna-pro:floor",
+		"openrouter/openai/gpt-5.6-luna-pro:nitro",
+		"openai/gpt-5.6-luna-pro:free",
+	} {
+		t.Run(modelID, func(t *testing.T) {
+			meta := Resolve(list, "openrouter", modelID)
+			if meta == nil {
+				t.Fatal("Resolve() = nil, want metadata of the unsuffixed model")
+			}
+			if meta.DisplayName != "GPT-5.6 Luna Pro" {
+				t.Errorf("display name = %q", meta.DisplayName)
+			}
+			if meta.ContextWindow == nil || *meta.ContextWindow != 1050000 {
+				t.Errorf("context window = %v", meta.ContextWindow)
+			}
+		})
+	}
+}
+
+func TestResolve_RoutingSuffixDoesNotShadowExplicitEntry(t *testing.T) {
+	list := &ModelList{
+		Models: map[string]ModelEntry{
+			"deepseek-r1": {
+				DisplayName:   "DeepSeek R1",
+				ContextWindow: new(128000),
+				Aliases:       []string{"deepseek/deepseek-r1"},
+			},
+			"deepseek-r1-free": {
+				DisplayName:   "DeepSeek R1 (free)",
+				ContextWindow: new(64000),
+				Aliases:       []string{"deepseek/deepseek-r1:free"},
+			},
+		},
+	}
+	list.buildReverseIndex()
+
+	meta := Resolve(list, "openrouter", "deepseek/deepseek-r1:free")
+	if meta == nil {
+		t.Fatal("Resolve() = nil")
+	}
+	// The suffixed ID has an entry of its own, so the fallback must not run.
+	if meta.DisplayName != "DeepSeek R1 (free)" {
+		t.Errorf("display name = %q, want the explicit suffixed entry", meta.DisplayName)
+	}
+}
+
+func TestStripRoutingSuffix(t *testing.T) {
+	cases := []struct {
+		modelID string
+		base    string
+		ok      bool
+	}{
+		{"openrouter/openai/gpt-5.6-luna-pro:floor", "openrouter/openai/gpt-5.6-luna-pro", true},
+		{"qwen/qwen3.7-flash:free", "qwen/qwen3.7-flash", true},
+		{"gpt-5.6-luna", "", false},
+		{"qwen/qwen3.7-flash:", "", false},
+		{":floor", "", false},
+		// A colon before a slash belongs to the path, not to a variant.
+		{"host:8080/model", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.modelID, func(t *testing.T) {
+			base, ok := stripRoutingSuffix(tc.modelID)
+			if ok != tc.ok || base != tc.base {
+				t.Errorf("stripRoutingSuffix(%q) = (%q, %v), want (%q, %v)", tc.modelID, base, ok, tc.base, tc.ok)
+			}
+		})
+	}
+}
