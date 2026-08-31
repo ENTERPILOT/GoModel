@@ -97,8 +97,18 @@ docker run -d --name gomodel -p 8080:8080 \
 ```
 
 With no mount at `/app/data` the database lives in the container filesystem and
-`docker rm` deletes it. Run `docker cp gomodel:/app/data ./data-backup` first,
-and mount a volume this time.
+`docker rm` deletes it. Copy it out *before* removing the container, then seed
+the volume you are about to mount — an empty volume hides the copy, and the
+gateway starts with no keys, usage, or logs:
+
+```bash
+docker cp gomodel:/app/data/. ./gomodel-data
+docker run --rm -v gomodel_data:/data -v "$PWD/gomodel-data":/seed alpine \
+  sh -c 'cp -a /seed/. /data/ && chown -R 65532:65532 /data'
+```
+
+`65532` is the image's nonroot UID — the gateway cannot write a volume owned by
+anyone else.
 
 ### Binary
 
@@ -191,6 +201,17 @@ migration in between was additive; across a transforming one the older binary
 looks for storage the upgrade rebuilt. You cannot tell the two apart from the
 outside, so **restore the step 1 backup** unless the older version is known to
 start against the migrated database.
+
+Restoring a SQLite volume backup replaces the volume's contents, so stop the
+gateway first:
+
+```bash
+docker compose stop gomodel
+docker run --rm -v gomodel_data:/data -v "$PWD":/backup alpine \
+  sh -c 'rm -rf /data/* && tar xzf /backup/gomodel-YYYY-MM-DD.tar.gz -C /data \
+         && chown -R 65532:65532 /data'
+docker compose up -d gomodel
+```
 
 ## If something goes wrong
 
