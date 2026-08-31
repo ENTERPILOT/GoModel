@@ -7,6 +7,9 @@ keywords: ["faq", "update", "uninstall", "data location", "version pinning", "op
 
 ## How do I update GoModel?
 
+Back up your database first — [Updating GoModel](/guides/updating) has the
+backup commands for each storage backend, plus verification and rollback. Then:
+
 <Tabs>
   <Tab title="macOS / Linux">
     Re-run the installer — it always fetches the latest release and replaces
@@ -34,9 +37,7 @@ keywords: ["faq", "update", "uninstall", "data location", "version pinning", "op
   </Tab>
 </Tabs>
 
-Restart the gateway after updating; there is no in-place hot upgrade. Back up
-your database first — see [Updating GoModel](/guides/updating) for backup
-commands, verification, and rollback.
+Restart the gateway after updating; there is no in-place hot upgrade.
 
 ## How do I check which version I'm running?
 
@@ -60,14 +61,15 @@ On Windows set `$env:GOMODEL_VERSION` first. With Docker, use a version tag
 
 ## Is updating safe for my data?
 
-Yes. The database schema is migrated additively on startup, and updates never
-move or delete your database, configuration, or cache. Rolling back a version
-is equally safe for typical minor upgrades, though a database written by a
-much newer version may contain tables an older binary simply ignores.
+Yes, updating is. The schema is migrated on startup, and an update never moves
+or deletes your database, configuration, or cache.
 
-GoModel still ships fast, so keep a database copy before each update anyway —
-[Updating GoModel](/guides/updating#1-back-up-the-database) has the commands
-for each storage backend.
+Rolling back needs care. Most migrations are additive, and an older binary
+ignores what it does not know about — but some releases rebuild storage into a
+new shape, as scoped budgets and rate limits did, and the older binary will not
+find what it expects. Restore a backup taken before the update instead. GoModel
+ships fast, so take one every update:
+[Updating GoModel](/guides/updating#1-back-up-the-database) has the commands.
 
 ## Where does GoModel store its data?
 

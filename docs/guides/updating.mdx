@@ -82,7 +82,12 @@ The logs should show the new version on the first line and a
 
 ### docker run
 
+Recreating the container discards its flags, so read them off the running one
+and pass the same ones back — the example below assumes a `gomodel_data` volume
+and a `.env` file:
+
 ```bash
+docker inspect gomodel --format '{{json .Mounts}} {{.Config.Env}}'
 docker pull enterpilot/gomodel
 docker rm -f gomodel
 docker run -d --name gomodel -p 8080:8080 \
@@ -90,6 +95,10 @@ docker run -d --name gomodel -p 8080:8080 \
   --env-file .env \
   enterpilot/gomodel
 ```
+
+With no mount at `/app/data` the database lives in the container filesystem and
+`docker rm` deletes it. Run `docker cp gomodel:/app/data ./data-backup` first,
+and mount a volume this time.
 
 ### Binary
 
@@ -137,15 +146,15 @@ how to disable it.
 
 ## What migrations do
 
-Migrations are additive and idempotent. On startup GoModel creates any missing
-tables and indexes (`CREATE TABLE IF NOT EXISTS`) and adds any missing columns,
-ignoring the "column already exists" error each engine returns. Nothing is
-dropped, renamed, or rewritten, and a partially applied schema is safe to retry
-on the next start.
+Migrations run on the first start of a new version. There is no separate
+migration command, and an update never moves or deletes your database,
+configuration, or cache.
 
-That is why an update never moves or deletes your database, configuration, or
-cache, and why a rollback across a typical minor version works too: the older
-binary simply ignores tables and columns it does not know about.
+Most are additive: missing tables, indexes, and columns are created, and a
+partially applied schema is safe to retry on the next start. Some releases
+transform storage instead — when budgets and rate limits gained scopes, their
+tables were rebuilt and the old ones dropped. Both are safe going forward, which
+is what makes the reverse direction worth care.
 
 ## Pinning a version
 
@@ -177,9 +186,11 @@ Replace `X.Y.Z` with a
 
 ## Rolling back
 
-Install or pull the previous version the same way and restart. If the new
-version wrote data an older binary mishandles, restore the backup from step 1
-before starting the older binary.
+Install or pull the previous version and restart. That is enough only if every
+migration in between was additive; across a transforming one the older binary
+looks for storage the upgrade rebuilt. You cannot tell the two apart from the
+outside, so **restore the step 1 backup** unless the older version is known to
+start against the migrated database.
 
 ## If something goes wrong
 
