@@ -26,10 +26,10 @@ agentic coding, chat, and tool-heavy workloads.
   about a 2% *increase* in prompt-cache hits, since shorter, more stable
   requests fit the cache better — which adds savings on top of the compression
   itself.
-- **Real savings of 5%–15%** for our testers, depending on the use case.
-  Agents that re-read files, replay tool output, or carry long histories sit
-  at the top of that range; short, non-repetitive chat sits at the bottom,
-  where the compressor simply forwards requests unchanged.
+- **Real savings of 2%–20%** of input tokens for our testers, depending on
+  the use case. Agents that re-read files, replay tool output, or carry long
+  histories sit at the top of that range; short, non-repetitive chat sits at
+  the bottom, where the compressor simply forwards requests unchanged.
 - **Full control.** Choose the level per gateway or per request, exclude
   models by glob, protect pre-existing history with `new_messages_only`, keep
   source code verbatim, and inspect every rewrite through response headers,
