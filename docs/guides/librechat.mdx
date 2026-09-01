@@ -79,12 +79,12 @@ services:
       GOMODEL_API_KEY: change-me
       ALLOW_REGISTRATION: "true"
       SEARCH: "false"
-      JWT_SECRET: generate-with-openssl-rand-hex-32
-      JWT_REFRESH_SECRET: generate-with-openssl-rand-hex-32
-      CREDS_KEY: generate-with-openssl-rand-hex-32
-      CREDS_IV: generate-with-openssl-rand-hex-16
+      JWT_SECRET: ${JWT_SECRET:?generate with openssl rand -hex 32}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?generate with openssl rand -hex 32}
+      CREDS_KEY: ${CREDS_KEY:?generate with openssl rand -hex 32}
+      CREDS_IV: ${CREDS_IV:?generate with openssl rand -hex 16}
     ports:
-      - "3080:3080"
+      - "127.0.0.1:3080:3080"
     volumes:
       - ./librechat.yaml:/app/librechat.yaml
       - librechat_uploads:/app/uploads
@@ -109,12 +109,12 @@ volumes:
 | `titleModel` | LibreChat titles conversations with `gpt-3.5-turbo` by default, which GoModel does not expose. Set a model id GoModel serves. |
 | `TAGGING_HEADER_1` | Tells GoModel to record that header's value as a label on every request. |
 | `TAGGING_HEADER_1_DONOTPASS` | Keeps the label but strips the header before forwarding, so user emails never reach a provider on [passthrough](/features/passthrough-api) routes. Translated routes never forward client headers. |
-| `ALLOW_REGISTRATION` | Without a mounted `.env`, LibreChat refuses new sign-ups by default. Turn it off again after your users have accounts. |
+| `ALLOW_REGISTRATION` | Without a mounted `.env`, LibreChat refuses new sign-ups by default. The first account to register becomes the admin, so keep the port loopback-bound (as above) until that account exists, and turn registration off again once your users have accounts. |
 | `SEARCH` | Disables Meilisearch chat search so no extra container is needed. |
-| `JWT_SECRET`, `CREDS_KEY`, ... | LibreChat's session and encryption secrets. Generate real values with `openssl rand -hex 32` (and `-hex 16` for `CREDS_IV`). |
+| `JWT_SECRET`, `CREDS_KEY`, ... | LibreChat's session and encryption secrets. The `${VAR:?...}` syntax makes Compose refuse to start until you supply real values — generate each with `openssl rand -hex 32` (`-hex 16` for `CREDS_IV`) and put them in an `.env` file next to the compose file. |
 
-Open `http://localhost:3080`, register an account, and the `GoModel`
-endpoint appears in the model picker with every model GoModel exposes —
+Open `http://localhost:3080`, register the first account (it becomes the
+LibreChat admin), and the `GoModel` endpoint appears in the model picker with every model GoModel exposes —
 including Anthropic and Gemini models and any
 [virtual models](/features/virtual-models).
 
