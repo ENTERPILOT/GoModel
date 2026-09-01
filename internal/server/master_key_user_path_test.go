@@ -50,6 +50,12 @@ func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 			name:        "missing header denies restricted model",
 			wantAllowed: false,
 		},
+		{
+			name:           "unlisted user path header denies restricted model",
+			userPathHeader: "/team/y",
+			wantSnapshot:   "/team/y",
+			wantAllowed:    false,
+		},
 	}
 
 	for _, tt := range tests {
