@@ -44,18 +44,21 @@ Then enable GoModel's exporter:
 ```bash Self-hosted Langfuse
 OTEL_ENABLED=true
 OTEL_EXPORTER_OTLP_ENDPOINT=http://langfuse-web:3000/api/public/otel
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4"
 OTEL_METRICS_EXPORTER=none
 ```
 
 ```bash Langfuse Cloud
 OTEL_ENABLED=true
 OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4
+OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic <base64 above>,x-langfuse-ingestion-version=4"
 OTEL_METRICS_EXPORTER=none
 ```
 
 </CodeGroup>
+
+The quotes matter in a shell: the header value contains a space. In a Docker
+`.env` file, drop them — there they would become part of the value.
 
 | Variable | Why |
 | --- | --- |
