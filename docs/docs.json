@@ -187,7 +187,8 @@
                         ]
                     },
                     "guides/prometheus-metrics",
-                    "guides/opentelemetry"
+                    "guides/opentelemetry",
+                    "guides/langfuse"
                 ]
             },
             {
