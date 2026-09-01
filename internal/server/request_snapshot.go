@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/textproto"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,6 +22,11 @@ const requestSnapshotInlineBodyLimit int64 = 64 * 1024
 // stay on the live request stream until the handler actually decodes them.
 func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
+	// Header.Get/Set canonicalize a non-canonical key on every call, and the
+	// default header name keeps its brand casing ("GoModel"), so canonicalize
+	// it once here. userPathHeaderName stays the user-facing spelling for
+	// error messages and context.
+	canonicalUserPathHeader := textproto.CanonicalMIMEHeaderKey(userPathHeaderName)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			req, requestID := ensureRequestID(c.Request())
@@ -38,12 +44,12 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				// managed key's bound path still wins — auth middleware runs
 				// later and its context value shadows this one.
 				if desc.ModelInteraction {
-					userPath, err := core.NormalizeUserPath(req.Header.Get(userPathHeaderName))
+					userPath, err := core.NormalizeUserPath(req.Header.Get(canonicalUserPathHeader))
 					if err != nil {
 						return handleError(c, core.NewInvalidRequestError("invalid "+userPathHeaderName+" header", err))
 					}
 					if userPath != "" {
-						req.Header.Set(userPathHeaderName, userPath)
+						req.Header.Set(canonicalUserPathHeader, userPath)
 						req = req.WithContext(core.WithEffectiveUserPath(req.Context(), userPath))
 					}
 				}
@@ -51,12 +57,12 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			userPath, err := core.NormalizeUserPath(req.Header.Get(userPathHeaderName))
+			userPath, err := core.NormalizeUserPath(req.Header.Get(canonicalUserPathHeader))
 			if err != nil {
 				return handleError(c, core.NewInvalidRequestError("invalid "+userPathHeaderName+" header", err))
 			}
 			if userPath != "" {
-				req.Header.Set(userPathHeaderName, userPath)
+				req.Header.Set(canonicalUserPathHeader, userPath)
 			}
 
 			bodyBytes, bodyNotCaptured, bodyCaptured, err := captureSmallRequestBodyForSnapshot(req, desc.BodyMode)

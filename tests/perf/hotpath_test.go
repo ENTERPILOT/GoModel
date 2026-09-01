@@ -389,7 +389,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 88,    // baseline 85 (single-alloc body reader, lazy unknown-field buffer, no context re-wraps)
+			maxAllocs: 87,    // baseline 84 (single-alloc body reader, lazy unknown-field buffer, no context re-wraps)
 			maxBytes:  13440, // baseline ~12.9 KB (incl. per-attempt response body/header capture fields)
 		},
 		{
@@ -400,8 +400,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 102,   // baseline 99 (see the bare case; plus strings.Cut selector parsing)
-			maxBytes:  13888, // baseline ~13.3 KB
+			maxAllocs: 94,    // baseline 90 (see the bare case; plus selector-keyed catalog lookups)
+			maxBytes:  13760, // baseline ~13.2 KB
 		},
 		{
 			// Default-deployment shape: auth + audit (bodies/headers) + usage +
@@ -411,8 +411,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 160,   // baseline 156 (audit bodies kept as raw JSON instead of decoded into maps)
-			maxBytes:  19968, // baseline ~19.3 KB
+			maxAllocs: 150,   // baseline 145 (selector-keyed lookups + memoized resolved-model strings)
+			maxBytes:  19840, // baseline ~19.2 KB
 		},
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a

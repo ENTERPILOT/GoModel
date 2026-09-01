@@ -397,25 +397,69 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	r.invalidateSortedCaches()
 }
 
+// modelInfoLocked resolves a qualified or bare model string to its registry
+// entry. A "provider/" prefix consults that provider's bucket first (accepting
+// model IDs that themselves contain the full qualified spelling); an unknown
+// prefix falls through to the global table because the slash may be part of
+// the model ID (e.g. "meta-llama/Meta-Llama-3-70B").
+func (r *ModelRegistry) modelInfoLocked(model string) (*ModelInfo, bool) {
+	providerName, modelID := splitModelSelector(model)
+	if providerName != "" {
+		if providerModels, ok := r.modelsByProvider[providerName]; ok {
+			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
+				return info, true
+			}
+		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return nil, false
+		}
+	}
+	info, ok := r.models[model]
+	return info, ok
+}
+
+// selectorModelInfoLocked is modelInfoLocked for an already-parsed selector.
+// It looks up the same entry the qualified string would find, but only
+// materializes "provider/model" on the rare second-chance paths, keeping the
+// per-request lookups allocation-free.
+func (r *ModelRegistry) selectorModelInfoLocked(selector core.ModelSelector) (*ModelInfo, bool) {
+	providerName := strings.TrimSpace(selector.Provider)
+	modelID := strings.TrimSpace(selector.Model)
+	if providerName == "" || modelID == "" {
+		return r.modelInfoLocked(selector.QualifiedModel())
+	}
+	if providerModels, ok := r.modelsByProvider[providerName]; ok {
+		if info, exists := providerModels[modelID]; exists {
+			return info, true
+		}
+		if info, exists := providerModels[providerName+"/"+modelID]; exists {
+			return info, true
+		}
+	}
+	if r.hasConfiguredProviderNameLocked(providerName) {
+		return nil, false
+	}
+	info, ok := r.models[providerName+"/"+modelID]
+	return info, ok
+}
+
 // GetProvider returns the provider for the given model, or nil if not found
 func (r *ModelRegistry) GetProvider(model string) core.Provider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return info.Provider
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return nil
-		}
-		// Fall through: the slash may be part of the model ID (e.g. "meta-llama/Meta-Llama-3-70B")
+	if info, ok := r.modelInfoLocked(model); ok {
+		return info.Provider
 	}
+	return nil
+}
 
-	if info, ok := r.models[model]; ok {
+// GetProviderForSelector is GetProvider for an already-parsed selector.
+func (r *ModelRegistry) GetProviderForSelector(selector core.ModelSelector) core.Provider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if info, ok := r.selectorModelInfoLocked(selector); ok {
 		return info.Provider
 	}
 	return nil
@@ -427,20 +471,7 @@ func (r *ModelRegistry) GetModel(model string) *ModelInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return info
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return nil
-		}
-		// Fall through: the slash may be part of the model ID
-	}
-
-	if info, ok := r.models[model]; ok {
+	if info, ok := r.modelInfoLocked(model); ok {
 		return info
 	}
 	return nil
@@ -452,21 +483,7 @@ func (r *ModelRegistry) LookupModel(model string) (*core.Model, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				cloned := info.Model
-				return &cloned, true
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return nil, false
-		}
-		// Fall through: the slash may be part of the model ID
-	}
-
-	if info, ok := r.models[model]; ok {
+	if info, ok := r.modelInfoLocked(model); ok {
 		cloned := info.Model
 		return &cloned, true
 	}
@@ -478,20 +495,16 @@ func (r *ModelRegistry) Supports(model string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if _, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return true
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return false
-		}
-		// Fall through: the slash may be part of the model ID
-	}
+	_, ok := r.modelInfoLocked(model)
+	return ok
+}
 
-	_, ok := r.models[model]
+// SupportsSelector is Supports for an already-parsed selector.
+func (r *ModelRegistry) SupportsSelector(selector core.ModelSelector) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	_, ok := r.selectorModelInfoLocked(selector)
 	return ok
 }
 
@@ -676,20 +689,18 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return info.ProviderType
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return ""
-		}
-		// Fall through: the slash may be part of the model ID
+	if info, ok := r.modelInfoLocked(model); ok {
+		return info.ProviderType
 	}
+	return ""
+}
 
-	if info, ok := r.models[model]; ok {
+// GetProviderTypeForSelector is GetProviderType for an already-parsed selector.
+func (r *ModelRegistry) GetProviderTypeForSelector(selector core.ModelSelector) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if info, ok := r.selectorModelInfoLocked(selector); ok {
 		return info.ProviderType
 	}
 	return ""
@@ -701,19 +712,18 @@ func (r *ModelRegistry) GetProviderName(model string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return strings.TrimSpace(info.ProviderName)
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return ""
-		}
+	if info, ok := r.modelInfoLocked(model); ok {
+		return strings.TrimSpace(info.ProviderName)
 	}
+	return ""
+}
 
-	if info, ok := r.models[model]; ok {
+// GetProviderNameForSelector is GetProviderName for an already-parsed selector.
+func (r *ModelRegistry) GetProviderNameForSelector(selector core.ModelSelector) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if info, ok := r.selectorModelInfoLocked(selector); ok {
 		return strings.TrimSpace(info.ProviderName)
 	}
 	return ""

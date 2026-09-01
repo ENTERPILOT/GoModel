@@ -23,6 +23,9 @@ var ErrRegistryNotInitialized = fmt.Errorf("model registry has no models: ensure
 type Router struct {
 	lookup       core.ModelLookup
 	cachePlanner *cachePlanner
+	// selectorLookup is lookup's optional selector-keyed fast path, asserted
+	// once at construction; nil when the lookup only speaks qualified strings.
+	selectorLookup selectorModelLookup
 	// unqualifiedModelIDs makes ListModels advertise bare model IDs instead of
 	// provider-qualified ones.
 	unqualifiedModelIDs bool
@@ -68,6 +71,16 @@ type qualifiedSelectorResolver interface {
 	ResolveProviderSelector(segment, modelID string) (core.ModelSelector, bool)
 }
 
+// selectorModelLookup is an optional lookup fast path that answers the
+// ModelLookup queries for an already-parsed selector without materializing the
+// qualified "provider/model" string on every request.
+type selectorModelLookup interface {
+	SupportsSelector(selector core.ModelSelector) bool
+	GetProviderForSelector(selector core.ModelSelector) core.Provider
+	GetProviderTypeForSelector(selector core.ModelSelector) string
+	GetProviderNameForSelector(selector core.ModelSelector) string
+}
+
 type providerModelRefresher interface {
 	RefreshProviderModels(ctx context.Context, providerSelector string) (int, error)
 }
@@ -83,10 +96,44 @@ func NewRouter(lookup core.ModelLookup) (*Router, error) {
 	if lookup == nil {
 		return nil, fmt.Errorf("lookup cannot be nil")
 	}
-	return &Router{
+	router := &Router{
 		lookup:       lookup,
 		cachePlanner: newCachePlanner(),
-	}, nil
+	}
+	router.selectorLookup, _ = lookup.(selectorModelLookup)
+	return router, nil
+}
+
+// lookupSupports, lookupProvider, lookupProviderType and lookupProviderName
+// answer lookup queries for a parsed selector, using the selector-keyed fast
+// path when the lookup provides one.
+
+func (r *Router) lookupSupports(selector core.ModelSelector) bool {
+	if r.selectorLookup != nil {
+		return r.selectorLookup.SupportsSelector(selector)
+	}
+	return r.lookup.Supports(selector.QualifiedModel())
+}
+
+func (r *Router) lookupProvider(selector core.ModelSelector) core.Provider {
+	if r.selectorLookup != nil {
+		return r.selectorLookup.GetProviderForSelector(selector)
+	}
+	return r.lookup.GetProvider(selector.QualifiedModel())
+}
+
+func (r *Router) lookupProviderType(selector core.ModelSelector) string {
+	if r.selectorLookup != nil {
+		return r.selectorLookup.GetProviderTypeForSelector(selector)
+	}
+	return r.lookup.GetProviderType(selector.QualifiedModel())
+}
+
+func (r *Router) lookupProviderName(selector core.ModelSelector) string {
+	if r.selectorLookup != nil {
+		return r.selectorLookup.GetProviderNameForSelector(selector)
+	}
+	return r.lookup.GetProviderName(selector.QualifiedModel())
 }
 
 // SetUnqualifiedModelIDs controls whether ListModels advertises bare model IDs
@@ -276,8 +323,7 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 		}
 	}
 
-	lookupModel := selector.QualifiedModel()
-	p := r.lookup.GetProvider(lookupModel)
+	p := r.lookupProvider(selector)
 	if p == nil && !refreshed {
 		var refreshErr error
 		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
@@ -289,12 +335,11 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 			if err != nil {
 				return nil, core.ModelSelector{}, err
 			}
-			lookupModel = selector.QualifiedModel()
-			p = r.lookup.GetProvider(lookupModel)
+			p = r.lookupProvider(selector)
 		}
 	}
 	if p == nil {
-		return nil, core.ModelSelector{}, core.NewNotFoundError("model not found: " + lookupModel)
+		return nil, core.ModelSelector{}, core.NewNotFoundError("model not found: " + selector.QualifiedModel())
 	}
 	return p, selector, nil
 }
@@ -474,7 +519,9 @@ func routeResolvedModelCall[Req any, Resp any](
 	}
 
 	resp, err := call(ctx, p, buildForward(selector))
-	return resp, r.GetProviderType(selector.QualifiedModel()), err
+	// The selector is already concrete (resolveProvider found its provider), so
+	// the lookup answers directly without another resolution round-trip.
+	return resp, r.lookupProviderType(selector), err
 }
 
 func routeStampedModelResponse[Req any, Resp any](
@@ -587,7 +634,7 @@ func (r *Router) forwardChatRequest(ctx context.Context, req *core.ChatRequest, 
 	}
 	// The selector is already concrete, so querying the lookup directly avoids
 	// repeating model resolution on every routed Messages request.
-	return adaptAnthropicCacheControl(&forwardReq, r.lookup.GetProviderType(selector.QualifiedModel()))
+	return adaptAnthropicCacheControl(&forwardReq, r.lookupProviderType(selector))
 }
 
 func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
@@ -602,7 +649,7 @@ func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, 
 	if r.cachePlanner == nil {
 		return forward
 	}
-	return r.cachePlanner.planChat(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
+	return r.cachePlanner.planChat(forward, r.lookupProviderType(selector), selector)
 }
 
 func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
@@ -610,7 +657,7 @@ func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, selector co
 	if r.cachePlanner == nil {
 		return forward
 	}
-	return r.cachePlanner.planResponses(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
+	return r.cachePlanner.planResponses(forward, r.lookupProviderType(selector), selector)
 }
 
 func forwardEmbeddingRequest(req *core.EmbeddingRequest, selector core.ModelSelector) *core.EmbeddingRequest {
@@ -667,7 +714,7 @@ func (r *Router) Supports(model string) bool {
 	if err != nil {
 		return false
 	}
-	return r.lookup.Supports(selector.QualifiedModel())
+	return r.lookupSupports(selector)
 }
 
 // ModelCount returns the number of models currently loaded into the router lookup.
@@ -1001,7 +1048,7 @@ func (r *Router) GetProviderType(model string) string {
 	if err != nil {
 		return ""
 	}
-	return r.lookup.GetProviderType(selector.QualifiedModel())
+	return r.lookupProviderType(selector)
 }
 
 // GetProviderName returns the concrete configured provider instance name for
@@ -1011,13 +1058,13 @@ func (r *Router) GetProviderName(model string) string {
 	if err != nil {
 		return ""
 	}
-	if !r.lookup.Supports(selector.QualifiedModel()) {
+	if !r.lookupSupports(selector) {
 		return ""
 	}
 	if selector.Provider != "" {
 		return selector.Provider
 	}
-	return r.lookup.GetProviderName(selector.QualifiedModel())
+	return r.lookupProviderName(selector)
 }
 
 // GetProviderNameForType returns the concrete configured provider instance name
@@ -1085,7 +1132,7 @@ func (r *Router) providerByName(providerName string) core.Provider {
 		if modelID == "" {
 			continue
 		}
-		if provider := r.lookup.GetProvider(core.ModelSelector{Provider: providerName, Model: modelID}.QualifiedModel()); provider != nil {
+		if provider := r.lookupProvider(core.ModelSelector{Provider: providerName, Model: modelID}); provider != nil {
 			return provider
 		}
 	}
