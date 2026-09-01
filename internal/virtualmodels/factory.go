@@ -57,7 +57,11 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err := rejectUnmigratedLegacyData(ctx, store, shared); err != nil {
 		return nil, err
 	}
-	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover.Disabled); err != nil {
+	// The declarative virtual models are handed to the migration too: they are
+	// overlaid on the store below, so a conversion must not commit a row that
+	// only fails to load once they are.
+	declared := ConfigModels(cfg.VirtualModels)
+	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover.Disabled, declared); err != nil {
 		return nil, err
 	}
 
@@ -75,14 +79,13 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err != nil {
 		return nil, fmt.Errorf("list virtual models: %w", err)
 	}
-	declared := ConfigModels(cfg.VirtualModels)
 	service.SetConfigModels(append(declared, FailoverConfigModels(cfg.Failover, declared, stored)...))
 	if err := service.Refresh(ctx); err != nil {
 		if IsValidationError(err) {
 			// The named rows may predate today's validation (e.g. a chain cycle
 			// an older failover-rule migration committed), and with the server
 			// down the admin API cannot repair them — point at the store.
-			return nil, fmt.Errorf("virtual models failed to load: %w; edit or delete the named entries (declared under virtual_models in config, or rows of the virtual_models table in the database), then restart", err)
+			return nil, fmt.Errorf("virtual models failed to load: %w; edit or delete the named entries (declared under virtual_models in config, or stored virtual_models entries in the database), then restart", err)
 		}
 		return nil, err
 	}

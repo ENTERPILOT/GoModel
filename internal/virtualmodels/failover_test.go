@@ -491,8 +491,60 @@ func TestNew_InvalidStoredVirtualModelsFailWithRepairGuidance(t *testing.T) {
 	}
 
 	_, err = New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
-	if err == nil || !strings.Contains(err.Error(), "forms a cycle") || !strings.Contains(err.Error(), "virtual_models table") {
+	if err == nil || !strings.Contains(err.Error(), "forms a cycle") || !strings.Contains(err.Error(), "stored virtual_models entries") {
 		t.Fatalf("New() error = %v; want the cycle named with repair guidance", err)
+	}
+}
+
+// The declarative config models are overlaid on the store after the migration
+// runs, so the conversion check must see them too: a config-declared alias
+// routing a legacy rule's fallback back to its primary forms the same cycle a
+// stored alias does, and committing it would destroy the legacy rows and fail
+// every start until the config changes.
+func TestNew_KeepsLegacyFailoverRuleThatCyclesThroughConfigModel(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('groq/llama', '["anthropic/claude"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	cfg := &config.Config{VirtualModels: []config.VirtualModelConfig{
+		// A replacing alias, declared in config rather than stored.
+		{Source: "anthropic/claude", Targets: []config.VirtualModelTargetConfig{{Model: "groq/llama"}}},
+	}}
+
+	for range 2 {
+		result, err := New(ctx, cfg, conn, balancingCatalog(), nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if vm, ok := result.Service.Get("groq/llama"); ok && !vm.Managed {
+			t.Fatalf("cyclic rule must not be converted, got %+v", vm)
+		}
+		_ = result.Close()
+	}
+	var remaining string
+	if err := db.QueryRow(`SELECT group_concat(primary_model) FROM failover_rules`).Scan(&remaining); err != nil || remaining != "groq/llama" {
+		t.Fatalf("failover_rules rows = %q, %v; want the cyclic rule kept", remaining, err)
+	}
+
+	// Dropping the alias from config resolves the cycle: the next start
+	// finishes the migration and drops the store.
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() after resolving error = %v", err)
+	}
+	defer result.Close()
+	if vm, ok := result.Service.Get("groq/llama"); !ok || vm.Strategy != StrategyFailover {
+		t.Fatalf("resolved rule = %+v, %v; want it migrated", vm, ok)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(new(int)); err == nil {
+		t.Fatal("failover_rules still exists, want it dropped")
 	}
 }
 

@@ -53,17 +53,18 @@ func (r legacyFailoverRule) enabled() bool {
 // mergeableFailoverPolicy); otherwise the operator decides how the two should
 // combine, and the store is kept in place so the fallback list stays readable
 // and the warning repeats on every start until it is resolved. A rule whose
-// conversion would leave a store that cannot load — a fallback naming a stored
-// redirect that routes back into the rule's primary forms a chain cycle — is
-// kept for the operator the same way: committing it would make every later
-// start fail after the legacy rows are already gone. Config-managed rows are
+// conversion would not load together with the stored rows and the declared
+// config models — a fallback naming a redirect that routes back into the
+// rule's primary forms a chain cycle — is kept for the operator the same way:
+// committing it would make every later start fail after the legacy rows are
+// already gone. Config-managed rows are
 // skipped — the live configuration still declares them and
 // FailoverConfigModels translates it on every start. A rule whose primary is
 // listed in disabled (FAILOVER_DISABLED_MODELS) used to be switched off by
 // that setting at request time; it is converted as a disabled virtual model,
 // so the fallback list survives without becoming active. Databases that never
 // had the store are a no-op.
-func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.Storage, disabled map[string]bool) error {
+func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.Storage, disabled map[string]bool, declared []VirtualModel) error {
 	rules, keyColumn, err := readLegacyFailoverRules(ctx, conn)
 	if err != nil {
 		return fmt.Errorf("read legacy failover rules: %w", err)
@@ -88,7 +89,7 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 			existing, exists := taken[rule.Source]
 			switch {
 			case !exists:
-				if err := loadableWith(taken, model); err != nil {
+				if err := loadableWith(taken, declared, model); err != nil {
 					warnUnloadableFailoverRule(rule, err)
 					unresolved++
 					continue
@@ -103,7 +104,7 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 				// row delete left its own conversion behind; finish it.
 			case mergeableFailoverPolicy(existing):
 				merged := mergeFailoverPolicy(existing, model)
-				if err := loadableWith(taken, merged); err != nil {
+				if err := loadableWith(taken, declared, merged); err != nil {
 					warnUnloadableFailoverRule(rule, err)
 					unresolved++
 					continue
@@ -139,19 +140,33 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 	return nil
 }
 
-// loadableWith reports whether the stored rows still build a valid snapshot
-// with model added — the check Service.Upsert runs, applied here because the
-// migration writes through the raw store before the service exists. The legacy
-// failover store never chained, so a fallback naming a stored redirect that
-// routes back to the rule's primary becomes a cycle only on conversion.
-func loadableWith(existing map[string]VirtualModel, model VirtualModel) error {
-	rows := make([]VirtualModel, 0, len(existing)+1)
+// loadableWith reports whether the rows the first refresh will see still build
+// a valid snapshot with model added — the check Service.Upsert runs, applied
+// here because the migration writes through the raw store before the service
+// exists. The declared config models are overlaid the way mergeConfigModels
+// does (a managed row replaces a store row of the same source), so a redirect
+// that only exists declaratively is visible too. The legacy failover store
+// never chained, so a fallback naming a redirect that routes back to the
+// rule's primary becomes a cycle only on conversion.
+func loadableWith(existing map[string]VirtualModel, declared []VirtualModel, model VirtualModel) error {
+	managed := make(map[string]struct{}, len(declared))
+	for _, row := range declared {
+		managed[strings.TrimSpace(row.Source)] = struct{}{}
+	}
+	overlaid := func(source string) bool {
+		_, ok := managed[source]
+		return ok
+	}
+	rows := make([]VirtualModel, 0, len(existing)+len(declared)+1)
 	for source, row := range existing {
-		if source != model.Source {
+		if source != model.Source && !overlaid(source) {
 			rows = append(rows, row)
 		}
 	}
-	_, err := buildSnapshot(append(rows, model), true)
+	if !overlaid(model.Source) {
+		rows = append(rows, model)
+	}
+	_, err := buildSnapshot(append(rows, declared...), true)
 	return err
 }
 
