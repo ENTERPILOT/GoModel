@@ -23,6 +23,8 @@
   // Pick the first inventory model once, when nothing has been chosen yet.
   // If a model is already set (restored from storage), prefill the user path
   // with its first allowed path when one exists and none is chosen yet.
+  // Re-runs when store.userPath changes; Svelte bails on identical assignment,
+  // so this does not loop.
   $effect(() => {
     if (router.page !== PAGE || modelOptions.length === 0) return;
     if (!store.model) {

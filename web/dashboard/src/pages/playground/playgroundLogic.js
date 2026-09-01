@@ -337,13 +337,15 @@ export function playgroundModelOptions(inventory) {
 export function playgroundUserPathOptions(inventory, selector) {
   const id = String(selector || "").trim();
   const entry = (Array.isArray(inventory) ? inventory : []).find(
-    (item) => String(item?.selector || item?.model?.id || "") === id,
+    (item) => String(item?.selector || item?.model?.id || "").trim() === id,
   );
   const paths = entry?.access && Array.isArray(entry.access.user_paths) ? entry.access.user_paths : [];
-  return paths.map((path) => {
-    const value = String(path);
-    return { value, label: value };
-  });
+  return paths
+    .filter((path) => path && path.trim() !== "")
+    .map((path) => {
+      const value = String(path);
+      return { value, label: value };
+    });
 }
 
 // First allowed user path of the selected model, or "" when unrestricted.
