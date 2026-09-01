@@ -172,6 +172,7 @@
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/n8n",
+                    "guides/openwebui",
                     {
                         "group": "AI coding harnesses",
                         "icon": "terminal",
