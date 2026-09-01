@@ -83,15 +83,16 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 		if rule.ManagedSource != "config" && convertible {
 			existing, exists := taken[rule.Source]
 			switch {
-			case !exists, isMigratedFailoverModel(existing, model):
-				// Either a fresh conversion or one a previous start left
-				// behind when it stopped between the upsert and the row
-				// delete; writing the rule's current state covers both,
-				// including an enabled flag changed since that start.
+			case !exists:
 				if err := store.Upsert(ctx, model); err != nil {
 					return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
 				}
 				taken[rule.Source] = model
+				migrated++
+			case isMigratedFailoverModel(existing, model):
+				// A previous start converted the rule and stopped before
+				// deleting its row; the conversion is already stored exactly
+				// as it would be written now, so only the delete remains.
 				migrated++
 			case mergeableFailoverPolicy(existing):
 				merged := mergeFailoverPolicy(existing, model)
@@ -267,10 +268,10 @@ func mergeableFailoverPolicy(vm VirtualModel) bool {
 }
 
 // mergeFailoverPolicy turns a mergeable policy into the failover redirect its
-// legacy rule expressed, keeping the policy's description and slowdown. The
-// provenance marker is used only when the policy had no description, so a
-// start interrupted between this upsert and the row delete reports the row
-// as a collision for the operator rather than converting it twice.
+// legacy rule expressed, keeping the policy's description and slowdown. Either
+// kept setting makes the result differ from a plain conversion, so a start
+// interrupted between this upsert and the row delete reports the row as a
+// collision for the operator instead of overwriting the merge.
 func mergeFailoverPolicy(policy, model VirtualModel) VirtualModel {
 	merged := model
 	merged.Slowdown = policy.Slowdown
@@ -280,11 +281,15 @@ func mergeFailoverPolicy(policy, model VirtualModel) VirtualModel {
 	return merged
 }
 
-// isMigratedFailoverModel reports whether vm is the conversion this migration
-// would write for a rule: it carries the provenance failoverModel stamps and
-// exactly the expected targets. Anything else is the operator's own model.
+// isMigratedFailoverModel reports whether vm is exactly the conversion this
+// migration would write for its rule today: the provenance failoverModel
+// stamps, the same targets and enabled flag, and every other setting still
+// untouched. A model differing anywhere — the operator's own work, or a
+// conversion the operator edited after an interrupted start — is reported as
+// a collision instead, so nothing the operator did is overwritten.
 func isMigratedFailoverModel(vm, expected VirtualModel) bool {
-	if normalizeStrategy(vm.Strategy) != StrategyFailover || vm.Description != migratedFailoverDescription || len(vm.Targets) != len(expected.Targets) {
+	if normalizeStrategy(vm.Strategy) != StrategyFailover || vm.Description != migratedFailoverDescription ||
+		vm.Enabled != expected.Enabled || len(vm.Targets) != len(expected.Targets) {
 		return false
 	}
 	for i, target := range vm.Targets {
@@ -292,7 +297,8 @@ func isMigratedFailoverModel(vm, expected VirtualModel) bool {
 			return false
 		}
 	}
-	return true
+	return vm.Model == "" && vm.ProviderName == "" && len(vm.UserPaths) == 0 &&
+		vm.Slowdown == nil && vm.SessionAffinity == nil && vm.Failover == nil
 }
 
 // deleteLegacyFailoverRule removes one row by its trimmed key; keyColumn is

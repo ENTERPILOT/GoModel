@@ -294,8 +294,7 @@ func targetModels(targets []Target) string {
 
 // A start that stopped after writing the converted virtual model but before
 // removing its legacy row must finish the conversion on the next start, not
-// report its own conversion as a collision — and must carry over the rule's
-// current state, here a disable applied in the dashboard in between.
+// report its own conversion as a collision.
 func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
 	ctx := context.Background()
 	conn := newSQLiteStorage(t)
@@ -306,6 +305,7 @@ func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	converted, _ := failoverModel("openai/gpt-4o", []string{"groq/llama"}, false)
+	converted.Enabled = false
 	if err := first.Service.Upsert(ctx, converted); err != nil {
 		t.Fatalf("Upsert(converted) error = %v", err)
 	}
@@ -348,6 +348,53 @@ func TestNew_FinishesInterruptedLegacyFailoverMigration(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("failover_rules rows = %d, %v; want the differing rule retained", count, err)
+	}
+}
+
+// A conversion left behind by an interrupted start and then edited by the
+// operator — disabled, slowed down, affinity switched off — is their model
+// now: the next start must keep every edit and retain the legacy row as a
+// collision instead of rewriting the model from the row.
+func TestNew_KeepsOperatorEditsOnInterruptedLegacyFailoverMigration(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+
+	first, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	edited, _ := failoverModel("openai/gpt-4o", []string{"groq/llama"}, false)
+	edited.Enabled = false
+	slowdown, affinity := 2.5, false
+	edited.Slowdown = &slowdown
+	edited.SessionAffinity = &affinity
+	if err := first.Service.Upsert(ctx, edited); err != nil {
+		t.Fatalf("Upsert(edited) error = %v", err)
+	}
+	_ = first.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["groq/llama"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer result.Close()
+	vm, ok := result.Service.Get("openai/gpt-4o")
+	if !ok || vm.Enabled || vm.Slowdown == nil || *vm.Slowdown != slowdown ||
+		vm.SessionAffinity == nil || *vm.SessionAffinity != affinity {
+		t.Fatalf("edited model = %+v, %v; want every operator edit kept", vm, ok)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("failover_rules rows = %d, %v; want the rule retained for the operator", count, err)
 	}
 }
 
