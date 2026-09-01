@@ -27,8 +27,8 @@ What you get:
   Open WebUI.
 - Prometheus metrics and OpenTelemetry traces for chat traffic, once you
   enable those exporters (see [Notes](#notes)).
-- Failover, rate limits, budgets, and (when enabled) response caching applied
-  to chat traffic.
+- Failover, rate limits, budgets, and response caching applied to chat
+  traffic, when you configure them in GoModel.
 
 ## 1. Run GoModel next to Open WebUI
 
@@ -46,12 +46,12 @@ services:
       TAGGING_HEADER_1: X-OpenWebUI-User-Email
       TAGGING_HEADER_1_DONOTPASS: "true"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - gomodel_data:/app/data
 
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:v0.11.3
     environment:
       OPENAI_API_BASE_URL: http://gomodel:8080/v1
       OPENAI_API_KEY: change-me
@@ -74,7 +74,7 @@ volumes:
 | `ENABLE_OLLAMA_API` | Off unless you run Ollama; avoids connection errors in the logs. |
 | `ENABLE_FORWARD_USER_INFO_HEADERS` | Adds the signed-in user's name, email, id, and role as headers on every model call, which GoModel turns into labels below. |
 | `TAGGING_HEADER_1` | Tells GoModel to record that header's value as a label on every request. |
-| `TAGGING_HEADER_1_DONOTPASS` | Keeps the label but strips the header before the request is forwarded, so user emails never reach the upstream provider. |
+| `TAGGING_HEADER_1_DONOTPASS` | Keeps the label but strips the header before forwarding, so user emails never reach a provider on [passthrough](/features/passthrough-api) routes. Translated routes never forward client headers. |
 
 Open `http://localhost:3000`, create the first (admin) account, and the model
 picker lists exactly what GoModel exposes — including Anthropic and Gemini
@@ -110,12 +110,14 @@ With the two variables from step 1 set, every request carries
 `X-OpenWebUI-User-Email` (plus `-Name`, `-Id`, and `-Role`) and GoModel
 records the email as a label. The dashboard's usage-by-label view then shows
 requests, tokens, and cost per person. Add
-`TAGGING_HEADER_2: X-OpenWebUI-User-Name` for friendlier labels, or use the
+`TAGGING_HEADER_2: X-OpenWebUI-User-Name` (with its own
+`TAGGING_HEADER_2_DONOTPASS: "true"`) for friendlier labels, or use the
 `-Id` header if emails should not appear in usage data. Header-name matching
 is case-insensitive, so the `X-Openwebui-User-Email` casing Open WebUI
-actually sends is fine. Keep `TAGGING_HEADER_1_DONOTPASS` set: without it the
-header is forwarded as-is, which would send user emails to the upstream
-provider. See [Labelling](/features/labelling) for prefixes and
+actually sends is fine. Keep `TAGGING_HEADER_1_DONOTPASS` set: regular routed
+requests never forward client headers, but
+[passthrough](/features/passthrough-api) requests would otherwise carry the
+email header to the provider. See [Labelling](/features/labelling) for prefixes and
 keeping these headers from reaching the upstream provider.
 
 ### Tame the model picker
