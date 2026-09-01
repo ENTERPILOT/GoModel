@@ -19,8 +19,8 @@ import (
 // that opted out never writes one.
 //
 // The identifier is kept in the deployment's database first and the data
-// directory second (see versioncheck.ResolveInstallID), with the master key
-// as the fallback that survives a container recreated without either.
+// directory second (see versioncheck.Identity), with the master key as the
+// fallback that survives a container recreated without either.
 func newVersionChecker(ctx context.Context, cfg config.VersionCheckConfig, backend storage.Storage, masterKey string) *versioncheck.Checker {
 	checkerCfg := versioncheck.Config{
 		Enabled:        cfg.Enabled,

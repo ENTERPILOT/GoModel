@@ -92,11 +92,17 @@ const (
 	freshID    = "ffffffff-0000-4000-8000-0000000000ff"
 )
 
+// resolveInstallID resolves once with a fresh Identity, the way a gateway
+// start does.
+func resolveInstallID(ctx context.Context, store Store, secret string) (string, InstallIDSource) {
+	return NewIdentity(store, secret).Resolve(ctx)
+}
+
 func TestResolveInstallIDGeneratesAndPersistsEverywhere(t *testing.T) {
 	path := useTempDataDir(t)
 	store := newFakeStore()
 
-	id, source := ResolveInstallID(context.Background(), store, "")
+	id, source := resolveInstallID(context.Background(), store, "")
 
 	if source != SourceGenerated {
 		t.Fatalf("source = %q, want %q", source, SourceGenerated)
@@ -111,7 +117,7 @@ func TestResolveInstallIDGeneratesAndPersistsEverywhere(t *testing.T) {
 		t.Errorf("file holds %q, want %q", got, id+"\n")
 	}
 
-	again, source := ResolveInstallID(context.Background(), store, "")
+	again, source := resolveInstallID(context.Background(), store, "")
 	if again != id || source != SourceDatabase {
 		t.Errorf("second resolve = %q (%s), want %q (%s)", again, source, id, SourceDatabase)
 	}
@@ -122,7 +128,7 @@ func TestResolveInstallIDMigratesExistingFileToDatabaseUnchanged(t *testing.T) {
 	writeFile(t, path, existingID)
 	store := newFakeStore()
 
-	id, source := ResolveInstallID(context.Background(), store, "secret")
+	id, source := resolveInstallID(context.Background(), store, "secret")
 
 	if id != existingID || source != SourceFile {
 		t.Fatalf("resolve = %q (%s), want the file's id from %s", id, source, SourceFile)
@@ -138,7 +144,7 @@ func TestResolveInstallIDDatabaseWinsOverRegeneratedFile(t *testing.T) {
 	store := newFakeStore()
 	store.values[InstallIDKey] = existingID
 
-	id, source := ResolveInstallID(context.Background(), store, "")
+	id, source := resolveInstallID(context.Background(), store, "")
 
 	if id != existingID || source != SourceDatabase {
 		t.Fatalf("resolve = %q (%s), want the database's id", id, source)
@@ -154,7 +160,7 @@ func TestResolveInstallIDKeepsFileWhenDatabaseErrors(t *testing.T) {
 	store := newFakeStore()
 	store.fail(errors.New("connection refused"), nil)
 
-	id, source := ResolveInstallID(context.Background(), store, "secret")
+	id, source := resolveInstallID(context.Background(), store, "secret")
 
 	if id != existingID || source != SourceFile {
 		t.Fatalf("resolve = %q (%s), want the file's id; a failing store must never mint a new one", id, source)
@@ -169,7 +175,7 @@ func TestResolveInstallIDKeepsFileWhenDatabaseWriteFails(t *testing.T) {
 	store := newFakeStore()
 	store.fail(nil, errors.New("read-only transaction"))
 
-	id, source := ResolveInstallID(context.Background(), store, "")
+	id, source := resolveInstallID(context.Background(), store, "")
 	if source != SourceGenerated {
 		t.Fatalf("source = %q, want %q", source, SourceGenerated)
 	}
@@ -178,9 +184,24 @@ func TestResolveInstallIDKeepsFileWhenDatabaseWriteFails(t *testing.T) {
 	}
 
 	// The file is what survives; a later start without the database reads it.
-	again, source := ResolveInstallID(context.Background(), nil, "")
+	again, source := resolveInstallID(context.Background(), nil, "")
 	if again != id || source != SourceFile {
 		t.Errorf("later resolve = %q (%s), want %q (%s)", again, source, id, SourceFile)
+	}
+}
+
+func TestResolveInstallIDNeverAdoptsBlankDatabaseValue(t *testing.T) {
+	useTempDataDir(t)
+	store := newFakeStore()
+	// Pathological: something left a blank value under the key. SetDefault
+	// keeps it (insert-if-absent), so its read-back returns the blank; the
+	// resolved id must be the local candidate, never the blank.
+	store.values[InstallIDKey] = " "
+
+	id, source := resolveInstallID(context.Background(), store, "secret")
+
+	if id == "" || id == " " || source != SourceDerived {
+		t.Fatalf("resolve = %q (%s), want the derived candidate", id, source)
 	}
 }
 
@@ -239,7 +260,7 @@ func TestIdentityConvergesConcurrentFirstStarts(t *testing.T) {
 func TestResolveInstallIDDerivesFromSecretWhenNothingStored(t *testing.T) {
 	useTempDataDir(t)
 
-	first, source := ResolveInstallID(context.Background(), nil, "operator-secret")
+	first, source := resolveInstallID(context.Background(), nil, "operator-secret")
 	if source != SourceDerived {
 		t.Fatalf("source = %q, want %q", source, SourceDerived)
 	}
@@ -249,13 +270,13 @@ func TestResolveInstallIDDerivesFromSecretWhenNothingStored(t *testing.T) {
 
 	// A recreated container: no file, same secret, same id.
 	useTempDataDir(t)
-	second, _ := ResolveInstallID(context.Background(), nil, "operator-secret")
+	second, _ := resolveInstallID(context.Background(), nil, "operator-secret")
 	if second != first {
 		t.Errorf("same secret derived %q then %q", first, second)
 	}
 
 	useTempDataDir(t)
-	other, _ := ResolveInstallID(context.Background(), nil, "another-secret")
+	other, _ := resolveInstallID(context.Background(), nil, "another-secret")
 	if other == first {
 		t.Error("different secrets derived the same id")
 	}
@@ -264,7 +285,7 @@ func TestResolveInstallIDDerivesFromSecretWhenNothingStored(t *testing.T) {
 func TestResolveInstallIDWithoutStoreUsesFile(t *testing.T) {
 	path := useTempDataDir(t)
 
-	id, source := ResolveInstallID(context.Background(), nil, "")
+	id, source := resolveInstallID(context.Background(), nil, "")
 	if source != SourceGenerated {
 		t.Fatalf("source = %q, want %q", source, SourceGenerated)
 	}
@@ -272,7 +293,7 @@ func TestResolveInstallIDWithoutStoreUsesFile(t *testing.T) {
 		t.Fatalf("file holds %q, want %q", got, id)
 	}
 
-	again, source := ResolveInstallID(context.Background(), nil, "")
+	again, source := resolveInstallID(context.Background(), nil, "")
 	if again != id || source != SourceFile {
 		t.Errorf("second resolve = %q (%s), want %q (%s)", again, source, id, SourceFile)
 	}

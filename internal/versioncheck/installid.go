@@ -100,12 +100,6 @@ func NewIdentity(store Store, secret string) *Identity {
 	return &Identity{store: store, secret: secret}
 }
 
-// ResolveInstallID resolves the identifier once. It is Identity for callers
-// that do not need to keep retrying the database.
-func ResolveInstallID(ctx context.Context, store Store, secret string) (string, InstallIDSource) {
-	return NewIdentity(store, secret).Resolve(ctx)
-}
-
 // ID returns the identifier for a request, resolving it on first use.
 func (i *Identity) ID(ctx context.Context) string {
 	id, _ := i.Resolve(ctx)
@@ -160,11 +154,13 @@ func (i *Identity) Resolve(ctx context.Context) (string, InstallIDSource) {
 		switch {
 		case err != nil:
 			i.warnStoreOnce("install id could not be saved to the database; it stays in the data directory until it can", err)
-		case stored != i.id:
+		case strings.TrimSpace(stored) != "" && stored != i.id:
 			// Another replica initialised first, or the database already
 			// had an id the Get above missed: theirs is the deployment's.
 			i.adopt(stored, SourceDatabase, true)
 		default:
+			// Ours won — or the key holds a blank value, which must never
+			// become the deployment's id. Either way this id is final.
 			i.settled = true
 		}
 	} else if i.store == nil {
