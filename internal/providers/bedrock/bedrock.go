@@ -168,14 +168,13 @@ func (p *Provider) ready() error {
 }
 
 // CheckAvailability calls a no-op Bedrock control-plane request to confirm the
-// account has reachability and credentials work.
+// account has reachability and credentials work. The caller owns the probe
+// deadline.
 func (p *Provider) CheckAvailability(ctx context.Context) error {
 	if err := p.ready(); err != nil {
 		return err
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := p.control.ListFoundationModels(probeCtx, &bedrock.ListFoundationModelsInput{
+	_, err := p.control.ListFoundationModels(ctx, &bedrock.ListFoundationModelsInput{
 		ByInferenceType: bedrocktypes.InferenceTypeOnDemand,
 	})
 	if err != nil {

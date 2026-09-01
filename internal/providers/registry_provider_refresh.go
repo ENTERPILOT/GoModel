@@ -146,13 +146,7 @@ func (r *ModelRegistry) availableProviderRefreshTargets(ctx context.Context, pro
 	var availabilityErrs []error
 
 	for _, target := range targets {
-		checker, ok := target.provider.(core.AvailabilityChecker)
-		if !ok {
-			available = append(available, target)
-			continue
-		}
-		err := checker.CheckAvailability(ctx)
-		r.RecordAvailabilityCheck(target.providerName, err)
+		err := r.probeAvailability(ctx, target.provider, target.providerName, availabilityProbeTimeout)
 		if err != nil {
 			r.markProviderInventoryStale(target.providerName)
 			availabilityErrs = append(availabilityErrs, fmt.Errorf("%s: %w", target.providerName, err))

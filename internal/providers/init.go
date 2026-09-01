@@ -300,17 +300,11 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 				return
 			}
 
-			var availabilityErr error
-			if checker, ok := p.(core.AvailabilityChecker); ok {
-				probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				availabilityErr = checker.CheckAvailability(probeCtx)
-				cancel()
-			}
 			results[i] = initializedProvider{
 				name:            name,
 				config:          pCfg,
 				provider:        p,
-				availabilityErr: availabilityErr,
+				availabilityErr: registry.probeAvailability(ctx, p, name, availabilityProbeTimeout),
 			}
 		}(i, name)
 	}
@@ -327,16 +321,15 @@ func initializeProviders(ctx context.Context, providerMap map[string]ProviderCon
 			continue
 		}
 
-		if _, ok := p.(core.AvailabilityChecker); ok {
-			if result.availabilityErr != nil {
-				registry.RecordAvailabilityCheck(name, result.availabilityErr)
-				slog.Warn("provider unavailable at startup; keeping registered for refresh",
-					"name", name,
-					"type", pCfg.Type,
-					"reason", result.availabilityErr.Error())
-			} else {
-				registry.RecordAvailabilityCheck(name, nil)
-			}
+		// Availability checks are diagnostics only, and the probe already
+		// recorded its outcome. Providers stay registered so async
+		// initialization and periodic refresh can discover them later; only the
+		// warning is held back to here, to keep startup logs in name order.
+		if result.availabilityErr != nil {
+			slog.Warn("provider unavailable at startup; keeping registered for refresh",
+				"name", name,
+				"type", pCfg.Type,
+				"reason", result.availabilityErr.Error())
 		}
 
 		registry.RegisterProviderWithNameAndType(p, name, pCfg.Type)
