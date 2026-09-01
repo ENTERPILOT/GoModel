@@ -399,6 +399,7 @@ func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
 		"model":      sc.model,
 		"provider":   sc.provider,
 		"created_at": sc.createdAt,
+		"output":     sc.output.FinalOutputItems(reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, false),
 	}
 	// Include usage data if captured from OpenAI stream, renamed from Chat
 	// Completions field names (prompt_tokens/completion_tokens) to the

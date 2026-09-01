@@ -178,6 +178,7 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 						"model":      sc.model,
 						"provider":   "anthropic",
 						"created_at": sc.createdAt,
+						"output":     sc.output.FinalOutputItems(0, 0, sc.toolCalls, true),
 					}
 					// Include merged usage data captured across message_start/message_delta.
 					if sc.hasUsage {

@@ -68,6 +68,21 @@
           "id": "resp_\u003cgenerated\u003e",
           "model": "gemini-2.5-flash",
           "object": "response",
+          "output": [
+            {
+              "content": [
+                {
+                  "annotations": [],
+                  "text": "Hello World",
+                  "type": "output_text"
+                }
+              ],
+              "id": "msg_\u003cgenerated\u003e",
+              "role": "assistant",
+              "status": "completed",
+              "type": "message"
+            }
+          ],
           "provider": "gemini",
           "status": "completed"
         },
