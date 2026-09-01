@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -475,5 +476,146 @@ func TestInitializeProviders_AvailabilityCheckUsesCallerContext(t *testing.T) {
 	}
 	if !errors.Is(checkErr, context.Canceled) {
 		t.Fatalf("CheckAvailability() context error = %v, want %v", checkErr, context.Canceled)
+	}
+}
+
+func TestInitializeProviders_ParallelizesProbesAndRegistersDeterministically(t *testing.T) {
+	const providerCount = 3
+	var started atomic.Int32
+	var startedOnce sync.Once
+	allStarted := make(chan struct{})
+	release := make(chan struct{})
+	providers := make(map[string]*initTestProvider, providerCount)
+
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		name := name
+		providers[name] = &initTestProvider{
+			checkAvailability: func(context.Context) error {
+				if started.Add(1) == providerCount {
+					startedOnce.Do(func() { close(allStarted) })
+				}
+				<-release
+				if name == "beta" {
+					return errors.New("beta unavailable")
+				}
+				return nil
+			},
+		}
+	}
+
+	factory := NewProviderFactory()
+	factory.Add(Registration{
+		Type: "test",
+		New: func(cfg ProviderConfig, _ ProviderOptions) core.Provider {
+			return providers[cfg.Name]
+		},
+	})
+	providerConfigs := make(map[string]ProviderConfig, providerCount)
+	for name := range providers {
+		providerConfigs[name] = ProviderConfig{Name: name, Type: "test"}
+	}
+
+	registry := NewModelRegistry()
+	type result struct {
+		count int
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		count, err := initializeProviders(t.Context(), providerConfigs, factory, registry)
+		done <- result{count: count, err: err}
+	}()
+
+	select {
+	case <-allStarted:
+	case <-time.After(time.Second):
+		t.Fatal("availability checks did not overlap")
+	}
+	close(release)
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("initializeProviders() error = %v, want nil", got.err)
+		}
+		if got.count != providerCount {
+			t.Fatalf("initializeProviders() count = %d, want %d", got.count, providerCount)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("initializeProviders() did not finish")
+	}
+
+	if got := registry.providerNames[registry.providers[0]]; got != "alpha" {
+		t.Fatalf("first registered provider = %q, want alpha", got)
+	}
+	if got := registry.providerNames[registry.providers[1]]; got != "beta" {
+		t.Fatalf("second registered provider = %q, want beta", got)
+	}
+	if got := registry.providerNames[registry.providers[2]]; got != "gamma" {
+		t.Fatalf("third registered provider = %q, want gamma", got)
+	}
+	if got := registry.providerRuntime["beta"].lastAvailabilityError; got != "beta unavailable" {
+		t.Fatalf("beta availability error = %q, want beta unavailable", got)
+	}
+}
+
+func TestInitializeProviders_DoesNotLaunchUnboundedWorkers(t *testing.T) {
+	const providerCount = 16
+	const maxWorkers = 8
+	started := make(chan struct{}, providerCount)
+	release := make(chan struct{})
+	providers := make(map[string]*initTestProvider, providerCount)
+	for i := range providerCount {
+		name := fmt.Sprintf("provider-%02d", i)
+		providers[name] = &initTestProvider{
+			checkAvailability: func(context.Context) error {
+				started <- struct{}{}
+				<-release
+				return nil
+			},
+		}
+	}
+
+	factory := NewProviderFactory()
+	factory.Add(Registration{
+		Type: "test",
+		New: func(cfg ProviderConfig, _ ProviderOptions) core.Provider {
+			return providers[cfg.Name]
+		},
+	})
+	providerConfigs := make(map[string]ProviderConfig, providerCount)
+	for name := range providers {
+		providerConfigs[name] = ProviderConfig{Name: name, Type: "test"}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = initializeProviders(t.Context(), providerConfigs, factory, NewModelRegistry())
+		close(done)
+	}()
+
+	for range maxWorkers {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("provider initialization did not start all workers")
+		}
+	}
+
+	select {
+	case <-started:
+		t.Fatal("initializeProviders launched more than the worker limit")
+	default:
+	}
+
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("initializeProviders did not finish")
+	}
+
+	if len(started) != providerCount-maxWorkers {
+		t.Fatalf("started channel retained %d providers, want %d", len(started), providerCount-maxWorkers)
 	}
 }
