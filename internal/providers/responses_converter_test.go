@@ -352,8 +352,8 @@ data: [DONE]
 	if len(reasoningContent) != 1 {
 		t.Fatalf("reasoning content = %#v, want one reasoning_text part", reasoning["content"])
 	}
-	if part, _ := reasoningContent[0].(map[string]any); part["text"] != "Need the weather." {
-		t.Fatalf("reasoning text = %#v, want %q", part["text"], "Need the weather.")
+	if part, _ := reasoningContent[0].(map[string]any); part["type"] != "reasoning_text" || part["text"] != "Need the weather." {
+		t.Fatalf("reasoning part = %#v, want reasoning_text %q", reasoningContent[0], "Need the weather.")
 	}
 
 	message, _ := output[1].(map[string]any)

@@ -229,7 +229,9 @@ func (s *ResponsesOutputEventState) CompleteReasoningOutput(outputIndex int) str
 // FinalOutputItems assembles the full output array for the terminal
 // response.completed event, mirroring the output_item.done payloads already
 // emitted on the stream, ordered by output index. OpenAI includes the complete
-// output in response.completed, and strict SDK clients index into it.
+// output in response.completed, and strict SDK clients index into it. Only
+// tool calls whose output_item.done has been emitted are included — callers
+// must finalize pending tool calls first.
 func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIndex int, toolCalls map[int]*ResponsesOutputToolCallState, includePlaceholder bool) []map[string]any {
 	type indexedItem struct {
 		index int
@@ -243,7 +245,7 @@ func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIn
 		items = append(items, indexedItem{assistantIndex, s.AssistantMessageItem("completed", true)})
 	}
 	for _, state := range toolCalls {
-		if state == nil || !state.Started {
+		if state == nil || !state.Started || !state.Completed {
 			continue
 		}
 		items = append(items, indexedItem{state.OutputIndex, s.RenderToolCallItem(state, "completed", includePlaceholder)})
