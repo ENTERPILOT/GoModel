@@ -111,8 +111,9 @@ With the two variables from step 1 set, every request carries
 records the email as a label. The dashboard's usage-by-label view then shows
 requests, tokens, and cost per person. Add
 `TAGGING_HEADER_2: X-OpenWebUI-User-Name` (with its own
-`TAGGING_HEADER_2_DONOTPASS: "true"`) for friendlier labels, or use the
-`-Id` header if emails should not appear in usage data. Header-name matching
+`TAGGING_HEADER_2_DONOTPASS: "true"`) for friendlier labels. If emails should
+not appear in usage data, set `TAGGING_HEADER_1: X-OpenWebUI-User-Id` in
+step 1 instead, keeping `TAGGING_HEADER_1_DONOTPASS`. Header-name matching
 is case-insensitive, so the `X-Openwebui-User-Email` casing Open WebUI
 actually sends is fine. Keep `TAGGING_HEADER_1_DONOTPASS` set: regular routed
 requests never forward client headers, but
