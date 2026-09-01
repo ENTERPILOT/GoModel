@@ -341,9 +341,9 @@ export function playgroundUserPathOptions(inventory, selector) {
   );
   const paths = entry?.access && Array.isArray(entry.access.user_paths) ? entry.access.user_paths : [];
   return paths
-    .filter((path) => path && path.trim() !== "")
+    .filter((path) => typeof path === "string" && path.trim() !== "")
     .map((path) => {
-      const value = String(path);
+      const value = path;
       return { value, label: value };
     });
 }

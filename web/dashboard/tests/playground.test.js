@@ -337,6 +337,19 @@ test("playgroundUserPathOptions returns the user_paths of the selected model as 
   );
 });
 
+test("playgroundUserPathOptions skips non-string user_paths entries without throwing", () => {
+  const inventory = [
+    {
+      selector: "team-model",
+      access: { user_paths: ["/team/alpha", 42, null, "", { value: "/team/beta" }, "/team/beta"] },
+    },
+  ];
+  assert.deepEqual(playgroundUserPathOptions(inventory, "team-model"), [
+    { value: "/team/alpha", label: "/team/alpha" },
+    { value: "/team/beta", label: "/team/beta" },
+  ]);
+});
+
 test("defaultUserPathForModel returns the first allowed path or empty", () => {
   const inventory = [
     { selector: "gpt-4o", model: { id: "gpt-4o" }, access: { user_paths: [] } },
