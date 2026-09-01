@@ -52,8 +52,12 @@ func (r legacyFailoverRule) enabled() bool {
 // policy whose settings keep their meaning on a redirect (see
 // mergeableFailoverPolicy); otherwise the operator decides how the two should
 // combine, and the store is kept in place so the fallback list stays readable
-// and the warning repeats on every start until it is resolved. Config-managed
-// rows are skipped — the live configuration still declares them and
+// and the warning repeats on every start until it is resolved. A rule whose
+// conversion would leave a store that cannot load — a fallback naming a stored
+// redirect that routes back into the rule's primary forms a chain cycle — is
+// kept for the operator the same way: committing it would make every later
+// start fail after the legacy rows are already gone. Config-managed rows are
+// skipped — the live configuration still declares them and
 // FailoverConfigModels translates it on every start. A rule whose primary is
 // listed in disabled (FAILOVER_DISABLED_MODELS) used to be switched off by
 // that setting at request time; it is converted as a disabled virtual model,
@@ -84,6 +88,11 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 			existing, exists := taken[rule.Source]
 			switch {
 			case !exists:
+				if err := loadableWith(taken, model); err != nil {
+					warnUnloadableFailoverRule(rule, err)
+					unresolved++
+					continue
+				}
 				if err := store.Upsert(ctx, model); err != nil {
 					return fmt.Errorf("migrate legacy failover rule %q: %w", rule.Source, err)
 				}
@@ -94,6 +103,11 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 				// row delete left its own conversion behind; finish it.
 			case mergeableFailoverPolicy(existing):
 				merged := mergeFailoverPolicy(existing, model)
+				if err := loadableWith(taken, merged); err != nil {
+					warnUnloadableFailoverRule(rule, err)
+					unresolved++
+					continue
+				}
 				if err := store.Upsert(ctx, merged); err != nil {
 					return fmt.Errorf("migrate legacy failover rule %q into its policy: %w", rule.Source, err)
 				}
@@ -123,6 +137,30 @@ func importLegacyFailoverRules(ctx context.Context, store Store, conn storage.St
 	slog.Info("migrated legacy failover rules into failover-strategy virtual models",
 		"rules", len(rules), "migrated", migrated)
 	return nil
+}
+
+// loadableWith reports whether the stored rows still build a valid snapshot
+// with model added — the check Service.Upsert runs, applied here because the
+// migration writes through the raw store before the service exists. The legacy
+// failover store never chained, so a fallback naming a stored redirect that
+// routes back to the rule's primary becomes a cycle only on conversion.
+func loadableWith(existing map[string]VirtualModel, model VirtualModel) error {
+	rows := make([]VirtualModel, 0, len(existing)+1)
+	for source, row := range existing {
+		if source != model.Source {
+			rows = append(rows, row)
+		}
+	}
+	_, err := buildSnapshot(append(rows, model), true)
+	return err
+}
+
+// warnUnloadableFailoverRule reports a rule whose conversion the migration
+// refused; the rule stays in the legacy store so the warning repeats until the
+// operator resolves it.
+func warnUnloadableFailoverRule(rule legacyFailoverRule, err error) {
+	slog.Warn("legacy failover rule not migrated: converting it would leave virtual models that cannot load; adjust the virtual models it names, then delete the failover_rules row",
+		"source", rule.Source, "fallbacks", rule.fallbacks(), "error", err)
 }
 
 // legacyFailoverRows is the legacy store's content plus the name of its SQL
