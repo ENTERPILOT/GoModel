@@ -488,7 +488,6 @@ func TestInitializeProviders_ParallelizesProbesAndRegistersDeterministically(t *
 	providers := make(map[string]*initTestProvider, providerCount)
 
 	for _, name := range []string{"alpha", "beta", "gamma"} {
-		name := name
 		providers[name] = &initTestProvider{
 			checkAvailability: func(context.Context) error {
 				if started.Add(1) == providerCount {

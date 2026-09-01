@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/goccy/go-json"
 
@@ -132,11 +131,9 @@ func (p *Provider) SetBaseURL(url string) {
 }
 
 // CheckAvailability verifies that Ollama is running and accessible.
-// Makes a lightweight request to the models endpoint.
+// Makes a lightweight request to the models endpoint. The caller owns the
+// probe deadline.
 func (p *Provider) CheckAvailability(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	_, err := p.ListModels(ctx)
 	return err
 }

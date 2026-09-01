@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -94,13 +93,13 @@ func (p *Provider) ready() error {
 	return core.NewProviderError(providerName, http.StatusBadGateway, "invalid Bedrock Mantle provider configuration: "+err.Error(), err)
 }
 
+// CheckAvailability confirms the endpoint answers a model list. The caller
+// owns the probe deadline.
 func (p *Provider) CheckAvailability(ctx context.Context) error {
 	if err := p.ready(); err != nil {
 		return err
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := p.compatible.ListModels(probeCtx)
+	_, err := p.compatible.ListModels(ctx)
 	return err
 }
 

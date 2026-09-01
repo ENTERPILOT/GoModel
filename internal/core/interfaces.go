@@ -223,6 +223,10 @@ type AvailabilityChecker interface {
 	// CheckAvailability verifies the provider's backend service is reachable.
 	// Returns nil if available, error otherwise. Initialization logs failures but
 	// keeps the provider registered so later refreshes can retry discovery.
+	//
+	// The caller owns the deadline: implementations honor ctx and must not
+	// impose a timeout of their own, so startup and the request path can each
+	// probe on the budget that suits them.
 	CheckAvailability(ctx context.Context) error
 }
 
