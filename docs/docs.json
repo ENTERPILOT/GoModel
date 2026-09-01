@@ -173,6 +173,7 @@
                     "guides/openclaw",
                     "guides/n8n",
                     "guides/openwebui",
+                    "guides/librechat",
                     {
                         "group": "AI coding harnesses",
                         "icon": "terminal",
