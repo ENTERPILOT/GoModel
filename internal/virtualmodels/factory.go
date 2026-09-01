@@ -57,11 +57,11 @@ func New(ctx context.Context, cfg *config.Config, shared storage.Storage, catalo
 	if err := rejectUnmigratedLegacyData(ctx, store, shared); err != nil {
 		return nil, err
 	}
-	// The declarative virtual models are handed to the migration too: they are
-	// overlaid on the store below, so a conversion must not commit a row that
-	// only fails to load once they are.
+	// The declarative virtual models and the failover configuration are handed
+	// to the migration too: both are overlaid on the store below, so a
+	// conversion must not commit a row that only fails to load once they are.
 	declared := ConfigModels(cfg.VirtualModels)
-	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover.Disabled, declared); err != nil {
+	if err := importLegacyFailoverRules(ctx, store, shared, cfg.Failover, declared); err != nil {
 		return nil, err
 	}
 

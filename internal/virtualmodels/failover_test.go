@@ -468,6 +468,49 @@ func TestNew_KeepsLegacyFailoverRuleThatWouldFormAChainCycle(t *testing.T) {
 	}
 }
 
+// The first refresh also translates the deprecated failover rules
+// configuration into managed redirects, so the conversion check must include
+// them: a cycle can pass through a generated rule when replacing aliases sit
+// between it and the legacy rule (shadow-to-shadow references alone do not
+// chain).
+func TestNew_KeepsLegacyFailoverRuleThatCyclesThroughGeneratedConfigRule(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["alias-one"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	// migrated openai/gpt-4o -> alias-one -> cfg-primary (generated rule) ->
+	// alias-two -> openai/gpt-4o: every edge chains, so this is a cycle.
+	cfg := &config.Config{
+		VirtualModels: []config.VirtualModelConfig{
+			{Source: "alias-one", Targets: []config.VirtualModelTargetConfig{{Model: "cfg-primary"}}},
+			{Source: "alias-two", Targets: []config.VirtualModelTargetConfig{{Model: "openai/gpt-4o"}}},
+		},
+		Failover: config.FailoverConfig{Manual: map[string][]string{"cfg-primary": {"alias-two"}}},
+	}
+
+	for range 2 {
+		result, err := New(ctx, cfg, conn, balancingCatalog(), nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if vm, ok := result.Service.Get("openai/gpt-4o"); ok && !vm.Managed {
+			t.Fatalf("cyclic rule must not be converted, got %+v", vm)
+		}
+		_ = result.Close()
+	}
+	var remaining string
+	if err := db.QueryRow(`SELECT group_concat(primary_model) FROM failover_rules`).Scan(&remaining); err != nil || remaining != "openai/gpt-4o" {
+		t.Fatalf("failover_rules rows = %q, %v; want the cyclic rule kept", remaining, err)
+	}
+}
+
 // A database whose virtual_models rows no longer validate — the state the old
 // migration left behind after committing a cycle and dropping the legacy store
 // — must fail startup with guidance that points at the store, since the admin
