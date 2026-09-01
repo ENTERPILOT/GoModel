@@ -44,6 +44,27 @@ func (s *SQLStore) Get(ctx context.Context, key string) (string, bool, error) {
 	return value, true, nil
 }
 
+// SetDefault inserts value unless key exists, then reads back the winner.
+// ON CONFLICT DO NOTHING is atomic in both SQLite and PostgreSQL, so two
+// instances inserting at once cannot both believe they won.
+func (s *SQLStore) SetDefault(ctx context.Context, key, value string) (string, error) {
+	_, err := s.db.Exec(ctx, `
+		INSERT INTO runtime_settings (key, value, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT(key) DO NOTHING
+	`, key, value, time.Now().Unix())
+	if err != nil {
+		return "", fmt.Errorf("initialise runtime setting %q: %w", key, err)
+	}
+	stored, found, err := s.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("initialise runtime setting %q: value missing after insert", key)
+	}
+	return stored, nil
+}
+
 // Set upserts a persisted value.
 func (s *SQLStore) Set(ctx context.Context, key, value string) error {
 	_, err := s.db.Exec(ctx, `

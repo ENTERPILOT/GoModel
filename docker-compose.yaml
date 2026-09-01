@@ -24,6 +24,11 @@ services:
       # Audit logging is enabled by default; pick its storage backend below
       # - STORAGE_TYPE=postgresql
       - STORAGE_TYPE=mongodb
+    volumes:
+      # The gateway's own state: the SQLite database when STORAGE_TYPE is
+      # sqlite, the pid file, and the install identity. Without this the
+      # directory is part of the container and is lost when it is recreated.
+      - gomodel_data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -106,6 +111,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  gomodel_data:
   redis_data:
   postgres_data:
   mongodb_data:

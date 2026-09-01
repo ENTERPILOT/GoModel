@@ -647,8 +647,9 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	// The update check owns the only outbound connection core makes that is
 	// not a provider call. It is constructed even when disabled so GET
 	// /version keeps reporting the local build.
-	versionChecker := newVersionChecker(appCfg.VersionCheck)
+	versionChecker := newVersionChecker(ctx, appCfg.VersionCheck, sharedStorage, appCfg.Server.MasterKey)
 	app.versionCheck = versionChecker
+	warnIfDataDirEphemeral(appCfg.Storage.BackendConfig())
 
 	serverCfg := &server.Config{
 		BasePath:                        appCfg.Server.BasePath,

@@ -29,5 +29,11 @@ func TestMongoDBStoreRoundTrip(t *testing.T) {
 		if err != nil || !found || value != "high" {
 			t.Fatalf("Get value=%q found=%v err=%v", value, found, err)
 		}
+		if stored, err := store.SetDefault(ctx, "pro.compression.level", "low"); err != nil || stored != "high" {
+			t.Fatalf("SetDefault on an existing key = %q, %v; want the existing value", stored, err)
+		}
+		if stored, err := store.SetDefault(ctx, "install_id", "first"); err != nil || stored != "first" {
+			t.Fatalf("SetDefault on a new key = %q, %v; want the given value", stored, err)
+		}
 	})
 }

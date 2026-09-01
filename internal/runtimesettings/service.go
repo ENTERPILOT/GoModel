@@ -32,17 +32,29 @@ type Service struct {
 	done     chan struct{}
 }
 
-// New restores registered settings and starts cross-instance reconciliation.
-func New(ctx context.Context, backend storage.Storage, registered []ext.RuntimeSetting) (*Service, error) {
-	if len(registered) == 0 {
-		return nil, nil
-	}
+// NewStore opens the deployment-wide key/value store on the shared backend.
+// Besides the registered settings it holds other small per-deployment state
+// that must live with the database rather than the filesystem, such as the
+// install identifier.
+func NewStore(ctx context.Context, backend storage.Storage) (Store, error) {
 	store, err := storage.ResolveSQLBackend[Store](ctx, backend,
 		func(db sqlx.DB) (Store, error) { return NewSQLStore(ctx, db) },
 		func(database *mongo.Database) (Store, error) { return NewMongoDBStore(ctx, database) },
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create runtime settings store: %w", err)
+	}
+	return store, nil
+}
+
+// New restores registered settings and starts cross-instance reconciliation.
+func New(ctx context.Context, backend storage.Storage, registered []ext.RuntimeSetting) (*Service, error) {
+	if len(registered) == 0 {
+		return nil, nil
+	}
+	store, err := NewStore(ctx, backend)
+	if err != nil {
+		return nil, err
 	}
 	service := &Service{
 		store:    store,

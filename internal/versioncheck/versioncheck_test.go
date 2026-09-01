@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -123,6 +124,35 @@ func TestRefreshSendsIdentityHeaders(t *testing.T) {
 		if got.Get(header) != want {
 			t.Errorf("%s = %q, want %q", header, got.Get(header), want)
 		}
+	}
+}
+
+func TestRefreshAsksInstallIDFuncPerRequest(t *testing.T) {
+	var sent []string
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	current := "provisional-id"
+	checker, _ := newTestChecker(t, Config{
+		InstallID:     "fixed-id",
+		InstallIDFunc: func(context.Context) string { return current },
+		Now:           func() time.Time { return now },
+	}, func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("X-GoModel-Install"))
+		_, _ = w.Write([]byte("0.1.82"))
+	})
+
+	// The database answered between the two checks and the id it holds
+	// differs from the provisional one: the second request must carry it.
+	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	current = "database-id"
+	now = now.Add(2 * minRefreshInterval)
+	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	if want := []string{"provisional-id", "database-id"}; !slices.Equal(sent, want) {
+		t.Fatalf("X-GoModel-Install per request = %q, want %q (InstallID must not override the func)", sent, want)
 	}
 }
 
