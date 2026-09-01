@@ -55,6 +55,8 @@ func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := echo.New()
+			// This test uses the default header name; TestRequestSnapshotCapture_UsesConfiguredUserPathHeader
+			// covers the configured-name path.
 			chain := RequestSnapshotCapture()(AuthMiddleware("master-key", nil)(func(c *echo.Context) error {
 				ctx := c.Request().Context()
 				snapshot := core.GetRequestSnapshot(ctx)
