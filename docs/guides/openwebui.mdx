@@ -25,8 +25,10 @@ What you get:
   [labels](/features/labelling).
 - All providers behind one OpenAI connection; no per-provider setup in
   Open WebUI.
-- Prometheus metrics and OpenTelemetry traces for chat traffic.
-- Failover, caching, rate limits, and budgets applied to chat traffic.
+- Prometheus metrics and OpenTelemetry traces for chat traffic, once you
+  enable those exporters (see [Notes](#notes)).
+- Failover, rate limits, budgets, and (when enabled) response caching applied
+  to chat traffic.
 
 ## 1. Run GoModel next to Open WebUI
 
@@ -42,8 +44,11 @@ services:
       OPENAI_API_KEY: sk-...
       ANTHROPIC_API_KEY: sk-ant-...
       TAGGING_HEADER_1: X-OpenWebUI-User-Email
+      TAGGING_HEADER_1_DONOTPASS: "true"
     ports:
       - "8080:8080"
+    volumes:
+      - gomodel_data:/app/data
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
@@ -58,6 +63,7 @@ services:
       - openwebui_data:/app/backend/data
 
 volumes:
+  gomodel_data:
   openwebui_data:
 ```
 
@@ -67,6 +73,8 @@ volumes:
 | `OPENAI_API_KEY` | A GoModel API key (or `GOMODEL_MASTER_KEY`), not a real OpenAI key. |
 | `ENABLE_OLLAMA_API` | Off unless you run Ollama; avoids connection errors in the logs. |
 | `ENABLE_FORWARD_USER_INFO_HEADERS` | Adds the signed-in user's name, email, id, and role as headers on every model call, which GoModel turns into labels below. |
+| `TAGGING_HEADER_1` | Tells GoModel to record that header's value as a label on every request. |
+| `TAGGING_HEADER_1_DONOTPASS` | Keeps the label but strips the header before the request is forwarded, so user emails never reach the upstream provider. |
 
 Open `http://localhost:3000`, create the first (admin) account, and the model
 picker lists exactly what GoModel exposes — including Anthropic and Gemini
@@ -105,7 +113,9 @@ requests, tokens, and cost per person. Add
 `TAGGING_HEADER_2: X-OpenWebUI-User-Name` for friendlier labels, or use the
 `-Id` header if emails should not appear in usage data. Header-name matching
 is case-insensitive, so the `X-Openwebui-User-Email` casing Open WebUI
-actually sends is fine. See [Labelling](/features/labelling) for prefixes and
+actually sends is fine. Keep `TAGGING_HEADER_1_DONOTPASS` set: without it the
+header is forwarded as-is, which would send user emails to the upstream
+provider. See [Labelling](/features/labelling) for prefixes and
 keeping these headers from reaching the upstream provider.
 
 ### Tame the model picker
