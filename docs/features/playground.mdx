@@ -17,6 +17,22 @@ streamed responses are assembled into the same shape a non-streaming call return
 Requests are subject to the same budgets, rate limits, guardrails, and audit logging
 as any other client of the gateway.
 
+## User path scoping
+
+Virtual models can be restricted to specific `user_paths`, and Playground requests
+authenticated with the master key can scope themselves to one of those paths with
+the **User path** field next to the model picker. When you select a model whose
+policy declares `user_paths`, the field is prefilled with the first entry; you can
+edit or clear it before sending. On send, the value is carried on the
+`X-GoModel-User-Path` request header, exactly as an external client would send it,
+so the gateway records the path on the request snapshot and grants access to models
+restricted to that path — a request without the header is denied for those models.
+
+Note: the dashboard always sends the default `X-GoModel-User-Path` header name. If
+you customize the header through the `USER_PATH_HEADER` server configuration, the
+dashboard does not pick that up, and Playground requests stop carrying the scoped
+path.
+
 <img
   src="/features/playground.png"
   alt="GoModel dashboard Playground page with the Messages endpoint selected, a model picker, System, User, and Assistant message cards, a prompt composer, and the request JSON panel on the right"
