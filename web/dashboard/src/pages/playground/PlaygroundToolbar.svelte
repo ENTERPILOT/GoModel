@@ -7,7 +7,8 @@
   import { Eraser, Plus } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
   import { playgroundStore as store } from "./playground.svelte.js";
-  import { ROLES } from "./playgroundLogic.js";
+  import { playgroundUserPathOptions, ROLES } from "./playgroundLogic.js";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
 
   let { modelOptions = [] } = $props();
 
@@ -18,6 +19,8 @@
       description: option.provider,
     })),
   );
+
+  const userPathOptions = $derived(playgroundUserPathOptions(modelsStore.models, store.model));
 
   const endpointOptions = $derived([
     { value: "chat", label: m.playground_endpoint_chat() },
@@ -54,6 +57,20 @@
         placeholder={m.playground_model_placeholder()}
         searchPlaceholder={m.playground_model_search_placeholder()}
         ariaLabel={m.playground_model_label()}
+        allowCustom
+        mono
+      />
+    </div>
+    <div class="playground-field playground-field-user-path" title={m.playground_user_path_help()}>
+      <label class="playground-field-label" for="playground-user-path">{m.playground_user_path_label()}</label>
+      <SearchSelect
+        id="playground-user-path"
+        class="playground-user-path-select"
+        options={userPathOptions}
+        value={store.userPath}
+        onchange={(value) => store.setUserPath(value)}
+        placeholder={m.playground_user_path_placeholder()}
+        ariaLabel={m.playground_user_path_label()}
         allowCustom
         mono
       />
@@ -129,6 +146,15 @@
 
   /* The class lands on the molecule's wrapper, outside this scope hash. */
   .playground-field-model :global(.playground-model-select) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .playground-field-user-path {
+    flex: 0 1 260px;
+  }
+
+  .playground-field-user-path :global(.playground-user-path-select) {
     flex: 1 1 auto;
     min-width: 0;
   }

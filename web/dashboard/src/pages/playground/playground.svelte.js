@@ -7,17 +7,20 @@ import { apiFetch, isAbortError } from "$lib/api/client.js";
 import { errorPayloadMessage, isGatewayAuthError } from "$lib/api/errors.js";
 import { consumeEventStream } from "$lib/api/eventStream.js";
 import { auth } from "$lib/stores/auth.svelte.js";
+import { modelsStore } from "$lib/stores/models.svelte.js";
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import { moveItem } from "$lib/utils/sortable.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
   buildPlaygroundRequest,
   createStreamAccumulator,
+  defaultUserPathForModel,
   endpointById,
   extractResponseText,
   extractUsage,
   normalizeEndpoint,
   normalizeRole,
+  playgroundUserPathHeader,
 } from "./playgroundLogic.js";
 
 const STORAGE = {
@@ -30,6 +33,10 @@ const STORAGE = {
 class PlaygroundStore {
   endpoint = $state(normalizeEndpoint(readStored(STORAGE.endpoint, "")));
   model = $state(readStored(STORAGE.model, "") || "");
+  // Session-only: the user path to send as X-GoModel-User-Path. Defaults to
+  // the selected model's first allowed path when setModel picks a
+  // restricted model; never persisted to localStorage.
+  userPath = $state("");
   stream = $state(readStored(STORAGE.stream, "true") !== "false");
   // [{ id, role, content, pending }] — the conversation the user edits.
   messages = $state([]);
@@ -73,6 +80,11 @@ class PlaygroundStore {
   setModel(model) {
     this.model = String(model || "");
     writeStored(STORAGE.model, this.model);
+    this.userPath = defaultUserPathForModel(modelsStore.models, this.model.trim());
+  }
+
+  setUserPath(value) {
+    this.userPath = String(value || "");
   }
 
   setStream(enabled) {
@@ -153,11 +165,13 @@ class PlaygroundStore {
     const meta = { status: 0, durationMs: 0, streamed: false, events: 0, usage: null };
 
     try {
-      const res = await apiFetch(endpoint.path, {
+      const options = {
         method: "POST",
         body: JSON.stringify(body),
+        headers: playgroundUserPathHeader(this.userPath),
         signal: controller.signal,
-      });
+      };
+      const res = await apiFetch(endpoint.path, options);
       meta.status = res.status;
       if (!res.ok) {
         let payload = null;

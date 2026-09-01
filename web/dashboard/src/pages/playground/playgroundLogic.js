@@ -328,6 +328,35 @@ export function playgroundModelOptions(inventory) {
   return [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// --- User-path picker --------------------------------------------------------
+
+// User paths the selected inventory entry is restricted to
+// (access.user_paths), as { value, label } objects; empty when the model is
+// unknown or unrestricted. The playground sends the chosen path as
+// X-GoModel-User-Path so a restricted model can be exercised from the picker.
+export function playgroundUserPathOptions(inventory, selector) {
+  const id = String(selector || "").trim();
+  const entry = (Array.isArray(inventory) ? inventory : []).find(
+    (item) => String(item?.selector || item?.model?.id || "") === id,
+  );
+  const paths = entry?.access && Array.isArray(entry.access.user_paths) ? entry.access.user_paths : [];
+  return paths.map((path) => {
+    const value = String(path);
+    return { value, label: value };
+  });
+}
+
+// First allowed user path of the selected model, or "" when unrestricted.
+export function defaultUserPathForModel(inventory, selector) {
+  return playgroundUserPathOptions(inventory, selector)[0]?.value || "";
+}
+
+// Build the header to send when a non-empty user path is selected.
+export function playgroundUserPathHeader(userPath) {
+  const path = String(userPath || "").trim();
+  return path ? { "X-GoModel-User-Path": path } : {};
+}
+
 // --- JSON panel sizing -------------------------------------------------------
 
 export const DEFAULT_JSON_PANEL_WIDTH = 420;
