@@ -167,6 +167,32 @@ The objective decides how price enters the weight:
 | `PRO_ROUTING_WARM_CACHE_WEIGHT` | `8` | Weight multiplier for the provider that last served a session. |
 | `PRO_ROUTING_WARM_CACHE_TTL` | `10m` | How long prompt-cache warmth is assumed for a session. |
 
+### Session keeping and health
+
+With [Session keeping](/features/session-keeping) on (the default), the
+gateway hands the selector the target already serving each session and lets
+it decide, request by request, whether the session keeps it — whenever more
+than one target is viable. (With a single viable target there is nothing to
+choose, so the selector is skipped.) The pin holds
+while that target is healthy — moving a session throws away the provider
+prompt cache the pin exists to protect, so even a much cheaper or much faster
+alternative does not take it. A pin is released only when its target enters a
+cooldown, and the session then re-pins to the target the selector picks
+instead.
+
+This is the one judgement the gateway cannot make on its own: a target that
+is serving `429`s or timing out is still a configured, catalog-supported
+target, so it passes every check the core pin applies. Without the selector
+in the path, an agent session — one session id, thousands of requests — pins
+on its first request and rides a failing target for the pin's whole lifetime,
+visible only as latency and wasted upstream spend, because failover still
+returns `200`s to the client.
+
+`gomodel_pro_routing_session_affinity_total{outcome}` counts pins `honored`
+and pins `released` to a cooldown, so the behaviour is visible in Prometheus
+rather than only in a provider invoice.
+
 Prometheus metrics use the `gomodel_pro_routing_` prefix (selections,
-declines, outcomes, cooldowns, and a latency-estimate gauge). Scoring state is
-per node; replicas learn independently and share nothing.
+declines, outcomes, cooldowns, session affinity, and a latency-estimate
+gauge). Scoring state is per node; replicas learn independently and share
+nothing.

@@ -82,19 +82,62 @@ func (s *stickySessions) resolve(source, session string, viable func(string) boo
 		delete(s.entries, key)
 	}
 	if candidate != "" {
-		if s.entries == nil {
-			s.entries = make(map[stickyKey]stickyPin)
-		}
-		s.pruneLocked(now)
-		if len(s.entries) >= maxStickySessions {
-			s.evictSoonestLocked()
-		}
-		s.entries[key] = stickyPin{
-			qualified: candidate,
-			expires:   now.Add(stickySessionTTL),
-		}
+		s.setLocked(key, candidate, now)
 	}
 	return candidate
+}
+
+// repin records chosen as the target serving a session and returns the target
+// the caller must actually use. It is for strategies that decide affinity
+// themselves — the adaptive selector is handed the current pin and answers
+// with the target the session should use now — so the record follows the
+// decision instead of overriding it. Core's own pin then still carries the
+// session through a selector that declines, and through a restart that
+// empties the selector's state.
+//
+// observed is the pin the decision was made against. When another request has
+// pinned something else in the meantime, that pin wins and is returned: two
+// concurrent requests of one session both see the same pin, can be handed
+// different valid answers, and must still leave together on one target rather
+// than each committing its own and splitting the conversation.
+func (s *stickySessions) repin(source, session, observed, chosen string) string {
+	if chosen == "" {
+		return observed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := stickyKey{source: source, session: session}
+	now := s.clock()
+	if existing, ok := s.entries[key]; ok && existing.expires.After(now) && existing.qualified != observed {
+		existing.expires = now.Add(stickySessionTTL)
+		s.entries[key] = existing
+		return existing.qualified
+	}
+	s.setLocked(key, chosen, now)
+	return chosen
+}
+
+// setLocked writes a pin, making room for it first. The caller holds mu.
+func (s *stickySessions) setLocked(key stickyKey, qualified string, now time.Time) {
+	if _, exists := s.entries[key]; exists {
+		// Overwriting an existing pin needs no room made. Skipping the
+		// sweep matters: the adaptive strategy records its choice on every
+		// request of every pinned session, and a map-wide prune under the
+		// shared lock at that rate is a contention point, not housekeeping.
+		s.entries[key] = stickyPin{qualified: qualified, expires: now.Add(stickySessionTTL)}
+		return
+	}
+	if s.entries == nil {
+		s.entries = make(map[stickyKey]stickyPin)
+	}
+	s.pruneLocked(now)
+	if len(s.entries) >= maxStickySessions {
+		s.evictSoonestLocked()
+	}
+	s.entries[key] = stickyPin{
+		qualified: qualified,
+		expires:   now.Add(stickySessionTTL),
+	}
 }
 
 // prune drops expired pins and pins for redirect sources no longer present in
