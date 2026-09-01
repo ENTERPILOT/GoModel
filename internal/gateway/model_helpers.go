@@ -123,7 +123,10 @@ func QualifyModelWithProvider(model, providerName string) string {
 	if model == "" {
 		return ""
 	}
-	if providerName == "" || strings.HasPrefix(model, providerName+"/") {
+	if providerName == "" {
+		return model
+	}
+	if rest, ok := strings.CutPrefix(model, providerName); ok && strings.HasPrefix(rest, "/") {
 		return model
 	}
 	return providerName + "/" + model

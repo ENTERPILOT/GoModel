@@ -485,7 +485,7 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 	executedProvider := failoverRecorded && strings.TrimSpace(entry.Provider) != ""
 	executedProviderName := failoverRecorded && strings.TrimSpace(entry.ProviderName) != ""
 
-	if resolvedModel := resolvedModelForAuditLog(workflow); resolvedModel != "" && !executedResolvedModel {
+	if resolvedModel := workflow.Resolution.ResolvedRouteModel(); resolvedModel != "" && !executedResolvedModel {
 		entry.ResolvedModel = resolvedModel
 	}
 	if workflow.Mode == core.ExecutionModePassthrough && workflow.Passthrough != nil {
@@ -522,23 +522,6 @@ func enrichEntryWithWorkflow(entry *LogEntry, workflow *core.Workflow) {
 			Failover:   workflow.Policy.Features.Failover,
 		}
 	}
-}
-
-func resolvedModelForAuditLog(workflow *core.Workflow) string {
-	if workflow == nil || workflow.Resolution == nil {
-		return ""
-	}
-	model := strings.TrimSpace(workflow.Resolution.ResolvedSelector.Model)
-	if model == "" {
-		return ""
-	}
-	if providerName := strings.TrimSpace(workflow.Resolution.ProviderName); providerName != "" {
-		return providerName + "/" + model
-	}
-	if provider := strings.TrimSpace(workflow.Resolution.ResolvedSelector.Provider); provider != "" {
-		return provider + "/" + model
-	}
-	return model
 }
 
 func enrichEntryWithResolvedRoute(entry *LogEntry, resolvedModel, providerType, providerName string) {
