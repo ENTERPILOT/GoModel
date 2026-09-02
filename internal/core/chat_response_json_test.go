@@ -54,3 +54,17 @@ func TestChatResponseJSON_NullUsageAndChoiceDecode(t *testing.T) {
 		t.Fatalf("unexpected extras on null members: %+v", resp)
 	}
 }
+
+func TestChatResponseJSON_RejectsMalformedInput(t *testing.T) {
+	var resp ChatResponse
+	if err := json.Unmarshal([]byte(`{"id":`), &resp); err == nil {
+		t.Fatal("expected error for truncated response body")
+	}
+	var choice Choice
+	if err := json.Unmarshal([]byte(`{"index":"x"}`), &choice); err == nil {
+		t.Fatal("expected error for mistyped choice member")
+	}
+	if err := json.Unmarshal([]byte(`{"choices":[{"index":"x"}]}`), &resp); err == nil {
+		t.Fatal("expected error for mistyped nested choice")
+	}
+}
