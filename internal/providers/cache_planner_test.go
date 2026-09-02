@@ -147,6 +147,7 @@ func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
 		{name: "string", content: prefix},
 		{name: "typed parts", content: []core.ContentPart{{Type: "input_text", Text: prefix}}},
 		{name: "generic parts", content: []any{map[string]any{"type": "input_text", "text": prefix}}},
+		{name: "map parts", content: []map[string]any{{"type": "input_text", "text": prefix}}},
 	}
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
@@ -167,6 +168,18 @@ func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
 			if err != nil || !bytes.Contains(plannedJSON, []byte(`"prompt_cache_breakpoint"`)) {
 				t.Fatalf("Responses plan lacks explicit breakpoint: %s (err=%v)", plannedJSON, err)
 			}
+			// The Responses API rejects the Chat content vocabulary, so a
+			// breakpoint must never downgrade a part to {"type":"text"}.
+			if bytes.Contains(plannedJSON, []byte(`"type":"text"`)) {
+				t.Fatalf("Responses plan emitted Chat content vocabulary: %s", plannedJSON)
+			}
+			if !bytes.Contains(plannedJSON, []byte(`"type":"input_text"`)) {
+				t.Fatalf("Responses plan lost the input_text vocabulary: %s", plannedJSON)
+			}
+			assertResponsesBreakpointBlock(t, plannedJSON, map[string]any{
+				"type": "input_text", "text": prefix,
+				"prompt_cache_breakpoint": map[string]any{"mode": "explicit"},
+			})
 			after, err := json.Marshal(req)
 			if err != nil {
 				t.Fatal(err)
@@ -452,4 +465,85 @@ func TestGeminiPlanKeyIncludesEntireNativePrefixAndBoundary(t *testing.T) {
 	if len(keys) != 4 {
 		t.Fatalf("system, boundary, or tools were omitted from Gemini keys: %v", keys)
 	}
+}
+
+// assertResponsesBreakpointBlock decodes the planned request and checks the
+// first input item's content is exactly one block equal to want.
+func assertResponsesBreakpointBlock(t *testing.T, plannedJSON []byte, want map[string]any) {
+	t.Helper()
+	blocks := decodePrefixContentBlocks(t, plannedJSON)
+	if len(blocks) != 1 {
+		t.Fatalf("expected one content block on the prefix item: %s", plannedJSON)
+	}
+	got, err := json.Marshal(blocks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(expected) {
+		t.Fatalf("breakpoint block mismatch:\n got: %s\nwant: %s", got, expected)
+	}
+}
+
+func TestCachePlannerResponsesTypedPartsKeepVocabularyAndExtras(t *testing.T) {
+	planner := &cachePlanner{enabled: true}
+	prefix := strings.Repeat("stable response context ", 1200)
+	req := &core.ResponsesRequest{Model: "gpt-5.6", Input: []core.ResponsesInputElement{
+		{Role: "user", Content: []core.ContentPart{
+			{
+				Type: "input_text", Text: prefix,
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_note": json.RawMessage(`"keep"`)}),
+			},
+			{Type: "input_image", ImageURL: &core.ImageURLContent{URL: "https://example.com/a.png", Detail: "low"}},
+		}},
+		{Role: "user", Content: "dynamic"},
+	}}
+	planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+	if planned == req {
+		t.Fatal("expected a planned Responses request")
+	}
+	plannedJSON, err := json.Marshal(planned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := decodePrefixContentBlocks(t, plannedJSON)
+	if len(blocks) != 2 {
+		t.Fatalf("expected two content blocks: %s", plannedJSON)
+	}
+	if blocks[0]["type"] != "input_text" || blocks[0]["x_note"] != "keep" || blocks[0]["prompt_cache_breakpoint"] != nil {
+		t.Fatalf("text block lost vocabulary or extras, or gained a breakpoint: %v", blocks[0])
+	}
+	image := blocks[1]
+	if image["type"] != "input_image" || image["prompt_cache_breakpoint"] == nil {
+		t.Fatalf("last cacheable block should carry the breakpoint with input_image type: %v", image)
+	}
+	imageURL, _ := image["image_url"].(map[string]any)
+	if imageURL["url"] != "https://example.com/a.png" || imageURL["detail"] != "low" {
+		t.Fatalf("image payload not preserved: %v", image)
+	}
+}
+
+// decodePrefixContentBlocks returns the content blocks of the first input item
+// of a marshalled Responses request.
+func decodePrefixContentBlocks(t *testing.T, plannedJSON []byte) []map[string]any {
+	t.Helper()
+	var decoded struct {
+		Input []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(plannedJSON, &decoded); err != nil {
+		t.Fatalf("decode planned request: %v", err)
+	}
+	if len(decoded.Input) == 0 {
+		t.Fatalf("planned request has no input items: %s", plannedJSON)
+	}
+	var blocks []map[string]any
+	if err := json.Unmarshal(decoded.Input[0].Content, &blocks); err != nil {
+		t.Fatalf("prefix item content is not a block array: %s", decoded.Input[0].Content)
+	}
+	return blocks
 }
