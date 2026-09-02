@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
@@ -105,6 +107,13 @@ type CredentialsService struct {
 
 	managedNames map[string]struct{}
 	resilience   config.ResilienceConfig
+
+	// configs holds the effective ProviderConfig of every credential that is
+	// currently installed in the registry, so the admin status endpoint can
+	// report the same merged resilience settings for dashboard-registered
+	// providers that it reports for config.yaml/env ones.
+	mu      sync.RWMutex
+	configs map[string]ProviderConfig
 }
 
 // NewCredentialsService builds the service and applies every currently
@@ -134,6 +143,7 @@ func NewCredentialsService(ctx context.Context, factory *ProviderFactory, regist
 		store:        store,
 		managedNames: managed,
 		resilience:   resilience,
+		configs:      make(map[string]ProviderConfig),
 	}
 	if err := s.Reload(ctx); err != nil {
 		return nil, err
@@ -261,7 +271,7 @@ func (s *CredentialsService) Upsert(ctx context.Context, cred ManagedProviderCre
 	if cred.Enabled {
 		s.install(name, provider, cfg)
 	} else {
-		s.registry.UnregisterProvider(name)
+		s.remove(name)
 	}
 	// A Refresh error here means the provider's /models call itself failed
 	// (bad key, unreachable host, ...) -- registration still succeeded, and
@@ -285,7 +295,7 @@ func (s *CredentialsService) Delete(ctx context.Context, name string) error {
 	if err := s.store.Delete(ctx, name); err != nil {
 		return err
 	}
-	s.registry.UnregisterProvider(name)
+	s.remove(name)
 	// See the matching comment in Upsert: a Refresh failure here reflects a
 	// remaining provider's own health, not whether the delete succeeded.
 	if err := s.registry.Refresh(ctx); err != nil {
@@ -334,7 +344,8 @@ func (s *CredentialsService) buildProvider(row ManagedProviderCredential) (core.
 }
 
 // install unregisters whatever is currently registered under name (a no-op
-// if nothing is) and registers provider in its place.
+// if nothing is), registers provider in its place, and records cfg as the
+// provider's effective configuration.
 func (s *CredentialsService) install(name string, provider core.Provider, cfg ProviderConfig) {
 	s.registry.UnregisterProvider(name)
 	s.registry.RegisterProviderWithNameAndType(provider, name, cfg.Type)
@@ -345,4 +356,29 @@ func (s *CredentialsService) install(name string, provider core.Provider, cfg Pr
 		s.registry.SetProviderMetadataOverrides(name, cfg.ModelMetadataOverrides)
 	}
 	s.registry.SetProviderModelFilter(name, cfg.ModelFilter)
+
+	s.mu.Lock()
+	s.configs[name] = cfg
+	s.mu.Unlock()
+}
+
+// remove unregisters name from the registry and forgets its effective
+// configuration.
+func (s *CredentialsService) remove(name string) {
+	s.registry.UnregisterProvider(name)
+
+	s.mu.Lock()
+	delete(s.configs, name)
+	s.mu.Unlock()
+}
+
+// ConfiguredProviders returns the admin-safe effective configuration of every
+// credential currently installed in the registry, in the same shape
+// providers.Init produces for config.yaml/env providers.
+func (s *CredentialsService) ConfiguredProviders() []SanitizedProviderConfig {
+	s.mu.RLock()
+	configs := make(map[string]ProviderConfig, len(s.configs))
+	maps.Copy(configs, s.configs)
+	s.mu.RUnlock()
+	return SanitizeProviderConfigs(configs)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -409,5 +410,82 @@ func TestCredentialsService_ReloadSkipsShadowedStoreRowsAndAppliesTheRest(t *tes
 	}
 	if registry.ProviderByName("disabled") != nil {
 		t.Error("ProviderByName(disabled) != nil, want nil (disabled row should not register)")
+	}
+}
+
+// TestCredentialsService_ConfiguredProvidersCarryGlobalResilience guards the
+// admin status endpoint's view of dashboard-registered providers: the config
+// the service exposes must carry the same merged resilience settings
+// resolveProviders produces for config.yaml/env providers, and must track
+// the credential's lifecycle (disable, delete).
+func TestCredentialsService_ConfiguredProvidersCarryGlobalResilience(t *testing.T) {
+	ctx := t.Context()
+	global := config.ResilienceConfig{
+		Retry: config.RetryConfig{
+			MaxRetries:     3,
+			InitialBackoff: time.Second,
+			MaxBackoff:     30 * time.Second,
+			BackoffFactor:  2,
+			JitterFactor:   0.1,
+		},
+		CircuitBreaker: config.CircuitBreakerConfig{
+			Enabled:          true,
+			FailureThreshold: 5,
+			SuccessThreshold: 2,
+			Timeout:          30 * time.Second,
+		},
+	}
+	want := SanitizeProviderConfigs(map[string]ProviderConfig{
+		"my-openai": {Type: "test", Resilience: global},
+	})[0]
+
+	svc, err := NewCredentialsService(ctx, newCredentialsTestFactory(t), NewModelRegistry(), newFakeCredentialStore(), nil, global)
+	if err != nil {
+		t.Fatalf("NewCredentialsService() error = %v", err)
+	}
+	if got := svc.ConfiguredProviders(); len(got) != 0 {
+		t.Fatalf("ConfiguredProviders() before any upsert = %#v, want empty", got)
+	}
+
+	cred := ManagedProviderCredential{Name: "my-openai", Type: "test", APIKeys: []string{"sk-test"}, Enabled: true}
+	if err := svc.Upsert(ctx, cred); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	got := svc.ConfiguredProviders()
+	if len(got) != 1 {
+		t.Fatalf("ConfiguredProviders() = %#v, want exactly one entry", got)
+	}
+	if got[0].Name != want.Name || got[0].Type != want.Type {
+		t.Errorf("ConfiguredProviders()[0] = %q/%q, want %q/%q", got[0].Name, got[0].Type, want.Name, want.Type)
+	}
+	if got[0].Resilience != want.Resilience {
+		t.Errorf("ConfiguredProviders()[0].Resilience = %+v, want global defaults %+v", got[0].Resilience, want.Resilience)
+	}
+
+	tests := []struct {
+		name string
+		act  func() error
+	}{
+		{name: "disabled", act: func() error {
+			cred.Enabled = false
+			return svc.Upsert(ctx, cred)
+		}},
+		{name: "deleted", act: func() error {
+			cred.Enabled = true
+			if err := svc.Upsert(ctx, cred); err != nil {
+				return err
+			}
+			return svc.Delete(ctx, cred.Name)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.act(); err != nil {
+				t.Fatalf("%s: error = %v", tt.name, err)
+			}
+			if got := svc.ConfiguredProviders(); len(got) != 0 {
+				t.Errorf("ConfiguredProviders() after %s = %#v, want empty", tt.name, got)
+			}
+		})
 	}
 }

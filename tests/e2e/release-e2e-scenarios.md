@@ -5524,7 +5524,9 @@ sets no resilience overrides, so every provider must report the documented
 defaults: the breaker on, five failures to open, two successes to close, and a
 30s timeout. Turning the breaker off needs a gateway booted with
 `RESILIENCE_CIRCUIT_BREAKER_ENABLED=false`, so that path is covered by the
-`config` and `internal/llmclient` unit tests.
+`config` and `internal/llmclient` unit tests. The stack manager deletes every
+unmanaged (dashboard-registered) provider credential on `start`, so a leftover
+runtime credential cannot make this assertion nondeterministic.
 
 ```bash
 STATUS_FILE="$QA_RUN_DIR/s219.status.json"

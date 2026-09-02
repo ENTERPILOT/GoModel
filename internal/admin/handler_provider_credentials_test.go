@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -19,11 +20,16 @@ import (
 // handler tests: it stands in for *providers.CredentialsService without
 // touching a real registry/factory.
 type providerCredentialsAdminFake struct {
-	rows      map[string]providers.ManagedProviderCredential
-	managed   map[string]struct{}
-	types     []string
-	upsertErr error
-	deleteErr error
+	rows       map[string]providers.ManagedProviderCredential
+	managed    map[string]struct{}
+	types      []string
+	configured []providers.SanitizedProviderConfig
+	upsertErr  error
+	deleteErr  error
+}
+
+func (f *providerCredentialsAdminFake) ConfiguredProviders() []providers.SanitizedProviderConfig {
+	return f.configured
 }
 
 func newProviderCredentialsAdminFake() *providerCredentialsAdminFake {
@@ -606,5 +612,86 @@ func TestUpsertProviderCredential_BubblesProviderErrorOnStoreFailure(t *testing.
 	}
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders covers
+// dashboard-registered providers: they are absent from the static configured
+// snapshot, so their effective (resilience-merged) config must come from the
+// credentials service instead of being reported as all zeros. A declared
+// provider present in both sources keeps the declarative config.
+func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *testing.T) {
+	registry := providers.NewModelRegistry()
+	for _, name := range []string{"dash-openai", "openai_declared"} {
+		registry.RegisterProviderWithNameAndType(&handlerMockProvider{
+			models: &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "gpt-4o", Object: "model"}}},
+		}, name, "openai")
+	}
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	// A dashboard-registered provider installed after startup has no model
+	// inventory until its first refresh; it must still report its effective
+	// configuration and classify as configured rather than unknown.
+	registry.RegisterProviderWithNameAndType(&handlerMockProvider{
+		models: &core.ModelsResponse{Object: "list", Data: []core.Model{}},
+	}, "dash-empty", "openai")
+
+	resilience := func(maxRetries int) providers.SanitizedResilienceConfig {
+		return providers.SanitizedResilienceConfig{
+			Retry:          providers.SanitizedRetryConfig{MaxRetries: maxRetries, InitialBackoff: "1s", MaxBackoff: "30s", BackoffFactor: 2, JitterFactor: 0.1},
+			CircuitBreaker: providers.SanitizedCircuitBreakerConfig{Enabled: true, FailureThreshold: 5, SuccessThreshold: 2, Timeout: "30s"},
+		}
+	}
+	fake := newProviderCredentialsAdminFake()
+	fake.configured = []providers.SanitizedProviderConfig{
+		{Name: "dash-openai", Type: "openai", BaseURL: "https://dash.example.com/v1", Resilience: resilience(3)},
+		{Name: "openai_declared", Type: "openai", Resilience: resilience(9)},
+		{Name: "dash-empty", Type: "openai", BaseURL: "https://empty.example.com/v1", Resilience: resilience(3)},
+	}
+	declared := providers.SanitizedProviderConfig{Name: "openai_declared", Type: "openai", Resilience: resilience(1)}
+	h := NewHandler(nil, registry, WithProviderCredentials(fake), WithConfiguredProviders([]providers.SanitizedProviderConfig{declared}))
+
+	c, rec := newHandlerContext("/admin/providers/status")
+	if err := h.ProviderStatus(c); err != nil {
+		t.Fatalf("ProviderStatus() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body providerStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	byName := make(map[string]providerStatusItemResponse, len(body.Providers))
+	for _, provider := range body.Providers {
+		byName[provider.Name] = provider
+	}
+
+	tests := []struct {
+		name      string
+		want      providers.SanitizedProviderConfig
+		wantLabel string
+	}{
+		{name: "dash-openai", want: fake.configured[0], wantLabel: "Healthy"},
+		{name: "openai_declared", want: declared, wantLabel: "Healthy"},
+		{name: "dash-empty", want: fake.configured[2], wantLabel: "Configured"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item, ok := byName[tt.name]
+			if !ok {
+				t.Fatalf("missing %s in %#v", tt.name, body.Providers)
+			}
+			if item.Config.BaseURL != tt.want.BaseURL {
+				t.Errorf("config.base_url = %q, want %q", item.Config.BaseURL, tt.want.BaseURL)
+			}
+			if item.Config.Resilience != tt.want.Resilience {
+				t.Errorf("config.resilience = %+v, want %+v", item.Config.Resilience, tt.want.Resilience)
+			}
+			if item.StatusLabel != tt.wantLabel {
+				t.Errorf("status_label = %q, want %q", item.StatusLabel, tt.wantLabel)
+			}
+		})
 	}
 }
