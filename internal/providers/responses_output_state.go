@@ -19,23 +19,35 @@ type ResponsesOutputToolCallState struct {
 	Arguments         strings.Builder
 	Started           bool
 	Completed         bool
+	FinalStatus       string // status carried by the item's output_item.done event
 	PlaceholderObject bool
 }
 
 // ResponsesOutputEventState manages assistant/tool output items for Responses streams.
 type ResponsesOutputEventState struct {
-	responseID         string
-	assistantReserved  bool
-	assistantStarted   bool
-	assistantDone      bool
-	assistantMessageID string
-	assistantText      strings.Builder
+	responseID           string
+	assistantReserved    bool
+	assistantStarted     bool
+	assistantDone        bool
+	assistantMessageID   string
+	assistantText        strings.Builder
+	assistantFinalStatus string
 
-	reasoningReserved bool
-	reasoningStarted  bool
-	reasoningDone     bool
-	reasoningItemID   string
-	reasoningText     strings.Builder
+	reasoningReserved    bool
+	reasoningStarted     bool
+	reasoningDone        bool
+	reasoningItemID      string
+	reasoningText        strings.Builder
+	reasoningFinalStatus string
+}
+
+// finalStatusOrCompleted defaults an unset item status to "completed" so items
+// finished before status tracking existed keep their historical shape.
+func finalStatusOrCompleted(status string) string {
+	if status == "" {
+		return "completed"
+	}
+	return status
 }
 
 // NewResponsesOutputEventState creates a new Responses output-item state manager.
@@ -124,13 +136,21 @@ func (s *ResponsesOutputEventState) StartAssistantOutput(outputIndex int) string
 
 // CompleteAssistantOutput emits the assistant message output_item.done event once.
 func (s *ResponsesOutputEventState) CompleteAssistantOutput(outputIndex int) string {
+	return s.FinishAssistantOutput(outputIndex, "completed")
+}
+
+// FinishAssistantOutput emits the assistant message output_item.done event once,
+// carrying the given terminal status ("completed", or "incomplete" when the
+// upstream stream was interrupted before closing the message).
+func (s *ResponsesOutputEventState) FinishAssistantOutput(outputIndex int, status string) string {
 	if !s.assistantReserved || s.assistantDone {
 		return ""
 	}
 	s.assistantDone = true
+	s.assistantFinalStatus = status
 	return s.StartAssistantOutput(outputIndex) + s.WriteEvent("response.output_item.done", map[string]any{
 		"type":         "response.output_item.done",
-		"item":         s.AssistantMessageItem("completed", true),
+		"item":         s.AssistantMessageItem(status, true),
 		"output_index": outputIndex,
 	})
 }
@@ -205,10 +225,17 @@ func (s *ResponsesOutputEventState) AppendReasoningDelta(outputIndex int, delta 
 // CompleteReasoningOutput emits the raw reasoning completion and
 // output_item.done events once.
 func (s *ResponsesOutputEventState) CompleteReasoningOutput(outputIndex int) string {
+	return s.FinishReasoningOutput(outputIndex, "completed")
+}
+
+// FinishReasoningOutput emits the raw reasoning completion and output_item.done
+// events once, carrying the given terminal status.
+func (s *ResponsesOutputEventState) FinishReasoningOutput(outputIndex int, status string) string {
 	if !s.reasoningReserved || s.reasoningDone {
 		return ""
 	}
 	s.reasoningDone = true
+	s.reasoningFinalStatus = status
 	var b strings.Builder
 	b.WriteString(s.StartReasoningOutput(outputIndex))
 	b.WriteString(s.WriteEvent("response.reasoning_text.done", map[string]any{
@@ -220,18 +247,19 @@ func (s *ResponsesOutputEventState) CompleteReasoningOutput(outputIndex int) str
 	}))
 	b.WriteString(s.WriteEvent("response.output_item.done", map[string]any{
 		"type":         "response.output_item.done",
-		"item":         s.ReasoningItem("completed", true),
+		"item":         s.ReasoningItem(status, true),
 		"output_index": outputIndex,
 	}))
 	return b.String()
 }
 
 // FinalOutputItems assembles the full output array for the terminal
-// response.completed event, mirroring the output_item.done payloads already
-// emitted on the stream, ordered by output index. OpenAI includes the complete
-// output in response.completed, and strict SDK clients index into it. Only
-// tool calls whose output_item.done has been emitted are included — callers
-// must finalize pending tool calls first.
+// response.completed (or response.incomplete) event, mirroring the
+// output_item.done payloads already emitted on the stream, ordered by output
+// index. OpenAI includes the complete output in the terminal event, and strict
+// SDK clients index into it. Each item carries the status its output_item.done
+// event declared, and only tool calls whose output_item.done has been emitted
+// are included — callers must finalize pending tool calls first.
 func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIndex int, toolCalls map[int]*ResponsesOutputToolCallState, includePlaceholder bool) []map[string]any {
 	type indexedItem struct {
 		index int
@@ -239,16 +267,16 @@ func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIn
 	}
 	items := make([]indexedItem, 0, 2+len(toolCalls))
 	if s.reasoningStarted {
-		items = append(items, indexedItem{reasoningIndex, s.ReasoningItem("completed", true)})
+		items = append(items, indexedItem{reasoningIndex, s.ReasoningItem(finalStatusOrCompleted(s.reasoningFinalStatus), true)})
 	}
 	if s.assistantStarted {
-		items = append(items, indexedItem{assistantIndex, s.AssistantMessageItem("completed", true)})
+		items = append(items, indexedItem{assistantIndex, s.AssistantMessageItem(finalStatusOrCompleted(s.assistantFinalStatus), true)})
 	}
 	for _, state := range toolCalls {
 		if state == nil || !state.Started || !state.Completed {
 			continue
 		}
-		items = append(items, indexedItem{state.OutputIndex, s.RenderToolCallItem(state, "completed", includePlaceholder)})
+		items = append(items, indexedItem{state.OutputIndex, s.RenderToolCallItem(state, finalStatusOrCompleted(state.FinalStatus), includePlaceholder)})
 	}
 	slices.SortStableFunc(items, func(a, b indexedItem) int { return a.index - b.index })
 	output := make([]map[string]any, 0, len(items))
@@ -305,10 +333,17 @@ func (s *ResponsesOutputEventState) StartToolCall(state *ResponsesOutputToolCall
 
 // CompleteToolCall emits the argument completion and output_item.done events once.
 func (s *ResponsesOutputEventState) CompleteToolCall(state *ResponsesOutputToolCallState, includePlaceholder bool) string {
+	return s.FinishToolCall(state, "completed", includePlaceholder)
+}
+
+// FinishToolCall emits the argument completion and output_item.done events
+// once, carrying the given terminal status.
+func (s *ResponsesOutputEventState) FinishToolCall(state *ResponsesOutputToolCallState, status string, includePlaceholder bool) string {
 	if state == nil || state.Completed {
 		return ""
 	}
 	state.Completed = true
+	state.FinalStatus = status
 	return s.WriteEvent("response.function_call_arguments.done", map[string]any{
 		"type":         "response.function_call_arguments.done",
 		"item_id":      state.ItemID,
@@ -316,7 +351,7 @@ func (s *ResponsesOutputEventState) CompleteToolCall(state *ResponsesOutputToolC
 		"arguments":    s.ToolCallArguments(state),
 	}) + s.WriteEvent("response.output_item.done", map[string]any{
 		"type":         "response.output_item.done",
-		"item":         s.RenderToolCallItem(state, "completed", includePlaceholder),
+		"item":         s.RenderToolCallItem(state, status, includePlaceholder),
 		"output_index": state.OutputIndex,
 	})
 }

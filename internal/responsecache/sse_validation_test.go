@@ -58,6 +58,31 @@ func TestValidateCacheableSSE(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "rejects incomplete responses stream",
+			raw: []byte(
+				"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n" +
+					"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"status\":\"incomplete\"}}\n\n" +
+					"data: [DONE]\n\n",
+			),
+			want: false,
+		},
+		{
+			name: "rejects failed responses stream",
+			raw: []byte(
+				"event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_1\",\"status\":\"failed\"}}\n\n" +
+					"data: [DONE]\n\n",
+			),
+			want: false,
+		},
+		{
+			name: "rejects incomplete event with whitespace formatting",
+			raw: []byte(
+				"event: response.incomplete\ndata: { \"response\" : {\"id\":\"resp_1\"}, \"type\" : \"response.incomplete\" }\n\n" +
+					"data: [DONE]\n\n",
+			),
+			want: false,
+		},
+		{
 			name: "rejects payload after done",
 			raw: []byte(
 				"data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-1\"}}\n\n" +

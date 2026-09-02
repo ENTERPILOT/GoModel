@@ -469,6 +469,48 @@ data: [DONE]
 	}
 }
 
+// TestStreamUsageObserverResponsesAPIIncomplete verifies usage is still logged
+// when an interrupted stream ends with response.incomplete — the tokens were
+// consumed even though the response did not finish.
+func TestStreamUsageObserverResponsesAPIIncomplete(t *testing.T) {
+	streamData := `event: response.created
+data: {"type":"response.created","response":{"id":"resp-123","object":"response","status":"in_progress","model":"gpt-5"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"Hel"}
+
+event: response.incomplete
+data: {"type":"response.incomplete","response":{"id":"resp-123","object":"response","status":"incomplete","model":"gpt-5","incomplete_details":{"reason":"interrupted"},"output":[],"usage":{"input_tokens":15,"output_tokens":2,"total_tokens":17}}}
+
+data: [DONE]
+
+`
+	logger := &trackingLogger{enabled: true}
+	stream := streaming.NewObservedSSEStream(
+		io.NopCloser(strings.NewReader(streamData)),
+		NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-2", "/v1/responses", nil),
+	)
+
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	entries := logger.getEntries()
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	entry := entries[0]
+	if entry.InputTokens != 15 || entry.OutputTokens != 2 || entry.TotalTokens != 17 {
+		t.Errorf("usage = %d/%d/%d, want 15/2/17", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
+	}
+	if entry.ProviderID != "resp-123" {
+		t.Errorf("ProviderID = %s, want resp-123", entry.ProviderID)
+	}
+}
+
 func TestStreamUsageObserverResponsesAPIWithDetailedUsage(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-detailed", "/v1/responses", nil)

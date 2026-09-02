@@ -476,12 +476,14 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a
 			// fraction of its former map[string]any-per-chunk cost (was 202/19.6KB).
-			// response.completed now carries the full output array, a once-per-
-			// stream cost independent of chunk count.
+			// response.completed now carries the full output array, and the
+			// terminal status became a variable (completed vs incomplete),
+			// boxing a few extra interface values — both once-per-stream costs
+			// independent of chunk count.
 			name:      "openai_responses_stream_converter",
 			bench:     BenchmarkOpenAIResponsesStreamConverter,
-			maxAllocs: 103,   // baseline 101
-			maxBytes:  12288, // baseline ~11.2 KB (leaves headroom for pool cold-starts)
+			maxAllocs: 107,   // baseline 105
+			maxBytes:  12288, // baseline ~11.3 KB (leaves headroom for pool cold-starts)
 		},
 		{
 			name:      "shared_stream_audit_and_usage_observers",

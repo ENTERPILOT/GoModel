@@ -42,6 +42,23 @@ func TestEnsureResponsesDone_AppendsDoneMarker(t *testing.T) {
 	}
 }
 
+func TestEnsureResponsesDone_AppendsDoneMarkerAfterIncomplete(t *testing.T) {
+	stream := io.NopCloser(strings.NewReader("event: response.incomplete\ndata: {\"type\":\"response.incomplete\"}\n\n"))
+
+	data, err := io.ReadAll(EnsureResponsesDone(stream))
+	if err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+
+	got := string(data)
+	if !strings.HasSuffix(got, "data: [DONE]\n\n") {
+		t.Fatalf("expected stream to end with done marker, got %q", got)
+	}
+	if strings.Count(got, "[DONE]") != 1 {
+		t.Fatalf("expected exactly one done marker, got %q", got)
+	}
+}
+
 func TestEnsureResponsesDone_InsertsEventSeparatorBeforeDoneMarker(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}\n"))
 

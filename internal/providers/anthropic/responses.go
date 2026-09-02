@@ -134,6 +134,8 @@ type responsesStreamConverter struct {
 	buffer               streaming.StreamBuffer
 	closed               bool
 	sentDone             bool
+	sawStop              bool  // upstream signalled the end of the message
+	pendingErr           error // upstream read error deferred until terminal events are drained
 	usage                anthropicUsage
 	hasUsage             bool
 }
@@ -164,53 +166,36 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 		return sc.buffer.Read(p), nil
 	}
 
+	// Terminal events for a failed upstream read have been drained; surface
+	// the deferred error now.
+	if sc.pendingErr != nil {
+		pendingErr := sc.pendingErr
+		sc.closed = true
+		sc.releaseBuffer()
+		_ = sc.body.Close() //nolint:errcheck
+		if pendingErr == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, pendingErr
+	}
+
 	// Read the next SSE event from Anthropic
 	for {
 		line, err := sc.reader.ReadBytes('\n')
 		if err != nil {
+			// Any upstream read failure — clean EOF, io.ErrUnexpectedEOF from
+			// a chunked body cut mid-transfer, a connection reset — ends the
+			// upstream stream, so emit the terminal events before surfacing a
+			// non-EOF error.
+			sc.appendTerminalEvents()
+			if sc.buffer.Len() > 0 {
+				sc.pendingErr = err
+				return sc.buffer.Read(p), nil
+			}
+			sc.closed = true
+			sc.releaseBuffer()
+			_ = sc.body.Close() //nolint:errcheck
 			if err == io.EOF {
-				// Send final done event and [DONE] message
-				if !sc.sentDone {
-					sc.sentDone = true
-					// Finalize items still open at EOF (e.g. a truncated
-					// stream that never sent content_block_stop) so the
-					// terminal output only reports items whose done events
-					// were emitted.
-					prefix := sc.output.CompleteAssistantOutput(sc.assistantOutputIndex) + sc.completePendingToolCalls()
-					responseData := map[string]any{
-						"id":         sc.responseID,
-						"object":     "response",
-						"status":     "completed",
-						"model":      sc.model,
-						"provider":   "anthropic",
-						"created_at": sc.createdAt,
-						"output":     sc.output.FinalOutputItems(0, sc.assistantOutputIndex, sc.toolCalls, true),
-					}
-					// Include merged usage data captured across message_start/message_delta.
-					if sc.hasUsage {
-						responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
-					}
-					doneEvent := map[string]any{
-						"type":     "response.completed",
-						"response": responseData,
-					}
-					jsonData, marshalErr := json.Marshal(doneEvent)
-					if marshalErr != nil {
-						slog.Error("failed to marshal response.completed event", "error", marshalErr, "response_id", sc.responseID)
-						sc.closed = true
-						sc.releaseBuffer()
-						_ = sc.body.Close() //nolint:errcheck
-						return 0, io.EOF
-					}
-					sc.buffer.AppendString(prefix)
-					sc.buffer.AppendString("event: response.completed\ndata: ")
-					sc.buffer.AppendBytes(jsonData)
-					sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
-					return sc.buffer.Read(p), nil
-				}
-				sc.closed = true
-				sc.releaseBuffer()
-				_ = sc.body.Close() //nolint:errcheck
 				return 0, io.EOF
 			}
 			return 0, err
@@ -254,9 +239,60 @@ func (sc *responsesStreamConverter) reserveAssistantMessageOutput() {
 	sc.nextOutputIndex++
 }
 
+// appendTerminalEvents finalizes items still open when the upstream stream
+// ends and appends the terminal event plus the trailing [DONE] marker exactly
+// once. A stream that ends without Anthropic signalling the end of the message
+// (message_stop or a stop_reason) was interrupted: it ends with
+// response.incomplete instead of fabricating completion, and its open items
+// close with status "incomplete".
+func (sc *responsesStreamConverter) appendTerminalEvents() {
+	if sc.sentDone {
+		return
+	}
+	sc.sentDone = true
+	status := "completed"
+	eventName := "response.completed"
+	if !sc.sawStop {
+		status = "incomplete"
+		eventName = "response.incomplete"
+	}
+	prefix := sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status) + sc.completePendingToolCalls(status)
+	responseData := map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     status,
+		"model":      sc.model,
+		"provider":   "anthropic",
+		"created_at": sc.createdAt,
+		"output":     sc.output.FinalOutputItems(0, sc.assistantOutputIndex, sc.toolCalls, true),
+	}
+	if status == "incomplete" {
+		responseData["incomplete_details"] = map[string]any{"reason": "interrupted"}
+	}
+	// Include merged usage data captured across message_start/message_delta.
+	if sc.hasUsage {
+		responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
+	}
+	doneEvent := map[string]any{
+		"type":     eventName,
+		"response": responseData,
+	}
+	jsonData, marshalErr := json.Marshal(doneEvent)
+	if marshalErr != nil {
+		slog.Error("failed to marshal terminal responses event", "error", marshalErr, "event", eventName, "response_id", sc.responseID)
+		return
+	}
+	sc.buffer.AppendString(prefix)
+	sc.buffer.AppendString("event: ")
+	sc.buffer.AppendString(eventName)
+	sc.buffer.AppendString("\ndata: ")
+	sc.buffer.AppendBytes(jsonData)
+	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+}
+
 // completePendingToolCalls emits the done events for tool calls the upstream
-// stream left open, in content-block order.
-func (sc *responsesStreamConverter) completePendingToolCalls() string {
+// stream left open, in content-block order, carrying the given terminal status.
+func (sc *responsesStreamConverter) completePendingToolCalls(status string) string {
 	indices := make([]int, 0, len(sc.toolCalls))
 	for index := range sc.toolCalls {
 		indices = append(indices, index)
@@ -265,7 +301,7 @@ func (sc *responsesStreamConverter) completePendingToolCalls() string {
 
 	var out strings.Builder
 	for _, index := range indices {
-		out.WriteString(sc.output.CompleteToolCall(sc.toolCalls[index], true))
+		out.WriteString(sc.output.FinishToolCall(sc.toolCalls[index], status, true))
 	}
 	return out.String()
 }
@@ -355,7 +391,10 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 				return ""
 			}
 			state := sc.toolCalls[event.Index]
-			if state == nil {
+			// A delta for an already-closed call (stray event after its
+			// content_block_stop) must not mutate the arguments its
+			// output_item.done event declared.
+			if state == nil || state.Completed {
 				return ""
 			}
 			if state.PlaceholderObject {
@@ -381,6 +420,11 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
 		}
+		// A stop_reason means Anthropic finished generating, even if the
+		// stream is cut before message_stop arrives.
+		if event.Delta != nil && event.Delta.StopReason != "" {
+			sc.sawStop = true
+		}
 		if !sc.output.AssistantReserved() && len(sc.toolCalls) == 0 {
 			sc.reserveAssistantMessageOutput()
 		}
@@ -388,6 +432,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 
 	case "message_stop":
 		// Will be handled in Read() when we get EOF
+		sc.sawStop = true
 		return ""
 	}
 

@@ -3161,8 +3161,8 @@ data: {"type":"message_stop"}
 
 // TestStreamResponses_TruncatedToolCallFinalizedAtEOF covers an upstream stream
 // that dies mid tool call (no content_block_stop / message_stop). The converter
-// must emit the tool call's done events before response.completed so the
-// terminal output only reports items the stream actually closed.
+// must close the tool call with status "incomplete" and end the stream with
+// response.incomplete instead of fabricating completion.
 func TestStreamResponses_TruncatedToolCallFinalizedAtEOF(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -3196,8 +3196,9 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta"
 	}
 
 	foundArgumentsDone := false
-	foundItemDone := false
-	var output []any
+	itemDoneStatus := ""
+	foundCompleted := false
+	var response map[string]any
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		if event.Done {
 			continue
@@ -3208,26 +3209,164 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta"
 		case "response.output_item.done":
 			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "function_call" {
-				foundItemDone = true
+				itemDoneStatus, _ = item["status"].(string)
 			}
 		case "response.completed":
-			response, _ := event.Payload["response"].(map[string]any)
-			output, _ = response["output"].([]any)
+			foundCompleted = true
+		case "response.incomplete":
+			response, _ = event.Payload["response"].(map[string]any)
 		}
 	}
 
+	if foundCompleted {
+		t.Fatal("truncated stream must not end with response.completed")
+	}
+	if response == nil {
+		t.Fatal("expected response.incomplete terminal event on truncated stream")
+	}
 	if !foundArgumentsDone {
-		t.Fatal("expected response.function_call_arguments.done before response.completed on truncated stream")
+		t.Fatal("expected response.function_call_arguments.done before the terminal event on truncated stream")
 	}
-	if !foundItemDone {
-		t.Fatal("expected function_call response.output_item.done before response.completed on truncated stream")
+	if itemDoneStatus != "incomplete" {
+		t.Fatalf("function_call output_item.done status = %q, want %q", itemDoneStatus, "incomplete")
 	}
+	if response["status"] != "incomplete" {
+		t.Fatalf("response.status = %v, want incomplete", response["status"])
+	}
+	details, _ := response["incomplete_details"].(map[string]any)
+	if details["reason"] != "interrupted" {
+		t.Fatalf("incomplete_details = %#v, want reason interrupted", response["incomplete_details"])
+	}
+	output, _ := response["output"].([]any)
 	if len(output) != 1 {
-		t.Fatalf("response.completed output has %d items, want 1: %#v", len(output), output)
+		t.Fatalf("response.incomplete output has %d items, want 1: %#v", len(output), output)
 	}
 	toolCall, _ := output[0].(map[string]any)
-	if toolCall["type"] != "function_call" || toolCall["call_id"] != "toolu_123" || toolCall["arguments"] != `{"city":"War` {
-		t.Fatalf("output[0] = %#v, want finalized function_call with accumulated arguments", toolCall)
+	if toolCall["type"] != "function_call" || toolCall["call_id"] != "toolu_123" || toolCall["status"] != "incomplete" || toolCall["arguments"] != `{"city":"War` {
+		t.Fatalf("output[0] = %#v, want incomplete function_call with accumulated arguments", toolCall)
+	}
+}
+
+// failingReadCloser returns its data on the first read and the configured
+// error afterwards, mimicking an upstream body that dies mid-transfer.
+type failingReadCloser struct {
+	data []byte
+	err  error
+	read bool
+}
+
+func (r *failingReadCloser) Read(p []byte) (int, error) {
+	if !r.read {
+		r.read = true
+		return copy(p, r.data), nil
+	}
+	return 0, r.err
+}
+
+func (r *failingReadCloser) Close() error { return nil }
+
+// TestStreamResponses_NonEOFReadErrorEndsIncomplete covers an upstream body
+// that fails with a non-EOF error mid-message: the client must still receive
+// the response.incomplete terminal event and [DONE] before the error surfaces.
+func TestStreamResponses_NonEOFReadErrorEndsIncomplete(t *testing.T) {
+	reader := &failingReadCloser{
+		data: []byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}
+
+`),
+		err: io.ErrUnexpectedEOF,
+	}
+
+	converter := newResponsesStreamConverter(reader, "claude-sonnet-4-5-20250929")
+	raw, err := io.ReadAll(converter)
+	if err != io.ErrUnexpectedEOF {
+		t.Fatalf("ReadAll() error = %v, want io.ErrUnexpectedEOF surfaced after terminal events", err)
+	}
+
+	var response map[string]any
+	sawDone := false
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			sawDone = true
+			continue
+		}
+		if event.Name == "response.incomplete" {
+			response, _ = event.Payload["response"].(map[string]any)
+		}
+	}
+
+	if response == nil {
+		t.Fatal("expected response.incomplete terminal event before the read error")
+	}
+	if !sawDone {
+		t.Fatal("expected trailing [DONE] before the read error")
+	}
+	if response["status"] != "incomplete" {
+		t.Fatalf("response.status = %v, want incomplete", response["status"])
+	}
+}
+
+// TestStreamResponses_StopReasonWithoutMessageStopCompletes covers a stream cut
+// after message_delta carried a stop_reason but before message_stop arrived:
+// Anthropic finished generating, so the stream must still end with
+// response.completed.
+func TestStreamResponses_StopReasonWithoutMessageStopCompletes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	var response map[string]any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		response, _ = event.Payload["response"].(map[string]any)
+	}
+
+	if response == nil {
+		t.Fatal("expected response.completed when the stream ends after a stop_reason without message_stop")
+	}
+	if response["status"] != "completed" {
+		t.Fatalf("response.status = %v, want completed", response["status"])
 	}
 }
 
