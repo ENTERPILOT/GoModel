@@ -1399,6 +1399,26 @@
   "models_price_add_field": "Add at least one pricing field before saving.",
   "models_price_form_value": "Form/API value",
   "models_price_unset": "Unset",
+  "models_failover_generated": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Generated {count} Fallback model.",
+        "count_plural=*": "Generated {count} Fallback models."
+      }
+    }
+  ],
+  "models_failover_saved": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Saved {count} Failover mapping.",
+        "count_plural=*": "Saved {count} Failover mappings."
+      }
+    }
+  ],
   "providers_paste_service_account": "Paste service account JSON",
   "providers_type_required": "Select a provider type.",
   "providers_name_required": "Name is required.",

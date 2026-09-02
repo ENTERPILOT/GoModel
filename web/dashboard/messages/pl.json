@@ -1427,6 +1427,30 @@
   "models_price_add_field": "Przed zapisem dodaj co najmniej jedno pole ceny.",
   "models_price_form_value": "Wartość Form/API",
   "models_price_unset": "Nieustawione",
+  "models_failover_generated": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Wygenerowano {count} model Fallback.",
+        "count_plural=few": "Wygenerowano {count} modele Fallback.",
+        "count_plural=many": "Wygenerowano {count} modeli Fallback.",
+        "count_plural=*": "Wygenerowano {count} modelu Fallback."
+      }
+    }
+  ],
+  "models_failover_saved": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "Zapisano {count} mapowanie Failover.",
+        "count_plural=few": "Zapisano {count} mapowania Failover.",
+        "count_plural=many": "Zapisano {count} mapowań Failover.",
+        "count_plural=*": "Zapisano {count} mapowania Failover."
+      }
+    }
+  ],
   "providers_paste_service_account": "Wklej Service Account JSON",
   "providers_type_required": "Wybierz typ dostawcy.",
   "providers_name_required": "Nazwa jest wymagana.",
