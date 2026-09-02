@@ -47,7 +47,8 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t 
 		return c.String(http.StatusOK, "ok")
 	}))
 
-	ctxReq, _ := ensureRequestID(c.Request())
+	ctxReq, scope := installRequestScope(c.Request())
+	ensureRequestID(ctxReq, scope)
 	c.SetRequest(ctxReq)
 	err := RequestSnapshotCapture()(handler)(c)
 	require.NoError(t, err)

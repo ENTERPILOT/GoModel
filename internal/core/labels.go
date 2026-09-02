@@ -35,6 +35,9 @@ func WithRequestLabels(ctx context.Context, labels []string) context.Context {
 	if len(labels) == 0 {
 		return ctx
 	}
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetLabels(labels) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, requestLabelsKey, labels)
 }
 
@@ -43,6 +46,9 @@ func WithRequestLabels(ctx context.Context, labels []string) context.Context {
 func RequestLabelsFromContext(ctx context.Context) []string {
 	if ctx == nil {
 		return nil
+	}
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.labels
 	}
 	if labels, ok := ctx.Value(requestLabelsKey).([]string); ok {
 		return labels
@@ -56,6 +62,9 @@ func WithTaggingStripHeaders(ctx context.Context, headers map[string]struct{}) c
 	if len(headers) == 0 {
 		return ctx
 	}
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetTaggingStripHeaders(headers) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, taggingStripHeadersKey, headers)
 }
 
@@ -65,6 +74,9 @@ func WithTaggingStripHeaders(ctx context.Context, headers map[string]struct{}) c
 func TaggingStripHeadersFromContext(ctx context.Context) map[string]struct{} {
 	if ctx == nil {
 		return nil
+	}
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.taggingStripHeaders
 	}
 	if headers, ok := ctx.Value(taggingStripHeadersKey).(map[string]struct{}); ok {
 		return headers

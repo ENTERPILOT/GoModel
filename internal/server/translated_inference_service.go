@@ -512,7 +512,6 @@ func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context,
 	}
 
 	ctx, _ := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
 
 	const endpoint = "/chat/completions"
 	providerType := strings.TrimSpace(workflow.ProviderType)
@@ -886,7 +885,7 @@ func markRequestFailoverUsed(c *echo.Context) {
 	if c == nil || c.Request() == nil {
 		return
 	}
-	c.SetRequest(c.Request().WithContext(core.WithFailoverUsed(c.Request().Context())))
+	requestScope(c).SetFailoverUsed()
 }
 
 func resolvedModelFromWorkflow(workflow *core.Workflow, fallback string) string {

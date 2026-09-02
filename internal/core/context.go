@@ -87,6 +87,9 @@ const (
 
 // WithRequestID returns a new context with the request ID attached.
 func WithRequestID(ctx context.Context, requestID string) context.Context {
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetRequestID(requestID) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, requestIDKey, requestID)
 }
 
@@ -99,6 +102,9 @@ const RequestIDHeader = "X-Request-Id"
 // GetRequestID retrieves the request ID from the context.
 // Returns empty string if not found.
 func GetRequestID(ctx context.Context) string {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.requestID
+	}
 	if v := ctx.Value(requestIDKey); v != nil {
 		if id, ok := v.(string); ok {
 			return id
@@ -109,11 +115,17 @@ func GetRequestID(ctx context.Context) string {
 
 // WithRequestSnapshot returns a new context with the request snapshot attached.
 func WithRequestSnapshot(ctx context.Context, snapshot *RequestSnapshot) context.Context {
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetSnapshot(snapshot) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, requestSnapshotKey, snapshot)
 }
 
 // GetRequestSnapshot retrieves the request snapshot from the context.
 func GetRequestSnapshot(ctx context.Context) *RequestSnapshot {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.snapshot
+	}
 	if v := ctx.Value(requestSnapshotKey); v != nil {
 		if snapshot, ok := v.(*RequestSnapshot); ok {
 			return snapshot
@@ -124,11 +136,17 @@ func GetRequestSnapshot(ctx context.Context) *RequestSnapshot {
 
 // WithWhiteBoxPrompt returns a new context with the white-box prompt attached.
 func WithWhiteBoxPrompt(ctx context.Context, prompt *WhiteBoxPrompt) context.Context {
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetWhiteBoxPrompt(prompt) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, whiteBoxPromptKey, prompt)
 }
 
 // GetWhiteBoxPrompt retrieves the white-box prompt from the context.
 func GetWhiteBoxPrompt(ctx context.Context) *WhiteBoxPrompt {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.whiteBoxPrompt
+	}
 	if v := ctx.Value(whiteBoxPromptKey); v != nil {
 		if prompt, ok := v.(*WhiteBoxPrompt); ok {
 			return prompt
@@ -144,11 +162,17 @@ func WithWorkflow(ctx context.Context, workflow *Workflow) context.Context {
 	if GetWorkflow(ctx) == workflow {
 		return ctx
 	}
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetWorkflow(workflow) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, workflowKey, workflow)
 }
 
 // GetWorkflow retrieves the workflow from the context.
 func GetWorkflow(ctx context.Context) *Workflow {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.workflow
+	}
 	if v := ctx.Value(workflowKey); v != nil {
 		if workflow, ok := v.(*Workflow); ok {
 			return workflow
@@ -162,12 +186,18 @@ func WithSessionID(ctx context.Context, sessionID string) context.Context {
 	if sessionID == "" {
 		return ctx
 	}
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetSessionID(sessionID) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, sessionIDKey, sessionID)
 }
 
 // SessionIDFromContext retrieves the detected client session id, or "" when
 // the request carries no session signal.
 func SessionIDFromContext(ctx context.Context) string {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.sessionID
+	}
 	if v := ctx.Value(sessionIDKey); v != nil {
 		if id, ok := v.(string); ok {
 			return id
@@ -194,11 +224,17 @@ func RequestDialectFromContext(ctx context.Context) RequestDialect {
 
 // WithAuthKeyID returns a new context with the authenticated managed auth key id attached.
 func WithAuthKeyID(ctx context.Context, id string) context.Context {
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetAuthKeyID(id) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, authKeyIDKey, id)
 }
 
 // GetAuthKeyID retrieves the managed auth key id from the context.
 func GetAuthKeyID(ctx context.Context) string {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.authKeyID
+	}
 	if v := ctx.Value(authKeyIDKey); v != nil {
 		if id, ok := v.(string); ok {
 			return id
@@ -210,6 +246,9 @@ func GetAuthKeyID(ctx context.Context) string {
 // WithCredentialAllowedModels returns a new context carrying the model
 // allowlist bound to the authenticated credential. An empty list clears it.
 func WithCredentialAllowedModels(ctx context.Context, allowed []string) context.Context {
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetCredentialAllowedModels(allowed) }); ok {
+		return scoped
+	}
 	if len(allowed) == 0 {
 		return context.WithValue(ctx, credentialAllowedModelsKey, []string(nil))
 	}
@@ -219,6 +258,9 @@ func WithCredentialAllowedModels(ctx context.Context, allowed []string) context.
 // GetCredentialAllowedModels retrieves the credential-bound model allowlist.
 // Nil means the credential does not restrict models.
 func GetCredentialAllowedModels(ctx context.Context) []string {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.credentialAllowedModels
+	}
 	if v := ctx.Value(credentialAllowedModelsKey); v != nil {
 		if allowed, ok := v.([]string); ok {
 			return allowed
@@ -229,11 +271,17 @@ func GetCredentialAllowedModels(ctx context.Context) []string {
 
 // WithEffectiveUserPath returns a new context with an effective user path override attached.
 func WithEffectiveUserPath(ctx context.Context, userPath string) context.Context {
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetEffectiveUserPath(userPath) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, effectiveUserPathKey, userPath)
 }
 
 // GetEffectiveUserPath retrieves the effective user path override from context.
 func GetEffectiveUserPath(ctx context.Context) string {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.effectiveUserPath
+	}
 	if v := ctx.Value(effectiveUserPathKey); v != nil {
 		if userPath, ok := v.(string); ok {
 			return userPath
@@ -249,6 +297,9 @@ func WithUserPathHeaderName(ctx context.Context, headerName string) context.Cont
 	headerName = UserPathHeaderName(headerName)
 	if headerName == UserPathHeader {
 		return ctx
+	}
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetUserPathHeaderName(headerName) }); ok {
+		return scoped
 	}
 	return context.WithValue(ctx, userPathHeaderNameKey, headerName)
 }
@@ -326,11 +377,17 @@ func GetGuardrailsHash(ctx context.Context) string {
 
 // WithFailoverUsed returns a new context marked as having used a failover model.
 func WithFailoverUsed(ctx context.Context) context.Context {
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetFailoverUsed() }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, failoverUsedKey, true)
 }
 
 // GetFailoverUsed reports whether the request was served by a failover model.
 func GetFailoverUsed(ctx context.Context) bool {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.failoverUsed
+	}
 	if v := ctx.Value(failoverUsedKey); v != nil {
 		if used, ok := v.(bool); ok {
 			return used
@@ -346,12 +403,18 @@ func WithRewriteTokensSaved(ctx context.Context, tokensSaved int) context.Contex
 	if tokensSaved <= 0 {
 		return ctx
 	}
+	if scoped, ok := withScope(ctx, func(s *RequestScope) { s.SetRewriteTokensSaved(tokensSaved) }); ok {
+		return scoped
+	}
 	return context.WithValue(ctx, rewriteTokensSavedKey, tokensSaved)
 }
 
 // RewriteTokensSavedFromContext retrieves the request's rewrite savings
 // estimate, or zero when no rewriter reported savings.
 func RewriteTokensSavedFromContext(ctx context.Context) int {
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.rewriteTokensSaved
+	}
 	if v := ctx.Value(rewriteTokensSavedKey); v != nil {
 		if saved, ok := v.(int); ok && saved > 0 {
 			return saved

@@ -83,10 +83,7 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 			if changed {
 				pinOriginalAuditRequestBody(c, auditLogger)
 				applyRewrittenBody(c, in.Body)
-				if tokensSaved > 0 {
-					req := c.Request()
-					c.SetRequest(req.WithContext(core.WithRewriteTokensSaved(req.Context(), tokensSaved)))
-				}
+				requestScope(c).SetRewriteTokensSaved(tokensSaved)
 			}
 			if len(feedbackObservers) > 0 {
 				setResponseFeedbackObservers(c, feedbackObservers)

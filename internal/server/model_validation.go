@@ -52,7 +52,7 @@ func deriveWorkflowWithPolicy(
 
 	requestID := requestIDFromContextOrHeader(c.Request())
 	if requestID != "" && strings.TrimSpace(core.GetRequestID(c.Request().Context())) != requestID {
-		c.SetRequest(c.Request().WithContext(core.WithRequestID(c.Request().Context(), requestID)))
+		requestScope(c).SetRequestID(requestID)
 	}
 
 	desc := core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path)
@@ -127,10 +127,10 @@ func storeWorkflow(c *echo.Context, workflow *core.Workflow) {
 		return
 	}
 	// Resolution stores the workflow once and the inference path stores it
-	// again after preparation; skip the context wrap (and request copy) when
-	// the context already carries this exact workflow.
-	if ctx := c.Request().Context(); core.GetWorkflow(ctx) != workflow {
-		c.SetRequest(c.Request().WithContext(core.WithWorkflow(ctx, workflow)))
+	// again after preparation; skip the scope update when the context already
+	// carries this exact workflow.
+	if core.GetWorkflow(c.Request().Context()) != workflow {
+		requestScope(c).SetWorkflow(workflow)
 	}
 	auditlog.EnrichEntryWithWorkflow(c, workflow)
 }

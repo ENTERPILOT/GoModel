@@ -24,12 +24,25 @@ func UserPathHeaderName(raw string) string {
 // UserPathHeaderNameFromContext returns the request-scoped user-path header
 // name, falling back to the default public header.
 func UserPathHeaderNameFromContext(ctx context.Context) string {
-	if ctx != nil {
-		if value, ok := ctx.Value(userPathHeaderNameKey).(string); ok {
-			return UserPathHeaderName(value)
-		}
+	if name := userPathHeaderNameValue(ctx); name != "" {
+		return UserPathHeaderName(name)
 	}
 	return UserPathHeader
+}
+
+// userPathHeaderNameValue returns the raw configured header name carried by
+// ctx, or "" when only the default applies.
+func userPathHeaderNameValue(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if scope := RequestScopeFromContext(ctx); scope != nil {
+		return scope.userPathHeaderName
+	}
+	if value, ok := ctx.Value(userPathHeaderNameKey).(string); ok {
+		return value
+	}
+	return ""
 }
 
 // NormalizeUserPath canonicalizes one user hierarchy path from request ingress.

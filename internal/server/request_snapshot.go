@@ -23,14 +23,17 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 	userPathHeaderName := configuredUserPathHeaderName(userPathHeader...)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			req, requestID := ensureRequestID(c.Request())
+			// One context wrap installs the request scope; every later stage
+			// fills it in place instead of re-wrapping (and copying) the request.
+			req, scope := installRequestScope(c.Request())
+			requestID := ensureRequestID(req, scope)
 			c.Response().Header().Set(core.RequestIDHeader, requestID)
 			desc := core.DescribeEndpoint(req.Method, req.URL.Path)
 			if !desc.IngressManaged {
 				// The configured header name must reach every handler that
 				// reads the user path itself (GET /v1/models), not only the
 				// model-interaction endpoints below.
-				req = req.WithContext(core.WithUserPathHeaderName(req.Context(), userPathHeaderName))
+				scope.SetUserPathHeaderName(userPathHeaderName)
 				// Model endpoints that own their transport (MCP, realtime,
 				// audio) take no snapshot, but their identity must still reach
 				// the context: rate limits, budgets, session binding, and
@@ -44,7 +47,7 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 					}
 					if userPath != "" {
 						req.Header.Set(userPathHeaderName, userPath)
-						req = req.WithContext(core.WithEffectiveUserPath(req.Context(), userPath))
+						scope.SetEffectiveUserPath(userPath)
 					}
 				}
 				c.SetRequest(req)
@@ -80,15 +83,15 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 				userPath,
 			)
 
-			ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
-			ctx = core.WithRequestSnapshot(ctx, snapshot)
+			scope.SetUserPathHeaderName(userPathHeaderName)
+			scope.SetSnapshot(snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
 				if !bodyCaptured {
 					seedRequestBodySelectorHints(req, desc.BodyMode, semantics)
 				}
-				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
+				scope.SetWhiteBoxPrompt(semantics)
 			}
-			c.SetRequest(req.WithContext(ctx))
+			c.SetRequest(req)
 
 			return next(c)
 		}
@@ -102,7 +105,19 @@ func configuredUserPathHeaderName(headerNames ...string) string {
 	return core.UserPathHeaderName(headerNames[0])
 }
 
-func ensureRequestID(req *http.Request) (*http.Request, string) {
+// installRequestScope returns req carrying a request scope, wrapping its
+// context once when it has none yet.
+func installRequestScope(req *http.Request) (*http.Request, *core.RequestScope) {
+	if scope := core.RequestScopeFromContext(req.Context()); scope != nil {
+		return req, scope
+	}
+	ctx, scope := core.WithRequestScope(req.Context())
+	return req.WithContext(ctx), scope
+}
+
+// ensureRequestID resolves the request id (context, client header, or a fresh
+// UUID), mirrors it into the request header, and records it on the scope.
+func ensureRequestID(req *http.Request, scope *core.RequestScope) string {
 	if req.Header == nil {
 		req.Header = make(http.Header)
 	}
@@ -115,10 +130,8 @@ func ensureRequestID(req *http.Request) (*http.Request, string) {
 	}
 
 	req.Header.Set(core.RequestIDHeader, requestID)
-	if current := strings.TrimSpace(core.GetRequestID(req.Context())); current != requestID {
-		req = req.WithContext(core.WithRequestID(req.Context(), requestID))
-	}
-	return req, requestID
+	scope.SetRequestID(requestID)
+	return requestID
 }
 
 func snapshotRouteParams(path string, params map[string]string) map[string]string {
@@ -263,14 +276,14 @@ func storeRequestBodySnapshot(c *echo.Context, bodyBytes []byte) {
 	}
 
 	updated := snapshot.WithOwnedCapturedBody(capturedBody, bodyNotCaptured)
-	ctx := core.WithRequestSnapshot(req.Context(), updated)
+	scope := requestScope(c)
+	scope.SetSnapshot(updated)
 	previous := core.GetWhiteBoxPrompt(req.Context())
 	semanticSnapshot := updated
 	if bodyNotCaptured {
 		semanticSnapshot = snapshot.WithOwnedCapturedBody(bodyBytes, false)
 	}
 	if semantics := core.RefreshWhiteBoxPrompt(semanticSnapshot, previous); semantics != nil {
-		ctx = core.WithWhiteBoxPrompt(ctx, semantics)
+		scope.SetWhiteBoxPrompt(semantics)
 	}
-	c.SetRequest(req.WithContext(ctx))
 }

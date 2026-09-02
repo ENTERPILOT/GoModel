@@ -43,8 +43,9 @@ func applyUserPathHeaderToContext(c *echo.Context) (bool, error) {
 		return true, nil
 	}
 	req.Header.Set(headerName, userPath)
-	ctx = core.WithUserPathHeaderName(ctx, headerName)
-	c.SetRequest(req.WithContext(core.WithEffectiveUserPath(ctx, userPath)))
+	scope := requestScope(c)
+	scope.SetUserPathHeaderName(headerName)
+	scope.SetEffectiveUserPath(userPath)
 	return true, nil
 }
 
@@ -88,8 +89,12 @@ func requestContextWithRequestID(req *http.Request) (context.Context, string) {
 
 	ctx := req.Context()
 	if strings.TrimSpace(core.GetRequestID(ctx)) != requestID {
-		ctx = core.WithRequestID(ctx, requestID)
-		*req = *req.WithContext(ctx)
+		if scope := core.RequestScopeFromContext(ctx); scope != nil {
+			scope.SetRequestID(requestID)
+		} else {
+			ctx = core.WithRequestID(ctx, requestID)
+			*req = *req.WithContext(ctx)
+		}
 	}
 
 	return ctx, requestID

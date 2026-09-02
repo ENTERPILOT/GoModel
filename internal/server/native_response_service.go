@@ -199,7 +199,6 @@ func (s *nativeResponseService) DeleteResponse(c *echo.Context) error {
 
 func (s *nativeResponseService) CountResponseInputTokens(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
 
 	req, providerType, err := s.utilityRequest(c)
 	if err != nil {
@@ -229,7 +228,6 @@ func (s *nativeResponseService) CountResponseInputTokens(c *echo.Context) error 
 
 func (s *nativeResponseService) CompactResponse(c *echo.Context) error {
 	ctx, _ := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
 
 	req, providerType, err := s.utilityRequest(c)
 	if err != nil {

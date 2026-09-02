@@ -37,8 +37,7 @@ func sessionCapture(detector *session.Detector, parentLookup interactionParentLo
 				if id == "" {
 					return false
 				}
-				req := c.Request()
-				c.SetRequest(req.WithContext(core.WithSessionID(req.Context(), id)))
+				requestScope(c).SetSessionID(id)
 				auditlog.EnrichEntryWithSessionID(c, id)
 				return true
 			}
@@ -149,7 +148,6 @@ func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) (
 
 func markSessionBodyNotCaptured(c *echo.Context, snapshot *core.RequestSnapshot) *core.RequestSnapshot {
 	updated := snapshot.WithOwnedCapturedBody(nil, true)
-	req := c.Request()
-	c.SetRequest(req.WithContext(core.WithRequestSnapshot(req.Context(), updated)))
+	requestScope(c).SetSnapshot(updated)
 	return updated
 }

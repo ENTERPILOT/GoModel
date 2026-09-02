@@ -3,7 +3,6 @@ package server
 import (
 	"github.com/labstack/echo/v5"
 
-	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/tagging"
 )
 
@@ -17,20 +16,9 @@ func TaggingCapture(service *tagging.Service) echo.MiddlewareFunc {
 			if service == nil || !service.HasRules() {
 				return next(c)
 			}
-			req := c.Request()
-			ctx := req.Context()
-			changed := false
-			if labels := service.ExtractLabels(req.Header); len(labels) > 0 {
-				ctx = core.WithRequestLabels(ctx, labels)
-				changed = true
-			}
-			if strip := service.StripHeaders(); len(strip) > 0 {
-				ctx = core.WithTaggingStripHeaders(ctx, strip)
-				changed = true
-			}
-			if changed {
-				c.SetRequest(req.WithContext(ctx))
-			}
+			scope := requestScope(c)
+			scope.SetLabels(service.ExtractLabels(c.Request().Header))
+			scope.SetTaggingStripHeaders(service.StripHeaders())
 			return next(c)
 		}
 	}

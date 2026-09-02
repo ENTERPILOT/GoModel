@@ -47,7 +47,6 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	defer adm.release()
 
 	ctx, _ := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
 		Method:          c.Request().Method,
 		Endpoint:        endpoint,

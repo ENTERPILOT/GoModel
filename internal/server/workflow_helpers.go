@@ -106,10 +106,8 @@ func translatedWorkflowForRequest(
 	}
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	ctx := c.Request().Context()
-	if requestID != "" && strings.TrimSpace(core.GetRequestID(ctx)) != requestID {
-		ctx = core.WithRequestID(ctx, requestID)
-		c.SetRequest(c.Request().WithContext(ctx))
+	if requestID != "" && strings.TrimSpace(core.GetRequestID(c.Request().Context())) != requestID {
+		requestScope(c).SetRequestID(requestID)
 	}
 
 	return translatedWorkflow(

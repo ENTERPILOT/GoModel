@@ -22,7 +22,7 @@ func ensureWhiteBoxPrompt(c *echo.Context) *core.WhiteBoxPrompt {
 		return nil
 	}
 
-	c.SetRequest(c.Request().WithContext(core.WithWhiteBoxPrompt(ctx, semantics)))
+	requestScope(c).SetWhiteBoxPrompt(semantics)
 	return semantics
 }
 

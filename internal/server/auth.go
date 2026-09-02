@@ -71,10 +71,10 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 				// the response header would leave downstream context consumers scoped
 				// to the wrong principal.
 				setAuthenticationUserHeader(c, "")
-				ctx := ext.WithoutAuthentication(c.Request().Context())
-				ctx = core.WithEffectiveUserPath(ctx, "")
-				ctx = core.WithCredentialAllowedModels(ctx, nil)
-				c.SetRequest(c.Request().WithContext(ctx))
+				c.SetRequest(c.Request().WithContext(ext.WithoutAuthentication(c.Request().Context())))
+				scope := requestScope(c)
+				scope.SetEffectiveUserPath("")
+				scope.SetCredentialAllowedModels(nil)
 				if tokenErr != "" {
 					authErr := authenticationError(c, tokenErr)
 					return writeGatewayError(c, authErr)
@@ -170,19 +170,14 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, normalized.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, normalized.DashboardAccess)
 	ctx = ext.WithAuthentication(ctx, normalized)
+	c.SetRequest(c.Request().WithContext(ctx))
+	scope := requestScope(c)
 	if len(normalized.Labels) > 0 {
-		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), normalized.Labels))
+		scope.SetLabels(core.MergeLabels(core.RequestLabelsFromContext(ctx), normalized.Labels))
 	}
 	if userPath != "" {
-		ctx = core.WithEffectiveUserPath(ctx, userPath)
-		ctx = core.WithUserPathHeaderName(ctx, userPathHeaderName)
-		if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
-			ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
-		}
-		c.Request().Header.Set(userPathHeaderName, userPath)
-		auditlog.EnrichEntryWithUserPath(c, userPath)
+		bindScopeUserPath(c, scope, userPath, userPathHeaderName)
 	}
-	c.SetRequest(c.Request().WithContext(ctx))
 	setAuthenticationUserHeader(c, userPath)
 	auditlog.EnrichEntryWithAuthMethod(c, normalized.Method)
 	auditlog.EnrichEntryWithPrincipalID(c, normalized.PrincipalID)
@@ -269,29 +264,37 @@ func interactionContinuationAllowed(ctx context.Context) bool {
 // applyAuthKeyResult enriches the request context and audit entry with the
 // authenticated managed key's identity, labels, and bound user path.
 func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResult, userPathHeaderName string) {
-	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
-	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
+	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, authResult.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
+	c.SetRequest(c.Request().WithContext(ctx))
+	scope := requestScope(c)
+	scope.SetAuthKeyID(authResult.ID)
 	if len(authResult.AllowedModels) > 0 {
-		ctx = core.WithCredentialAllowedModels(ctx, authResult.AllowedModels)
+		scope.SetCredentialAllowedModels(authResult.AllowedModels)
 	}
 	if len(authResult.Labels) > 0 {
 		// Key labels join any labels the tagging middleware already
 		// extracted from request headers; duplicates collapse.
-		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), authResult.Labels))
+		scope.SetLabels(core.MergeLabels(core.RequestLabelsFromContext(ctx), authResult.Labels))
 	}
 	if userPath := strings.TrimSpace(authResult.UserPath); userPath != "" {
-		ctx = core.WithEffectiveUserPath(ctx, userPath)
-		ctx = core.WithUserPathHeaderName(ctx, userPathHeaderName)
-		if snapshot := core.GetRequestSnapshot(ctx); snapshot != nil {
-			ctx = core.WithRequestSnapshot(ctx, snapshot.WithUserPathHeader(userPath, userPathHeaderName))
-		}
-		c.Request().Header.Set(userPathHeaderName, userPath)
-		auditlog.EnrichEntryWithUserPath(c, userPath)
+		bindScopeUserPath(c, scope, userPath, userPathHeaderName)
 	}
-	c.SetRequest(c.Request().WithContext(ctx))
 	setAuthenticationUserHeader(c, strings.TrimSpace(authResult.UserPath))
 	auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
+}
+
+// bindScopeUserPath binds a credential's user path to the request: the
+// effective path, the configured header name, the captured snapshot, the
+// live header, and the audit entry all follow it.
+func bindScopeUserPath(c *echo.Context, scope *core.RequestScope, userPath, userPathHeaderName string) {
+	scope.SetEffectiveUserPath(userPath)
+	scope.SetUserPathHeaderName(userPathHeaderName)
+	if snapshot := core.GetRequestSnapshot(c.Request().Context()); snapshot != nil {
+		scope.SetSnapshot(snapshot.WithUserPathHeader(userPath, userPathHeaderName))
+	}
+	c.Request().Header.Set(userPathHeaderName, userPath)
+	auditlog.EnrichEntryWithUserPath(c, userPath)
 }
 
 func setAuthenticationUserHeader(c *echo.Context, userPath string) {

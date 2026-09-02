@@ -225,7 +225,6 @@ func (s *realtimeService) prepare(c *echo.Context, model, providerHint string) (
 	auditlog.EnrichEntry(c, selector.Model, "")
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
 
 	qualified := selector.QualifiedModel()
 	route := realtimeRoute{

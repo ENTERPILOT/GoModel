@@ -63,7 +63,6 @@ func (s *modelCallService) prepare(c *echo.Context, model, providerHint string) 
 	auditlog.EnrichEntry(c, selector.Model, "")
 
 	ctx, requestID := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
 	route := s.routeFor(selector, requestID)
 	// Stamp the executed route so audit rows carry the resolved model and
 	// provider, as the inference orchestrator does for chat.
