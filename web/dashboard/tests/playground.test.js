@@ -7,11 +7,14 @@ import {
   buildPlaygroundRequest,
   clampJsonPanelWidth,
   createStreamAccumulator,
+  defaultUserPathForModel,
   extractResponseText,
   extractUsage,
   maxJsonPanelWidth,
   normalizeEndpoint,
   playgroundModelOptions,
+  playgroundUserPathHeader,
+  playgroundUserPathOptions,
   sendableMessages,
   streamErrorMessage,
 } from "../src/pages/playground/playgroundLogic.js";
@@ -303,6 +306,73 @@ test("playgroundModelOptions strips a provider prefix that repeats the provider"
     { id: "Ollama/qwen2.5:0.5b", label: "qwen2.5:0.5b", provider: "ollama" },
     { id: "openai-eu/gpt-4o", label: "openai-eu/gpt-4o", provider: "openai" },
   ]);
+});
+
+test("playgroundUserPathOptions returns the user_paths of the selected model as {value,label}", () => {
+  const inventory = [
+    { selector: "gpt-4o", provider_name: "openai", model: { id: "gpt-4o" } },
+    {
+      selector: "team-model",
+      provider_name: "x",
+      model: { id: "team-model" },
+      access: { user_paths: ["/team/alpha", "/team/beta"] },
+    },
+  ];
+  assert.deepEqual(playgroundUserPathOptions(inventory, "team-model"), [
+    { value: "/team/alpha", label: "/team/alpha" },
+    { value: "/team/beta", label: "/team/beta" },
+  ]);
+  // Whitespace around the selector still matches the trimmed id.
+  assert.deepEqual(playgroundUserPathOptions(inventory, " team-model "), [
+    { value: "/team/alpha", label: "/team/alpha" },
+    { value: "/team/beta", label: "/team/beta" },
+  ]);
+  // Unrestricted, unknown, or malformed entries yield no options.
+  assert.deepEqual(playgroundUserPathOptions(inventory, "gpt-4o"), []);
+  assert.deepEqual(playgroundUserPathOptions(inventory, "nope"), []);
+  assert.deepEqual(playgroundUserPathOptions(undefined, "team-model"), []);
+  assert.deepEqual(
+    playgroundUserPathOptions([{ selector: "x", access: { user_paths: "nope" } }], "x"),
+    [],
+  );
+});
+
+test("playgroundUserPathOptions skips non-string user_paths entries without throwing", () => {
+  const inventory = [
+    {
+      selector: "team-model",
+      access: { user_paths: ["/team/alpha", 42, null, "", { value: "/team/beta" }, "/team/beta"] },
+    },
+  ];
+  assert.deepEqual(playgroundUserPathOptions(inventory, "team-model"), [
+    { value: "/team/alpha", label: "/team/alpha" },
+    { value: "/team/beta", label: "/team/beta" },
+  ]);
+});
+
+test("defaultUserPathForModel returns the first allowed path or empty", () => {
+  const inventory = [
+    { selector: "gpt-4o", model: { id: "gpt-4o" }, access: { user_paths: [] } },
+    {
+      selector: "team-model",
+      model: { id: "team-model" },
+      access: { user_paths: ["/team/alpha", "/team/beta"] },
+    },
+  ];
+  assert.equal(defaultUserPathForModel(inventory, "team-model"), "/team/alpha");
+  assert.equal(defaultUserPathForModel(inventory, "gpt-4o"), "");
+  assert.equal(defaultUserPathForModel(inventory, "nope"), "");
+  assert.equal(defaultUserPathForModel(undefined, "team-model"), "");
+});
+
+test("playgroundUserPathHeader sends X-GoModel-User-Path only when non-empty", () => {
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha"), { "X-GoModel-User-Path": "/team/alpha" });
+  // Surrounding whitespace is trimmed before the header is built.
+  assert.deepEqual(playgroundUserPathHeader("  /team/alpha  "), { "X-GoModel-User-Path": "/team/alpha" });
+  // Unrestricted selection or blank input drops the header.
+  assert.deepEqual(playgroundUserPathHeader(""), {});
+  assert.deepEqual(playgroundUserPathHeader("   "), {});
+  assert.deepEqual(playgroundUserPathHeader(undefined), {});
 });
 
 test("clampJsonPanelWidth keeps the panel inside the viewport", () => {
