@@ -3,7 +3,9 @@ package providers
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"hash"
 	"log/slog"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -66,19 +68,14 @@ func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, sele
 	if hasChatCacheDirective(req, prefixMessages) {
 		return req
 	}
-	prefixBody, err := json.Marshal(struct {
-		Tools    []map[string]any `json:"tools,omitempty"`
-		Messages []core.Message   `json:"messages"`
-	}{req.Tools, prefixMessages})
-	if err != nil || estimatedTokens(prefixBody) < minimum {
+	digest := newPrefixDigest(providerType, selector, req.User)
+	digest.writeChatPrefix(req.Tools, prefixMessages)
+	if digest.err != nil || digest.tokens() < minimum {
 		return req
 	}
 
-	planned, ok := cloneChatRequest(req)
-	if !ok {
-		return req
-	}
-	key := cacheAffinityKey(providerType, selector, req.User, prefixBody)
+	planned := cloneChatRequest(req)
+	key := digest.key()
 	switch profile.mode {
 	case promptCacheOpenAI:
 		planned.ExtraFields = mergeCacheExtras(planned.ExtraFields, map[string]json.RawMessage{
@@ -117,19 +114,13 @@ func (p *cachePlanner) planResponses(req *core.ResponsesRequest, providerType st
 	if !ok || len(items) < 2 || hasResponsesCacheDirective(req, items[:len(items)-1]) {
 		return req
 	}
-	prefixBody, err := json.Marshal(struct {
-		Instructions string                       `json:"instructions,omitempty"`
-		Tools        []map[string]any             `json:"tools,omitempty"`
-		Input        []core.ResponsesInputElement `json:"input"`
-	}{req.Instructions, req.Tools, items[:len(items)-1]})
-	if err != nil || estimatedTokens(prefixBody) < providerCacheMinimum(profile, selector.Model) {
+	digest := newPrefixDigest(providerType, selector, req.User)
+	digest.writeResponsesPrefix(req.Instructions, req.Tools, items[:len(items)-1])
+	if digest.err != nil || digest.tokens() < providerCacheMinimum(profile, selector.Model) {
 		return req
 	}
-	planned, ok := cloneResponsesRequest(req)
-	if !ok {
-		return req
-	}
-	key := cacheAffinityKey(providerType, selector, req.User, prefixBody)
+	planned := cloneResponsesRequest(req, items)
+	key := digest.key()
 	switch profile.mode {
 	case promptCacheOpenAI:
 		planned.ExtraFields = mergeCacheExtras(planned.ExtraFields, map[string]json.RawMessage{
@@ -148,32 +139,28 @@ func (p *cachePlanner) planResponses(req *core.ResponsesRequest, providerType st
 	return planned
 }
 
-func cloneChatRequest(req *core.ChatRequest) (*core.ChatRequest, bool) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, false
-	}
-	var clone core.ChatRequest
-	if err := json.Unmarshal(body, &clone); err != nil {
-		return nil, false
-	}
+// cloneChatRequest returns a copy the planner may annotate without touching
+// the caller's request. Only what the planner writes is duplicated: the
+// request struct, the Messages slice header, and the internal cache plan.
+// ExtraFields values are immutable raw JSON, and the mark* helpers copy any
+// nested content slice or map before writing into it.
+func cloneChatRequest(req *core.ChatRequest) *core.ChatRequest {
+	clone := *req
+	clone.Messages = slices.Clone(req.Messages)
 	if req.PromptCachePlan != nil {
 		plan := *req.PromptCachePlan
 		clone.PromptCachePlan = &plan
 	}
-	return &clone, true
+	return &clone
 }
 
-func cloneResponsesRequest(req *core.ResponsesRequest) (*core.ResponsesRequest, bool) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, false
-	}
-	var clone core.ResponsesRequest
-	if err := json.Unmarshal(body, &clone); err != nil {
-		return nil, false
-	}
-	return &clone, true
+// cloneResponsesRequest mirrors cloneChatRequest for the Responses API. items
+// is req.Input already asserted to its typed slice form; the clone owns a
+// fresh slice header so per-item writes never reach the caller.
+func cloneResponsesRequest(req *core.ResponsesRequest, items []core.ResponsesInputElement) *core.ResponsesRequest {
+	clone := *req
+	clone.Input = slices.Clone(items)
+	return &clone
 }
 
 var cacheDirectiveKeys = []string{
@@ -329,10 +316,11 @@ func markOpenAIChatBreakpoint(messages *[]core.Message) bool {
 		case []core.ContentPart:
 			for j := len(content) - 1; j >= 0; j-- {
 				if content[j].Type == "text" || content[j].Type == "image_url" || content[j].Type == "input_audio" {
-					content[j].ExtraFields = mergeCacheExtras(content[j].ExtraFields, map[string]json.RawMessage{
+					parts := slices.Clone(content)
+					parts[j].ExtraFields = mergeCacheExtras(parts[j].ExtraFields, map[string]json.RawMessage{
 						"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
 					})
-					msg.Content = content
+					msg.Content = parts
 					return true
 				}
 			}
@@ -363,16 +351,17 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 		case []core.ContentPart:
 			for j := len(content) - 1; j >= 0; j-- {
 				if content[j].Type == "text" || content[j].Type == "input_text" || content[j].Type == "input_image" || content[j].Type == "input_file" {
-					content[j].ExtraFields = mergeCacheExtras(content[j].ExtraFields, map[string]json.RawMessage{
+					parts := slices.Clone(content)
+					parts[j].ExtraFields = mergeCacheExtras(parts[j].ExtraFields, map[string]json.RawMessage{
 						"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
 					})
-					items[i].Content = content
+					items[i].Content = parts
 					req.Input = items
 					return true
 				}
 			}
 		case []any:
-			for _, c := range slices.Backward(content) {
+			for j, c := range slices.Backward(content) {
 				block, ok := c.(map[string]any)
 				if !ok {
 					continue
@@ -380,7 +369,11 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 				blockType, _ := block["type"].(string)
 				if blockType == "text" || blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
 					if _, exists := block["prompt_cache_breakpoint"]; !exists {
-						block["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
+						marked := maps.Clone(block)
+						marked["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
+						blocks := slices.Clone(content)
+						blocks[j] = marked
+						content = blocks
 					}
 					items[i].Content = content
 					req.Input = items
@@ -388,11 +381,15 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 				}
 			}
 		case []map[string]any:
-			for _, c := range slices.Backward(content) {
+			for j, c := range slices.Backward(content) {
 				blockType, _ := c["type"].(string)
 				if blockType == "text" || blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
 					if _, exists := c["prompt_cache_breakpoint"]; !exists {
-						c["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
+						marked := maps.Clone(c)
+						marked["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
+						blocks := slices.Clone(content)
+						blocks[j] = marked
+						content = blocks
 					}
 					items[i].Content = content
 					req.Input = items
@@ -418,21 +415,110 @@ func mergeCacheExtras(base core.UnknownJSONFields, values map[string]json.RawMes
 	return merged
 }
 
-func cacheAffinityKey(providerType string, selector core.ModelSelector, user string, prefix []byte) string {
-	hash := sha256.New()
-	hash.Write([]byte(normalizedProviderType(providerType)))
-	hash.Write([]byte{0})
-	hash.Write([]byte(selector.Provider))
-	hash.Write([]byte{0})
-	hash.Write([]byte(selector.Model))
-	hash.Write([]byte{0})
-	hash.Write([]byte(user))
-	hash.Write([]byte{0})
-	hash.Write(prefix)
-	return "gomodel-" + hex.EncodeToString(hash.Sum(nil)[:16])
+// prefixDigest hashes the cache-relevant request prefix as it is encoded, so
+// the affinity key and the token estimate derive from the same bytes without
+// materializing the serialized prefix. The bytes fed to the hash are exactly
+// the JSON of the prefix object the planner used to marshal in full, which
+// keeps affinity keys stable across gateway versions.
+type prefixDigest struct {
+	hash hash.Hash
+	enc  *json.Encoder
+	// bytes counts prefix bytes only; the key header is excluded.
+	bytes int
+	err   error
+	// encoding is set while the encoder writes one value so the newline it
+	// appends after every value can be dropped instead of hashed.
+	encoding bool
 }
 
-func estimatedTokens(body []byte) int { return (len(body) + 3) / 4 }
+func newPrefixDigest(providerType string, selector core.ModelSelector, user string) *prefixDigest {
+	d := &prefixDigest{hash: sha256.New()}
+	d.enc = json.NewEncoder(d)
+	d.hash.Write([]byte(normalizedProviderType(providerType)))
+	d.hash.Write([]byte{0})
+	d.hash.Write([]byte(selector.Provider))
+	d.hash.Write([]byte{0})
+	d.hash.Write([]byte(selector.Model))
+	d.hash.Write([]byte{0})
+	d.hash.Write([]byte(user))
+	d.hash.Write([]byte{0})
+	return d
+}
+
+// Write implements io.Writer for the JSON encoder. The newline the encoder
+// emits after each value is not part of the prefix and is dropped.
+func (d *prefixDigest) Write(p []byte) (int, error) {
+	n := len(p)
+	if d.encoding && n > 0 && p[n-1] == '\n' {
+		p = p[:n-1]
+	}
+	d.hash.Write(p)
+	d.bytes += len(p)
+	return n, nil
+}
+
+func (d *prefixDigest) literal(s string) {
+	if d.err == nil {
+		_, _ = d.Write([]byte(s))
+	}
+}
+
+func (d *prefixDigest) encode(value any) {
+	if d.err != nil {
+		return
+	}
+	d.encoding = true
+	d.err = d.enc.Encode(value)
+	d.encoding = false
+}
+
+// writeChatPrefix streams {"tools":[...],"messages":[...]} into the digest.
+func (d *prefixDigest) writeChatPrefix(tools []map[string]any, messages []core.Message) {
+	d.literal("{")
+	if len(tools) > 0 {
+		d.literal(`"tools":`)
+		d.encode(tools)
+		d.literal(",")
+	}
+	d.literal(`"messages":[`)
+	for i := range messages {
+		if i > 0 {
+			d.literal(",")
+		}
+		d.encode(messages[i])
+	}
+	d.literal("]}")
+}
+
+// writeResponsesPrefix streams {"instructions":"...","tools":[...],"input":[...]}
+// into the digest.
+func (d *prefixDigest) writeResponsesPrefix(instructions string, tools []map[string]any, items []core.ResponsesInputElement) {
+	d.literal("{")
+	if instructions != "" {
+		d.literal(`"instructions":`)
+		d.encode(instructions)
+		d.literal(",")
+	}
+	if len(tools) > 0 {
+		d.literal(`"tools":`)
+		d.encode(tools)
+		d.literal(",")
+	}
+	d.literal(`"input":[`)
+	for i := range items {
+		if i > 0 {
+			d.literal(",")
+		}
+		d.encode(items[i])
+	}
+	d.literal("]}")
+}
+
+func (d *prefixDigest) tokens() int { return (d.bytes + 3) / 4 }
+
+func (d *prefixDigest) key() string {
+	return "gomodel-" + hex.EncodeToString(d.hash.Sum(nil)[:16])
+}
 
 func providerCacheMinimum(profile promptCacheProfile, model string) int {
 	model = strings.NewReplacer(".", "-", "_", "-").Replace(strings.ToLower(model))

@@ -2,6 +2,8 @@ package providers
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"strings"
 	"testing"
@@ -232,13 +234,193 @@ func TestCachePlannerSkipsUnsupportedResponsesModesBeforeCloning(t *testing.T) {
 
 func TestCloneChatRequestPreservesInternalCachePlan(t *testing.T) {
 	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "stable"}}
-	clone, ok := cloneChatRequest(req)
-	if !ok || clone.PromptCachePlan == nil || clone.PromptCachePlan.Key != "stable" {
+	clone := cloneChatRequest(req)
+	if clone.PromptCachePlan == nil || clone.PromptCachePlan.Key != "stable" {
 		t.Fatalf("clone lost internal cache metadata: %+v", clone)
 	}
 	if clone.PromptCachePlan == req.PromptCachePlan {
 		t.Fatal("clone aliases internal cache metadata")
 	}
+}
+
+// The planner clones shallowly, so every write it performs must land on a
+// copied slice element or map rather than on memory the caller still holds.
+func TestCachePlannerDoesNotAliasCallerContentOrExtras(t *testing.T) {
+	planner := &cachePlanner{enabled: true}
+	prefix := strings.Repeat("stable context ", 1500)
+
+	t.Run("chat parts and message extras", func(t *testing.T) {
+		parts := []core.ContentPart{{Type: "text", Text: prefix}}
+		req := &core.ChatRequest{
+			Model:       "gpt-5.6",
+			Messages:    []core.Message{{Role: "system", Content: parts}, {Role: "user", Content: "new turn"}},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"seed": json.RawMessage(`1`)}),
+		}
+		before, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		planned := planner.planChat(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+		if planned == req {
+			t.Fatal("planner returned caller-owned request")
+		}
+		plannedParts, ok := planned.Messages[0].Content.([]core.ContentPart)
+		if !ok || len(plannedParts) != 1 || len(plannedParts[0].ExtraFields.Lookup("prompt_cache_breakpoint")) == 0 {
+			t.Fatalf("planned content lacks breakpoint: %#v", planned.Messages[0].Content)
+		}
+		if &plannedParts[0] == &parts[0] || !parts[0].ExtraFields.IsEmpty() {
+			t.Fatal("planner wrote into the caller's content parts")
+		}
+		if &planned.Messages[0] == &req.Messages[0] {
+			t.Fatal("planner aliases the caller's messages slice")
+		}
+		if len(req.ExtraFields.Lookup("prompt_cache_key")) != 0 || len(req.ExtraFields.Lookup("seed")) == 0 {
+			t.Fatal("planner rewrote the caller's extra fields")
+		}
+		after, err := json.Marshal(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(before) != string(after) {
+			t.Fatalf("planner mutated caller: before=%s after=%s", before, after)
+		}
+		bedrock := planner.planChat(req, "bedrock", core.ModelSelector{Provider: "bedrock-primary", Model: "anthropic.claude-sonnet-4-5"})
+		if len(bedrock.Messages[0].ExtraFields.Lookup(core.GatewayCachePointField)) == 0 || !req.Messages[0].ExtraFields.IsEmpty() {
+			t.Fatal("bedrock marker leaked into caller message")
+		}
+	})
+
+	t.Run("responses generic blocks", func(t *testing.T) {
+		block := map[string]any{"type": "input_text", "text": prefix}
+		blocks := []any{block}
+		req := &core.ResponsesRequest{Model: "gpt-5.6", Input: []core.ResponsesInputElement{
+			{Role: "user", Content: blocks},
+			{Role: "user", Content: "dynamic"},
+		}}
+		planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+		items, ok := planned.Input.([]core.ResponsesInputElement)
+		if !ok || planned == req {
+			t.Fatalf("unexpected plan: %+v", planned)
+		}
+		plannedBlocks, ok := items[0].Content.([]any)
+		if !ok || len(plannedBlocks) != 1 {
+			t.Fatalf("unexpected planned content: %#v", items[0].Content)
+		}
+		marked, _ := plannedBlocks[0].(map[string]any)
+		if _, exists := marked["prompt_cache_breakpoint"]; !exists {
+			t.Fatal("planned block lacks breakpoint")
+		}
+		if _, leaked := block["prompt_cache_breakpoint"]; leaked {
+			t.Fatal("planner wrote into the caller's block map")
+		}
+		if &plannedBlocks[0] == &blocks[0] {
+			t.Fatal("planner aliases the caller's block slice")
+		}
+		original := req.Input.([]core.ResponsesInputElement)
+		if &items[0] == &original[0] {
+			t.Fatal("planner aliases the caller's input slice")
+		}
+	})
+
+	t.Run("responses typed map blocks", func(t *testing.T) {
+		block := map[string]any{"type": "input_text", "text": prefix}
+		req := &core.ResponsesRequest{Model: "gpt-5.6", Input: []core.ResponsesInputElement{
+			{Role: "user", Content: []map[string]any{block}},
+			{Role: "user", Content: "dynamic"},
+		}}
+		planned := planner.planResponses(req, "openai", core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"})
+		body, err := json.Marshal(planned)
+		if err != nil || !bytes.Contains(body, []byte(`"prompt_cache_breakpoint"`)) {
+			t.Fatalf("plan lacks breakpoint: %s (err=%v)", body, err)
+		}
+		if _, leaked := block["prompt_cache_breakpoint"]; leaked {
+			t.Fatal("planner wrote into the caller's block map")
+		}
+	})
+}
+
+// legacyCacheAffinityKey is the pre-streaming key derivation: sha256 over the
+// header fields followed by the fully marshaled prefix object. The streaming
+// digest must produce the same key so deployed cache affinity survives upgrades.
+func legacyCacheAffinityKey(t *testing.T, providerType string, selector core.ModelSelector, user string, prefix any) (string, int) {
+	t.Helper()
+	body, err := json.Marshal(prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.New()
+	for _, part := range []string{normalizedProviderType(providerType), selector.Provider, selector.Model, user} {
+		hash.Write([]byte(part))
+		hash.Write([]byte{0})
+	}
+	hash.Write(body)
+	return "gomodel-" + hex.EncodeToString(hash.Sum(nil)[:16]), (len(body) + 3) / 4
+}
+
+func TestPrefixDigestMatchesLegacyMarshaledPrefix(t *testing.T) {
+	selector := core.ModelSelector{Provider: "openai-primary", Model: "gpt-5.6"}
+	tools := []map[string]any{{"type": "function", "function": map[string]any{"name": "lookup", "description": "a <b> & c"}}}
+	messages := []core.Message{
+		{Role: "system", Content: "line one\nline \"two\" <html> & more"},
+		{Role: "user", Content: []core.ContentPart{{Type: "text", Text: "part"}, {Type: "image_url", ImageURL: &core.ImageURLContent{URL: "https://x/y?a=1&b=2"}}}},
+		{Role: "assistant", ToolCalls: []core.ToolCall{{ID: "call_1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: `{"q":"x"}`}}},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"name": json.RawMessage(`"bot"`)})},
+		{Role: "tool", ToolCallID: "call_1", Content: "result"},
+	}
+
+	t.Run("chat", func(t *testing.T) {
+		for _, withTools := range []bool{false, true} {
+			var reqTools []map[string]any
+			if withTools {
+				reqTools = tools
+			}
+			want, wantTokens := legacyCacheAffinityKey(t, "OpenAI ", selector, "user-1", struct {
+				Tools    []map[string]any `json:"tools,omitempty"`
+				Messages []core.Message   `json:"messages"`
+			}{reqTools, messages})
+			digest := newPrefixDigest("OpenAI ", selector, "user-1")
+			digest.writeChatPrefix(reqTools, messages)
+			if digest.err != nil {
+				t.Fatal(digest.err)
+			}
+			if got := digest.key(); got != want {
+				t.Fatalf("tools=%v key mismatch: got %s want %s", withTools, got, want)
+			}
+			if got := digest.tokens(); got != wantTokens {
+				t.Fatalf("tools=%v token estimate mismatch: got %d want %d", withTools, got, wantTokens)
+			}
+		}
+	})
+
+	t.Run("responses", func(t *testing.T) {
+		items := []core.ResponsesInputElement{
+			{Role: "user", Content: "hello <there>"},
+			{Role: "user", Content: []core.ContentPart{{Type: "input_text", Text: "typed"}}},
+			{Role: "user", Content: []any{map[string]any{"type": "input_text", "text": "generic"}}},
+			{Type: "function_call", CallID: "c1", Name: "lookup", Arguments: `{}`},
+		}
+		for _, tc := range []struct {
+			instructions string
+			tools        []map[string]any
+		}{{}, {instructions: "be brief"}, {tools: tools}, {instructions: "be brief", tools: tools}} {
+			want, wantTokens := legacyCacheAffinityKey(t, "openai", selector, "", struct {
+				Instructions string                       `json:"instructions,omitempty"`
+				Tools        []map[string]any             `json:"tools,omitempty"`
+				Input        []core.ResponsesInputElement `json:"input"`
+			}{tc.instructions, tc.tools, items})
+			digest := newPrefixDigest("openai", selector, "")
+			digest.writeResponsesPrefix(tc.instructions, tc.tools, items)
+			if digest.err != nil {
+				t.Fatal(digest.err)
+			}
+			if got := digest.key(); got != want {
+				t.Fatalf("%+v key mismatch: got %s want %s", tc, got, want)
+			}
+			if got := digest.tokens(); got != wantTokens {
+				t.Fatalf("%+v token estimate mismatch: got %d want %d", tc, got, wantTokens)
+			}
+		}
+	})
 }
 
 func TestGeminiPlanKeyIncludesEntireNativePrefixAndBoundary(t *testing.T) {
