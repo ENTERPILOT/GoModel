@@ -97,7 +97,7 @@ models:
 #   - path: /acme
 #     allowed_models: [openai/*, anthropic/*]
 #   - path: /acme/eng
-#     allowed_models: [anthropic/*] # provider wildcard, provider/model, or bare model id
+#     allowed_models: [anthropic/*] # provider wildcard, provider/model, or bare model id; virtual models resolve to their targets first, so list the targets, not the virtual model
 #     description: Engineering only ships on Claude
 
 # MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the
