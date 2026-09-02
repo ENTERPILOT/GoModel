@@ -3071,6 +3071,247 @@ data: {"type":"message_stop"}
 	}
 }
 
+// TestStreamResponses_CompletedIncludesOutput verifies the terminal
+// response.completed event carries the full output array (assistant message,
+// then function_call), matching OpenAI's native behavior — strict SDK clients
+// index into response.output.
+func TestStreamResponses_CompletedIncludesOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I'll check that for you."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_123","name":"lookup_weather","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Warsaw\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":10,"output_tokens":4}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "What's the weather?",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	var output []any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		response, _ := event.Payload["response"].(map[string]any)
+		output, _ = response["output"].([]any)
+	}
+
+	if len(output) != 2 {
+		t.Fatalf("response.completed output has %d items, want 2: %#v", len(output), output)
+	}
+
+	message, _ := output[0].(map[string]any)
+	if message["type"] != "message" || message["role"] != "assistant" || message["status"] != "completed" {
+		t.Fatalf("output[0] = %#v, want completed assistant message", message)
+	}
+	messageContent, _ := message["content"].([]any)
+	if len(messageContent) != 1 {
+		t.Fatalf("message content = %#v, want one output_text part", message["content"])
+	}
+	if part, _ := messageContent[0].(map[string]any); part["type"] != "output_text" || part["text"] != "I'll check that for you." {
+		t.Fatalf("message part = %#v, want output_text %q", messageContent[0], "I'll check that for you.")
+	}
+
+	toolCall, _ := output[1].(map[string]any)
+	if toolCall["type"] != "function_call" || toolCall["status"] != "completed" {
+		t.Fatalf("output[1] = %#v, want completed function_call", toolCall)
+	}
+	if toolCall["call_id"] != "toolu_123" || toolCall["name"] != "lookup_weather" || toolCall["arguments"] != `{"city":"Warsaw"}` {
+		t.Fatalf("function_call = %#v, want toolu_123 lookup_weather with recorded arguments", toolCall)
+	}
+}
+
+// TestStreamResponses_TruncatedToolCallFinalizedAtEOF covers an upstream stream
+// that dies mid tool call (no content_block_stop / message_stop). The converter
+// must emit the tool call's done events before response.completed so the
+// terminal output only reports items the stream actually closed.
+func TestStreamResponses_TruncatedToolCallFinalizedAtEOF(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_123","name":"lookup_weather","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"War"}}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "What's the weather?",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	foundArgumentsDone := false
+	foundItemDone := false
+	var output []any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.function_call_arguments.done":
+			foundArgumentsDone = true
+		case "response.output_item.done":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] == "function_call" {
+				foundItemDone = true
+			}
+		case "response.completed":
+			response, _ := event.Payload["response"].(map[string]any)
+			output, _ = response["output"].([]any)
+		}
+	}
+
+	if !foundArgumentsDone {
+		t.Fatal("expected response.function_call_arguments.done before response.completed on truncated stream")
+	}
+	if !foundItemDone {
+		t.Fatal("expected function_call response.output_item.done before response.completed on truncated stream")
+	}
+	if len(output) != 1 {
+		t.Fatalf("response.completed output has %d items, want 1: %#v", len(output), output)
+	}
+	toolCall, _ := output[0].(map[string]any)
+	if toolCall["type"] != "function_call" || toolCall["call_id"] != "toolu_123" || toolCall["arguments"] != `{"city":"War` {
+		t.Fatalf("output[0] = %#v, want finalized function_call with accumulated arguments", toolCall)
+	}
+}
+
+// TestStreamResponses_ToolCallBeforeTextKeepsOutputOrder covers a tool_use
+// block preceding the first text block. The assistant message must claim the
+// next free output index (not collide with the tool call at index 0) and the
+// terminal output must preserve stream order.
+func TestStreamResponses_ToolCallBeforeTextKeepsOutputOrder(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_123","name":"lookup_weather","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Warsaw\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Looking it up."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_stop
+data: {"type":"message_stop"}
+`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Input: "What's the weather?",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer func() { _ = body.Close() }()
+
+	raw, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	addedIndexes := make(map[string]float64)
+	var output []any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.output_item.added":
+			item, _ := event.Payload["item"].(map[string]any)
+			itemType, _ := item["type"].(string)
+			addedIndexes[itemType], _ = event.Payload["output_index"].(float64)
+		case "response.completed":
+			response, _ := event.Payload["response"].(map[string]any)
+			output, _ = response["output"].([]any)
+		}
+	}
+
+	if addedIndexes["function_call"] != 0 || addedIndexes["message"] != 1 {
+		t.Fatalf("output indexes = %#v, want function_call at 0 and message at 1", addedIndexes)
+	}
+	if len(output) != 2 {
+		t.Fatalf("response.completed output has %d items, want 2: %#v", len(output), output)
+	}
+	first, _ := output[0].(map[string]any)
+	second, _ := output[1].(map[string]any)
+	if first["type"] != "function_call" || second["type"] != "message" {
+		t.Fatalf("output order = [%v, %v], want [function_call, message]", first["type"], second["type"])
+	}
+}
+
 func TestStreamResponses_WithEmptyToolArguments(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

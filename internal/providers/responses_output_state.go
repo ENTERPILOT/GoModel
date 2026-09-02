@@ -2,6 +2,7 @@ package providers
 
 import (
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -223,6 +224,38 @@ func (s *ResponsesOutputEventState) CompleteReasoningOutput(outputIndex int) str
 		"output_index": outputIndex,
 	}))
 	return b.String()
+}
+
+// FinalOutputItems assembles the full output array for the terminal
+// response.completed event, mirroring the output_item.done payloads already
+// emitted on the stream, ordered by output index. OpenAI includes the complete
+// output in response.completed, and strict SDK clients index into it. Only
+// tool calls whose output_item.done has been emitted are included — callers
+// must finalize pending tool calls first.
+func (s *ResponsesOutputEventState) FinalOutputItems(reasoningIndex, assistantIndex int, toolCalls map[int]*ResponsesOutputToolCallState, includePlaceholder bool) []map[string]any {
+	type indexedItem struct {
+		index int
+		item  map[string]any
+	}
+	items := make([]indexedItem, 0, 2+len(toolCalls))
+	if s.reasoningStarted {
+		items = append(items, indexedItem{reasoningIndex, s.ReasoningItem("completed", true)})
+	}
+	if s.assistantStarted {
+		items = append(items, indexedItem{assistantIndex, s.AssistantMessageItem("completed", true)})
+	}
+	for _, state := range toolCalls {
+		if state == nil || !state.Started || !state.Completed {
+			continue
+		}
+		items = append(items, indexedItem{state.OutputIndex, s.RenderToolCallItem(state, "completed", includePlaceholder)})
+	}
+	slices.SortStableFunc(items, func(a, b indexedItem) int { return a.index - b.index })
+	output := make([]map[string]any, 0, len(items))
+	for _, entry := range items {
+		output = append(output, entry.item)
+	}
+	return output
 }
 
 // ToolCallArguments returns the serialized argument payload for a function_call item.

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -120,20 +121,21 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 
 // responsesStreamConverter wraps an Anthropic stream and converts it to Responses API format
 type responsesStreamConverter struct {
-	reader          *bufio.Reader
-	body            io.ReadCloser
-	model           string
-	responseID      string
-	createdAt       int64
-	output          *providers.ResponsesOutputEventState
-	nextOutputIndex int
-	toolCalls       map[int]*providers.ResponsesOutputToolCallState
-	thinkingBlocks  map[int]bool // tracks which content block indices are thinking blocks
-	buffer          streaming.StreamBuffer
-	closed          bool
-	sentDone        bool
-	usage           anthropicUsage
-	hasUsage        bool
+	reader               *bufio.Reader
+	body                 io.ReadCloser
+	model                string
+	responseID           string
+	createdAt            int64
+	output               *providers.ResponsesOutputEventState
+	nextOutputIndex      int
+	assistantOutputIndex int
+	toolCalls            map[int]*providers.ResponsesOutputToolCallState
+	thinkingBlocks       map[int]bool // tracks which content block indices are thinking blocks
+	buffer               streaming.StreamBuffer
+	closed               bool
+	sentDone             bool
+	usage                anthropicUsage
+	hasUsage             bool
 }
 
 func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
@@ -170,7 +172,11 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 				// Send final done event and [DONE] message
 				if !sc.sentDone {
 					sc.sentDone = true
-					prefix := sc.output.CompleteAssistantOutput(0)
+					// Finalize items still open at EOF (e.g. a truncated
+					// stream that never sent content_block_stop) so the
+					// terminal output only reports items whose done events
+					// were emitted.
+					prefix := sc.output.CompleteAssistantOutput(sc.assistantOutputIndex) + sc.completePendingToolCalls()
 					responseData := map[string]any{
 						"id":         sc.responseID,
 						"object":     "response",
@@ -178,6 +184,7 @@ func (sc *responsesStreamConverter) Read(p []byte) (n int, err error) {
 						"model":      sc.model,
 						"provider":   "anthropic",
 						"created_at": sc.createdAt,
+						"output":     sc.output.FinalOutputItems(0, sc.assistantOutputIndex, sc.toolCalls, true),
 					}
 					// Include merged usage data captured across message_start/message_delta.
 					if sc.hasUsage {
@@ -243,7 +250,24 @@ func (sc *responsesStreamConverter) reserveAssistantMessageOutput() {
 		return
 	}
 	sc.output.ReserveAssistant()
+	sc.assistantOutputIndex = sc.nextOutputIndex
 	sc.nextOutputIndex++
+}
+
+// completePendingToolCalls emits the done events for tool calls the upstream
+// stream left open, in content-block order.
+func (sc *responsesStreamConverter) completePendingToolCalls() string {
+	indices := make([]int, 0, len(sc.toolCalls))
+	for index := range sc.toolCalls {
+		indices = append(indices, index)
+	}
+	slices.Sort(indices)
+
+	var out strings.Builder
+	for _, index := range indices {
+		out.WriteString(sc.output.CompleteToolCall(sc.toolCalls[index], true))
+	}
+	return out.String()
 }
 
 func (sc *responsesStreamConverter) newResponsesToolCallState(contentBlock *anthropicContent) *providers.ResponsesOutputToolCallState {
@@ -295,7 +319,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		}
 		if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
 			if sc.output.AssistantStarted() && !sc.output.AssistantDone() {
-				prefix := sc.output.CompleteAssistantOutput(0)
+				prefix := sc.output.CompleteAssistantOutput(sc.assistantOutputIndex)
 				state := sc.newResponsesToolCallState(event.ContentBlock)
 				sc.toolCalls[event.Index] = state
 				return prefix + sc.output.StartToolCall(state, true)
@@ -319,7 +343,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		case "text_delta":
 			if event.Delta.Text != "" {
 				sc.reserveAssistantMessageOutput()
-				prefix := sc.output.StartAssistantOutput(0)
+				prefix := sc.output.StartAssistantOutput(sc.assistantOutputIndex)
 				sc.output.AppendAssistantText(event.Delta.Text)
 				return prefix + sc.output.WriteEvent("response.output_text.delta", map[string]any{
 					"type":  "response.output_text.delta",

@@ -309,6 +309,106 @@ data: [DONE]
 	}
 }
 
+// TestOpenAIResponsesStreamConverter_CompletedIncludesOutput verifies the
+// terminal response.completed event carries the full output array (reasoning,
+// message, function_call in stream order), matching OpenAI's native behavior —
+// strict SDK clients index into response.output.
+func TestOpenAIResponsesStreamConverter_CompletedIncludesOutput(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"reasoning_content":"Need the weather."},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":"Checking."},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	var output []any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		response, _ := event.Payload["response"].(map[string]any)
+		output, _ = response["output"].([]any)
+	}
+
+	if len(output) != 3 {
+		t.Fatalf("response.completed output has %d items, want 3: %#v", len(output), output)
+	}
+
+	reasoning, _ := output[0].(map[string]any)
+	if reasoning["type"] != "reasoning" || reasoning["status"] != "completed" {
+		t.Fatalf("output[0] = %#v, want completed reasoning item", reasoning)
+	}
+	reasoningContent, _ := reasoning["content"].([]any)
+	if len(reasoningContent) != 1 {
+		t.Fatalf("reasoning content = %#v, want one reasoning_text part", reasoning["content"])
+	}
+	if part, _ := reasoningContent[0].(map[string]any); part["type"] != "reasoning_text" || part["text"] != "Need the weather." {
+		t.Fatalf("reasoning part = %#v, want reasoning_text %q", reasoningContent[0], "Need the weather.")
+	}
+
+	message, _ := output[1].(map[string]any)
+	if message["type"] != "message" || message["role"] != "assistant" || message["status"] != "completed" {
+		t.Fatalf("output[1] = %#v, want completed assistant message", message)
+	}
+	messageContent, _ := message["content"].([]any)
+	if len(messageContent) != 1 {
+		t.Fatalf("message content = %#v, want one output_text part", message["content"])
+	}
+	if part, _ := messageContent[0].(map[string]any); part["type"] != "output_text" || part["text"] != "Checking." {
+		t.Fatalf("message part = %#v, want output_text %q", messageContent[0], "Checking.")
+	}
+
+	toolCall, _ := output[2].(map[string]any)
+	if toolCall["type"] != "function_call" || toolCall["status"] != "completed" {
+		t.Fatalf("output[2] = %#v, want completed function_call", toolCall)
+	}
+	if toolCall["call_id"] != "call_1" || toolCall["name"] != "lookup_weather" || toolCall["arguments"] != `{"city":"Warsaw"}` {
+		t.Fatalf("function_call = %#v, want call_1 lookup_weather with recorded arguments", toolCall)
+	}
+}
+
+// TestOpenAIResponsesStreamConverter_CompletedEmptyOutputIsArray verifies a
+// stream with no output items still yields output: [] rather than omitting the
+// field or emitting null.
+func TestOpenAIResponsesStreamConverter_CompletedEmptyOutputIsArray(t *testing.T) {
+	mockStream := "data: [DONE]\n"
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	found := false
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		found = true
+		response, _ := event.Payload["response"].(map[string]any)
+		output, ok := response["output"].([]any)
+		if !ok {
+			t.Fatalf("response.completed output = %#v, want an array", response["output"])
+		}
+		if len(output) != 0 {
+			t.Fatalf("response.completed output = %#v, want empty array", output)
+		}
+	}
+	if !found {
+		t.Fatal("expected response.completed event")
+	}
+}
+
 func TestOpenAIResponsesStreamConverter_OutOfOrderToolCallsKeepUniqueIndexes(t *testing.T) {
 	mockStream := `data: {"choices":[{"delta":{"reasoning_content":"Plan."},"finish_reason":null}]}
 

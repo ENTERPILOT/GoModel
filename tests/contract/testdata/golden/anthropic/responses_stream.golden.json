@@ -68,6 +68,21 @@
           "id": "resp_\u003cgenerated\u003e",
           "model": "claude-sonnet-4-20250514",
           "object": "response",
+          "output": [
+            {
+              "content": [
+                {
+                  "annotations": [],
+                  "text": "Hello World",
+                  "type": "output_text"
+                }
+              ],
+              "id": "msg_\u003cgenerated\u003e",
+              "role": "assistant",
+              "status": "completed",
+              "type": "message"
+            }
+          ],
           "provider": "anthropic",
           "status": "completed",
           "usage": {

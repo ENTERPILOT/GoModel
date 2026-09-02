@@ -84,6 +84,21 @@
           "id": "resp_\u003cgenerated\u003e",
           "model": "llama-3.3-70b-versatile",
           "object": "response",
+          "output": [
+            {
+              "content": [
+                {
+                  "annotations": [],
+                  "text": "Hello World!",
+                  "type": "output_text"
+                }
+              ],
+              "id": "msg_\u003cgenerated\u003e",
+              "role": "assistant",
+              "status": "completed",
+              "type": "message"
+            }
+          ],
           "provider": "groq",
           "status": "completed",
           "usage": {
