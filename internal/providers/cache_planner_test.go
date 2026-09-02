@@ -547,3 +547,32 @@ func decodePrefixContentBlocks(t *testing.T, plannedJSON []byte) []map[string]an
 	}
 	return blocks
 }
+
+func TestMarkOpenAIResponsesBreakpointEdgeCases(t *testing.T) {
+	t.Run("keeps an existing breakpoint untouched", func(t *testing.T) {
+		block := map[string]any{"type": "input_text", "text": "prefix", "prompt_cache_breakpoint": map[string]any{"mode": "explicit"}}
+		req := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
+			{Role: "user", Content: []any{block}},
+			{Role: "user", Content: "dynamic"},
+		}}
+		if !markOpenAIResponsesBreakpoint(req) {
+			t.Fatal("expected the existing breakpoint to count as marked")
+		}
+		items := req.Input.([]core.ResponsesInputElement)
+		blocks, _ := items[0].Content.([]any)
+		if len(blocks) != 1 || blocks[0].(map[string]any)["prompt_cache_breakpoint"] == nil {
+			t.Fatalf("breakpoint block changed: %v", items[0].Content)
+		}
+	})
+	t.Run("skips typed parts that cannot be encoded and unsupported shapes", func(t *testing.T) {
+		req := &core.ResponsesRequest{Input: []core.ResponsesInputElement{
+			{Role: "user", Content: 42},
+			{Role: "user", Content: []core.ContentPart{{Type: "input_file"}}},
+			{Role: "user", Content: []any{"not a block"}},
+			{Role: "user", Content: "dynamic"},
+		}}
+		if markOpenAIResponsesBreakpoint(req) {
+			t.Fatalf("marked an item with no cacheable block: %+v", req.Input)
+		}
+	})
+}

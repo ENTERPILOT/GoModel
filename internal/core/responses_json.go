@@ -363,6 +363,29 @@ func (c ResponsesContentItem) MarshalJSON() ([]byte, error) {
 	}{alias(c), c.Annotations})
 }
 
+// ResponsesBlocksFromContentParts converts typed parts into generic content
+// blocks with their type kept verbatim, or returns nil when a part cannot be
+// encoded. ContentPart is the Chat content type: its MarshalJSON rewrites
+// "input_text" to "text", which the Responses API rejects, so code that
+// places typed parts into Responses input must convert them with this helper
+// instead of serializing them directly.
+func ResponsesBlocksFromContentParts(parts []ContentPart) []any {
+	blocks := make([]any, 0, len(parts))
+	for _, part := range parts {
+		encoded, err := json.Marshal(part)
+		if err != nil {
+			return nil
+		}
+		var block map[string]any
+		if err := json.Unmarshal(encoded, &block); err != nil {
+			return nil
+		}
+		block["type"] = part.Type
+		blocks = append(blocks, block)
+	}
+	return blocks
+}
+
 // cloneRawMessage returns a detached, whitespace-trimmed copy of a raw JSON
 // value so stored Raw fields stay independent of the decoder's backing buffer.
 func cloneRawMessage(data []byte) json.RawMessage {

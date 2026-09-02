@@ -343,7 +343,7 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 			}
 			blocks = []any{map[string]any{"type": "input_text", "text": content}}
 		case []core.ContentPart:
-			blocks = responsesBlocksFromContentParts(content)
+			blocks = core.ResponsesBlocksFromContentParts(content)
 		case []any:
 			blocks = content
 		case []map[string]any:
@@ -389,28 +389,6 @@ func markResponsesBlockBreakpoint(blocks []any) ([]any, bool) {
 		return updated, true
 	}
 	return nil, false
-}
-
-// responsesBlocksFromContentParts converts typed parts into generic blocks
-// with their type kept verbatim, or returns nil when a part cannot be
-// encoded so the item is left untouched. core.ContentPart is the Chat content
-// type: its MarshalJSON rewrites "input_text" to "text", which the Responses
-// API rejects, so typed parts must not be serialized directly on this path.
-func responsesBlocksFromContentParts(parts []core.ContentPart) []any {
-	blocks := make([]any, 0, len(parts))
-	for _, part := range parts {
-		encoded, err := json.Marshal(part)
-		if err != nil {
-			return nil
-		}
-		var block map[string]any
-		if err := json.Unmarshal(encoded, &block); err != nil {
-			return nil
-		}
-		block["type"] = part.Type
-		blocks = append(blocks, block)
-	}
-	return blocks
 }
 
 func mergeCacheExtras(base core.UnknownJSONFields, values map[string]json.RawMessage) core.UnknownJSONFields {

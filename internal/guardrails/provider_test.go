@@ -1,6 +1,7 @@
 package guardrails
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -2351,5 +2352,70 @@ func TestApplyMessagesToResponses_RewritesStructuredArrayInputPreservingInputTex
 	}
 	if firstPart["text"] != "[|---|](PERSON_1)" {
 		t.Fatalf("first content text = %#v, want rewritten value", firstPart["text"])
+	}
+}
+
+func TestApplyGuardedResponsesContent_TypedPartsKeepResponsesVocabulary(t *testing.T) {
+	tests := []struct {
+		name      string
+		original  []core.ContentPart
+		rewritten string
+		wantTypes []string
+		wantText  string
+	}{
+		{
+			name:      "prepends rewritten text to image-only content",
+			original:  []core.ContentPart{{Type: "input_image", ImageURL: &core.ImageURLContent{URL: "https://example.com/a.png"}}},
+			rewritten: "clean",
+			wantTypes: []string{"input_text", "input_image"},
+			wantText:  "clean",
+		},
+		{
+			name: "rewrites the single text part in place",
+			original: []core.ContentPart{{
+				Type: "input_text", Text: "dirty",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_note": json.RawMessage(`"keep"`)}),
+			}},
+			rewritten: "clean",
+			wantTypes: []string{"input_text"},
+			wantText:  "clean",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := applyGuardedResponsesContentToOriginal(tt.original, tt.rewritten, false)
+			if err != nil {
+				t.Fatalf("applyGuardedResponsesContentToOriginal() error = %v", err)
+			}
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(encoded, []byte(`"type":"text"`)) {
+				t.Fatalf("rewrite emitted Chat content vocabulary: %s", encoded)
+			}
+			var blocks []map[string]any
+			if err := json.Unmarshal(encoded, &blocks); err != nil {
+				t.Fatalf("rewritten content is not a block array: %s", encoded)
+			}
+			if len(blocks) != len(tt.wantTypes) {
+				t.Fatalf("blocks = %s, want %d blocks", encoded, len(tt.wantTypes))
+			}
+			for i, want := range tt.wantTypes {
+				if blocks[i]["type"] != want {
+					t.Fatalf("block %d type = %v, want %s: %s", i, blocks[i]["type"], want, encoded)
+				}
+			}
+			if blocks[0]["text"] != tt.wantText {
+				t.Fatalf("block 0 text = %v, want %q", blocks[0]["text"], tt.wantText)
+			}
+			if !tt.original[0].ExtraFields.IsEmpty() && blocks[0]["x_note"] != "keep" {
+				t.Fatalf("extra fields lost: %s", encoded)
+			}
+		})
+	}
+
+	if _, err := applyGuardedResponsesContentToOriginal([]core.ContentPart{{Type: "input_file"}}, "clean", false); err == nil {
+		t.Fatal("expected an error for a typed part that cannot be encoded")
 	}
 }
