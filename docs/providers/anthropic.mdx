@@ -93,9 +93,11 @@ so on legacy models they are capped at the `high` budget rather than inflating
 | `high` / `xhigh` / `max` | 20000 |
 
 <Note>
-  Omit `reasoning` to leave thinking off. On the adaptive models above, GoModel
-  only sets `thinking: {type: "adaptive"}` when you pass `reasoning.effort`;
-  without it those models do not engage extended thinking. Effort is a separate
+  Omit `reasoning` to leave thinking at the model's default. GoModel only sets
+  `thinking: {type: "adaptive"}` when you pass `reasoning.effort`. Without it,
+  Opus 4.6 to 4.8 and Sonnet 4.6/5 do not engage extended thinking, while
+  Fable 5/5.1, Mythos 5/5.1, and Opus 5 think adaptively on their own (see the
+  always-on note below). Effort is a separate
   control that governs overall token spend (text and tool calls) whether or not
   thinking is engaged, and Anthropic defaults it to `high` when unset. It is a
   behavioral signal for depth and verbosity, not a hard budget — actual usage
@@ -112,10 +114,11 @@ so on legacy models they are capped at the `high` budget rather than inflating
 </Note>
 
 <Note>
-  On Fable 5.1 (and Mythos 5.1) thinking is always on, whether or not you send
-  `reasoning`. The tokens it spends are reported as
-  `usage.completion_reasoning_tokens` in Chat Completions responses. The
-  reasoning text itself is not returned; only the token count is.
+  On Fable 5/5.1, Mythos 5/5.1, and Opus 5 thinking is always on, whether or
+  not you send `reasoning`; `reasoning.effort` only tunes its depth. The tokens
+  it spends are reported as `usage.completion_reasoning_tokens` in Chat
+  Completions responses. The reasoning text itself is not returned; only the
+  token count is.
 </Note>
 
 ## Sampling parameters
