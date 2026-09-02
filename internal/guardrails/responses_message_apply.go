@@ -403,7 +403,13 @@ func isResponsesStructuredContent(content any) bool {
 func rewriteStructuredResponsesContentWithTextRewrite(originalContent any, rewrittenText string) (any, error) {
 	switch typed := originalContent.(type) {
 	case []core.ContentPart:
-		return rewriteStructuredResponsesTypedContentParts(typed, rewrittenText)
+		// Typed parts are converted to generic blocks so the rewrite keeps the
+		// Responses content vocabulary; core.ContentPart serializes as Chat content.
+		blocks := core.ResponsesBlocksFromContentParts(typed)
+		if blocks == nil {
+			return nil, core.NewInvalidRequestError("unsupported structured responses content part", nil)
+		}
+		return rewriteStructuredResponsesInterfaceContentParts(blocks, rewrittenText)
 	case []any:
 		return rewriteStructuredResponsesInterfaceContentParts(typed, rewrittenText)
 	case []map[string]any:
@@ -419,68 +425,6 @@ func rewriteStructuredResponsesContentWithTextRewrite(originalContent any, rewri
 		}
 		return rewriteStructuredResponsesInterfaceContentParts(parts, rewrittenText)
 	}
-}
-
-func rewriteStructuredResponsesTypedContentParts(parts []core.ContentPart, rewrittenText string) (any, error) {
-	textIndexes := make([]int, 0, len(parts))
-	originalTexts := make([]string, 0, len(parts))
-	for i, part := range parts {
-		if !isResponsesTextPartType(part.Type) || part.Text == "" {
-			continue
-		}
-		textIndexes = append(textIndexes, i)
-		originalTexts = append(originalTexts, part.Text)
-	}
-
-	if len(textIndexes) == 0 {
-		if rewrittenText == "" {
-			if len(parts) == 0 {
-				return []core.ContentPart{}, nil
-			}
-			return cloneContentParts(parts), nil
-		}
-		prepended := []core.ContentPart{{Type: "input_text", Text: rewrittenText}}
-		prepended = append(prepended, cloneContentParts(parts)...)
-		return prepended, nil
-	}
-
-	if len(textIndexes) == 1 {
-		merged := cloneContentParts(parts)
-		textIndex := textIndexes[0]
-		if rewrittenText == "" {
-			merged = append(merged[:textIndex], merged[textIndex+1:]...)
-		} else {
-			merged[textIndex].Text = rewrittenText
-		}
-		if len(merged) == 0 {
-			return nil, core.NewInvalidRequestError("guardrails produced empty structured responses content after rewrite", nil)
-		}
-		return merged, nil
-	}
-
-	if rewrittenText == strings.Join(originalTexts, " ") {
-		return cloneContentParts(parts), nil
-	}
-
-	merged := make([]core.ContentPart, 0, len(parts))
-	insertedRewrittenText := false
-	for _, part := range parts {
-		if isResponsesTextPartType(part.Type) {
-			if !insertedRewrittenText && rewrittenText != "" {
-				rewrittenPart := cloneContentPart(part)
-				rewrittenPart.Text = rewrittenText
-				merged = append(merged, rewrittenPart)
-				insertedRewrittenText = true
-			}
-			continue
-		}
-		merged = append(merged, cloneContentPart(part))
-	}
-
-	if len(merged) == 0 {
-		return nil, core.NewInvalidRequestError("guardrails produced empty structured responses content after rewrite", nil)
-	}
-	return merged, nil
 }
 
 func rewriteStructuredResponsesInterfaceContentParts(parts []any, rewrittenText string) (any, error) {

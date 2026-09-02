@@ -335,70 +335,60 @@ func markOpenAIResponsesBreakpoint(req *core.ResponsesRequest) bool {
 		return false
 	}
 	for i := len(items) - 2; i >= 0; i-- {
+		var blocks []any
 		switch content := items[i].Content.(type) {
 		case string:
 			if content == "" {
 				continue
 			}
-			items[i].Content = []core.ContentPart{{
-				Type: "input_text", Text: content,
-				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-					"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
-				}),
-			}}
-			req.Input = items
-			return true
+			blocks = []any{map[string]any{"type": "input_text", "text": content}}
 		case []core.ContentPart:
-			for j := len(content) - 1; j >= 0; j-- {
-				if content[j].Type == "text" || content[j].Type == "input_text" || content[j].Type == "input_image" || content[j].Type == "input_file" {
-					parts := slices.Clone(content)
-					parts[j].ExtraFields = mergeCacheExtras(parts[j].ExtraFields, map[string]json.RawMessage{
-						"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),
-					})
-					items[i].Content = parts
-					req.Input = items
-					return true
-				}
-			}
+			blocks = core.ResponsesBlocksFromContentParts(content)
 		case []any:
-			for j, c := range slices.Backward(content) {
-				block, ok := c.(map[string]any)
-				if !ok {
-					continue
-				}
-				blockType, _ := block["type"].(string)
-				if blockType == "text" || blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
-					if _, exists := block["prompt_cache_breakpoint"]; !exists {
-						marked := maps.Clone(block)
-						marked["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
-						blocks := slices.Clone(content)
-						blocks[j] = marked
-						content = blocks
-					}
-					items[i].Content = content
-					req.Input = items
-					return true
-				}
-			}
+			blocks = content
 		case []map[string]any:
-			for j, c := range slices.Backward(content) {
-				blockType, _ := c["type"].(string)
-				if blockType == "text" || blockType == "input_text" || blockType == "input_image" || blockType == "input_file" {
-					if _, exists := c["prompt_cache_breakpoint"]; !exists {
-						marked := maps.Clone(c)
-						marked["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
-						blocks := slices.Clone(content)
-						blocks[j] = marked
-						content = blocks
-					}
-					items[i].Content = content
-					req.Input = items
-					return true
-				}
+			blocks = make([]any, len(content))
+			for j, block := range content {
+				blocks[j] = block
 			}
+		default:
+			continue
 		}
+		marked, ok := markResponsesBlockBreakpoint(blocks)
+		if !ok {
+			continue
+		}
+		items[i].Content = marked
+		req.Input = items
+		return true
 	}
 	return false
+}
+
+// markResponsesBlockBreakpoint attaches the explicit breakpoint to the last
+// cacheable block and returns the updated slice, or false when no block
+// qualifies. Blocks stay generic maps so the Responses content vocabulary
+// (input_text, input_image, ...) reaches the provider verbatim.
+func markResponsesBlockBreakpoint(blocks []any) ([]any, bool) {
+	for j, c := range slices.Backward(blocks) {
+		block, ok := c.(map[string]any)
+		if !ok {
+			continue
+		}
+		blockType, _ := block["type"].(string)
+		if blockType != "text" && blockType != "input_text" && blockType != "input_image" && blockType != "input_file" {
+			continue
+		}
+		if _, exists := block["prompt_cache_breakpoint"]; exists {
+			return blocks, true
+		}
+		marked := maps.Clone(block)
+		marked["prompt_cache_breakpoint"] = map[string]any{"mode": "explicit"}
+		updated := slices.Clone(blocks)
+		updated[j] = marked
+		return updated, true
+	}
+	return nil, false
 }
 
 func mergeCacheExtras(base core.UnknownJSONFields, values map[string]json.RawMessage) core.UnknownJSONFields {

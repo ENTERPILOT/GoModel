@@ -1122,3 +1122,61 @@ func TestResponsesContentItemMarshalJSON_Annotations(t *testing.T) {
 		})
 	}
 }
+
+func TestResponsesBlocksFromContentPartsKeepsVocabularyAndExtras(t *testing.T) {
+	parts := []ContentPart{
+		{
+			Type: "input_text", Text: "hello",
+			ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_note": json.RawMessage(`"keep"`)}),
+		},
+		{Type: "input_image", ImageURL: &ImageURLContent{URL: "https://example.com/a.png", Detail: "low"}},
+	}
+	blocks := ResponsesBlocksFromContentParts(parts)
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %v, want 2", blocks)
+	}
+	text, _ := blocks[0].(map[string]any)
+	if text["type"] != "input_text" || text["text"] != "hello" || text["x_note"] != "keep" {
+		t.Fatalf("text block = %v", text)
+	}
+	image, _ := blocks[1].(map[string]any)
+	imageURL, _ := image["image_url"].(map[string]any)
+	if image["type"] != "input_image" || imageURL["url"] != "https://example.com/a.png" || imageURL["detail"] != "low" {
+		t.Fatalf("image block = %v", image)
+	}
+	encoded, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(`"type":"text"`)) {
+		t.Fatalf("blocks serialized with Chat vocabulary: %s", encoded)
+	}
+}
+
+func TestResponsesBlocksFromContentPartsRejectsUnencodablePart(t *testing.T) {
+	if got := ResponsesBlocksFromContentParts([]ContentPart{{Type: "input_file"}}); got != nil {
+		t.Fatalf("expected nil for an unencodable part, got %v", got)
+	}
+	if got := ResponsesBlocksFromContentParts(nil); len(got) != 0 {
+		t.Fatalf("expected no blocks for no parts, got %v", got)
+	}
+}
+
+func TestResponsesBlocksFromContentPartsKeepsLargeIntegersExact(t *testing.T) {
+	parts := []ContentPart{{
+		Type: "input_text", Text: "hello",
+		ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"x_id":    json.RawMessage(`9007199254740993`),
+			"x_ratio": json.RawMessage(`0.1`),
+		}),
+	}}
+	encoded, err := json.Marshal(ResponsesBlocksFromContentParts(parts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"x_id":9007199254740993`, `"x_ratio":0.1`} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Fatalf("blocks = %s, want %s", encoded, want)
+		}
+	}
+}
