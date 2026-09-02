@@ -222,6 +222,36 @@ func TestChatCompletionStreaming_FastPathRelaysSSEWhenNoPlanApplies(t *testing.T
 	}
 }
 
+// The gateway writes its own X-Ratelimit-* headers before dispatch; the
+// provider's account limits must not replace them on the fast path, while
+// other upstream headers are still relayed.
+func TestChatCompletion_FastPathDropsUpstreamRateLimitHeaders(t *testing.T) {
+	for _, entry := range chatEntryPoints {
+		t.Run(entry.name, func(t *testing.T) {
+			mock := fastPathJSONMock(fastPathUpstreamBody)
+			mock.passthroughResponse.Headers["x-ratelimit-limit-requests"] = []string{"5000"}
+			mock.passthroughResponse.Headers["X-Ratelimit-Remaining-Tokens"] = []string{"1999989"}
+			mock.passthroughResponse.Headers["X-Upstream-Trace"] = []string{"abc"}
+			rec := entry.post(t, mock, fastPathChatRequestBody)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if mock.lastPassthroughReq == nil {
+				t.Fatal("request did not take the fast path")
+			}
+			for key := range rec.Header() {
+				if strings.HasPrefix(http.CanonicalHeaderKey(key), "X-Ratelimit-") {
+					t.Fatalf("upstream rate-limit header %s relayed: %v", key, rec.Header().Values(key))
+				}
+			}
+			if got := rec.Header().Get("X-Upstream-Trace"); got != "abc" {
+				t.Fatalf("X-Upstream-Trace = %q, want abc", got)
+			}
+		})
+	}
+}
+
 func TestChatCompletion_FastPathSkippedWhenRawModelIsNotCanonical(t *testing.T) {
 	tests := []struct {
 		name string
