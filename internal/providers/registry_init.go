@@ -269,20 +269,31 @@ func (r *ModelRegistry) fetchAllProviderModels(
 
 		for _, model := range resp.Data {
 			info := newModelInfo(model, provider, providerName, providerTypes[provider])
-			out.modelsByProvider[providerName][model.ID] = info
+			modelID := info.Model.ID
+			if _, exists := out.modelsByProvider[providerName][modelID]; exists {
+				// IDs are trimmed on entry, so "foo" and " foo " from the same
+				// provider collapse to one record. First wins, matching the
+				// bare-ID map below.
+				slog.Debug("duplicate model in provider response, keeping first",
+					"model", modelID,
+					"provider", providerName,
+				)
+				continue
+			}
+			out.modelsByProvider[providerName][modelID] = info
 
-			if _, exists := out.models[model.ID]; exists {
+			if _, exists := out.models[modelID]; exists {
 				// First provider wins for unqualified lookups; later duplicates
 				// stay reachable via modelsByProvider but lose the bare-id slot.
 				slog.Debug("model already registered, skipping",
-					"model", model.ID,
+					"model", modelID,
 					"provider", providerName,
 					"owner", model.OwnedBy,
 				)
 				continue
 			}
 
-			out.models[model.ID] = info
+			out.models[modelID] = info
 			out.totalModels++
 		}
 	}
@@ -458,14 +469,14 @@ func (r *ModelRegistry) applyProviderRuntimeUpdatesLocked(updates map[string]pro
 			// old error doesn't survive a subsequent successful refresh —
 			// this matters in particular for allowlist-mode refreshes which
 			// don't bump SuccessAt but still produce usable models.
-			current.lastModelFetchError = strings.TrimSpace(update.lastModelFetchError)
+			current.lastModelFetchError = optionalFailureMessage(update.lastModelFetchError)
 		}
 		if !update.lastModelFetchSuccessAt.IsZero() {
 			current.lastModelFetchSuccessAt = update.lastModelFetchSuccessAt
 		}
 		if !update.lastAvailabilityCheckAt.IsZero() {
 			current.lastAvailabilityCheckAt = update.lastAvailabilityCheckAt
-			current.lastAvailabilityError = strings.TrimSpace(update.lastAvailabilityError)
+			current.lastAvailabilityError = optionalFailureMessage(update.lastAvailabilityError)
 		}
 		if !update.lastAvailabilityOKAt.IsZero() {
 			current.lastAvailabilityOKAt = update.lastAvailabilityOKAt

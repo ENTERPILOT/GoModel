@@ -35,12 +35,17 @@ type ModelInfo struct {
 // newModelInfo registers a model together with the metadata its provider
 // reported for it. Always build ModelInfo through this so Discovered is
 // captured before enrichment has a chance to overwrite Model.Metadata.
+//
+// The model ID, provider name, and provider type are whitespace-trimmed here,
+// at the boundary where inventory enters the registry, so every read path can
+// compare stored values directly.
 func newModelInfo(model core.Model, provider core.Provider, providerName, providerType string) *ModelInfo {
+	model.ID = strings.TrimSpace(model.ID)
 	return &ModelInfo{
 		Model:        model,
 		Provider:     provider,
-		ProviderName: providerName,
-		ProviderType: providerType,
+		ProviderName: strings.TrimSpace(providerName),
+		ProviderType: strings.TrimSpace(providerType),
 		Discovered:   model.Metadata.Clone(),
 	}
 }
@@ -211,20 +216,18 @@ func (r *ModelRegistry) buildSelectorIndexLocked() {
 	byType := make(map[string]core.ModelSelector, total)
 	for providerName, providerModels := range r.modelsByProvider {
 		for _, info := range providerModels {
-			publicName := strings.TrimSpace(providerName)
+			publicName := providerName
 			if info.ProviderName != "" {
-				publicName = strings.TrimSpace(info.ProviderName)
+				publicName = info.ProviderName
 			}
-			id := strings.TrimSpace(info.Model.ID)
+			id := info.Model.ID
 			if publicName == "" || id == "" {
 				continue
 			}
-			// Keys are trimmed to match the trimmed lookup inputs and the
-			// previous scan, which compared trimmed fields on both sides.
-			sel := core.ModelSelector{Provider: publicName, Model: info.Model.ID}
+			sel := core.ModelSelector{Provider: publicName, Model: id}
 			byName[publicName+"/"+id] = sel
-			if providerType := strings.TrimSpace(info.ProviderType); providerType != "" {
-				typeKey := providerType + "/" + id
+			if info.ProviderType != "" {
+				typeKey := info.ProviderType + "/" + id
 				if existing, ok := byType[typeKey]; !ok || sel.Provider < existing.Provider {
 					byType[typeKey] = sel
 				}
@@ -404,6 +407,7 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 // model ID itself (e.g. "meta-llama/Meta-Llama-3-70B"), so the raw selector is
 // tried against the global map. Callers must hold r.mu.
 func (r *ModelRegistry) lookupLocked(model string) (*ModelInfo, bool) {
+	model = strings.TrimSpace(model)
 	providerName, modelID := splitModelSelector(model)
 	if providerName != "" {
 		if providerModels, ok := r.modelsByProvider[providerName]; ok {
@@ -461,20 +465,7 @@ func (r *ModelRegistry) Supports(model string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if _, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return true
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return false
-		}
-		// Fall through: the slash may be part of the model ID
-	}
-
-	_, ok := r.models[model]
+	_, ok := r.lookupLocked(model)
 	return ok
 }
 
@@ -487,23 +478,11 @@ func (r *ModelRegistry) ModelAvailable(model string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if _, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return !r.providerRuntime[providerName].inventoryStale
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return false
-		}
-		// Fall through: the slash may be part of the model ID
+	info, ok := r.lookupLocked(model)
+	if !ok {
+		return false
 	}
-
-	if info, ok := r.models[model]; ok {
-		return !r.providerRuntime[info.ProviderName].inventoryStale
-	}
-	return false
+	return !r.providerRuntime[info.ProviderName].inventoryStale
 }
 
 // providerAdvertisedLocked reports whether providerName's models belong in
@@ -672,7 +651,7 @@ func (r *ModelRegistry) GetProviderName(model string) string {
 	defer r.mu.RUnlock()
 
 	if info, ok := r.lookupLocked(model); ok {
-		return strings.TrimSpace(info.ProviderName)
+		return info.ProviderName
 	}
 	return ""
 }
@@ -689,10 +668,10 @@ func (r *ModelRegistry) GetProviderNameForType(providerType string) string {
 		return ""
 	}
 	for _, provider := range r.providers {
-		if strings.TrimSpace(r.providerTypes[provider]) != providerType {
+		if r.providerTypes[provider] != providerType {
 			continue
 		}
-		return strings.TrimSpace(r.providerNames[provider])
+		return r.providerNames[provider]
 	}
 	return ""
 }
@@ -708,10 +687,10 @@ func (r *ModelRegistry) GetProviderTypeForName(providerName string) string {
 		return ""
 	}
 	for _, provider := range r.providers {
-		if strings.TrimSpace(r.providerNames[provider]) != providerName {
+		if r.providerNames[provider] != providerName {
 			continue
 		}
-		return strings.TrimSpace(r.providerTypes[provider])
+		return r.providerTypes[provider]
 	}
 	return ""
 }
@@ -746,7 +725,7 @@ func (r *ModelRegistry) ProviderByName(providerName string) core.Provider {
 		return nil
 	}
 	for _, provider := range r.providers {
-		if strings.TrimSpace(r.providerNames[provider]) == providerName {
+		if r.providerNames[provider] == providerName {
 			return provider
 		}
 	}
@@ -762,7 +741,7 @@ func (r *ModelRegistry) ProviderTypes() []string {
 	seen := make(map[string]struct{}, len(r.providerTypes))
 	result := make([]string, 0, len(r.providerTypes))
 	for _, provider := range r.providers {
-		providerType := strings.TrimSpace(r.providerTypes[provider])
+		providerType := r.providerTypes[provider]
 		if providerType == "" {
 			continue
 		}
@@ -783,7 +762,7 @@ func (r *ModelRegistry) ProviderNames() []string {
 
 	result := make([]string, 0, len(r.providers))
 	for _, provider := range r.providers {
-		providerName := strings.TrimSpace(r.providerNames[provider])
+		providerName := r.providerNames[provider]
 		if providerName == "" {
 			continue
 		}
@@ -792,8 +771,9 @@ func (r *ModelRegistry) ProviderNames() []string {
 	return result
 }
 
+// splitModelSelector splits an already-trimmed selector into its provider and
+// model segments. Whitespace around the slash is tolerated.
 func splitModelSelector(model string) (providerName, modelID string) {
-	model = strings.TrimSpace(model)
 	if model == "" {
 		return "", ""
 	}
@@ -810,8 +790,6 @@ func splitModelSelector(model string) (providerName, modelID string) {
 }
 
 func providerModelInfo(providerModels map[string]*ModelInfo, modelID, rawModel string) (*ModelInfo, bool) {
-	modelID = strings.TrimSpace(modelID)
-	rawModel = strings.TrimSpace(rawModel)
 	if info, exists := providerModels[modelID]; exists {
 		return info, true
 	}
@@ -824,8 +802,6 @@ func providerModelInfo(providerModels map[string]*ModelInfo, modelID, rawModel s
 }
 
 func qualifyPublicModelID(providerName, modelID string) string {
-	providerName = strings.TrimSpace(providerName)
-	modelID = strings.TrimSpace(modelID)
 	if providerName == "" {
 		return modelID
 	}
@@ -836,7 +812,6 @@ func qualifyPublicModelID(providerName, modelID string) string {
 }
 
 func (r *ModelRegistry) hasConfiguredProviderNameLocked(providerName string) bool {
-	providerName = strings.TrimSpace(providerName)
 	if providerName == "" {
 		return false
 	}
@@ -1045,6 +1020,25 @@ func (r *ModelRegistry) ProviderCount() int {
 	return len(r.providers)
 }
 
+// failureMessage returns the trimmed text of a failure for runtime state. An
+// empty stored message means "no failure", so a message that is empty or only
+// whitespace becomes a fixed marker instead of reading as success.
+func failureMessage(message string) string {
+	if trimmed := strings.TrimSpace(message); trimmed != "" {
+		return trimmed
+	}
+	return "unknown error"
+}
+
+// optionalFailureMessage is failureMessage for fields where "" means no
+// failure occurred.
+func optionalFailureMessage(message string) string {
+	if message == "" {
+		return ""
+	}
+	return failureMessage(message)
+}
+
 // RecordAvailabilityCheck stores the latest startup or explicit availability
 // probe result for a configured provider name.
 func (r *ModelRegistry) RecordAvailabilityCheck(providerName string, err error) {
@@ -1060,7 +1054,7 @@ func (r *ModelRegistry) RecordAvailabilityCheck(providerName string, err error) 
 	state.registered = true
 	state.lastAvailabilityCheckAt = time.Now().UTC()
 	if err != nil {
-		state.lastAvailabilityError = err.Error()
+		state.lastAvailabilityError = failureMessage(err.Error())
 	} else {
 		state.lastAvailabilityOKAt = state.lastAvailabilityCheckAt
 		state.lastAvailabilityError = ""
@@ -1090,14 +1084,14 @@ func (r *ModelRegistry) markProviderInventoryStale(providerName string) {
 
 	healthyAlternative := false
 	for _, provider := range r.providers {
-		name := strings.TrimSpace(r.providerNames[provider])
+		name := r.providerNames[provider]
 		if name == "" || name == providerName {
 			continue
 		}
 		state := r.providerRuntime[name]
 		if state.registered && !state.inventoryStale &&
-			strings.TrimSpace(state.lastModelFetchError) == "" &&
-			strings.TrimSpace(state.lastAvailabilityError) == "" &&
+			state.lastModelFetchError == "" &&
+			state.lastAvailabilityError == "" &&
 			len(r.modelsByProvider[name]) > 0 {
 			healthyAlternative = true
 			break
@@ -1126,13 +1120,12 @@ func (r *ModelRegistry) FailedProviderNames() []string {
 
 	names := make([]string, 0)
 	for _, provider := range r.providers {
-		providerName := strings.TrimSpace(r.providerNames[provider])
+		providerName := r.providerNames[provider]
 		if providerName == "" {
 			continue
 		}
 		state := r.providerRuntime[providerName]
-		if strings.TrimSpace(state.lastModelFetchError) == "" &&
-			strings.TrimSpace(state.lastAvailabilityError) == "" {
+		if state.lastModelFetchError == "" && state.lastAvailabilityError == "" {
 			continue
 		}
 		names = append(names, providerName)
@@ -1146,22 +1139,22 @@ func (r *ModelRegistry) ProviderRuntimeSnapshots() []ProviderRuntimeSnapshot {
 	r.mu.RLock()
 	result := make([]ProviderRuntimeSnapshot, 0, len(r.providers))
 	for _, provider := range r.providers {
-		providerName := strings.TrimSpace(r.providerNames[provider])
+		providerName := r.providerNames[provider]
 		if providerName == "" {
 			continue
 		}
 		state := r.providerRuntime[providerName]
 		result = append(result, ProviderRuntimeSnapshot{
 			Name:                    providerName,
-			Type:                    strings.TrimSpace(r.providerTypes[provider]),
+			Type:                    r.providerTypes[provider],
 			Registered:              state.registered,
 			DiscoveredModelCount:    len(r.modelsByProvider[providerName]),
 			LastModelFetchAt:        timePtrUTC(state.lastModelFetchAt),
 			LastModelFetchSuccessAt: timePtrUTC(state.lastModelFetchSuccessAt),
-			LastModelFetchError:     strings.TrimSpace(state.lastModelFetchError),
+			LastModelFetchError:     state.lastModelFetchError,
 			LastAvailabilityCheckAt: timePtrUTC(state.lastAvailabilityCheckAt),
 			LastAvailabilityOKAt:    timePtrUTC(state.lastAvailabilityOKAt),
-			LastAvailabilityError:   strings.TrimSpace(state.lastAvailabilityError),
+			LastAvailabilityError:   state.lastAvailabilityError,
 			InventoryStale:          state.inventoryStale,
 		})
 	}
