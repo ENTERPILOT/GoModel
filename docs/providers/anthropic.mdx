@@ -94,7 +94,8 @@ so on legacy models they are capped at the `high` budget rather than inflating
 
 <Note>
   Omit `reasoning` to leave thinking at the model's default. GoModel only sets
-  `thinking: {type: "adaptive"}` when you pass `reasoning.effort`. Without it,
+  `thinking: {type: "adaptive"}` when you pass `reasoning.effort` (or
+  `reasoning_effort`). Without it,
   Opus 4.6 to 4.8 and Sonnet 4.6/5 do not engage extended thinking, while
   Fable 5/5.1, Mythos 5/5.1, and Opus 5 think adaptively on their own (see the
   always-on note below). Effort is a separate

@@ -304,9 +304,10 @@ func rejectsForcedToolChoice(model string) bool {
 	return matchesModelPrefix(model, forcedToolChoiceRejectedPrefixes)
 }
 
-// matchesModelPrefix reports whether model is one of the prefixes exactly or a
-// dated snapshot of one ("<prefix>-YYYYMMDD"). The trailing dash keeps
-// "claude-opus-4-6" from matching "claude-opus-4-65".
+// matchesModelPrefix reports whether model is one of the prefixes exactly or
+// extends one past a dash, which covers dated snapshots ("claude-opus-4-8-20260301")
+// and point releases ("claude-fable-5" matches "claude-fable-5-1"). The trailing
+// dash keeps "claude-opus-4-6" from matching "claude-opus-4-65".
 func matchesModelPrefix(model string, prefixes []string) bool {
 	for _, prefix := range prefixes {
 		if model == prefix || strings.HasPrefix(model, prefix+"-") {
