@@ -334,6 +334,8 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		anthropicReq.MaxTokens = resolveDefaultMaxTokens()
 	}
 
+	dropUnsupportedSamplingParameters(anthropicReq)
+
 	if effort := resolveAnthropicReasoningEffort(req); effort != "" {
 		applyReasoning(anthropicReq, req.Model, effort)
 	}
@@ -343,6 +345,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		return nil, err
 	}
 	anthropicReq.Tools = tools
+	var forcedToolInstruction string
 	if toolChoice, disableTools, err := convertOpenAIToolChoiceToAnthropic(req.ToolChoice); err != nil {
 		return nil, err
 	} else if err := validateAnthropicToolChoice(toolChoice, anthropicReq.Tools, disableTools); err != nil {
@@ -353,6 +356,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		if toolChoice == nil && req.ParallelToolCalls != nil && !*req.ParallelToolCalls {
 			toolChoice = &anthropicToolChoice{Type: "auto"}
 		}
+		toolChoice, forcedToolInstruction = relaxForcedToolChoice(toolChoice, req.Model)
 		toolChoice = applyParallelToolCalls(toolChoice, req.ParallelToolCalls)
 		anthropicReq.ToolChoice = toolChoice
 	}
@@ -396,7 +400,57 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		})
 	}
 
+	if forcedToolInstruction != "" {
+		anthropicReq.System = appendAnthropicSystemContent(anthropicReq.System, forcedToolInstruction)
+	}
+
 	return anthropicReq, nil
+}
+
+// dropUnsupportedSamplingParameters removes temperature and top_p for models
+// that reject them outright (Opus 4.7 onward and the Claude 5 generation).
+// The values are logged so operators can see the client intent that was
+// discarded; failing the request would break every OpenAI SDK default.
+func dropUnsupportedSamplingParameters(req *anthropicRequest) {
+	if !rejectsSamplingParameters(req.Model) || (req.Temperature == nil && req.TopP == nil) {
+		return
+	}
+	attrs := []any{"model", req.Model}
+	if req.Temperature != nil {
+		attrs = append(attrs, "temperature", *req.Temperature)
+	}
+	if req.TopP != nil {
+		attrs = append(attrs, "top_p", *req.TopP)
+	}
+	slog.Warn("dropping sampling parameters the model does not accept", attrs...)
+	req.Temperature = nil
+	req.TopP = nil
+}
+
+// relaxForcedToolChoice downgrades tool_choice "any" and "tool" to "auto" on
+// models that reject forced tool use (Fable 5.1 and Mythos 5.1). Anthropic's
+// documented replacement is "auto" plus a prompt instruction naming the tool,
+// so the returned instruction is appended to the system prompt to preserve the
+// caller's intent as closely as the provider allows.
+func relaxForcedToolChoice(choice *anthropicToolChoice, model string) (*anthropicToolChoice, string) {
+	if choice == nil || !rejectsForcedToolChoice(model) {
+		return choice, ""
+	}
+	var instruction string
+	switch choice.Type {
+	case "any":
+		instruction = "You must respond by calling one of the provided tools."
+	case "tool":
+		instruction = "You must respond by calling the tool named " + strconv.Quote(choice.Name) + "."
+	default:
+		return choice, ""
+	}
+	slog.Warn("tool_choice downgraded to auto; model rejects forced tool use",
+		"model", model, "tool_choice", choice.Type, "tool", choice.Name)
+	relaxed := *choice
+	relaxed.Type = "auto"
+	relaxed.Name = ""
+	return &relaxed, instruction
 }
 
 func validateAnthropicUnsupportedChatExtras(extra core.UnknownJSONFields) error {
