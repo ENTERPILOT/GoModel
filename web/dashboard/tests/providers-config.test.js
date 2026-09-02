@@ -22,6 +22,7 @@ import {
   resetProviderCredentialFields,
   validateProviderCredentialForm,
   buildProviderCredentialPayload,
+  providerRowsHaveActions,
 } from "../src/pages/providers-config/providersConfigLogic.js";
 
 // Schemas shaped like GET /admin/provider-credentials/types serves them.
@@ -558,4 +559,14 @@ test("splitCommaList trims and drops empties", () => {
     ["gpt-4o", "gpt-4o-mini"],
   );
   assert.deepEqual(splitCommaList(""), []);
+});
+
+test("providerRowsHaveActions is false when every provider is managed", () => {
+  assert.equal(providerRowsHaveActions([]), false);
+  assert.equal(providerRowsHaveActions([{ name: "openai", managed: true }]), false);
+  assert.equal(
+    providerRowsHaveActions([{ name: "openai", managed: true }, { name: "mine", managed: false }]),
+    true,
+  );
+  assert.equal(providerRowsHaveActions(undefined), false);
 });

@@ -518,3 +518,10 @@ function providerCredentialPayloadValue(form, name) {
       return String((form && form[name]) || "").trim();
   }
 }
+
+// providerRowsHaveActions reports whether any listed provider can be edited
+// or deleted. Managed rows (config.yaml or env) never can, so a deployment
+// with only managed providers has no use for an actions column.
+export function providerRowsHaveActions(rows) {
+  return (Array.isArray(rows) ? rows : []).some((row) => row && !row.managed);
+}
