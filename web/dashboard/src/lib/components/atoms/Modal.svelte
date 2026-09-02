@@ -116,7 +116,7 @@
       }
 
     .editor-modal-shell > :global(*) {
-        max-height: calc(100vh - 24px);
+        max-height: calc(100vh - 24px - env(safe-area-inset-bottom, 0px));
       }
   }
 </style>

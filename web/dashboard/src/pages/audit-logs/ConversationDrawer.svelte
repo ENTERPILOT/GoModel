@@ -16,6 +16,7 @@
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import { conversationRequestStepID } from "./conversation-helpers.js";
   import {
+    CONVERSATION_FULLSCREEN_MAX_VIEWPORT,
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
     conversationMessageNavigationTarget,
@@ -181,11 +182,22 @@
         }
       }
     };
+    // Shrinking an open drawer below the phone breakpoint (a window resize,
+    // a device rotation) switches to fullscreen the same way opening there
+    // does. Growing back leaves the operator's choice alone.
+    const phoneViewport = window.matchMedia(
+      "(max-width: " + CONVERSATION_FULLSCREEN_MAX_VIEWPORT + "px)",
+    );
+    const onPhoneViewportChange = (event) => {
+      if (event.matches) fullscreen = true;
+    };
+    phoneViewport.addEventListener("change", onPhoneViewportChange);
     window.addEventListener("keydown", onKeydown);
     window.addEventListener("resize", syncPanelWidth);
     return () => {
       finishResize({});
       sidebarObserver.disconnect();
+      phoneViewport.removeEventListener("change", onPhoneViewportChange);
       window.removeEventListener("keydown", onKeydown);
       window.removeEventListener("resize", syncPanelWidth);
     };
@@ -477,7 +489,8 @@
     }
 
     .conversation-drawer-fullscreen {
-      padding-bottom: env(safe-area-inset-bottom);
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
     }
   }
 

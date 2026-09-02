@@ -368,6 +368,8 @@ export const MIN_JSON_PANEL_WIDTH = 280;
 // desktop preference; opening it would hide the composer on first load.
 export const JSON_PANEL_FULLSCREEN_MAX_VIEWPORT = 768;
 
+// initialJsonPanelOpen resolves the panel's open state on load from the
+// stored preference ("true"/"false") and the viewport width.
 export function initialJsonPanelOpen(stored, viewportWidth) {
   if (Number(viewportWidth) <= JSON_PANEL_FULLSCREEN_MAX_VIEWPORT) return false;
   return stored !== "false";

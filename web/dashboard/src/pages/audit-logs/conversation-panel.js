@@ -5,6 +5,8 @@ export const DEFAULT_CONVERSATION_PANEL_WIDTH = 520;
 // so it opens straight into fullscreen there.
 export const CONVERSATION_FULLSCREEN_MAX_VIEWPORT = 768;
 
+// conversationOpensFullscreen reports whether a drawer opened at this
+// viewport width should start in fullscreen rather than the split layout.
 export function conversationOpensFullscreen(viewportWidth) {
   return finite(viewportWidth) <= CONVERSATION_FULLSCREEN_MAX_VIEWPORT;
 }
