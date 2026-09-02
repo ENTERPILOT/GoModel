@@ -269,20 +269,21 @@ func (r *ModelRegistry) fetchAllProviderModels(
 
 		for _, model := range resp.Data {
 			info := newModelInfo(model, provider, providerName, providerTypes[provider])
-			out.modelsByProvider[providerName][model.ID] = info
+			modelID := info.Model.ID
+			out.modelsByProvider[providerName][modelID] = info
 
-			if _, exists := out.models[model.ID]; exists {
+			if _, exists := out.models[modelID]; exists {
 				// First provider wins for unqualified lookups; later duplicates
 				// stay reachable via modelsByProvider but lose the bare-id slot.
 				slog.Debug("model already registered, skipping",
-					"model", model.ID,
+					"model", modelID,
 					"provider", providerName,
 					"owner", model.OwnedBy,
 				)
 				continue
 			}
 
-			out.models[model.ID] = info
+			out.models[modelID] = info
 			out.totalModels++
 		}
 	}

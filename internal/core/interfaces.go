@@ -232,6 +232,10 @@ type AvailabilityChecker interface {
 
 // ModelLookup defines the interface for looking up models and their providers.
 // This abstraction allows the Router to be decoupled from the concrete ModelRegistry implementation.
+//
+// Implementations normalize on write: every provider name, provider type, and
+// model ID they return is whitespace-trimmed, so callers compare the values
+// directly.
 type ModelLookup interface {
 	// Supports returns true if the registry has a provider for the given model
 	Supports(model string) bool

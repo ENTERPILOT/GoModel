@@ -69,7 +69,7 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 				OwnedBy: cachedProv.OwnedBy,
 				Created: cached.Created,
 			}, provider, providerName, providerType)
-			providerModels[cached.ID] = info
+			providerModels[info.Model.ID] = info
 		}
 		newModelsByProvider[providerName] = providerModels
 	}

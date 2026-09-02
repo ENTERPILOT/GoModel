@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,11 +22,47 @@ var ErrRegistryNotInitialized = fmt.Errorf("model registry has no models: ensure
 // It uses a dynamic model-to-provider mapping that is populated at startup
 // by fetching available models from each provider's /models endpoint.
 type Router struct {
-	lookup       core.ModelLookup
+	lookup core.ModelLookup
+	// caps holds the optional lookup capabilities, resolved once at
+	// construction so the request path never repeats the type assertions.
+	caps         lookupCaps
 	cachePlanner *cachePlanner
 	// unqualifiedModelIDs makes ListModels advertise bare model IDs instead of
 	// provider-qualified ones.
 	unqualifiedModelIDs bool
+}
+
+// lookupCaps records which optional interfaces the lookup implements. A nil
+// field means the lookup lacks that capability and the router uses the
+// fallback path built on the core.ModelLookup contract.
+type lookupCaps struct {
+	typeRegistry            providerTypeRegistry
+	nameRegistry            providerNameRegistry
+	initialized             initializedLookup
+	typeLister              providerTypeLister
+	nameLister              providerNameLister
+	publicModels            publicModelLister
+	unqualifiedPublicModels unqualifiedPublicModelLister
+	modelsWithProvider      modelWithProviderLister
+	selectorResolver        qualifiedSelectorResolver
+	modelInfo               modelInfoLookup
+	refresher               providerModelRefresher
+}
+
+func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
+	var caps lookupCaps
+	caps.typeRegistry, _ = lookup.(providerTypeRegistry)
+	caps.nameRegistry, _ = lookup.(providerNameRegistry)
+	caps.initialized, _ = lookup.(initializedLookup)
+	caps.typeLister, _ = lookup.(providerTypeLister)
+	caps.nameLister, _ = lookup.(providerNameLister)
+	caps.publicModels, _ = lookup.(publicModelLister)
+	caps.unqualifiedPublicModels, _ = lookup.(unqualifiedPublicModelLister)
+	caps.modelsWithProvider, _ = lookup.(modelWithProviderLister)
+	caps.selectorResolver, _ = lookup.(qualifiedSelectorResolver)
+	caps.modelInfo, _ = lookup.(modelInfoLookup)
+	caps.refresher, _ = lookup.(providerModelRefresher)
+	return caps
 }
 
 type providerTypeRegistry interface {
@@ -92,6 +129,7 @@ func NewRouter(lookup core.ModelLookup) (*Router, error) {
 	}
 	return &Router{
 		lookup:       lookup,
+		caps:         resolveLookupCaps(lookup),
 		cachePlanner: newCachePlanner(),
 	}, nil
 }
@@ -143,10 +181,10 @@ func (r *Router) ResolveModel(requested core.RequestedModelSelector) (core.Model
 }
 
 func (r *Router) resolveUnqualifiedSelector(selector core.ModelSelector) (core.ModelSelector, bool) {
-	if selector.Provider != "" || strings.TrimSpace(selector.Model) == "" {
+	if selector.Provider != "" || selector.Model == "" {
 		return core.ModelSelector{}, false
 	}
-	providerName := strings.TrimSpace(r.lookup.GetProviderName(selector.Model))
+	providerName := r.lookup.GetProviderName(selector.Model)
 	if providerName == "" {
 		return core.ModelSelector{}, false
 	}
@@ -154,21 +192,21 @@ func (r *Router) resolveUnqualifiedSelector(selector core.ModelSelector) (core.M
 }
 
 func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector, selector core.ModelSelector) (core.ModelSelector, bool) {
-	models, ok := r.lookup.(modelWithProviderLister)
-	if !ok {
+	if r.caps.modelsWithProvider == nil {
 		return core.ModelSelector{}, false
 	}
 
-	providerSegment := strings.TrimSpace(selector.Provider)
-	modelID := strings.TrimSpace(selector.Model)
+	// selector comes from Normalize(), so both segments are already trimmed.
+	providerSegment := selector.Provider
+	modelID := selector.Model
 	if providerSegment == "" || modelID == "" {
 		return core.ModelSelector{}, false
 	}
 
 	// O(1) fast path: direct provider name/type match. Falls through to the
 	// catalog scan only for raw slash-shaped IDs and other edge cases.
-	if resolver, ok := r.lookup.(qualifiedSelectorResolver); ok {
-		if concrete, ok := resolver.ResolveProviderSelector(providerSegment, modelID); ok {
+	if r.caps.selectorResolver != nil {
+		if concrete, ok := r.caps.selectorResolver.ResolveProviderSelector(providerSegment, modelID); ok {
 			return concrete, true
 		}
 	}
@@ -177,7 +215,7 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 	// raw slash-shaped model IDs the fast path can't key on). The parsed-modelID
 	// pass mirrors the fast path for non-indexed lookups; the requested.Model pass
 	// additionally resolves models whose own IDs contain a slash.
-	entries := models.ListModelsWithProvider()
+	entries := r.caps.modelsWithProvider.ListModelsWithProvider()
 
 	if concrete, ok := resolveProviderOwnedRawSelector(entries, providerSegment, modelID); ok {
 		return concrete, true
@@ -196,12 +234,12 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 		return core.ModelSelector{}, false
 	}
 
-	rawModelID := strings.TrimSpace(requested.Model)
+	rawModelID := requested.Model
 	if rawModelID == "" {
 		return core.ModelSelector{}, false
 	}
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.Model.ID) != rawModelID {
+		if entry.Model.ID != rawModelID {
 			continue
 		}
 		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
@@ -210,52 +248,40 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 	return core.ModelSelector{}, false
 }
 
+// resolveProviderOwnedRawSelector scans the catalog for a trimmed provider
+// segment (name first, then type) and a trimmed raw model ID.
 func resolveProviderOwnedRawSelector(entries []ModelWithProvider, providerSegment, rawModelID string) (core.ModelSelector, bool) {
-	providerSegment = strings.TrimSpace(providerSegment)
-	rawModelID = strings.TrimSpace(rawModelID)
 	if providerSegment == "" || rawModelID == "" {
 		return core.ModelSelector{}, false
 	}
 
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.ProviderName) != providerSegment {
-			continue
+		if entry.ProviderName == providerSegment && entry.Model.ID == rawModelID {
+			return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 		}
-		if strings.TrimSpace(entry.Model.ID) != rawModelID {
-			continue
-		}
-		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 	}
 
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.ProviderType) != providerSegment {
-			continue
+		if entry.ProviderType == providerSegment && entry.Model.ID == rawModelID {
+			return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 		}
-		if strings.TrimSpace(entry.Model.ID) != rawModelID {
-			continue
-		}
-		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 	}
 
 	return core.ModelSelector{}, false
 }
 
+// hasConfiguredProviderName reports whether a trimmed provider name is a
+// configured provider instance.
 func (r *Router) hasConfiguredProviderName(providerName string) bool {
-	providerName = strings.TrimSpace(providerName)
 	if providerName == "" {
 		return false
 	}
-	if named, ok := r.lookup.(providerNameLister); ok {
-		for _, candidate := range named.ProviderNames() {
-			if strings.TrimSpace(candidate) == providerName {
-				return true
-			}
-		}
-		return false
+	if r.caps.nameLister != nil {
+		return slices.Contains(r.caps.nameLister.ProviderNames(), providerName)
 	}
-	if models, ok := r.lookup.(modelWithProviderLister); ok {
-		for _, entry := range models.ListModelsWithProvider() {
-			if strings.TrimSpace(entry.ProviderName) == providerName {
+	if r.caps.modelsWithProvider != nil {
+		for _, entry := range r.caps.modelsWithProvider.ListModelsWithProvider() {
+			if entry.ProviderName == providerName {
 				return true
 			}
 		}
@@ -275,8 +301,8 @@ type resolvedRoute struct {
 // lookupRoute fetches the provider and provider type for an already-resolved
 // selector, taking the registry lock once when the lookup supports it.
 func (r *Router) lookupRoute(model string) (core.Provider, string) {
-	if infos, ok := r.lookup.(modelInfoLookup); ok {
-		info := infos.GetModel(model)
+	if r.caps.modelInfo != nil {
+		info := r.caps.modelInfo.GetModel(model)
 		if info == nil || info.Provider == nil {
 			return nil, ""
 		}
@@ -333,8 +359,7 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 }
 
 func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested core.RequestedModelSelector) (bool, error) {
-	refresher, ok := r.lookup.(providerModelRefresher)
-	if !ok {
+	if r.caps.refresher == nil {
 		return false, nil
 	}
 
@@ -342,7 +367,7 @@ func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested 
 	if err != nil {
 		return false, nil
 	}
-	providerSelector := strings.TrimSpace(selector.Provider)
+	providerSelector := selector.Provider
 	if providerSelector == "" {
 		return false, nil
 	}
@@ -350,7 +375,7 @@ func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested 
 		return false, nil
 	}
 
-	_, err = refresher.RefreshProviderModels(ctx, providerSelector)
+	_, err = r.caps.refresher.RefreshProviderModels(ctx, providerSelector)
 	return true, err
 }
 
@@ -361,22 +386,22 @@ func (r *Router) RefreshProviderModels(ctx context.Context, providerSelector str
 	if !r.hasRegisteredProviderSelector(providerSelector) {
 		return 0, nil
 	}
-	refresher, ok := r.lookup.(providerModelRefresher)
-	if !ok {
+	if r.caps.refresher == nil {
 		return 0, nil
 	}
-	return refresher.RefreshProviderModels(ctx, providerSelector)
+	return r.caps.refresher.RefreshProviderModels(ctx, providerSelector)
 }
 
+// hasRegisteredProviderSelector reports whether a trimmed selector names a
+// configured provider instance or a registered provider type.
 func (r *Router) hasRegisteredProviderSelector(providerSelector string) bool {
-	providerSelector = strings.TrimSpace(providerSelector)
 	if providerSelector == "" {
 		return false
 	}
 	if r.hasConfiguredProviderName(providerSelector) {
 		return true
 	}
-	if strings.TrimSpace(r.lookup.GetProviderNameForType(providerSelector)) != "" {
+	if r.lookup.GetProviderNameForType(providerSelector) != "" {
 		return true
 	}
 	return r.providerByTypeRegistry(providerSelector) != nil
@@ -408,7 +433,7 @@ func (r *Router) resolveProviderSelector(providerSelector string) (core.Provider
 		return provider, providerSelector, nil
 	}
 	if provider := r.providerByNameRegistry(providerSelector); provider != nil {
-		providerType := strings.TrimSpace(r.GetProviderTypeForName(providerSelector))
+		providerType := r.GetProviderTypeForName(providerSelector)
 		if providerType == "" {
 			providerType = providerSelector
 		}
@@ -418,8 +443,8 @@ func (r *Router) resolveProviderSelector(providerSelector string) (core.Provider
 }
 
 func (r *Router) ensureProviderInventoryReady() error {
-	if initialized, ok := r.lookup.(initializedLookup); ok {
-		if !initialized.IsInitialized() {
+	if r.caps.initialized != nil {
+		if !r.caps.initialized.IsInitialized() {
 			if err := r.checkReady(); err != nil {
 				if errors.Is(err, ErrRegistryNotInitialized) {
 					return registryUnavailableError(err)
@@ -748,10 +773,10 @@ func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
 		return nil, registryUnavailableError(err)
 	}
 	var models []core.Model
-	if unqualified, ok := r.lookup.(unqualifiedPublicModelLister); ok && r.unqualifiedModelIDs {
-		models = unqualified.ListUnqualifiedPublicModels()
-	} else if public, ok := r.lookup.(publicModelLister); ok {
-		models = public.ListPublicModels()
+	if r.caps.unqualifiedPublicModels != nil && r.unqualifiedModelIDs {
+		models = r.caps.unqualifiedPublicModels.ListUnqualifiedPublicModels()
+	} else if r.caps.publicModels != nil {
+		models = r.caps.publicModels.ListPublicModels()
 	} else {
 		models = r.lookup.ListModels()
 	}
@@ -1056,7 +1081,7 @@ func (r *Router) GetProviderName(model string) string {
 // GetProviderNameForType returns the concrete configured provider instance name
 // chosen for a provider-typed route.
 func (r *Router) GetProviderNameForType(providerType string) string {
-	return strings.TrimSpace(r.lookup.GetProviderNameForType(providerType))
+	return r.lookup.GetProviderNameForType(providerType)
 }
 
 // GetProviderTypeForName returns the provider type for a concrete configured
@@ -1066,7 +1091,7 @@ func (r *Router) GetProviderTypeForName(providerName string) string {
 	if providerName == "" {
 		return ""
 	}
-	return strings.TrimSpace(r.lookup.GetProviderTypeForName(providerName))
+	return r.lookup.GetProviderTypeForName(providerName)
 }
 
 func (r *Router) providerByType(providerType string) core.Provider {
@@ -1084,8 +1109,8 @@ func (r *Router) providerByType(providerType string) core.Provider {
 }
 
 func (r *Router) providerByTypeRegistry(providerType string) core.Provider {
-	if registry, ok := r.lookup.(providerTypeRegistry); ok {
-		if provider := registry.ProviderByType(providerType); provider != nil {
+	if r.caps.typeRegistry != nil {
+		if provider := r.caps.typeRegistry.ProviderByType(providerType); provider != nil {
 			return provider
 		}
 	}
@@ -1093,32 +1118,24 @@ func (r *Router) providerByTypeRegistry(providerType string) core.Provider {
 }
 
 func (r *Router) providerByNameRegistry(providerName string) core.Provider {
-	if registry, ok := r.lookup.(providerNameRegistry); ok {
-		if provider := registry.ProviderByName(providerName); provider != nil {
+	if r.caps.nameRegistry != nil {
+		if provider := r.caps.nameRegistry.ProviderByName(providerName); provider != nil {
 			return provider
 		}
 	}
 	return r.providerByName(providerName)
 }
 
+// providerByName scans the catalog for a trimmed provider instance name.
 func (r *Router) providerByName(providerName string) core.Provider {
-	providerName = strings.TrimSpace(providerName)
-	if providerName == "" {
+	if providerName == "" || r.caps.modelsWithProvider == nil {
 		return nil
 	}
-	models, ok := r.lookup.(modelWithProviderLister)
-	if !ok {
-		return nil
-	}
-	for _, entry := range models.ListModelsWithProvider() {
-		if strings.TrimSpace(entry.ProviderName) != providerName {
+	for _, entry := range r.caps.modelsWithProvider.ListModelsWithProvider() {
+		if entry.ProviderName != providerName || entry.Model.ID == "" {
 			continue
 		}
-		modelID := strings.TrimSpace(entry.Model.ID)
-		if modelID == "" {
-			continue
-		}
-		if provider := r.lookup.GetProvider(core.ModelSelector{Provider: providerName, Model: modelID}.QualifiedModel()); provider != nil {
+		if provider := r.lookup.GetProvider(core.ModelSelector{Provider: providerName, Model: entry.Model.ID}.QualifiedModel()); provider != nil {
 			return provider
 		}
 	}
@@ -1126,14 +1143,14 @@ func (r *Router) providerByName(providerName string) core.Provider {
 }
 
 func (r *Router) providerTypes() []string {
-	if typed, ok := r.lookup.(providerTypeLister); ok {
-		return typed.ProviderTypes()
+	if r.caps.typeLister != nil {
+		return r.caps.typeLister.ProviderTypes()
 	}
 
 	seen := make(map[string]struct{})
 	result := make([]string, 0)
 	for _, model := range r.lookup.ListModels() {
-		providerType := strings.TrimSpace(r.lookup.GetProviderType(model.ID))
+		providerType := r.lookup.GetProviderType(model.ID)
 		if providerType == "" {
 			continue
 		}
@@ -1190,14 +1207,23 @@ func (r *Router) NativeResponseProviderTypes() []string {
 	})
 }
 
+// requestedProviderName returns the trimmed provider instance name a
+// passthrough request asks for, or "" when it names none.
+func requestedProviderName(req *core.PassthroughRequest) string {
+	if req == nil {
+		return ""
+	}
+	return strings.TrimSpace(req.ProviderName)
+}
+
 // Passthrough routes an opaque provider-native request by provider type.
 // If req.ProviderName is set, routing prefers the named provider instance over
 // the first registered provider of the given type.
 func (r *Router) Passthrough(ctx context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
 	var pp core.PassthroughProvider
-	if req != nil && strings.TrimSpace(req.ProviderName) != "" {
+	if providerName := requestedProviderName(req); providerName != "" {
 		slog.DebugContext(ctx, "passthrough routing by name", "providerName", req.ProviderName, "providerType", providerType)
-		if p := r.providerByNameRegistry(strings.TrimSpace(req.ProviderName)); p != nil {
+		if p := r.providerByNameRegistry(providerName); p != nil {
 			if named, ok := p.(core.PassthroughProvider); ok {
 				pp = named
 				slog.DebugContext(ctx, "passthrough routed by name", "providerName", req.ProviderName)
