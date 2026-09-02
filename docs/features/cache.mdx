@@ -7,12 +7,17 @@ keywords: ["response cache", "semantic cache", "exact cache", "cache key", "Redi
 
 ## Overview
 
-GoModel ships with two response-cache layers for non-streaming requests on:
+GoModel ships with two response-cache layers for streaming and non-streaming
+requests on:
 
 - `/v1/chat/completions`
 - `/v1/responses`
 - `/v1/messages`
 - `/v1/embeddings`
+
+Streaming and non-streaming variants of the same request are cached
+independently: a streaming miss stores the raw SSE bytes and a streaming hit
+replays them verbatim as `text/event-stream`.
 
 Exact-match cache returns byte-identical responses with:
 
