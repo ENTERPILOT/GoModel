@@ -225,12 +225,26 @@
       element.inert = true;
       element.setAttribute("aria-hidden", "true");
     });
+    // Entering fullscreen re-renders the drawer (the keyed block above) and
+    // makes the page behind it inert, so focus must move into the dialog
+    // explicitly; otherwise it stays on an inert list control. The keyed
+    // swap binds the new close button after this effect runs.
+    const previousFocusEl =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    requestAnimationFrame(() => {
+      if (fullscreen) drawer.conversationCloseBtnEl?.focus();
+    });
     return () => {
       shellElements.forEach(({ element, inert, ariaHidden }) => {
         element.inert = inert;
         if (ariaHidden === null) element.removeAttribute("aria-hidden");
         else element.setAttribute("aria-hidden", ariaHidden);
       });
+      // Leaving fullscreen while the drawer stays open hands focus back to
+      // where it was; closing the drawer restores focus on its own.
+      if (drawer.conversationOpen && previousFocusEl && document.contains(previousFocusEl)) {
+        previousFocusEl.focus();
+      }
     };
   });
 

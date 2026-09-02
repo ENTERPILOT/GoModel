@@ -291,10 +291,6 @@
         display: none;
       }
 
-    .contribution-calendar-section {
-        padding: 16px;
-      }
-
     .contribution-calendar-footer {
         align-items: flex-start;
         flex-direction: column;
