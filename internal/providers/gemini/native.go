@@ -636,10 +636,29 @@ func thinkingConfigForEffort(model, effort string) map[string]any {
 			return nil
 		}
 	}
-	if effort == "none" {
-		effort = "minimal"
+	if effort == "none" || effort == "minimal" {
+		if supportsMinimalThinking(model) {
+			effort = "minimal"
+		} else {
+			effort = "low"
+		}
 	}
 	return map[string]any{"thinkingLevel": effort}
+}
+
+// supportsMinimalThinking reports whether a Gemini 3 model accepts the
+// "minimal" thinkingLevel. Gemini 3 Pro models never had it, and Gemini 3.7
+// and 3.8 Flash dropped it; Google answers HTTP 400 for those, so the lowest
+// accepted level ("low") is sent instead. Thinking cannot be turned off on
+// Gemini 3, so "none" is clamped the same way.
+func supportsMinimalThinking(model string) bool {
+	model = strings.ToLower(model)
+	for _, family := range []string{"gemini-3-pro", "gemini-3.1-pro", "gemini-3.7", "gemini-3.8"} {
+		if strings.Contains(model, family) {
+			return false
+		}
+	}
+	return true
 }
 
 func geminiSafetySettings(req *core.ChatRequest) []map[string]any {
