@@ -493,16 +493,18 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 			cfg["maxOutputTokens"] = maxTokens
 		}
 	}
-	if req.Temperature != nil {
-		cfg["temperature"] = *req.Temperature
+	if !dropsSamplingParameters(req.Model) {
+		if req.Temperature != nil {
+			cfg["temperature"] = *req.Temperature
+		}
+		if req.TopP != nil {
+			cfg["topP"] = *req.TopP
+		} else {
+			copyJSONNumber(req.ExtraFields.Lookup("top_p"), cfg, "topP")
+		}
+		copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
+		copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	}
-	if req.TopP != nil {
-		cfg["topP"] = *req.TopP
-	} else {
-		copyJSONNumber(req.ExtraFields.Lookup("top_p"), cfg, "topP")
-	}
-	copyJSONNumber(req.ExtraFields.Lookup("top_k"), cfg, "topK")
-	copyJSONNumber(req.ExtraFields.Lookup("candidate_count"), cfg, "candidateCount")
 	copyJSONNumber(req.ExtraFields.Lookup("presence_penalty"), cfg, "presencePenalty")
 	copyJSONNumber(req.ExtraFields.Lookup("frequency_penalty"), cfg, "frequencyPenalty")
 	copyStopSequences(req.ExtraFields.Lookup("stop"), cfg)
@@ -519,6 +521,45 @@ func geminiGenerationConfig(req *core.ChatRequest) map[string]any {
 		return nil
 	}
 	return cfg
+}
+
+// dropsSamplingParameters reports whether temperature, topP, topK and
+// candidateCount are left out of the generation config. Google's Gemini 3
+// migration guides say to remove the sampling parameters from every request
+// ("Gemini 3's reasoning capabilities are optimized for the default settings")
+// and list candidate_count as unsupported on Gemini 3.x, so they are dropped
+// for Gemini 3 and later while Gemini 2.5 keeps honoring them.
+func dropsSamplingParameters(model string) bool {
+	major, _, ok := geminiGeneration(model)
+	return ok && major >= 3
+}
+
+// geminiGeneration parses the "<major>[.<minor>]" generation that follows the
+// "gemini-" family prefix in a model ID such as "gemini-3.8-flash",
+// "google/gemini-3-pro-preview" or "gemini-2.5-flash-image". It reports
+// ok=false for IDs without that prefix (gemma, imagen, embeddings, tuned
+// models), which then keep the pre-Gemini-3 behavior.
+func geminiGeneration(model string) (major, minor int, ok bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	rest, found := strings.CutPrefix(model, "gemini-")
+	if !found {
+		return 0, 0, false
+	}
+	version, _, _ := strings.Cut(rest, "-")
+	majorText, minorText, hasMinor := strings.Cut(version, ".")
+	major, err := strconv.Atoi(majorText)
+	if err != nil || major < 0 {
+		return 0, 0, false
+	}
+	if hasMinor {
+		if minor, err = strconv.Atoi(minorText); err != nil || minor < 0 {
+			return 0, 0, false
+		}
+	}
+	return major, minor, true
 }
 
 func copyJSONNumber(raw json.RawMessage, cfg map[string]any, key string) {
