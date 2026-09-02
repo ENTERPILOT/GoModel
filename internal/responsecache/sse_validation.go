@@ -6,9 +6,18 @@ import (
 	"github.com/goccy/go-json"
 )
 
+// nonCacheableEventPatterns marks streams that must never be replayed from
+// cache: a response that ended incomplete (interrupted upstream) or failed is
+// not a reusable answer even though it is fully framed and ends with [DONE].
+var nonCacheableEventPatterns = [][]byte{
+	[]byte(`"type":"response.incomplete"`),
+	[]byte(`"type":"response.failed"`),
+}
+
 // validateCacheableSSE reports whether raw is a complete, cache-safe SSE body.
 // Cacheable streams must be fully framed, contain at least one JSON data payload,
-// and terminate with a final [DONE] event.
+// terminate with a final [DONE] event, and not carry an incomplete or failed
+// terminal Responses event.
 func validateCacheableSSE(raw []byte) bool {
 	if len(raw) == 0 {
 		return false
@@ -43,6 +52,11 @@ func validateCacheableSSE(raw []byte) bool {
 		}
 		if !json.Valid(payload) {
 			return false
+		}
+		for _, pattern := range nonCacheableEventPatterns {
+			if bytes.Contains(payload, pattern) {
+				return false
+			}
 		}
 		sawJSONPayload = true
 	}

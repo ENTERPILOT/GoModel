@@ -177,7 +177,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	usageRaw, ok := chunk["usage"]
 	if !ok {
 		switch eventType, _ := chunk["type"].(string); eventType {
-		case "response.completed", "response.done":
+		case "response.completed", "response.done", "response.incomplete":
 			if response, respOK := chunk["response"].(map[string]any); respOK {
 				usageRaw, ok = response["usage"]
 				if id, idOK := response["id"].(string); idOK && id != "" {

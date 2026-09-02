@@ -35,6 +35,7 @@ type OpenAIResponsesStreamConverter struct {
 	closed               bool
 	sentCreate           bool
 	sentDone             bool
+	sawFinish            bool            // upstream signalled completion (finish_reason or [DONE])
 	cachedUsage          json.RawMessage // Stores usage from final chunk for inclusion in response.completed
 }
 
@@ -157,6 +158,10 @@ func (sc *OpenAIResponsesStreamConverter) forceStartToolCall(state *ResponsesOut
 }
 
 func (sc *OpenAIResponsesStreamConverter) completePendingToolCalls() string {
+	return sc.finishPendingToolCalls("completed")
+}
+
+func (sc *OpenAIResponsesStreamConverter) finishPendingToolCalls(status string) string {
 	indices := make([]int, 0, len(sc.toolCalls))
 	for index := range sc.toolCalls {
 		indices = append(indices, index)
@@ -173,7 +178,7 @@ func (sc *OpenAIResponsesStreamConverter) completePendingToolCalls() string {
 		if !state.Started {
 			continue
 		}
-		out.WriteString(sc.output.CompleteToolCall(state, false))
+		out.WriteString(sc.output.FinishToolCall(state, status, false))
 	}
 
 	return out.String()
@@ -255,6 +260,12 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	}
 	choice := &chunk.Choices[0]
 
+	// Any finish_reason means the model finished generating; some providers
+	// close the stream without a trailing [DONE] marker (Postel's law).
+	if choice.FinishReason != "" {
+		sc.sawFinish = true
+	}
+
 	if choice.Delta.ReasoningContent != "" {
 		sc.appendReasoningDelta(choice.Delta.ReasoningContent)
 	}
@@ -309,7 +320,11 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 			sc.buffer.AppendString(sc.handleToolCallDeltas(chunkToolCallsFromAny(toolCalls)))
 		}
 	}
-	if finishReason, _ := choice["finish_reason"].(string); finishReason == "tool_calls" {
+	finishReason, _ := choice["finish_reason"].(string)
+	if finishReason != "" {
+		sc.sawFinish = true
+	}
+	if finishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
 	}
 }
@@ -382,24 +397,36 @@ func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString("\n\n")
 }
 
-// appendCompletedEvents flushes open output items and appends the final
-// response.completed event plus the trailing [DONE] marker exactly once.
-func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
+// appendTerminalEvents flushes open output items and appends the terminal
+// event plus the trailing [DONE] marker exactly once. Streams the upstream
+// finished (a finish_reason or [DONE] was seen) end with response.completed;
+// interrupted streams end with response.incomplete and close their open items
+// with status "incomplete" instead of fabricating completion.
+func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 	if sc.sentDone {
 		return
 	}
 	sc.sentDone = true
-	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
-	sc.buffer.AppendString(sc.output.CompleteAssistantOutput(sc.assistantOutputIndex))
-	sc.buffer.AppendString(sc.completePendingToolCalls())
+	status := "completed"
+	eventName := "response.completed"
+	if !sc.sawFinish {
+		status = "incomplete"
+		eventName = "response.incomplete"
+	}
+	sc.buffer.AppendString(sc.output.FinishReasoningOutput(reasoningOutputIndex, status))
+	sc.buffer.AppendString(sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status))
+	sc.buffer.AppendString(sc.finishPendingToolCalls(status))
 	responseData := map[string]any{
 		"id":         sc.responseID,
 		"object":     "response",
-		"status":     "completed",
+		"status":     status,
 		"model":      sc.model,
 		"provider":   sc.provider,
 		"created_at": sc.createdAt,
 		"output":     sc.output.FinalOutputItems(reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, false),
+	}
+	if status == "incomplete" {
+		responseData["incomplete_details"] = map[string]any{"reason": "interrupted"}
 	}
 	// Include usage data if captured from OpenAI stream, renamed from Chat
 	// Completions field names (prompt_tokens/completion_tokens) to the
@@ -411,15 +438,17 @@ func (sc *OpenAIResponsesStreamConverter) appendCompletedEvents() {
 		}
 	}
 	doneEvent := map[string]any{
-		"type":     "response.completed",
+		"type":     eventName,
 		"response": responseData,
 	}
 	jsonData, err := json.Marshal(doneEvent)
 	if err != nil {
-		slog.Error("failed to marshal response.completed event", "error", err, "response_id", sc.responseID)
+		slog.Error("failed to marshal terminal responses event", "error", err, "event", eventName, "response_id", sc.responseID)
 		return
 	}
-	sc.buffer.AppendString("event: response.completed\ndata: ")
+	sc.buffer.AppendString("event: ")
+	sc.buffer.AppendString(eventName)
+	sc.buffer.AppendString("\ndata: ")
 	sc.buffer.AppendBytes(jsonData)
 	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
 }
@@ -564,7 +593,8 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 
 			if data, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
 				if bytes.Equal(data, []byte("[DONE]")) {
-					sc.appendCompletedEvents()
+					sc.sawFinish = true
+					sc.appendTerminalEvents()
 					continue
 				}
 				sc.processChunk(data)
@@ -575,7 +605,7 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	if readErr != nil {
 		if readErr == io.EOF {
 			// Send final done event if we haven't already
-			sc.appendCompletedEvents()
+			sc.appendTerminalEvents()
 
 			if sc.buffer.Len() > 0 {
 				return sc.buffer.Read(p), nil

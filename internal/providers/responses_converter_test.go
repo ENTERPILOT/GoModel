@@ -409,6 +409,119 @@ func TestOpenAIResponsesStreamConverter_CompletedEmptyOutputIsArray(t *testing.T
 	}
 }
 
+// TestOpenAIResponsesStreamConverter_TruncatedStreamEndsIncomplete covers an
+// upstream stream that dies without a finish_reason or [DONE]. The converter
+// must close open items with status "incomplete" and end the stream with
+// response.incomplete instead of fabricating completion.
+func TestOpenAIResponsesStreamConverter_TruncatedStreamEndsIncomplete(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"content":"Hel"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	itemDoneStatus := ""
+	foundCompleted := false
+	var response map[string]any
+	sawDone := false
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			sawDone = true
+			continue
+		}
+		switch event.Name {
+		case "response.output_item.done":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] == "message" {
+				itemDoneStatus, _ = item["status"].(string)
+			}
+		case "response.completed":
+			foundCompleted = true
+		case "response.incomplete":
+			response, _ = event.Payload["response"].(map[string]any)
+		}
+	}
+
+	if foundCompleted {
+		t.Fatal("truncated stream must not end with response.completed")
+	}
+	if response == nil {
+		t.Fatal("expected response.incomplete terminal event on truncated stream")
+	}
+	if !sawDone {
+		t.Fatal("expected trailing [DONE] after response.incomplete")
+	}
+	if itemDoneStatus != "incomplete" {
+		t.Fatalf("message output_item.done status = %q, want %q", itemDoneStatus, "incomplete")
+	}
+	if response["status"] != "incomplete" {
+		t.Fatalf("response.status = %v, want incomplete", response["status"])
+	}
+	details, _ := response["incomplete_details"].(map[string]any)
+	if details["reason"] != "interrupted" {
+		t.Fatalf("incomplete_details = %#v, want reason interrupted", response["incomplete_details"])
+	}
+	output, _ := response["output"].([]any)
+	if len(output) != 1 {
+		t.Fatalf("response.incomplete output has %d items, want 1: %#v", len(output), output)
+	}
+	message, _ := output[0].(map[string]any)
+	if message["type"] != "message" || message["status"] != "incomplete" {
+		t.Fatalf("output[0] = %#v, want incomplete assistant message", message)
+	}
+	messageContent, _ := message["content"].([]any)
+	if len(messageContent) != 1 {
+		t.Fatalf("message content = %#v, want one output_text part", message["content"])
+	}
+	if part, _ := messageContent[0].(map[string]any); part["text"] != "Hello" {
+		t.Fatalf("partial text = %#v, want %q", part["text"], "Hello")
+	}
+}
+
+// TestOpenAIResponsesStreamConverter_FinishReasonWithoutDoneCompletes covers
+// providers that close the stream after the finish_reason chunk without a
+// trailing [DONE] marker: the model finished, so the stream must still end
+// with response.completed.
+func TestOpenAIResponsesStreamConverter_FinishReasonWithoutDoneCompletes(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	var response map[string]any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done || event.Name != "response.completed" {
+			continue
+		}
+		response, _ = event.Payload["response"].(map[string]any)
+	}
+
+	if response == nil {
+		t.Fatal("expected response.completed when the stream ends after finish_reason without [DONE]")
+	}
+	if response["status"] != "completed" {
+		t.Fatalf("response.status = %v, want completed", response["status"])
+	}
+	output, _ := response["output"].([]any)
+	if len(output) != 1 {
+		t.Fatalf("response.completed output has %d items, want 1: %#v", len(output), output)
+	}
+	if message, _ := output[0].(map[string]any); message["status"] != "completed" {
+		t.Fatalf("output[0] = %#v, want completed assistant message", message)
+	}
+}
+
 func TestOpenAIResponsesStreamConverter_OutOfOrderToolCallsKeepUniqueIndexes(t *testing.T) {
 	mockStream := `data: {"choices":[{"delta":{"reasoning_content":"Plan."},"finish_reason":null}]}
 
