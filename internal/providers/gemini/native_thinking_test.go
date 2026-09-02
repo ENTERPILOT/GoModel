@@ -30,6 +30,9 @@ func TestThinkingConfigForEffort(t *testing.T) {
 		{name: "3.8 flash passes high through", model: "gemini-3.8-flash", effort: " high ", want: map[string]any{"thinkingLevel": "high"}},
 		{name: "3.1 pro clamps minimal to low", model: "gemini-3.1-pro-preview", effort: "minimal", want: map[string]any{"thinkingLevel": "low"}},
 		{name: "vertex publisher prefix is honored", model: "google/gemini-3.8-flash", effort: "none", want: map[string]any{"thinkingLevel": "low"}},
+		{name: "3.8 pro is outside the documented clamp set", model: "gemini-3.8-pro-preview", effort: "minimal", want: map[string]any{"thinkingLevel": "minimal"}},
+		{name: "3.70 is not 3.7", model: "gemini-3.70-flash-preview", effort: "none", want: map[string]any{"thinkingLevel": "minimal"}},
+		{name: "3.8 flash embedded in a longer name is not matched", model: "my-gemini-3.8-flash", effort: "minimal", want: map[string]any{"thinkingLevel": "minimal"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
