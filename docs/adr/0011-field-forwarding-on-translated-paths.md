@@ -72,8 +72,17 @@ Passthrough routes (`/p/{provider}/...`) are exempt. The client speaks the
 provider's dialect and chose the provider by name, so the body reaches the
 provider byte for byte. The gateway substitutes credentials and records audit
 and usage, and it does not edit the body. The reverse also holds: a translated
-endpoint must not be served with passthrough semantics, because every gateway
-invariant then has to be re-implemented on the shortcut.
+endpoint must not be served with passthrough semantics as an optimization,
+because every gateway invariant then has to be re-implemented on the shortcut.
+
+One exception is deliberate. When the ingress dialect is the selected
+provider's own dialect and the translated hop would lose information, the
+request may be forwarded natively. Today that is `/v1/messages` routed to an
+Anthropic provider, where translation drops thinking-block signatures and
+server tools that Claude Code clients depend on. Native forwarding rewrites
+only the model member, declines whenever a feature that works on the
+canonical request is engaged (guardrails, response cache, failover), and is
+justified by fidelity, never by latency.
 
 ### Where the rules live
 
