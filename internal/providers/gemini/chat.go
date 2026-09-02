@@ -125,8 +125,9 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 		return nil, err
 	}
 
-	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE, so we can pass it through directly
-	return stream, nil
+	// Gemini's OpenAI-compatible endpoint returns OpenAI-format SSE; normalize
+	// it like every other OpenAI-compatible upstream.
+	return providers.EnsureChatCompletionSSE(p.responseProviderName(), stream)
 }
 
 func (p *Provider) nativeStreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {

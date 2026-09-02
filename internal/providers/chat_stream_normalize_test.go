@@ -1,9 +1,13 @@
 package providers
 
 import (
+	"errors"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // errAfterReadCloser yields its data once, then fails — simulating a connection
@@ -33,7 +37,11 @@ func TestEnsureChatCompletionSSE_ConvertsBufferedJSON(t *testing.T) {
 	body := `{"id":"x","object":"chat.completion","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"Hi there"}}]}`
 	stream := io.NopCloser(strings.NewReader(body))
 
-	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
+	normalized, err := EnsureChatCompletionSSE("test", stream)
+	if err != nil {
+		t.Fatalf("normalize stream: %v", err)
+	}
+	got, err := io.ReadAll(normalized)
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}
@@ -62,7 +70,11 @@ func TestEnsureChatCompletionSSE_PassesThroughRealSSE(t *testing.T) {
 	original := strings.Join([]string{string(chunks[0]), string(chunks[1]), string(chunks[2])}, "")
 	stream := &chunkedReadCloser{chunks: chunks}
 
-	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
+	normalized, err := EnsureChatCompletionSSE("test", stream)
+	if err != nil {
+		t.Fatalf("normalize stream: %v", err)
+	}
+	got, err := io.ReadAll(normalized)
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}
@@ -76,7 +88,11 @@ func TestEnsureChatCompletionSSE_PassesThroughSSEWithLeadingComment(t *testing.T
 	body := ": OPENROUTER PROCESSING\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\ndata: [DONE]\n\n"
 	stream := io.NopCloser(strings.NewReader(body))
 
-	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
+	normalized, err := EnsureChatCompletionSSE("test", stream)
+	if err != nil {
+		t.Fatalf("normalize stream: %v", err)
+	}
+	got, err := io.ReadAll(normalized)
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}
@@ -91,7 +107,11 @@ func TestEnsureChatCompletionSSE_PreservesPartialBodyOnReadError(t *testing.T) {
 	partial := `{"id":"x","choices":[{"message":{"content":"Hel`
 	stream := &errAfterReadCloser{data: []byte(partial), err: io.ErrUnexpectedEOF}
 
-	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
+	normalized, err := EnsureChatCompletionSSE("test", stream)
+	if err != nil {
+		t.Fatalf("normalize stream: %v", err)
+	}
+	got, err := io.ReadAll(normalized)
 	if err != nil {
 		t.Fatalf("read stream: %v", err)
 	}
@@ -104,8 +124,41 @@ func TestEnsureChatCompletionSSE_PreservesPartialBodyOnReadError(t *testing.T) {
 	}
 }
 
+func TestEnsureChatCompletionSSE_BufferedErrorBodyFailsTheRequest(t *testing.T) {
+	// Upstream answered a stream request with HTTP 200 and a bare error body.
+	// It must surface as the provider error it is, not as a fake completion chunk.
+	body := `{"error":{"message":"Rate limited","code":429}}`
+	stream := io.NopCloser(strings.NewReader(body))
+
+	normalized, err := EnsureChatCompletionSSE("openrouter", stream)
+	if err == nil {
+		t.Fatal("expected error for buffered error body, got stream")
+	}
+	if normalized != nil {
+		t.Fatal("expected nil stream alongside the error")
+	}
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %v", err)
+	}
+	if gatewayErr.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusTooManyRequests)
+	}
+	if gatewayErr.Message != "Rate limited" {
+		t.Errorf("Message = %q, want %q", gatewayErr.Message, "Rate limited")
+	}
+	if gatewayErr.Provider != "openrouter" {
+		t.Errorf("Provider = %q, want %q", gatewayErr.Provider, "openrouter")
+	}
+}
+
 func TestEnsureChatCompletionSSE_NilStream(t *testing.T) {
-	if EnsureChatCompletionSSE(nil) != nil {
+	stream, err := EnsureChatCompletionSSE("test", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stream != nil {
 		t.Fatal("expected nil for nil stream")
 	}
 }

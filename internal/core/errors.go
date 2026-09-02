@@ -3,11 +3,14 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
 )
 
 // ErrorType represents the type of error that occurred
@@ -277,6 +280,86 @@ func ParseProviderError(provider string, statusCode int, body []byte, originalEr
 	gatewayErr.ResponseBody = captureGatewayErrorBody(body)
 
 	return gatewayErr
+}
+
+// embeddedErrorResourceKeys are top-level members whose presence marks a 2xx
+// JSON body as a genuine resource even when an "error" member is also present.
+// A stored Responses API object, for example, legitimately carries "error"
+// alongside "id", "object", "status" and "output" and must pass through
+// unchanged.
+var embeddedErrorResourceKeys = [...]string{
+	"id", "object", "choices", "data", "output", "content", "candidates", "usage",
+}
+
+// ErrEmbeddedInSuccess marks provider errors that arrived inside an HTTP
+// success (2xx) response body. Test with errors.Is; provider adapters use it
+// to recognize upstreams that hide failures behind HTTP 200.
+var ErrEmbeddedInSuccess = errors.New("provider embedded an error in a success response")
+
+// ParseEmbeddedProviderError detects a provider error delivered inside a
+// successful (2xx) response body. Some providers — OpenRouter is the canonical
+// offender — answer HTTP 200 with a bare {"error": ...} payload; accepting it
+// as a success would hand the client an empty completion and record a healthy
+// provider. When the body is such a payload, it is converted to the
+// GatewayError the provider effectively returned: an HTTP status embedded in
+// error.code (Gemini and OpenRouter put the real status there) is preserved,
+// anything else maps to 502 Bad Gateway. Returns nil for normal success
+// payloads. The returned error wraps ErrEmbeddedInSuccess.
+func ParseEmbeddedProviderError(provider string, body []byte) *GatewayError {
+	errMember, ok := bareErrorMember(body)
+	if !ok {
+		return nil
+	}
+	return ParseProviderError(provider, embeddedErrorStatusCode(errMember), body, ErrEmbeddedInSuccess)
+}
+
+// bareErrorMember returns the non-null top-level "error" member when body is a
+// bare error payload: a JSON object carrying "error" without any resource
+// member. This runs on every 2xx body, so it is layered by cost: the byte
+// checks reject non-JSON and error-free bodies without parsing, and a lazy
+// gjson lookup rejects bodies whose "error" is only nested or an explicit
+// null (some providers emit "error": null on success) in one allocation-free
+// scan. Only genuine candidates — small by nature — pay for the resource-key
+// pass and, because gjson reads leniently (a JSONL body would classify by its
+// first object alone), a strict validation before being trusted.
+func bareErrorMember(body []byte) (json.RawMessage, bool) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' || !bytes.Contains(trimmed, []byte(`"error"`)) {
+		return nil, false
+	}
+
+	errMember := gjson.GetBytes(trimmed, "error")
+	if !errMember.Exists() || errMember.Type == gjson.Null {
+		return nil, false
+	}
+
+	for _, resource := range gjson.GetManyBytes(trimmed, embeddedErrorResourceKeys[:]...) {
+		if resource.Exists() {
+			return nil, false
+		}
+	}
+	if !json.Valid(trimmed) {
+		return nil, false
+	}
+	return json.RawMessage(errMember.Raw), true
+}
+
+// embeddedErrorStatusCode extracts an HTTP status carried inside an embedded
+// error member as a numeric (or numeric-string) "code". Errors that carry no
+// usable status map to 502: the upstream reported success while delivering a
+// failure.
+func embeddedErrorStatusCode(errMember json.RawMessage) int {
+	var fields struct {
+		Code json.RawMessage `json:"code"`
+	}
+	if err := json.Unmarshal(errMember, &fields); err != nil {
+		return http.StatusBadGateway
+	}
+	code, err := strconv.Atoi(jsonScalarString(fields.Code))
+	if err != nil || code < 400 || code > 599 {
+		return http.StatusBadGateway
+	}
+	return code
 }
 
 type providerErrorDetails struct {

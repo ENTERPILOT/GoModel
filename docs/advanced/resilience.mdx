@@ -60,6 +60,16 @@ retry less than the table suggests:
   `GET`, `HEAD`, `OPTIONS`, `PUT`, or any request carrying an
   `Idempotency-Key` header.
 
+**Errors hidden behind HTTP 200** are unmasked before any of this applies.
+Some providers (OpenRouter is the best-known) answer `200 OK` with a bare
+`{"error": ...}` JSON body. GoModel detects such payloads and handles them as
+the error they really are: a status embedded in `error.code` is preserved
+(so a hidden `429` behaves like a real one), anything else maps to `502`.
+The mapped status then drives retries, the circuit breaker, and failover
+exactly like a genuine error status, and the response is never cached as a
+success. Passthrough endpoints are exempt: they forward the provider's
+response byte-for-byte.
+
 **The circuit breaker** counts transport errors and `5xx` responses
 (including non-retried `500`s) as failures. It deliberately ignores:
 

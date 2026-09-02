@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -842,5 +843,185 @@ func TestGatewayError_ToJSON_ProviderOnlyWhenUpstream(t *testing.T) {
 	errorData = gateway.ToJSON()["error"].(map[string]any)
 	if _, present := errorData["provider"]; present {
 		t.Fatalf("ToJSON() should omit provider for gateway-originated errors, got %v", errorData["provider"])
+	}
+}
+
+func TestParseEmbeddedProviderError(t *testing.T) {
+	tests := []struct {
+		name            string
+		body            string
+		wantError       bool
+		expectedStatus  int
+		expectedType    ErrorType
+		expectedMessage string
+	}{
+		{
+			name:            "bare error object",
+			body:            `{"error":{"message":"upstream exploded","type":"server_error"}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "upstream exploded",
+		},
+		{
+			name:            "error with embedded numeric status code",
+			body:            `{"error":{"message":"Rate limited","code":429}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusTooManyRequests,
+			expectedType:    ErrorTypeRateLimit,
+			expectedMessage: "Rate limited",
+		},
+		{
+			name:            "error with embedded numeric-string status code",
+			body:            `{"error":{"message":"no credit","code":"402"}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusPaymentRequired,
+			expectedType:    ErrorTypeInvalidRequest,
+			expectedMessage: "no credit",
+		},
+		{
+			name:            "error with non-HTTP code falls back to 502",
+			body:            `{"error":{"message":"quota exceeded","code":1027}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "quota exceeded",
+		},
+		{
+			name:            "string error member",
+			body:            `{"error":"model overloaded"}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "model overloaded",
+		},
+		{
+			name:            "openrouter error beside metadata keys",
+			body:            `{"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"upstream rate limit hit"}},"user_id":"user_123"}`,
+			wantError:       true,
+			expectedStatus:  http.StatusTooManyRequests,
+			expectedType:    ErrorTypeRateLimit,
+			expectedMessage: "upstream rate limit hit",
+		},
+		{
+			name:            "anthropic native error shape",
+			body:            `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+			wantError:       true,
+			expectedStatus:  http.StatusBadGateway,
+			expectedType:    ErrorTypeProvider,
+			expectedMessage: "Overloaded",
+		},
+		{
+			name:      "chat completion success",
+			body:      `{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"hi"}}]}`,
+			wantError: false,
+		},
+		{
+			name:      "success content mentioning error key",
+			body:      `{"id":"chatcmpl-1","choices":[{"message":{"content":"set \"error\" handler"}}]}`,
+			wantError: false,
+		},
+		{
+			name:      "responses object with null error",
+			body:      `{"id":"resp_1","object":"response","status":"completed","error":null,"output":[]}`,
+			wantError: false,
+		},
+		{
+			name:      "failed responses object passes through",
+			body:      `{"id":"resp_1","object":"response","status":"failed","error":{"code":"server_error","message":"boom"},"output":[]}`,
+			wantError: false,
+		},
+		{
+			name:      "error member beside usage passes through",
+			body:      `{"error":null,"usage":{"total_tokens":10}}`,
+			wantError: false,
+		},
+		{
+			name:      "empty body",
+			body:      "",
+			wantError: false,
+		},
+		{
+			name:      "non-object body",
+			body:      `[{"error":"x"}]`,
+			wantError: false,
+		},
+		{
+			name:      "invalid json",
+			body:      `{"error":{"message":"trunc`,
+			wantError: false,
+		},
+		{
+			name:      "jsonl body with error keys",
+			body:      "{\"error\":{\"message\":\"a\"}}\n{\"error\":{\"message\":\"b\"}}",
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ParseEmbeddedProviderError("openrouter", []byte(tt.body))
+			if !tt.wantError {
+				if err != nil {
+					t.Fatalf("ParseEmbeddedProviderError() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("ParseEmbeddedProviderError() = nil, want error")
+			}
+			if err.StatusCode != tt.expectedStatus {
+				t.Errorf("StatusCode = %d, want %d", err.StatusCode, tt.expectedStatus)
+			}
+			if err.Type != tt.expectedType {
+				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
+			}
+			if err.Message != tt.expectedMessage {
+				t.Errorf("Message = %q, want %q", err.Message, tt.expectedMessage)
+			}
+			if err.Provider != "openrouter" {
+				t.Errorf("Provider = %q, want %q", err.Provider, "openrouter")
+			}
+			if len(err.ResponseBody) == 0 {
+				t.Error("ResponseBody should capture the raw upstream body")
+			}
+		})
+	}
+}
+
+// BenchmarkParseEmbeddedProviderError exercises the hot-path classification:
+// every 200 response body passes through it, so a large success body whose
+// content merely mentions "error" must classify quickly.
+func BenchmarkParseEmbeddedProviderError(b *testing.B) {
+	// Escaped quotes inside content never match the `"error"` byte prefilter,
+	// so this body is classified by the prefilter scan alone.
+	largeSuccess := []byte(`{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"` +
+		strings.Repeat(`set the \"error\" handler, log the \"error\" field, and retry. `, 800) +
+		`"}}],"usage":{"total_tokens":420}}`)
+	// A literal top-level "error" member (some providers emit "error": null on
+	// success, and stored Responses API objects always carry one) defeats the
+	// prefilter, so this body exercises the structural classification.
+	largeSuccessErrorNull := []byte(`{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"` +
+		strings.Repeat(`retry with backoff after transient failures and log the cause. `, 800) +
+		`"}}],"usage":{"total_tokens":420},"error":null}`)
+	cases := []struct {
+		name string
+		body []byte
+	}{
+		{"large success body mentioning error", largeSuccess},
+		{"large success body with error null member", largeSuccessErrorNull},
+		{"small success body", []byte(`{"id":"chatcmpl-1","object":"chat.completion","choices":[{"message":{"content":"hi"}}]}`)},
+		{"bare error payload", []byte(`{"error":{"message":"Rate limited","code":429}}`)},
+	}
+	for _, bc := range cases {
+		b.Run(bc.name, func(b *testing.B) {
+			b.SetBytes(int64(len(bc.body)))
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := ParseEmbeddedProviderError("openrouter", bc.body); (err != nil) != (bc.name == "bare error payload") {
+					b.Fatal("unexpected classification")
+				}
+			}
+		})
 	}
 }

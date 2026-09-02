@@ -215,7 +215,7 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 	if err != nil {
 		return nil, err
 	}
-	return providers.EnsureChatCompletionSSE(stream), nil
+	return providers.EnsureChatCompletionSSE(p.providerName, stream)
 }
 
 func (p *CompatibleProvider) adaptedChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
