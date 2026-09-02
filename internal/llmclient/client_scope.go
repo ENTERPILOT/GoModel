@@ -250,11 +250,14 @@ func (c *Client) waitForRetry(ctx context.Context, attempt int) error {
 	if attempt <= 0 {
 		return nil
 	}
-	backoff := c.calculateBackoff(attempt)
+	// A stopped timer releases its resources immediately; time.After would
+	// keep the timer alive until it fires even after the context is cancelled.
+	timer := time.NewTimer(c.calculateBackoff(attempt))
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(backoff):
+	case <-timer.C:
 		return nil
 	}
 }

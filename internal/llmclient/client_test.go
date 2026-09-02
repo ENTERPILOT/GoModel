@@ -2046,6 +2046,46 @@ func TestBackoffCalculation_WithJitter(t *testing.T) {
 	}
 }
 
+// TestWaitForRetry_ContextCancelled checks that cancelling the context during
+// a long backoff returns ctx.Err() promptly instead of waiting out the timer.
+func TestWaitForRetry_ContextCancelled(t *testing.T) {
+	config := DefaultConfig("test", "http://test.com")
+	config.Retry.InitialBackoff = time.Hour
+	config.Retry.MaxBackoff = time.Hour
+	config.Retry.JitterFactor = 0
+	client := New(config, nil)
+
+	tests := []struct {
+		name    string
+		attempt int
+		cancel  bool
+		want    error
+	}{
+		{name: "first attempt does not wait", attempt: 0, cancel: false, want: nil},
+		{name: "cancelled during backoff", attempt: 1, cancel: true, want: context.Canceled},
+		{name: "already cancelled", attempt: 3, cancel: true, want: context.Canceled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancel {
+				cancel()
+			}
+
+			start := time.Now()
+			err := client.waitForRetry(ctx, tt.attempt)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("waitForRetry() error = %v, want %v", err, tt.want)
+			}
+			if elapsed := time.Since(start); elapsed > time.Second {
+				t.Fatalf("waitForRetry() took %v, expected a prompt return", elapsed)
+			}
+		})
+	}
+}
+
 type recordingReadCloser struct {
 	io.Reader
 	closed atomic.Bool
