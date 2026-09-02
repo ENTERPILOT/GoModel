@@ -4374,6 +4374,9 @@ func TestIsAdaptiveThinkingModel(t *testing.T) {
 	}{
 		{"claude-fable-5", true},
 		{"claude-fable-5-20260601", true},
+		{"claude-fable-5-1", true},
+		{"claude-mythos-5", true},
+		{"claude-mythos-5-1-20260901", true},
 		{"claude-opus-5", true},
 		{"claude-opus-5-20260601", true},
 		{"claude-sonnet-5", true},
@@ -5720,5 +5723,42 @@ func TestConvertToAnthropicRequest_RelaxesForcedToolChoice(t *testing.T) {
 				t.Fatalf("System = %q, want %q", gotSystem, tt.wantInstruction)
 			}
 		})
+	}
+}
+
+func TestConvertToAnthropicRequest_AdaptiveThinkingForDatedFableAndMythos(t *testing.T) {
+	for _, model := range []string{"claude-fable-5-1-20260901", "claude-mythos-5-1-20260901"} {
+		t.Run("chat "+model, func(t *testing.T) {
+			out, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:     model,
+				Reasoning: &core.Reasoning{Effort: "high"},
+				Messages:  []core.Message{{Role: "user", Content: "Hello"}},
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v", err)
+			}
+			assertAdaptiveHighEffort(t, out)
+		})
+		t.Run("responses "+model, func(t *testing.T) {
+			out, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+				Model:     model,
+				Input:     "Hello",
+				Reasoning: &core.Reasoning{Effort: "high"},
+			})
+			if err != nil {
+				t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
+			}
+			assertAdaptiveHighEffort(t, out)
+		})
+	}
+}
+
+func assertAdaptiveHighEffort(t *testing.T, out *anthropicRequest) {
+	t.Helper()
+	if out.Thinking == nil || out.Thinking.Type != "adaptive" || out.Thinking.BudgetTokens != 0 {
+		t.Fatalf("Thinking = %+v, want adaptive without budget_tokens", out.Thinking)
+	}
+	if out.OutputConfig == nil || out.OutputConfig.Effort != "high" {
+		t.Fatalf("OutputConfig = %+v, want effort high", out.OutputConfig)
 	}
 }
