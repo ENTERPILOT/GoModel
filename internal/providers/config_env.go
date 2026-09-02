@@ -613,7 +613,7 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 		env  *string
 		cfg  string
 	}{
-		{"base_url", &v.BaseURL, normalizeResolvedBaseURL(existing.BaseURL)},
+		{"base_url", &v.BaseURL, existing.BaseURL},
 		{"api_version", &v.APIVersion, existing.APIVersion},
 		{"backend", &v.Backend, existing.Backend},
 		{"auth_type", &v.AuthType, existing.AuthType},
@@ -633,12 +633,19 @@ func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig)
 
 	drop("session_sticky_keys", v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
 	drop("fairness_from_user_path", v.FairnessFromUserPath != nil, existing.FairnessFromUserPath != nil, func() { v.FairnessFromUserPath = nil })
-	drop("models", len(v.Models) > 0, len(existing.Models) > 0, func() { v.Models = nil })
+	drop("models", len(v.Models) > 0, rawProviderHasResolvedModel(existing), func() { v.Models = nil })
 	drop("model_filter.include", len(v.ModelFilterInclude) > 0, len(existing.ModelFilter.Include) > 0, func() { v.ModelFilterInclude = nil })
 	drop("model_filter.exclude", len(v.ModelFilterExclude) > 0, len(existing.ModelFilter.Exclude) > 0, func() { v.ModelFilterExclude = nil })
 	drop("model_filter.max_price_per_mtok", v.ModelFilterMaxPrice != nil, existing.ModelFilter.MaxPricePerMtok != nil, func() { v.ModelFilterMaxPrice = nil })
 
 	return v, ignored
+}
+
+// rawProviderHasResolvedModel reports whether the config provider declares at
+// least one model ID that is not an unresolved ${VAR} placeholder, so a list
+// left to the environment does not block the bare <PROVIDER>_MODELS fill.
+func rawProviderHasResolvedModel(cfg config.RawProviderConfig) bool {
+	return slices.ContainsFunc(cfg.Models, func(m config.RawProviderModel) bool { return HasResolvedProviderValue(m.ID) })
 }
 
 func rawProviderHasAPIKey(cfg config.RawProviderConfig) bool {

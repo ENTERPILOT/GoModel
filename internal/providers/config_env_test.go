@@ -65,6 +65,28 @@ func TestApplyProviderEnvVars_BareTypeEnvVarsAgainstRenamedProviders(t *testing.
 			wantNoOpenAI: true,
 		},
 		{
+			name: "renamed provider with an embedded base_url placeholder receives the env base_url",
+			env:  map[string]string{"OPENAI_BASE_URL": "https://env.example.com/v1"},
+			raw: map[string]config.RawProviderConfig{
+				"alpha": {Type: "openai", APIKey: "alpha-key", BaseURL: "https://${MISSING_HOST}/v1"},
+			},
+			want: map[string]config.RawProviderConfig{
+				"alpha": {Type: "openai", APIKey: "alpha-key", BaseURL: "https://env.example.com/v1"},
+			},
+			wantNoOpenAI: true,
+		},
+		{
+			name: "renamed provider with unresolved model placeholders receives the env models",
+			env:  map[string]string{"OPENAI_MODELS": "gpt-4o-mini,gpt-4o"},
+			raw: map[string]config.RawProviderConfig{
+				"alpha": {Type: "openai", APIKey: "alpha-key", BaseURL: "https://alpha.example.com/v1", Models: []config.RawProviderModel{{ID: "${MISSING_MODELS}"}}},
+			},
+			want: map[string]config.RawProviderConfig{
+				"alpha": {Type: "openai", APIKey: "alpha-key", BaseURL: "https://alpha.example.com/v1", Models: []config.RawProviderModel{{ID: "gpt-4o-mini"}, {ID: "gpt-4o"}}},
+			},
+			wantNoOpenAI: true,
+		},
+		{
 			name: "provider named after the type is fully overridden",
 			env:  map[string]string{"OPENAI_API_KEY": envKey},
 			raw: map[string]config.RawProviderConfig{
@@ -112,6 +134,9 @@ func TestApplyProviderEnvVars_BareTypeEnvVarsAgainstRenamedProviders(t *testing.
 				}
 				if p.BaseURL != want.BaseURL {
 					t.Errorf("%s BaseURL = %q, want %q", name, p.BaseURL, want.BaseURL)
+				}
+				if got, wantIDs := config.ProviderModelIDs(p.Models), config.ProviderModelIDs(want.Models); strings.Join(got, ",") != strings.Join(wantIDs, ",") {
+					t.Errorf("%s Models = %v, want %v", name, got, wantIDs)
 				}
 			}
 			if tt.wantNoOpenAI {
