@@ -1,9 +1,11 @@
 package providers
 
 import (
+	"log/slog"
 	"maps"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -422,19 +424,39 @@ func applyUnsuffixedProviderEnvVars(result map[string]config.RawProviderConfig, 
 		return
 	}
 
-	targetKey, matched, ambiguous := findEnvOverlayTarget(result, providerType, source)
-	if matched {
-		result[targetKey] = overlayProviderEnvValues(result[targetKey], values, spec)
-		return
+	candidates := envOverlayCandidates(result, providerType, source)
+	switch len(candidates) {
+	case 0:
+		if spec.RequireBaseURL && values.BaseURL == "" {
+			return
+		}
+		result[source.DefaultName] = values.rawConfig(providerType, spec)
+	case 1:
+		targetKey := candidates[0]
+		if targetKey == source.DefaultName {
+			result[targetKey] = overlayProviderEnvValues(result[targetKey], values, spec)
+			return
+		}
+		// A config provider that merely shares the type may borrow the bare env
+		// values for fields it left empty, but its explicit settings win: a stray
+		// OPENAI_API_KEY must never be sent to whatever base_url "alpha" points at.
+		fill, ignored := values.withoutFieldsSetBy(result[targetKey])
+		if len(ignored) > 0 {
+			slog.Warn("provider env vars ignored: a differently named config provider of this type already sets these fields",
+				"env_prefix", source.Prefix,
+				"provider", targetKey,
+				"fields", ignored,
+				"hint", "name the provider after its type or add another instance with "+source.Prefix+"_<SUFFIX>_*")
+		}
+		if !fill.empty() {
+			result[targetKey] = overlayProviderEnvValues(result[targetKey], fill, spec)
+		}
+	default:
+		slog.Warn("provider env vars ignored: several config providers share this type and none is named after it",
+			"env_prefix", source.Prefix,
+			"providers", candidates,
+			"hint", "name one provider after its type or add another instance with "+source.Prefix+"_<SUFFIX>_*")
 	}
-	if ambiguous {
-		return
-	}
-	if spec.RequireBaseURL && values.BaseURL == "" {
-		return
-	}
-
-	result[source.DefaultName] = values.rawConfig(providerType, spec)
 }
 
 func applySuffixedProviderEnvVars(result map[string]config.RawProviderConfig, providerType string, spec DiscoveryConfig, source providerEnvSource, suffix string, values providerEnvValues) {
@@ -569,6 +591,60 @@ func overlayProviderEnvValues(existing config.RawProviderConfig, values provider
 	return existing
 }
 
+// withoutFieldsSetBy drops every env value whose field the config provider
+// already sets explicitly, so the remainder only fills gaps. It returns the
+// YAML names of the dropped fields for logging; values are never returned.
+func (v providerEnvValues) withoutFieldsSetBy(existing config.RawProviderConfig) (providerEnvValues, []string) {
+	var ignored []string
+	drop := func(name string, envSet, cfgSet bool, clear func()) {
+		if envSet && cfgSet {
+			clear()
+			ignored = append(ignored, name)
+		}
+	}
+
+	drop("api_key", v.hasAPIKey(), rawProviderHasAPIKey(existing), func() {
+		v.APIKey = ""
+		v.APIKeysByIndex = nil
+	})
+
+	stringFields := []struct {
+		name string
+		env  *string
+		cfg  string
+	}{
+		{"base_url", &v.BaseURL, normalizeResolvedBaseURL(existing.BaseURL)},
+		{"api_version", &v.APIVersion, existing.APIVersion},
+		{"backend", &v.Backend, existing.Backend},
+		{"auth_type", &v.AuthType, existing.AuthType},
+		{"api_mode", &v.APIMode, existing.APIMode},
+		{"vertex_project", &v.VertexProject, existing.VertexProject},
+		{"vertex_location", &v.VertexLocation, existing.VertexLocation},
+		{"service_account_file", &v.ServiceAccountFile, existing.ServiceAccountFile},
+		{"service_account_json", &v.ServiceAccountJSON, existing.ServiceAccountJSON},
+		{"service_account_json_base64", &v.ServiceAccountJSONBase64, existing.ServiceAccountJSONBase64},
+		{"gcp_scope", &v.GCPScope, existing.GCPScope},
+		{"inference_objective", &v.InferenceObjective, existing.InferenceObjective},
+	}
+	for _, f := range stringFields {
+		env := f.env
+		drop(f.name, strings.TrimSpace(*env) != "", HasResolvedProviderValue(f.cfg), func() { *env = "" })
+	}
+
+	drop("session_sticky_keys", v.SessionStickyKeys != nil, existing.SessionStickyKeys != nil, func() { v.SessionStickyKeys = nil })
+	drop("fairness_from_user_path", v.FairnessFromUserPath != nil, existing.FairnessFromUserPath != nil, func() { v.FairnessFromUserPath = nil })
+	drop("models", len(v.Models) > 0, len(existing.Models) > 0, func() { v.Models = nil })
+	drop("model_filter.include", len(v.ModelFilterInclude) > 0, len(existing.ModelFilter.Include) > 0, func() { v.ModelFilterInclude = nil })
+	drop("model_filter.exclude", len(v.ModelFilterExclude) > 0, len(existing.ModelFilter.Exclude) > 0, func() { v.ModelFilterExclude = nil })
+	drop("model_filter.max_price_per_mtok", v.ModelFilterMaxPrice != nil, existing.ModelFilter.MaxPricePerMtok != nil, func() { v.ModelFilterMaxPrice = nil })
+
+	return v, ignored
+}
+
+func rawProviderHasAPIKey(cfg config.RawProviderConfig) bool {
+	return HasResolvedProviderValue(cfg.APIKey) || slices.ContainsFunc(cfg.APIKeys, HasResolvedProviderValue)
+}
+
 func providerNameForEnvSuffix(source providerEnvSource, suffix string) string {
 	baseName := strings.TrimSpace(source.DefaultName)
 	suffixName := normalizeEnvSuffixForProviderName(suffix, source.NameSeparator)
@@ -600,31 +676,26 @@ func normalizeEnvSuffixForProviderName(suffix, separator string) string {
 	return strings.Trim(b.String(), separator)
 }
 
-func findEnvOverlayTarget(raw map[string]config.RawProviderConfig, providerType string, source providerEnvSource) (string, bool, bool) {
+// envOverlayCandidates returns the config providers the bare (unsuffixed) env
+// vars of a type may apply to: the provider named after the type when it
+// exists, otherwise every provider of that type. An empty result means the env
+// vars register a new provider named after the type.
+func envOverlayCandidates(raw map[string]config.RawProviderConfig, providerType string, source providerEnvSource) []string {
 	if existing, ok := raw[source.DefaultName]; ok && rawProviderMatchesType(existing, providerType) {
-		return source.DefaultName, true, false
+		return []string{source.DefaultName}
 	}
 	if !source.OverlayByType {
-		return "", false, false
+		return nil
 	}
 
-	var matchedKey string
-	var matches int
+	var candidates []string
 	for name, cfg := range raw {
-		if !rawProviderMatchesType(cfg, providerType) {
-			continue
-		}
-		matchedKey = name
-		matches++
-		if matches > 1 {
-			return "", false, true
+		if rawProviderMatchesType(cfg, providerType) {
+			candidates = append(candidates, name)
 		}
 	}
-
-	if matches == 1 {
-		return matchedKey, true, false
-	}
-	return "", false, false
+	sort.Strings(candidates)
+	return candidates
 }
 
 func rawProviderMatchesType(cfg config.RawProviderConfig, providerType string) bool {
