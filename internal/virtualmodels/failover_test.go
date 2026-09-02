@@ -396,6 +396,201 @@ func TestNew_KeepsLegacyFailoverStoreWhileARuleCollides(t *testing.T) {
 	}
 }
 
+// A legacy rule whose fallback names a stored redirect that routes back to the
+// rule's primary would convert into a chain cycle. The migration used to write
+// it through the raw store (which does not validate), then drop the legacy
+// rows — leaving a virtual_models set every later start refuses to load. Such
+// a rule must instead stay in the legacy store, like a collision, until the
+// operator resolves it.
+func TestNew_KeepsLegacyFailoverRuleThatWouldFormAChainCycle(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+
+	first, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	// A replacing alias: requests for anthropic/claude go to groq/llama.
+	if err := first.Service.Upsert(ctx, VirtualModel{Source: "anthropic/claude", Targets: []Target{{Model: "groq/llama"}}, Enabled: true}); err != nil {
+		t.Fatalf("Upsert(alias) error = %v", err)
+	}
+	_ = first.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		// Falls back to anthropic/claude, which the alias routes right back.
+		`INSERT INTO failover_rules VALUES ('groq/llama', '["anthropic/claude"]', 1, 'dashboard', 0, 0)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["local/mistral"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	for range 2 {
+		result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if migrated, ok := result.Service.Get("openai/gpt-4o"); !ok || migrated.Strategy != StrategyFailover {
+			t.Fatalf("convertible rule = %+v, %v; want it migrated alongside the cyclic one", migrated, ok)
+		}
+		if vm, ok := result.Service.Get("groq/llama"); ok {
+			t.Fatalf("cyclic rule must not be converted, got %+v", vm)
+		}
+		_ = result.Close()
+	}
+	var remaining string
+	if err := db.QueryRow(`SELECT group_concat(primary_model) FROM failover_rules`).Scan(&remaining); err != nil || remaining != "groq/llama" {
+		t.Fatalf("failover_rules rows = %q, %v; want only the cyclic rule kept", remaining, err)
+	}
+
+	// Removing the alias resolves the cycle: the next start finishes the
+	// migration and drops the store.
+	resolve, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := resolve.Service.Delete(ctx, "anthropic/claude"); err != nil {
+		t.Fatalf("Delete(alias) error = %v", err)
+	}
+	_ = resolve.Close()
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() after resolving error = %v", err)
+	}
+	defer result.Close()
+	if vm, ok := result.Service.Get("groq/llama"); !ok || vm.Strategy != StrategyFailover {
+		t.Fatalf("resolved rule = %+v, %v; want it migrated", vm, ok)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(new(int)); err == nil {
+		t.Fatal("failover_rules still exists, want it dropped")
+	}
+}
+
+// The first refresh also translates the deprecated failover rules
+// configuration into managed redirects, so the conversion check must include
+// them: a cycle can pass through a generated rule when replacing aliases sit
+// between it and the legacy rule (shadow-to-shadow references alone do not
+// chain).
+func TestNew_KeepsLegacyFailoverRuleThatCyclesThroughGeneratedConfigRule(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('openai/gpt-4o', '["alias-one"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	// migrated openai/gpt-4o -> alias-one -> cfg-primary (generated rule) ->
+	// alias-two -> openai/gpt-4o: every edge chains, so this is a cycle.
+	cfg := &config.Config{
+		VirtualModels: []config.VirtualModelConfig{
+			{Source: "alias-one", Targets: []config.VirtualModelTargetConfig{{Model: "cfg-primary"}}},
+			{Source: "alias-two", Targets: []config.VirtualModelTargetConfig{{Model: "openai/gpt-4o"}}},
+		},
+		Failover: config.FailoverConfig{Manual: map[string][]string{"cfg-primary": {"alias-two"}}},
+	}
+
+	for range 2 {
+		result, err := New(ctx, cfg, conn, balancingCatalog(), nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if vm, ok := result.Service.Get("openai/gpt-4o"); ok && !vm.Managed {
+			t.Fatalf("cyclic rule must not be converted, got %+v", vm)
+		}
+		_ = result.Close()
+	}
+	var remaining string
+	if err := db.QueryRow(`SELECT group_concat(primary_model) FROM failover_rules`).Scan(&remaining); err != nil || remaining != "openai/gpt-4o" {
+		t.Fatalf("failover_rules rows = %q, %v; want the cyclic rule kept", remaining, err)
+	}
+}
+
+// A database whose virtual_models rows no longer validate — the state the old
+// migration left behind after committing a cycle and dropping the legacy store
+// — must fail startup with guidance that points at the store, since the admin
+// API is unreachable while the server is down.
+func TestNew_InvalidStoredVirtualModelsFailWithRepairGuidance(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+
+	warm, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	_ = warm.Close()
+	for _, stmt := range []string{
+		`INSERT INTO virtual_models (source, targets, enabled, created_at, updated_at) VALUES ('anthropic/claude', '[{"model":"groq/llama"}]', TRUE, 0, 0)`,
+		`INSERT INTO virtual_models (source, targets, strategy, description, enabled, created_at, updated_at) VALUES ('groq/llama', '[{"model":"groq/llama"},{"model":"anthropic/claude"}]', 'failover', 'Migrated from failover rules', TRUE, 0, 0)`,
+	} {
+		if _, err := conn.DB().Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	_, err = New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err == nil || !strings.Contains(err.Error(), "forms a cycle") || !strings.Contains(err.Error(), "stored virtual_models entries") {
+		t.Fatalf("New() error = %v; want the cycle named with repair guidance", err)
+	}
+}
+
+// The declarative config models are overlaid on the store after the migration
+// runs, so the conversion check must see them too: a config-declared alias
+// routing a legacy rule's fallback back to its primary forms the same cycle a
+// stored alias does, and committing it would destroy the legacy rows and fail
+// every start until the config changes.
+func TestNew_KeepsLegacyFailoverRuleThatCyclesThroughConfigModel(t *testing.T) {
+	ctx := context.Background()
+	conn := newSQLiteStorage(t)
+	db := conn.DB()
+	for _, stmt := range []string{
+		`CREATE TABLE failover_rules (primary_model TEXT PRIMARY KEY, fallback_models TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1, managed_source TEXT NOT NULL DEFAULT 'dashboard', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`INSERT INTO failover_rules VALUES ('groq/llama', '["anthropic/claude"]', 1, 'dashboard', 0, 0)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	cfg := &config.Config{VirtualModels: []config.VirtualModelConfig{
+		// A replacing alias, declared in config rather than stored.
+		{Source: "anthropic/claude", Targets: []config.VirtualModelTargetConfig{{Model: "groq/llama"}}},
+	}}
+
+	for range 2 {
+		result, err := New(ctx, cfg, conn, balancingCatalog(), nil)
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if vm, ok := result.Service.Get("groq/llama"); ok && !vm.Managed {
+			t.Fatalf("cyclic rule must not be converted, got %+v", vm)
+		}
+		_ = result.Close()
+	}
+	var remaining string
+	if err := db.QueryRow(`SELECT group_concat(primary_model) FROM failover_rules`).Scan(&remaining); err != nil || remaining != "groq/llama" {
+		t.Fatalf("failover_rules rows = %q, %v; want the cyclic rule kept", remaining, err)
+	}
+
+	// Dropping the alias from config resolves the cycle: the next start
+	// finishes the migration and drops the store.
+	result, err := New(ctx, &config.Config{}, conn, balancingCatalog(), nil)
+	if err != nil {
+		t.Fatalf("New() after resolving error = %v", err)
+	}
+	defer result.Close()
+	if vm, ok := result.Service.Get("groq/llama"); !ok || vm.Strategy != StrategyFailover {
+		t.Fatalf("resolved rule = %+v, %v; want it migrated", vm, ok)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM failover_rules`).Scan(new(int)); err == nil {
+		t.Fatal("failover_rules still exists, want it dropped")
+	}
+}
+
 func TestFailover_FlagSwitchesTheChainOffPerRedirect(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)

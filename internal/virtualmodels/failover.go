@@ -72,6 +72,13 @@ func (s *snapshot) failoverEntry(resolution *core.RequestModelResolution) (*redi
 // virtual model, with a warning that names it, so the rule's fallbacks can be
 // moved into it by hand.
 func FailoverConfigModels(cfg config.FailoverConfig, declared, stored []VirtualModel) []VirtualModel {
+	return failoverConfigModels(cfg, declared, stored, true)
+}
+
+// failoverConfigModels is FailoverConfigModels with the warnings switchable
+// off, for the legacy migration's candidate validation — that runs per rule,
+// and the startup translation warns once already.
+func failoverConfigModels(cfg config.FailoverConfig, declared, stored []VirtualModel, warn bool) []VirtualModel {
 	if len(cfg.Manual) == 0 {
 		return nil
 	}
@@ -99,8 +106,10 @@ func FailoverConfigModels(cfg config.FailoverConfig, declared, stored []VirtualM
 			continue
 		}
 		if _, ok := inStore[source]; ok {
-			slog.Warn("deprecated failover rule skipped: a stored virtual model with the same source exists; add the fallbacks as targets of that virtual model with the failover strategy",
-				"source", source, "fallbacks", cfg.Manual[rawSource])
+			if warn {
+				slog.Warn("deprecated failover rule skipped: a stored virtual model with the same source exists; add the fallbacks as targets of that virtual model with the failover strategy",
+					"source", source, "fallbacks", cfg.Manual[rawSource])
+			}
 			continue
 		}
 		if model, ok := failoverModel(source, cfg.Manual[rawSource], true); ok {
@@ -108,7 +117,7 @@ func FailoverConfigModels(cfg config.FailoverConfig, declared, stored []VirtualM
 			taken[source] = struct{}{}
 		}
 	}
-	if len(models) > 0 {
+	if warn && len(models) > 0 {
 		slog.Warn("the failover rules configuration is deprecated; declare a virtual model with strategy \"failover\" under virtual_models instead",
 			"migrated", len(models))
 	}

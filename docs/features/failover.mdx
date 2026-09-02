@@ -178,7 +178,10 @@ converted automatically:
   the setting is kept. A primary that already has a redirect, a path-scoped
   setting, or is disabled is logged and skipped, and the store is kept until
   it is resolved — add its fallbacks as targets of that virtual model with
-  the failover strategy, then delete the row. A primary listed in
+  the failover strategy, then delete the row. A mapping whose fallback names
+  a virtual model that routes back to its primary is kept the same way, since
+  converting it would form a chain cycle — adjust or remove that virtual
+  model, then restart. A primary listed in
   `disabled_models` converts as a disabled virtual model: its fallbacks are
   kept but inactive until you enable it from the Models page.
 - `failover.rules`, `manual_rules_path`, `FAILOVER_RULES_JSON`, and
