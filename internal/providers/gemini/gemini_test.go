@@ -1761,6 +1761,44 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 	}
 }
 
+func TestParseOpenAIStreamChunksStopsAtDone(t *testing.T) {
+	tests := []struct {
+		name       string
+		stream     string
+		wantChunks int
+		wantID     string
+	}{
+		{
+			name: "after a data chunk",
+			stream: `data: {"id":"before-done"}
+
+data: [DONE]
+
+data: {}
+`,
+			wantChunks: 1,
+			wantID:     "before-done",
+		},
+		{
+			name:       "before any data chunks",
+			stream:     "data: [DONE]\n\ndata: {}\n\n",
+			wantChunks: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks := parseOpenAIStreamChunks(t, tt.stream)
+			if len(chunks) != tt.wantChunks {
+				t.Fatalf("parsed %d chunks, want %d; chunks = %#v", len(chunks), tt.wantChunks, chunks)
+			}
+			if tt.wantID != "" && chunks[0]["id"] != tt.wantID {
+				t.Fatalf("first chunk id = %v, want %q", chunks[0]["id"], tt.wantID)
+			}
+		})
+	}
+}
+
 func parseOpenAIStreamChunks(t *testing.T, stream string) []map[string]any {
 	t.Helper()
 
@@ -1771,8 +1809,11 @@ func parseOpenAIStreamChunks(t *testing.T, stream string) []map[string]any {
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
+		if payload == "" {
 			continue
+		}
+		if payload == "[DONE]" {
+			break
 		}
 		var chunk map[string]any
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {

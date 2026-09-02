@@ -89,6 +89,16 @@ Flash reject `minimal`, so GoModel sends the lowest level those models accept
 instead of surfacing Google's 400. An explicit
 `extra_body.google.thinking_config` is always forwarded unchanged.
 
+## Sampling parameters on Gemini 3
+
+Google's Gemini 3 migration guides say to remove `temperature`, `top_p` and
+`top_k` from every request because the models are tuned for their defaults,
+and list `candidate_count` as unsupported on Gemini 3.x. In native mode GoModel
+therefore drops those four fields for Gemini 3 and later (`gemini-3-*`,
+`gemini-3.5-*`, `gemini-3.8-*`, ...) and still forwards them for Gemini 2.5,
+Gemma and other models. `max_tokens`, `stop`, penalties, `response_format` and
+thinking settings are unaffected.
+
 ## Image input
 
 | Mode | OpenAI-style `image_url` |
