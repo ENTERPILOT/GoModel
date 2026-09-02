@@ -1020,6 +1020,25 @@ func (r *ModelRegistry) ProviderCount() int {
 	return len(r.providers)
 }
 
+// failureMessage returns the trimmed text of a failure for runtime state. An
+// empty stored message means "no failure", so a message that is empty or only
+// whitespace becomes a fixed marker instead of reading as success.
+func failureMessage(message string) string {
+	if trimmed := strings.TrimSpace(message); trimmed != "" {
+		return trimmed
+	}
+	return "unknown error"
+}
+
+// optionalFailureMessage is failureMessage for fields where "" means no
+// failure occurred.
+func optionalFailureMessage(message string) string {
+	if message == "" {
+		return ""
+	}
+	return failureMessage(message)
+}
+
 // RecordAvailabilityCheck stores the latest startup or explicit availability
 // probe result for a configured provider name.
 func (r *ModelRegistry) RecordAvailabilityCheck(providerName string, err error) {
@@ -1035,7 +1054,7 @@ func (r *ModelRegistry) RecordAvailabilityCheck(providerName string, err error) 
 	state.registered = true
 	state.lastAvailabilityCheckAt = time.Now().UTC()
 	if err != nil {
-		state.lastAvailabilityError = strings.TrimSpace(err.Error())
+		state.lastAvailabilityError = failureMessage(err.Error())
 	} else {
 		state.lastAvailabilityOKAt = state.lastAvailabilityCheckAt
 		state.lastAvailabilityError = ""

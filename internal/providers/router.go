@@ -192,10 +192,6 @@ func (r *Router) resolveUnqualifiedSelector(selector core.ModelSelector) (core.M
 }
 
 func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector, selector core.ModelSelector) (core.ModelSelector, bool) {
-	if r.caps.modelsWithProvider == nil {
-		return core.ModelSelector{}, false
-	}
-
 	// selector comes from Normalize(), so both segments are already trimmed.
 	providerSegment := selector.Provider
 	modelID := selector.Model
@@ -209,6 +205,11 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 		if concrete, ok := r.caps.selectorResolver.ResolveProviderSelector(providerSegment, modelID); ok {
 			return concrete, true
 		}
+	}
+
+	// The remaining passes scan the catalog, which needs the lister.
+	if r.caps.modelsWithProvider == nil {
+		return core.ModelSelector{}, false
 	}
 
 	// Fallback for lookups that don't implement qualifiedSelectorResolver (and for

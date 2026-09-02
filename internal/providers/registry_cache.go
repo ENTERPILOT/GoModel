@@ -69,6 +69,10 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 				OwnedBy: cachedProv.OwnedBy,
 				Created: cached.Created,
 			}, provider, providerName, providerType)
+			if _, exists := providerModels[info.Model.ID]; exists {
+				// Trimmed duplicates collapse to one record; first wins.
+				continue
+			}
 			providerModels[info.Model.ID] = info
 		}
 		newModelsByProvider[providerName] = providerModels

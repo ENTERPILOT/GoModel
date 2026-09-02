@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -176,15 +177,16 @@ func TestRouterTrimsSelectorInput(t *testing.T) {
 		model        string
 		providerHint string
 		wantResolved string
+		wantType     string
 		wantErr      bool
 	}{
-		{name: "bare", model: "gpt-4o", wantResolved: "west/gpt-4o"},
-		{name: "bare padded", model: "  gpt-4o  ", wantResolved: "west/gpt-4o"},
-		{name: "name qualified padded", model: " west/gpt-4o ", wantResolved: "west/gpt-4o"},
-		{name: "type qualified padded", model: " openai/gpt-4o ", wantResolved: "west/gpt-4o"},
-		{name: "hint padded", model: " gpt-4o ", providerHint: " west ", wantResolved: "west/gpt-4o"},
-		{name: "type hint padded", model: "gpt-4o", providerHint: " openai ", wantResolved: "west/gpt-4o"},
-		{name: "unknown", model: "east/gpt-4o", wantResolved: "east/gpt-4o"},
+		{name: "bare", model: "gpt-4o", wantResolved: "west/gpt-4o", wantType: "openai"},
+		{name: "bare padded", model: "  gpt-4o  ", wantResolved: "west/gpt-4o", wantType: "openai"},
+		{name: "name qualified padded", model: " west/gpt-4o ", wantResolved: "west/gpt-4o", wantType: "openai"},
+		{name: "type qualified padded", model: " openai/gpt-4o ", wantResolved: "west/gpt-4o", wantType: "openai"},
+		{name: "hint padded", model: " gpt-4o ", providerHint: " west ", wantResolved: "west/gpt-4o", wantType: "openai"},
+		{name: "type hint padded", model: "gpt-4o", providerHint: " openai ", wantResolved: "west/gpt-4o", wantType: "openai"},
+		{name: "unknown", model: "east/gpt-4o", wantResolved: "east/gpt-4o", wantType: ""},
 		{name: "blank", model: "   ", wantErr: true},
 	}
 	for _, tt := range tests {
@@ -199,8 +201,8 @@ func TestRouterTrimsSelectorInput(t *testing.T) {
 			if got := selector.QualifiedModel(); got != tt.wantResolved {
 				t.Fatalf("ResolveModel() = %q, want %q", got, tt.wantResolved)
 			}
-			if got := router.GetProviderType(tt.model); (got == "openai") != (tt.wantResolved == "west/gpt-4o") {
-				t.Fatalf("GetProviderType(%q) = %q", tt.model, got)
+			if got := router.GetProviderType(tt.model); got != tt.wantType {
+				t.Fatalf("GetProviderType(%q) = %q, want %q", tt.model, got, tt.wantType)
 			}
 		})
 	}
@@ -261,5 +263,122 @@ func TestRegistryNormalizesDiscoveredModelIDs(t *testing.T) {
 	}
 	if resp.ID != "chatcmpl-west" || provider.lastChatReq == nil || provider.lastChatReq.Model != "gpt-4o" {
 		t.Fatalf("ChatCompletion() = %+v, forwarded %+v; want west response for gpt-4o", resp, provider.lastChatReq)
+	}
+}
+
+// A provider that lists "foo" and " foo " produces one record after trimming.
+// The provider-scoped map and the bare-ID map must both keep the first one.
+func TestRegistryKeepsFirstDuplicateDiscoveredModel(t *testing.T) {
+	provider := &lazyRefreshProvider{
+		name: "west",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{
+				{ID: "foo", Object: "model", OwnedBy: "first", Created: 1},
+				{ID: " foo ", Object: "model", OwnedBy: "second", Created: 2},
+			},
+		},
+	}
+	registry := NewModelRegistry()
+	registry.RegisterProviderWithNameAndType(provider, "west", "openai")
+	if err := registry.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	if got := registry.ListModels(); len(got) != 1 || got[0].ID != "foo" {
+		t.Fatalf("ListModels() = %+v, want exactly one model foo", got)
+	}
+	qualified := registry.GetModel("west/foo")
+	bare := registry.GetModel("foo")
+	if qualified == nil || bare == nil {
+		t.Fatalf("GetModel(west/foo) = %v, GetModel(foo) = %v; want both found", qualified, bare)
+	}
+	if qualified != bare {
+		t.Fatalf("provider-scoped and bare-ID maps hold different records: %+v vs %+v", qualified.Model, bare.Model)
+	}
+	if qualified.Model.OwnedBy != "first" || qualified.Model.Created != 1 {
+		t.Fatalf("kept record = %+v, want the first listed (owned_by first, created 1)", qualified.Model)
+	}
+}
+
+// selectorResolverOnlyLookup implements the O(1) qualified-selector fast path
+// without the catalog lister the slow path needs.
+type selectorResolverOnlyLookup struct {
+	*mockModelLookup
+	resolved core.ModelSelector
+	calls    int
+}
+
+func (l *selectorResolverOnlyLookup) ResolveProviderSelector(segment, modelID string) (core.ModelSelector, bool) {
+	l.calls++
+	if segment == "openai" && modelID == l.resolved.Model {
+		return l.resolved, true
+	}
+	return core.ModelSelector{}, false
+}
+
+func TestRouterUsesSelectorResolverWithoutCatalogLister(t *testing.T) {
+	lookup := &selectorResolverOnlyLookup{
+		mockModelLookup: newMockLookup(),
+		resolved:        core.ModelSelector{Provider: "west", Model: "gpt-4o"},
+	}
+	lookup.addModel("west/gpt-4o", &mockProvider{name: "west"}, "openai")
+	router, err := NewRouter(lookup)
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+	if router.caps.modelsWithProvider != nil {
+		t.Fatalf("test lookup unexpectedly implements the catalog lister")
+	}
+
+	selector, changed, err := router.ResolveModel(core.NewRequestedModelSelector("openai/gpt-4o", ""))
+	if err != nil {
+		t.Fatalf("ResolveModel() error = %v", err)
+	}
+	if got := selector.QualifiedModel(); got != "west/gpt-4o" || !changed {
+		t.Fatalf("ResolveModel() = %q (changed=%v), want west/gpt-4o via the resolver fast path", got, changed)
+	}
+	if lookup.calls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", lookup.calls)
+	}
+
+	// A miss on the fast path with no catalog lister leaves the selector as is.
+	selector, changed, err = router.ResolveModel(core.NewRequestedModelSelector("openai/other", ""))
+	if err != nil {
+		t.Fatalf("ResolveModel(miss) error = %v", err)
+	}
+	if got := selector.QualifiedModel(); got != "openai/other" || changed {
+		t.Fatalf("ResolveModel(miss) = %q (changed=%v), want openai/other unchanged", got, changed)
+	}
+}
+
+func TestRecordAvailabilityCheckKeepsFailureMarker(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "plain", err: errors.New("boom"), want: "boom"},
+		{name: "padded", err: errors.New("  boom \n"), want: "boom"},
+		{name: "whitespace only", err: errors.New("   "), want: "unknown error"},
+		{name: "empty", err: errors.New(""), want: "unknown error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := NewModelRegistry()
+			registry.RegisterProviderWithNameAndType(&mockProvider{name: "west"}, "west", "openai")
+			registry.RecordAvailabilityCheck("west", tt.err)
+
+			if got := registry.providerRuntime["west"].lastAvailabilityError; got != tt.want {
+				t.Fatalf("lastAvailabilityError = %q, want %q", got, tt.want)
+			}
+			if got := registry.FailedProviderNames(); len(got) != 1 || got[0] != "west" {
+				t.Fatalf("FailedProviderNames() = %v, want [west]", got)
+			}
+			snapshots := registry.ProviderRuntimeSnapshots()
+			if len(snapshots) != 1 || snapshots[0].LastAvailabilityError != tt.want {
+				t.Fatalf("ProviderRuntimeSnapshots() = %+v, want LastAvailabilityError %q", snapshots, tt.want)
+			}
+		})
 	}
 }
