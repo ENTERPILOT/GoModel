@@ -2585,56 +2585,75 @@ func TestClient_DoStream_ErrorShapedFirstFrameWithTrailerStreamsThrough(t *testi
 	}
 }
 
-func TestClient_DoStream_ErrorObjectWithBrokenTrailerReplaysBytes(t *testing.T) {
-	// The error object arrives but the connection breaks before EOF confirms
-	// it was the whole body. The classification cannot be trusted, so the
-	// bytes replay followed by the read failure.
-	partial := `{"error":"a"}`
+func TestClient_DoStream_EmbeddedErrorReturnsBeforeBodyCloses(t *testing.T) {
+	// The provider flushes a complete error object and then holds the body
+	// open. DoStream must classify from the bytes it has and return the error
+	// at once — the handler only ends the body after DoStream has returned,
+	// so waiting for EOF deadlocks.
+	streamReturned := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Length", strconv.Itoa(len(partial)+512))
-		_, _ = w.Write([]byte(partial))
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream down","code":503}}`))
+		w.(http.Flusher).Flush()
+		<-streamReturned
 	}))
 	defer server.Close()
 
 	client := New(DefaultConfig("test", server.URL), nil)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer stream.Close()
-
-	got, err := io.ReadAll(stream)
+	close(streamReturned)
 	if err == nil {
-		t.Fatal("expected the trailer read failure to propagate, got clean EOF")
+		_ = stream.Close()
+		t.Fatal("expected the embedded error, got a stream")
 	}
-	if string(got) != partial {
-		t.Errorf("partial bytes altered.\n got: %q\nwant: %q", string(got), partial)
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected a 503 gateway error, got %v", err)
 	}
 }
 
-func TestReadTrailer(t *testing.T) {
+func TestClient_DoStream_ErrorObjectWithLyingContentLengthStillFails(t *testing.T) {
+	// The error object is complete even though the upstream announced more
+	// bytes than it delivers; the bytes in hand decide, not the transport.
+	body := `{"error":"a"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)+512))
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err == nil {
+		_ = stream.Close()
+		t.Fatal("expected the embedded error, got a stream")
+	}
+	if !errors.Is(err, core.ErrEmbeddedInSuccess) {
+		t.Fatalf("expected an embedded provider error, got %v", err)
+	}
+}
+
+func TestBufferedTrailerIsBlank(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		limit       int
-		wantTrailer string
-		wantEOF     bool
+		name     string
+		buffered string
+		want     bool
 	}{
-		{name: "whitespace then EOF", input: " \n", limit: 16, wantTrailer: " \n", wantEOF: true},
-		{name: "immediate EOF", input: "", limit: 16, wantTrailer: "", wantEOF: true},
-		{name: "next frame stops the scan", input: "\n{\"b\":2}", limit: 16, wantTrailer: "\n{", wantEOF: false},
-		{name: "limit reached in whitespace", input: "    ", limit: 2, wantTrailer: "  ", wantEOF: false},
+		{name: "nothing buffered", buffered: "", want: true},
+		{name: "whitespace only", buffered: " \r\n\t", want: true},
+		{name: "next frame", buffered: "\n{\"b\":2}", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			trailer, atEOF, err := readTrailer(bufio.NewReader(strings.NewReader(tt.input)), tt.limit)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			r := bufio.NewReader(strings.NewReader("x" + tt.buffered))
+			if _, err := r.ReadByte(); err != nil { // fill the buffer, consume the sentinel
+				t.Fatal(err)
 			}
-			if string(trailer) != tt.wantTrailer || atEOF != tt.wantEOF {
-				t.Errorf("got (%q, %v), want (%q, %v)", trailer, atEOF, tt.wantTrailer, tt.wantEOF)
+			if got := bufferedTrailerIsBlank(r); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
 	}
