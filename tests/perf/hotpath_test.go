@@ -23,7 +23,12 @@ import (
 
 const (
 	sampleChatRequest = `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}`
-	sampleChatStream  = "" +
+	// Production clients rarely send a bare model: they address an alias
+	// ("fast") or a provider-qualified selector ("mock/gpt-4o-mini"). Both
+	// shapes go through extra resolution work the bare case never sees.
+	sampleAliasChatRequest     = `{"model":"fast","messages":[{"role":"user","content":"Hi"}]}`
+	sampleQualifiedChatRequest = `{"model":"mock/gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}`
+	sampleChatStream           = "" +
 		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n" +
@@ -212,6 +217,24 @@ const routedCatalogSize = 256
 // catalog-sized allocation and CPU cost actually live.
 func newRoutedBenchServer(tb testing.TB, modelCount int) *server.Server {
 	tb.Helper()
+	return newRoutedBenchServerWithResolver(tb, modelCount, nil)
+}
+
+// benchAliasResolver stands in for the virtual-model service: it maps an alias
+// to a concrete selector and normalizes every other request unchanged, which is
+// the contract gateway.ResolveExecutionSelector expects from a resolver.
+type benchAliasResolver map[string]core.ModelSelector
+
+func (r benchAliasResolver) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
+	if target, ok := r[requested.Model]; ok && !requested.ExplicitProvider {
+		return target, true, nil
+	}
+	selector, err := requested.Normalize()
+	return selector, false, err
+}
+
+func newRoutedBenchServerWithResolver(tb testing.TB, modelCount int, resolver server.RequestModelResolver) *server.Server {
+	tb.Helper()
 
 	models := make([]core.Model, 0, modelCount)
 	models = append(models, core.Model{ID: "gpt-4o-mini", Object: "model", OwnedBy: "mock", Created: 1700000000})
@@ -235,7 +258,7 @@ func newRoutedBenchServer(tb testing.TB, modelCount int) *server.Server {
 		tb.Fatalf("new router: %v", err)
 	}
 
-	return server.New(router, &server.Config{LogOnlyModelInteractions: true})
+	return server.New(router, &server.Config{LogOnlyModelInteractions: true, ModelResolver: resolver})
 }
 
 // BenchmarkGatewayHotPathChatCompletionRouted measures the hot path through a
@@ -243,8 +266,26 @@ func newRoutedBenchServer(tb testing.TB, modelCount int) *server.Server {
 // BenchmarkGatewayHotPathChatCompletion (bare provider, no routing) to see the
 // cost the routing/resolution layer adds per request.
 func BenchmarkGatewayHotPathChatCompletionRouted(b *testing.B) {
-	srv := newRoutedBenchServer(b, routedCatalogSize)
-	body := []byte(sampleChatRequest)
+	runChatCompletionBench(b, newRoutedBenchServer(b, routedCatalogSize), sampleChatRequest)
+}
+
+// BenchmarkGatewayHotPathChatCompletionRoutedAlias resolves an alias through a
+// model resolver before routing, the shape most production clients send.
+func BenchmarkGatewayHotPathChatCompletionRoutedAlias(b *testing.B) {
+	resolver := benchAliasResolver{"fast": {Model: "gpt-4o-mini", Provider: "mock"}}
+	runChatCompletionBench(b, newRoutedBenchServerWithResolver(b, routedCatalogSize, resolver), sampleAliasChatRequest)
+}
+
+// BenchmarkGatewayHotPathChatCompletionRoutedQualified routes a
+// provider-qualified selector, which takes the qualified-selector index and
+// rewrites the model the upstream receives.
+func BenchmarkGatewayHotPathChatCompletionRoutedQualified(b *testing.B) {
+	runChatCompletionBench(b, newRoutedBenchServer(b, routedCatalogSize), sampleQualifiedChatRequest)
+}
+
+func runChatCompletionBench(b *testing.B, srv *server.Server, request string) {
+	b.Helper()
+	body := []byte(request)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -257,7 +298,7 @@ func BenchmarkGatewayHotPathChatCompletionRouted(b *testing.B) {
 		srv.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusOK {
-			b.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+			b.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
 		}
 	}
 }
@@ -389,8 +430,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		{
 			name:      "gateway_chat_completion_hot_path",
 			bench:     BenchmarkGatewayHotPathChatCompletion,
-			maxAllocs: 88,    // baseline 85 (single-alloc body reader, lazy unknown-field buffer, no context re-wraps)
-			maxBytes:  13440, // baseline ~12.9 KB (incl. per-attempt response body/header capture fields)
+			maxAllocs: 92,    // baseline 89 (85 + 2 per unknown-field-preserving response level: ChatResponse, Choice)
+			maxBytes:  14336, // baseline ~13.7 KB (incl. per-attempt response body/header capture fields)
 		},
 		{
 			// Production-shaped path: request resolves through a real Router +
@@ -400,8 +441,26 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// full catalog several times per request) would blow these limits.
 			name:      "gateway_chat_completion_hot_path_routed",
 			bench:     BenchmarkGatewayHotPathChatCompletionRouted,
-			maxAllocs: 102,   // baseline 99 (see the bare case; plus strings.Cut selector parsing)
-			maxBytes:  13888, // baseline ~13.3 KB
+			maxAllocs: 103,   // baseline 100 (see the bare case; plus strings.Cut selector parsing)
+			maxBytes:  14720, // baseline ~13.7 KB
+		},
+		{
+			// Alias shape: the model resolver rewrites "fast" to a concrete
+			// selector before routing. Production clients send this far more
+			// often than a bare model, so it is guarded at the same ceiling
+			// family as the bare routed case.
+			name:      "gateway_chat_completion_hot_path_routed_alias",
+			bench:     BenchmarkGatewayHotPathChatCompletionRoutedAlias,
+			maxAllocs: 104,   // baseline 101 (routed + resolver selector)
+			maxBytes:  14656, // baseline ~13.7 KB
+		},
+		{
+			// Provider-qualified shape ("mock/gpt-4o-mini"): the qualified
+			// selector index plus the model rewrite the upstream receives.
+			name:      "gateway_chat_completion_hot_path_routed_qualified",
+			bench:     BenchmarkGatewayHotPathChatCompletionRoutedQualified,
+			maxAllocs: 103,   // baseline 100
+			maxBytes:  14720, // baseline ~13.8 KB
 		},
 		{
 			// Default-deployment shape: auth + audit (bodies/headers) + usage +
@@ -411,8 +470,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 			// deployments actually run.
 			name:      "gateway_chat_completion_production_shape",
 			bench:     BenchmarkGatewayHotPathProductionShape,
-			maxAllocs: 160,   // baseline 156 (audit bodies kept as raw JSON instead of decoded into maps)
-			maxBytes:  19968, // baseline ~19.3 KB
+			maxAllocs: 161,   // baseline 158 (audit bodies kept as raw JSON instead of decoded into maps)
+			maxBytes:  21056, // baseline ~19.6 KB
 		},
 		{
 			// Typed chunk decoding + reused read buffer keep this converter at a

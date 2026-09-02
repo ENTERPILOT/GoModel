@@ -32,6 +32,13 @@ covers the per-request resolution path. Resolution goes through an O(1)
 selector index, so the routed path costs only a few allocations more than the
 bare one and is independent of catalog size.
 
+`BenchmarkGatewayHotPathChatCompletionRoutedAlias` and
+`BenchmarkGatewayHotPathChatCompletionRoutedQualified` send the request shapes
+production clients actually use: an alias (`fast`) resolved through a model
+resolver, and a provider-qualified selector (`mock/gpt-4o-mini`). Both are
+guarded alongside the bare routed case, so a regression that only shows up
+when the model has to be rewritten cannot hide behind the bare benchmark.
+
 `BenchmarkSharedStreamingObserversDefaultConfig` covers streaming observation
 with audit body capture disabled (the default), where the observed stream
 skips JSON decoding for chunks no observer wants.

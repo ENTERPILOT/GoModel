@@ -1,20 +1,17 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/tidwall/gjson"
 
 	"github.com/labstack/echo/v5"
 
@@ -23,7 +20,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
-	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/observability"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
@@ -120,11 +116,6 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	ctx = adm.dispatchContext(ctx)
 
 	feedbackEnabled := hasResponseFeedbackObservers(c)
-	if !feedbackEnabled && len(s.inference().FailoverSelectors(workflow)) == 0 {
-		if handled, err := s.tryFastPathChatPassthrough(c, workflow, req); handled {
-			return err
-		}
-	}
 
 	if req.Stream {
 		if feedbackEnabled {
@@ -491,199 +482,6 @@ func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(rec snap
 	)
 }
 
-// tryFastPathChatPassthrough proxies an OpenAI-compatible chat request byte for
-// byte when translation would not change it (see CanFastPathChatPassthrough).
-// Streaming responses are relayed as-is; non-streaming bodies get the same
-// "provider" stamp the translated path puts on core.ChatResponse so the public
-// response shape does not depend on which path served it.
-func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context, workflow *core.Workflow, req *core.ChatRequest) (bool, error) {
-	if !s.inference().CanFastPathChatPassthrough(workflow, req) {
-		return false, nil
-	}
-
-	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
-	if !ok {
-		return false, nil
-	}
-
-	model := resolvedModelFromWorkflow(workflow, req.Model)
-	if !rawRequestModelMatches(c, model) {
-		return false, nil
-	}
-
-	ctx, _ := requestContextWithRequestID(c.Request())
-	c.SetRequest(c.Request().WithContext(ctx))
-
-	const endpoint = "/chat/completions"
-	providerType := strings.TrimSpace(workflow.ProviderType)
-	providerName := providerNameFromWorkflow(workflow)
-	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), providerType, providerName)
-	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
-		Method:       c.Request().Method,
-		Endpoint:     endpoint,
-		Operation:    llmclient.OperationChat,
-		Model:        model,
-		Stream:       req.Stream,
-		Body:         c.Request().Body,
-		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
-		ProviderName: providerName,
-	})
-	if err != nil {
-		return true, handleError(c, err)
-	}
-	dropUpstreamRateLimitHeaders(resp.Headers)
-	if !req.Stream {
-		if err := stampPassthroughChatProvider(resp, providerType); err != nil {
-			_ = resp.Body.Close()
-			return true, handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
-		}
-	}
-
-	info := &core.PassthroughRouteInfo{
-		Provider:    providerType,
-		RawEndpoint: strings.TrimPrefix(endpoint, "/"),
-		AuditPath:   c.Request().URL.Path,
-		Model:       model,
-	}
-	passthrough := passthroughService{
-		provider:        s.provider,
-		logger:          s.logger,
-		usageLogger:     s.usageLogger,
-		pricingResolver: s.pricingResolver,
-	}
-	return true, passthrough.proxyPassthroughResponse(c, providerType, providerName, endpoint, info, resp)
-}
-
-// rawRequestModelMatches reports whether the model string exactly as the client
-// wrote it equals the model the upstream must receive. The gateway gate compares
-// normalized selectors, but the fast path forwards the body untouched, so a
-// padded or otherwise non-canonical raw value must take the translated path.
-// The raw value survives only in the buffered body: by dispatch time both the
-// decoded request and the whitebox route hints already carry the resolved
-// model (see storeRequestModelResolution).
-//
-// Every top-level "model" member is checked, not just the first: a body may
-// repeat the member, and the decoder keeps the last value while a provider's
-// parser may keep another, so the request is only forwarded verbatim when all
-// of them already carry the upstream model.
-func rawRequestModelMatches(c *echo.Context, resolvedModel string) bool {
-	body, ok := bufferedRequestBody(c)
-	if !ok {
-		return false
-	}
-	seen, matched := false, true
-	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
-		if key.Str != "model" {
-			return true
-		}
-		seen = true
-		matched = value.Type == gjson.String && value.Str == resolvedModel
-		return matched
-	})
-	return seen && matched
-}
-
-// bufferedRequestBody returns the request body the decode step already
-// buffered. With a request snapshot that is the captured view (no copy); a
-// body too large to capture reports false instead of re-reading and
-// re-snapshotting the request. Without a snapshot (the handler is being used
-// outside the middleware stack) the rewound request body is read.
-func bufferedRequestBody(c *echo.Context) ([]byte, bool) {
-	if snapshot := core.GetRequestSnapshot(c.Request().Context()); snapshot != nil {
-		body := snapshot.CapturedBodyView()
-		return body, body != nil
-	}
-	body, err := requestBodyBytes(c)
-	return body, err == nil
-}
-
-// dropUpstreamRateLimitHeaders removes the provider's own X-Ratelimit-* headers
-// from a fast-path response. The gateway sets its rate-limit headers on the
-// response before dispatch, and copying the upstream values would replace
-// them with the provider account's limits, which the translated path never
-// exposes.
-func dropUpstreamRateLimitHeaders(headers map[string][]string) {
-	for key := range headers {
-		if strings.HasPrefix(http.CanonicalHeaderKey(strings.TrimSpace(key)), "X-Ratelimit-") {
-			delete(headers, key)
-		}
-	}
-}
-
-// bodyValidatorHeaders are response headers derived from the body bytes; they
-// are dropped whenever the gateway rewrites a proxied body.
-var bodyValidatorHeaders = []string{"Etag", "Content-Md5", "Digest", "Content-Digest", "Repr-Digest"}
-
-// stampPassthroughChatProvider buffers a successful non-streaming JSON chat
-// body and sets the gateway "provider" member, matching the translated path.
-// Bodies beyond maxObservedJSONResponseBytes are relayed untouched, as the
-// usage observer already declines to buffer them.
-func stampPassthroughChatProvider(resp *core.PassthroughResponse, providerType string) error {
-	if resp == nil || resp.Body == nil || !isObservablePassthroughStatus(resp.StatusCode) ||
-		!isJSONContentType(resp.Headers) || isSSEContentType(resp.Headers) {
-		return nil
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxObservedJSONResponseBytes+1))
-	if err != nil {
-		return err
-	}
-	if len(body) > maxObservedJSONResponseBytes {
-		resp.Body = &combinedReadCloser{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), rc: resp.Body}
-		return nil
-	}
-	stamped := stampJSONObjectProvider(body, providerType)
-	if !bytes.Equal(stamped, body) {
-		dropBodyValidatorHeaders(resp.Headers)
-	}
-	resp.Body = &combinedReadCloser{Reader: bytes.NewReader(stamped), rc: resp.Body}
-	return nil
-}
-
-func dropBodyValidatorHeaders(headers map[string][]string) {
-	for key := range headers {
-		if slices.Contains(bodyValidatorHeaders, http.CanonicalHeaderKey(strings.TrimSpace(key))) {
-			delete(headers, key)
-		}
-	}
-}
-
-// stampJSONObjectProvider sets "provider":<providerType> on a JSON object
-// body, mirroring how the typed core.ChatResponse field overrides any
-// provider-supplied value on the translated path. An existing top-level member
-// (OpenRouter emits one) is replaced in place so the object never carries
-// duplicate keys; nested members are left alone. Without one the member is
-// appended last. Bodies that are not a JSON object are returned unchanged.
-func stampJSONObjectProvider(body []byte, providerType string) []byte {
-	quoted, err := json.Marshal(providerType)
-	if err != nil {
-		return body
-	}
-	if existing := gjson.GetBytes(body, "provider"); existing.Exists() && existing.Index > 0 {
-		end := existing.Index + len(existing.Raw)
-		stamped := make([]byte, 0, len(body)-len(existing.Raw)+len(quoted))
-		stamped = append(stamped, body[:existing.Index]...)
-		stamped = append(stamped, quoted...)
-		return append(stamped, body[end:]...)
-	}
-	end := len(bytes.TrimRight(body, " \t\r\n"))
-	if end == 0 || body[end-1] != '}' {
-		return body
-	}
-	object := body[:end-1]
-	members := bytes.TrimSpace(object)
-	if len(members) == 0 || members[0] != '{' {
-		return body
-	}
-	stamped := make([]byte, 0, len(body)+len(quoted)+13)
-	stamped = append(stamped, object...)
-	if len(bytes.TrimSpace(members[1:])) > 0 {
-		stamped = append(stamped, ',')
-	}
-	stamped = append(stamped, `"provider":`...)
-	stamped = append(stamped, quoted...)
-	return append(stamped, body[end-1:]...)
-}
-
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	req, err := canonicalJSONRequestFromSemantics[*core.EmbeddingRequest](c, core.DecodeEmbeddingRequest)
 	if err != nil {
@@ -915,10 +713,6 @@ func isClientDisconnectDuringDispatch(ctx context.Context, err error) bool {
 		return true
 	}
 	return err == nil && ctx != nil && ctx.Err() == context.Canceled
-}
-
-func providerNameFromWorkflow(workflow *core.Workflow) string {
-	return gateway.ProviderNameFromWorkflow(workflow)
 }
 
 func qualifyExecutedModel(workflow *core.Workflow, model, providerName string) string {

@@ -118,16 +118,6 @@ The plan is applied post-routing so provider-only fields cannot leak through a
 fallback to another backend. Cache keys include the concrete provider instance
 and model, and caller-supplied cache controls always win.
 
-Chat requests to OpenAI-compatible providers that need no rewriting are proxied
-without translation, streaming or not. Streaming responses are relayed byte for
-byte; non-streaming JSON responses are relayed with the resolved `provider`
-member set, as on the translated path, and usage is still recorded from the
-response body. A request whose stable prefix qualifies for a cache plan always
-takes the translated path instead, so the plan is never skipped in favor of the
-proxy. With `ENFORCE_RETURNING_USAGE_DATA=true` (the default), streaming
-requests also take the translated path so `stream_options.include_usage` can
-be injected; non-streaming requests are unaffected.
-
 Provider prompt-cache planning is enabled by default. To disable GoModel's
 automatic planning while continuing to pass through compatible client cache
 directives, set:
