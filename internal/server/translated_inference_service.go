@@ -7,12 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
 
 	"github.com/labstack/echo/v5"
 
@@ -504,13 +506,17 @@ func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context,
 		return false, nil
 	}
 
+	model := resolvedModelFromWorkflow(workflow, req.Model)
+	if !rawRequestModelMatches(c, model) {
+		return false, nil
+	}
+
 	ctx, _ := requestContextWithRequestID(c.Request())
 	c.SetRequest(c.Request().WithContext(ctx))
 
 	const endpoint = "/chat/completions"
 	providerType := strings.TrimSpace(workflow.ProviderType)
 	providerName := providerNameFromWorkflow(workflow)
-	model := resolvedModelFromWorkflow(workflow, req.Model)
 	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), providerType, providerName)
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
 		Method:       c.Request().Method,
@@ -547,10 +553,28 @@ func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context,
 	return true, passthrough.proxyPassthroughResponse(c, providerType, providerName, endpoint, info, resp)
 }
 
+// rawRequestModelMatches reports whether the model string exactly as the client
+// wrote it equals the model the upstream must receive. The gateway gate compares
+// normalized selectors, but the fast path forwards the body untouched, so a
+// padded or otherwise non-canonical raw value must take the translated path.
+func rawRequestModelMatches(c *echo.Context, resolvedModel string) bool {
+	if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil {
+		return env.JSONBodyParsed && env.RouteHints.Model == resolvedModel
+	}
+	// Without ingress capture (the handler is being used outside the
+	// middleware stack) fall back to the buffered body the decode step read.
+	body, err := requestBodyBytes(c)
+	return err == nil && gjson.GetBytes(body, "model").Str == resolvedModel
+}
+
+// bodyValidatorHeaders are response headers derived from the body bytes; they
+// are dropped whenever the gateway rewrites a proxied body.
+var bodyValidatorHeaders = []string{"Etag", "Content-Md5", "Digest", "Content-Digest", "Repr-Digest"}
+
 // stampPassthroughChatProvider buffers a successful non-streaming JSON chat
-// body and appends the gateway "provider" field, matching the translated
-// path. Bodies beyond maxObservedJSONResponseBytes are relayed untouched, as
-// the usage observer already declines to buffer them.
+// body and sets the gateway "provider" member, matching the translated path.
+// Bodies beyond maxObservedJSONResponseBytes are relayed untouched, as the
+// usage observer already declines to buffer them.
 func stampPassthroughChatProvider(resp *core.PassthroughResponse, providerType string) error {
 	if resp == nil || resp.Body == nil || !isObservablePassthroughStatus(resp.StatusCode) ||
 		!isJSONContentType(resp.Headers) || isSSEContentType(resp.Headers) {
@@ -564,17 +588,40 @@ func stampPassthroughChatProvider(resp *core.PassthroughResponse, providerType s
 		resp.Body = &combinedReadCloser{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), rc: resp.Body}
 		return nil
 	}
-	resp.Body = &combinedReadCloser{Reader: bytes.NewReader(stampJSONObjectProvider(body, providerType)), rc: resp.Body}
+	stamped := stampJSONObjectProvider(body, providerType)
+	if !bytes.Equal(stamped, body) {
+		dropBodyValidatorHeaders(resp.Headers)
+	}
+	resp.Body = &combinedReadCloser{Reader: bytes.NewReader(stamped), rc: resp.Body}
 	return nil
 }
 
-// stampJSONObjectProvider appends "provider":<providerType> as the last member
-// of a JSON object body. Appending last means a provider-supplied "provider"
-// member (OpenRouter emits one) is overridden the same way the typed
-// core.ChatResponse field overrides it on the translated path, since JSON
-// decoders keep the last duplicate key. Bodies that are not a JSON object are
-// returned unchanged.
+func dropBodyValidatorHeaders(headers map[string][]string) {
+	for key := range headers {
+		if slices.Contains(bodyValidatorHeaders, http.CanonicalHeaderKey(strings.TrimSpace(key))) {
+			delete(headers, key)
+		}
+	}
+}
+
+// stampJSONObjectProvider sets "provider":<providerType> on a JSON object
+// body, mirroring how the typed core.ChatResponse field overrides any
+// provider-supplied value on the translated path. An existing top-level member
+// (OpenRouter emits one) is replaced in place so the object never carries
+// duplicate keys; nested members are left alone. Without one the member is
+// appended last. Bodies that are not a JSON object are returned unchanged.
 func stampJSONObjectProvider(body []byte, providerType string) []byte {
+	quoted, err := json.Marshal(providerType)
+	if err != nil {
+		return body
+	}
+	if existing := gjson.GetBytes(body, "provider"); existing.Exists() && existing.Index > 0 {
+		end := existing.Index + len(existing.Raw)
+		stamped := make([]byte, 0, len(body)-len(existing.Raw)+len(quoted))
+		stamped = append(stamped, body[:existing.Index]...)
+		stamped = append(stamped, quoted...)
+		return append(stamped, body[end:]...)
+	}
 	end := len(bytes.TrimRight(body, " \t\r\n"))
 	if end == 0 || body[end-1] != '}' {
 		return body
@@ -582,10 +629,6 @@ func stampJSONObjectProvider(body []byte, providerType string) []byte {
 	object := body[:end-1]
 	members := bytes.TrimSpace(object)
 	if len(members) == 0 || members[0] != '{' {
-		return body
-	}
-	quoted, err := json.Marshal(providerType)
-	if err != nil {
 		return body
 	}
 	stamped := make([]byte, 0, len(body)+len(quoted)+13)

@@ -103,6 +103,71 @@ func TestChatCompletion_FastPathLogsUsageFromJSONBody(t *testing.T) {
 	}
 }
 
+func TestChatCompletion_FastPathReplacesUpstreamProviderAndDropsValidators(t *testing.T) {
+	upstream := `{"id":"gen-1","object":"chat.completion","model":"gpt-4o-mini","provider":"OpenAI","choices":[{"provider":"nested"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
+	mock := fastPathJSONMock(upstream)
+	mock.passthroughResponse.Headers["ETag"] = []string{`"abc"`}
+	mock.passthroughResponse.Headers["Content-MD5"] = []string{"md5"}
+	mock.passthroughResponse.Headers["Digest"] = []string{"sha-256=x"}
+	mock.passthroughResponse.Headers["X-Request-Id"] = []string{"req-1"}
+	rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), fastPathChatRequestBody)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	want := strings.Replace(upstream, `"provider":"OpenAI"`, `"provider":"openai"`, 1)
+	if got := rec.Body.String(); got != want {
+		t.Fatalf("body = %s\nwant %s", got, want)
+	}
+	if strings.Count(rec.Body.String(), `"provider":`) != 2 {
+		t.Fatalf("body has duplicate or missing provider members: %s", rec.Body.String())
+	}
+	for _, header := range []string{"ETag", "Content-MD5", "Digest"} {
+		if got := rec.Header().Get(header); got != "" {
+			t.Fatalf("%s = %q, want dropped after body rewrite", header, got)
+		}
+	}
+	if got := rec.Header().Get("X-Request-Id"); got != "req-1" {
+		t.Fatalf("X-Request-Id = %q, want forwarded", got)
+	}
+}
+
+func TestChatCompletionStreaming_FastPathRelaysSSEWhenNoPlanApplies(t *testing.T) {
+	streamData := "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n"
+	mock := fastPathJSONMock(streamData)
+	mock.passthroughResponse.Headers["Content-Type"] = []string{"text/event-stream"}
+	reqBody := `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
+	rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), reqBody)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != streamData {
+		t.Fatalf("stream body = %q, want %q", got, streamData)
+	}
+	if mock.chatCompletionCalls != 0 {
+		t.Fatalf("ChatCompletion calls = %d, want 0", mock.chatCompletionCalls)
+	}
+	if mock.lastPassthroughReq == nil || !mock.lastPassthroughReq.Stream {
+		t.Fatalf("passthrough request = %+v, want Stream: true", mock.lastPassthroughReq)
+	}
+}
+
+func TestChatCompletion_FastPathSkippedWhenRawModelIsNotCanonical(t *testing.T) {
+	mock := fastPathJSONMock(fastPathUpstreamBody)
+	rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), `{"model":" gpt-4o-mini ","messages":[{"role":"user","content":"Hi"}]}`)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if mock.lastPassthroughReq != nil {
+		t.Fatal("padded model took the fast path; the upstream would have received it unnormalized")
+	}
+	if mock.chatCompletionCalls != 1 {
+		t.Fatalf("ChatCompletion calls = %d, want 1", mock.chatCompletionCalls)
+	}
+}
+
 func TestChatCompletion_FastPathSkippedWhenPlannerApplies(t *testing.T) {
 	tests := []struct {
 		name string
@@ -156,10 +221,12 @@ func TestStampJSONObjectProvider(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "object", body: `{"id":"x"}`, want: `{"id":"x","provider":"openai"}`},
+		{name: "no provider key", body: `{"id":"x"}`, want: `{"id":"x","provider":"openai"}`},
 		{name: "trailing newline", body: "{\"id\":\"x\"}\n", want: "{\"id\":\"x\",\"provider\":\"openai\"}\n"},
 		{name: "empty object", body: `{}`, want: `{"provider":"openai"}`},
-		{name: "upstream provider member is overridden by the last key", body: `{"provider":"OpenAI"}`, want: `{"provider":"OpenAI","provider":"openai"}`},
+		{name: "top-level provider replaced in place", body: `{"id":"x","provider":"OpenAI","model":"m"}`, want: `{"id":"x","provider":"openai","model":"m"}`},
+		{name: "top-level non-string provider replaced", body: `{"provider":{"name":"OpenAI"},"id":"x"}`, want: `{"provider":"openai","id":"x"}`},
+		{name: "nested provider inside choices untouched", body: `{"choices":[{"provider":"OpenAI"}]}`, want: `{"choices":[{"provider":"OpenAI"}],"provider":"openai"}`},
 		{name: "array untouched", body: `[1]`, want: `[1]`},
 		{name: "empty untouched", body: ``, want: ``},
 		{name: "truncated untouched", body: `{"id":`, want: `{"id":`},
@@ -173,15 +240,11 @@ func TestStampJSONObjectProvider(t *testing.T) {
 	}
 }
 
-// BenchmarkChatCompletionNonStreaming compares the translated path (forced by
-// enforced usage data, which the fast path declines) against the passthrough
-// fast path for a ~30 KB request and ~30 KB response through a real router
-// and OpenAI provider talking to an in-process upstream.
-func BenchmarkChatCompletionNonStreaming(b *testing.B) {
-	content := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 660) // ~30 KB
-	requestBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"` + content + `"}]}`
-	responseBody := `{"id":"chatcmpl-bench","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"` + content + `"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7000,"completion_tokens":7000,"total_tokens":14000}}`
-
+// newOpenAIRouter builds a real providers.Router with one OpenAI provider whose
+// upstream is an in-process server answering /models and /chat/completions
+// with responseBody.
+func newOpenAIRouter(tb testing.TB, responseBody string) *providers.Router {
+	tb.Helper()
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -192,19 +255,63 @@ func BenchmarkChatCompletionNonStreaming(b *testing.B) {
 			_, _ = w.Write([]byte(responseBody))
 		}
 	}))
-	b.Cleanup(upstream.Close)
+	tb.Cleanup(upstream.Close)
 
 	provider := openai.NewWithHTTPClient("test-key", upstream.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(upstream.URL)
 	registry := providers.NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "openai", "openai")
 	if err := registry.Initialize(context.Background()); err != nil {
-		b.Fatalf("registry initialize: %v", err)
+		tb.Fatalf("registry initialize: %v", err)
 	}
 	router, err := providers.NewRouter(registry)
 	if err != nil {
-		b.Fatalf("new router: %v", err)
+		tb.Fatalf("new router: %v", err)
 	}
+	return router
+}
+
+// TestChatCompletion_FastPathFiresThroughMiddlewareStack drives a bare model
+// id through the full server stack with a real router. The fast path used to
+// be unreachable here: preparation writes the resolved provider into the
+// request, and the gate mistook that for a client-supplied provider.
+func TestChatCompletion_FastPathFiresThroughMiddlewareStack(t *testing.T) {
+	srv := New(newOpenAIRouter(t, fastPathUpstreamBody), &Config{})
+	for _, stream := range []bool{false, true} {
+		body := fastPathChatRequestBody
+		if stream {
+			body = `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("stream=%v status = %d, want 200; body=%s", stream, rec.Code, rec.Body.String())
+		}
+		// The translated path re-encodes core.ChatResponse (provider after
+		// model, no unknown members). A proxied streaming body is the upstream
+		// bytes untouched; a proxied non-streaming body keeps the upstream's
+		// native_finish_reason and carries provider as its last member.
+		want := fastPathUpstreamBody
+		if !stream {
+			want = strings.TrimSuffix(fastPathUpstreamBody, "}") + `,"provider":"openai"}`
+		}
+		if got := rec.Body.String(); got != want {
+			t.Fatalf("stream=%v body was translated instead of proxied:\n got %s\nwant %s", stream, got, want)
+		}
+	}
+}
+
+// BenchmarkChatCompletionNonStreaming compares the translated path (forced by
+// enforced usage data, which the fast path declines) against the passthrough
+// fast path for a ~30 KB request and ~30 KB response through a real router
+// and OpenAI provider talking to an in-process upstream.
+func BenchmarkChatCompletionNonStreaming(b *testing.B) {
+	content := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 660) // ~30 KB
+	requestBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"` + content + `"}]}`
+	responseBody := `{"id":"chatcmpl-bench","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"` + content + `"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7000,"completion_tokens":7000,"total_tokens":14000}}`
+	router := newOpenAIRouter(b, responseBody)
 
 	run := func(b *testing.B, usageCfg usage.Config) {
 		handler := NewHandler(router, nil, &collectingUsageLogger{config: usageCfg}, nil)
