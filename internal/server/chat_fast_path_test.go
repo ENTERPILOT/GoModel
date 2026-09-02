@@ -130,6 +130,48 @@ func TestChatCompletion_FastPathLogsUsageFromJSONBody(t *testing.T) {
 	}
 }
 
+// TestChatCompletion_FastPathWithEnforcedUsageData covers the default
+// configuration: usage tracking on with ENFORCE_RETURNING_USAGE_DATA=true.
+// Enforcement only rewrites streaming requests (stream_options.include_usage),
+// so a non-streaming request still takes the fast path and records usage from
+// the JSON body, while a streaming request stays on the translated path.
+func TestChatCompletion_FastPathWithEnforcedUsageData(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantFastPath bool
+	}{
+		{name: "non-streaming takes the fast path", body: fastPathChatRequestBody, wantFastPath: true},
+		{name: "streaming stays translated", body: `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usageLog := &collectingUsageLogger{config: usage.Config{Enabled: true, EnforceReturningUsageData: true}}
+			mock := fastPathJSONMock(fastPathUpstreamBody)
+			rec := postChatCompletion(t, NewHandler(mock, nil, usageLog, nil), tt.body)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if got := mock.lastPassthroughReq != nil; got != tt.wantFastPath {
+				t.Fatalf("fast path taken = %v, want %v", got, tt.wantFastPath)
+			}
+			if !tt.wantFastPath {
+				if !strings.Contains(rec.Body.String(), `"typed"`) {
+					t.Fatalf("body = %s, want the translated provider response", rec.Body.String())
+				}
+				return
+			}
+			if len(usageLog.entries) != 1 {
+				t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
+			}
+			if entry := usageLog.entries[0]; entry.InputTokens != 7 || entry.OutputTokens != 3 {
+				t.Fatalf("usage tokens = %d/%d, want 7/3", entry.InputTokens, entry.OutputTokens)
+			}
+		})
+	}
+}
+
 func TestChatCompletion_FastPathReplacesUpstreamProviderAndDropsValidators(t *testing.T) {
 	upstream := `{"id":"gen-1","object":"chat.completion","model":"gpt-4o-mini","provider":"OpenAI","choices":[{"provider":"nested"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`
 	mock := fastPathJSONMock(upstream)
@@ -337,17 +379,19 @@ func TestChatCompletion_FastPathFiresThroughMiddlewareStack(t *testing.T) {
 }
 
 // BenchmarkChatCompletionNonStreaming compares the translated path (forced by
-// enforced usage data, which the fast path declines) against the passthrough
-// fast path for a ~30 KB request and ~30 KB response through a real router
-// and OpenAI provider talking to an in-process upstream.
+// a provider-qualified model, which the fast path declines) against the
+// passthrough fast path for a ~30 KB request and ~30 KB response through a
+// real router and OpenAI provider talking to an in-process upstream.
 func BenchmarkChatCompletionNonStreaming(b *testing.B) {
 	content := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 660) // ~30 KB
-	requestBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"` + content + `"}]}`
+	requestBody := func(model string) string {
+		return `{"model":"` + model + `","messages":[{"role":"user","content":"` + content + `"}]}`
+	}
 	responseBody := `{"id":"chatcmpl-bench","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"` + content + `"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7000,"completion_tokens":7000,"total_tokens":14000}}`
 	router := newOpenAIRouter(b, responseBody)
 
-	run := func(b *testing.B, usageCfg usage.Config) {
-		handler := NewHandler(router, nil, &collectingUsageLogger{config: usageCfg}, nil)
+	run := func(b *testing.B, requestBody string) {
+		handler := NewHandler(router, nil, &collectingUsageLogger{config: usage.Config{Enabled: true, EnforceReturningUsageData: true}}, nil)
 		e := echo.New()
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -364,9 +408,9 @@ func BenchmarkChatCompletionNonStreaming(b *testing.B) {
 		}
 	}
 	b.Run("translated", func(b *testing.B) {
-		run(b, usage.Config{Enabled: true, EnforceReturningUsageData: true})
+		run(b, requestBody("openai/gpt-4o-mini"))
 	})
 	b.Run("fast_path", func(b *testing.B) {
-		run(b, usage.Config{Enabled: true})
+		run(b, requestBody("gpt-4o-mini"))
 	})
 }
