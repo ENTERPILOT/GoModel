@@ -43,7 +43,7 @@ func tryFailoverResponse[T any](
 	model, provider string,
 	primaryErr error,
 	call func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
-) (T, string, string, string, bool, error) {
+) (T, ExecutionMeta, error) {
 	var zero T
 
 	// A canceled or expired context means the client is gone or the deadline
@@ -51,12 +51,12 @@ func tryFailoverResponse[T any](
 	// only wastes attempts and charges spurious failures to healthy failover
 	// providers' circuit breakers. Short-circuit to the primary error instead.
 	if ctx.Err() != nil {
-		return zero, "", "", "", false, primaryErr
+		return zero, ExecutionMeta{}, primaryErr
 	}
 
 	failovers := o.FailoverSelectors(workflow)
 	if len(failovers) == 0 || !o.failoverPolicy.ShouldRetry(primaryErr) {
-		return zero, "", "", "", false, primaryErr
+		return zero, ExecutionMeta{}, primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
@@ -102,12 +102,17 @@ func tryFailoverResponse[T any](
 				"to", qualified,
 				"provider_type", resolvedProviderType,
 			)
-			return resp, resolvedProviderType, providerName, qualified, true, nil
+			return resp, ExecutionMeta{
+				ProviderType:  resolvedProviderType,
+				ProviderName:  providerName,
+				FailoverModel: qualified,
+				UsedFailover:  true,
+			}, nil
 		}
 		lastErr = err
 	}
 
-	return zero, "", "", "", false, lastErr
+	return zero, ExecutionMeta{}, lastErr
 }
 
 func executeWithFailoverResponse[T any](
@@ -117,10 +122,10 @@ func executeWithFailoverResponse[T any](
 	model, provider string,
 	primary func() (T, string, string, error),
 	failoverFn func(selector core.ModelSelector, providerType, providerName string) (T, string, error),
-) (T, string, string, string, bool, error) {
+) (T, ExecutionMeta, error) {
 	resp, resolvedProviderType, resolvedProviderName, err := primary()
 	if err == nil {
-		return resp, resolvedProviderType, resolvedProviderName, "", false, nil
+		return resp, ExecutionMeta{ProviderType: resolvedProviderType, ProviderName: resolvedProviderName}, nil
 	}
 	return tryFailoverResponse(ctx, o, workflow, model, provider, err, failoverFn)
 }
@@ -133,7 +138,7 @@ func executeTranslatedWithFailover[Req any, Resp any](
 	model, provider string,
 	cloneForSelector func(Req, core.ModelSelector) Req,
 	call func(context.Context, Req) (Resp, string, error),
-) (Resp, string, string, string, bool, error) {
+) (Resp, ExecutionMeta, error) {
 	return executeWithFailoverResponse(ctx, o, workflow, model, provider,
 		func() (Resp, string, string, error) {
 			started := time.Now()
@@ -171,16 +176,16 @@ func tryFailoverStream(
 	model, provider string,
 	primaryErr error,
 	call func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error),
-) (io.ReadCloser, string, string, string, string, error) {
+) (io.ReadCloser, ExecutionMeta, error) {
 	// See tryFailoverResponse: never sweep failover targets once the context is
 	// done, or the doomed attempts pollute healthy providers' circuit breakers.
 	if ctx.Err() != nil {
-		return nil, "", "", "", "", primaryErr
+		return nil, ExecutionMeta{}, primaryErr
 	}
 
 	failovers := o.FailoverSelectors(workflow)
 	if len(failovers) == 0 || !o.failoverPolicy.ShouldRetry(primaryErr) {
-		return nil, "", "", "", "", primaryErr
+		return nil, ExecutionMeta{}, primaryErr
 	}
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))
@@ -226,12 +231,18 @@ func tryFailoverStream(
 				"to", qualified,
 				"provider_type", resolvedProviderType,
 			)
-			return stream, resolvedProviderType, providerName, usageModel, qualified, nil
+			return stream, ExecutionMeta{
+				ProviderType:  resolvedProviderType,
+				ProviderName:  providerName,
+				Model:         usageModel,
+				FailoverModel: qualified,
+				UsedFailover:  true,
+			}, nil
 		}
 		lastErr = err
 	}
 
-	return nil, "", "", "", "", lastErr
+	return nil, ExecutionMeta{}, lastErr
 }
 
 func firstNonEmptyString(values ...string) string {

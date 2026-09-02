@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -48,7 +49,7 @@ func TestSlowedStreamRecordsUsageConsumedBeforeClientCancellation(t *testing.T) 
 			done := make(chan struct{})
 			go func() {
 				_ = handler.translatedInference().handleStreamingReadCloser(
-					c, nil, "gpt-4o", "openai", "primary-openai", "", source,
+					c, nil, gateway.ExecutionMeta{Model: "gpt-4o", ProviderType: "openai", ProviderName: "primary-openai"}, source,
 					func(observed io.ReadCloser) io.ReadCloser {
 						return streaming.NewSlowdownStream(ctx, observed, 10, time.Now().Add(-time.Second))
 					},

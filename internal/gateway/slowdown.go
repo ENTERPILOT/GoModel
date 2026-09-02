@@ -51,17 +51,17 @@ func executeResultWithSlowdown[Result any](
 func dispatchTranslatedWithSlowdown[Response any](
 	ctx context.Context,
 	workflow *core.Workflow,
-	execute func() (Response, string, string, string, bool, error),
-) (Response, string, string, string, bool, error) {
+	execute func() (Response, ExecutionMeta, error),
+) (Response, ExecutionMeta, error) {
 	started := time.Now()
-	resp, providerType, providerName, failoverModel, usedFailover, err := execute()
+	resp, meta, err := execute()
 	if err != nil {
 		var zero Response
-		return zero, "", "", "", false, err
+		return zero, ExecutionMeta{}, err
 	}
 	if err := waitForInferenceSlowdown(ctx, workflow, time.Since(started)); err != nil {
 		var zero Response
-		return zero, "", "", "", false, err
+		return zero, ExecutionMeta{}, err
 	}
-	return resp, providerType, providerName, failoverModel, usedFailover, nil
+	return resp, meta, nil
 }

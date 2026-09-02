@@ -137,18 +137,9 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		return s.handleStreamingReadCloser(
-			c,
-			workflow,
-			result.Meta.Model,
-			result.Meta.ProviderType,
-			result.Meta.ProviderName,
-			result.Meta.FailoverModel,
-			result.Stream,
-			func(stream io.ReadCloser) io.ReadCloser {
-				return result.WrapDeliveryStream(ctx, stream)
-			},
-		)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, result.Stream, func(stream io.ReadCloser) io.ReadCloser {
+			return result.WrapDeliveryStream(ctx, stream)
+		})
 	}
 
 	result, err := s.inference().ExecuteChatCompletion(ctx, workflow, req, requestID, "/v1/chat/completions")
@@ -317,18 +308,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}
-		return s.handleStreamingReadCloser(
-			c,
-			workflow,
-			result.Meta.Model,
-			result.Meta.ProviderType,
-			result.Meta.ProviderName,
-			result.Meta.FailoverModel,
-			stream,
-			func(stream io.ReadCloser) io.ReadCloser {
-				return result.WrapDeliveryStream(ctx, stream)
-			},
-		)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
+			return result.WrapDeliveryStream(ctx, stream)
+		})
 	}
 
 	result, err := s.inference().ExecuteResponses(ctx, workflow, req, requestID, "/v1/responses")
@@ -631,15 +613,15 @@ func cacheWorkflowResolutionHints(c *echo.Context, workflow *core.Workflow) {
 func (s *translatedInferenceService) handleStreamingReadCloser(
 	c *echo.Context,
 	workflow *core.Workflow,
-	model, provider, providerName string,
-	failoverModel string,
+	meta gateway.ExecutionMeta,
 	stream io.ReadCloser,
 	outerWrap func(io.ReadCloser) io.ReadCloser,
 ) error {
+	model, provider, providerName := meta.Model, meta.ProviderType, meta.ProviderName
 	auditlog.MarkEntryAsStreaming(c, true)
 	auditlog.EnrichEntryWithStream(c, true)
 	enrichAuditEntryWithProviderAttempts(c)
-	auditlog.EnrichEntryWithFailover(c, failoverModel)
+	auditlog.EnrichEntryWithFailover(c, meta.FailoverModel)
 	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), provider, providerName)
 
 	entry := auditlog.GetStreamEntryFromContext(c)
