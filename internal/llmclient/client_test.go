@@ -2046,6 +2046,55 @@ func TestBackoffCalculation_WithJitter(t *testing.T) {
 	}
 }
 
+// TestWaitForRetry_ContextCancelled checks that cancelling the context returns
+// ctx.Err() promptly instead of waiting out the backoff timer. The "cancelled
+// while the timer is pending" case cancels from a goroutine after
+// waitForRetry has started blocking, so a precheck-then-time.After
+// implementation would not pass it.
+func TestWaitForRetry_ContextCancelled(t *testing.T) {
+	config := DefaultConfig("test", "http://test.com")
+	config.Retry.InitialBackoff = time.Hour
+	config.Retry.MaxBackoff = time.Hour
+	config.Retry.JitterFactor = 0
+	client := New(config, nil)
+
+	tests := []struct {
+		name    string
+		attempt int
+		// cancelAfter is the delay before the context is cancelled from a
+		// separate goroutine; a negative value cancels before the call.
+		cancelAfter time.Duration
+		want        error
+	}{
+		{name: "first attempt does not wait", attempt: 0, cancelAfter: time.Hour, want: nil},
+		{name: "cancelled while the timer is pending", attempt: 1, cancelAfter: 20 * time.Millisecond, want: context.Canceled},
+		{name: "already cancelled", attempt: 3, cancelAfter: -1, want: context.Canceled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancelAfter < 0 {
+				cancel()
+			} else {
+				timer := time.AfterFunc(tt.cancelAfter, cancel)
+				defer timer.Stop()
+			}
+
+			start := time.Now()
+			err := client.waitForRetry(ctx, tt.attempt)
+			elapsed := time.Since(start)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("waitForRetry() error = %v, want %v", err, tt.want)
+			}
+			if elapsed > time.Second {
+				t.Fatalf("waitForRetry() took %v, expected a return well before the backoff", elapsed)
+			}
+		})
+	}
+}
+
 type recordingReadCloser struct {
 	io.Reader
 	closed atomic.Bool
