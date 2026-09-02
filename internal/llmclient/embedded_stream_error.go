@@ -19,7 +19,9 @@ const streamPeekBytes = 512
 // error (see core.ParseEmbeddedProviderError). Genuine streams pass through
 // after a bounded peek. Candidates are read only to the end of their first
 // top-level object, capped at maxErrorBodyBytes, so inspection never waits
-// for EOF on an open stream. Inspected bytes that are not an error replay
+// for EOF on an open stream. An error-shaped object is trusted only when
+// nothing but whitespace follows it before EOF; a trailing JSONL frame or
+// stray bytes mark a stream. Inspected bytes that are not an error replay
 // ahead of the live stream, and a read failure is replayed after them.
 // Returns the error with resp.Body closed, or nil with resp.Body ready.
 func interceptEmbeddedStreamError(provider string, resp *http.Response) *core.GatewayError {
@@ -36,8 +38,14 @@ func interceptEmbeddedStreamError(provider string, resp *http.Response) *core.Ga
 	head, complete, readErr := readFirstJSONObject(reader, maxErrorBodyBytes)
 	if complete {
 		if embedded := core.ParseEmbeddedProviderError(provider, head); embedded != nil {
-			_ = resp.Body.Close()
-			return embedded
+			var trailer []byte
+			var atEOF bool
+			trailer, atEOF, readErr = readTrailer(reader, maxErrorBodyBytes-len(head))
+			if atEOF {
+				_ = resp.Body.Close()
+				return embedded
+			}
+			head = append(head, trailer...)
 		}
 	}
 
@@ -91,6 +99,28 @@ func readFirstJSONObject(r *bufio.Reader, limit int) (head []byte, complete bool
 		}
 	}
 	return head, false, nil
+}
+
+// readTrailer consumes whitespace from r until a non-whitespace byte, limit
+// bytes, a read failure, or a clean EOF, which atEOF reports: the JSON object
+// read before it was the entire body.
+func readTrailer(r *bufio.Reader, limit int) (trailer []byte, atEOF bool, err error) {
+	for len(trailer) < limit {
+		b, readErr := r.ReadByte()
+		if readErr == io.EOF {
+			return trailer, true, nil
+		}
+		if readErr != nil {
+			return trailer, false, readErr
+		}
+		trailer = append(trailer, b)
+		switch b {
+		case ' ', '\t', '\r', '\n':
+		default:
+			return trailer, false, nil
+		}
+	}
+	return trailer, false, nil
 }
 
 // firstNonSpaceByte peeks, without consuming, for the first non-whitespace

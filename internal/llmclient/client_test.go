@@ -2557,6 +2557,89 @@ func TestClient_DoStream_OpenJSONStreamReturnsWithoutWaitingForEOF(t *testing.T)
 	}
 }
 
+func TestClient_DoStream_ErrorShapedFirstFrameWithTrailerStreamsThrough(t *testing.T) {
+	// A JSONL body mislabeled application/json whose first frame happens to
+	// be error-shaped is still a stream: a bare error is the entire body, so
+	// the trailing frame must be relayed rather than lost to classification.
+	body := `{"error":"a"}` + "\n" + `{"id":"next"}` + "\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("expected the JSONL body to stream through, got error: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("stream altered.\n got: %q\nwant: %q", string(got), body)
+	}
+}
+
+func TestClient_DoStream_ErrorObjectWithBrokenTrailerReplaysBytes(t *testing.T) {
+	// The error object arrives but the connection breaks before EOF confirms
+	// it was the whole body. The classification cannot be trusted, so the
+	// bytes replay followed by the read failure.
+	partial := `{"error":"a"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(partial)+512))
+		_, _ = w.Write([]byte(partial))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	if err == nil {
+		t.Fatal("expected the trailer read failure to propagate, got clean EOF")
+	}
+	if string(got) != partial {
+		t.Errorf("partial bytes altered.\n got: %q\nwant: %q", string(got), partial)
+	}
+}
+
+func TestReadTrailer(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		limit       int
+		wantTrailer string
+		wantEOF     bool
+	}{
+		{name: "whitespace then EOF", input: " \n", limit: 16, wantTrailer: " \n", wantEOF: true},
+		{name: "immediate EOF", input: "", limit: 16, wantTrailer: "", wantEOF: true},
+		{name: "next frame stops the scan", input: "\n{\"b\":2}", limit: 16, wantTrailer: "\n{", wantEOF: false},
+		{name: "limit reached in whitespace", input: "    ", limit: 2, wantTrailer: "  ", wantEOF: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trailer, atEOF, err := readTrailer(bufio.NewReader(strings.NewReader(tt.input)), tt.limit)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(trailer) != tt.wantTrailer || atEOF != tt.wantEOF {
+				t.Errorf("got (%q, %v), want (%q, %v)", trailer, atEOF, tt.wantTrailer, tt.wantEOF)
+			}
+		})
+	}
+}
+
 func TestReadFirstJSONObject(t *testing.T) {
 	tests := []struct {
 		name         string
