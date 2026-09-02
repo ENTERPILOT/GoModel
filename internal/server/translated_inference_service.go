@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -116,19 +117,20 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	defer adm.release()
 	ctx = adm.dispatchContext(ctx)
 
+	feedbackEnabled := hasResponseFeedbackObservers(c)
+	if !feedbackEnabled && len(s.inference().FailoverSelectors(workflow)) == 0 {
+		if handled, err := s.tryFastPathChatPassthrough(c, workflow, req); handled {
+			return err
+		}
+	}
+
 	if req.Stream {
-		feedbackEnabled := hasResponseFeedbackObservers(c)
 		if feedbackEnabled {
 			req = gateway.CloneChatRequestForStreamUsage(req)
 			if req.StreamOptions == nil {
 				req.StreamOptions = &core.StreamOptions{}
 			}
 			req.StreamOptions.IncludeUsage = true
-		}
-		if !feedbackEnabled && len(s.inference().FailoverSelectors(workflow)) == 0 {
-			if handled, err := s.tryFastPathStreamingChatPassthrough(c, workflow, req); handled {
-				return err
-			}
 		}
 		result, err := s.inference().StreamChatCompletion(ctx, workflow, req)
 		if err != nil {
@@ -487,8 +489,13 @@ func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(rec snap
 	)
 }
 
-func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo.Context, workflow *core.Workflow, req *core.ChatRequest) (bool, error) {
-	if !s.inference().CanFastPathStreamingChatPassthrough(workflow, req) {
+// tryFastPathChatPassthrough proxies an OpenAI-compatible chat request byte for
+// byte when translation would not change it (see CanFastPathChatPassthrough).
+// Streaming responses are relayed as-is; non-streaming bodies get the same
+// "provider" stamp the translated path puts on core.ChatResponse so the public
+// response shape does not depend on which path served it.
+func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context, workflow *core.Workflow, req *core.ChatRequest) (bool, error) {
+	if !s.inference().CanFastPathChatPassthrough(workflow, req) {
 		return false, nil
 	}
 
@@ -502,25 +509,34 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 
 	const endpoint = "/chat/completions"
 	providerType := strings.TrimSpace(workflow.ProviderType)
+	providerName := providerNameFromWorkflow(workflow)
+	model := resolvedModelFromWorkflow(workflow, req.Model)
+	auditlog.EnrichEntryWithResolvedRoute(c, qualifyExecutedModel(workflow, model, providerName), providerType, providerName)
 	resp, err := passthroughProvider.Passthrough(ctx, providerType, &core.PassthroughRequest{
 		Method:       c.Request().Method,
 		Endpoint:     endpoint,
 		Operation:    llmclient.OperationChat,
-		Model:        resolvedModelFromWorkflow(workflow, req.Model),
+		Model:        model,
 		Stream:       req.Stream,
 		Body:         c.Request().Body,
 		Headers:      buildPassthroughHeaders(ctx, c.Request().Header),
-		ProviderName: providerNameFromWorkflow(workflow),
+		ProviderName: providerName,
 	})
 	if err != nil {
 		return true, handleError(c, err)
+	}
+	if !req.Stream {
+		if err := stampPassthroughChatProvider(resp, providerType); err != nil {
+			_ = resp.Body.Close()
+			return true, handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider response", err))
+		}
 	}
 
 	info := &core.PassthroughRouteInfo{
 		Provider:    providerType,
 		RawEndpoint: strings.TrimPrefix(endpoint, "/"),
 		AuditPath:   c.Request().URL.Path,
-		Model:       resolvedModelFromWorkflow(workflow, req.Model),
+		Model:       model,
 	}
 	passthrough := passthroughService{
 		provider:        s.provider,
@@ -528,7 +544,58 @@ func (s *translatedInferenceService) tryFastPathStreamingChatPassthrough(c *echo
 		usageLogger:     s.usageLogger,
 		pricingResolver: s.pricingResolver,
 	}
-	return true, passthrough.proxyPassthroughResponse(c, providerType, providerNameFromWorkflow(workflow), endpoint, info, resp)
+	return true, passthrough.proxyPassthroughResponse(c, providerType, providerName, endpoint, info, resp)
+}
+
+// stampPassthroughChatProvider buffers a successful non-streaming JSON chat
+// body and appends the gateway "provider" field, matching the translated
+// path. Bodies beyond maxObservedJSONResponseBytes are relayed untouched, as
+// the usage observer already declines to buffer them.
+func stampPassthroughChatProvider(resp *core.PassthroughResponse, providerType string) error {
+	if resp == nil || resp.Body == nil || !isObservablePassthroughStatus(resp.StatusCode) ||
+		!isJSONContentType(resp.Headers) || isSSEContentType(resp.Headers) {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxObservedJSONResponseBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > maxObservedJSONResponseBytes {
+		resp.Body = &combinedReadCloser{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), rc: resp.Body}
+		return nil
+	}
+	resp.Body = &combinedReadCloser{Reader: bytes.NewReader(stampJSONObjectProvider(body, providerType)), rc: resp.Body}
+	return nil
+}
+
+// stampJSONObjectProvider appends "provider":<providerType> as the last member
+// of a JSON object body. Appending last means a provider-supplied "provider"
+// member (OpenRouter emits one) is overridden the same way the typed
+// core.ChatResponse field overrides it on the translated path, since JSON
+// decoders keep the last duplicate key. Bodies that are not a JSON object are
+// returned unchanged.
+func stampJSONObjectProvider(body []byte, providerType string) []byte {
+	end := len(bytes.TrimRight(body, " \t\r\n"))
+	if end == 0 || body[end-1] != '}' {
+		return body
+	}
+	object := body[:end-1]
+	members := bytes.TrimSpace(object)
+	if len(members) == 0 || members[0] != '{' {
+		return body
+	}
+	quoted, err := json.Marshal(providerType)
+	if err != nil {
+		return body
+	}
+	stamped := make([]byte, 0, len(body)+len(quoted)+13)
+	stamped = append(stamped, object...)
+	if len(bytes.TrimSpace(members[1:])) > 0 {
+		stamped = append(stamped, ',')
+	}
+	stamped = append(stamped, `"provider":`...)
+	stamped = append(stamped, quoted...)
+	return append(stamped, body[end-1:]...)
 }
 
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {

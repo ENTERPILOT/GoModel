@@ -172,9 +172,20 @@ func (o *InferenceOrchestrator) routeMetadata(workflow *core.Workflow, failoverM
 	return providerType, providerName, model
 }
 
-// CanFastPathStreamingChatPassthrough reports whether a streaming chat request can bypass translation.
-func (o *InferenceOrchestrator) CanFastPathStreamingChatPassthrough(workflow *core.Workflow, req *core.ChatRequest) bool {
-	if req == nil || !req.Stream {
+// chatCachePlanner is implemented by routers that run a prompt-cache planner
+// after routing. The passthrough fast path bypasses routing, so it must decline
+// any request the planner would have annotated.
+type chatCachePlanner interface {
+	PromptCachePlanApplies(providerType string, selector core.ModelSelector, req *core.ChatRequest) bool
+}
+
+// CanFastPathChatPassthrough reports whether a chat request, streaming or not,
+// can bypass translation and be proxied to the provider byte for byte. It
+// declines whenever the translated path would change the outbound request:
+// slowdown, request patching, enforced usage, selector or body rewrites, and
+// prompt-cache planning.
+func (o *InferenceOrchestrator) CanFastPathChatPassthrough(workflow *core.Workflow, req *core.ChatRequest) bool {
+	if req == nil {
 		return false
 	}
 	if workflowSlowdown(workflow) > 0 {
@@ -194,34 +205,42 @@ func (o *InferenceOrchestrator) CanFastPathStreamingChatPassthrough(workflow *co
 		return false
 	}
 
-	if translatedStreamingSelectorRewriteRequired(workflow.Resolution) {
+	if translatedSelectorRewriteRequired(workflow.Resolution) {
 		return false
 	}
-	if translatedStreamingChatBodyRewriteRequired(req) {
+	if translatedChatBodyRewriteRequired(req) {
+		return false
+	}
+	if planner, ok := o.provider.(chatCachePlanner); ok &&
+		planner.PromptCachePlanApplies(providerType, workflow.Resolution.ResolvedSelector, req) {
 		return false
 	}
 
 	return true
 }
 
-func translatedStreamingSelectorRewriteRequired(resolution *core.RequestModelResolution) bool {
-	if resolution == nil {
+// translatedSelectorRewriteRequired reports whether the model string the client
+// sent differs from the one the provider must receive. Only the model travels
+// upstream: translation strips the "provider" field, and a request carrying one
+// is already declined by translatedChatBodyRewriteRequired. The resolved
+// provider name is therefore not compared; a bare "gpt-4o" that resolves to the
+// configured "openai" instance still forwards "gpt-4o" verbatim, while an alias
+// or a provider-qualified "openai/gpt-4o" does not.
+func translatedSelectorRewriteRequired(resolution *core.RequestModelResolution) bool {
+	if resolution == nil || resolution.Requested.ExplicitProvider {
 		return true
 	}
-
-	requestedModel := strings.TrimSpace(resolution.Requested.Model)
-	requestedProvider := strings.TrimSpace(resolution.Requested.ProviderHint)
-	resolvedModel := strings.TrimSpace(resolution.ResolvedSelector.Model)
-	resolvedProvider := strings.TrimSpace(resolution.ResolvedSelector.Provider)
-
-	return requestedModel != resolvedModel || requestedProvider != resolvedProvider
+	return strings.TrimSpace(resolution.Requested.Model) != strings.TrimSpace(resolution.ResolvedSelector.Model)
 }
 
-func translatedStreamingChatBodyRewriteRequired(req *core.ChatRequest) bool {
+// translatedChatBodyRewriteRequired reports whether translation would change a
+// field other than the model selector. req.Provider is not consulted: by the
+// time dispatch runs, preparation has already written the resolved provider
+// into it, so it no longer says whether the client sent one. A client-supplied
+// provider is caught by Requested.ExplicitProvider in
+// translatedSelectorRewriteRequired.
+func translatedChatBodyRewriteRequired(req *core.ChatRequest) bool {
 	if req == nil {
-		return true
-	}
-	if strings.TrimSpace(req.Provider) != "" {
 		return true
 	}
 

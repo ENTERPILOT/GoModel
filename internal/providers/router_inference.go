@@ -34,6 +34,14 @@ func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, 
 	return r.cachePlanner.planChat(forward, route.providerType, route.selector)
 }
 
+// PromptCachePlanApplies reports whether routing req to providerType and
+// selector would attach a prompt-cache directive. The passthrough fast path
+// consults it so a request that bypasses translation never loses a plan the
+// translated path would have applied.
+func (r *Router) PromptCachePlanApplies(providerType string, selector core.ModelSelector, req *core.ChatRequest) bool {
+	return r.cachePlanner.chatPlanApplies(req, providerType, selector)
+}
+
 func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, route resolvedRoute) *core.ResponsesRequest {
 	forward := forwardResponsesRequest(req, route.selector)
 	if r.cachePlanner == nil {
