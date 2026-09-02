@@ -210,9 +210,8 @@ type ollamaEmbedResponse struct {
 	PromptEvalCount int         `json:"prompt_eval_count"`
 }
 
-// openAICompatHint guides users who registered an OpenAI-compatible server
-// (e.g. LM Studio) as an "ollama" provider; such servers reject the native
-// /api/embed contract in ways that would otherwise be cryptic.
+// openAICompatHint points users who registered an OpenAI-compatible server
+// (e.g. LM Studio) as "ollama" at the right provider type.
 const openAICompatHint = `; if this endpoint is an OpenAI-compatible server (e.g. LM Studio), configure it as an "openai" or "vllm" provider instead of "ollama"`
 
 // Embeddings sends an embeddings request to Ollama via its native /api/embed endpoint.
@@ -233,8 +232,7 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 	}, &ollamaResp)
 	if err != nil {
 		// An error hidden behind HTTP 200 on the native path is the signature
-		// of an OpenAI-compatible server (e.g. LM Studio) registered as
-		// "ollama"; extend the upstream message with the registration hint.
+		// of an OpenAI-compatible server registered as "ollama".
 		var gatewayErr *core.GatewayError
 		if errors.Is(err, core.ErrEmbeddedInSuccess) && errors.As(err, &gatewayErr) {
 			gatewayErr.Message += openAICompatHint
@@ -244,11 +242,11 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 
 	// A request that carried input always yields at least one vector. Zero
 	// vectors for a non-empty request means the upstream did not honor the
-	// native /api/embed contract — e.g. an OpenAI-compatible server that has no
-	// native Ollama API and answered with an OpenAI-shaped body. Fail loudly
-	// instead of returning an empty, OpenAI-shaped list that silently breaks
-	// the caller. An empty input batch legitimately returns no vectors, so
-	// leave that case to pass through as an empty response.
+	// native /api/embed contract — e.g. an OpenAI-compatible server (LM Studio,
+	// vLLM) that has no native Ollama API and answered with an OpenAI-shaped body.
+	// Fail loudly instead of returning an empty, OpenAI-shaped list that
+	// silently breaks the caller. An empty input batch legitimately returns no
+	// vectors, so leave that case to pass through as an empty response.
 	if len(ollamaResp.Embeddings) == 0 && !embeddingInputIsEmpty(req.Input) {
 		return nil, core.NewProviderError("ollama", http.StatusBadGateway,
 			"ollama embeddings returned no vectors"+openAICompatHint, nil)

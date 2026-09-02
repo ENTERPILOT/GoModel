@@ -6,8 +6,6 @@ import (
 	"io"
 
 	"github.com/goccy/go-json"
-
-	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // chatDonePayload terminates a chat completions SSE stream.
@@ -28,21 +26,15 @@ const peekForNonSSE = 512
 // forever for an end-of-stream marker that never arrives. When the upstream body
 // is detected as a buffered JSON object it is re-emitted as one SSE chunk plus a
 // terminal [DONE]; genuine SSE streams pass through untouched with no buffering.
-//
-// A buffered body that is a bare {"error": ...} payload (a provider error hidden
-// behind HTTP 200) is returned as the provider error it really is, so callers
-// fail the request — and the gateway can fail over — instead of streaming a
-// fake completion chunk. Mid-stream errors inside genuine SSE cannot be caught
-// here and are relayed for the client to handle.
-func EnsureChatCompletionSSE(provider string, stream io.ReadCloser) (io.ReadCloser, error) {
+func EnsureChatCompletionSSE(stream io.ReadCloser) io.ReadCloser {
 	if stream == nil {
-		return nil, nil
+		return nil
 	}
 
 	reader := bufio.NewReaderSize(stream, peekForNonSSE)
 	if firstNonSpaceByte(reader, peekForNonSSE) != '{' {
 		// Genuine SSE (or empty): stream through unchanged, no buffering.
-		return &bufferedReadCloser{Reader: reader, closer: stream}, nil
+		return &bufferedReadCloser{Reader: reader, closer: stream}
 	}
 
 	// The '{' that classified this body is already buffered, so io.ReadAll
@@ -52,10 +44,7 @@ func EnsureChatCompletionSSE(provider string, stream io.ReadCloser) (io.ReadClos
 	// is never dropped and the client always receives a terminator.
 	body, _ := io.ReadAll(reader)
 	_ = stream.Close() //nolint:errcheck
-	if embedded := core.ParseEmbeddedProviderError(provider, body); embedded != nil {
-		return nil, embedded
-	}
-	return io.NopCloser(bytes.NewReader(bufferedCompletionToSSE(body))), nil
+	return io.NopCloser(bytes.NewReader(bufferedCompletionToSSE(body)))
 }
 
 // firstNonSpaceByte reports the first non-whitespace byte buffered by reader,

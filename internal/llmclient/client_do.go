@@ -128,9 +128,8 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			return nil, parsedErr
 		}
 
-		// Some providers answer 200 with a bare {"error": ...} body. Surface it
-		// here — not in the callers — so the mapped status drives retries, the
-		// circuit breaker, and metrics exactly like a genuine error status.
+		// Some providers answer 200 with a bare {"error": ...} body; map it
+		// here so the status drives retries, the breaker, and metrics.
 		if embedded := core.ParseEmbeddedProviderError(c.config.ProviderName, resp.Body); embedded != nil {
 			lastErr = attachResponseHeaders(embedded, resp.Header)
 			lastStatusCode = embedded.StatusCode
@@ -194,14 +193,10 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 		return nil, providerErr
 	}
 
-	// A stream request answered with a buffered application/json object is no
-	// stream at all; when that object is a bare {"error": ...} payload the
-	// request failed despite its 200 status. Detect this before the scope
-	// completes so the circuit breaker and metrics record the failure —
-	// downstream detection (stream normalization) runs after the outcome is
-	// committed and cannot revise it. Genuine streams cost only a bounded
-	// peek; errors arriving mid-stream after genuine SSE has begun remain the
-	// caller's to handle.
+	// A 200 stream answered with a buffered {"error": ...} object failed
+	// despite its status. Detect it before the scope completes so the breaker
+	// and metrics record the failure; later layers cannot revise the outcome.
+	// Errors arriving mid-stream inside genuine SSE remain the caller's.
 	if embedded := interceptEmbeddedStreamError(c.config.ProviderName, resp); embedded != nil {
 		providerErr := attachResponseHeaders(embedded, resp.Header)
 		c.completeScope(scope, embedded.StatusCode, providerErr, nil)

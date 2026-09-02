@@ -10,26 +10,18 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// streamPeekBytes bounds how many leading bytes are inspected to classify a
-// 200 stream response body. SSE begins with a field name or a ':' comment and
-// a buffered JSON object begins with '{'; 512 bytes comfortably clears any
-// leading whitespace without buffering real streams.
+// streamPeekBytes bounds the leading bytes inspected to classify a stream
+// body; 512 clears any leading whitespace without buffering real streams.
 const streamPeekBytes = 512
 
-// interceptEmbeddedStreamError inspects a 200 streaming response that
-// presents as a buffered JSON object — Content-Type application/json with a
-// leading '{' — for a bare embedded error payload (see
-// core.ParseEmbeddedProviderError). Every genuine stream shape (SSE, NDJSON,
-// chunked JSON arrays) fails one of the two guards and passes through with at
-// most a bounded peek. Candidate bodies are read only to the close of their
-// first top-level object, capped at maxErrorBodyBytes — a genuine error
-// payload is exactly one small object, so inspection never waits for EOF on a
-// stream that stays open, never buffers without bound, and a mid-object stall
-// blocks no one because no usable data exists yet. Whatever was inspected and
-// not classified as an error replays ahead of the live stream, and a failed
-// read replays the bytes already taken and then surfaces the failure, so
-// truncation is never presented as a clean stream. Returns the embedded error
-// with resp.Body closed, or nil with resp.Body ready for streaming.
+// interceptEmbeddedStreamError checks a 200 stream response whose body is a
+// buffered JSON object (application/json, leading '{') for a bare embedded
+// error (see core.ParseEmbeddedProviderError). Genuine streams pass through
+// after a bounded peek. Candidates are read only to the end of their first
+// top-level object, capped at maxErrorBodyBytes, so inspection never waits
+// for EOF on an open stream. Inspected bytes that are not an error replay
+// ahead of the live stream, and a read failure is replayed after them.
+// Returns the error with resp.Body closed, or nil with resp.Body ready.
 func interceptEmbeddedStreamError(provider string, resp *http.Response) *core.GatewayError {
 	if !strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
 		return nil
@@ -60,12 +52,9 @@ func interceptEmbeddedStreamError(provider string, resp *http.Response) *core.Ga
 	return nil
 }
 
-// readFirstJSONObject consumes bytes from r until the first top-level JSON
-// object closes, the size cap is reached, the source fails, or it ends.
-// complete reports whether the object closed within the cap. The scan is
-// string- and escape-aware so braces inside string values do not count. A
-// clean EOF before the object closes is not a failure — the truncated bytes
-// simply replay as-is — so err carries genuine read failures only.
+// readFirstJSONObject consumes r until the first top-level JSON object closes
+// (complete=true), limit bytes are read, or r ends. Braces inside strings do
+// not count. A clean EOF is not an error; the truncated bytes simply replay.
 func readFirstJSONObject(r *bufio.Reader, limit int) (head []byte, complete bool, err error) {
 	head = make([]byte, 0, 512)
 	depth := 0
@@ -104,16 +93,12 @@ func readFirstJSONObject(r *bufio.Reader, limit int) (head []byte, complete bool
 	return head, false, nil
 }
 
-// firstNonSpaceByte reports the first non-whitespace byte buffered by reader,
-// peeking one byte further at a time so a genuine stream is classified from
-// its first token without blocking until a full buffer fills. It never
-// consumes input. Returns 0 when the stream ends, errors, or yields only
-// whitespace within max bytes.
+// firstNonSpaceByte peeks, without consuming, for the first non-whitespace
+// byte within max bytes; it returns 0 when none is found or r fails.
 func firstNonSpaceByte(r *bufio.Reader, max int) byte {
 	for i := 1; i <= max; i++ {
-		prefix, err := r.Peek(i)
+		prefix, _ := r.Peek(i)
 		if len(prefix) < i {
-			_ = err // EOF or error before any non-space byte was found
 			return 0
 		}
 		switch b := prefix[i-1]; b {
@@ -126,9 +111,7 @@ func firstNonSpaceByte(r *bufio.Reader, max int) byte {
 	return 0
 }
 
-// wrappedStreamBody pairs a replacement reader with the original body's
-// Close, so no inspected byte is lost and the upstream connection is still
-// released.
+// wrappedStreamBody serves a replacement reader while closing the original body.
 type wrappedStreamBody struct {
 	io.Reader
 	closer io.Closer
@@ -136,8 +119,7 @@ type wrappedStreamBody struct {
 
 func (b *wrappedStreamBody) Close() error { return b.closer.Close() }
 
-// errorReader replays a read failure captured during inspection, so the
-// caller sees the stream fail exactly where it did.
+// errorReader replays a read failure captured during inspection.
 type errorReader struct{ err error }
 
 func (r errorReader) Read([]byte) (int, error) { return 0, r.err }
