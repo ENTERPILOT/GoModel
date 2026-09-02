@@ -1,6 +1,7 @@
 package llmclient
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2239,5 +2240,511 @@ func TestClient_DoPassthrough_ReportsStreamThatEndsBeforeFirstChunk(t *testing.T
 	}
 	if len(empties) != 1 || !empties[0].Stream || empties[0].StatusCode != http.StatusOK || !errors.Is(empties[0].Error, io.EOF) {
 		t.Fatalf("OnStreamEmpty = %+v, want one successful-status EOF report", empties)
+	}
+}
+
+func TestClient_Do_EmbeddedErrorBody(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// HTTP 200 that is really an error (OpenRouter-style).
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid key","code":401}}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 3
+	config.Retry.InitialBackoff = time.Millisecond
+	client := New(config, nil)
+
+	var result map[string]any
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, &result)
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %v", err)
+	}
+	if gatewayErr.StatusCode != http.StatusUnauthorized {
+		t.Errorf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusUnauthorized)
+	}
+	if gatewayErr.Type != core.ErrorTypeAuthentication {
+		t.Errorf("Type = %v, want %v", gatewayErr.Type, core.ErrorTypeAuthentication)
+	}
+	if gatewayErr.Message != "invalid key" {
+		t.Errorf("Message = %q, want %q", gatewayErr.Message, "invalid key")
+	}
+	if gatewayErr.ResponseHeaders == nil {
+		t.Error("expected upstream response headers attached for audit")
+	}
+	if !errors.Is(err, core.ErrEmbeddedInSuccess) {
+		t.Error("expected error to wrap core.ErrEmbeddedInSuccess")
+	}
+	// An embedded 401 is not retryable, exactly like a genuine 401 status.
+	if attempts.Load() != 1 {
+		t.Errorf("expected 1 attempt, got %d", attempts.Load())
+	}
+}
+
+func TestClient_Do_EmbeddedErrorRetriesRetryableStatus(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if attempts.Add(1) == 1 {
+			_, _ = w.Write([]byte(`{"error":{"message":"Rate limited","code":429}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 2
+	config.Retry.InitialBackoff = time.Millisecond
+	config.Retry.JitterFactor = 0
+	client := New(config, nil)
+
+	var result struct {
+		Success bool `json:"success"`
+	}
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, &result)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success after retrying past the embedded 429")
+	}
+	if attempts.Load() != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempts.Load())
+	}
+}
+
+func TestClient_Do_EmbeddedErrorWithoutCodeMapsToBadGateway(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream disconnected"}}`))
+	}))
+	defer server.Close()
+
+	config := DefaultConfig("test", server.URL)
+	config.Retry.MaxRetries = 1
+	config.Retry.InitialBackoff = time.Millisecond
+	client := New(config, nil)
+
+	err := client.Do(context.Background(), Request{
+		Method:   http.MethodGet,
+		Endpoint: "/test",
+	}, nil)
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) {
+		t.Fatalf("expected GatewayError, got %v", err)
+	}
+	if gatewayErr.StatusCode != http.StatusBadGateway {
+		t.Errorf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusBadGateway)
+	}
+	if gatewayErr.Type != core.ErrorTypeProvider {
+		t.Errorf("Type = %v, want %v", gatewayErr.Type, core.ErrorTypeProvider)
+	}
+	if gatewayErr.Message != "upstream disconnected" {
+		t.Errorf("Message = %q, want %q", gatewayErr.Message, "upstream disconnected")
+	}
+}
+
+func TestClient_DoStream_EmbeddedErrorOpensCircuitBreaker(t *testing.T) {
+	var attempts atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// A stream request answered with a buffered 200 error body.
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream down","code":503}}`))
+	}))
+	defer server.Close()
+
+	var lastInfo ResponseInfo
+	config := DefaultConfig("test", server.URL)
+	config.CircuitBreaker = goconfig.CircuitBreakerConfig{
+		Enabled:          true,
+		FailureThreshold: 2,
+		SuccessThreshold: 1,
+		Timeout:          time.Minute,
+	}
+	config.Hooks.OnRequestEnd = func(_ context.Context, info ResponseInfo) {
+		lastInfo = info
+	}
+	client := New(config, nil)
+
+	streamReq := Request{Method: http.MethodPost, Endpoint: "/stream", Body: map[string]bool{"stream": true}}
+
+	for i := 1; i <= 2; i++ {
+		stream, err := client.DoStream(context.Background(), streamReq)
+		if stream != nil || err == nil {
+			t.Fatalf("call %d: expected error and nil stream, got stream=%v err=%v", i, stream, err)
+		}
+		var gatewayErr *core.GatewayError
+		if !errors.As(err, &gatewayErr) {
+			t.Fatalf("call %d: expected GatewayError, got %v", i, err)
+		}
+		if gatewayErr.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("call %d: StatusCode = %d, want %d", i, gatewayErr.StatusCode, http.StatusServiceUnavailable)
+		}
+		if lastInfo.StatusCode != http.StatusServiceUnavailable || lastInfo.Error == nil {
+			t.Errorf("call %d: hook recorded status=%d error=%v, want mapped failure", i, lastInfo.StatusCode, lastInfo.Error)
+		}
+	}
+
+	// Two embedded failures reach the threshold: the third request must fail
+	// fast without reaching the upstream.
+	if _, err := client.DoStream(context.Background(), streamReq); err == nil {
+		t.Fatal("expected circuit breaker error, got nil")
+	}
+	if attempts.Load() != 2 {
+		t.Errorf("expected 2 upstream requests (breaker open on third), got %d", attempts.Load())
+	}
+}
+
+func TestClient_DoStream_BufferedCompletionPassesThrough(t *testing.T) {
+	body := `{"id":"chatcmpl-1","object":"chat.completion","choices":[{"message":{"content":"hi"}}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("buffered completion altered by inspection.\n got: %q\nwant: %q", string(got), body)
+	}
+}
+
+func TestClient_DoStream_NonObjectJSONStreamsThrough(t *testing.T) {
+	// Gemini-style chunked JSON array under application/json: the leading '['
+	// must leave the stream untouched, with peeked bytes replayed.
+	body := "  [{\"candidates\":[{\"content\":\"a\"}]},\n{\"candidates\":[{\"content\":\"b\"}]}]"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("stream altered by inspection.\n got: %q\nwant: %q", string(got), body)
+	}
+}
+
+func TestClient_DoStream_OversizedBufferedJSONStreamsThrough(t *testing.T) {
+	// A JSON object larger than the error-payload cap cannot be an embedded
+	// error; it must stream through complete instead of being buffered whole.
+	body := `{"id":"chatcmpl-1","object":"chat.completion","choices":[{"message":{"content":"` +
+		strings.Repeat("a", maxErrorBodyBytes+1024) + `"}}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("oversized body altered: got %d bytes, want %d", len(got), len(body))
+	}
+}
+
+func TestClient_DoStream_BufferedReadErrorPropagates(t *testing.T) {
+	// The upstream announces more bytes than it delivers, so the read fails
+	// mid-body. The partial bytes must reach the caller followed by the read
+	// error — never a clean EOF that presents truncation as success.
+	partial := `{"id":"chatcmpl-1","choices":[{"message":{"content":"Hel`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(partial)+512))
+		_, _ = w.Write([]byte(partial))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	if err == nil {
+		t.Fatal("expected the mid-body read failure to propagate, got clean EOF")
+	}
+	if string(got) != partial {
+		t.Errorf("partial bytes altered.\n got: %q\nwant: %q", string(got), partial)
+	}
+}
+
+func TestClient_DoStream_OpenJSONStreamReturnsWithoutWaitingForEOF(t *testing.T) {
+	// An NDJSON-style trickle mislabeled application/json: the first object
+	// arrives, then the stream stays open. DoStream must classify on that
+	// first object alone and hand the stream back — the handler only sends
+	// the rest after DoStream has returned, so waiting for EOF deadlocks.
+	streamReturned := make(chan struct{})
+	first := `{"choices":[{"delta":{"content":"Hi"}}]}` + "\n"
+	second := `{"choices":[{"delta":{"content":"!"}}]}` + "\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(first))
+		w.(http.Flusher).Flush()
+		<-streamReturned
+		_, _ = w.Write([]byte(second))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer stream.Close()
+	close(streamReturned)
+
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if string(got) != first+second {
+		t.Errorf("stream altered.\n got: %q\nwant: %q", string(got), first+second)
+	}
+}
+
+func TestClient_DoStream_ErrorShapedFirstFrameWithTrailerStreamsThrough(t *testing.T) {
+	// A JSONL body mislabeled application/json whose first frame happens to
+	// be error-shaped is still a stream: a bare error is the entire body, so
+	// the trailing frame must be relayed rather than lost to classification.
+	body := `{"error":"a"}` + "\n" + `{"id":"next"}` + "\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err != nil {
+		t.Fatalf("expected the JSONL body to stream through, got error: %v", err)
+	}
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("failed to read stream: %v", err)
+	}
+	if string(got) != body {
+		t.Errorf("stream altered.\n got: %q\nwant: %q", string(got), body)
+	}
+}
+
+func TestClient_DoStream_EmbeddedErrorReturnsBeforeBodyCloses(t *testing.T) {
+	// The provider flushes a complete error object and then holds the body
+	// open. DoStream must classify from the bytes it has and return the error
+	// at once — the handler only ends the body after DoStream has returned,
+	// so waiting for EOF deadlocks.
+	streamReturned := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":{"message":"upstream down","code":503}}`))
+		w.(http.Flusher).Flush()
+		<-streamReturned
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	close(streamReturned)
+	if err == nil {
+		_ = stream.Close()
+		t.Fatal("expected the embedded error, got a stream")
+	}
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected a 503 gateway error, got %v", err)
+	}
+}
+
+func TestClient_DoStream_ErrorObjectWithLyingContentLengthStillFails(t *testing.T) {
+	// The error object is complete even though the upstream announced more
+	// bytes than it delivers; the bytes in hand decide, not the transport.
+	body := `{"error":"a"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)+512))
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	if err == nil {
+		_ = stream.Close()
+		t.Fatal("expected the embedded error, got a stream")
+	}
+	if !errors.Is(err, core.ErrEmbeddedInSuccess) {
+		t.Fatalf("expected an embedded provider error, got %v", err)
+	}
+}
+
+func TestBufferedTrailerIsBlank(t *testing.T) {
+	tests := []struct {
+		name     string
+		buffered string
+		want     bool
+	}{
+		{name: "nothing buffered", buffered: "", want: true},
+		{name: "whitespace only", buffered: " \r\n\t", want: true},
+		{name: "next frame", buffered: "\n{\"b\":2}", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := bufio.NewReader(strings.NewReader("x" + tt.buffered))
+			if _, err := r.ReadByte(); err != nil { // fill the buffer, consume the sentinel
+				t.Fatal(err)
+			}
+			if got := bufferedTrailerIsBlank(r); got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadFirstJSONObject(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		limit        int
+		wantHead     string
+		wantComplete bool
+	}{
+		{
+			name:         "object followed by stream tail",
+			input:        `{"a":1}` + "\n" + `{"b":2}`,
+			limit:        1024,
+			wantHead:     `{"a":1}`,
+			wantComplete: true,
+		},
+		{
+			name:         "braces and escaped quotes inside strings do not count",
+			input:        `{"msg":"a \"quoted\" {brace}"}tail`,
+			limit:        1024,
+			wantHead:     `{"msg":"a \"quoted\" {brace}"}`,
+			wantComplete: true,
+		},
+		{
+			name:         "escaped backslash before closing quote",
+			input:        `{"path":"c:\\"}`,
+			limit:        1024,
+			wantHead:     `{"path":"c:\\"}`,
+			wantComplete: true,
+		},
+		{
+			name:         "nested objects close at the outer brace",
+			input:        `{"a":{"b":{}}}`,
+			limit:        1024,
+			wantHead:     `{"a":{"b":{}}}`,
+			wantComplete: true,
+		},
+		{
+			name:         "clean EOF mid-object is incomplete without error",
+			input:        `{"a":`,
+			limit:        1024,
+			wantHead:     `{"a":`,
+			wantComplete: false,
+		},
+		{
+			name:         "cap reached mid-object is incomplete",
+			input:        `{"long":"value"}`,
+			limit:        4,
+			wantHead:     `{"lo`,
+			wantComplete: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			head, complete, err := readFirstJSONObject(bufio.NewReader(strings.NewReader(tt.input)), tt.limit)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(head) != tt.wantHead {
+				t.Errorf("head = %q, want %q", head, tt.wantHead)
+			}
+			if complete != tt.wantComplete {
+				t.Errorf("complete = %v, want %v", complete, tt.wantComplete)
+			}
+		})
+	}
+}
+
+func TestFirstNonSpaceByte(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		max   int
+		want  byte
+	}{
+		{"leading whitespace then object", " \r\n\t{", 512, '{'},
+		{"empty input", "", 512, 0},
+		{"whitespace only", "   ", 512, 0},
+		{"whitespace beyond the window", strings.Repeat(" ", 20) + "{", 8, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := firstNonSpaceByte(bufio.NewReader(strings.NewReader(tt.input)), tt.max); got != tt.want {
+				t.Errorf("firstNonSpaceByte = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

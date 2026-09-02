@@ -1,7 +1,7 @@
 // Package llmclient provides a base HTTP client for LLM providers with:
 // - Request marshaling/unmarshaling
 // - Retries with exponential backoff and jitter
-// - Standardized error parsing (429, 502, 503, 504)
+// - Standardized error parsing (429, 502, 503, 504), including errors embedded in 200-status bodies
 // - Circuit breaking with half-open state protection
 package llmclient
 

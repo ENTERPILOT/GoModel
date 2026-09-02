@@ -128,6 +128,19 @@ func (c *Client) DoRaw(ctx context.Context, req Request) (*Response, error) {
 			return nil, parsedErr
 		}
 
+		// Some providers answer 200 with a bare {"error": ...} body; map it
+		// here so the status drives retries, the breaker, and metrics.
+		if embedded := core.ParseEmbeddedProviderError(c.config.ProviderName, resp.Body); embedded != nil {
+			lastErr = attachResponseHeaders(embedded, resp.Header)
+			lastStatusCode = embedded.StatusCode
+			lastErrFromTransport = false
+			if c.isRetryable(embedded.StatusCode) && !scope.halfOpenProbe {
+				continue
+			}
+			c.completeScope(scope, lastStatusCode, lastErr, nil)
+			return nil, lastErr
+		}
+
 		// Success
 		c.completeScope(scope, resp.StatusCode, nil, nil)
 		return resp, nil
@@ -177,6 +190,16 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 
 		providerErr := attachResponseHeaders(core.ParseProviderError(c.config.ProviderName, resp.StatusCode, respBody, nil), resp.Header)
 		c.completeScope(scope, resp.StatusCode, providerErr, nil)
+		return nil, providerErr
+	}
+
+	// A 200 stream answered with a buffered {"error": ...} object failed
+	// despite its status. Detect it before the scope completes so the breaker
+	// and metrics record the failure; later layers cannot revise the outcome.
+	// Errors arriving mid-stream inside genuine SSE remain the caller's.
+	if embedded := interceptEmbeddedStreamError(c.config.ProviderName, resp); embedded != nil {
+		providerErr := attachResponseHeaders(embedded, resp.Header)
+		c.completeScope(scope, embedded.StatusCode, providerErr, nil)
 		return nil, providerErr
 	}
 
