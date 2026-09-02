@@ -58,6 +58,19 @@ func (s *nativeFileService) fileByID(
 		return handleError(c, core.NewInvalidRequestError("file id is required", nil))
 	}
 
+	stored, tracked, lookupErr := s.storedFileMapping(c.Request().Context(), id)
+	if lookupErr != nil && !core.AccessScopeFromContext(c.Request().Context()).Global() {
+		// Ownership cannot be established; a scoped caller must not fall
+		// through to a provider lookup that ignores tenancy.
+		return handleError(c, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up file provider mapping", lookupErr))
+	}
+	if tracked && !core.AccessScopeFromContext(c.Request().Context()).Allows(stored.UserPath) {
+		// A tracked file outside the caller's scope is reported like a
+		// missing one; no provider is consulted, so the ID leaks nothing.
+		auditlog.EnrichEntry(c, "file", "")
+		return handleError(c, core.NewNotFoundError("file not found: "+id))
+	}
+
 	if providerType := fileReq.Provider; providerType != "" {
 		auditlog.EnrichEntry(c, "file", providerType)
 		result, err := callFn(nativeRouter, providerType, id)
@@ -72,9 +85,8 @@ func (s *nativeFileService) fileByID(
 		return respondFn(c, result)
 	}
 
-	if providerType, ok, err := s.storedProviderForFile(c.Request().Context(), id); err != nil {
-		return handleError(c, err)
-	} else if ok {
+	if tracked {
+		providerType := strings.TrimSpace(stored.ProviderType)
 		result, err := callFn(nativeRouter, providerType, id)
 		if err == nil {
 			auditlog.EnrichEntry(c, "file", providerType)
@@ -216,9 +228,20 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 	after := fileReq.After
 	providerType := fileReq.Provider
 
+	ctx := c.Request().Context()
+	scope := core.AccessScopeFromContext(ctx)
+
 	if providerType != "" {
 		auditlog.EnrichEntry(c, "file", providerType)
-		resp, err := nativeRouter.ListFiles(c.Request().Context(), providerType, purpose, limit, after)
+		fetch := func(cursor string) (*core.FileListResponse, error) {
+			return nativeRouter.ListFiles(ctx, providerType, purpose, limit, cursor)
+		}
+		var resp *core.FileListResponse
+		if scope.Global() {
+			resp, err = fetch(after)
+		} else {
+			resp, err = s.listScopedFiles(ctx, scope, fetch, limit, after)
+		}
 		if err != nil {
 			return handleError(c, err)
 		}
@@ -236,7 +259,15 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntry(c, "file", "")
-	resp, err := s.listMergedFiles(c.Request().Context(), nativeRouter, providers, purpose, limit, after)
+	fetch := func(cursor string) (*core.FileListResponse, error) {
+		return s.listMergedFiles(ctx, nativeRouter, providers, purpose, limit, cursor)
+	}
+	var resp *core.FileListResponse
+	if scope.Global() {
+		resp, err = fetch(after)
+	} else {
+		resp, err = s.listScopedFiles(ctx, scope, fetch, limit, after)
+	}
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -314,21 +345,26 @@ func (s *nativeFileService) recordStoredFile(ctx context.Context, resp *core.Fil
 	return nil
 }
 
-func (s *nativeFileService) storedProviderForFile(ctx context.Context, id string) (string, bool, error) {
+// storedFileMapping returns the gateway's ownership record for a file when
+// one is tracked. A store lookup failure is logged and returned alongside an
+// untracked result: global callers keep today's provider fallback so a
+// degraded store does not take file access down, scoped callers fail closed.
+func (s *nativeFileService) storedFileMapping(ctx context.Context, id string) (*filestore.StoredFile, bool, error) {
 	if s.fileStore == nil {
-		return "", false, nil
+		return nil, false, nil
 	}
 	stored, err := s.fileStore.Get(ctx, id)
 	if err != nil {
-		if !errors.Is(err, filestore.ErrNotFound) {
-			slog.Warn("failed to look up file provider mapping", "file_id", id, "error", err)
+		if errors.Is(err, filestore.ErrNotFound) {
+			return nil, false, nil
 		}
-		return "", false, nil
+		slog.Warn("failed to look up file provider mapping", "file_id", id, "error", err)
+		return nil, false, err
 	}
-	if stored != nil && strings.TrimSpace(stored.ProviderType) != "" {
-		return strings.TrimSpace(stored.ProviderType), true, nil
+	if stored == nil || strings.TrimSpace(stored.ProviderType) == "" {
+		return nil, false, nil
 	}
-	return "", false, nil
+	return stored, true, nil
 }
 
 func (s *nativeFileService) deleteStoredFileMapping(ctx context.Context, id string) error {

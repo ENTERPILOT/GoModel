@@ -27,6 +27,9 @@ const (
 	ErrorTypeAuthentication ErrorType = "authentication_error"
 	// ErrorTypeNotFound indicates a not found error (404)
 	ErrorTypeNotFound ErrorType = "not_found_error"
+	// ErrorTypePermission indicates an authenticated caller lacks the
+	// permission for the operation (403)
+	ErrorTypePermission ErrorType = "permission_error"
 )
 
 // GatewayError is the base error type for all gateway errors
@@ -200,6 +203,16 @@ func NewAuthenticationError(provider string, message string) *GatewayError {
 		Message:    message,
 		StatusCode: http.StatusUnauthorized,
 		Provider:   provider,
+	}
+}
+
+// NewPermissionError creates a new permission error (403) for an
+// authenticated caller whose credential does not cover the operation.
+func NewPermissionError(message string) *GatewayError {
+	return &GatewayError{
+		Type:       ErrorTypePermission,
+		Message:    message,
+		StatusCode: http.StatusForbidden,
 	}
 }
 

@@ -305,6 +305,13 @@ func (s *nativeResponseService) loadStoredResponse(ctx context.Context, id strin
 	if stored == nil || stored.Response == nil {
 		return nil, core.NewProviderError("response_store", http.StatusInternalServerError, "stored response payload missing", nil)
 	}
+	// A tracked response outside the caller's user-path scope is reported
+	// exactly like a missing one. The error is deliberately not
+	// responsestore.ErrNotFound so callers do not fall through to the
+	// provider lookup, which would hand the same object back by ID.
+	if !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return nil, core.NewNotFoundError("response not found")
+	}
 	return stored, nil
 }
 

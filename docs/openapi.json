@@ -7,6 +7,49 @@
     "version": "1.0"
   },
   "paths": {
+    "/admin/access": {
+      "get": {
+        "description": "Reports whether the credential administers the whole gateway\nor only one user-path subtree, so clients can adapt what\nthey offer before hitting scoped endpoints.",
+        "tags": [
+          "admin"
+        ],
+        "summary": "Describe the caller's admin scope",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/admin.accessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.GatewayError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/admin/access",
+            "title": "Describe the caller's admin scope",
+            "description": "GoModel API reference for GET /admin/access: Describe the caller's admin scope."
+          }
+        }
+      }
+    },
     "/admin/audit/conversation": {
       "get": {
         "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nresponse headers are omitted; redacted request headers and\nper-request usage summaries are retained for continuation\nand prompt-cache visualization.",
@@ -532,6 +575,14 @@
           {
             "description": "End date (YYYY-MM-DD)",
             "name": "end_date",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by tracked user path subtree",
+            "name": "user_path",
             "in": "query",
             "schema": {
               "type": "string"
@@ -10756,6 +10807,19 @@
           }
         }
       },
+      "admin.accessResponse": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "description": "Scope is \"global\" for the master key and unscoped credentials, or\n\"user_path\" for a credential confined to one user-path subtree.",
+            "type": "string"
+          },
+          "user_path": {
+            "description": "UserPath is the subtree root of a user_path-scoped credential.",
+            "type": "string"
+          }
+        }
+      },
       "admin.auditConversationResponse": {
         "type": "object",
         "properties": {
@@ -12269,7 +12333,7 @@
             "type": "integer"
           },
           "request_body": {
-            "description": "Optional bodies (when LOGGING_LOG_BODIES=true)\nStored as interface{} so MongoDB serializes as native BSON documents (queryable/readable)\ninstead of BSON Binary (base64 in Compass)"
+            "description": "Optional bodies (when LOGGING_LOG_BODIES=true). Captured JSON is kept\nas json.RawMessage; other captures (string fallbacks, audio/image logs,\nstream-built responses) keep their own types. The MongoDB writer decodes\nraw JSON into documents so they stay queryable — see body.go."
           },
           "request_body_too_big_to_handle": {
             "description": "Body capture status flags (set when body exceeds 1MB limit)",
@@ -12341,7 +12405,7 @@
         "type": "object",
         "properties": {
           "body": {
-            "description": "Body is the request body after this revision (parsed JSON, or a string\nwhen not valid JSON). Populated only when body logging is enabled and\nthe body is within the capture limit."
+            "description": "Body is the request body after this revision (the raw JSON, or a string\nwhen not valid JSON — see body.go). Populated only when body logging is\nenabled and the body is within the capture limit."
           },
           "bytes_after": {
             "type": "integer"
@@ -13077,14 +13141,16 @@
           "rate_limit_error",
           "invalid_request_error",
           "authentication_error",
-          "not_found_error"
+          "not_found_error",
+          "permission_error"
         ],
         "x-enum-varnames": [
           "ErrorTypeProvider",
           "ErrorTypeRateLimit",
           "ErrorTypeInvalidRequest",
           "ErrorTypeAuthentication",
-          "ErrorTypeNotFound"
+          "ErrorTypeNotFound",
+          "ErrorTypePermission"
         ]
       },
       "core.FileDeleteResponse": {

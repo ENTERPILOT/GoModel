@@ -90,6 +90,42 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredFile, error) 
 	})
 }
 
+// GetMany retrieves the mappings present for the given ids in one query.
+func (s *MongoDBStore) GetMany(ctx context.Context, ids []string) (map[string]*StoredFile, error) {
+	result := make(map[string]*StoredFile, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	cursor, err := s.collection.Find(ctx, bson.M{"_id": bson.M{"$in": ids}})
+	if err != nil {
+		return nil, fmt.Errorf("query file mappings: %w", err)
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+	for cursor.Next(ctx) {
+		var doc mongoFileDocument
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, fmt.Errorf("decode file mapping: %w", err)
+		}
+		file, err := cloneStoredFile(&StoredFile{
+			ID:           doc.ID,
+			ProviderType: doc.ProviderType,
+			Purpose:      doc.Purpose,
+			Filename:     doc.Filename,
+			Bytes:        doc.Bytes,
+			CreatedAt:    doc.CreatedAt,
+			UserPath:     doc.UserPath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		result[file.ID] = file
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file mappings: %w", err)
+	}
+	return result, nil
+}
+
 // Delete removes one file mapping by id.
 func (s *MongoDBStore) Delete(ctx context.Context, id string) error {
 	result, err := s.collection.DeleteOne(ctx, bson.M{"_id": id})

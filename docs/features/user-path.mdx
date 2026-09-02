@@ -48,6 +48,41 @@ If the API key has its own `user_path`, the key wins. GoModel overwrites the
 header value with the key-bound path before workflow matching, audit logging,
 usage tracking, and model access checks run.
 
+## Access scope
+
+The key-bound `user_path` is also the key's **access scope**: the subtree it
+may read and manage. A key bound to `/team/alpha` can reach `/team/alpha` and
+every descendant, but not `/team/beta`, not `/team`, and not rows recorded
+without a user path. The header never widens the scope; it only chooses the
+path a request is attributed to.
+
+| Credential                              | Scope                        |
+| --------------------------------------- | ---------------------------- |
+| Master key                              | Global                       |
+| Managed key without `user_path` (or `/`) | Global                      |
+| Managed key bound to `/team/alpha`      | `/team/alpha` and descendants |
+
+The scope applies in two places:
+
+- **Admin API and dashboard.** A key with dashboard access and a `user_path`
+  is a scoped admin of that subtree. See
+  [Scoped admin access](/advanced/admin-endpoints#scoped-admin-access).
+- **Object ownership** on `/v1` lifecycle endpoints, described next.
+
+## Object ownership
+
+Responses, conversations, batches, and uploaded files remember the `user_path`
+they were created under. Retrieving, listing, updating, cancelling, or deleting
+one of them by ID succeeds only when that path lies inside the caller's scope;
+otherwise the gateway answers `404`, exactly as for an unknown ID. A
+`/v1/responses` call that references a conversation from another subtree fails
+the same way.
+
+Global credentials see every object, including legacy rows recorded before the
+path was stored. Objects the gateway has no record of (an ID stored only by the
+upstream provider) are still looked up at the provider as before; use a
+persistent store so every object stays tracked.
+
 ## Model access
 
 Model access policies are enabled by default. A policy is a virtual model with

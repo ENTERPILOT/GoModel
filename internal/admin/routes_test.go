@@ -31,6 +31,7 @@ func TestRegisterRoutes_RegistersExpectedPaths(t *testing.T) {
 	h.RegisterRoutes(g)
 
 	want := []string{
+		"GET /admin/access",
 		"GET /admin/runtime/config",
 		"GET /admin/cache/overview",
 		"GET /admin/live/logs",

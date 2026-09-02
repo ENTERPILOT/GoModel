@@ -4,6 +4,7 @@
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
@@ -130,6 +131,8 @@ class BudgetsStore {
       };
     } else {
       this.form = defaultBudgetForm();
+      // A scoped key can only budget its own subtree: start there.
+      this.form.subject = access.defaultPath(this.form.subject);
     }
     this.formOpen = true;
   }

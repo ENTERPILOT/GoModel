@@ -133,6 +133,48 @@ allowlists are managed through the [user endpoints](#user-endpoints).
 
 Dashboard access only gates `/admin/*`. Model endpoints and the self-service [`GET /v1/usage`](/advanced/usage-api) endpoint stay available to every managed key.
 
+### Scoped admin access
+
+A managed key's `user_path` also bounds what it can administer. A key with
+dashboard access and no `user_path` (or `/`) is a **global admin** and sees
+everything, like the master key. A key bound to `/team/alpha` is a **scoped
+admin**: it reads and manages only `/team/alpha` and its descendants
+(`/team/alpha/service`, `/team/alpha/service/worker`, ...). The
+`X-GoModel-User-Path` header never widens a key's scope.
+
+Use `GET /admin/access` to find out which one a credential is:
+
+```json
+{"scope": "global"}
+{"scope": "user_path", "user_path": "/team/alpha"}
+```
+
+For a scoped admin:
+
+- Usage, audit, API key, user, budget, and rate-limit endpoints are filtered
+  to the scope. An omitted `user_path` filter means the scope root; a
+  `user_path` outside the scope returns `403` with code
+  `user_path_out_of_scope`.
+- Objects addressed by ID that belong to another subtree (an audit entry, an
+  API key) return `404`, exactly as if they did not exist.
+- New API keys and user policies default to the scope root and cannot be
+  created outside it. Keys with dashboard access created this way are scoped
+  admins of that subtree in turn.
+- Only user-path budgets and rate limits are visible and editable; label,
+  provider, and model rules are gateway-wide.
+- Gateway-wide endpoints return `403` with code `admin_scope_denied`: provider
+  status and credentials, runtime settings and refresh, tagging settings,
+  virtual models, workflows, guardrails, MCP servers, pricing overrides, cache
+  overview, live logs, token throughput, pricing recalculation, budget and
+  rate-limit reset-all, and budget settings updates. The dashboard hides the
+  matching pages and actions.
+
+Rows recorded without a user path (for example traffic sent with the master
+key and no header) are visible to global admins only.
+
+The same scope applies to `/v1` lifecycle objects; see
+[User Path → Object ownership](/features/user-path#object-ownership).
+
 The dashboard UI pages (`/admin/dashboard`) and static assets (`/admin/static/*`) **skip authentication** so the dashboard shell is accessible without configuring API keys in the browser — the data it loads still requires a key with dashboard access.
 
 <Warning>
@@ -153,6 +195,20 @@ All admin API endpoints are mounted under `/admin`.
   `/admin/` in your scripts. One endpoint also moved within `/admin`:
   `/admin/api/v1/dashboard/config` → `/admin/runtime/config`.
 </Note>
+
+### GET /admin/access
+
+Returns the caller's admin scope so scripts and the dashboard can adapt. See
+[Scoped admin access](#scoped-admin-access).
+
+**Response:**
+
+```json
+{"scope": "user_path", "user_path": "/team/alpha"}
+```
+
+`scope` is `global` (master key, or a key without a `user_path`) or
+`user_path`; `user_path` is present only for scoped credentials.
 
 ### GET /admin/usage/summary
 

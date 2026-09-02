@@ -377,6 +377,14 @@ func (emptyProviderFileStore) Get(_ context.Context, id string) (*filestore.Stor
 	return &filestore.StoredFile{ID: id}, nil
 }
 
+func (emptyProviderFileStore) GetMany(_ context.Context, ids []string) (map[string]*filestore.StoredFile, error) {
+	result := make(map[string]*filestore.StoredFile, len(ids))
+	for _, id := range ids {
+		result[id] = &filestore.StoredFile{ID: id}
+	}
+	return result, nil
+}
+
 func (emptyProviderFileStore) Delete(context.Context, string) error {
 	return nil
 }
@@ -401,6 +409,10 @@ func (s failingFileStore) Upsert(context.Context, *filestore.StoredFile) error {
 }
 
 func (s failingFileStore) Get(context.Context, string) (*filestore.StoredFile, error) {
+	return nil, s.storeErr()
+}
+
+func (s failingFileStore) GetMany(context.Context, []string) (map[string]*filestore.StoredFile, error) {
 	return nil, s.storeErr()
 }
 

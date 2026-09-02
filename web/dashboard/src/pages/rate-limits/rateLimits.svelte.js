@@ -5,6 +5,7 @@
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import * as logic from "./rateLimitsLogic.js";
 
@@ -49,8 +50,13 @@ class RateLimitsStore {
     return logic.rateLimitScopeMeta(scope);
   }
 
+  // Provider and model rules are gateway-wide, so a key scoped to a user
+  // path only creates user-path rules inside its subtree.
   rateLimitScopeOptions() {
-    return logic.rateLimitScopeOptions();
+    const options = logic.rateLimitScopeOptions();
+    return access.scoped
+      ? options.filter((option) => option.value === "user_path")
+      : options;
   }
 
   rateLimitScope(item) {
@@ -261,6 +267,8 @@ class RateLimitsStore {
     } else {
       this.rateLimitEditingOriginal = null;
       this.rateLimitForm = logic.defaultRateLimitForm();
+      // A scoped key can only limit its own subtree: start there.
+      this.rateLimitForm.subject = access.defaultPath(this.rateLimitForm.subject);
     }
     this.rateLimitFormOpen = true;
   }

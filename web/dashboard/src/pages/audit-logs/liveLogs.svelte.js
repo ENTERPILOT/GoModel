@@ -25,6 +25,7 @@
 import { untrack } from "svelte";
 import { apiFetch, getJSON, isAbortError } from "$lib/api/client.js";
 import { nextReconnect } from "$lib/api/eventStream.js";
+import { access } from "$lib/stores/access.svelte.js";
 import { readStored } from "$lib/utils/storage.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
@@ -159,19 +160,22 @@ class LiveLogsStore {
     return dateRange.followsToday;
   }
 
-  // Only DASHBOARD_LIVE_LOGS_ENABLED gates the stream (default true). Audit
-  // logging being off does not stop the stream — live entries are exactly
-  // what the dashboard shows when persistence is off.
+  // DASHBOARD_LIVE_LOGS_ENABLED gates the stream (default true), and so does
+  // the credential: the stream is gateway-wide, so a key scoped to a user
+  // path gets no live entries. Audit logging being off does not stop the
+  // stream — live entries are exactly what the dashboard shows when
+  // persistence is off.
   liveLogsEnabled() {
-    return runtimeConfig.liveLogsVisible();
+    return runtimeConfig.liveLogsVisible() && !access.scoped;
   }
 
   async startLiveLogs() {
     if (typeof fetch !== "function" || typeof ReadableStream === "undefined") {
       return;
     }
-    // Ensure the runtime-config flags are present before evaluating the gate.
-    await runtimeConfig.ensureLoaded();
+    // Ensure the runtime-config flags and the access scope are present
+    // before evaluating the gate.
+    await Promise.all([runtimeConfig.ensureLoaded(), access.ensureLoaded()]);
     if (!this.liveLogsEnabled()) {
       return;
     }

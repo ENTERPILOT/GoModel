@@ -253,3 +253,60 @@ func TestSQLReaderGetRequestStats(t *testing.T) {
 		}
 	})
 }
+
+func TestSQLReaderGetRequestStats_FiltersByUserPathSubtree(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := newSQLStoreForTest(t, db, 0)
+		if err != nil {
+			t.Fatalf("failed to create store: %v", err)
+		}
+
+		day := time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC)
+		entries := []*LogEntry{
+			{ID: "alpha", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6, UserPath: "/team/alpha"},
+			{ID: "alpha-child", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 500, DurationNs: 100e6, UserPath: "/team/alpha/service"},
+			{ID: "alpha-sibling", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6, UserPath: "/team/alpha-2"},
+			{ID: "beta", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6, UserPath: "/team/beta"},
+			{ID: "no-path", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6},
+		}
+		if err := store.WriteBatch(context.Background(), entries); err != nil {
+			t.Fatalf("failed to seed audit logs: %v", err)
+		}
+		reader, err := NewSQLReader(db)
+		if err != nil {
+			t.Fatalf("failed to create reader: %v", err)
+		}
+
+		tests := []struct {
+			name         string
+			userPath     string
+			wantRequests int64
+			wantStatus5x int64
+		}{
+			{name: "no filter counts everything", wantRequests: 5, wantStatus5x: 1},
+			{name: "subtree counts path and descendants", userPath: "/team/alpha", wantRequests: 2, wantStatus5x: 1},
+			{name: "root counts every tracked path", userPath: "/", wantRequests: 5, wantStatus5x: 1},
+			{name: "unknown subtree is empty", userPath: "/team/gamma", wantRequests: 0},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				stats, err := reader.GetRequestStats(context.Background(), RequestStatsParams{
+					StartDate: day, EndDate: day,
+					UserPath: tt.userPath,
+					Interval: StatsIntervalHour,
+					Location: time.UTC,
+					Now:      day.Add(23 * time.Hour),
+				})
+				if err != nil {
+					t.Fatalf("GetRequestStats failed: %v", err)
+				}
+				if stats.Summary.Requests != tt.wantRequests {
+					t.Fatalf("summary requests = %d, want %d", stats.Summary.Requests, tt.wantRequests)
+				}
+				if stats.Summary.Status5xx != tt.wantStatus5x {
+					t.Fatalf("summary 5xx = %d, want %d", stats.Summary.Status5xx, tt.wantStatus5x)
+				}
+			})
+		}
+	})
+}

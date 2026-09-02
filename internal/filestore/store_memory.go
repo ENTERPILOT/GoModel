@@ -42,6 +42,25 @@ func (s *MemoryStore) Get(_ context.Context, id string) (*StoredFile, error) {
 	return cloneStoredFile(file)
 }
 
+// GetMany retrieves the mappings present for the given ids.
+func (s *MemoryStore) GetMany(_ context.Context, ids []string) (map[string]*StoredFile, error) {
+	result := make(map[string]*StoredFile, len(ids))
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, id := range ids {
+		file, ok := s.items[id]
+		if !ok {
+			continue
+		}
+		cloned, err := cloneStoredFile(file)
+		if err != nil {
+			return nil, err
+		}
+		result[id] = cloned
+	}
+	return result, nil
+}
+
 // Delete removes one file mapping by id.
 func (s *MemoryStore) Delete(_ context.Context, id string) error {
 	s.mu.Lock()

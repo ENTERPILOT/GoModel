@@ -21,6 +21,15 @@ func (r *SQLReader) GetRequestStats(ctx context.Context, params RequestStatsPara
 		conditions = append(conditions, "timestamp < ?")
 		args = append(args, r.dialect.timestampBound(params.EndDate.AddDate(0, 0, 1)))
 	}
+	userPath, err := normalizeAuditUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		lower, upper := auditUserPathSubtreeBounds(userPath)
+		conditions = append(conditions, auditUserPathSQLPredicate(userPath, r.dialect.userPath))
+		args = append(args, userPath, lower, upper)
+	}
 
 	// Group by UTC hour and provider; foldRequestStats folds hours into the
 	// requested bucket granularity.

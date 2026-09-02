@@ -332,7 +332,7 @@ func (o *BatchOrchestrator) List(ctx context.Context, params BatchListParams) (*
 	}
 	after := strings.TrimSpace(params.After)
 
-	items, err := o.batchStore.List(ctx, limit+1, after)
+	items, err := o.listStoredBatches(ctx, limit+1, after)
 	if err != nil {
 		if errors.Is(err, batchstore.ErrNotFound) {
 			return nil, core.NewNotFoundError("after cursor batch not found: " + after)
@@ -536,7 +536,60 @@ func (o *BatchOrchestrator) requireStoredBatch(ctx context.Context, id string) (
 	if stored == nil || stored.Batch == nil {
 		return nil, core.NewProviderError("batch_store", http.StatusInternalServerError, "stored batch payload missing", nil)
 	}
+	// Another tenant's batch is indistinguishable from a missing one.
+	if !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return nil, core.NewNotFoundError("batch not found: " + id)
+	}
 	return stored, nil
+}
+
+// maxScopedBatchListPages bounds how many store pages one scoped List call
+// reads while collecting rows inside the caller's user-path scope. A scope
+// whose batches are buried under more pages than this sees a short page with
+// has_more false; the cap keeps a crowded store from turning one request
+// into an unbounded scan.
+const maxScopedBatchListPages = 50
+
+// listStoredBatches returns up to want batches the caller may see, in store
+// order starting after the cursor. Global scopes take one store query. Other
+// scopes page through the store, since user_path lives inside the serialized
+// row where the store cannot filter it, until want rows are collected, the
+// store is exhausted, or maxScopedBatchListPages pages were read.
+func (o *BatchOrchestrator) listStoredBatches(ctx context.Context, want int, after string) ([]*batchstore.StoredBatch, error) {
+	scope := core.AccessScopeFromContext(ctx)
+	if scope.Global() {
+		return o.batchStore.List(ctx, want, after)
+	}
+	if after != "" {
+		// The cursor must be a batch the caller may see; otherwise the
+		// store's cursor lookup would confirm a foreign ID exists.
+		if _, err := o.requireStoredBatch(ctx, after); err != nil {
+			return nil, batchstore.ErrNotFound
+		}
+	}
+
+	collected := make([]*batchstore.StoredBatch, 0, want)
+	cursor := after
+	for range maxScopedBatchListPages {
+		items, err := o.batchStore.List(ctx, want, cursor)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			if item == nil || item.Batch == nil || !scope.Allows(item.UserPath) {
+				continue
+			}
+			collected = append(collected, item)
+			if len(collected) >= want {
+				return collected, nil
+			}
+		}
+		if len(items) < want {
+			break
+		}
+		cursor = items[len(items)-1].Batch.ID
+	}
+	return collected, nil
 }
 
 func workflowVersionID(workflow *core.Workflow) string {

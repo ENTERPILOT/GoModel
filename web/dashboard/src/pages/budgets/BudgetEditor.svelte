@@ -6,6 +6,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
+  import { access } from "$lib/stores/access.svelte.js";
   import { budgetsStore as store } from "./budgets.svelte.js";
   import {
     budgetOverrideDialogMessage,
@@ -16,6 +17,14 @@
   } from "./budgets-helpers.js";
   import { Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
+
+  // Label budgets are gateway-wide, so a key scoped to a user path only
+  // creates user-path budgets inside its subtree.
+  const scopeOptions = $derived(
+    access.scoped
+      ? budgetScopeOptions().filter((option) => option.value === "user_path")
+      : budgetScopeOptions(),
+  );
 
   function onSubjectInput(event) {
     store.setFormSubject(event.target.value);
@@ -45,7 +54,7 @@
         disabled={store.editing}
         onchange={() => store.syncScope()}
       >
-        {#each budgetScopeOptions() as option (option.value)}
+        {#each scopeOptions as option (option.value)}
           <option value={option.value}>{option.label}</option>
         {/each}
       </select>

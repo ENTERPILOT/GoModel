@@ -28,6 +28,9 @@ type StoredFile struct {
 type Store interface {
 	Upsert(ctx context.Context, file *StoredFile) error
 	Get(ctx context.Context, id string) (*StoredFile, error)
+	// GetMany retrieves the mappings for the given ids in one round trip.
+	// Unknown ids are simply absent from the result.
+	GetMany(ctx context.Context, ids []string) (map[string]*StoredFile, error)
 	Delete(ctx context.Context, id string) error
 	Close() error
 }

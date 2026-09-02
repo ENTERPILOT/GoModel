@@ -3,6 +3,7 @@ package filestore
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -70,6 +71,39 @@ func (s *SQLStore) Get(ctx context.Context, id string) (*StoredFile, error) {
 		FROM file_mappings
 		WHERE id = ?
 	`, id))
+}
+
+// GetMany retrieves the mappings present for the given ids in one query.
+func (s *SQLStore) GetMany(ctx context.Context, ids []string) (map[string]*StoredFile, error) {
+	result := make(map[string]*StoredFile, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.Query(ctx, `
+		SELECT id, provider_type, purpose, filename, bytes, created_at, user_path
+		FROM file_mappings
+		WHERE id IN (`+placeholders+`)
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query file mappings: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		file, err := scanStoredFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		result[file.ID] = file
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file mappings: %w", err)
+	}
+	return result, nil
 }
 
 // Delete removes one file mapping by id.

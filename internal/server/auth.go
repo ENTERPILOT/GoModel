@@ -74,6 +74,7 @@ func AuthMiddlewareWithRequestAuthenticators(masterKey string, authenticator Bea
 				ctx := ext.WithoutAuthentication(c.Request().Context())
 				ctx = core.WithEffectiveUserPath(ctx, "")
 				ctx = core.WithCredentialAllowedModels(ctx, nil)
+				ctx = core.WithAccessScope(ctx, core.AccessScope{})
 				c.SetRequest(c.Request().WithContext(ctx))
 				if tokenErr != "" {
 					authErr := authenticationError(c, tokenErr)
@@ -170,6 +171,9 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, normalized.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, normalized.DashboardAccess)
 	ctx = ext.WithAuthentication(ctx, normalized)
+	// The identity's bound user path is the subtree it may administer and
+	// the objects it may address; the request header never widens it.
+	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: userPath})
 	if len(normalized.Labels) > 0 {
 		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), normalized.Labels))
 	}
@@ -270,6 +274,9 @@ func interactionContinuationAllowed(ctx context.Context) bool {
 // authenticated managed key's identity, labels, and bound user path.
 func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResult, userPathHeaderName string) {
 	ctx := core.WithAuthKeyID(c.Request().Context(), authResult.ID)
+	// The key's bound user path is the subtree it may administer and the
+	// objects it may address; a key without one stays global.
+	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: strings.TrimSpace(authResult.UserPath)})
 	ctx = context.WithValue(ctx, managedDashboardAccessKey{}, authResult.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, authResult.DashboardAccess)
 	if len(authResult.AllowedModels) > 0 {
