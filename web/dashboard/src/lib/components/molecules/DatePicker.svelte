@@ -272,6 +272,11 @@
         min-width: 0;
       }
 
+    .preset-btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+
     .date-picker-calendars {
         justify-content: center;
       }

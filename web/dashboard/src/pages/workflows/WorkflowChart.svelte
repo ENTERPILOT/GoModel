@@ -150,6 +150,8 @@
     display: flex;
     flex-direction: column;
     gap: 0;
+    min-width: 0;
+    max-width: 100%;
     padding: 18px 20px 4px;
     margin-bottom: 12px;
     border-radius: var(--radius);

@@ -251,3 +251,30 @@ td.col-price {
   height: 14px;
   flex-shrink: 0;
 }
+
+/* Mobile: a wide table scrolls sideways inside its wrapper instead of being
+   clipped by the wrapper's rounded corners, and the actions column stays
+   pinned to the right edge so row actions are reachable without dragging to
+   the end of every row. */
+@media (max-width: 768px) {
+  .table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table th.col-actions,
+  .data-table td.col-actions {
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    box-shadow: -10px 0 10px -10px rgb(0 0 0 / 0.45);
+  }
+
+  .data-table td.col-actions {
+    background: var(--bg-surface);
+  }
+
+  .data-table th.model-actions-header {
+    min-width: 0;
+  }
+}

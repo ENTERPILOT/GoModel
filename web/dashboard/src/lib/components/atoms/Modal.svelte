@@ -112,6 +112,7 @@
     .editor-modal-shell {
         align-items: end;
         padding: 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
       }
 
     .editor-modal-shell > :global(*) {

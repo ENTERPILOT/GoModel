@@ -116,6 +116,8 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+    min-width: 0;
+    max-width: 100%;
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);

@@ -275,7 +275,14 @@
   }
 
   @media (max-width: 768px) {
+    /* The strip scrolls sideways so a label is never truncated to "Provi…". */
+    .rate-limit-tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
     .rate-limit-tab {
+      flex: 1 0 auto;
       padding: 6px 10px;
       font-size: 12px;
       gap: 6px;

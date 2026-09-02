@@ -400,3 +400,32 @@
   margin-top: 16px;
   margin-bottom: 0;
 }
+
+/* Phones: subject and period on the first row, source and actions on the
+   second, actions never wrapping onto a third. The remaining/elapsed bar
+   captions are dropped so they cannot overlap the centered amount. */
+@media (max-width: 520px) {
+  .budget-row-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .budget-row-controls {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+  }
+
+  .budget-row-actions {
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+  }
+
+  .budget-bar-text-start,
+  .budget-bar-text-end {
+    display: none;
+  }
+
+  .budget-bar-text-center {
+    max-width: 92%;
+  }
+}

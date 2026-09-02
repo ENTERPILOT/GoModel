@@ -19,7 +19,7 @@
         <th>{m.users_column_effective()}</th>
         <th>{m.users_column_keys()}</th>
         <th>{m.users_column_description()}</th>
-        <th aria-label={m.users_actions()}></th>
+        <th class="col-actions" aria-label={m.users_actions()}></th>
       </tr>
     </thead>
     <tbody>
@@ -95,7 +95,7 @@
             {/if}
           </td>
           <td class="user-description">{node.description || "—"}</td>
-          <td class="user-actions-cell">
+          <td class="user-actions-cell col-actions">
             <div class="user-row-actions">
               <TableActionButton
                 label={m.users_add_key_action({ path: node.user_path })}

@@ -1,5 +1,14 @@
 export const DEFAULT_CONVERSATION_PANEL_WIDTH = 520;
 
+// Below this viewport width the drawer cannot share the screen with the
+// audit list (the same breakpoint the rest of the dashboard collapses at),
+// so it opens straight into fullscreen there.
+export const CONVERSATION_FULLSCREEN_MAX_VIEWPORT = 768;
+
+export function conversationOpensFullscreen(viewportWidth) {
+  return finite(viewportWidth) <= CONVERSATION_FULLSCREEN_MAX_VIEWPORT;
+}
+
 export function conversationPanelBounds(viewportWidth, leadingWidth = 0) {
   const available = Math.max(0, finite(viewportWidth) - Math.max(0, finite(leadingWidth)));
   // Grow the content reserve continuously from a compact 128px strip to the

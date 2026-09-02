@@ -110,8 +110,11 @@
     margin-bottom: 0;
   }
 
-  @media (max-width: 520px) {
+  /* Mobile: one chart per row. Two 130px-wide charts leave no room for a
+     title, the view toggle, or the axis labels. */
+  @media (max-width: 768px) {
     .usage-charts-grid :global(.model-chart-section) {
+        flex: 1 1 100%;
         min-width: 0;
       }
   }

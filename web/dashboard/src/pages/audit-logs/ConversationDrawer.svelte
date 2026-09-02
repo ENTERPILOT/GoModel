@@ -19,6 +19,7 @@
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
     conversationMessageNavigationTarget,
+    conversationOpensFullscreen,
     conversationPanelBounds,
     conversationPanelWidthFromPointer,
   } from "./conversation-panel.js";
@@ -171,8 +172,13 @@
     if (sidebarEl) sidebarObserver.observe(sidebarEl);
     const onKeydown = (event) => {
       if (event.key === "Escape" && !modals.anyOpen) {
-        if (fullscreen) void setFullscreen(false);
-        else drawer.closeConversation();
+        // On a phone-width viewport the split layout is not usable, so
+        // Escape closes the drawer instead of shrinking it.
+        if (fullscreen && !conversationOpensFullscreen(window.innerWidth)) {
+          void setFullscreen(false);
+        } else {
+          drawer.closeConversation();
+        }
       }
     };
     window.addEventListener("keydown", onKeydown);
@@ -186,7 +192,14 @@
   });
 
   $effect(() => {
-    if (!drawer.conversationOpen) fullscreen = false;
+    if (!drawer.conversationOpen) {
+      fullscreen = false;
+      return;
+    }
+    // A phone-width viewport cannot fit the audit list beside the drawer, so
+    // open straight into fullscreen there. The header toggle still lets the
+    // operator drop back to the split layout.
+    if (conversationOpensFullscreen(window.innerWidth)) fullscreen = true;
   });
 
   $effect(() => {
@@ -456,6 +469,16 @@
 
   .conversation-drawer-fullscreen .conversation-resize-handle {
     display: none;
+  }
+
+  @media (max-width: 768px) {
+    .conversation-resize-handle {
+      display: none;
+    }
+
+    .conversation-drawer-fullscreen {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
   }
 
   .conversation-resize-handle {

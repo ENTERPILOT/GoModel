@@ -220,5 +220,26 @@
     .playground-endpoint-path {
       display: none;
     }
+
+    .playground-field {
+      flex-wrap: wrap;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .playground-field :global(.segmented-control) {
+      max-width: 100%;
+      overflow-x: auto;
+    }
+
+    .playground-field-model,
+    .playground-field-user-path {
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+
+    .playground-add-buttons {
+      flex-wrap: wrap;
+    }
   }
 </style>

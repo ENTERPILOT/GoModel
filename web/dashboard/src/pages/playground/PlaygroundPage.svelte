@@ -137,9 +137,18 @@
     max-width: 420px;
   }
 
+  /* Mobile: the page scrolls as a whole. With height: 100% the banner and
+     header above the playground pushed the composer below the fold. */
   @media (max-width: 768px) {
     .playground {
+      height: auto;
       min-height: 0;
+    }
+
+    .playground-history {
+      flex: 0 1 auto;
+      min-height: 160px;
+      max-height: 60dvh;
     }
   }
 </style>

@@ -371,6 +371,22 @@
         align-items: flex-start;
       }
 
+    .audit-entry-left {
+        flex-wrap: wrap;
+        max-width: 100%;
+      }
+
+    .audit-provider-model {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+    .audit-path {
+        flex: 1 1 100%;
+        min-width: 0;
+      }
+
     .audit-entry-right {
         width: 100%;
         justify-content: space-between;

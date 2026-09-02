@@ -363,6 +363,15 @@ export function playgroundUserPathHeader(userPath) {
 
 export const DEFAULT_JSON_PANEL_WIDTH = 420;
 export const MIN_JSON_PANEL_WIDTH = 280;
+// Below this viewport width the panel covers the whole screen (see
+// PlaygroundJsonPanel), so it starts closed there regardless of the stored
+// desktop preference; opening it would hide the composer on first load.
+export const JSON_PANEL_FULLSCREEN_MAX_VIEWPORT = 768;
+
+export function initialJsonPanelOpen(stored, viewportWidth) {
+  if (Number(viewportWidth) <= JSON_PANEL_FULLSCREEN_MAX_VIEWPORT) return false;
+  return stored !== "false";
+}
 
 // Widest the panel may get at a viewport width: 60% of it, capped at 760px.
 export function maxJsonPanelWidth(viewportWidth) {

@@ -149,7 +149,7 @@ import {
   {#each columns as col, i (i)}
     <td class={col.class}>{col.value(row, pricing)}</td>
   {/each}
-  <td class="model-row-actions">
+  <td class="model-row-actions col-actions">
     {#if row.is_alias}
       <div class="alias-actions-cell model-list-actions">
         <AccessToggle {row} />
@@ -286,6 +286,10 @@ import {
     .model-name-primary {
         flex-direction: column;
         align-items: flex-start;
+      }
+
+    .model-row-actions {
+        width: auto;
       }
   }
 </style>

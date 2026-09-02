@@ -38,7 +38,7 @@
         </th>
         <th>{m.api_keys_expires()}</th>
         <th>{m.api_keys_column_created()}</th>
-        <th aria-label={m.api_keys_actions()}></th>
+        <th class="col-actions" aria-label={m.api_keys_actions()}></th>
       </tr>
     </thead>
     <tbody>
@@ -109,7 +109,7 @@
             {/if}
           </td>
           <td>{timezone.formatTimestamp(key.created_at)}</td>
-          <td class="auth-key-actions-cell">
+          <td class="auth-key-actions-cell col-actions">
             <div class="auth-key-row-actions">
               {#if key.active}
                 <TableActionButton

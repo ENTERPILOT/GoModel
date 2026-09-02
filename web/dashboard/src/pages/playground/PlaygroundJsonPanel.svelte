@@ -258,13 +258,35 @@
     overflow-wrap: anywhere;
   }
 
+  /* Mobile: the panel takes the whole viewport. A partial overlay left a
+     sliver of the page peeking out that was neither readable nor tappable,
+     and dragging the edge is not a phone gesture. */
   @media (max-width: 768px) {
     .playground-json-panel {
       position: fixed;
-      inset: 0 0 0 auto;
-      width: min(100vw, var(--playground-json-panel-width, 420px));
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      border: 0;
       border-radius: 0;
       z-index: 30;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .playground-json-resize-handle {
+      display: none;
+    }
+
+    .playground-json-header {
+      flex-wrap: nowrap;
+    }
+
+    .playground-json-header :global(.segmented-control) {
+      min-width: 0;
+    }
+
+    .playground-json-actions {
+      flex-shrink: 0;
     }
   }
 </style>

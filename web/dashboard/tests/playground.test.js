@@ -10,6 +10,7 @@ import {
   defaultUserPathForModel,
   extractResponseText,
   extractUsage,
+  initialJsonPanelOpen,
   maxJsonPanelWidth,
   normalizeEndpoint,
   playgroundModelOptions,
@@ -385,4 +386,14 @@ test("clampJsonPanelWidth keeps the panel inside the viewport", () => {
   assert.equal(maxJsonPanelWidth(1440), 760);
   assert.equal(maxJsonPanelWidth(600), 360);
   assert.equal(maxJsonPanelWidth(0), 280);
+});
+
+test("initialJsonPanelOpen honours the stored preference only on wide viewports", () => {
+  assert.equal(initialJsonPanelOpen("true", 1280), true);
+  assert.equal(initialJsonPanelOpen(undefined, 1280), true);
+  assert.equal(initialJsonPanelOpen("false", 1280), false);
+  // The panel covers the whole screen on phones, so it never starts open there.
+  assert.equal(initialJsonPanelOpen("true", 390), false);
+  assert.equal(initialJsonPanelOpen("true", 768), false);
+  assert.equal(initialJsonPanelOpen("true", 769), true);
 });
