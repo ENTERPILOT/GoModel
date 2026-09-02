@@ -480,6 +480,12 @@ export LLMD_MODELS="Qwen/Qwen2.5-0.5B-Instruct"
 # Optional: export LLMD_FAIRNESS_FROM_USER_PATH="true"
 ```
 
+Bare `<PROVIDER>_*` variables win over the `config.yaml` provider named after
+the type (`openai`). A provider you renamed (`alpha: {type: openai}`) only picks
+up fields it left empty; its explicit `api_key` or `base_url` is kept and the
+ignored variables are logged as a warning at startup. When several renamed
+providers share a type, the bare variables are ignored with the same warning.
+
 Use suffixed variables to register more than one instance of the same provider
 type without YAML. GoModel normalizes the suffix to lowercase and converts
 underscores to hyphens in the configured provider name:
