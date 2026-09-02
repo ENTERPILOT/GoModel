@@ -59,7 +59,7 @@ textarea:disabled,
 
 .data-table th {
   text-align: left;
-  padding: 12px 16px;
+  padding: 12px var(--space-cell);
   font-weight: 600;
   font-size: 12px;
   text-transform: uppercase;
@@ -77,7 +77,7 @@ textarea:disabled,
 }
 
 .data-table td {
-  padding: 10px 16px;
+  padding: 10px var(--space-cell);
   border-bottom: 1px solid var(--border);
 }
 
@@ -276,5 +276,19 @@ td.col-price {
 
   .data-table th.model-actions-header {
     min-width: 0;
+  }
+}
+
+/* Phones: the pinned actions wrap two buttons per row so the column covers
+   about a third of the visible table instead of most of it. Rows with a
+   toggle put it on its own line above the icon buttons. */
+@media (max-width: 520px) {
+  .data-table th.col-actions > *,
+  .data-table td.col-actions > * {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    width: 70px;
+    gap: 6px;
   }
 }

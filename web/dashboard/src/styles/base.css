@@ -32,3 +32,37 @@ body.dashboard-modal-open {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+
+/* Spacing scale. Containers read their padding and pages their rhythm from
+   these tokens, so the tiers below are the only place mobile spacing is
+   decided; components carry no spacing media queries of their own. */
+:root {
+  --space-page: 32px; /* .content padding */
+  --space-block: 24px; /* sections, panels, editors */
+  --space-card: 20px; /* stat cards, workflow cards */
+  --space-cell: 16px; /* table cell horizontal padding */
+  --space-stack: 24px; /* vertical rhythm: page header, gaps between blocks */
+  --space-grid: 16px; /* card grid gap */
+}
+
+/* Tablet */
+@media (max-width: 768px) {
+  :root {
+    --space-page: 20px;
+    --space-block: 18px;
+    --space-stack: 20px;
+  }
+}
+
+/* Phone: the sidebar rail already takes 60px, so nested desktop paddings
+   would leave a third of the width to whitespace. */
+@media (max-width: 520px) {
+  :root {
+    --space-page: 12px;
+    --space-block: 14px;
+    --space-card: 14px;
+    --space-cell: 10px;
+    --space-stack: 16px;
+    --space-grid: 10px;
+  }
+}

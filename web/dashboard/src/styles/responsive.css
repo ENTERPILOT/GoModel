@@ -4,16 +4,6 @@
       display: none;
     }
 
-  .content {
-      width: 100%;
-      margin: 0 auto;
-      padding: 20px;
-    }
-
-  .auth-dialog {
-      padding: 18px;
-    }
-
   .auth-dialog-actions {
       flex-direction: column-reverse;
     }
@@ -109,10 +99,6 @@
       width: 100%;
     }
 
-  .model-editor {
-      padding: 16px;
-    }
-
   .alias-actions-cell, .editor-header {
       flex-direction: column;
       align-items: flex-start;
@@ -169,10 +155,6 @@
       width: 32px;
       min-width: 32px;
       align-self: flex-start;
-    }
-
-  .settings-panel {
-      padding: 18px;
     }
 
   .budget-settings-actions {

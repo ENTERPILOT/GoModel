@@ -6,7 +6,7 @@
   min-height: 0;
   min-width: 0;
   width: 100%;
-  padding: 32px;
+  padding: var(--space-page);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   transition: width 0.2s;
@@ -30,7 +30,7 @@ body.dashboard-modal-open .content {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: var(--space-stack);
 }
 
 .page-header h2 {
@@ -72,6 +72,6 @@ body.dashboard-modal-open .content {
 }
 
 .provider-status-section {
-  margin-top: 28px;
+  margin-top: var(--space-stack);
   scroll-margin-top: 24px;
 }

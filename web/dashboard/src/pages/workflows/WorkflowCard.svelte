@@ -121,7 +121,7 @@
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 20px;
+    padding: var(--space-card);
   }
 
   .workflow-card-head {

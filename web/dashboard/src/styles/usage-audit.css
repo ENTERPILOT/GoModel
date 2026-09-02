@@ -3,8 +3,8 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px;
-  margin-bottom: 24px;
+  padding: var(--space-block);
+  margin-bottom: var(--space-stack);
 }
 
 .model-chart-section h3 {

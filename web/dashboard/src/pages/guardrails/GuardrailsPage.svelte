@@ -83,7 +83,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 20px;
-    padding: 24px;
+    padding: var(--space-block);
     margin-bottom: 20px;
     border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border));
     border-radius: var(--radius);

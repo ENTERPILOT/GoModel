@@ -91,8 +91,8 @@
   .usage-charts-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 24px;
-    margin-bottom: 24px;
+    gap: var(--space-stack);
+    margin-bottom: var(--space-stack);
   }
 
   .usage-charts-grid :global(.model-chart-section) {
@@ -102,7 +102,7 @@
   }
 
   .usage-session-breakdown-wrap {
-    margin-bottom: 24px;
+    margin-bottom: var(--space-stack);
   }
 
   .usage-session-breakdown-wrap :global(.session-usage-breakdown) {
