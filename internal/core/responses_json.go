@@ -376,8 +376,11 @@ func ResponsesBlocksFromContentParts(parts []ContentPart) []any {
 		if err != nil {
 			return nil
 		}
+		// UseNumber keeps integer extras above 2^53 exact through re-encoding.
+		decoder := json.NewDecoder(bytes.NewReader(encoded))
+		decoder.UseNumber()
 		var block map[string]any
-		if err := json.Unmarshal(encoded, &block); err != nil {
+		if err := decoder.Decode(&block); err != nil {
 			return nil
 		}
 		block["type"] = part.Type

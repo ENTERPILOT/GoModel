@@ -1161,3 +1161,22 @@ func TestResponsesBlocksFromContentPartsRejectsUnencodablePart(t *testing.T) {
 		t.Fatalf("expected no blocks for no parts, got %v", got)
 	}
 }
+
+func TestResponsesBlocksFromContentPartsKeepsLargeIntegersExact(t *testing.T) {
+	parts := []ContentPart{{
+		Type: "input_text", Text: "hello",
+		ExtraFields: UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"x_id":    json.RawMessage(`9007199254740993`),
+			"x_ratio": json.RawMessage(`0.1`),
+		}),
+	}}
+	encoded, err := json.Marshal(ResponsesBlocksFromContentParts(parts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"x_id":9007199254740993`, `"x_ratio":0.1`} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Fatalf("blocks = %s, want %s", encoded, want)
+		}
+	}
+}
