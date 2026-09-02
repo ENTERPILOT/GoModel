@@ -630,6 +630,12 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 	if err := registry.Initialize(context.Background()); err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
+	// A dashboard-registered provider installed after startup has no model
+	// inventory until its first refresh; it must still report its effective
+	// configuration and classify as configured rather than unknown.
+	registry.RegisterProviderWithNameAndType(&handlerMockProvider{
+		models: &core.ModelsResponse{Object: "list", Data: []core.Model{}},
+	}, "dash-empty", "openai")
 
 	resilience := func(maxRetries int) providers.SanitizedResilienceConfig {
 		return providers.SanitizedResilienceConfig{
@@ -641,6 +647,7 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 	fake.configured = []providers.SanitizedProviderConfig{
 		{Name: "dash-openai", Type: "openai", BaseURL: "https://dash.example.com/v1", Resilience: resilience(3)},
 		{Name: "openai_declared", Type: "openai", Resilience: resilience(9)},
+		{Name: "dash-empty", Type: "openai", BaseURL: "https://empty.example.com/v1", Resilience: resilience(3)},
 	}
 	declared := providers.SanitizedProviderConfig{Name: "openai_declared", Type: "openai", Resilience: resilience(1)}
 	h := NewHandler(nil, registry, WithProviderCredentials(fake), WithConfiguredProviders([]providers.SanitizedProviderConfig{declared}))
@@ -662,11 +669,13 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 	}
 
 	tests := []struct {
-		name string
-		want providers.SanitizedProviderConfig
+		name      string
+		want      providers.SanitizedProviderConfig
+		wantLabel string
 	}{
-		{name: "dash-openai", want: fake.configured[0]},
-		{name: "openai_declared", want: declared},
+		{name: "dash-openai", want: fake.configured[0], wantLabel: "Healthy"},
+		{name: "openai_declared", want: declared, wantLabel: "Healthy"},
+		{name: "dash-empty", want: fake.configured[2], wantLabel: "Configured"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -680,8 +689,8 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 			if item.Config.Resilience != tt.want.Resilience {
 				t.Errorf("config.resilience = %+v, want %+v", item.Config.Resilience, tt.want.Resilience)
 			}
-			if item.Status != "healthy" {
-				t.Errorf("status = %q, want healthy", item.Status)
+			if item.StatusLabel != tt.wantLabel {
+				t.Errorf("status_label = %q, want %q", item.StatusLabel, tt.wantLabel)
 			}
 		})
 	}
