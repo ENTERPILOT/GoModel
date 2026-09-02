@@ -55,69 +55,28 @@ func newCachePlanner() *cachePlanner {
 	return &cachePlanner{enabled: enabled}
 }
 
-// chatPlanGate carries what planChat and chatPlanApplies share once the cheap
-// rejections (planner off, short conversation, unsupported provider, client
-// directive present, text-only prefix under the minimum) have passed.
-type chatPlanGate struct {
-	profile promptCacheProfile
-	minimum int
-	prefix  []core.Message
-	// prefixLargeEnough is set when the text-only estimate was conclusive and
-	// already met the minimum. That estimate never exceeds the encoded size,
-	// so the encoded prefix is guaranteed to meet it too.
-	prefixLargeEnough bool
-}
-
-func (p *cachePlanner) gateChat(req *core.ChatRequest, providerType string, selector core.ModelSelector) (chatPlanGate, bool) {
+func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, selector core.ModelSelector) *core.ChatRequest {
 	profile := promptCacheProfileFor(providerType)
 	if p == nil || !p.enabled || req == nil || len(req.Messages) < 2 || profile.mode == promptCacheUnsupported {
-		return chatPlanGate{}, false
+		return req
 	}
-	gate := chatPlanGate{profile: profile, minimum: providerCacheMinimum(profile, selector.Model)}
-	if tokens, conclusive := estimateSimpleChatPrefixTokens(req); conclusive {
-		if tokens < gate.minimum {
-			return chatPlanGate{}, false
-		}
-		gate.prefixLargeEnough = true
+	minimum := providerCacheMinimum(profile, selector.Model)
+	if tokens, conclusive := estimateSimpleChatPrefixTokens(req); conclusive && tokens < minimum {
+		return req
 	}
-	gate.prefix = req.Messages[:len(req.Messages)-1]
-	if hasChatCacheDirective(req, gate.prefix) {
-		return chatPlanGate{}, false
-	}
-	return gate, true
-}
-
-// chatPlanApplies reports whether planChat would return a planned copy of req,
-// without hashing or cloning anything. When the text-only estimate is not
-// conclusive the prefix is encoded once into a byte counter that discards the
-// output, so the answer always agrees with planChat.
-func (p *cachePlanner) chatPlanApplies(req *core.ChatRequest, providerType string, selector core.ModelSelector) bool {
-	gate, ok := p.gateChat(req, providerType, selector)
-	if !ok {
-		return false
-	}
-	if gate.prefixLargeEnough {
-		return true
-	}
-	counter := newPrefixCounter()
-	counter.writeChatPrefix(req.Tools, gate.prefix)
-	return counter.err == nil && counter.tokens() >= gate.minimum
-}
-
-func (p *cachePlanner) planChat(req *core.ChatRequest, providerType string, selector core.ModelSelector) *core.ChatRequest {
-	gate, ok := p.gateChat(req, providerType, selector)
-	if !ok {
+	prefix := req.Messages[:len(req.Messages)-1]
+	if hasChatCacheDirective(req, prefix) {
 		return req
 	}
 	digest := newPrefixDigest(providerType, selector, req.User)
-	digest.writeChatPrefix(req.Tools, gate.prefix)
-	if digest.err != nil || digest.tokens() < gate.minimum {
+	digest.writeChatPrefix(req.Tools, prefix)
+	if digest.err != nil || digest.tokens() < minimum {
 		return req
 	}
 
 	planned := cloneChatRequest(req)
 	key := digest.key()
-	switch gate.profile.mode {
+	switch profile.mode {
 	case promptCacheOpenAI:
 		planned.ExtraFields = mergeCacheExtras(planned.ExtraFields, map[string]json.RawMessage{
 			"prompt_cache_key": jsonString(key),
@@ -462,8 +421,6 @@ func mergeCacheExtras(base core.UnknownJSONFields, values map[string]json.RawMes
 // the JSON of the prefix object the planner used to marshal in full, which
 // keeps affinity keys stable across gateway versions.
 type prefixDigest struct {
-	// hash is nil for a counter built by newPrefixCounter, which only
-	// measures the prefix and never produces a key.
 	hash hash.Hash
 	enc  *json.Encoder
 	// bytes counts prefix bytes only; the key header is excluded.
@@ -488,14 +445,6 @@ func newPrefixDigest(providerType string, selector core.ModelSelector, user stri
 	return d
 }
 
-// newPrefixCounter returns a digest that measures the encoded prefix without
-// hashing it, for callers that only need to know whether a plan would apply.
-func newPrefixCounter() *prefixDigest {
-	d := &prefixDigest{}
-	d.enc = json.NewEncoder(d)
-	return d
-}
-
 // Write implements io.Writer for the JSON encoder. The newline the encoder
 // emits after each value is not part of the prefix and is dropped.
 func (d *prefixDigest) Write(p []byte) (int, error) {
@@ -503,9 +452,7 @@ func (d *prefixDigest) Write(p []byte) (int, error) {
 	if d.encoding && n > 0 && p[n-1] == '\n' {
 		p = p[:n-1]
 	}
-	if d.hash != nil {
-		d.hash.Write(p)
-	}
+	d.hash.Write(p)
 	d.bytes += len(p)
 	return n, nil
 }

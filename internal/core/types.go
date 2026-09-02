@@ -122,6 +122,9 @@ type ChatResponse struct {
 	Choices           []Choice `json:"choices"`
 	Usage             Usage    `json:"usage"`
 	Created           int64    `json:"created"`
+	// ExtraFields keeps provider response members the gateway does not model
+	// (for example OpenRouter's top-level extras) so they reach the client.
+	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // Choice represents a single completion choice
@@ -135,7 +138,8 @@ type Choice struct {
 	// "stop" conflates natural stops with stop-parameter hits, so this is an
 	// extension field: present only when the provider knows the answer, in the
 	// same spirit as the relayed reasoning_content extension.
-	StopSequence string `json:"stop_sequence,omitempty"`
+	StopSequence string            `json:"stop_sequence,omitempty"`
+	ExtraFields  UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // ResponseMessage represents a single assistant message in a chat response.
