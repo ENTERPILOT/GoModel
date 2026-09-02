@@ -560,9 +560,26 @@ func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context,
 // The raw value survives only in the buffered body: by dispatch time both the
 // decoded request and the whitebox route hints already carry the resolved
 // model (see storeRequestModelResolution).
+//
+// Every top-level "model" member is checked, not just the first: a body may
+// repeat the member, and the decoder keeps the last value while a provider's
+// parser may keep another, so the request is only forwarded verbatim when all
+// of them already carry the upstream model.
 func rawRequestModelMatches(c *echo.Context, resolvedModel string) bool {
 	body, ok := bufferedRequestBody(c)
-	return ok && gjson.GetBytes(body, "model").Str == resolvedModel
+	if !ok {
+		return false
+	}
+	seen, matched := false, true
+	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
+		if key.Str != "model" {
+			return true
+		}
+		seen = true
+		matched = value.Type == gjson.String && value.Str == resolvedModel
+		return matched
+	})
+	return seen && matched
 }
 
 // bufferedRequestBody returns the request body the decode step already

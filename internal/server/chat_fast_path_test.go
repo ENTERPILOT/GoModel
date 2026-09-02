@@ -223,21 +223,33 @@ func TestChatCompletionStreaming_FastPathRelaysSSEWhenNoPlanApplies(t *testing.T
 }
 
 func TestChatCompletion_FastPathSkippedWhenRawModelIsNotCanonical(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "padded model", body: `{"model":" gpt-4o-mini ","messages":[{"role":"user","content":"Hi"}]}`},
+		// The decoder keeps the last duplicate member, so the resolved model is
+		// canonical, while a parser that keeps the first would see the same;
+		// only the padded copy is what a last-wins upstream would receive.
+		{name: "duplicate model members", body: `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}],"model":" gpt-4o-mini "}`},
+	}
 	for _, entry := range chatEntryPoints {
-		t.Run(entry.name, func(t *testing.T) {
-			mock := fastPathJSONMock(fastPathUpstreamBody)
-			rec := entry.post(t, mock, `{"model":" gpt-4o-mini ","messages":[{"role":"user","content":"Hi"}]}`)
+		for _, tt := range tests {
+			t.Run(entry.name+"/"+tt.name, func(t *testing.T) {
+				mock := fastPathJSONMock(fastPathUpstreamBody)
+				rec := entry.post(t, mock, tt.body)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			if mock.lastPassthroughReq != nil {
-				t.Fatal("padded model took the fast path; the upstream would have received it unnormalized")
-			}
-			if mock.chatCompletionCalls != 1 {
-				t.Fatalf("ChatCompletion calls = %d, want 1", mock.chatCompletionCalls)
-			}
-		})
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+				}
+				if mock.lastPassthroughReq != nil {
+					t.Fatal("non-canonical model took the fast path; the upstream would have received it unnormalized")
+				}
+				if mock.chatCompletionCalls != 1 {
+					t.Fatalf("ChatCompletion calls = %d, want 1", mock.chatCompletionCalls)
+				}
+			})
+		}
 	}
 }
 
