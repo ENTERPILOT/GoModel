@@ -14,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -86,5 +87,6 @@ func (s *translatedInferenceService) handleStreamingResponse(
 	if err != nil {
 		return handleStreamingDispatchError(c, err)
 	}
-	return s.handleStreamingReadCloser(c, workflow, model, provider, providerName, "", stream, nil)
+	meta := gateway.ExecutionMeta{Model: model, ProviderType: provider, ProviderName: providerName}
+	return s.handleStreamingReadCloser(c, workflow, meta, stream, nil)
 }

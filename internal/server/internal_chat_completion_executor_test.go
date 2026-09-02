@@ -388,7 +388,7 @@ func TestInternalChatCompletionExecutor_CachedNilWorkflowDoesNotPanic(t *testing
 		},
 	}
 
-	_, _, _, _, _, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
+	_, _, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
 	if err != nil {
 		t.Fatalf("first executeChatCompletion() error = %v", err)
 	}
@@ -399,7 +399,7 @@ func TestInternalChatCompletionExecutor_CachedNilWorkflowDoesNotPanic(t *testing
 		t.Fatalf("ResponseCacheMiddleware.Close() error = %v", err)
 	}
 
-	resp, providerType, providerName, _, _, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
+	resp, meta, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
 	if err != nil {
 		t.Fatalf("cached executeChatCompletion() error = %v", err)
 	}
@@ -409,11 +409,11 @@ func TestInternalChatCompletionExecutor_CachedNilWorkflowDoesNotPanic(t *testing
 	if resp == nil || resp.ID != "chatcmpl-internal-cache-nil-workflow" {
 		t.Fatalf("resp = %#v, want cached provider response", resp)
 	}
-	if providerType != "" {
-		t.Fatalf("providerType = %q, want empty for nil workflow cache hit", providerType)
+	if meta.ProviderType != "" {
+		t.Fatalf("meta.ProviderType = %q, want empty for nil workflow cache hit", meta.ProviderType)
 	}
-	if providerName != "" {
-		t.Fatalf("providerName = %q, want empty for nil workflow cache hit", providerName)
+	if meta.ProviderName != "" {
+		t.Fatalf("meta.ProviderName = %q, want empty for nil workflow cache hit", meta.ProviderName)
 	}
 	if cacheType != responsecache.CacheTypeExact {
 		t.Fatalf("cacheType = %q, want %q", cacheType, responsecache.CacheTypeExact)

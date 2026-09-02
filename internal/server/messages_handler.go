@@ -209,20 +209,10 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		model := result.Meta.Model
-		return s.handleStreamingReadCloser(
-			c,
-			workflow,
-			model,
-			result.Meta.ProviderType,
-			result.Meta.ProviderName,
-			result.Meta.FailoverModel,
-			result.Stream,
-			func(stream io.ReadCloser) io.ReadCloser {
-				converted := anthropicapi.NewStreamConverter(stream, model, anthropicapi.EstimateChatInputTokens(req))
-				return result.WrapDeliveryStream(ctx, converted)
-			},
-		)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, result.Stream, func(stream io.ReadCloser) io.ReadCloser {
+			converted := anthropicapi.NewStreamConverter(stream, result.Meta.Model, anthropicapi.EstimateChatInputTokens(req))
+			return result.WrapDeliveryStream(ctx, converted)
+		})
 	}
 
 	result, err := s.inference().ExecuteChatCompletion(ctx, workflow, req, requestID, "/v1/messages")

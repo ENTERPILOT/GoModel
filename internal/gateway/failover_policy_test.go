@@ -93,10 +93,10 @@ func TestTryFailoverResponseHonorsMaxAttempts(t *testing.T) {
 				return "", "", core.NewProviderError("openai", http.StatusBadGateway, selector.Model+" down", nil)
 			}
 
-			_, _, _, _, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+			_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-			if didFailover || err == nil {
-				t.Fatalf("expected the sweep to fail, got didFailover=%v err=%v", didFailover, err)
+			if meta.UsedFailover || err == nil {
+				t.Fatalf("expected the sweep to fail, got didFailover=%v err=%v", meta.UsedFailover, err)
 			}
 			if strings.Join(calls, ",") != strings.Join(tt.wantCalls, ",") {
 				t.Fatalf("calls = %v, want %v", calls, tt.wantCalls)
@@ -120,10 +120,10 @@ func TestTryFailoverResponseMaxAttemptsCountsCallsOnly(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	_, _, _, model, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if !didFailover || err != nil || model != "openai/b" || len(calls) != 1 {
-		t.Fatalf("result = (model:%q didFailover:%v err:%v calls:%v), want one successful call to openai/b", model, didFailover, err, calls)
+	if !meta.UsedFailover || err != nil || meta.FailoverModel != "openai/b" || len(calls) != 1 {
+		t.Fatalf("result = (model:%q didFailover:%v err:%v calls:%v), want one successful call to openai/b", meta.FailoverModel, meta.UsedFailover, err, calls)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestTryFailoverStreamHonorsMaxAttempts(t *testing.T) {
 		return nil, "", "", core.NewProviderError("openai", http.StatusBadGateway, selector.Model+" down", nil)
 	}
 
-	stream, _, _, _, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	stream, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
 	if stream != nil || err == nil || len(calls) != 1 || calls[0] != "openai/a" {
 		t.Fatalf("calls = %v err = %v, want exactly one failed attempt at openai/a", calls, err)
@@ -153,10 +153,10 @@ func TestTryFailoverResponseSkipsWhenPolicyDoesNotMatch(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	_, _, _, _, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if called || didFailover || err != primaryErr {
-		t.Fatalf("expected the primary 429 to be returned untouched (called=%v didFailover=%v err=%v)", called, didFailover, err)
+	if called || meta.UsedFailover || err != primaryErr {
+		t.Fatalf("expected the primary 429 to be returned untouched (called=%v didFailover=%v err=%v)", called, meta.UsedFailover, err)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestTryFailoverStreamSkipsWhenPolicyDoesNotMatch(t *testing.T) {
 		return nil, "", "", nil
 	}
 
-	stream, _, _, _, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	stream, _, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
 	if called || stream != nil || err != primaryErr {
 		t.Fatalf("expected the primary 429 to be returned untouched (called=%v stream=%v err=%v)", called, stream, err)

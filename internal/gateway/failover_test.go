@@ -48,12 +48,12 @@ func TestTryFailoverResponseSkipsWhenContextCanceled(t *testing.T) {
 		return "", "", core.NewProviderError("openai", http.StatusBadGateway, "unexpected failover call", nil)
 	}
 
-	_, _, _, _, didFailover, err := tryFailoverResponse(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	_, meta, err := tryFailoverResponse(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
 	if called {
 		t.Fatal("tryFailoverResponse invoked a failover provider on a canceled context; it must short-circuit")
 	}
-	if didFailover {
+	if meta.UsedFailover {
 		t.Fatalf("didFailover = true, want false when context is canceled")
 	}
 	if !errors.Is(err, context.Canceled) {
@@ -72,13 +72,13 @@ func TestTryFailoverResponseAttemptsWhenContextLive(t *testing.T) {
 		return "ok", "openai", nil
 	}
 
-	resp, _, _, _, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
 	if !called {
 		t.Fatal("tryFailoverResponse did not attempt failover on a live context")
 	}
-	if !didFailover || err != nil || resp != "ok" {
-		t.Fatalf("failover result = (resp:%q didFailover:%v err:%v), want (ok true <nil>)", resp, didFailover, err)
+	if !meta.UsedFailover || err != nil || resp != "ok" {
+		t.Fatalf("failover result = (resp:%q didFailover:%v err:%v), want (ok true <nil>)", resp, meta.UsedFailover, err)
 	}
 }
 
@@ -108,13 +108,13 @@ func TestTryFailoverResponseSkipsRateLimitedTargets(t *testing.T) {
 		return "ok", "anthropic", nil
 	}
 
-	resp, _, _, failoverModel, didFailover, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
 	if len(attempted) != 1 || attempted[0] != "anthropic/claude" {
 		t.Fatalf("attempted = %v, want only anthropic/claude (rate-limited target skipped)", attempted)
 	}
-	if !didFailover || err != nil || resp != "ok" || failoverModel != "anthropic/claude" {
-		t.Fatalf("failover result = (resp:%q model:%q didFailover:%v err:%v), want anthropic success", resp, failoverModel, didFailover, err)
+	if !meta.UsedFailover || err != nil || resp != "ok" || meta.FailoverModel != "anthropic/claude" {
+		t.Fatalf("failover result = (resp:%q model:%q didFailover:%v err:%v), want anthropic success", resp, meta.FailoverModel, meta.UsedFailover, err)
 	}
 }
 
@@ -134,13 +134,13 @@ func TestTryFailoverStreamSkipsRateLimitedTargets(t *testing.T) {
 		return io.NopCloser(strings.NewReader("data")), "anthropic", "claude", nil
 	}
 
-	stream, _, _, _, failoverModel, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	stream, meta, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
 	if len(attempted) != 1 || attempted[0] != "anthropic/claude" {
 		t.Fatalf("attempted = %v, want only anthropic/claude (rate-limited target skipped)", attempted)
 	}
-	if err != nil || stream == nil || failoverModel != "anthropic/claude" {
-		t.Fatalf("failover result = (stream:%v model:%q err:%v), want anthropic success", stream != nil, failoverModel, err)
+	if err != nil || stream == nil || meta.FailoverModel != "anthropic/claude" {
+		t.Fatalf("failover result = (stream:%v model:%q err:%v), want anthropic success", stream != nil, meta.FailoverModel, err)
 	}
 	stream.Close()
 }
@@ -158,7 +158,7 @@ func TestTryFailoverStreamSkipsWhenContextCanceled(t *testing.T) {
 		return nil, "", "", core.NewProviderError("openai", http.StatusBadGateway, "unexpected failover call", nil)
 	}
 
-	stream, _, _, _, _, err := tryFailoverStream(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
+	stream, _, err := tryFailoverStream(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
 	if called {
 		t.Fatal("tryFailoverStream invoked a failover provider on a canceled context; it must short-circuit")
@@ -228,7 +228,7 @@ func TestExecuteTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 	ctx := core.WithPrimaryRouteSaturated(context.Background(), saturated)
 
 	var calls []string
-	resp, _, _, failoverModel, didFailover, err := executeTranslatedWithFailover(
+	resp, meta, err := executeTranslatedWithFailover(
 		ctx, o, workflow, "req", "openai/gpt-4o", "openai",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
 		func(_ context.Context, req string) (string, string, error) {
@@ -243,8 +243,8 @@ func TestExecuteTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 	if len(calls) != 1 || calls[0] != "openai/gpt-5" {
 		t.Fatalf("provider calls = %v, want only the failover target", calls)
 	}
-	if !didFailover || err != nil || resp != "ok" || failoverModel != "openai/gpt-5" {
-		t.Fatalf("result = (resp:%q model:%q didFailover:%v err:%v), want failover success", resp, failoverModel, didFailover, err)
+	if !meta.UsedFailover || err != nil || resp != "ok" || meta.FailoverModel != "openai/gpt-5" {
+		t.Fatalf("result = (resp:%q model:%q didFailover:%v err:%v), want failover success", resp, meta.FailoverModel, meta.UsedFailover, err)
 	}
 }
 
@@ -256,7 +256,7 @@ func TestExecuteTranslatedSaturatedPrimarySurfaces429WhenNoTargetRemains(t *test
 	saturated := core.NewRateLimitError("ratelimit", "rate limit exceeded for provider openai").WithCode("rate_limit_exceeded")
 	ctx := core.WithPrimaryRouteSaturated(context.Background(), saturated)
 
-	_, _, _, _, didFailover, err := executeTranslatedWithFailover(
+	_, meta, err := executeTranslatedWithFailover(
 		ctx, o, workflow, "req", "openai/gpt-4o", "openai",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
 		func(_ context.Context, _ string) (string, string, error) {
@@ -265,7 +265,7 @@ func TestExecuteTranslatedSaturatedPrimarySurfaces429WhenNoTargetRemains(t *test
 		},
 	)
 
-	if didFailover {
+	if meta.UsedFailover {
 		t.Fatal("didFailover = true, want false")
 	}
 	var gatewayErr *core.GatewayError
@@ -281,7 +281,7 @@ func TestStreamTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 	ctx := core.WithPrimaryRouteSaturated(context.Background(), saturated)
 
 	var calls []string
-	stream, _, _, _, failoverModel, usedFailover, err := streamTranslatedProviderRequest(
+	stream, meta, err := streamTranslatedProviderRequest(
 		o, ctx, workflow, "req", "openai/gpt-4o", "openai",
 		"openai", "openai", "gpt-4o",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
@@ -297,8 +297,8 @@ func TestStreamTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 	if len(calls) != 1 || calls[0] != "openai/gpt-5" {
 		t.Fatalf("provider calls = %v, want only the failover target", calls)
 	}
-	if err != nil || stream == nil || !usedFailover || failoverModel != "openai/gpt-5" {
-		t.Fatalf("result = (stream:%v model:%q usedFailover:%v err:%v), want failover success", stream != nil, failoverModel, usedFailover, err)
+	if err != nil || stream == nil || !meta.UsedFailover || meta.FailoverModel != "openai/gpt-5" {
+		t.Fatalf("result = (stream:%v model:%q usedFailover:%v err:%v), want failover success", stream != nil, meta.FailoverModel, meta.UsedFailover, err)
 	}
 	stream.Close()
 }
