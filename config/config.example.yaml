@@ -97,7 +97,7 @@ models:
 #   - path: /acme
 #     allowed_models: [openai/*, anthropic/*]
 #   - path: /acme/eng
-#     allowed_models: [anthropic/*] # provider wildcard, provider/model, or bare model id
+#     allowed_models: [anthropic/*] # provider wildcard, provider/model, or bare model id; virtual models resolve to their targets first, so list the targets, not the virtual model
 #     description: Engineering only ships on Claude
 
 # MCP gateway: aggregate upstream MCP (Model Context Protocol) servers behind the
@@ -392,6 +392,12 @@ failover:
   #     - "azure/gpt-4o"
   #     - "gemini/gemini-2.5-pro"
 
+# Bare <PROVIDER>_* env vars (OPENAI_API_KEY, OPENAI_BASE_URL, ...) override the
+# provider that carries the type's name ("openai"). For a provider you renamed
+# (alpha: {type: openai}) they only fill fields left empty here; values set
+# explicitly are kept and the ignored env vars are logged as a warning at
+# startup. To run a second instance of a type, use <PROVIDER>_<SUFFIX>_* env
+# vars or another named entry here.
 providers:
   openai:
     type: openai

@@ -81,6 +81,25 @@ func (s *stubStore) Get(_ context.Context, key string) (string, bool, error) {
 	return value, found, nil
 }
 
+func (s *stubStore) SetDefault(_ context.Context, key, value string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.getErrs[key]; err != nil {
+		return "", err
+	}
+	if stored, found := s.values[key]; found {
+		return stored, nil
+	}
+	if s.setErr != nil {
+		return "", s.setErr
+	}
+	if s.values == nil {
+		s.values = make(map[string]string)
+	}
+	s.values[key] = value
+	return value, nil
+}
+
 func (s *stubStore) Set(_ context.Context, key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

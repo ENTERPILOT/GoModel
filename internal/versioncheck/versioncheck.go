@@ -50,11 +50,15 @@ const DefaultURL = "https://gomodel.enterpilot.io/version"
 
 // Config configures a Checker. Zero values fall back to package defaults.
 type Config struct {
-	Enabled        bool
-	URL            string
-	App            string
-	Version        string
-	InstallID      string
+	Enabled   bool
+	URL       string
+	App       string
+	Version   string
+	InstallID string
+	// InstallIDFunc, when set, supplies the identifier per request instead
+	// of InstallID. An Identity uses it to keep retrying its database until
+	// it has confirmed which id this deployment has.
+	InstallIDFunc  func(context.Context) string
 	Interval       time.Duration
 	Timeout        time.Duration
 	MaxDailyChecks int
@@ -116,6 +120,13 @@ func New(cfg Config) *Checker {
 	}
 	manifest := manifestURL(cfg.URL, cfg.App)
 	return &Checker{cfg: cfg, url: manifest, safeURL: SafeURL(manifest)}
+}
+
+func (c *Checker) installID(ctx context.Context) string {
+	if c.cfg.InstallIDFunc != nil {
+		return c.cfg.InstallIDFunc(ctx)
+	}
+	return c.cfg.InstallID
 }
 
 // manifestURL appends the distribution's channel file to the configured base.
@@ -308,7 +319,7 @@ func (c *Checker) fetch(ctx context.Context, beacon Beacon) (string, error) {
 	req.Header.Set("User-Agent", fmt.Sprintf("%s/%s", strings.ReplaceAll(c.cfg.App, " ", "-"), c.cfg.Version))
 	req.Header.Set("X-GoModel-Version", c.cfg.Version)
 	req.Header.Set("X-GoModel-App", c.cfg.App)
-	req.Header.Set("X-GoModel-Install", c.cfg.InstallID)
+	req.Header.Set("X-GoModel-Install", c.installID(ctx))
 	beacon.apply(req)
 
 	resp, err := c.cfg.Client.Do(req)

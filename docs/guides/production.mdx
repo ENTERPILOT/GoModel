@@ -72,6 +72,8 @@ high concurrency with budgets or rate limits enabled.
   directory. Without an explicit volume mount, every audit log, usage record,
   budget, managed API key, and stored credential is lost when the container is
   replaced. Always mount a volume at `/app/data`, or move to Postgres/MongoDB.
+  The gateway logs a warning at startup when it detects this situation, and the
+  repository's `docker-compose.yaml` mounts the `gomodel_data` volume there.
 </Warning>
 
 The default SQLite path is `./data/gomodel.db` when a `./data` directory already

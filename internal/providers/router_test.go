@@ -630,6 +630,83 @@ func TestRouterChatCompletion(t *testing.T) {
 	}
 }
 
+// TestRouterChatCompletion_ResolvedRouteDispatch pins the resolvedRoute
+// contract for both lookup shapes: a registry that serves provider, type, and
+// name under one lock (modelInfoLookup) and a plain core.ModelLookup without
+// that capability. Either way the upstream sees the concrete model with the
+// gateway-only Provider hint stripped, and the response is stamped with the
+// resolved provider type.
+func TestRouterChatCompletion_ResolvedRouteDispatch(t *testing.T) {
+	tests := []struct {
+		name         string
+		newLookup    func(provider core.Provider) core.ModelLookup
+		wantInfoPath bool
+		model        string
+		providerHint string
+	}{
+		{
+			name: "registry with modelInfoLookup",
+			newLookup: func(provider core.Provider) core.ModelLookup {
+				return newTestRegistryWithModels(registryModelEntry{
+					provider:     provider,
+					providerName: "openai-primary",
+					providerType: "openai",
+					modelID:      "gpt-4o",
+				})
+			},
+			wantInfoPath: true,
+			model:        "gpt-4o",
+			providerHint: "openai-primary",
+		},
+		{
+			name: "lookup without modelInfoLookup",
+			newLookup: func(provider core.Provider) core.ModelLookup {
+				lookup := newMockLookup()
+				lookup.addModel("gpt-4o", provider, "openai")
+				return lookup
+			},
+			wantInfoPath: false,
+			model:        "gpt-4o",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &mockProvider{name: "upstream", chatResponse: &core.ChatResponse{ID: "resp", Model: "gpt-4o"}}
+			lookup := tt.newLookup(provider)
+			if _, ok := lookup.(modelInfoLookup); ok != tt.wantInfoPath {
+				t.Fatalf("lookup implements modelInfoLookup = %v, want %v", ok, tt.wantInfoPath)
+			}
+			router, err := NewRouter(lookup)
+			if err != nil {
+				t.Fatalf("NewRouter: %v", err)
+			}
+
+			req := &core.ChatRequest{Model: tt.model, Provider: tt.providerHint}
+			resp, err := router.ChatCompletion(context.Background(), req)
+			if err != nil {
+				t.Fatalf("ChatCompletion: %v", err)
+			}
+
+			if provider.lastChatReq == nil {
+				t.Fatal("provider was not called")
+			}
+			if got := provider.lastChatReq.Model; got != "gpt-4o" {
+				t.Fatalf("forwarded model = %q, want concrete gpt-4o", got)
+			}
+			if got := provider.lastChatReq.Provider; got != "" {
+				t.Fatalf("forwarded provider hint = %q, want empty", got)
+			}
+			if resp.Provider != "openai" {
+				t.Fatalf("response provider = %q, want resolved provider type openai", resp.Provider)
+			}
+			if req.Model != tt.model || req.Provider != tt.providerHint {
+				t.Fatalf("caller request mutated: %+v", req)
+			}
+		})
+	}
+}
+
 func TestRouterChatCompletion_ProviderSelector(t *testing.T) {
 	eastResp := &core.ChatResponse{ID: "east", Model: "gpt-4o"}
 	westResp := &core.ChatResponse{ID: "west", Model: "gpt-4o"}

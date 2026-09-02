@@ -4374,6 +4374,9 @@ func TestIsAdaptiveThinkingModel(t *testing.T) {
 	}{
 		{"claude-fable-5", true},
 		{"claude-fable-5-20260601", true},
+		{"claude-fable-5-1", true},
+		{"claude-mythos-5", true},
+		{"claude-mythos-5-1-20260901", true},
 		{"claude-opus-5", true},
 		{"claude-opus-5-20260601", true},
 		{"claude-sonnet-5", true},
@@ -5548,5 +5551,214 @@ func TestMessagesCacheBreakpointsSurviveTranslation(t *testing.T) {
 	blocks, ok := last.Content.([]anthropicContentBlock)
 	if !ok || len(blocks) != 1 || len(blocks[0].CacheControl) == 0 {
 		t.Fatalf("trailing system message = %#v, want one block with cache_control", last.Content)
+	}
+}
+
+func TestRejectsSamplingParameters(t *testing.T) {
+	for model, want := range map[string]bool{
+		"claude-fable-5":             true,
+		"claude-fable-5-1":           true,
+		"claude-mythos-5-1":          true,
+		"claude-opus-5":              true,
+		"claude-sonnet-5-20260601":   true,
+		"claude-opus-4-8":            true,
+		"claude-opus-4-7-20260101":   true,
+		"claude-opus-4-6":            false,
+		"claude-sonnet-4-6":          false,
+		"claude-sonnet-4-5-20250929": false,
+		"claude-haiku-4-5-20251001":  false,
+		"claude-opus-4-75":           false,
+		"":                           false,
+	} {
+		if got := rejectsSamplingParameters(model); got != want {
+			t.Errorf("rejectsSamplingParameters(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
+func TestRejectsForcedToolChoice(t *testing.T) {
+	for model, want := range map[string]bool{
+		"claude-fable-5-1":          true,
+		"claude-fable-5-1-20260901": true,
+		"claude-mythos-5-1":         true,
+		"claude-fable-5":            false,
+		"claude-fable-5-20260601":   false,
+		"claude-fable-5-10":         false,
+		"claude-opus-5":             false,
+		"claude-sonnet-4-6":         false,
+	} {
+		if got := rejectsForcedToolChoice(model); got != want {
+			t.Errorf("rejectsForcedToolChoice(%q) = %v, want %v", model, got, want)
+		}
+	}
+}
+
+func TestConvertToAnthropicRequest_DropsSamplingForModelsThatRejectIt(t *testing.T) {
+	temp := 0.2
+	topP := 0.9
+	tests := []struct {
+		name     string
+		model    string
+		wantKept bool
+	}{
+		{name: "fable 5.1 drops temperature and top_p", model: "claude-fable-5-1"},
+		{name: "opus 4.7 drops temperature and top_p", model: "claude-opus-4-7"},
+		{name: "sonnet 4.6 keeps sampling parameters", model: "claude-sonnet-4-6", wantKept: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:       tt.model,
+				Temperature: &temp,
+				TopP:        &topP,
+				Messages:    []core.Message{{Role: "user", Content: "Hello"}},
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v", err)
+			}
+			if tt.wantKept {
+				if out.Temperature == nil || *out.Temperature != temp || out.TopP == nil || *out.TopP != topP {
+					t.Fatalf("Temperature = %v, TopP = %v, want %v and %v", out.Temperature, out.TopP, temp, topP)
+				}
+				return
+			}
+			if out.Temperature != nil || out.TopP != nil {
+				t.Fatalf("Temperature = %v, TopP = %v, want both dropped", out.Temperature, out.TopP)
+			}
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_RelaxesForcedToolChoice(t *testing.T) {
+	tools := []map[string]any{{
+		"type": "function",
+		"function": map[string]any{
+			"name":       "get_weather",
+			"parameters": map[string]any{"type": "object"},
+		},
+	}}
+	parallelOff := false
+	tests := []struct {
+		name            string
+		model           string
+		toolChoice      any
+		system          string
+		parallel        *bool
+		wantType        string
+		wantName        string
+		wantInstruction string
+	}{
+		{
+			name:            "required becomes auto with a generic instruction",
+			model:           "claude-fable-5-1",
+			toolChoice:      "required",
+			wantType:        "auto",
+			wantInstruction: "You must respond by calling one of the provided tools.",
+		},
+		{
+			name:            "named function becomes auto with a named instruction",
+			model:           "claude-mythos-5-1",
+			toolChoice:      map[string]any{"type": "function", "function": map[string]any{"name": "get_weather"}},
+			wantType:        "auto",
+			wantInstruction: `You must respond by calling the tool named "get_weather".`,
+		},
+		{
+			name:            "instruction is appended after an existing system prompt",
+			model:           "claude-fable-5-1",
+			toolChoice:      "required",
+			system:          "You are terse.",
+			wantType:        "auto",
+			wantInstruction: "You are terse.\n\nYou must respond by calling one of the provided tools.",
+		},
+		{
+			name:            "parallel_tool_calls=false survives the downgrade",
+			model:           "claude-fable-5-1",
+			toolChoice:      "required",
+			parallel:        &parallelOff,
+			wantType:        "auto",
+			wantInstruction: "You must respond by calling one of the provided tools.",
+		},
+		{
+			name:       "auto is forwarded untouched",
+			model:      "claude-fable-5-1",
+			toolChoice: "auto",
+			wantType:   "auto",
+		},
+		{
+			name:       "fable 5 keeps forced tool use",
+			model:      "claude-fable-5",
+			toolChoice: map[string]any{"type": "function", "function": map[string]any{"name": "get_weather"}},
+			wantType:   "tool",
+			wantName:   "get_weather",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			messages := []core.Message{}
+			if tt.system != "" {
+				messages = append(messages, core.Message{Role: "system", Content: tt.system})
+			}
+			messages = append(messages, core.Message{Role: "user", Content: "Weather in Warsaw?"})
+			out, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:             tt.model,
+				Tools:             tools,
+				ToolChoice:        tt.toolChoice,
+				ParallelToolCalls: tt.parallel,
+				Messages:          messages,
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v", err)
+			}
+			if out.ToolChoice == nil {
+				t.Fatalf("ToolChoice = nil, want type %q", tt.wantType)
+			}
+			if out.ToolChoice.Type != tt.wantType || out.ToolChoice.Name != tt.wantName {
+				t.Fatalf("ToolChoice = %+v, want type %q name %q", out.ToolChoice, tt.wantType, tt.wantName)
+			}
+			if tt.parallel != nil && (out.ToolChoice.DisableParallelToolUse == nil || !*out.ToolChoice.DisableParallelToolUse) {
+				t.Fatalf("DisableParallelToolUse = %v, want true", out.ToolChoice.DisableParallelToolUse)
+			}
+			gotSystem, _ := out.System.(string)
+			if gotSystem != tt.wantInstruction {
+				t.Fatalf("System = %q, want %q", gotSystem, tt.wantInstruction)
+			}
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_AdaptiveThinkingForDatedFableAndMythos(t *testing.T) {
+	for _, model := range []string{"claude-fable-5-1-20260901", "claude-mythos-5-1-20260901"} {
+		t.Run("chat "+model, func(t *testing.T) {
+			out, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:     model,
+				Reasoning: &core.Reasoning{Effort: "high"},
+				Messages:  []core.Message{{Role: "user", Content: "Hello"}},
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v", err)
+			}
+			assertAdaptiveHighEffort(t, out)
+		})
+		t.Run("responses "+model, func(t *testing.T) {
+			out, err := convertResponsesRequestToAnthropic(&core.ResponsesRequest{
+				Model:     model,
+				Input:     "Hello",
+				Reasoning: &core.Reasoning{Effort: "high"},
+			})
+			if err != nil {
+				t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
+			}
+			assertAdaptiveHighEffort(t, out)
+		})
+	}
+}
+
+func assertAdaptiveHighEffort(t *testing.T, out *anthropicRequest) {
+	t.Helper()
+	if out.Thinking == nil || out.Thinking.Type != "adaptive" || out.Thinking.BudgetTokens != 0 {
+		t.Fatalf("Thinking = %+v, want adaptive without budget_tokens", out.Thinking)
+	}
+	if out.OutputConfig == nil || out.OutputConfig.Effort != "high" {
+		t.Fatalf("OutputConfig = %+v, want effort high", out.OutputConfig)
 	}
 }

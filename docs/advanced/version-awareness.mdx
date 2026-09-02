@@ -63,7 +63,7 @@ Every check carries:
 | ------------------- | ----------- | ----------------------------------- |
 | `X-GoModel-Version` | `0.1.81`    | the release you are running         |
 | `X-GoModel-App`     | `GoModel`   | `GoModel` or `GoModel Pro`          |
-| `X-GoModel-Install` | a UUID      | random per-deployment id, see below |
+| `X-GoModel-Install` | a UUID      | anonymous per-deployment id, below  |
 | `X-GoModel-Source`  | `scheduled` | `scheduled` or `dashboard`          |
 
 A check triggered by a dashboard visit also forwards an **allowlisted** slice of
@@ -80,10 +80,29 @@ personal data. Neither is ever sent.
 
 ### The install identifier
 
-A random UUID stored in `install-id` in the gateway's data directory, created on
-first use. It encodes nothing about your host, your organization, or your
-configuration; it exists only so repeated checks from one deployment count as
-one deployment. Disabling the check means it is never created.
+A UUID chosen on first use: a random one, or one derived from your master key
+as described below. It encodes nothing about your host, your organization, or
+your configuration; it exists only so repeated checks from one deployment count
+as one deployment. Disabling the check means it is never created.
+
+It is kept in the deployment's database, under the `install_id` key in the
+`runtime_settings` table (or collection), and mirrored to `install-id` in the
+data directory. The database copy is authoritative: it survives a container
+being recreated, and replicas sharing one database report as one deployment.
+An `install-id` file from an earlier release is adopted unchanged the first time
+the gateway starts with this one, unless the database already holds an id — for
+instance because another replica sharing it started first — in which case the
+database's id wins and the file is rewritten to match. If the database cannot
+be reached at startup, the gateway uses the file (or the fallback below) until
+it can, and switches to the database's id on a later check rather than keeping
+a provisional one for the life of the process.
+
+When neither copy exists — a container recreated without a volume, running
+SQLite — the identifier is derived from `GOMODEL_MASTER_KEY` with HMAC-SHA256,
+so the same configuration keeps the same identity. The key itself is never
+sent and cannot be recovered from the identifier. Rotating the key in that
+situation reads as a new deployment; without a master key a fresh random id
+is generated on every recreate.
 
 ## Turning it off if you don't want to get the updates
 

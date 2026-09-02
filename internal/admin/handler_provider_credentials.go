@@ -25,6 +25,9 @@ type ProviderCredentialsAdmin interface {
 	IsManaged(name string) bool
 	RegisteredTypes() []string
 	CredentialSchemas() []providers.CredentialSchema
+	// ConfiguredProviders returns the effective, admin-safe configuration of
+	// every credential currently installed in the registry.
+	ConfiguredProviders() []providers.SanitizedProviderConfig
 }
 
 // redactedCredentialValue replaces secret values (API keys, service account

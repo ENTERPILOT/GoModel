@@ -172,6 +172,8 @@
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/n8n",
+                    "guides/openwebui",
+                    "guides/librechat",
                     {
                         "group": "AI coding harnesses",
                         "icon": "terminal",
@@ -185,7 +187,8 @@
                         ]
                     },
                     "guides/prometheus-metrics",
-                    "guides/opentelemetry"
+                    "guides/opentelemetry",
+                    "guides/langfuse"
                 ]
             },
             {

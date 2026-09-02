@@ -182,7 +182,7 @@ func TestStreamResponsesRejectsNilRequest(t *testing.T) {
 func TestDispatchChatCompletionRejectsEmptyProviderResponse(t *testing.T) {
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: &providerTypeResolverStub{}})
 
-	_, _, _, _, _, err := orchestrator.DispatchChatCompletion(context.Background(), nil, &core.ChatRequest{Model: "gpt-4o-mini"})
+	_, _, err := orchestrator.DispatchChatCompletion(context.Background(), nil, &core.ChatRequest{Model: "gpt-4o-mini"})
 	if err == nil {
 		t.Fatal("DispatchChatCompletion() error = nil, want provider error")
 	}

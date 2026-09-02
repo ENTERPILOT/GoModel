@@ -5,10 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -21,11 +19,47 @@ var ErrRegistryNotInitialized = fmt.Errorf("model registry has no models: ensure
 // It uses a dynamic model-to-provider mapping that is populated at startup
 // by fetching available models from each provider's /models endpoint.
 type Router struct {
-	lookup       core.ModelLookup
+	lookup core.ModelLookup
+	// caps holds the optional lookup capabilities, resolved once at
+	// construction so the request path never repeats the type assertions.
+	caps         lookupCaps
 	cachePlanner *cachePlanner
 	// unqualifiedModelIDs makes ListModels advertise bare model IDs instead of
 	// provider-qualified ones.
 	unqualifiedModelIDs bool
+}
+
+// lookupCaps records which optional interfaces the lookup implements. A nil
+// field means the lookup lacks that capability and the router uses the
+// fallback path built on the core.ModelLookup contract.
+type lookupCaps struct {
+	typeRegistry            providerTypeRegistry
+	nameRegistry            providerNameRegistry
+	initialized             initializedLookup
+	typeLister              providerTypeLister
+	nameLister              providerNameLister
+	publicModels            publicModelLister
+	unqualifiedPublicModels unqualifiedPublicModelLister
+	modelsWithProvider      modelWithProviderLister
+	selectorResolver        qualifiedSelectorResolver
+	modelInfo               modelInfoLookup
+	refresher               providerModelRefresher
+}
+
+func resolveLookupCaps(lookup core.ModelLookup) lookupCaps {
+	var caps lookupCaps
+	caps.typeRegistry, _ = lookup.(providerTypeRegistry)
+	caps.nameRegistry, _ = lookup.(providerNameRegistry)
+	caps.initialized, _ = lookup.(initializedLookup)
+	caps.typeLister, _ = lookup.(providerTypeLister)
+	caps.nameLister, _ = lookup.(providerNameLister)
+	caps.publicModels, _ = lookup.(publicModelLister)
+	caps.unqualifiedPublicModels, _ = lookup.(unqualifiedPublicModelLister)
+	caps.modelsWithProvider, _ = lookup.(modelWithProviderLister)
+	caps.selectorResolver, _ = lookup.(qualifiedSelectorResolver)
+	caps.modelInfo, _ = lookup.(modelInfoLookup)
+	caps.refresher, _ = lookup.(providerModelRefresher)
+	return caps
 }
 
 type providerTypeRegistry interface {
@@ -68,6 +102,13 @@ type qualifiedSelectorResolver interface {
 	ResolveProviderSelector(segment, modelID string) (core.ModelSelector, bool)
 }
 
+// modelInfoLookup is an optional fast path: the registry hands back provider,
+// provider type, and provider name under one lock instead of one lock per
+// accessor. Lookups without it fall back to GetProvider + GetProviderType.
+type modelInfoLookup interface {
+	GetModel(model string) *ModelInfo
+}
+
 type providerModelRefresher interface {
 	RefreshProviderModels(ctx context.Context, providerSelector string) (int, error)
 }
@@ -85,6 +126,7 @@ func NewRouter(lookup core.ModelLookup) (*Router, error) {
 	}
 	return &Router{
 		lookup:       lookup,
+		caps:         resolveLookupCaps(lookup),
 		cachePlanner: newCachePlanner(),
 	}, nil
 }
@@ -136,10 +178,10 @@ func (r *Router) ResolveModel(requested core.RequestedModelSelector) (core.Model
 }
 
 func (r *Router) resolveUnqualifiedSelector(selector core.ModelSelector) (core.ModelSelector, bool) {
-	if selector.Provider != "" || strings.TrimSpace(selector.Model) == "" {
+	if selector.Provider != "" || selector.Model == "" {
 		return core.ModelSelector{}, false
 	}
-	providerName := strings.TrimSpace(r.lookup.GetProviderName(selector.Model))
+	providerName := r.lookup.GetProviderName(selector.Model)
 	if providerName == "" {
 		return core.ModelSelector{}, false
 	}
@@ -147,30 +189,31 @@ func (r *Router) resolveUnqualifiedSelector(selector core.ModelSelector) (core.M
 }
 
 func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector, selector core.ModelSelector) (core.ModelSelector, bool) {
-	models, ok := r.lookup.(modelWithProviderLister)
-	if !ok {
-		return core.ModelSelector{}, false
-	}
-
-	providerSegment := strings.TrimSpace(selector.Provider)
-	modelID := strings.TrimSpace(selector.Model)
+	// selector comes from Normalize(), so both segments are already trimmed.
+	providerSegment := selector.Provider
+	modelID := selector.Model
 	if providerSegment == "" || modelID == "" {
 		return core.ModelSelector{}, false
 	}
 
 	// O(1) fast path: direct provider name/type match. Falls through to the
 	// catalog scan only for raw slash-shaped IDs and other edge cases.
-	if resolver, ok := r.lookup.(qualifiedSelectorResolver); ok {
-		if concrete, ok := resolver.ResolveProviderSelector(providerSegment, modelID); ok {
+	if r.caps.selectorResolver != nil {
+		if concrete, ok := r.caps.selectorResolver.ResolveProviderSelector(providerSegment, modelID); ok {
 			return concrete, true
 		}
+	}
+
+	// The remaining passes scan the catalog, which needs the lister.
+	if r.caps.modelsWithProvider == nil {
+		return core.ModelSelector{}, false
 	}
 
 	// Fallback for lookups that don't implement qualifiedSelectorResolver (and for
 	// raw slash-shaped model IDs the fast path can't key on). The parsed-modelID
 	// pass mirrors the fast path for non-indexed lookups; the requested.Model pass
 	// additionally resolves models whose own IDs contain a slash.
-	entries := models.ListModelsWithProvider()
+	entries := r.caps.modelsWithProvider.ListModelsWithProvider()
 
 	if concrete, ok := resolveProviderOwnedRawSelector(entries, providerSegment, modelID); ok {
 		return concrete, true
@@ -189,12 +232,12 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 		return core.ModelSelector{}, false
 	}
 
-	rawModelID := strings.TrimSpace(requested.Model)
+	rawModelID := requested.Model
 	if rawModelID == "" {
 		return core.ModelSelector{}, false
 	}
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.Model.ID) != rawModelID {
+		if entry.Model.ID != rawModelID {
 			continue
 		}
 		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
@@ -203,52 +246,40 @@ func (r *Router) resolveQualifiedSelector(requested core.RequestedModelSelector,
 	return core.ModelSelector{}, false
 }
 
+// resolveProviderOwnedRawSelector scans the catalog for a trimmed provider
+// segment (name first, then type) and a trimmed raw model ID.
 func resolveProviderOwnedRawSelector(entries []ModelWithProvider, providerSegment, rawModelID string) (core.ModelSelector, bool) {
-	providerSegment = strings.TrimSpace(providerSegment)
-	rawModelID = strings.TrimSpace(rawModelID)
 	if providerSegment == "" || rawModelID == "" {
 		return core.ModelSelector{}, false
 	}
 
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.ProviderName) != providerSegment {
-			continue
+		if entry.ProviderName == providerSegment && entry.Model.ID == rawModelID {
+			return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 		}
-		if strings.TrimSpace(entry.Model.ID) != rawModelID {
-			continue
-		}
-		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 	}
 
 	for _, entry := range entries {
-		if strings.TrimSpace(entry.ProviderType) != providerSegment {
-			continue
+		if entry.ProviderType == providerSegment && entry.Model.ID == rawModelID {
+			return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 		}
-		if strings.TrimSpace(entry.Model.ID) != rawModelID {
-			continue
-		}
-		return core.ModelSelector{Provider: entry.ProviderName, Model: entry.Model.ID}, true
 	}
 
 	return core.ModelSelector{}, false
 }
 
+// hasConfiguredProviderName reports whether a trimmed provider name is a
+// configured provider instance.
 func (r *Router) hasConfiguredProviderName(providerName string) bool {
-	providerName = strings.TrimSpace(providerName)
 	if providerName == "" {
 		return false
 	}
-	if named, ok := r.lookup.(providerNameLister); ok {
-		for _, candidate := range named.ProviderNames() {
-			if strings.TrimSpace(candidate) == providerName {
-				return true
-			}
-		}
-		return false
+	if r.caps.nameLister != nil {
+		return slices.Contains(r.caps.nameLister.ProviderNames(), providerName)
 	}
-	if models, ok := r.lookup.(modelWithProviderLister); ok {
-		for _, entry := range models.ListModelsWithProvider() {
-			if strings.TrimSpace(entry.ProviderName) == providerName {
+	if r.caps.modelsWithProvider != nil {
+		for _, entry := range r.caps.modelsWithProvider.ListModelsWithProvider() {
+			if entry.ProviderName == providerName {
 				return true
 			}
 		}
@@ -256,8 +287,34 @@ func (r *Router) hasConfiguredProviderName(providerName string) bool {
 	return false
 }
 
+// resolvedRoute is the outcome of resolving a request's model selector: the
+// provider instance to call, the concrete selector to forward, and the
+// provider type used for response stamping and request planning.
+type resolvedRoute struct {
+	provider     core.Provider
+	selector     core.ModelSelector
+	providerType string
+}
+
+// lookupRoute fetches the provider and provider type for an already-resolved
+// selector, taking the registry lock once when the lookup supports it.
+func (r *Router) lookupRoute(model string) (core.Provider, string) {
+	if r.caps.modelInfo != nil {
+		info := r.caps.modelInfo.GetModel(model)
+		if info == nil || info.Provider == nil {
+			return nil, ""
+		}
+		return info.Provider, info.ProviderType
+	}
+	p := r.lookup.GetProvider(model)
+	if p == nil {
+		return nil, ""
+	}
+	return p, r.lookup.GetProviderType(model)
+}
+
 // resolveProvider validates readiness, parses the model selector, and finds the target provider.
-func (r *Router) resolveProvider(ctx context.Context, model, providerHint string) (core.Provider, core.ModelSelector, error) {
+func (r *Router) resolveProvider(ctx context.Context, model, providerHint string) (resolvedRoute, error) {
 	requested := core.NewRequestedModelSelector(model, providerHint)
 	selector, _, err := r.ResolveModel(requested)
 	refreshed := false
@@ -265,43 +322,42 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 		var refreshErr error
 		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
 		if refreshErr != nil {
-			return nil, core.ModelSelector{}, refreshErr
+			return resolvedRoute{}, refreshErr
 		}
 		if !refreshed {
-			return nil, core.ModelSelector{}, err
+			return resolvedRoute{}, err
 		}
 		selector, _, err = r.ResolveModel(requested)
 		if err != nil {
-			return nil, core.ModelSelector{}, err
+			return resolvedRoute{}, err
 		}
 	}
 
 	lookupModel := selector.QualifiedModel()
-	p := r.lookup.GetProvider(lookupModel)
+	p, providerType := r.lookupRoute(lookupModel)
 	if p == nil && !refreshed {
 		var refreshErr error
 		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
 		if refreshErr != nil {
-			return nil, core.ModelSelector{}, refreshErr
+			return resolvedRoute{}, refreshErr
 		}
 		if refreshed {
 			selector, _, err = r.ResolveModel(requested)
 			if err != nil {
-				return nil, core.ModelSelector{}, err
+				return resolvedRoute{}, err
 			}
 			lookupModel = selector.QualifiedModel()
-			p = r.lookup.GetProvider(lookupModel)
+			p, providerType = r.lookupRoute(lookupModel)
 		}
 	}
 	if p == nil {
-		return nil, core.ModelSelector{}, core.NewNotFoundError("model not found: " + lookupModel)
+		return resolvedRoute{}, core.NewNotFoundError("model not found: " + lookupModel)
 	}
-	return p, selector, nil
+	return resolvedRoute{provider: p, selector: selector, providerType: providerType}, nil
 }
 
 func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested core.RequestedModelSelector) (bool, error) {
-	refresher, ok := r.lookup.(providerModelRefresher)
-	if !ok {
+	if r.caps.refresher == nil {
 		return false, nil
 	}
 
@@ -309,7 +365,7 @@ func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested 
 	if err != nil {
 		return false, nil
 	}
-	providerSelector := strings.TrimSpace(selector.Provider)
+	providerSelector := selector.Provider
 	if providerSelector == "" {
 		return false, nil
 	}
@@ -317,7 +373,7 @@ func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested 
 		return false, nil
 	}
 
-	_, err = refresher.RefreshProviderModels(ctx, providerSelector)
+	_, err = r.caps.refresher.RefreshProviderModels(ctx, providerSelector)
 	return true, err
 }
 
@@ -328,22 +384,22 @@ func (r *Router) RefreshProviderModels(ctx context.Context, providerSelector str
 	if !r.hasRegisteredProviderSelector(providerSelector) {
 		return 0, nil
 	}
-	refresher, ok := r.lookup.(providerModelRefresher)
-	if !ok {
+	if r.caps.refresher == nil {
 		return 0, nil
 	}
-	return refresher.RefreshProviderModels(ctx, providerSelector)
+	return r.caps.refresher.RefreshProviderModels(ctx, providerSelector)
 }
 
+// hasRegisteredProviderSelector reports whether a trimmed selector names a
+// configured provider instance or a registered provider type.
 func (r *Router) hasRegisteredProviderSelector(providerSelector string) bool {
-	providerSelector = strings.TrimSpace(providerSelector)
 	if providerSelector == "" {
 		return false
 	}
 	if r.hasConfiguredProviderName(providerSelector) {
 		return true
 	}
-	if strings.TrimSpace(r.lookup.GetProviderNameForType(providerSelector)) != "" {
+	if r.lookup.GetProviderNameForType(providerSelector) != "" {
 		return true
 	}
 	return r.providerByTypeRegistry(providerSelector) != nil
@@ -375,7 +431,7 @@ func (r *Router) resolveProviderSelector(providerSelector string) (core.Provider
 		return provider, providerSelector, nil
 	}
 	if provider := r.providerByNameRegistry(providerSelector); provider != nil {
-		providerType := strings.TrimSpace(r.GetProviderTypeForName(providerSelector))
+		providerType := r.GetProviderTypeForName(providerSelector)
 		if providerType == "" {
 			providerType = providerSelector
 		}
@@ -385,8 +441,8 @@ func (r *Router) resolveProviderSelector(providerSelector string) (core.Provider
 }
 
 func (r *Router) ensureProviderInventoryReady() error {
-	if initialized, ok := r.lookup.(initializedLookup); ok {
-		if !initialized.IsInitialized() {
+	if r.caps.initialized != nil {
+		if !r.caps.initialized.IsInitialized() {
 			if err := r.checkReady(); err != nil {
 				if errors.Is(err, ErrRegistryNotInitialized) {
 					return registryUnavailableError(err)
@@ -401,263 +457,6 @@ func (r *Router) ensureProviderInventoryReady() error {
 		return err
 	}
 	return nil
-}
-
-// assertProviderCapability narrows a resolved provider to capability T. It
-// propagates any resolution error unchanged and, when the provider does not
-// implement T, returns the error built by unsupported.
-func assertProviderCapability[T any](provider core.Provider, err error, unsupported func() error) (T, error) {
-	var capability T
-	if err != nil {
-		return capability, err
-	}
-	capability, ok := provider.(T)
-	if !ok {
-		return capability, unsupported()
-	}
-	return capability, nil
-}
-
-func (r *Router) resolveNativeBatchProvider(providerType string) (core.NativeBatchProvider, error) {
-	provider, err := r.resolveProviderType(providerType)
-	return assertProviderCapability[core.NativeBatchProvider](provider, err, func() error {
-		return core.NewInvalidRequestError(fmt.Sprintf("%s does not support native batch processing", providerType), nil)
-	})
-}
-
-func (r *Router) resolveNativeFileProvider(providerType string) (core.NativeFileProvider, error) {
-	provider, err := r.resolveProviderType(providerType)
-	return assertProviderCapability[core.NativeFileProvider](provider, err, func() error {
-		return core.NewInvalidRequestError(fmt.Sprintf("%s does not support native file operations", providerType), nil)
-	})
-}
-
-func (r *Router) resolveNativeResponseLifecycleProvider(providerType string) (core.NativeResponseLifecycleProvider, string, error) {
-	provider, resolvedProviderType, err := r.resolveProviderSelector(providerType)
-	rp, err := assertProviderCapability[core.NativeResponseLifecycleProvider](provider, err, func() error {
-		return unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response lifecycle operations", providerType))
-	})
-	return rp, resolvedProviderType, err
-}
-
-func (r *Router) resolveNativeResponseUtilityProvider(providerType string) (core.NativeResponseUtilityProvider, string, error) {
-	provider, resolvedProviderType, err := r.resolveProviderSelector(providerType)
-	rp, err := assertProviderCapability[core.NativeResponseUtilityProvider](provider, err, func() error {
-		return unsupportedNativeResponseOperation(fmt.Sprintf("%s does not support native response utility operations", providerType))
-	})
-	return rp, resolvedProviderType, err
-}
-
-func unsupportedNativeResponseOperation(message string) *core.GatewayError {
-	return core.NewInvalidRequestErrorWithStatus(http.StatusNotImplemented, message, nil).WithCode("unsupported_response_operation")
-}
-
-func (r *Router) resolvePassthroughProvider(providerType string) (core.PassthroughProvider, error) {
-	provider, err := r.resolveProviderType(providerType)
-	return assertProviderCapability[core.PassthroughProvider](provider, err, func() error {
-		return core.NewInvalidRequestError(fmt.Sprintf("%s does not support provider passthrough", providerType), nil)
-	})
-}
-
-func routeResolvedModelCall[Req any, Resp any](
-	r *Router,
-	ctx context.Context,
-	model string,
-	providerHint string,
-	buildForward func(core.ModelSelector) Req,
-	call func(context.Context, core.Provider, Req) (Resp, error),
-) (Resp, string, error) {
-	p, selector, err := r.resolveProvider(ctx, model, providerHint)
-	if err != nil {
-		var zero Resp
-		return zero, "", err
-	}
-
-	resp, err := call(ctx, p, buildForward(selector))
-	return resp, r.GetProviderType(selector.QualifiedModel()), err
-}
-
-func routeStampedModelResponse[Req any, Resp any](
-	r *Router,
-	ctx context.Context,
-	model string,
-	providerHint string,
-	buildForward func(core.ModelSelector) Req,
-	call func(context.Context, core.Provider, Req) (Resp, error),
-) (Resp, error) {
-	resp, providerType, err := routeResolvedModelCall(r, ctx, model, providerHint, buildForward, call)
-	if err != nil {
-		var zero Resp
-		return zero, err
-	}
-	return stampProvider(resp, providerType), nil
-}
-
-func routeModelStream[Req any](
-	r *Router,
-	ctx context.Context,
-	model, providerHint string,
-	buildForward func(core.ModelSelector) Req,
-	call func(context.Context, core.Provider, Req) (io.ReadCloser, error),
-) (io.ReadCloser, error) {
-	stream, _, err := routeResolvedModelCall(r, ctx, model, providerHint, buildForward, call)
-	return stream, err
-}
-
-func routeNativeBatchCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeBatchProvider) (T, error)) (T, error) {
-	bp, err := r.resolveNativeBatchProvider(providerType)
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return call(ctx, bp)
-}
-
-func routeNativeFileCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeFileProvider) (T, error)) (T, error) {
-	fp, err := r.resolveNativeFileProvider(providerType)
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return call(ctx, fp)
-}
-
-func routeNativeResponseLifecycleCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeResponseLifecycleProvider) (T, error)) (T, string, error) {
-	rp, resolvedProviderType, err := r.resolveNativeResponseLifecycleProvider(providerType)
-	if err != nil {
-		var zero T
-		return zero, "", err
-	}
-	resp, err := call(ctx, rp)
-	return resp, resolvedProviderType, err
-}
-
-func routeNativeResponseUtilityCall[T any](r *Router, ctx context.Context, providerType string, call func(context.Context, core.NativeResponseUtilityProvider) (T, error)) (T, string, error) {
-	rp, resolvedProviderType, err := r.resolveNativeResponseUtilityProvider(providerType)
-	if err != nil {
-		var zero T
-		return zero, "", err
-	}
-	resp, err := call(ctx, rp)
-	return resp, resolvedProviderType, err
-}
-
-func stampProvider[T any](resp T, providerType string) T {
-	switch typed := any(resp).(type) {
-	case *core.ChatResponse:
-		if typed != nil {
-			typed.Provider = providerType
-		}
-	case *core.ResponsesResponse:
-		if typed != nil {
-			typed.Provider = providerType
-		}
-	case *core.EmbeddingResponse:
-		if typed != nil {
-			typed.Provider = providerType
-		}
-	case *core.BatchResponse:
-		if typed != nil {
-			typed.Provider = providerType
-		}
-	case *core.FileObject:
-		if typed != nil {
-			typed.Provider = providerType
-		}
-	case *core.ResponseCompactResponse:
-		if typed != nil {
-			typed.Provider = providerType
-		}
-	case *core.ImageGenerationResponse:
-		if typed != nil {
-			typed.Provider = providerType
-		}
-	}
-	return resp
-}
-
-// Provider is gateway routing metadata on OpenAI-compatible request structs and
-// must be removed before dispatching to an upstream provider implementation.
-func (r *Router) forwardChatRequest(ctx context.Context, req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	if core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
-		return &forwardReq
-	}
-	// The selector is already concrete, so querying the lookup directly avoids
-	// repeating model resolution on every routed Messages request.
-	return adaptAnthropicCacheControl(&forwardReq, r.lookup.GetProviderType(selector.QualifiedModel()))
-}
-
-func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return &forwardReq
-}
-
-func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
-	forward := r.forwardChatRequest(ctx, req, selector)
-	if r.cachePlanner == nil {
-		return forward
-	}
-	return r.cachePlanner.planChat(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
-}
-
-func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
-	forward := forwardResponsesRequest(req, selector)
-	if r.cachePlanner == nil {
-		return forward
-	}
-	return r.cachePlanner.planResponses(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
-}
-
-func forwardEmbeddingRequest(req *core.EmbeddingRequest, selector core.ModelSelector) *core.EmbeddingRequest {
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return &forwardReq
-}
-
-func forwardAudioSpeechRequest(req *core.AudioSpeechRequest, selector core.ModelSelector) *core.AudioSpeechRequest {
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return &forwardReq
-}
-
-func forwardImageGenerationRequest(req *core.ImageGenerationRequest, selector core.ModelSelector) *core.ImageGenerationRequest {
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return &forwardReq
-}
-
-func forwardImageEditRequest(req *core.ImageEditRequest, selector core.ModelSelector) *core.ImageEditRequest {
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return &forwardReq
-}
-
-func forwardAudioTranscriptionRequest(req *core.AudioTranscriptionRequest, selector core.ModelSelector) *core.AudioTranscriptionRequest {
-	forwardReq := *req
-	forwardReq.Model = selector.Model
-	forwardReq.Provider = ""
-	return &forwardReq
-}
-
-func callChatCompletion(ctx context.Context, provider core.Provider, req *core.ChatRequest) (*core.ChatResponse, error) {
-	return provider.ChatCompletion(ctx, req)
-}
-
-func callResponses(ctx context.Context, provider core.Provider, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return provider.Responses(ctx, req)
-}
-
-func callEmbeddings(ctx context.Context, provider core.Provider, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	return provider.Embeddings(ctx, req)
 }
 
 // Supports returns true if any provider supports the given model.
@@ -676,729 +475,4 @@ func (r *Router) ModelCount() int {
 		return 0
 	}
 	return r.lookup.ModelCount()
-}
-
-// ChatCompletion routes the request to the appropriate provider.
-// Returns ErrRegistryNotInitialized if the lookup has no models loaded.
-func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
-	return routeStampedModelResponse(
-		r,
-		ctx,
-		req.Model,
-		req.Provider,
-		func(selector core.ModelSelector) *core.ChatRequest {
-			return r.plannedChatRequest(ctx, req, selector)
-		},
-		callChatCompletion,
-	)
-}
-
-// StreamChatCompletion routes the streaming request to the appropriate provider.
-// Returns ErrRegistryNotInitialized if the lookup has no models loaded.
-func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
-	return routeModelStream(
-		r,
-		ctx,
-		req.Model,
-		req.Provider,
-		func(selector core.ModelSelector) *core.ChatRequest {
-			return r.plannedChatRequest(ctx, req, selector)
-		},
-		func(ctx context.Context, provider core.Provider, forwardReq *core.ChatRequest) (io.ReadCloser, error) {
-			return provider.StreamChatCompletion(ctx, forwardReq)
-		},
-	)
-}
-
-// ListModels returns all models from the lookup.
-// Returns ErrRegistryNotInitialized if the lookup has no models loaded.
-func (r *Router) ListModels(_ context.Context) (*core.ModelsResponse, error) {
-	if err := r.checkReady(); err != nil {
-		return nil, registryUnavailableError(err)
-	}
-	var models []core.Model
-	if unqualified, ok := r.lookup.(unqualifiedPublicModelLister); ok && r.unqualifiedModelIDs {
-		models = unqualified.ListUnqualifiedPublicModels()
-	} else if public, ok := r.lookup.(publicModelLister); ok {
-		models = public.ListPublicModels()
-	} else {
-		models = r.lookup.ListModels()
-	}
-	return &core.ModelsResponse{
-		Object: "list",
-		Data:   models,
-	}, nil
-}
-
-// Responses routes the Responses API request to the appropriate provider.
-// Returns ErrRegistryNotInitialized if the lookup has no models loaded.
-func (r *Router) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return routeStampedModelResponse(
-		r,
-		ctx,
-		req.Model,
-		req.Provider,
-		func(selector core.ModelSelector) *core.ResponsesRequest {
-			return r.plannedResponsesRequest(req, selector)
-		},
-		callResponses,
-	)
-}
-
-// StreamResponses routes the streaming Responses API request to the appropriate provider.
-// Returns ErrRegistryNotInitialized if the lookup has no models loaded.
-func (r *Router) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return routeModelStream(
-		r,
-		ctx,
-		req.Model,
-		req.Provider,
-		func(selector core.ModelSelector) *core.ResponsesRequest {
-			return r.plannedResponsesRequest(req, selector)
-		},
-		func(ctx context.Context, provider core.Provider, forwardReq *core.ResponsesRequest) (io.ReadCloser, error) {
-			return provider.StreamResponses(ctx, forwardReq)
-		},
-	)
-}
-
-// Embeddings routes the embeddings request to the appropriate provider.
-func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	resp, err := routeStampedModelResponse(
-		r,
-		ctx,
-		req.Model,
-		req.Provider,
-		func(selector core.ModelSelector) *core.EmbeddingRequest {
-			return forwardEmbeddingRequest(req, selector)
-		},
-		callEmbeddings,
-	)
-	if err != nil {
-		return nil, err
-	}
-	// Some OpenAI-compatible servers ignore encoding_format and always return
-	// float arrays; re-encode to the format the client asked for so SDKs that
-	// default to base64 (OpenAI, LangChain) don't mis-decode the response.
-	core.NormalizeEmbeddingEncoding(resp, req.EncodingFormat)
-	return resp, nil
-}
-
-// CreateSpeech routes a text-to-speech request to the provider that owns the model.
-func (r *Router) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
-	return routeAudioCall(
-		r, ctx, req.Model, req.Provider,
-		func(selector core.ModelSelector) *core.AudioSpeechRequest {
-			return forwardAudioSpeechRequest(req, selector)
-		},
-		func(ctx context.Context, ap core.AudioProvider, forwardReq *core.AudioSpeechRequest) (*core.AudioResponse, error) {
-			return ap.CreateSpeech(ctx, forwardReq)
-		},
-	)
-}
-
-// CreateTranscription routes a speech-to-text request to the provider that owns the model.
-func (r *Router) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-	return routeAudioCall(
-		r, ctx, req.Model, req.Provider,
-		func(selector core.ModelSelector) *core.AudioTranscriptionRequest {
-			return forwardAudioTranscriptionRequest(req, selector)
-		},
-		func(ctx context.Context, ap core.AudioProvider, forwardReq *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-			return ap.CreateTranscription(ctx, forwardReq)
-		},
-	)
-}
-
-// CreateTranslation routes a speech translation request to a provider that
-// explicitly supports the OpenAI-compatible translations endpoint.
-func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-	if req == nil {
-		return nil, core.NewInvalidRequestError("audio translation request is required", nil)
-	}
-	resp, _, err := routeResolvedModelCall(
-		r, ctx, req.Model, req.Provider,
-		func(selector core.ModelSelector) *core.AudioTranscriptionRequest {
-			return forwardAudioTranscriptionRequest(req, selector)
-		},
-		func(ctx context.Context, provider core.Provider, forwardReq *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-			translator, ok := provider.(core.AudioTranslationProvider)
-			if !ok {
-				return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support audio translations", req.Model), nil)
-			}
-			return translator.CreateTranslation(ctx, forwardReq)
-		},
-	)
-	return resp, err
-}
-
-// CreateImage routes an image generation request to the provider that owns the
-// model, requiring it to implement core.ImageProvider.
-func (r *Router) CreateImage(ctx context.Context, req *core.ImageGenerationRequest) (*core.ImageGenerationResponse, error) {
-	if req == nil {
-		return nil, core.NewInvalidRequestError("image generation request is required", nil)
-	}
-	return routeImageCall(
-		r, ctx, req.Model, req.Provider, "image generation",
-		func(selector core.ModelSelector) *core.ImageGenerationRequest {
-			return forwardImageGenerationRequest(req, selector)
-		},
-		core.ImageProvider.CreateImage,
-	)
-}
-
-// CreateImageEdit routes an image edit request to the provider that owns the
-// model, requiring it to implement core.ImageEditProvider.
-func (r *Router) CreateImageEdit(ctx context.Context, req *core.ImageEditRequest) (*core.ImageGenerationResponse, error) {
-	if req == nil {
-		return nil, core.NewInvalidRequestError("image edit request is required", nil)
-	}
-	return routeImageCall(
-		r, ctx, req.Model, req.Provider, "image edits",
-		func(selector core.ModelSelector) *core.ImageEditRequest {
-			return forwardImageEditRequest(req, selector)
-		},
-		core.ImageEditProvider.CreateImageEdit,
-	)
-}
-
-// routeImageCall resolves the model, requires the target provider to implement
-// the image capability P, and invokes call, stamping the provider on the
-// response. capability names the operation in the unsupported-provider error.
-func routeImageCall[Req any, P any](
-	r *Router,
-	ctx context.Context,
-	model, providerHint, capability string,
-	forward func(core.ModelSelector) Req,
-	call func(P, context.Context, Req) (*core.ImageGenerationResponse, error),
-) (*core.ImageGenerationResponse, error) {
-	return routeStampedModelResponse(
-		r, ctx, model, providerHint, forward,
-		func(ctx context.Context, provider core.Provider, forwardReq Req) (*core.ImageGenerationResponse, error) {
-			p, ok := provider.(P)
-			if !ok {
-				return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support %s", model, capability), nil)
-			}
-			return call(p, ctx, forwardReq)
-		},
-	)
-}
-
-// routeAudioCall resolves the model, requires the target provider to implement
-// core.AudioProvider, and invokes call. It mirrors routeNative*Call but for the
-// optional audio capability.
-func routeAudioCall[Req any](
-	r *Router,
-	ctx context.Context,
-	model, providerHint string,
-	forward func(core.ModelSelector) Req,
-	call func(context.Context, core.AudioProvider, Req) (*core.AudioResponse, error),
-) (*core.AudioResponse, error) {
-	resp, _, err := routeResolvedModelCall(
-		r, ctx, model, providerHint, forward,
-		func(ctx context.Context, provider core.Provider, forwardReq Req) (*core.AudioResponse, error) {
-			ap, ok := provider.(core.AudioProvider)
-			if !ok {
-				return nil, audioUnsupportedError(model)
-			}
-			return call(ctx, ap, forwardReq)
-		},
-	)
-	return resp, err
-}
-
-func audioUnsupportedError(model string) error {
-	return core.NewInvalidRequestError(fmt.Sprintf("model %q does not support audio operations", model), nil)
-}
-
-// RealtimeTarget resolves the upstream realtime websocket for the model's owning
-// provider, requiring it to implement core.RealtimeProvider. It mirrors the audio
-// routing: resolve the model, narrow to the capability, and forward the bare
-// provider model id.
-func (r *Router) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeTarget, error) {
-	if req == nil {
-		return nil, core.NewInvalidRequestError("realtime request is required", nil)
-	}
-	p, selector, err := r.resolveProvider(ctx, req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	rp, ok := p.(core.RealtimeProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support realtime sessions", req.Model), nil)
-	}
-	if err := checkRealtimeIntent(p, req.Model, req.Intent); err != nil {
-		return nil, err
-	}
-	return rp.RealtimeTarget(ctx, &core.RealtimeRequest{
-		Model:    selector.Model,
-		Provider: selector.Provider,
-		CallID:   req.CallID,
-		Intent:   req.Intent,
-	})
-}
-
-// RealtimeCallTarget resolves the upstream HTTP endpoint for the WebRTC SDP
-// exchange, requiring the model's provider to implement core.RealtimeCallProvider.
-func (r *Router) RealtimeCallTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
-	return r.realtimeCallTarget(ctx, req, core.RealtimeCallProvider.RealtimeCallTarget)
-}
-
-// RealtimeClientSecretTarget resolves the upstream HTTP endpoint for minting
-// ephemeral realtime client secrets.
-func (r *Router) RealtimeClientSecretTarget(ctx context.Context, req *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error) {
-	return r.realtimeCallTarget(ctx, req, core.RealtimeCallProvider.RealtimeClientSecretTarget)
-}
-
-// realtimeCallTarget mirrors RealtimeTarget for the realtime HTTP signaling
-// endpoints: resolve the model, narrow to the capability, and forward the bare
-// provider model id.
-func (r *Router) realtimeCallTarget(
-	ctx context.Context,
-	req *core.RealtimeRequest,
-	call func(core.RealtimeCallProvider, context.Context, *core.RealtimeRequest) (*core.RealtimeHTTPTarget, error),
-) (*core.RealtimeHTTPTarget, error) {
-	if req == nil {
-		return nil, core.NewInvalidRequestError("realtime request is required", nil)
-	}
-	p, selector, err := r.resolveProvider(ctx, req.Model, req.Provider)
-	if err != nil {
-		return nil, err
-	}
-	rp, ok := p.(core.RealtimeCallProvider)
-	if !ok {
-		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support realtime calls", req.Model), nil)
-	}
-	if err := checkRealtimeIntent(p, req.Model, req.Intent); err != nil {
-		return nil, err
-	}
-	return call(rp, ctx, &core.RealtimeRequest{
-		Model:    selector.Model,
-		Provider: selector.Provider,
-		Intent:   req.Intent,
-	})
-}
-
-// checkRealtimeIntent rejects a specialized session intent the resolved provider
-// does not serve. Providers build their targets from the intent, so one that
-// ignores it would answer a translation request with an ordinary conversation
-// session — or mint a client secret for one. Failing here keeps that mismatch
-// from reaching the caller as a valid-looking session.
-func checkRealtimeIntent(p core.Provider, model, intent string) error {
-	if strings.TrimSpace(intent) == "" {
-		return nil
-	}
-	if ip, ok := p.(core.RealtimeIntentProvider); ok && ip.SupportsRealtimeIntent(intent) {
-		return nil
-	}
-	return core.NewInvalidRequestError(fmt.Sprintf("model %q does not support %s realtime sessions", model, strings.TrimSpace(intent)), nil)
-}
-
-// GetProviderType returns the provider type string for the given model.
-// Returns empty string if the model is not found.
-func (r *Router) GetProviderType(model string) string {
-	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
-	if err != nil {
-		return ""
-	}
-	return r.lookup.GetProviderType(selector.QualifiedModel())
-}
-
-// GetProviderName returns the concrete configured provider instance name for
-// the given model selector. Returns empty string when unavailable.
-func (r *Router) GetProviderName(model string) string {
-	selector, _, err := r.ResolveModel(core.NewRequestedModelSelector(model, ""))
-	if err != nil {
-		return ""
-	}
-	if !r.lookup.Supports(selector.QualifiedModel()) {
-		return ""
-	}
-	if selector.Provider != "" {
-		return selector.Provider
-	}
-	return r.lookup.GetProviderName(selector.QualifiedModel())
-}
-
-// GetProviderNameForType returns the concrete configured provider instance name
-// chosen for a provider-typed route.
-func (r *Router) GetProviderNameForType(providerType string) string {
-	return strings.TrimSpace(r.lookup.GetProviderNameForType(providerType))
-}
-
-// GetProviderTypeForName returns the provider type for a concrete configured
-// provider instance name.
-func (r *Router) GetProviderTypeForName(providerName string) string {
-	providerName = strings.TrimSpace(providerName)
-	if providerName == "" {
-		return ""
-	}
-	return strings.TrimSpace(r.lookup.GetProviderTypeForName(providerName))
-}
-
-func (r *Router) providerByType(providerType string) core.Provider {
-	models := r.lookup.ListModels()
-	for _, model := range models {
-		if r.lookup.GetProviderType(model.ID) != providerType {
-			continue
-		}
-		p := r.lookup.GetProvider(model.ID)
-		if p != nil {
-			return p
-		}
-	}
-	return nil
-}
-
-func (r *Router) providerByTypeRegistry(providerType string) core.Provider {
-	if registry, ok := r.lookup.(providerTypeRegistry); ok {
-		if provider := registry.ProviderByType(providerType); provider != nil {
-			return provider
-		}
-	}
-	return r.providerByType(providerType)
-}
-
-func (r *Router) providerByNameRegistry(providerName string) core.Provider {
-	if registry, ok := r.lookup.(providerNameRegistry); ok {
-		if provider := registry.ProviderByName(providerName); provider != nil {
-			return provider
-		}
-	}
-	return r.providerByName(providerName)
-}
-
-func (r *Router) providerByName(providerName string) core.Provider {
-	providerName = strings.TrimSpace(providerName)
-	if providerName == "" {
-		return nil
-	}
-	models, ok := r.lookup.(modelWithProviderLister)
-	if !ok {
-		return nil
-	}
-	for _, entry := range models.ListModelsWithProvider() {
-		if strings.TrimSpace(entry.ProviderName) != providerName {
-			continue
-		}
-		modelID := strings.TrimSpace(entry.Model.ID)
-		if modelID == "" {
-			continue
-		}
-		if provider := r.lookup.GetProvider(core.ModelSelector{Provider: providerName, Model: modelID}.QualifiedModel()); provider != nil {
-			return provider
-		}
-	}
-	return nil
-}
-
-func (r *Router) providerTypes() []string {
-	if typed, ok := r.lookup.(providerTypeLister); ok {
-		return typed.ProviderTypes()
-	}
-
-	seen := make(map[string]struct{})
-	result := make([]string, 0)
-	for _, model := range r.lookup.ListModels() {
-		providerType := strings.TrimSpace(r.lookup.GetProviderType(model.ID))
-		if providerType == "" {
-			continue
-		}
-		if _, exists := seen[providerType]; exists {
-			continue
-		}
-		seen[providerType] = struct{}{}
-		result = append(result, providerType)
-	}
-	sort.Strings(result)
-	return result
-}
-
-// providerTypesSupporting returns the registered provider types whose backing
-// provider satisfies the given capability check. The inventory is independent of
-// the public model catalog whenever the underlying lookup can expose provider
-// types directly.
-func (r *Router) providerTypesSupporting(supports func(core.Provider) bool) []string {
-	providerTypes := r.providerTypes()
-	result := make([]string, 0, len(providerTypes))
-	for _, providerType := range providerTypes {
-		provider := r.providerByTypeRegistry(providerType)
-		if provider != nil && supports(provider) {
-			result = append(result, providerType)
-		}
-	}
-	return result
-}
-
-// NativeFileProviderTypes returns the registered provider types that support
-// native file operations.
-func (r *Router) NativeFileProviderTypes() []string {
-	return r.providerTypesSupporting(func(p core.Provider) bool {
-		_, ok := p.(core.NativeFileProvider)
-		return ok
-	})
-}
-
-// NativeBatchProviderTypes returns the registered provider types that support
-// native batch operations.
-func (r *Router) NativeBatchProviderTypes() []string {
-	return r.providerTypesSupporting(func(p core.Provider) bool {
-		_, ok := p.(core.NativeBatchProvider)
-		return ok
-	})
-}
-
-// NativeResponseProviderTypes returns the registered provider types that
-// support native Responses lifecycle operations.
-func (r *Router) NativeResponseProviderTypes() []string {
-	return r.providerTypesSupporting(func(p core.Provider) bool {
-		_, ok := p.(core.NativeResponseLifecycleProvider)
-		return ok
-	})
-}
-
-// Passthrough routes an opaque provider-native request by provider type.
-// If req.ProviderName is set, routing prefers the named provider instance over
-// the first registered provider of the given type.
-func (r *Router) Passthrough(ctx context.Context, providerType string, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
-	var pp core.PassthroughProvider
-	if req != nil && strings.TrimSpace(req.ProviderName) != "" {
-		slog.DebugContext(ctx, "passthrough routing by name", "providerName", req.ProviderName, "providerType", providerType)
-		if p := r.providerByNameRegistry(strings.TrimSpace(req.ProviderName)); p != nil {
-			if named, ok := p.(core.PassthroughProvider); ok {
-				pp = named
-				slog.DebugContext(ctx, "passthrough routed by name", "providerName", req.ProviderName)
-			} else {
-				slog.DebugContext(ctx, "passthrough provider found by name but does not implement PassthroughProvider", "providerName", req.ProviderName)
-			}
-		} else {
-			slog.DebugContext(ctx, "passthrough provider not found by name, falling back to type", "providerName", req.ProviderName, "providerType", providerType)
-		}
-	}
-	if pp == nil {
-		var err error
-		pp, err = r.resolvePassthroughProvider(providerType)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return pp.Passthrough(ctx, req)
-}
-
-// CreateBatch routes native batch creation to a provider type.
-func (r *Router) CreateBatch(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, error) {
-	forwardReq, err := adaptAnthropicBatchCacheControl(ctx, req, providerType)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
-		return bp.CreateBatch(ctx, forwardReq)
-	})
-	return stampProvider(resp, providerType), err
-}
-
-// CreateBatchWithHints routes native batch creation and returns any provider
-// batch-result shaping hints that need gateway persistence.
-func (r *Router) CreateBatchWithHints(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, map[string]string, error) {
-	type createBatchWithHintsResult struct {
-		resp  *core.BatchResponse
-		hints map[string]string
-	}
-	forwardReq, err := adaptAnthropicBatchCacheControl(ctx, req, providerType)
-	if err != nil {
-		return nil, nil, err
-	}
-	result, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (createBatchWithHintsResult, error) {
-		if hinted, ok := bp.(core.BatchCreateHintAwareProvider); ok {
-			resp, hints, err := hinted.CreateBatchWithHints(ctx, forwardReq)
-			return createBatchWithHintsResult{resp: resp, hints: hints}, err
-		}
-		resp, err := bp.CreateBatch(ctx, forwardReq)
-		return createBatchWithHintsResult{resp: resp}, err
-	})
-	return stampProvider(result.resp, providerType), result.hints, err
-}
-
-// GetBatch routes native batch lookup to a provider type.
-func (r *Router) GetBatch(ctx context.Context, providerType, id string) (*core.BatchResponse, error) {
-	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
-		return bp.GetBatch(ctx, id)
-	})
-	return stampProvider(resp, providerType), err
-}
-
-// ListBatches routes native batch listing to a provider type.
-func (r *Router) ListBatches(ctx context.Context, providerType string, limit int, after string) (*core.BatchListResponse, error) {
-	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchListResponse, error) {
-		return bp.ListBatches(ctx, limit, after)
-	})
-	if err != nil {
-		return nil, err
-	}
-	if resp != nil {
-		for i := range resp.Data {
-			resp.Data[i].Provider = providerType
-		}
-	}
-	return resp, nil
-}
-
-// CancelBatch routes native batch cancellation to a provider type.
-func (r *Router) CancelBatch(ctx context.Context, providerType, id string) (*core.BatchResponse, error) {
-	resp, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResponse, error) {
-		return bp.CancelBatch(ctx, id)
-	})
-	return stampProvider(resp, providerType), err
-}
-
-// DeleteBatch routes native batch deletion to a provider type. It reports
-// core.ErrNativeBatchDeleteUnsupported for providers whose upstream batch API
-// has no delete operation, so callers can fall back to gateway-local deletion.
-func (r *Router) DeleteBatch(ctx context.Context, providerType, id string) error {
-	_, err := routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (struct{}, error) {
-		deleter, ok := bp.(core.NativeBatchDeleteProvider)
-		if !ok {
-			return struct{}{}, core.ErrNativeBatchDeleteUnsupported
-		}
-		return struct{}{}, deleter.DeleteBatch(ctx, id)
-	})
-	return err
-}
-
-// GetBatchResults routes native batch results lookup to a provider type.
-func (r *Router) GetBatchResults(ctx context.Context, providerType, id string) (*core.BatchResultsResponse, error) {
-	return routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResultsResponse, error) {
-		return bp.GetBatchResults(ctx, id)
-	})
-}
-
-// GetBatchResultsWithHints routes native batch results lookup with persisted
-// per-item endpoint hints when the provider supports them.
-func (r *Router) GetBatchResultsWithHints(ctx context.Context, providerType, id string, endpointByCustomID map[string]string) (*core.BatchResultsResponse, error) {
-	return routeNativeBatchCall(r, ctx, providerType, func(ctx context.Context, bp core.NativeBatchProvider) (*core.BatchResultsResponse, error) {
-		if hinted, ok := bp.(core.BatchResultHintAwareProvider); ok && len(endpointByCustomID) > 0 {
-			return hinted.GetBatchResultsWithHints(ctx, id, endpointByCustomID)
-		}
-		return bp.GetBatchResults(ctx, id)
-	})
-}
-
-// ClearBatchResultHints clears transient provider-side batch result hints once
-// they have been persisted by the gateway.
-func (r *Router) ClearBatchResultHints(providerType, batchID string) {
-	if strings.TrimSpace(batchID) == "" {
-		return
-	}
-	bp, err := r.resolveNativeBatchProvider(providerType)
-	if err != nil {
-		return
-	}
-	hinted, ok := bp.(core.BatchResultHintAwareProvider)
-	if !ok {
-		return
-	}
-	hinted.ClearBatchResultHints(batchID)
-}
-
-// CreateFile routes file upload to a provider type.
-func (r *Router) CreateFile(ctx context.Context, providerType string, req *core.FileCreateRequest) (*core.FileObject, error) {
-	resp, err := routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileObject, error) {
-		return fp.CreateFile(ctx, req)
-	})
-	return stampProvider(resp, providerType), err
-}
-
-// ListFiles routes file listing to a provider type.
-func (r *Router) ListFiles(ctx context.Context, providerType, purpose string, limit int, after string) (*core.FileListResponse, error) {
-	resp, err := routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileListResponse, error) {
-		return fp.ListFiles(ctx, purpose, limit, after)
-	})
-	if err != nil {
-		return nil, err
-	}
-	if resp != nil {
-		for i := range resp.Data {
-			resp.Data[i].Provider = providerType
-		}
-	}
-	return resp, nil
-}
-
-// GetFile routes file retrieval to a provider type.
-func (r *Router) GetFile(ctx context.Context, providerType, id string) (*core.FileObject, error) {
-	resp, err := routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileObject, error) {
-		return fp.GetFile(ctx, id)
-	})
-	return stampProvider(resp, providerType), err
-}
-
-// DeleteFile routes file deletion to a provider type.
-func (r *Router) DeleteFile(ctx context.Context, providerType, id string) (*core.FileDeleteResponse, error) {
-	return routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileDeleteResponse, error) {
-		return fp.DeleteFile(ctx, id)
-	})
-}
-
-// GetFileContent routes file content retrieval to a provider type.
-func (r *Router) GetFileContent(ctx context.Context, providerType, id string) (*core.FileContentResponse, error) {
-	return routeNativeFileCall(r, ctx, providerType, func(ctx context.Context, fp core.NativeFileProvider) (*core.FileContentResponse, error) {
-		return fp.GetFileContent(ctx, id)
-	})
-}
-
-// GetResponse routes native response retrieval to a provider type.
-func (r *Router) GetResponse(ctx context.Context, providerType, id string, params core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
-	resp, resolvedProviderType, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponsesResponse, error) {
-		return rp.GetResponse(ctx, id, params)
-	})
-	return stampProvider(resp, resolvedProviderType), err
-}
-
-// ListResponseInputItems routes native response input item listing to a provider type.
-func (r *Router) ListResponseInputItems(ctx context.Context, providerType, id string, params core.ResponseInputItemsParams) (*core.ResponseInputItemListResponse, error) {
-	resp, _, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponseInputItemListResponse, error) {
-		return rp.ListResponseInputItems(ctx, id, params)
-	})
-	return resp, err
-}
-
-// CancelResponse routes native response cancellation to a provider type.
-func (r *Router) CancelResponse(ctx context.Context, providerType, id string) (*core.ResponsesResponse, error) {
-	resp, resolvedProviderType, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponsesResponse, error) {
-		return rp.CancelResponse(ctx, id)
-	})
-	return stampProvider(resp, resolvedProviderType), err
-}
-
-// DeleteResponse routes native response deletion to a provider type.
-func (r *Router) DeleteResponse(ctx context.Context, providerType, id string) (*core.ResponseDeleteResponse, error) {
-	resp, _, err := routeNativeResponseLifecycleCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseLifecycleProvider) (*core.ResponseDeleteResponse, error) {
-		return rp.DeleteResponse(ctx, id)
-	})
-	return resp, err
-}
-
-// CountResponseInputTokens routes native response input token counting to a provider type.
-func (r *Router) CountResponseInputTokens(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseInputTokensResponse, error) {
-	resp, _, err := routeNativeResponseUtilityCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseUtilityProvider) (*core.ResponseInputTokensResponse, error) {
-		return rp.CountResponseInputTokens(ctx, forwardNativeResponseUtilityRequest(req))
-	})
-	return resp, err
-}
-
-// CompactResponse routes native response compaction to a provider type.
-func (r *Router) CompactResponse(ctx context.Context, providerType string, req *core.ResponsesRequest) (*core.ResponseCompactResponse, error) {
-	resp, resolvedProviderType, err := routeNativeResponseUtilityCall(r, ctx, providerType, func(ctx context.Context, rp core.NativeResponseUtilityProvider) (*core.ResponseCompactResponse, error) {
-		return rp.CompactResponse(ctx, forwardNativeResponseUtilityRequest(req))
-	})
-	return stampProvider(resp, resolvedProviderType), err
-}
-
-func forwardNativeResponseUtilityRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
-	if req == nil {
-		return nil
-	}
-	forwardReq := *req
-	forwardReq.Provider = ""
-	return &forwardReq
 }

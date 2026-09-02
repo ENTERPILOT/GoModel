@@ -25,6 +25,7 @@
   "model": "llama-3.3-70b-versatile",
   "object": "chat.completion",
   "provider": "",
+  "service_tier": "on_demand",
   "system_fingerprint": "fp_dae98b5ecb",
   "usage": {
     "completion_time": 0.055257456,
@@ -34,5 +35,10 @@
     "queue_time": 0.092826763,
     "total_time": 0.074920409,
     "total_tokens": 217
+  },
+  "usage_breakdown": null,
+  "x_groq": {
+    "id": "req_\u003cgenerated\u003e",
+    "seed": 1450173236
   }
 }
