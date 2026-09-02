@@ -531,6 +531,7 @@ func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context,
 	if err != nil {
 		return true, handleError(c, err)
 	}
+	dropUpstreamRateLimitHeaders(resp.Headers)
 	if !req.Stream {
 		if err := stampPassthroughChatProvider(resp, providerType); err != nil {
 			_ = resp.Body.Close()
@@ -594,6 +595,19 @@ func bufferedRequestBody(c *echo.Context) ([]byte, bool) {
 	}
 	body, err := requestBodyBytes(c)
 	return body, err == nil
+}
+
+// dropUpstreamRateLimitHeaders removes the provider's own X-Ratelimit-* headers
+// from a fast-path response. The gateway sets its rate-limit headers on the
+// response before dispatch, and copying the upstream values would replace
+// them with the provider account's limits, which the translated path never
+// exposes.
+func dropUpstreamRateLimitHeaders(headers map[string][]string) {
+	for key := range headers {
+		if strings.HasPrefix(http.CanonicalHeaderKey(strings.TrimSpace(key)), "X-Ratelimit-") {
+			delete(headers, key)
+		}
+	}
 }
 
 // bodyValidatorHeaders are response headers derived from the body bytes; they

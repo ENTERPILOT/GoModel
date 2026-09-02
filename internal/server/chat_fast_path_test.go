@@ -222,6 +222,85 @@ func TestChatCompletionStreaming_FastPathRelaysSSEWhenNoPlanApplies(t *testing.T
 	}
 }
 
+// The gateway writes its own X-Ratelimit-* headers before dispatch; the
+// provider's account limits must not replace them on the fast path, while
+// other upstream headers are still relayed. gatewayRateLimitHeader stands in
+// for the value the rate-limit reservation wrote before the handler ran.
+func TestChatCompletion_FastPathDropsUpstreamRateLimitHeaders(t *testing.T) {
+	const gatewayRateLimitHeader = "X-Ratelimit-Limit-Tokens"
+	streamData := "data: {\"id\":\"chatcmpl-123\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: [DONE]\n\n"
+
+	tests := []struct {
+		name     string
+		body     string
+		upstream string
+		stream   bool
+	}{
+		{name: "non-streaming", body: fastPathChatRequestBody, upstream: fastPathUpstreamBody},
+		{name: "streaming", body: `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`, upstream: streamData, stream: true},
+	}
+	entries := []struct {
+		name string
+		post func(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder
+	}{
+		{name: "handler only", post: func(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder {
+			t.Helper()
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			rec.Header().Set(gatewayRateLimitHeader, "1")
+			if err := NewHandler(mock, nil, nil, nil).ChatCompletion(e.NewContext(req, rec)); err != nil {
+				t.Fatalf("handler returned error: %v", err)
+			}
+			return rec
+		}},
+		{name: "middleware stack", post: func(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder {
+			t.Helper()
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			rec.Header().Set(gatewayRateLimitHeader, "1")
+			New(mock, &Config{}).ServeHTTP(rec, req)
+			return rec
+		}},
+	}
+
+	for _, entry := range entries {
+		for _, tt := range tests {
+			t.Run(entry.name+"/"+tt.name, func(t *testing.T) {
+				mock := fastPathJSONMock(tt.upstream)
+				if tt.stream {
+					mock.passthroughResponse.Headers["Content-Type"] = []string{"text/event-stream"}
+				}
+				mock.passthroughResponse.Headers["x-ratelimit-limit-requests"] = []string{"5000"}
+				mock.passthroughResponse.Headers[gatewayRateLimitHeader] = []string{"2000000"}
+				mock.passthroughResponse.Headers["X-Upstream-Trace"] = []string{"abc"}
+				rec := entry.post(t, mock, tt.body)
+
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+				}
+				if mock.lastPassthroughReq == nil {
+					t.Fatal("request did not take the fast path")
+				}
+				if got := rec.Header().Values(gatewayRateLimitHeader); len(got) != 1 || got[0] != "1" {
+					t.Fatalf("%s = %v, want the gateway's [1]", gatewayRateLimitHeader, got)
+				}
+				if got := rec.Header().Values("X-Ratelimit-Limit-Requests"); len(got) != 0 {
+					t.Fatalf("upstream X-Ratelimit-Limit-Requests relayed: %v", got)
+				}
+				if got := rec.Header().Get("X-Upstream-Trace"); got != "abc" {
+					t.Fatalf("X-Upstream-Trace = %q, want abc", got)
+				}
+				if tt.stream && rec.Body.String() != streamData {
+					t.Fatalf("stream body = %q, want %q", rec.Body.String(), streamData)
+				}
+			})
+		}
+	}
+}
+
 func TestChatCompletion_FastPathSkippedWhenRawModelIsNotCanonical(t *testing.T) {
 	tests := []struct {
 		name string
