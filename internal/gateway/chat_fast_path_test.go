@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 func TestTranslatedSelectorRewriteRequired(t *testing.T) {
@@ -87,10 +88,15 @@ func TestCanFastPathChatPassthrough(t *testing.T) {
 		providerHint string
 		req          *core.ChatRequest
 		planApplies  bool
+		enforceUsage bool
 		want         bool
 	}{
 		{name: "non-streaming openai", providerType: "openai", req: prepared("openai", false), want: true},
 		{name: "streaming openai", providerType: "openai", req: prepared("openai", true), want: true},
+		// Usage enforcement only injects stream_options into streaming
+		// requests; a non-streaming JSON response always carries usage.
+		{name: "non-streaming openai with enforced usage", providerType: "openai", req: prepared("openai", false), enforceUsage: true, want: true},
+		{name: "streaming openai with enforced usage", providerType: "openai", req: prepared("openai", true), enforceUsage: true},
 		{name: "azure", providerType: "azure", req: prepared("azure", false), want: true},
 		{name: "anthropic never proxied", providerType: "anthropic", req: prepared("anthropic", false)},
 		{name: "planner would apply", providerType: "openai", req: prepared("openai", false), planApplies: true},
@@ -100,7 +106,11 @@ func TestCanFastPathChatPassthrough(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			o := NewInferenceOrchestrator(InferenceConfig{Provider: planningProvider{applies: tt.planApplies}})
+			cfg := InferenceConfig{Provider: planningProvider{applies: tt.planApplies}}
+			if tt.enforceUsage {
+				cfg.UsageLogger = &usageCaptureLogger{config: usage.Config{Enabled: true, EnforceReturningUsageData: true}}
+			}
+			o := NewInferenceOrchestrator(cfg)
 			if got := o.CanFastPathChatPassthrough(workflow(tt.providerType, tt.providerHint), tt.req); got != tt.want {
 				t.Fatalf("CanFastPathChatPassthrough() = %v, want %v", got, tt.want)
 			}

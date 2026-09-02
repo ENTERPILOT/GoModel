@@ -557,14 +557,43 @@ func (s *translatedInferenceService) tryFastPathChatPassthrough(c *echo.Context,
 // wrote it equals the model the upstream must receive. The gateway gate compares
 // normalized selectors, but the fast path forwards the body untouched, so a
 // padded or otherwise non-canonical raw value must take the translated path.
+// The raw value survives only in the buffered body: by dispatch time both the
+// decoded request and the whitebox route hints already carry the resolved
+// model (see storeRequestModelResolution).
+//
+// Every top-level "model" member is checked, not just the first: a body may
+// repeat the member, and the decoder keeps the last value while a provider's
+// parser may keep another, so the request is only forwarded verbatim when all
+// of them already carry the upstream model.
 func rawRequestModelMatches(c *echo.Context, resolvedModel string) bool {
-	if env := core.GetWhiteBoxPrompt(c.Request().Context()); env != nil {
-		return env.JSONBodyParsed && env.RouteHints.Model == resolvedModel
+	body, ok := bufferedRequestBody(c)
+	if !ok {
+		return false
 	}
-	// Without ingress capture (the handler is being used outside the
-	// middleware stack) fall back to the buffered body the decode step read.
+	seen, matched := false, true
+	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
+		if key.Str != "model" {
+			return true
+		}
+		seen = true
+		matched = value.Type == gjson.String && value.Str == resolvedModel
+		return matched
+	})
+	return seen && matched
+}
+
+// bufferedRequestBody returns the request body the decode step already
+// buffered. With a request snapshot that is the captured view (no copy); a
+// body too large to capture reports false instead of re-reading and
+// re-snapshotting the request. Without a snapshot (the handler is being used
+// outside the middleware stack) the rewound request body is read.
+func bufferedRequestBody(c *echo.Context) ([]byte, bool) {
+	if snapshot := core.GetRequestSnapshot(c.Request().Context()); snapshot != nil {
+		body := snapshot.CapturedBodyView()
+		return body, body != nil
+	}
 	body, err := requestBodyBytes(c)
-	return err == nil && gjson.GetBytes(body, "model").Str == resolvedModel
+	return body, err == nil
 }
 
 // bodyValidatorHeaders are response headers derived from the body bytes; they

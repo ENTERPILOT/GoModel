@@ -182,8 +182,10 @@ type chatCachePlanner interface {
 // CanFastPathChatPassthrough reports whether a chat request, streaming or not,
 // can bypass translation and be proxied to the provider byte for byte. It
 // declines whenever the translated path would change the outbound request:
-// slowdown, request patching, enforced usage, selector or body rewrites, and
-// prompt-cache planning.
+// slowdown, request patching, selector or body rewrites, prompt-cache planning,
+// and enforced usage data. Enforcement only rewrites streaming requests (it
+// injects stream_options.include_usage); a non-streaming JSON response always
+// carries usage, so it does not block the fast path.
 func (o *InferenceOrchestrator) CanFastPathChatPassthrough(workflow *core.Workflow, req *core.ChatRequest) bool {
 	if req == nil {
 		return false
@@ -191,7 +193,10 @@ func (o *InferenceOrchestrator) CanFastPathChatPassthrough(workflow *core.Workfl
 	if workflowSlowdown(workflow) > 0 {
 		return false
 	}
-	if o.translatedRequestPatcher != nil || o.ShouldEnforceReturningUsageData() {
+	if o.translatedRequestPatcher != nil {
+		return false
+	}
+	if req.Stream && o.ShouldEnforceReturningUsageData() {
 		return false
 	}
 	if workflow == nil || workflow.Resolution == nil {

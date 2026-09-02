@@ -52,6 +52,33 @@ func postChatCompletion(t *testing.T, handler *Handler, body string) *httptest.R
 	return rec
 }
 
+// postChatCompletionThroughStack sends the request through the full server
+// middleware stack (request snapshot, whitebox ingress capture, workflow
+// resolution) the way production requests arrive, instead of calling the
+// handler directly.
+func postChatCompletionThroughStack(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	New(mock, &Config{}).ServeHTTP(rec, req)
+	return rec
+}
+
+// chatEntryPoints lists the two ways a chat request reaches the handler in
+// tests: the bare handler (no ingress capture, so the buffered body is the
+// only raw-model source) and the full middleware stack (whitebox hints
+// present, and already overwritten with the resolved model by dispatch time).
+var chatEntryPoints = []struct {
+	name string
+	post func(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder
+}{
+	{name: "handler only", post: func(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder {
+		return postChatCompletion(t, NewHandler(mock, nil, nil, nil), body)
+	}},
+	{name: "middleware stack", post: postChatCompletionThroughStack},
+}
+
 func TestChatCompletion_FastPathProxiesNonStreamingBodyVerbatim(t *testing.T) {
 	mock := fastPathJSONMock(fastPathUpstreamBody)
 	rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), fastPathChatRequestBody)
@@ -100,6 +127,48 @@ func TestChatCompletion_FastPathLogsUsageFromJSONBody(t *testing.T) {
 	}
 	if entry.ProviderName != "openai_test" {
 		t.Fatalf("ProviderName = %q, want openai_test", entry.ProviderName)
+	}
+}
+
+// TestChatCompletion_FastPathWithEnforcedUsageData covers the default
+// configuration: usage tracking on with ENFORCE_RETURNING_USAGE_DATA=true.
+// Enforcement only rewrites streaming requests (stream_options.include_usage),
+// so a non-streaming request still takes the fast path and records usage from
+// the JSON body, while a streaming request stays on the translated path.
+func TestChatCompletion_FastPathWithEnforcedUsageData(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantFastPath bool
+	}{
+		{name: "non-streaming takes the fast path", body: fastPathChatRequestBody, wantFastPath: true},
+		{name: "streaming stays translated", body: `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usageLog := &collectingUsageLogger{config: usage.Config{Enabled: true, EnforceReturningUsageData: true}}
+			mock := fastPathJSONMock(fastPathUpstreamBody)
+			rec := postChatCompletion(t, NewHandler(mock, nil, usageLog, nil), tt.body)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if got := mock.lastPassthroughReq != nil; got != tt.wantFastPath {
+				t.Fatalf("fast path taken = %v, want %v", got, tt.wantFastPath)
+			}
+			if !tt.wantFastPath {
+				if !strings.Contains(rec.Body.String(), `"typed"`) {
+					t.Fatalf("body = %s, want the translated provider response", rec.Body.String())
+				}
+				return
+			}
+			if len(usageLog.entries) != 1 {
+				t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
+			}
+			if entry := usageLog.entries[0]; entry.InputTokens != 7 || entry.OutputTokens != 3 {
+				t.Fatalf("usage tokens = %d/%d, want 7/3", entry.InputTokens, entry.OutputTokens)
+			}
+		})
 	}
 }
 
@@ -154,17 +223,33 @@ func TestChatCompletionStreaming_FastPathRelaysSSEWhenNoPlanApplies(t *testing.T
 }
 
 func TestChatCompletion_FastPathSkippedWhenRawModelIsNotCanonical(t *testing.T) {
-	mock := fastPathJSONMock(fastPathUpstreamBody)
-	rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), `{"model":" gpt-4o-mini ","messages":[{"role":"user","content":"Hi"}]}`)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "padded model", body: `{"model":" gpt-4o-mini ","messages":[{"role":"user","content":"Hi"}]}`},
+		// The decoder keeps the last duplicate member, so the resolved model is
+		// canonical, while a parser that keeps the first would see the same;
+		// only the padded copy is what a last-wins upstream would receive.
+		{name: "duplicate model members", body: `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}],"model":" gpt-4o-mini "}`},
+	}
+	for _, entry := range chatEntryPoints {
+		for _, tt := range tests {
+			t.Run(entry.name+"/"+tt.name, func(t *testing.T) {
+				mock := fastPathJSONMock(fastPathUpstreamBody)
+				rec := entry.post(t, mock, tt.body)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if mock.lastPassthroughReq != nil {
-		t.Fatal("padded model took the fast path; the upstream would have received it unnormalized")
-	}
-	if mock.chatCompletionCalls != 1 {
-		t.Fatalf("ChatCompletion calls = %d, want 1", mock.chatCompletionCalls)
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+				}
+				if mock.lastPassthroughReq != nil {
+					t.Fatal("non-canonical model took the fast path; the upstream would have received it unnormalized")
+				}
+				if mock.chatCompletionCalls != 1 {
+					t.Fatalf("ChatCompletion calls = %d, want 1", mock.chatCompletionCalls)
+				}
+			})
+		}
 	}
 }
 
@@ -176,22 +261,24 @@ func TestChatCompletion_FastPathSkippedWhenPlannerApplies(t *testing.T) {
 		{name: "non-streaming", body: fastPathChatRequestBody},
 		{name: "streaming", body: `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mock := fastPathJSONMock(fastPathUpstreamBody)
-			mock.promptCachePlanApplies = true
-			rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), tt.body)
+	for _, entry := range chatEntryPoints {
+		for _, tt := range tests {
+			t.Run(entry.name+"/"+tt.name, func(t *testing.T) {
+				mock := fastPathJSONMock(fastPathUpstreamBody)
+				mock.promptCachePlanApplies = true
+				rec := entry.post(t, mock, tt.body)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			if mock.lastPassthroughReq != nil {
-				t.Fatal("request took the passthrough fast path although the cache planner applies")
-			}
-			if !strings.Contains(rec.Body.String(), `"typed"`) {
-				t.Fatalf("body = %s, want the translated provider response", rec.Body.String())
-			}
-		})
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+				}
+				if mock.lastPassthroughReq != nil {
+					t.Fatal("request took the passthrough fast path although the cache planner applies")
+				}
+				if !strings.Contains(rec.Body.String(), `"typed"`) {
+					t.Fatalf("body = %s, want the translated provider response", rec.Body.String())
+				}
+			})
+		}
 	}
 }
 
@@ -304,17 +391,19 @@ func TestChatCompletion_FastPathFiresThroughMiddlewareStack(t *testing.T) {
 }
 
 // BenchmarkChatCompletionNonStreaming compares the translated path (forced by
-// enforced usage data, which the fast path declines) against the passthrough
-// fast path for a ~30 KB request and ~30 KB response through a real router
-// and OpenAI provider talking to an in-process upstream.
+// a provider-qualified model, which the fast path declines) against the
+// passthrough fast path for a ~30 KB request and ~30 KB response through a
+// real router and OpenAI provider talking to an in-process upstream.
 func BenchmarkChatCompletionNonStreaming(b *testing.B) {
 	content := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 660) // ~30 KB
-	requestBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"` + content + `"}]}`
+	requestBody := func(model string) string {
+		return `{"model":"` + model + `","messages":[{"role":"user","content":"` + content + `"}]}`
+	}
 	responseBody := `{"id":"chatcmpl-bench","object":"chat.completion","model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"` + content + `"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7000,"completion_tokens":7000,"total_tokens":14000}}`
 	router := newOpenAIRouter(b, responseBody)
 
-	run := func(b *testing.B, usageCfg usage.Config) {
-		handler := NewHandler(router, nil, &collectingUsageLogger{config: usageCfg}, nil)
+	run := func(b *testing.B, requestBody string) {
+		handler := NewHandler(router, nil, &collectingUsageLogger{config: usage.Config{Enabled: true, EnforceReturningUsageData: true}}, nil)
 		e := echo.New()
 		b.ReportAllocs()
 		b.ResetTimer()
@@ -331,9 +420,9 @@ func BenchmarkChatCompletionNonStreaming(b *testing.B) {
 		}
 	}
 	b.Run("translated", func(b *testing.B) {
-		run(b, usage.Config{Enabled: true, EnforceReturningUsageData: true})
+		run(b, requestBody("openai/gpt-4o-mini"))
 	})
 	b.Run("fast_path", func(b *testing.B) {
-		run(b, usage.Config{Enabled: true})
+		run(b, requestBody("gpt-4o-mini"))
 	})
 }
