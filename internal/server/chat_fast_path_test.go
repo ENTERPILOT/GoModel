@@ -52,6 +52,33 @@ func postChatCompletion(t *testing.T, handler *Handler, body string) *httptest.R
 	return rec
 }
 
+// postChatCompletionThroughStack sends the request through the full server
+// middleware stack (request snapshot, whitebox ingress capture, workflow
+// resolution) the way production requests arrive, instead of calling the
+// handler directly.
+func postChatCompletionThroughStack(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	New(mock, &Config{}).ServeHTTP(rec, req)
+	return rec
+}
+
+// chatEntryPoints lists the two ways a chat request reaches the handler in
+// tests: the bare handler (no ingress capture, so the buffered body is the
+// only raw-model source) and the full middleware stack (whitebox hints
+// present, and already overwritten with the resolved model by dispatch time).
+var chatEntryPoints = []struct {
+	name string
+	post func(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder
+}{
+	{name: "handler only", post: func(t *testing.T, mock *mockProvider, body string) *httptest.ResponseRecorder {
+		return postChatCompletion(t, NewHandler(mock, nil, nil, nil), body)
+	}},
+	{name: "middleware stack", post: postChatCompletionThroughStack},
+}
+
 func TestChatCompletion_FastPathProxiesNonStreamingBodyVerbatim(t *testing.T) {
 	mock := fastPathJSONMock(fastPathUpstreamBody)
 	rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), fastPathChatRequestBody)
@@ -154,17 +181,21 @@ func TestChatCompletionStreaming_FastPathRelaysSSEWhenNoPlanApplies(t *testing.T
 }
 
 func TestChatCompletion_FastPathSkippedWhenRawModelIsNotCanonical(t *testing.T) {
-	mock := fastPathJSONMock(fastPathUpstreamBody)
-	rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), `{"model":" gpt-4o-mini ","messages":[{"role":"user","content":"Hi"}]}`)
+	for _, entry := range chatEntryPoints {
+		t.Run(entry.name, func(t *testing.T) {
+			mock := fastPathJSONMock(fastPathUpstreamBody)
+			rec := entry.post(t, mock, `{"model":" gpt-4o-mini ","messages":[{"role":"user","content":"Hi"}]}`)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if mock.lastPassthroughReq != nil {
-		t.Fatal("padded model took the fast path; the upstream would have received it unnormalized")
-	}
-	if mock.chatCompletionCalls != 1 {
-		t.Fatalf("ChatCompletion calls = %d, want 1", mock.chatCompletionCalls)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if mock.lastPassthroughReq != nil {
+				t.Fatal("padded model took the fast path; the upstream would have received it unnormalized")
+			}
+			if mock.chatCompletionCalls != 1 {
+				t.Fatalf("ChatCompletion calls = %d, want 1", mock.chatCompletionCalls)
+			}
+		})
 	}
 }
 
@@ -176,22 +207,24 @@ func TestChatCompletion_FastPathSkippedWhenPlannerApplies(t *testing.T) {
 		{name: "non-streaming", body: fastPathChatRequestBody},
 		{name: "streaming", body: `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mock := fastPathJSONMock(fastPathUpstreamBody)
-			mock.promptCachePlanApplies = true
-			rec := postChatCompletion(t, NewHandler(mock, nil, nil, nil), tt.body)
+	for _, entry := range chatEntryPoints {
+		for _, tt := range tests {
+			t.Run(entry.name+"/"+tt.name, func(t *testing.T) {
+				mock := fastPathJSONMock(fastPathUpstreamBody)
+				mock.promptCachePlanApplies = true
+				rec := entry.post(t, mock, tt.body)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			if mock.lastPassthroughReq != nil {
-				t.Fatal("request took the passthrough fast path although the cache planner applies")
-			}
-			if !strings.Contains(rec.Body.String(), `"typed"`) {
-				t.Fatalf("body = %s, want the translated provider response", rec.Body.String())
-			}
-		})
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+				}
+				if mock.lastPassthroughReq != nil {
+					t.Fatal("request took the passthrough fast path although the cache planner applies")
+				}
+				if !strings.Contains(rec.Body.String(), `"typed"`) {
+					t.Fatalf("body = %s, want the translated provider response", rec.Body.String())
+				}
+			})
+		}
 	}
 }
 
