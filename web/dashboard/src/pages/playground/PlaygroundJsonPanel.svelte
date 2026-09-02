@@ -110,6 +110,24 @@
     };
   });
 
+  // On a phone the open panel hides the whole page, so it must be a
+  // deliberate act each time: leaving the Playground or shrinking an open
+  // desktop panel into the phone tier closes it. The in-memory state is
+  // reset without touching the stored desktop preference.
+  $effect(() => {
+    const phoneViewport = window.matchMedia(
+      "(max-width: " + JSON_PANEL_FULLSCREEN_MAX_VIEWPORT + "px)",
+    );
+    const closeOnShrink = (event) => {
+      if (event.matches) store.panelOpen = false;
+    };
+    phoneViewport.addEventListener("change", closeOnShrink);
+    return () => {
+      phoneViewport.removeEventListener("change", closeOnShrink);
+      if (phoneViewport.matches) store.panelOpen = false;
+    };
+  });
+
   $effect(() => {
     if (!coversViewport) return;
     const shellElements = [
