@@ -459,7 +459,6 @@
   "settings_timezone_override": "Timezone Override",
   "settings_timezone_automatic": "Automatic ({timezone})",
   "settings_timezone_use_browser": "Use Browser Timezone",
-  "settings_failover_title": "Failover",
   "settings_failover_generating": "Generating…",
   "settings_failover_generate": "Generate failover models automatically",
   "settings_failover_remove_all": "Remove all failover models",
