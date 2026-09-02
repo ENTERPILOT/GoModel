@@ -259,6 +259,7 @@
         bottom: 0;
         border-radius: var(--radius) var(--radius) 0 0;
         max-height: 80vh;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
         overflow-y: auto;
       }
 
@@ -270,6 +271,11 @@
         border-right: none;
         border-bottom: 1px solid var(--border);
         min-width: 0;
+      }
+
+    .preset-btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
       }
 
     .date-picker-calendars {

@@ -4,16 +4,6 @@
       display: none;
     }
 
-  .content {
-      width: 100%;
-      margin: 0 auto;
-      padding: 20px;
-    }
-
-  .auth-dialog {
-      padding: 18px;
-    }
-
   .auth-dialog-actions {
       flex-direction: column-reverse;
     }
@@ -109,10 +99,6 @@
       width: 100%;
     }
 
-  .model-editor {
-      padding: 16px;
-    }
-
   .alias-actions-cell, .editor-header {
       flex-direction: column;
       align-items: flex-start;
@@ -143,6 +129,17 @@
       flex-basis: 32px;
     }
 
+  /* The toggle keeps its aria-label; the visible text is dropped so the
+     pinned actions column covers as little of the row as possible. */
+  .model-list-actions .alias-toggle {
+      gap: 0;
+      padding: 6px;
+    }
+
+  .model-list-actions .alias-toggle > span:not(.alias-toggle-track) {
+      display: none;
+    }
+
   .model-editor .editor-header {
       flex-direction: row;
       align-items: flex-start;
@@ -160,15 +157,19 @@
       align-self: flex-start;
     }
 
-  .settings-panel {
-      padding: 18px;
-    }
-
   .budget-settings-actions {
       width: 100%;
     }
 
   .budget-settings-actions .btn {
       width: 100%;
+    }
+}
+
+/* Phones: two summary cards side by side cannot fit a token sum or a gauge,
+   so they stack. */
+@media (max-width: 520px) {
+  .cards {
+      grid-template-columns: 1fr;
     }
 }

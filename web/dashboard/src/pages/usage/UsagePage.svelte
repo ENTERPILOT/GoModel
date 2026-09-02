@@ -91,8 +91,8 @@
   .usage-charts-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 24px;
-    margin-bottom: 24px;
+    gap: var(--space-stack);
+    margin-bottom: var(--space-stack);
   }
 
   .usage-charts-grid :global(.model-chart-section) {
@@ -102,7 +102,7 @@
   }
 
   .usage-session-breakdown-wrap {
-    margin-bottom: 24px;
+    margin-bottom: var(--space-stack);
   }
 
   .usage-session-breakdown-wrap :global(.session-usage-breakdown) {
@@ -110,8 +110,11 @@
     margin-bottom: 0;
   }
 
-  @media (max-width: 520px) {
+  /* Mobile: one chart per row. Two 130px-wide charts leave no room for a
+     title, the view toggle, or the axis labels. */
+  @media (max-width: 768px) {
     .usage-charts-grid :global(.model-chart-section) {
+        flex: 1 1 100%;
         min-width: 0;
       }
   }

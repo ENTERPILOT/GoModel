@@ -16,9 +16,11 @@
   import { conversationDrawer } from "./conversationDrawer.svelte.js";
   import { conversationRequestStepID } from "./conversation-helpers.js";
   import {
+    CONVERSATION_FULLSCREEN_MAX_VIEWPORT,
     DEFAULT_CONVERSATION_PANEL_WIDTH,
     clampConversationPanelWidth,
     conversationMessageNavigationTarget,
+    conversationOpensFullscreen,
     conversationPanelBounds,
     conversationPanelWidthFromPointer,
   } from "./conversation-panel.js";
@@ -171,22 +173,45 @@
     if (sidebarEl) sidebarObserver.observe(sidebarEl);
     const onKeydown = (event) => {
       if (event.key === "Escape" && !modals.anyOpen) {
-        if (fullscreen) void setFullscreen(false);
-        else drawer.closeConversation();
+        // On a phone-width viewport the split layout is not usable, so
+        // Escape closes the drawer instead of shrinking it.
+        if (fullscreen && !conversationOpensFullscreen(window.innerWidth)) {
+          void setFullscreen(false);
+        } else {
+          drawer.closeConversation();
+        }
       }
     };
+    // Shrinking an open drawer below the phone breakpoint (a window resize,
+    // a device rotation) switches to fullscreen the same way opening there
+    // does. Growing back leaves the operator's choice alone.
+    const phoneViewport = window.matchMedia(
+      "(max-width: " + CONVERSATION_FULLSCREEN_MAX_VIEWPORT + "px)",
+    );
+    const onPhoneViewportChange = (event) => {
+      if (event.matches) fullscreen = true;
+    };
+    phoneViewport.addEventListener("change", onPhoneViewportChange);
     window.addEventListener("keydown", onKeydown);
     window.addEventListener("resize", syncPanelWidth);
     return () => {
       finishResize({});
       sidebarObserver.disconnect();
+      phoneViewport.removeEventListener("change", onPhoneViewportChange);
       window.removeEventListener("keydown", onKeydown);
       window.removeEventListener("resize", syncPanelWidth);
     };
   });
 
   $effect(() => {
-    if (!drawer.conversationOpen) fullscreen = false;
+    if (!drawer.conversationOpen) {
+      fullscreen = false;
+      return;
+    }
+    // A phone-width viewport cannot fit the audit list beside the drawer, so
+    // open straight into fullscreen there. The header toggle still lets the
+    // operator drop back to the split layout.
+    if (conversationOpensFullscreen(window.innerWidth)) fullscreen = true;
   });
 
   $effect(() => {
@@ -200,12 +225,26 @@
       element.inert = true;
       element.setAttribute("aria-hidden", "true");
     });
+    // Entering fullscreen re-renders the drawer (the keyed block above) and
+    // makes the page behind it inert, so focus must move into the dialog
+    // explicitly; otherwise it stays on an inert list control. The keyed
+    // swap binds the new close button after this effect runs.
+    const previousFocusEl =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    requestAnimationFrame(() => {
+      if (fullscreen) drawer.conversationCloseBtnEl?.focus();
+    });
     return () => {
       shellElements.forEach(({ element, inert, ariaHidden }) => {
         element.inert = inert;
         if (ariaHidden === null) element.removeAttribute("aria-hidden");
         else element.setAttribute("aria-hidden", ariaHidden);
       });
+      // Leaving fullscreen while the drawer stays open hands focus back to
+      // where it was; closing the drawer restores focus on its own.
+      if (drawer.conversationOpen && previousFocusEl && document.contains(previousFocusEl)) {
+        previousFocusEl.focus();
+      }
     };
   });
 
@@ -456,6 +495,17 @@
 
   .conversation-drawer-fullscreen .conversation-resize-handle {
     display: none;
+  }
+
+  @media (max-width: 768px) {
+    .conversation-resize-handle {
+      display: none;
+    }
+
+    .conversation-drawer-fullscreen {
+      padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    }
   }
 
   .conversation-resize-handle {

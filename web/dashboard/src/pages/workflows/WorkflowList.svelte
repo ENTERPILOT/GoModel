@@ -35,7 +35,9 @@
 
 .workflow-card-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  /* minmax(0, …) lets a card shrink below its pipeline's natural width so the
+     pipeline row scrolls instead of the whole page. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 </style>

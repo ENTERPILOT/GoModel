@@ -3,8 +3,8 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 24px;
-  margin-bottom: 24px;
+  padding: var(--space-block);
+  margin-bottom: var(--space-stack);
 }
 
 .model-chart-section h3 {
@@ -19,6 +19,15 @@
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+/* Mobile: the title keeps its line and the stats or view toggle drop under
+   it, instead of the title breaking one word per line beside them. */
+@media (max-width: 768px) {
+  .model-chart-header {
+    flex-wrap: wrap;
+    gap: 10px 16px;
+  }
 }
 
 .bar-chart-wrap {

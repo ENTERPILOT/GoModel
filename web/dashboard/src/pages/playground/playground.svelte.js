@@ -18,6 +18,7 @@ import {
   endpointById,
   extractResponseText,
   extractUsage,
+  initialJsonPanelOpen,
   normalizeEndpoint,
   normalizeRole,
   playgroundUserPathHeader,
@@ -50,7 +51,12 @@ class PlaygroundStore {
   // {status, durationMs, streamed, events, usage} summary.
   response = $state(null);
   responseMeta = $state(null);
-  panelOpen = $state(readStored(STORAGE.panel, "true") !== "false");
+  panelOpen = $state(
+    initialJsonPanelOpen(
+      readStored(STORAGE.panel, "true"),
+      typeof window === "undefined" ? Infinity : window.innerWidth,
+    ),
+  );
   panelTab = $state("request");
 
   requestBody = $derived(

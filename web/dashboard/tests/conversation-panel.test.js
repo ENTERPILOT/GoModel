@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   clampConversationPanelWidth,
   conversationMessageNavigationTarget,
+  conversationOpensFullscreen,
   conversationPanelBounds,
   conversationPanelWidthFromPointer,
 } from "../src/pages/audit-logs/conversation-panel.js";
@@ -59,4 +60,12 @@ test("message navigation steps from the message nearest the viewport top", () =>
     index: 3,
     align: "end",
   });
+});
+
+test("the drawer opens fullscreen only on phone-width viewports", () => {
+  assert.equal(conversationOpensFullscreen(390), true);
+  assert.equal(conversationOpensFullscreen(768), true);
+  assert.equal(conversationOpensFullscreen(769), false);
+  assert.equal(conversationOpensFullscreen(1440), false);
+  assert.equal(conversationOpensFullscreen(undefined), true);
 });
