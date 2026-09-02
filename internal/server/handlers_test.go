@@ -464,6 +464,8 @@ type mockProvider struct {
 
 	passthroughResponse     *core.PassthroughResponse
 	passthroughErr          error
+	promptCachePlanApplies  bool
+	chatCompletionCalls     int
 	lastPassthroughProvider string
 	lastPassthroughReq      *core.PassthroughRequest
 
@@ -773,6 +775,7 @@ func (p *providerWithoutResponseLifecycle) GetProviderType(model string) string 
 }
 
 func (m *mockProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+	m.chatCompletionCalls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -823,7 +826,31 @@ func (m *mockProvider) Passthrough(_ context.Context, providerType string, req *
 	if m.passthroughErr != nil {
 		return nil, m.passthroughErr
 	}
-	return m.passthroughResponse, nil
+	if m.passthroughResponse != nil {
+		return m.passthroughResponse, nil
+	}
+	// Tests that only configure the typed chat response still reach the
+	// passthrough fast path; serve the same JSON a real upstream would.
+	if req != nil && !req.Stream && m.response != nil {
+		if m.err != nil {
+			return nil, m.err
+		}
+		body, err := json.Marshal(m.response)
+		if err != nil {
+			return nil, err
+		}
+		return &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    map[string][]string{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+		}, nil
+	}
+	return nil, nil
+}
+
+// PromptCachePlanApplies lets tests steer the fast path's planner exclusion.
+func (m *mockProvider) PromptCachePlanApplies(string, core.ModelSelector, *core.ChatRequest) bool {
+	return m.promptCachePlanApplies
 }
 
 func (m *mockProvider) GetResponse(_ context.Context, providerType, id string, _ core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
