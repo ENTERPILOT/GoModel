@@ -70,7 +70,7 @@ depends on whether the model supports **adaptive thinking**.
 
 | Model generation | Thinking config | Effort destination |
 | ---------------- | --------------- | ------------------ |
-| Adaptive — `claude-fable-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (and dated snapshots of each) | `thinking: {type: "adaptive"}` | `output_config.effort` (passed through) |
+| Adaptive — `claude-fable-5`, `claude-fable-5-1`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` (and dated snapshots of each) | `thinking: {type: "adaptive"}` | `output_config.effort` (passed through) |
 | Legacy (everything else, e.g. `claude-opus-4-5`, `claude-3-5-sonnet`) | `thinking: {type: "enabled", budget_tokens: N}` | mapped to a token budget |
 
 <Note>
@@ -103,16 +103,52 @@ so on legacy models they are capped at the `high` budget rather than inflating
 </Note>
 
 <Note>
-  Effort levels are model-gated upstream: `xhigh` is only available on Fable 5
-  and Opus 4.8/4.7, and `max` on Fable 5, Opus 4.8/4.7/4.6, and Sonnet 4.6.
-  GoModel forwards the level you send; Anthropic rejects it with a 400 if the
-  target model does not support it. Manual `budget_tokens` thinking is rejected
-  on Fable 5 and Opus 4.7/4.8, which is why GoModel uses adaptive thinking for
-  those models.
+  Effort levels are model-gated upstream: `xhigh` is available on Fable 5/5.1,
+  Opus 5, Sonnet 5, and Opus 4.8/4.7; `max` on those plus Opus 4.6 and
+  Sonnet 4.6. GoModel forwards the level you send; Anthropic rejects it with a
+  400 if the target model does not support it. Manual `budget_tokens` thinking
+  is rejected from Opus 4.7 onward, which is why GoModel uses adaptive thinking
+  for those models.
 </Note>
 
-When extended thinking is engaged, Anthropic requires `temperature = 1`. GoModel
-drops any other temperature value (and logs it) rather than failing the request.
+<Note>
+  On Fable 5.1 (and Mythos 5.1) thinking is always on, whether or not you send
+  `reasoning`. The tokens it spends are reported as
+  `usage.completion_reasoning_tokens` in Chat Completions responses. The
+  reasoning text itself is not returned; only the token count is.
+</Note>
+
+## Sampling parameters
+
+Anthropic removed `temperature` and `top_p` from Fable 5/5.1, Mythos 5/5.1,
+Opus 5, Sonnet 5, and Opus 4.8/4.7 — any value, including the OpenAI SDK
+default of `temperature: 1`, is rejected upstream with a 400. GoModel drops
+both fields for those models and logs the discarded values, so clients that
+always send a temperature keep working. Older models still receive them as
+sent.
+
+Independently of the model, when extended thinking is engaged Anthropic
+requires `temperature = 1`. GoModel drops any other temperature value (and logs
+it) rather than failing the request.
+
+## Forced tool choice on Fable 5.1
+
+Fable 5.1 and Mythos 5.1 accept only `tool_choice: "auto"` and `"none"`;
+forcing a call with `"required"` or `{"type": "function", ...}` returns a 400
+from Anthropic. GoModel follows Anthropic's documented replacement: the choice
+is downgraded to `auto` and an instruction is appended to the system prompt —
+"You must respond by calling one of the provided tools." for `required`, or
+"You must respond by calling the tool named `<name>`." for a named function.
+The downgrade is logged. `parallel_tool_calls: false` is still honored. Fable 5
+and every other Claude model keep forced tool use unchanged.
+
+<Warning>
+  The instruction is strong guidance, not a hard guarantee: the model can still
+  answer in text. If you relied on forced tool choice to obtain JSON, check
+  `finish_reason` and retry, or use the
+  [native passthrough](#native-passthrough) with Anthropic's structured
+  outputs instead.
+</Warning>
 
 ## Native passthrough
 

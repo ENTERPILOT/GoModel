@@ -271,7 +271,43 @@ var adaptiveThinkingPrefixes = []string{
 }
 
 func isAdaptiveThinkingModel(model string) bool {
-	for _, prefix := range adaptiveThinkingPrefixes {
+	return matchesModelPrefix(model, adaptiveThinkingPrefixes)
+}
+
+// samplingRejectedPrefixes lists the model families that removed the
+// temperature and top_p sampling parameters. Anthropic rejects a request that
+// carries either of them with a 400 ("`temperature` is deprecated for this
+// model"), regardless of the value, so GoModel drops them instead of failing.
+var samplingRejectedPrefixes = []string{
+	"claude-fable-5",
+	"claude-mythos-5",
+	"claude-opus-5",
+	"claude-sonnet-5",
+	"claude-opus-4-8",
+	"claude-opus-4-7",
+}
+
+func rejectsSamplingParameters(model string) bool {
+	return matchesModelPrefix(model, samplingRejectedPrefixes)
+}
+
+// forcedToolChoiceRejectedPrefixes lists the models that no longer accept
+// tool_choice type "any" or "tool" (only "auto" and "none" remain). Fable 5.1
+// introduced the restriction; Fable 5 still honors forced tool use.
+var forcedToolChoiceRejectedPrefixes = []string{
+	"claude-fable-5-1",
+	"claude-mythos-5-1",
+}
+
+func rejectsForcedToolChoice(model string) bool {
+	return matchesModelPrefix(model, forcedToolChoiceRejectedPrefixes)
+}
+
+// matchesModelPrefix reports whether model is one of the prefixes exactly or a
+// dated snapshot of one ("<prefix>-YYYYMMDD"). The trailing dash keeps
+// "claude-opus-4-6" from matching "claude-opus-4-65".
+func matchesModelPrefix(model string, prefixes []string) bool {
+	for _, prefix := range prefixes {
 		if model == prefix || strings.HasPrefix(model, prefix+"-") {
 			return true
 		}
