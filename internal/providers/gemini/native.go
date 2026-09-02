@@ -677,10 +677,35 @@ func thinkingConfigForEffort(model, effort string) map[string]any {
 			return nil
 		}
 	}
-	if effort == "none" {
-		effort = "minimal"
+	if effort == "none" || effort == "minimal" {
+		if supportsMinimalThinking(model) {
+			effort = "minimal"
+		} else {
+			effort = "low"
+		}
 	}
 	return map[string]any{"thinkingLevel": effort}
+}
+
+// supportsMinimalThinking reports whether the model accepts the "minimal"
+// thinkingLevel. Gemini 3 Pro models never had it, and Gemini 3.7 and 3.8
+// Flash dropped it; Google answers HTTP 400 for those, so the lowest accepted
+// level ("low") is sent instead. Thinking cannot be turned off on Gemini 3,
+// so "none" is clamped the same way. A family matches only as a whole
+// dash-delimited prefix of the model ID (after any "publisher/" prefix), so
+// "gemini-3.8-flash-cyber" matches while "gemini-3.8-pro-preview" or
+// "gemini-3.70-flash" do not.
+func supportsMinimalThinking(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+	for _, family := range [...]string{"gemini-3-pro", "gemini-3.1-pro", "gemini-3.7-flash", "gemini-3.8-flash"} {
+		if rest, ok := strings.CutPrefix(model, family); ok && (rest == "" || rest[0] == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func geminiSafetySettings(req *core.ChatRequest) []map[string]any {
