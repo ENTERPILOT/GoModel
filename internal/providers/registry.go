@@ -397,25 +397,35 @@ func (r *ModelRegistry) UnregisterProvider(providerName string) {
 	r.invalidateSortedCaches()
 }
 
+// lookupLocked resolves a model selector to its registry entry. Qualified
+// selectors ("<provider>/<model>") are looked up under the configured provider
+// name first; a qualified selector naming a configured provider that does not
+// serve the model is a definitive miss. Otherwise the slash may be part of the
+// model ID itself (e.g. "meta-llama/Meta-Llama-3-70B"), so the raw selector is
+// tried against the global map. Callers must hold r.mu.
+func (r *ModelRegistry) lookupLocked(model string) (*ModelInfo, bool) {
+	providerName, modelID := splitModelSelector(model)
+	if providerName != "" {
+		if providerModels, ok := r.modelsByProvider[providerName]; ok {
+			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
+				return info, true
+			}
+		}
+		if r.hasConfiguredProviderNameLocked(providerName) {
+			return nil, false
+		}
+	}
+
+	info, ok := r.models[model]
+	return info, ok
+}
+
 // GetProvider returns the provider for the given model, or nil if not found
 func (r *ModelRegistry) GetProvider(model string) core.Provider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return info.Provider
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return nil
-		}
-		// Fall through: the slash may be part of the model ID (e.g. "meta-llama/Meta-Llama-3-70B")
-	}
-
-	if info, ok := r.models[model]; ok {
+	if info, ok := r.lookupLocked(model); ok {
 		return info.Provider
 	}
 	return nil
@@ -427,20 +437,7 @@ func (r *ModelRegistry) GetModel(model string) *ModelInfo {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return info
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return nil
-		}
-		// Fall through: the slash may be part of the model ID
-	}
-
-	if info, ok := r.models[model]; ok {
+	if info, ok := r.lookupLocked(model); ok {
 		return info
 	}
 	return nil
@@ -452,21 +449,7 @@ func (r *ModelRegistry) LookupModel(model string) (*core.Model, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				cloned := info.Model
-				return &cloned, true
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return nil, false
-		}
-		// Fall through: the slash may be part of the model ID
-	}
-
-	if info, ok := r.models[model]; ok {
+	if info, ok := r.lookupLocked(model); ok {
 		cloned := info.Model
 		return &cloned, true
 	}
@@ -676,20 +659,7 @@ func (r *ModelRegistry) GetProviderType(model string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return info.ProviderType
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return ""
-		}
-		// Fall through: the slash may be part of the model ID
-	}
-
-	if info, ok := r.models[model]; ok {
+	if info, ok := r.lookupLocked(model); ok {
 		return info.ProviderType
 	}
 	return ""
@@ -701,19 +671,7 @@ func (r *ModelRegistry) GetProviderName(model string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	providerName, modelID := splitModelSelector(model)
-	if providerName != "" {
-		if providerModels, ok := r.modelsByProvider[providerName]; ok {
-			if info, exists := providerModelInfo(providerModels, modelID, model); exists {
-				return strings.TrimSpace(info.ProviderName)
-			}
-		}
-		if r.hasConfiguredProviderNameLocked(providerName) {
-			return ""
-		}
-	}
-
-	if info, ok := r.models[model]; ok {
+	if info, ok := r.lookupLocked(model); ok {
 		return strings.TrimSpace(info.ProviderName)
 	}
 	return ""

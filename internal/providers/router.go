@@ -68,6 +68,13 @@ type qualifiedSelectorResolver interface {
 	ResolveProviderSelector(segment, modelID string) (core.ModelSelector, bool)
 }
 
+// modelInfoLookup is an optional fast path: the registry hands back provider,
+// provider type, and provider name under one lock instead of one lock per
+// accessor. Lookups without it fall back to GetProvider + GetProviderType.
+type modelInfoLookup interface {
+	GetModel(model string) *ModelInfo
+}
+
 type providerModelRefresher interface {
 	RefreshProviderModels(ctx context.Context, providerSelector string) (int, error)
 }
@@ -256,8 +263,34 @@ func (r *Router) hasConfiguredProviderName(providerName string) bool {
 	return false
 }
 
+// resolvedRoute is the outcome of resolving a request's model selector: the
+// provider instance to call, the concrete selector to forward, and the
+// provider type used for response stamping and request planning.
+type resolvedRoute struct {
+	provider     core.Provider
+	selector     core.ModelSelector
+	providerType string
+}
+
+// lookupRoute fetches the provider and provider type for an already-resolved
+// selector, taking the registry lock once when the lookup supports it.
+func (r *Router) lookupRoute(model string) (core.Provider, string) {
+	if infos, ok := r.lookup.(modelInfoLookup); ok {
+		info := infos.GetModel(model)
+		if info == nil || info.Provider == nil {
+			return nil, ""
+		}
+		return info.Provider, info.ProviderType
+	}
+	p := r.lookup.GetProvider(model)
+	if p == nil {
+		return nil, ""
+	}
+	return p, r.lookup.GetProviderType(model)
+}
+
 // resolveProvider validates readiness, parses the model selector, and finds the target provider.
-func (r *Router) resolveProvider(ctx context.Context, model, providerHint string) (core.Provider, core.ModelSelector, error) {
+func (r *Router) resolveProvider(ctx context.Context, model, providerHint string) (resolvedRoute, error) {
 	requested := core.NewRequestedModelSelector(model, providerHint)
 	selector, _, err := r.ResolveModel(requested)
 	refreshed := false
@@ -265,38 +298,38 @@ func (r *Router) resolveProvider(ctx context.Context, model, providerHint string
 		var refreshErr error
 		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
 		if refreshErr != nil {
-			return nil, core.ModelSelector{}, refreshErr
+			return resolvedRoute{}, refreshErr
 		}
 		if !refreshed {
-			return nil, core.ModelSelector{}, err
+			return resolvedRoute{}, err
 		}
 		selector, _, err = r.ResolveModel(requested)
 		if err != nil {
-			return nil, core.ModelSelector{}, err
+			return resolvedRoute{}, err
 		}
 	}
 
 	lookupModel := selector.QualifiedModel()
-	p := r.lookup.GetProvider(lookupModel)
+	p, providerType := r.lookupRoute(lookupModel)
 	if p == nil && !refreshed {
 		var refreshErr error
 		refreshed, refreshErr = r.refreshProviderModelsForRequest(ctx, requested)
 		if refreshErr != nil {
-			return nil, core.ModelSelector{}, refreshErr
+			return resolvedRoute{}, refreshErr
 		}
 		if refreshed {
 			selector, _, err = r.ResolveModel(requested)
 			if err != nil {
-				return nil, core.ModelSelector{}, err
+				return resolvedRoute{}, err
 			}
 			lookupModel = selector.QualifiedModel()
-			p = r.lookup.GetProvider(lookupModel)
+			p, providerType = r.lookupRoute(lookupModel)
 		}
 	}
 	if p == nil {
-		return nil, core.ModelSelector{}, core.NewNotFoundError("model not found: " + lookupModel)
+		return resolvedRoute{}, core.NewNotFoundError("model not found: " + lookupModel)
 	}
-	return p, selector, nil
+	return resolvedRoute{provider: p, selector: selector, providerType: providerType}, nil
 }
 
 func (r *Router) refreshProviderModelsForRequest(ctx context.Context, requested core.RequestedModelSelector) (bool, error) {
@@ -464,17 +497,17 @@ func routeResolvedModelCall[Req any, Resp any](
 	ctx context.Context,
 	model string,
 	providerHint string,
-	buildForward func(core.ModelSelector) Req,
+	buildForward func(resolvedRoute) Req,
 	call func(context.Context, core.Provider, Req) (Resp, error),
 ) (Resp, string, error) {
-	p, selector, err := r.resolveProvider(ctx, model, providerHint)
+	route, err := r.resolveProvider(ctx, model, providerHint)
 	if err != nil {
 		var zero Resp
 		return zero, "", err
 	}
 
-	resp, err := call(ctx, p, buildForward(selector))
-	return resp, r.GetProviderType(selector.QualifiedModel()), err
+	resp, err := call(ctx, route.provider, buildForward(route))
+	return resp, route.providerType, err
 }
 
 func routeStampedModelResponse[Req any, Resp any](
@@ -482,7 +515,7 @@ func routeStampedModelResponse[Req any, Resp any](
 	ctx context.Context,
 	model string,
 	providerHint string,
-	buildForward func(core.ModelSelector) Req,
+	buildForward func(resolvedRoute) Req,
 	call func(context.Context, core.Provider, Req) (Resp, error),
 ) (Resp, error) {
 	resp, providerType, err := routeResolvedModelCall(r, ctx, model, providerHint, buildForward, call)
@@ -497,7 +530,7 @@ func routeModelStream[Req any](
 	r *Router,
 	ctx context.Context,
 	model, providerHint string,
-	buildForward func(core.ModelSelector) Req,
+	buildForward func(resolvedRoute) Req,
 	call func(context.Context, core.Provider, Req) (io.ReadCloser, error),
 ) (io.ReadCloser, error) {
 	stream, _, err := routeResolvedModelCall(r, ctx, model, providerHint, buildForward, call)
@@ -578,16 +611,14 @@ func stampProvider[T any](resp T, providerType string) T {
 
 // Provider is gateway routing metadata on OpenAI-compatible request structs and
 // must be removed before dispatching to an upstream provider implementation.
-func (r *Router) forwardChatRequest(ctx context.Context, req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
+func forwardChatRequest(ctx context.Context, req *core.ChatRequest, route resolvedRoute) *core.ChatRequest {
 	forwardReq := *req
-	forwardReq.Model = selector.Model
+	forwardReq.Model = route.selector.Model
 	forwardReq.Provider = ""
 	if core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
 		return &forwardReq
 	}
-	// The selector is already concrete, so querying the lookup directly avoids
-	// repeating model resolution on every routed Messages request.
-	return adaptAnthropicCacheControl(&forwardReq, r.lookup.GetProviderType(selector.QualifiedModel()))
+	return adaptAnthropicCacheControl(&forwardReq, route.providerType)
 }
 
 func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
@@ -597,20 +628,20 @@ func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSele
 	return &forwardReq
 }
 
-func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, selector core.ModelSelector) *core.ChatRequest {
-	forward := r.forwardChatRequest(ctx, req, selector)
+func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, route resolvedRoute) *core.ChatRequest {
+	forward := forwardChatRequest(ctx, req, route)
 	if r.cachePlanner == nil {
 		return forward
 	}
-	return r.cachePlanner.planChat(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
+	return r.cachePlanner.planChat(forward, route.providerType, route.selector)
 }
 
-func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
-	forward := forwardResponsesRequest(req, selector)
+func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, route resolvedRoute) *core.ResponsesRequest {
+	forward := forwardResponsesRequest(req, route.selector)
 	if r.cachePlanner == nil {
 		return forward
 	}
-	return r.cachePlanner.planResponses(forward, r.lookup.GetProviderType(selector.QualifiedModel()), selector)
+	return r.cachePlanner.planResponses(forward, route.providerType, route.selector)
 }
 
 func forwardEmbeddingRequest(req *core.EmbeddingRequest, selector core.ModelSelector) *core.EmbeddingRequest {
@@ -686,8 +717,8 @@ func (r *Router) ChatCompletion(ctx context.Context, req *core.ChatRequest) (*co
 		ctx,
 		req.Model,
 		req.Provider,
-		func(selector core.ModelSelector) *core.ChatRequest {
-			return r.plannedChatRequest(ctx, req, selector)
+		func(route resolvedRoute) *core.ChatRequest {
+			return r.plannedChatRequest(ctx, req, route)
 		},
 		callChatCompletion,
 	)
@@ -701,8 +732,8 @@ func (r *Router) StreamChatCompletion(ctx context.Context, req *core.ChatRequest
 		ctx,
 		req.Model,
 		req.Provider,
-		func(selector core.ModelSelector) *core.ChatRequest {
-			return r.plannedChatRequest(ctx, req, selector)
+		func(route resolvedRoute) *core.ChatRequest {
+			return r.plannedChatRequest(ctx, req, route)
 		},
 		func(ctx context.Context, provider core.Provider, forwardReq *core.ChatRequest) (io.ReadCloser, error) {
 			return provider.StreamChatCompletion(ctx, forwardReq)
@@ -738,8 +769,8 @@ func (r *Router) Responses(ctx context.Context, req *core.ResponsesRequest) (*co
 		ctx,
 		req.Model,
 		req.Provider,
-		func(selector core.ModelSelector) *core.ResponsesRequest {
-			return r.plannedResponsesRequest(req, selector)
+		func(route resolvedRoute) *core.ResponsesRequest {
+			return r.plannedResponsesRequest(req, route)
 		},
 		callResponses,
 	)
@@ -753,8 +784,8 @@ func (r *Router) StreamResponses(ctx context.Context, req *core.ResponsesRequest
 		ctx,
 		req.Model,
 		req.Provider,
-		func(selector core.ModelSelector) *core.ResponsesRequest {
-			return r.plannedResponsesRequest(req, selector)
+		func(route resolvedRoute) *core.ResponsesRequest {
+			return r.plannedResponsesRequest(req, route)
 		},
 		func(ctx context.Context, provider core.Provider, forwardReq *core.ResponsesRequest) (io.ReadCloser, error) {
 			return provider.StreamResponses(ctx, forwardReq)
@@ -769,8 +800,8 @@ func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*c
 		ctx,
 		req.Model,
 		req.Provider,
-		func(selector core.ModelSelector) *core.EmbeddingRequest {
-			return forwardEmbeddingRequest(req, selector)
+		func(route resolvedRoute) *core.EmbeddingRequest {
+			return forwardEmbeddingRequest(req, route.selector)
 		},
 		callEmbeddings,
 	)
@@ -788,8 +819,8 @@ func (r *Router) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*c
 func (r *Router) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 	return routeAudioCall(
 		r, ctx, req.Model, req.Provider,
-		func(selector core.ModelSelector) *core.AudioSpeechRequest {
-			return forwardAudioSpeechRequest(req, selector)
+		func(route resolvedRoute) *core.AudioSpeechRequest {
+			return forwardAudioSpeechRequest(req, route.selector)
 		},
 		func(ctx context.Context, ap core.AudioProvider, forwardReq *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 			return ap.CreateSpeech(ctx, forwardReq)
@@ -801,8 +832,8 @@ func (r *Router) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest)
 func (r *Router) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
 	return routeAudioCall(
 		r, ctx, req.Model, req.Provider,
-		func(selector core.ModelSelector) *core.AudioTranscriptionRequest {
-			return forwardAudioTranscriptionRequest(req, selector)
+		func(route resolvedRoute) *core.AudioTranscriptionRequest {
+			return forwardAudioTranscriptionRequest(req, route.selector)
 		},
 		func(ctx context.Context, ap core.AudioProvider, forwardReq *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
 			return ap.CreateTranscription(ctx, forwardReq)
@@ -818,8 +849,8 @@ func (r *Router) CreateTranslation(ctx context.Context, req *core.AudioTranscrip
 	}
 	resp, _, err := routeResolvedModelCall(
 		r, ctx, req.Model, req.Provider,
-		func(selector core.ModelSelector) *core.AudioTranscriptionRequest {
-			return forwardAudioTranscriptionRequest(req, selector)
+		func(route resolvedRoute) *core.AudioTranscriptionRequest {
+			return forwardAudioTranscriptionRequest(req, route.selector)
 		},
 		func(ctx context.Context, provider core.Provider, forwardReq *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
 			translator, ok := provider.(core.AudioTranslationProvider)
@@ -840,8 +871,8 @@ func (r *Router) CreateImage(ctx context.Context, req *core.ImageGenerationReque
 	}
 	return routeImageCall(
 		r, ctx, req.Model, req.Provider, "image generation",
-		func(selector core.ModelSelector) *core.ImageGenerationRequest {
-			return forwardImageGenerationRequest(req, selector)
+		func(route resolvedRoute) *core.ImageGenerationRequest {
+			return forwardImageGenerationRequest(req, route.selector)
 		},
 		core.ImageProvider.CreateImage,
 	)
@@ -855,8 +886,8 @@ func (r *Router) CreateImageEdit(ctx context.Context, req *core.ImageEditRequest
 	}
 	return routeImageCall(
 		r, ctx, req.Model, req.Provider, "image edits",
-		func(selector core.ModelSelector) *core.ImageEditRequest {
-			return forwardImageEditRequest(req, selector)
+		func(route resolvedRoute) *core.ImageEditRequest {
+			return forwardImageEditRequest(req, route.selector)
 		},
 		core.ImageEditProvider.CreateImageEdit,
 	)
@@ -869,7 +900,7 @@ func routeImageCall[Req any, P any](
 	r *Router,
 	ctx context.Context,
 	model, providerHint, capability string,
-	forward func(core.ModelSelector) Req,
+	forward func(resolvedRoute) Req,
 	call func(P, context.Context, Req) (*core.ImageGenerationResponse, error),
 ) (*core.ImageGenerationResponse, error) {
 	return routeStampedModelResponse(
@@ -891,7 +922,7 @@ func routeAudioCall[Req any](
 	r *Router,
 	ctx context.Context,
 	model, providerHint string,
-	forward func(core.ModelSelector) Req,
+	forward func(resolvedRoute) Req,
 	call func(context.Context, core.AudioProvider, Req) (*core.AudioResponse, error),
 ) (*core.AudioResponse, error) {
 	resp, _, err := routeResolvedModelCall(
@@ -919,10 +950,11 @@ func (r *Router) RealtimeTarget(ctx context.Context, req *core.RealtimeRequest) 
 	if req == nil {
 		return nil, core.NewInvalidRequestError("realtime request is required", nil)
 	}
-	p, selector, err := r.resolveProvider(ctx, req.Model, req.Provider)
+	route, err := r.resolveProvider(ctx, req.Model, req.Provider)
 	if err != nil {
 		return nil, err
 	}
+	p, selector := route.provider, route.selector
 	rp, ok := p.(core.RealtimeProvider)
 	if !ok {
 		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support realtime sessions", req.Model), nil)
@@ -961,10 +993,11 @@ func (r *Router) realtimeCallTarget(
 	if req == nil {
 		return nil, core.NewInvalidRequestError("realtime request is required", nil)
 	}
-	p, selector, err := r.resolveProvider(ctx, req.Model, req.Provider)
+	route, err := r.resolveProvider(ctx, req.Model, req.Provider)
 	if err != nil {
 		return nil, err
 	}
+	p, selector := route.provider, route.selector
 	rp, ok := p.(core.RealtimeCallProvider)
 	if !ok {
 		return nil, core.NewInvalidRequestError(fmt.Sprintf("model %q does not support realtime calls", req.Model), nil)
