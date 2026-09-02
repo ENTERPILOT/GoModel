@@ -230,6 +230,32 @@ wait_for_health() {
   exit 1
 }
 
+# Deletes every unmanaged (dashboard-registered) provider credential on a
+# running gateway so the stack only carries the providers declared in .env.
+# Config/env providers report `managed: true` and are never touched. Runtime
+# credentials persist in the gateway's storage across restarts, and a leftover
+# one from an earlier session would otherwise show up on
+# /admin/providers/status and skew scenarios such as S219.
+clear_unmanaged_credentials() {
+  local gateway="$1"
+  local port entries name encoded
+  port="$(gateway_port "$gateway")"
+
+  entries="$(curl -fsS "http://localhost:$port/admin/provider-credentials" \
+    -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
+    | jq -r '.[] | select(.managed == false) | "\(.name)\t\(.name | @uri)"')" \
+    || die "failed to list provider credentials on $gateway"
+
+  [[ -n "$entries" ]] || return 0
+  while IFS=$'\t' read -r name encoded; do
+    [[ -n "$encoded" ]] || continue
+    curl -fsS -X DELETE "http://localhost:$port/admin/provider-credentials/$encoded" \
+      -H "Authorization: Bearer $GOMODEL_MASTER_KEY" >/dev/null \
+      || die "failed to delete unmanaged provider credential $name on $gateway"
+    printf 'deleted unmanaged provider credential %s on %s\n' "$name" "$gateway"
+  done <<<"$entries"
+}
+
 start_gateway() {
   local gateway="$1"
   shift
@@ -413,6 +439,11 @@ start_stack() {
   curl -fsS "http://localhost:18084/admin/runtime/config" \
     -H "Authorization: Bearer $GOMODEL_MASTER_KEY" \
     | jq -e '.CACHE_ENABLED == "on" and .REDIS_URL == "on"' >/dev/null
+
+  local gateway
+  for gateway in sqlite-main pg-smoke mongo-smoke; do
+    clear_unmanaged_credentials "$gateway"
+  done
 
   printf 'stack_dir=%s\n' "$STACK_DIR"
 }

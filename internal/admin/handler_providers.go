@@ -91,6 +91,23 @@ func (h *Handler) collectProviderStatusInputs() (
 		configuredByName[name] = cfg
 		nameSet[name] = struct{}{}
 	}
+	// Dashboard-registered credentials are installed after startup, so they
+	// are absent from the static snapshot above; take their effective config
+	// from the credentials service. Declarative providers keep priority: the
+	// service never registers a store row a config/env provider shadows.
+	if h.providerCredentials != nil {
+		for _, cfg := range h.providerCredentials.ConfiguredProviders() {
+			name := strings.TrimSpace(cfg.Name)
+			if name == "" {
+				continue
+			}
+			if _, exists := configuredByName[name]; exists {
+				continue
+			}
+			configuredByName[name] = cfg
+			nameSet[name] = struct{}{}
+		}
+	}
 
 	runtimeByName := make(map[string]providers.ProviderRuntimeSnapshot)
 	if h.registry != nil {
