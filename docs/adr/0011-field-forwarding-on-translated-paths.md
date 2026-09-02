@@ -20,8 +20,9 @@ the same question three different ways today:
   `temperature` for reasoning models (o-series, GPT-5).
 - The shared cache-control helper strips Anthropic `cache_control` directives
   before a request goes to a provider that does not accept them.
-- The Anthropic adapter rejects `response_format` and `verbosity` with a 400
-  instead of dropping or translating them.
+- The Anthropic adapter rejects `verbosity` and any `response_format` other
+  than type `text` with a 400, and silently accepts a `text` format because it
+  changes nothing.
 
 Each answer is reasonable on its own. Without a shared rule the next adapter
 picks one at random, and clients cannot predict whether a field will be
@@ -50,6 +51,12 @@ that matches, in this order:
 typed struct member. `cache_control` travels in `ExtraFields` and is still a
 known field.
 
+A known field with no rule for the selected target is forwarded as-is (rule 2
+is the default). The provider is the authority on what it accepts and answers
+with its own error when it does not. Add a rule for a target only when that
+answer is wrong or unhelpful: the provider silently ignores the field, needs
+another spelling, or returns an error a client cannot act on.
+
 Gateway-reserved fields are outside the ladder. Members the gateway itself
 sets or interprets, such as `provider` on requests and responses and the
 usage options it injects into streams, are never forwarded from the client
@@ -76,8 +83,11 @@ field-capability registry; ADR-0004's capability model describes routes and
 features, not fields. Revisit if three adapters end up with the same table
 shape.
 
-When a field is translated or dropped, the adapter logs it at debug level.
-Nothing is added to the response.
+A rule that translates or drops a field should log the decision at debug
+level so operators can see why an outbound request differs from the inbound
+one. The adapters that already translate or drop (OpenAI reasoning models,
+cache-control stripping) do not log today; adding that is a follow-up, not a
+prerequisite for this ADR. Nothing is added to the response.
 
 ### Example ladder for `/v1/chat/completions`
 
@@ -105,7 +115,8 @@ a provider starts accepting a field.
 - Adapters gain an explicit place to record their decisions, and reviewers
   have a rule to check a new mapping against.
 - Response types need the same `ExtraFields` treatment requests already have,
-  so rule 1 holds in both directions.
+  so rule 1 holds in both directions. `ChatResponse` and `Choice` gain it in
+  #859; `Usage` already keeps extras in `raw_usage`.
 - Some existing behavior may move between rungs once reviewed against the
   ladder; each move is a behavior change and gets its own PR and changelog
   entry.
