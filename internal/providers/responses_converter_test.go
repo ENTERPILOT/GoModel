@@ -431,6 +431,9 @@ data: {"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}
 	sawDone := false
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		if event.Done {
+			if response == nil {
+				t.Fatal("[DONE] arrived before the response.incomplete terminal event")
+			}
 			sawDone = true
 			continue
 		}
@@ -480,6 +483,113 @@ data: {"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}
 	}
 	if part, _ := messageContent[0].(map[string]any); part["text"] != "Hello" {
 		t.Fatalf("partial text = %#v, want %q", part["text"], "Hello")
+	}
+}
+
+// failingReadCloser returns its data on the first read and the configured
+// error afterwards, mimicking an upstream body that dies mid-transfer.
+type failingReadCloser struct {
+	data []byte
+	err  error
+	read bool
+}
+
+func (r *failingReadCloser) Read(p []byte) (int, error) {
+	if !r.read {
+		r.read = true
+		return copy(p, r.data), nil
+	}
+	return 0, r.err
+}
+
+func (r *failingReadCloser) Close() error { return nil }
+
+// TestOpenAIResponsesStreamConverter_NonEOFReadErrorEndsIncomplete covers an
+// upstream body that fails with a non-EOF error (io.ErrUnexpectedEOF from a
+// chunked body cut mid-transfer, a connection reset). The client must still
+// receive the response.incomplete terminal event and [DONE] before the error
+// surfaces.
+func TestOpenAIResponsesStreamConverter_NonEOFReadErrorEndsIncomplete(t *testing.T) {
+	reader := &failingReadCloser{
+		data: []byte("data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}\n\n"),
+		err:  io.ErrUnexpectedEOF,
+	}
+
+	converter := NewOpenAIResponsesStreamConverter(reader, "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != io.ErrUnexpectedEOF {
+		t.Fatalf("ReadAll() error = %v, want io.ErrUnexpectedEOF surfaced after terminal events", err)
+	}
+
+	var response map[string]any
+	sawDone := false
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			sawDone = true
+			continue
+		}
+		if event.Name == "response.incomplete" {
+			response, _ = event.Payload["response"].(map[string]any)
+		}
+	}
+
+	if response == nil {
+		t.Fatal("expected response.incomplete terminal event before the read error")
+	}
+	if !sawDone {
+		t.Fatal("expected trailing [DONE] before the read error")
+	}
+	if response["status"] != "incomplete" {
+		t.Fatalf("response.status = %v, want incomplete", response["status"])
+	}
+}
+
+// TestOpenAIResponsesStreamConverter_IgnoresDeltaAfterToolCallClosed covers a
+// stray argument delta arriving after finish_reason "tool_calls" closed the
+// call: it must not mutate the arguments the output_item.done event declared,
+// so the terminal output array stays identical to the emitted done events.
+func TestOpenAIResponsesStreamConverter_IgnoresDeltaAfterToolCallClosed(t *testing.T) {
+	mockStream := `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"Warsaw\"}"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"garbage"}}]},"finish_reason":null}]}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	doneArguments := ""
+	var output []any
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			continue
+		}
+		switch event.Name {
+		case "response.output_item.done":
+			item, _ := event.Payload["item"].(map[string]any)
+			if item["type"] == "function_call" {
+				doneArguments, _ = item["arguments"].(string)
+			}
+		case "response.completed":
+			response, _ := event.Payload["response"].(map[string]any)
+			output, _ = response["output"].([]any)
+		}
+	}
+
+	if doneArguments != `{"city":"Warsaw"}` {
+		t.Fatalf("output_item.done arguments = %q, want %q", doneArguments, `{"city":"Warsaw"}`)
+	}
+	if len(output) != 1 {
+		t.Fatalf("response.completed output has %d items, want 1: %#v", len(output), output)
+	}
+	if toolCall, _ := output[0].(map[string]any); toolCall["arguments"] != `{"city":"Warsaw"}` {
+		t.Fatalf("terminal output arguments = %v, want the arguments the done event declared", toolCall["arguments"])
 	}
 }
 

@@ -3247,6 +3247,71 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta"
 	}
 }
 
+// failingReadCloser returns its data on the first read and the configured
+// error afterwards, mimicking an upstream body that dies mid-transfer.
+type failingReadCloser struct {
+	data []byte
+	err  error
+	read bool
+}
+
+func (r *failingReadCloser) Read(p []byte) (int, error) {
+	if !r.read {
+		r.read = true
+		return copy(p, r.data), nil
+	}
+	return 0, r.err
+}
+
+func (r *failingReadCloser) Close() error { return nil }
+
+// TestStreamResponses_NonEOFReadErrorEndsIncomplete covers an upstream body
+// that fails with a non-EOF error mid-message: the client must still receive
+// the response.incomplete terminal event and [DONE] before the error surfaces.
+func TestStreamResponses_NonEOFReadErrorEndsIncomplete(t *testing.T) {
+	reader := &failingReadCloser{
+		data: []byte(`event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}
+
+`),
+		err: io.ErrUnexpectedEOF,
+	}
+
+	converter := newResponsesStreamConverter(reader, "claude-sonnet-4-5-20250929")
+	raw, err := io.ReadAll(converter)
+	if err != io.ErrUnexpectedEOF {
+		t.Fatalf("ReadAll() error = %v, want io.ErrUnexpectedEOF surfaced after terminal events", err)
+	}
+
+	var response map[string]any
+	sawDone := false
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Done {
+			sawDone = true
+			continue
+		}
+		if event.Name == "response.incomplete" {
+			response, _ = event.Payload["response"].(map[string]any)
+		}
+	}
+
+	if response == nil {
+		t.Fatal("expected response.incomplete terminal event before the read error")
+	}
+	if !sawDone {
+		t.Fatal("expected trailing [DONE] before the read error")
+	}
+	if response["status"] != "incomplete" {
+		t.Fatalf("response.status = %v, want incomplete", response["status"])
+	}
+}
+
 // TestStreamResponses_StopReasonWithoutMessageStopCompletes covers a stream cut
 // after message_delta carried a stop_reason but before message_stop arrived:
 // Anthropic finished generating, so the stream must still end with

@@ -36,6 +36,7 @@ type OpenAIResponsesStreamConverter struct {
 	sentCreate           bool
 	sentDone             bool
 	sawFinish            bool            // upstream signalled completion (finish_reason or [DONE])
+	pendingErr           error           // upstream read error deferred until terminal events are drained
 	cachedUsage          json.RawMessage // Stores usage from final chunk for inclusion in response.completed
 }
 
@@ -198,6 +199,11 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openA
 		}
 
 		state := sc.ensureToolCallState(*toolCall.Index)
+		// A delta for an already-closed call (stray chunk after its
+		// output_item.done) must not mutate the arguments that event declared.
+		if state.Completed {
+			continue
+		}
 		if toolCall.ID != "" {
 			state.CallID = toolCall.ID
 		}
@@ -545,6 +551,19 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 		return sc.buffer.Read(p), nil
 	}
 
+	// Terminal events for a failed upstream read have been drained; surface
+	// the deferred error now.
+	if sc.pendingErr != nil {
+		pendingErr := sc.pendingErr
+		sc.closed = true
+		sc.releaseBuffers()
+		_ = sc.reader.Close()
+		if pendingErr == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, pendingErr
+	}
+
 	// Send response.created event first
 	if !sc.sentCreate {
 		sc.sentCreate = true
@@ -603,17 +622,21 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	}
 
 	if readErr != nil {
+		// Any upstream read failure — clean EOF, io.ErrUnexpectedEOF from a
+		// chunked body cut mid-transfer, a connection reset — ends the
+		// upstream stream, so emit the terminal events (response.incomplete
+		// unless completion was signalled) before surfacing a non-EOF error.
+		sc.appendTerminalEvents()
+
+		if sc.buffer.Len() > 0 {
+			sc.pendingErr = readErr
+			return sc.buffer.Read(p), nil
+		}
+
+		sc.closed = true
+		sc.releaseBuffers()
+		_ = sc.reader.Close()
 		if readErr == io.EOF {
-			// Send final done event if we haven't already
-			sc.appendTerminalEvents()
-
-			if sc.buffer.Len() > 0 {
-				return sc.buffer.Read(p), nil
-			}
-
-			sc.closed = true
-			sc.releaseBuffers()
-			_ = sc.reader.Close()
 			return 0, io.EOF
 		}
 		return 0, readErr
