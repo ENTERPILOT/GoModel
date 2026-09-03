@@ -161,3 +161,19 @@ test("flattened indices the editor passes to moveFormTarget align with the list"
   assert.equal(moveFormTarget(noPrimary, 1, 0), true);
   assert.deepEqual(modelsOf(noPrimary), ["c", "b"]);
 });
+
+test("non-positive weights normalize to 1, matching the backend contract", () => {
+  // The backend treats a non-positive or unset weight as 1
+  // (internal/virtualmodels/types.go), so the frontend mirrors that instead
+  // of preserving a value the gateway would ignore.
+  const form = {
+    ...defaultVirtualModelForm(),
+    source: "w",
+    target_model: "a",
+    target_weight: 0,
+    targets: [{ provider: "", model: "b", weight: 0 }],
+  };
+  assert.equal(moveFormTarget(form, 1, 0), true);
+  assert.equal(form.target_weight, 1);
+  assert.equal(form.targets[0].weight, 1);
+});

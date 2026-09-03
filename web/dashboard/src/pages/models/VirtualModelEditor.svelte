@@ -86,7 +86,7 @@
     <span class="form-field-label">{m.models_targets()}</span>
     <VmTargetRow
       id="virtual-model-target"
-      index={0}
+      index={hasPrimary ? 0 : undefined}
       draggable={canReorder && hasPrimary}
       bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
@@ -98,7 +98,7 @@
       <VmTargetRow
         placeholder="groq/llama"
         index={(hasPrimary ? 1 : 0) + index}
-        draggable={canReorder}
+        draggable={canReorder && String(target.model || "").trim() !== ""}
         bind:provider={target.provider}
         bind:model={target.model}
         bind:weight={target.weight}
