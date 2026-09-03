@@ -131,3 +131,33 @@ test("target helpers tolerate a null or malformed form", () => {
     false,
   );
 });
+
+test("flattened indices the editor passes to moveFormTarget align with the list", () => {
+  // The editor renders the primary row with index 0 and extras from 1 on —
+  // but only when the primary holds a model: an empty primary row is not in
+  // the flattened list, so extras must start at 0. This pins that contract;
+  // a mismatch made drops on unsaved/new rows land out of bounds.
+  const withPrimary = formWithTargets(["a", "b", "c"]);
+  assert.deepEqual(modelsOf(withPrimary), ["a", "b", "c"]);
+  // UI: primary index 0, extras 1 and 2 — all in bounds.
+  assert.equal(moveFormTarget(withPrimary, 2, 0), true);
+  assert.deepEqual(modelsOf(withPrimary), ["c", "a", "b"]);
+
+  // UI: primary row holds no model (empty slot in a fresh form): the row is
+  // not in the flattened list, so extras must be indexed from 0.
+  const noPrimary = {
+    ...defaultVirtualModelForm(),
+    source: "new-vm",
+    target_model: "",
+    target_weight: 1,
+    targets: [
+      { provider: "", model: "b", weight: 1 },
+      { provider: "", model: "c", weight: 1 },
+    ],
+  };
+  assert.equal(vmFormTargetCount(noPrimary), 2);
+  assert.deepEqual(modelsOf(noPrimary), ["b", "c"]);
+  // UI: extras at indices 0 and 1 — the move the component now sends.
+  assert.equal(moveFormTarget(noPrimary, 1, 0), true);
+  assert.deepEqual(modelsOf(noPrimary), ["c", "b"]);
+});

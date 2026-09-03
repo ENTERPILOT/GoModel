@@ -85,8 +85,12 @@ class VirtualModelEditorStore {
   }
 
   // enterVmTargetDrop marks the row under the cursor as the drop target.
+  // dragover fires continuously; only write on change so fast drags do not
+  // re-render the list on every event.
   enterVmTargetDrop(index) {
-    this.vmDropIndex = index;
+    if (this.vmDropIndex !== index) {
+      this.vmDropIndex = index;
+    }
   }
 
   leaveVmTargetDrop(index) {

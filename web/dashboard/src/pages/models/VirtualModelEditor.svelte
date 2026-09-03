@@ -22,6 +22,9 @@
 
   // The handle shows only when there is more than one row to reorder.
   const canReorder = $derived(vm.vmTargetCount() > 1 && !vm.vmFormManaged);
+  // Row indices must match the flattened target list the move logic operates
+  // on: an empty primary row is not in that list, so extras start at 0 then.
+  const hasPrimary = $derived(vmFormHasPrimaryTarget(vm.vmForm));
 
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
   // sure the runtime config is loaded by the time the editor shows it.
@@ -84,7 +87,7 @@
     <VmTargetRow
       id="virtual-model-target"
       index={0}
-      draggable={canReorder}
+      draggable={canReorder && hasPrimary}
       bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
@@ -94,7 +97,7 @@
     {#each vm.vmForm.targets as target, index (index)}
       <VmTargetRow
         placeholder="groq/llama"
-        index={index + 1}
+        index={(hasPrimary ? 1 : 0) + index}
         draggable={canReorder}
         bind:provider={target.provider}
         bind:model={target.model}
