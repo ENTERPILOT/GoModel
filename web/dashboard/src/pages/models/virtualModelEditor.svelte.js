@@ -53,6 +53,11 @@ class VirtualModelEditorStore {
   // the drop highlight). Both reset when the drag ends.
   vmDragIndex = $state(null);
   vmDropIndex = $state(null);
+  // After a keyboard move, focus must follow the moved row: the each block
+  // reuses DOM nodes per position, so without this the focus would stay on
+  // the handle at the old index (now a different model). Set to the moved
+  // row's new index; VmTargetRow focuses that handle and clears it.
+  vmFocusHandle = $state(null);
 
   addVmTarget() {
     if (!Array.isArray(this.vmForm.targets)) {
@@ -108,6 +113,17 @@ class VirtualModelEditorStore {
   endVmTargetDrag() {
     this.vmDragIndex = null;
     this.vmDropIndex = null;
+  }
+
+  // requestVmFocusHandle makes focus follow a keyboard move: the row that
+  // moved to `index` grabs focus so repeated arrows walk the same model up
+  // or down the list. VmTargetRow clears it once the focus lands.
+  requestVmFocusHandle(index) {
+    this.vmFocusHandle = index;
+  }
+
+  clearVmFocusHandle() {
+    this.vmFocusHandle = null;
   }
 
   // vmStrategyOptions builds the strategy dropdown from the strategies this

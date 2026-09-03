@@ -28,6 +28,18 @@
     index = undefined,
     draggable = false,
   } = $props();
+
+  let moveHandle = $state(null);
+
+  // After a keyboard move the editor asks for focus at the moved row's new
+  // index; grab it here so repeated arrows walk the same model, not whatever
+  // row now sits at the old index.
+  $effect(() => {
+    if (draggable && vm.vmFocusHandle === index && moveHandle) {
+      moveHandle.focus();
+      vm.clearVmFocusHandle();
+    }
+  });
 </script>
 
 <div
@@ -81,6 +93,7 @@
   {/if}
   {#if draggable}
     <span
+      bind:this={moveHandle}
       class="vm-target-move"
       role="button"
       tabindex="0"
@@ -97,12 +110,14 @@
         if (event.key === "ArrowUp" && index > 0) {
           event.preventDefault();
           moveFormTarget(vm.vmForm, index, index - 1);
+          vm.requestVmFocusHandle(index - 1);
         } else if (
           event.key === "ArrowDown" &&
           index < vm.vmTargetCount() - 1
         ) {
           event.preventDefault();
           moveFormTarget(vm.vmForm, index, index + 1);
+          vm.requestVmFocusHandle(index + 1);
         }
       }}
     >
