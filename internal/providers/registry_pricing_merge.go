@@ -69,6 +69,11 @@ func mergeConfigPricing(base, override *core.ModelPricing) *core.ModelPricing {
 	if len(override.Tiers) > 0 {
 		merged.Tiers = override.Clone().Tiers
 	}
+	if len(override.TimeWindows) > 0 {
+		merged.TimeWindows = override.Clone().TimeWindows
+	} else {
+		merged.DropTimeWindowRatesOverriddenBy(override)
+	}
 	return merged
 }
 

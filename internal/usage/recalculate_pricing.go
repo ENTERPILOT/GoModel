@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
 
@@ -34,7 +35,10 @@ type PricingRecalculator interface {
 }
 
 type recalculationEntry struct {
-	ID                 string
+	ID string
+	// Timestamp selects the time-of-day pricing window the row fell in; a zero
+	// value prices the row at the base (standard) rates.
+	Timestamp          time.Time
 	Model              string
 	Provider           string
 	ProviderName       string
@@ -71,7 +75,7 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 	if resolver != nil {
 		pricing = resolver.ResolvePricing(entry.Model, pricingProvider)
 	}
-	effectivePricing := pricingForEndpoint(pricing, entry.Endpoint)
+	effectivePricing := pricingForEndpoint(pricing.AtTime(entry.Timestamp), entry.Endpoint)
 	result := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing)
 	caveat := result.Caveat
 	if retained := retainedMissingUsageCaveat(entry.Caveat, entry.RawData, effectivePricing); retained != "" {

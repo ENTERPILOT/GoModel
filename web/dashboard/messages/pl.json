@@ -1302,6 +1302,7 @@
   ],
   "models_column_input_output": "Wejście / wyjście ($/MTok)",
   "models_column_cached": "Cache $/MTok",
+  "models_price_time_window_hint": "{label}: {prices} w godzinach {schedule} UTC",
   "models_column_input": "Wejście",
   "models_column_per_image": "$/obraz",
   "models_column_per_second": "$/sekundę",

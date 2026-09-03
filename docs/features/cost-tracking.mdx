@@ -29,6 +29,40 @@ When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_tick
   `cached_input_per_mtok` rate. Without it, they are priced at the full input rate.
 </Note>
 
+## Time-of-day pricing
+
+Some providers charge different rates depending on when a request runs. DeepSeek, for example, bills its off-peak hours at half the peak rates and treats weekends as off-peak. The catalog publishes the standard (peak) rates as a model's base prices and lists the discounted periods under `pricing.time_windows`:
+
+```json
+"pricing": {
+  "input_per_mtok": 0.44,
+  "output_per_mtok": 1.32,
+  "cached_input_per_mtok": 0.014,
+  "time_windows": [
+    {
+      "label": "off_peak",
+      "utc_ranges": [
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "00:00", "end": "01:00" },
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "04:00", "end": "06:00" },
+        { "days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "24:00" },
+        { "days": ["sat", "sun"], "start": "00:00", "end": "24:00" }
+      ],
+      "pricing": { "input_per_mtok": 0.22, "output_per_mtok": 0.66, "cached_input_per_mtok": 0.007 }
+    }
+  ]
+}
+```
+
+GoModel prices each request with the rates in effect at the moment it completed, evaluated in **UTC** regardless of the server's or the dashboard's timezone. Ranges are half-open (`start` inclusive, `end` exclusive); an `end` at or before `start` wraps past midnight, and `days` limits a range to weekdays (all days when omitted). Rates absent from a window keep their base price, and outside every window the base prices apply. Recalculating stored costs uses each row's stored timestamp, so historical rows are re-priced for the window they actually fell in.
+
+On the **Models** page, a `*` next to a price marks a model with time windows; hover it to see the schedule and rates. Overriding a base rate (input, output, cached input, or cache write) replaces the catalog's discount for that rate as well: the override becomes the price at every hour. `config.yaml` model metadata may also declare its own `time_windows`, which replace the catalog's.
+
+<Note>
+  Time windows are recurring UTC schedules only. Rules the catalog cannot
+  express — a provider's holidays, or promotions with a fixed end date — are
+  not applied.
+</Note>
+
 ## Where pricing comes from
 
 Pricing for a model is resolved in priority order:

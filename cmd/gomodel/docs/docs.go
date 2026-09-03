@@ -8668,7 +8668,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "request_body": {
-                    "description": "Optional bodies (when LOGGING_LOG_BODIES=true)\nStored as interface{} so MongoDB serializes as native BSON documents (queryable/readable)\ninstead of BSON Binary (base64 in Compass)"
+                    "description": "Optional bodies (when LOGGING_LOG_BODIES=true). Captured JSON is kept\nas json.RawMessage; other captures (string fallbacks, audio/image logs,\nstream-built responses) keep their own types. The MongoDB writer decodes\nraw JSON into documents so they stay queryable — see body.go."
                 },
                 "request_body_too_big_to_handle": {
                     "description": "Body capture status flags (set when body exceeds 1MB limit)",
@@ -8740,7 +8740,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "body": {
-                    "description": "Body is the request body after this revision (parsed JSON, or a string\nwhen not valid JSON). Populated only when body logging is enabled and\nthe body is within the capture limit."
+                    "description": "Body is the request body after this revision (the raw JSON, or a string\nwhen not valid JSON — see body.go). Populated only when body logging is\nenabled and the body is within the capture limit."
                 },
                 "bytes_after": {
                     "type": "integer"
@@ -9909,6 +9909,13 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/core.ModelPricingTier"
                     }
+                },
+                "time_windows": {
+                    "description": "TimeWindows carry rates that replace the base prices during recurring\nUTC windows (see ModelPricingTimeWindow). Base prices are the standard\n(peak) rates; use AtTime to resolve the rates in effect at a moment.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ModelPricingTimeWindow"
+                    }
                 }
             }
         },
@@ -9926,6 +9933,57 @@ const docTemplate = `{
                 },
                 "up_to_tokens": {
                     "type": "number"
+                }
+            }
+        },
+        "core.ModelPricingTimeWindow": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "pricing": {
+                    "$ref": "#/definitions/core.ModelPricingTimeWindowRates"
+                },
+                "utc_ranges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/core.ModelPricingUTCRange"
+                    }
+                }
+            }
+        },
+        "core.ModelPricingTimeWindowRates": {
+            "type": "object",
+            "properties": {
+                "cache_write_per_mtok": {
+                    "type": "number"
+                },
+                "cached_input_per_mtok": {
+                    "type": "number"
+                },
+                "input_per_mtok": {
+                    "type": "number"
+                },
+                "output_per_mtok": {
+                    "type": "number"
+                }
+            }
+        },
+        "core.ModelPricingUTCRange": {
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "end": {
+                    "type": "string"
+                },
+                "start": {
+                    "type": "string"
                 }
             }
         },

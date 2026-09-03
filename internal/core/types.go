@@ -296,6 +296,10 @@ type ModelPricing struct {
 	PerRequest             *float64           `json:"per_request,omitempty" yaml:"per_request,omitempty"`
 	PerPage                *float64           `json:"per_page,omitempty" yaml:"per_page,omitempty"`
 	Tiers                  []ModelPricingTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
+	// TimeWindows carry rates that replace the base prices during recurring
+	// UTC windows (see ModelPricingTimeWindow). Base prices are the standard
+	// (peak) rates; use AtTime to resolve the rates in effect at a moment.
+	TimeWindows []ModelPricingTimeWindow `json:"time_windows,omitempty" yaml:"time_windows,omitempty"`
 }
 
 const (
@@ -336,6 +340,9 @@ func (p *ModelPricing) FieldSources(source string) map[string]string {
 	add("per_page", p.PerPage)
 	if len(p.Tiers) > 0 {
 		out["tiers"] = source
+	}
+	if len(p.TimeWindows) > 0 {
+		out["time_windows"] = source
 	}
 	if len(out) == 0 {
 		return nil
@@ -378,7 +385,7 @@ func CloneModelRanking(r ModelRanking) ModelRanking {
 }
 
 // Clone returns a deep copy so callers can safely mutate the result without
-// affecting the original. Pointer fields and Tiers are re-allocated.
+// affecting the original. Pointer fields, Tiers, and TimeWindows are re-allocated.
 func (p *ModelPricing) Clone() *ModelPricing {
 	if p == nil {
 		return nil
@@ -414,6 +421,7 @@ func (p *ModelPricing) Clone() *ModelPricing {
 	} else {
 		out.Tiers = nil
 	}
+	out.TimeWindows = cloneTimeWindows(p.TimeWindows)
 	return &out
 }
 

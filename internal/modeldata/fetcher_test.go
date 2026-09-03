@@ -348,3 +348,68 @@ func TestParse_InvalidJSON(t *testing.T) {
 		t.Error("expected error for invalid JSON")
 	}
 }
+
+func TestParse_PricingTimeWindows(t *testing.T) {
+	// The registry's time_windows format (ai-model-list pricing.time_windows),
+	// including a per-range "days" list and an unrelated future field that an
+	// older GoModel must keep ignoring.
+	raw := []byte(`{
+		"version": 1,
+		"updated_at": "2026-08-24T00:00:00Z",
+		"providers": {"deepseek": {"display_name": "DeepSeek", "api_type": "openai"}},
+		"models": {"deepseek-v4-flash": {"display_name": "DeepSeek V4 Flash", "modes": ["chat"]}},
+		"provider_models": {
+			"deepseek/deepseek-v4-flash": {
+				"model_ref": "deepseek-v4-flash",
+				"enabled": true,
+				"pricing": {
+					"currency": "USD",
+					"input_per_mtok": 0.44,
+					"output_per_mtok": 1.32,
+					"cached_input_per_mtok": 0.014,
+					"time_windows": [{
+						"label": "off_peak",
+						"utc_ranges": [
+							{"days": ["mon", "tue", "wed", "thu", "fri"], "start": "10:00", "end": "24:00"},
+							{"days": ["sat", "sun"], "start": "00:00", "end": "24:00"},
+							{"start": "04:00", "end": "06:00", "future_field": true}
+						],
+						"pricing": {"input_per_mtok": 0.22, "output_per_mtok": 0.66, "cached_input_per_mtok": 0.007}
+					}]
+				}
+			}
+		}
+	}`)
+
+	list, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	pricing := list.ProviderModels["deepseek/deepseek-v4-flash"].Pricing
+	if pricing == nil || len(pricing.TimeWindows) != 1 {
+		t.Fatalf("pricing = %+v, want one time window", pricing)
+	}
+	window := pricing.TimeWindows[0]
+	if window.Label != "off_peak" || len(window.UTCRanges) != 3 {
+		t.Fatalf("window = %+v, want off_peak with 3 ranges", window)
+	}
+	if got := window.UTCRanges[0]; len(got.Days) != 5 || got.Start != "10:00" || got.End != "24:00" {
+		t.Fatalf("range[0] = %+v", got)
+	}
+	if got := window.UTCRanges[2]; len(got.Days) != 0 || got.Start != "04:00" {
+		t.Fatalf("range[2] = %+v, want no day restriction", got)
+	}
+	if window.Pricing.InputPerMtok == nil || *window.Pricing.InputPerMtok != 0.22 || window.Pricing.CacheWritePerMtok != nil {
+		t.Fatalf("window rates = %+v", window.Pricing)
+	}
+
+	// Saturday 08:00 UTC would be a peak hour on a weekday.
+	saturday := time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC)
+	if got := pricing.AtTime(saturday); *got.InputPerMtok != 0.22 || *got.OutputPerMtok != 0.66 {
+		t.Fatalf("AtTime(saturday) = %v / %v, want off-peak 0.22 / 0.66", *got.InputPerMtok, *got.OutputPerMtok)
+	}
+	monday := time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC)
+	if got := pricing.AtTime(monday); *got.InputPerMtok != 0.44 {
+		t.Fatalf("AtTime(monday peak) = %v, want base 0.44", *got.InputPerMtok)
+	}
+}

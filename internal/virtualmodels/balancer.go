@@ -3,6 +3,7 @@ package virtualmodels
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -292,7 +293,7 @@ func (s *Service) targetCost(target resolvedTarget) (float64, bool) {
 	if !ok || model == nil || model.Metadata == nil || model.Metadata.Pricing == nil {
 		return 0, false
 	}
-	pricing := model.Metadata.Pricing
+	pricing := model.Metadata.Pricing.AtTime(time.Now())
 	if pricing.InputPerMtok == nil && pricing.OutputPerMtok == nil {
 		return 0, false
 	}

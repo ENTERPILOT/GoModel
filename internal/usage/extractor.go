@@ -113,13 +113,16 @@ func ExtractFromChatResponse(resp *core.ChatResponse, requestID, provider, endpo
 	return entry
 }
 
+// applyUsageCosts prices the entry with the rates in effect at its Timestamp
+// (time-of-day pricing windows, e.g. DeepSeek off-peak hours) and endpoint
+// (batch rates), so callers must set Timestamp before pricing the entry.
 func applyUsageCosts(entry *UsageEntry, provider, endpoint string, pricing ...*core.ModelPricing) {
 	if entry == nil {
 		return
 	}
 	var effectivePricing *core.ModelPricing
 	if len(pricing) > 0 && pricing[0] != nil {
-		effectivePricing = pricingForEndpoint(pricing[0], endpoint)
+		effectivePricing = pricingForEndpoint(pricing[0].AtTime(entry.Timestamp), endpoint)
 	}
 	costResult := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, provider, effectivePricing)
 	entry.InputCost = costResult.InputCost
