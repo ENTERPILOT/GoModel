@@ -47,6 +47,11 @@
   role="group"
   class:vm-target-dragging={vm.vmDragIndex === index}
   class:vm-target-drop={vm.vmDropIndex === index && vm.vmDragIndex !== null && vm.vmDragIndex !== index}
+  ondragenter={(event) => {
+    if (draggable && vm.vmDragIndex !== null) {
+      event.preventDefault();
+    }
+  }}
   ondragover={(event) => {
     if (draggable && vm.vmDragIndex !== null) {
       event.preventDefault();
@@ -150,6 +155,8 @@
     cursor: grab;
     color: var(--muted, var(--text));
     touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   .vm-target-move:active {
