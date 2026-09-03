@@ -747,6 +747,18 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
   const second = panes.find((p) => p.id === "response-2").pane;
   assert.equal(second.model, "provider-b/glm-5.3-flash");
 
+  // In-pane model strip names the virtual model the request chose and the
+  // concrete model this attempt tried, so a failed leg reads "virtual → tried".
+  const strip = panes.find((p) => p.id === "response-3").pane.modelStrip;
+  assert.deepEqual(strip, {
+    virtual: "forge/subagent",
+    tried: "provider-b/glm-5.3-flash",
+  });
+  // Every attempt pane carries the strip — the virtual name is the same,
+  // only the tried model changes per attempt.
+  assert.equal(first.modelStrip.virtual, "forge/subagent");
+  assert.equal(first.modelStrip.tried, "provider-a/Qwen/Qwen3.6-35B-A3B-FP8");
+
   // A single successful attempt collapses to the plain response tab, which
   // carries no model chip (the row's model column already names it).
   const single = {

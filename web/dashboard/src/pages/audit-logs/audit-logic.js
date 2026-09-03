@@ -647,6 +647,20 @@ function auditAttemptResponsePane(entry, attempt) {
     kind: single ? "" : kind === "attempt" ? "" : kind,
     model,
     modelTitle: model ? auditAttemptSegmentTitle(attempt) : "",
+    // In-pane strip under the tab header: the virtual model the request
+    // named and the concrete model this attempt actually tried, so a failed
+    // step reads "virtual → tried" without hovering anything.
+    modelStrip:
+      model && !single
+        ? {
+            virtual: String(
+              (entry && entry.requested_model) ||
+                (data && data.request_body && data.request_body.model) ||
+                "",
+            ).trim(),
+            tried: model,
+          }
+        : null,
     statusCode: single ? null : auditAttemptStatusCode(attempt),
     layout: "split",
     entry,

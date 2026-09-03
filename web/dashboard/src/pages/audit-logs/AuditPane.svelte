@@ -59,6 +59,21 @@
     pane.layout === "split" &&
     !(pane.showHeaders && pane.showBody)}
 >
+  {#if pane.modelStrip}
+    <div class="audit-pane-model-strip">
+      {#if pane.modelStrip.virtual}
+        <span class="audit-pane-model-strip-chip">
+          <span class="audit-pane-model-strip-label">virtual</span>
+          <span class="mono">{pane.modelStrip.virtual}</span>
+        </span>
+        <span class="audit-pane-model-strip-arrow" aria-hidden="true">→</span>
+      {/if}
+      <span class="audit-pane-model-strip-chip">
+        <span class="audit-pane-model-strip-label">tried</span>
+        <span class="mono">{pane.modelStrip.tried}</span>
+      </span>
+    </div>
+  {/if}
   {#if pane.showErrorMessage}
     <div class="audit-pane-block audit-pane-block-error">
       <h5>{m.audit_error_message_title()}</h5>
@@ -155,6 +170,51 @@
     grid-template-columns: 1fr 2fr;
     gap: 10px 14px;
     align-items: start;
+  }
+
+  /* Virtual → tried model strip at the top of a failover attempt pane: which
+     virtual model leg this attempt belongs to and which concrete model was
+     actually called. Chips stay on one line, ellipsized when long. */
+  .audit-pane-model-strip {
+    grid-column: 1 / -1;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+
+  .audit-pane-model-strip-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 320px;
+    padding: 3px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-surface);
+    font-size: 11px;
+  }
+
+  .audit-pane-model-strip-chip .mono {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+
+  .audit-pane-model-strip-label {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .audit-pane-model-strip-arrow {
+    color: var(--text-muted);
+    font-size: 12px;
   }
 
   .audit-pane-split-single {
