@@ -412,6 +412,15 @@ test("abortable rejects with an AbortError when the signal fires", async () => {
   await assert.rejects(pending, (error) => error.name === "AbortError");
   // An already-aborted signal rejects without waiting on the promise.
   await assert.rejects(abortable(new Promise(() => {}), controller.signal), (error) => error.name === "AbortError");
+  // A promise that later rejects after an abort is still observed (no
+  // unhandled rejection) and the caller sees the AbortError.
+  let rejectLater;
+  const late = new Promise((_, reject) => {
+    rejectLater = reject;
+  });
+  await assert.rejects(abortable(late, controller.signal), (error) => error.name === "AbortError");
+  rejectLater(new Error("late"));
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 test("clampJsonPanelWidth keeps the panel inside the viewport", () => {

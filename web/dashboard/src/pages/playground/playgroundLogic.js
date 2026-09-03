@@ -376,12 +376,11 @@ export function abortable(promise, signal) {
   if (!signal) return promise;
   return new Promise((resolve, reject) => {
     const abort = () => reject(new DOMException("Aborted", "AbortError"));
-    if (signal.aborted) {
-      abort();
-      return;
-    }
     signal.addEventListener("abort", abort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    // Always observe the promise, even when already aborted, so a later
+    // rejection never surfaces as an unhandled one.
+    Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) abort();
   });
 }
 
