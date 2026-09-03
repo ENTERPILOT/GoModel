@@ -25,16 +25,8 @@ const (
 // and accounting subject; it is deliberately separate because a login identity
 // and a policy hierarchy are not the same thing.
 type Authentication struct {
-	PrincipalID string
-	UserPath    string
-	// AccessScope confines the identity to one user-path subtree: the objects
-	// it may address on /v1 lifecycle endpoints and, with DashboardAccess,
-	// the subtree it administers. Empty means unconfined, so an SSO admin whose
-	// UserPath is a personal identity such as /users/alice keeps the whole
-	// gateway. Set it to a tenant root (for example /team/alpha) to hand out
-	// per-tenant admins. Unlike managed API keys, UserPath alone never scopes
-	// an extension identity, because a login identity is not a tenancy.
-	AccessScope     string
+	PrincipalID     string
+	UserPath        string
 	Labels          []string
 	DashboardAccess bool
 	// Method is a short, stable audit identifier such as "oidc" or "saml".

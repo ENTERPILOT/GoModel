@@ -161,14 +161,9 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 	if err != nil {
 		return err
 	}
-	accessScope, err := core.NormalizeUserPath(result.AccessScope)
-	if err != nil {
-		return err
-	}
 	normalized := *result
 	normalized.PrincipalID = principalID
 	normalized.UserPath = userPath
-	normalized.AccessScope = accessScope
 	normalized.Method = auditlog.NormalizeAuthMethod(result.Method)
 	if normalized.Method == "" {
 		normalized.Method = auditlog.AuthMethodExtension
@@ -176,10 +171,9 @@ func applyExtensionAuthResult(c *echo.Context, result *ext.Authentication, userP
 	ctx := context.WithValue(c.Request().Context(), managedDashboardAccessKey{}, normalized.DashboardAccess)
 	ctx = context.WithValue(ctx, interactionContinuationAllowedKey{}, normalized.DashboardAccess)
 	ctx = ext.WithAuthentication(ctx, normalized)
-	// Only an explicit access scope confines an extension identity; its user
-	// path is a login identity used for attribution, not a tenancy. The
-	// request header never widens the scope either way.
-	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: accessScope})
+	// The identity's bound user path is the subtree it may administer and
+	// the objects it may address; the request header never widens it.
+	ctx = core.WithAccessScope(ctx, core.AccessScope{UserPath: userPath})
 	if len(normalized.Labels) > 0 {
 		ctx = core.WithRequestLabels(ctx, core.MergeLabels(core.RequestLabelsFromContext(ctx), normalized.Labels))
 	}

@@ -142,9 +142,9 @@ admin**: it reads and manages only `/team/alpha` and its descendants
 (`/team/alpha/service`, `/team/alpha/service/worker`, ...). The
 `X-GoModel-User-Path` header never widens a key's scope.
 
-Extension identities such as SSO sessions are global admins by default; their
-user path is a login identity, not a tenancy. An extension can confine a
-session by setting an access scope explicitly.
+Extension identities such as SSO sessions follow the same rule: the session's
+user path is the subtree it administers, so an extension binds gateway admins
+to `/` and team admins to the team root.
 
 Use `GET /admin/access` to find out which one a credential is:
 
