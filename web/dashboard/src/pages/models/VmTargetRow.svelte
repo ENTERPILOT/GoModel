@@ -60,7 +60,13 @@
       vm.dropVmTarget(index);
     }
   }}
-  ondragleave={() => vm.leaveVmTargetDrop(index)}
+  ondragleave={(event) => {
+    // Child elements fire dragleave when the cursor moves between them;
+    // only clear the highlight when the cursor left the row itself.
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      vm.leaveVmTargetDrop(index);
+    }
+  }}
 >
   <SearchSelect
     {id}

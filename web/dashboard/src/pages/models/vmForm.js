@@ -78,19 +78,15 @@ export function vmFormHasPrimaryTarget(form) {
   return String((form && form.target_model) || "").trim() !== "";
 }
 
-// vmFormTargetCount is the total number of reorderable rows in the editor:
-// one for the primary target when present, plus every extra target. The drag
-// handle is shown only when this is greater than one.
+// vmFormTargetCount is the total number of reorderable rows in the editor.
 export function vmFormTargetCount(form) {
   if (!form) return 0;
   const primary = vmFormHasPrimaryTarget(form) ? 1 : 0;
   return primary + (Array.isArray(form.targets) ? form.targets.length : 0);
 }
 
-// flattenFormTargets returns the full target list in display order: the
-// primary target (if any) followed by the extra targets. The move logic
-// treats the editor as one contiguous list so position 0 is the failover
-// primary / first round-robin slot.
+// flattenFormTargets returns the full target list in display order: primary
+// first, so position 0 is the failover primary / first round-robin slot.
 export function flattenFormTargets(form) {
   if (!form) return [];
   const list = [];
@@ -113,10 +109,9 @@ export function flattenFormTargets(form) {
   return list;
 }
 
-// moveFormTarget reorders the form's flattened target list in place: it
-// splices the entry at `from` to `to` and writes the result back into the
-// primary slot plus the extras array. Invalid bounds or no-op moves return
-// false; the editor uses that to skip needless writes.
+// moveFormTarget splices the flattened target list in place, writing the
+// result back into the primary slot plus the extras array. Returns false on
+// invalid bounds or no-op moves.
 export function moveFormTarget(form, from, to) {
   if (!form) return false;
   const list = flattenFormTargets(form);

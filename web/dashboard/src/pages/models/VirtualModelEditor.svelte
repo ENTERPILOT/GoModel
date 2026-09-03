@@ -20,6 +20,9 @@
 
   const vm = virtualModelEditor;
 
+  // The handle shows only when there is more than one row to reorder.
+  const canReorder = $derived(vm.vmTargetCount() > 1 && !vm.vmFormManaged);
+
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
   // sure the runtime config is loaded by the time the editor shows it.
   $effect(() => {
@@ -81,7 +84,7 @@
     <VmTargetRow
       id="virtual-model-target"
       index={0}
-      draggable={vm.vmTargetCount() > 1 && !vm.vmFormManaged}
+      draggable={canReorder}
       bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
@@ -92,7 +95,7 @@
       <VmTargetRow
         placeholder="groq/llama"
         index={index + 1}
-        draggable={vm.vmTargetCount() > 1 && !vm.vmFormManaged}
+        draggable={canReorder}
         bind:provider={target.provider}
         bind:model={target.model}
         bind:weight={target.weight}

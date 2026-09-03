@@ -1,4 +1,4 @@
-// Contract tests for virtual-model target reordering (PR #77).
+// Contract tests for virtual-model target reordering.
 // These pin the behavior a reviewer sees in the editor so a future refactor
 // cannot silently change it:
 //   1. Drag-and-move, not drag-and-replace: dropping a row onto another row
@@ -108,5 +108,26 @@ test("weights and explicit provider pins survive a reorder", () => {
   assert.deepEqual(
     form.targets.map((t) => `${t.model}:${t.weight}`),
     ["a:1", "c:1"],
+  );
+});
+
+test("target helpers tolerate a null or malformed form", () => {
+  assert.equal(vmFormTargetCount(null), 0);
+  assert.equal(vmFormTargetCount(undefined), 0);
+  assert.deepEqual(flattenFormTargets(null), []);
+  assert.deepEqual(flattenFormTargets(undefined), []);
+  // Non-array targets still surfaces the primary row; moveFormTarget refuses
+  // because it cannot build a contiguous list.
+  assert.deepEqual(flattenFormTargets({ target_model: "a", targets: "bad" }), [
+    { provider: "", model: "a", weight: 1 },
+  ]);
+  assert.equal(moveFormTarget(null, 0, 1), false);
+  assert.equal(
+    moveFormTarget(
+      { ...defaultVirtualModelForm(), target_model: "a", targets: "bad" },
+      0,
+      1,
+    ),
+    false,
   );
 });

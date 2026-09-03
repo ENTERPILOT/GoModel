@@ -48,15 +48,12 @@ class VirtualModelEditorStore {
   vmFormOriginalSource = $state("");
   vmFormManaged = $state(false);
   vmForm = $state(defaultVirtualModelForm());
-  // Drag-to-reorder state for the target rows: vmDragIndex is the flattened
-  // row being dragged, vmDropIndex the row currently under the cursor (for
-  // the drop highlight). Both reset when the drag ends.
+  // Drag state: vmDragIndex is the row being dragged, vmDropIndex the row
+  // currently under the cursor for the drop highlight.
   vmDragIndex = $state(null);
   vmDropIndex = $state(null);
-  // After a keyboard move, focus must follow the moved row: the each block
-  // reuses DOM nodes per position, so without this the focus would stay on
-  // the handle at the old index (now a different model). Set to the moved
-  // row's new index; VmTargetRow focuses that handle and clears it.
+  // Set to the moved row's new index after a keyboard move so focus follows;
+  // VmTargetRow focuses the handle and clears it.
   vmFocusHandle = $state(null);
 
   addVmTarget() {
@@ -87,9 +84,7 @@ class VirtualModelEditorStore {
     this.vmDragIndex = index;
   }
 
-  // enterVmTargetDrop marks the row under the cursor as the current drop
-  // target; the editor calls it from the row's dragover (which must
-  // preventDefault for drop to fire).
+  // enterVmTargetDrop marks the row under the cursor as the drop target.
   enterVmTargetDrop(index) {
     this.vmDropIndex = index;
   }
@@ -100,8 +95,7 @@ class VirtualModelEditorStore {
     }
   }
 
-  // dropVmTarget moves the dragged row onto `index` and clears the drag
-  // state. A no-op move (same index) just resets the highlight.
+  // dropVmTarget moves the dragged row onto `index` and clears drag state.
   dropVmTarget(index) {
     if (this.vmDragIndex != null) {
       moveFormTarget(this.vmForm, this.vmDragIndex, index);
@@ -115,9 +109,7 @@ class VirtualModelEditorStore {
     this.vmDropIndex = null;
   }
 
-  // requestVmFocusHandle makes focus follow a keyboard move: the row that
-  // moved to `index` grabs focus so repeated arrows walk the same model up
-  // or down the list. VmTargetRow clears it once the focus lands.
+  // requestVmFocusHandle makes focus follow a keyboard move.
   requestVmFocusHandle(index) {
     this.vmFocusHandle = index;
   }

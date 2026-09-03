@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -684,8 +685,8 @@ func TestUpsertVirtualModelTargetOrderRoundTrips(t *testing.T) {
 		t.Fatal("stored virtual model missing after initial put")
 	}
 	want := []string{"openai/gpt-4o", "openai/gpt-4o-mini", "anthropic/claude-haiku"}
-	if got := qualifiedTargetNames(vm.Targets); !slicesEqual(got, want) {
-		t.Fatalf("stored order = %v, want %v", got, want)
+	if !slices.Equal(qualifiedTargetNames(vm.Targets), want) {
+		t.Fatalf("stored order = %v, want %v", vm.Targets, want)
 	}
 
 	// Reorder save: what the editor sends after dragging the last target onto
@@ -698,8 +699,8 @@ func TestUpsertVirtualModelTargetOrderRoundTrips(t *testing.T) {
 		t.Fatal("stored virtual model missing after reorder put")
 	}
 	want = []string{"anthropic/claude-haiku", "openai/gpt-4o", "openai/gpt-4o-mini"}
-	if got := qualifiedTargetNames(vm.Targets); !slicesEqual(got, want) {
-		t.Fatalf("stored order after reorder = %v, want %v", got, want)
+	if !slices.Equal(qualifiedTargetNames(vm.Targets), want) {
+		t.Fatalf("stored order after reorder = %v, want %v", vm.Targets, want)
 	}
 
 	// The list view the dashboard renders must return the same order.
@@ -715,8 +716,8 @@ func TestUpsertVirtualModelTargetOrderRoundTrips(t *testing.T) {
 		if view.Source != "smart" {
 			continue
 		}
-		if got := qualifiedTargetNames(view.Targets); !slicesEqual(got, want) {
-			t.Fatalf("view order after reorder = %v, want %v", got, want)
+		if !slices.Equal(qualifiedTargetNames(view.Targets), want) {
+			t.Fatalf("view order after reorder = %v, want %v", view.Targets, want)
 		}
 		return
 	}
@@ -735,14 +736,3 @@ func qualifiedTargetNames(targets []virtualmodels.Target) []string {
 	return names
 }
 
-func slicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
