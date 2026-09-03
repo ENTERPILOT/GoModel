@@ -23,6 +23,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
@@ -127,6 +128,18 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	if cfg.Factory == nil {
 		return nil, fmt.Errorf("factory is required")
+	}
+
+	// Outbound trust must be in place before any provider builds a transport,
+	// and a missing CA file is a startup error rather than a silent fallback.
+	tlsCfg := cfg.AppConfig.Config.HTTP.TLS
+	if err := httpclient.SetConfiguredTLS(httpclient.TLSSettings{
+		CAFile:             tlsCfg.CAFile,
+		ClientCertFile:     tlsCfg.ClientCertFile,
+		ClientKeyFile:      tlsCfg.ClientKeyFile,
+		InsecureSkipVerify: tlsCfg.InsecureSkipVerify,
+	}); err != nil {
+		return nil, err
 	}
 
 	b := newBootstrap(ctx, cfg)

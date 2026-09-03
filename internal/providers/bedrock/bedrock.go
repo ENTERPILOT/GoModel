@@ -29,6 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
@@ -68,7 +69,8 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p := &Provider{hooks: opts.Hooks}
 
 	region, endpoint := parseBaseURL(providerCfg.BaseURL)
-	loadOpts := []func(*awsconfig.LoadOptions) error{}
+	// The SDK's own client would ignore the gateway's proxy and TLS trust.
+	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(httpclient.NewDefaultHTTPClient())}
 	if region != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
 	}

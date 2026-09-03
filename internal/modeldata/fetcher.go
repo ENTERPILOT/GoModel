@@ -14,14 +14,13 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
-// httpClient is a shared HTTP client for model list fetching.
-// The 60-second timeout acts as a safety net; callers should use context
-// deadlines for finer-grained control.
-var httpClient = &http.Client{
-	Timeout: 60 * time.Second,
-}
+// fetchTimeout is a safety net for one catalog download; callers should use
+// context deadlines for finer-grained control.
+const fetchTimeout = 60 * time.Second
 
 // maxBodySize caps a catalog, whether downloaded or read from disk.
 const maxBodySize = 10 * 1024 * 1024 // 10 MB
@@ -61,7 +60,9 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 		return readLocal(path, etag)
 	}
 
-	client := httpClient
+	// Built per fetch so the client picks up the trust settings installed at
+	// startup (private CA, mTLS) and the proxy environment.
+	client := httpclient.NewClientWithTimeout(fetchTimeout)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {

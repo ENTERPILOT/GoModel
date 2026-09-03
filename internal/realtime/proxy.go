@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 // MaxFrameBytes caps a single realtime message. OpenAI streams base64-encoded
@@ -77,6 +79,9 @@ func (h Hooks) clientFrames() func([]byte) []byte {
 // or the terminal transport error (never a *DialError) for the caller to log.
 func Proxy(w http.ResponseWriter, r *http.Request, target Target, hooks Hooks) error {
 	upstream, _, err := websocket.Dial(r.Context(), target.URL, &websocket.DialOptions{
+		// The shared client carries the operator's proxy and TLS trust
+		// settings (private CA, mTLS); the default dialer would not.
+		HTTPClient:   httpclient.NewDefaultHTTPClient(),
 		HTTPHeader:   target.Headers,
 		Subprotocols: target.Subprotocols,
 	})

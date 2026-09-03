@@ -122,6 +122,7 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 		ResponseHeaderTimeout: config.ResponseHeaderTimeout,
 		ForceAttemptHTTP2:     true,
 		ExpectContinueTimeout: 1 * time.Second,
+		TLSClientConfig:       ConfiguredTLS(),
 	}
 
 	return &http.Client{
@@ -134,4 +135,18 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 // This is a convenience function equivalent to NewHTTPClient(nil).
 func NewDefaultHTTPClient() *http.Client {
 	return NewHTTPClient(nil)
+}
+
+// NewClientWithTimeout returns a client on the shared transport settings
+// (proxy, TLS trust, dial and keep-alive tuning) whose overall request and
+// response-header timeouts are both bound to timeout. Auxiliary callers such
+// as the model catalog fetch, the update check, and vector stores use it so
+// they inherit operator trust settings instead of building bare clients.
+func NewClientWithTimeout(timeout time.Duration) *http.Client {
+	cfg := DefaultConfig()
+	if timeout > 0 {
+		cfg.Timeout = timeout
+		cfg.ResponseHeaderTimeout = timeout
+	}
+	return NewHTTPClient(&cfg)
 }
