@@ -53,12 +53,15 @@ func (s *MemoryStore) Get(_ context.Context, id string) (*StoredBatch, error) {
 }
 
 // List returns batches ordered by created_at desc, id desc.
-func (s *MemoryStore) List(_ context.Context, limit int, after string) ([]*StoredBatch, error) {
+func (s *MemoryStore) List(_ context.Context, limit int, after, userPath string) ([]*StoredBatch, error) {
 	limit = normalizeLimit(limit)
 
 	s.mu.RLock()
 	all := make([]*StoredBatch, 0, len(s.items))
 	for _, b := range s.items {
+		if !batchInUserPath(userPath, b) {
+			continue
+		}
 		c, err := cloneBatch(b)
 		if err != nil {
 			s.mu.RUnlock()

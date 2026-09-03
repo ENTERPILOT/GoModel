@@ -4,8 +4,17 @@
   // RateLimitInspector). Entirely driven by the rateLimits store.
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
+  import { access } from "$lib/stores/access.svelte.js";
   import { rateLimits } from "./rateLimits.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
+
+  // The scope select only offers user_path once the credential turns out to
+  // be scoped; a form opened before that answer arrived must follow suit.
+  $effect(() => {
+    if (access.scoped && rateLimits.rateLimitForm.scope !== "user_path") {
+      rateLimits.rateLimitForm.scope = "user_path";
+    }
+  });
 </script>
 
 <!-- novalidate: validation lives in rateLimitFormPayload(), which surfaces

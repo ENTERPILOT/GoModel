@@ -58,7 +58,7 @@ func (h *Handler) ListUsers(c *echo.Context) error {
 	if h.users == nil {
 		return handleError(c, featureUnavailableError("users feature is unavailable"))
 	}
-	return c.JSON(http.StatusOK, userListResponse{Users: h.userNodes()})
+	return c.JSON(http.StatusOK, userListResponse{Users: h.userNodes(requestScope(c))})
 }
 
 // UpsertUser handles PUT /admin/users.
@@ -70,6 +70,9 @@ func (h *Handler) UpsertUser(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
+	if err := requireUserPathInScope(c, req.UserPath); err != nil {
+		return handleError(c, err)
+	}
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
 	if _, err := h.users.Upsert(c.Request().Context(), users.User{
@@ -79,7 +82,7 @@ func (h *Handler) UpsertUser(c *echo.Context) error {
 	}); err != nil {
 		return handleError(c, userWriteError(err))
 	}
-	return c.JSON(http.StatusOK, userListResponse{Users: h.userNodes()})
+	return c.JSON(http.StatusOK, userListResponse{Users: h.userNodes(requestScope(c))})
 }
 
 // DeleteUser handles DELETE /admin/users?user_path=...
@@ -91,6 +94,9 @@ func (h *Handler) DeleteUser(c *echo.Context) error {
 	if userPath == "" {
 		return handleError(c, core.NewInvalidRequestError("user_path is required", nil))
 	}
+	if err := requireUserPathInScope(c, userPath); err != nil {
+		return handleError(c, err)
+	}
 	h.mutationMu.Lock()
 	defer h.mutationMu.Unlock()
 	if err := h.users.Delete(c.Request().Context(), userPath); err != nil {
@@ -99,7 +105,25 @@ func (h *Handler) DeleteUser(c *echo.Context) error {
 		}
 		return handleError(c, userWriteError(err))
 	}
-	return c.JSON(http.StatusOK, userListResponse{Users: h.userNodes()})
+	return c.JSON(http.StatusOK, userListResponse{Users: h.userNodes(requestScope(c))})
+}
+
+// requireUserPathInScope rejects writes to user nodes outside the caller's
+// scope. Unparseable paths pass through so the service reports the usual
+// validation error.
+func requireUserPathInScope(c *echo.Context, raw string) error {
+	scope := requestScope(c)
+	if scope.Global() {
+		return nil
+	}
+	userPath, err := core.NormalizeUserPath(raw)
+	if err != nil {
+		return nil
+	}
+	if !scope.Allows(userPath) {
+		return userPathOutOfScopeError("user_path")
+	}
+	return nil
 }
 
 // userCatalog lists every registered model as a selector, or nil without a registry.
@@ -158,8 +182,9 @@ func userWriteError(err error) error {
 }
 
 // userNodes builds the tree: every stored policy, every auth-key user path,
-// and all their ancestors, sorted by path.
-func (h *Handler) userNodes() []userNodeResponse {
+// and all their ancestors, sorted by path. Only nodes inside scope are
+// returned, so a scoped admin sees its subtree without the ancestors above it.
+func (h *Handler) userNodes(scope core.AccessScope) []userNodeResponse {
 	nodes := make(map[string]*userNodeResponse)
 	ensure := func(userPath string) *userNodeResponse {
 		for _, ancestor := range core.UserPathAncestors(userPath) {
@@ -200,6 +225,9 @@ func (h *Handler) userNodes() []userNodeResponse {
 	catalog := h.userCatalog()
 	result := make([]userNodeResponse, 0, len(nodes))
 	for userPath, node := range nodes {
+		if !scope.Allows(userPath) {
+			continue
+		}
 		constraints := h.users.Constraints(userPath)
 		node.Restricted = len(constraints) > 0
 		for _, constraint := range constraints {

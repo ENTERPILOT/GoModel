@@ -43,8 +43,12 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 	}
 	views := h.authKeys.ListViews()
 	catalog := h.userCatalog()
+	scope := requestScope(c)
 	response := make([]authKeyResponse, 0, len(views))
 	for _, view := range views {
+		if !scope.Allows(view.UserPath) {
+			continue
+		}
 		row := authKeyResponse{View: view, Restricted: len(view.AllowedModels) > 0}
 		ctx := core.WithEffectiveUserPath(context.Background(), view.UserPath)
 		if len(view.AllowedModels) > 0 {
@@ -70,7 +74,9 @@ func (h *Handler) CreateAuthKey(c *echo.Context) error {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	userPath, err := normalizeUserPathQueryParam("user_path", req.UserPath)
+	// A scoped admin issues keys inside its own subtree: an omitted path
+	// binds the key to the scope root, an outside path is rejected.
+	userPath, err := scopedUserPath(c, "user_path", req.UserPath)
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -187,6 +193,9 @@ func (h *Handler) updateAuthKey(c *echo.Context, req any, update func(ctx contex
 	if err := c.Bind(req); err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
+	if err := h.requireAuthKeyInScope(c, id); err != nil {
+		return handleError(c, err)
+	}
 
 	view, err := update(c.Request().Context(), id)
 	if err != nil {
@@ -205,7 +214,27 @@ func (h *Handler) DeactivateAuthKey(c *echo.Context) error {
 	if h.authKeys == nil {
 		unavailableErr = featureUnavailableError("auth keys feature is unavailable")
 	} else {
-		deactivate = h.authKeys.Deactivate
+		deactivate = func(ctx context.Context, id string) error {
+			if err := h.requireAuthKeyInScope(c, id); err != nil {
+				return err
+			}
+			return h.authKeys.Deactivate(ctx, id)
+		}
 	}
 	return deactivateByID(c, unavailableErr, "auth key", authkeys.ErrNotFound, "auth key not found: ", deactivate, authKeyWriteError)
+}
+
+// requireAuthKeyInScope hides keys bound outside the caller's scope behind
+// the same not-found error an unknown id produces. Global scopes skip the
+// lookup so a missing key still surfaces from the update itself.
+func (h *Handler) requireAuthKeyInScope(c *echo.Context, id string) error {
+	scope := requestScope(c)
+	if scope.Global() {
+		return nil
+	}
+	view, err := h.authKeys.View(id)
+	if err != nil || !scope.Allows(view.UserPath) {
+		return core.NewNotFoundError("auth key not found: " + id)
+	}
+	return nil
 }

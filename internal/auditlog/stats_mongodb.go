@@ -16,6 +16,13 @@ func (r *MongoDBReader) GetRequestStats(ctx context.Context, params RequestStats
 	if tsFilter := mongoDateRangeFilter(params.QueryParams); tsFilter != nil {
 		match = append(match, bson.E{Key: "timestamp", Value: tsFilter})
 	}
+	userPath, err := normalizeAuditUserPathFilter(params.UserPath)
+	if err != nil {
+		return nil, err
+	}
+	if userPath != "" {
+		match = append(match, mongoUserPathMatchFilter(userPath))
+	}
 
 	// Latency covers successful requests with a recorded duration that
 	// actually reached a provider (local response-cache hits complete in

@@ -43,10 +43,27 @@ type StoredBatch struct {
 type Store interface {
 	Create(ctx context.Context, batch *StoredBatch) error
 	Get(ctx context.Context, id string) (*StoredBatch, error)
-	List(ctx context.Context, limit int, after string) ([]*StoredBatch, error)
+	// List returns batches newest first, starting after the cursor id. A
+	// non-empty userPath keeps only batches inside that subtree (the path
+	// itself and its descendants); the cursor must lie inside it too, else
+	// ErrNotFound.
+	List(ctx context.Context, limit int, after, userPath string) ([]*StoredBatch, error)
 	Update(ctx context.Context, batch *StoredBatch) error
 	Delete(ctx context.Context, id string) error
 	Close() error
+}
+
+// batchInUserPath reports whether a batch lies inside the user-path subtree
+// filter. An empty filter admits every batch; a batch without a user path
+// belongs to no subtree.
+func batchInUserPath(userPath string, batch *StoredBatch) bool {
+	if userPath == "" {
+		return true
+	}
+	if batch == nil {
+		return false
+	}
+	return core.UserPathContains(userPath, batch.UserPath)
 }
 
 func normalizeLimit(limit int) int {

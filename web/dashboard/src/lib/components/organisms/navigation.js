@@ -9,6 +9,7 @@
 // $derived and markup) to re-evaluate when the underlying state changes.
 
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
 import { versionStore } from "$lib/stores/version.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
@@ -28,10 +29,19 @@ import {
   Workflow,
 } from "lucide";
 
+// Gateway-wide configuration pages are hidden from scoped admins (a key bound
+// to a user path); their endpoints answer 403 for such credentials.
+const globalOnly = () => !access.scoped;
+
 export const NAV_ITEMS = [
   { page: "overview", label: m.navigation_overview, icon: LayoutDashboard },
-  { page: "providers-config", label: m.navigation_providers, icon: ServerCog },
-  { page: "models", label: m.navigation_models, icon: Box },
+  {
+    page: "providers-config",
+    label: m.navigation_providers,
+    icon: ServerCog,
+    visible: globalOnly,
+  },
+  { page: "models", label: m.navigation_models, icon: Box, visible: globalOnly },
   { page: "playground", label: m.navigation_playground, icon: FlaskConical },
   { page: "audit-logs", label: m.navigation_audit_logs, icon: History },
   { page: "usage", label: m.navigation_usage, icon: ChartColumn },
@@ -49,18 +59,23 @@ export const NAV_ITEMS = [
   },
   { page: "auth-keys", label: m.navigation_api_keys, icon: KeyRound },
   { page: "users", label: m.navigation_users, icon: Users },
-  { page: "workflows", label: m.navigation_workflows, icon: Workflow },
+  {
+    page: "workflows",
+    label: m.navigation_workflows,
+    icon: Workflow,
+    visible: globalOnly,
+  },
   {
     page: "guardrails",
     label: m.navigation_guardrails_beta,
     icon: ShieldCheck,
-    visible: () => runtimeConfig.guardrailsVisible(),
+    visible: () => globalOnly() && runtimeConfig.guardrailsVisible(),
   },
   {
     page: "mcp-servers",
     label: m.navigation_mcp_servers,
     icon: Plug,
-    visible: () => runtimeConfig.mcpVisible(),
+    visible: () => globalOnly() && runtimeConfig.mcpVisible(),
   },
   {
     page: "settings",

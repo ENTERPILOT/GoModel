@@ -10,6 +10,7 @@
 // clears every timer, and frees the bucket buffer when navigating away.
 
 import { getJSON, apiFetch, isAbortError } from "$lib/api/client.js";
+import { access } from "$lib/stores/access.svelte.js";
 import { consumeEventStream, nextReconnect } from "$lib/api/eventStream.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { GRANULARITIES } from "./liveTokensLogic.js";
@@ -141,9 +142,10 @@ class LiveTokensState {
   // --- Usage SSE signal stream ---
 
   async #startUsageSignalStream() {
-    await runtimeConfig.ensureLoaded();
+    await Promise.all([runtimeConfig.ensureLoaded(), access.ensureLoaded()]);
     if (!this.active) return;
-    if (!runtimeConfig.liveLogsVisible()) return;
+    // The usage stream is gateway-wide: a key scoped to a user path gets none.
+    if (!runtimeConfig.liveLogsVisible() || access.scoped) return;
     if (typeof ReadableStream === "undefined") return;
     if (this.#sseController) {
       this.#sseController.abort();

@@ -3,6 +3,7 @@
   // Each facet dropdown honors every filter except its own (faceted search).
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { debounced } from "$lib/utils/debounce.js";
+  import { access } from "$lib/stores/access.svelte.js";
   import { usagePage } from "./usage.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -50,9 +51,11 @@
       {/each}
     </select>
   {/if}
+  <!-- A scoped key's server-side default is its scope root: show it as the
+       placeholder so an empty filter reads as that subtree. -->
   <FilterInput
     class="usage-page-filters-user-path"
-    placeholder={m.usage_filter_user_path_placeholder()}
+    placeholder={access.scoped ? access.userPath : m.usage_filter_user_path_placeholder()}
     label={m.usage_filter_user_path()}
     bind:value={usagePage.usageFilterUserPath}
     oninput={onUserPathInput}

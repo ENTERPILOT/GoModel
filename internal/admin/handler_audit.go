@@ -57,6 +57,7 @@ const conversationBuildTimeout = 10 * time.Second
 // @Success      200  {object}  auditLogListResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/log [get]
 func (h *Handler) AuditLog(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
@@ -130,7 +131,7 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 			EndDate:   dateRange.EndDate,
 		}
 	}
-	userPath, err := normalizeUserPathQueryParam("user_path", c.QueryParam("user_path"))
+	userPath, err := scopedUserPath(c, "user_path", c.QueryParam("user_path"))
 	if err != nil {
 		return params, err
 	}
@@ -216,6 +217,7 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 // @Success      200  {object}  auditSessionsListResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/sessions [get]
 func (h *Handler) AuditSessions(c *echo.Context) error {
 	params, err := parseAuditLogQueryParams(c)
@@ -324,15 +326,21 @@ const auditStatsHourlyRangeDays = 3
 // @Param        days        query     int     false  "Number of days (default 30)"
 // @Param        start_date  query     string  false  "Start date (YYYY-MM-DD)"
 // @Param        end_date    query     string  false  "End date (YYYY-MM-DD)"
+// @Param        user_path   query     string  false  "Filter by tracked user path subtree"
 // @Success      200  {object}  auditlog.RequestStats
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/stats [get]
 func (h *Handler) AuditStats(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
 	// always get a 400 for malformed inputs, regardless of whether audit
 	// logging is configured.
 	dateRange, err := parseDateRangeParams(c)
+	if err != nil {
+		return handleError(c, err)
+	}
+	userPath, err := scopedUserPath(c, "user_path", c.QueryParam("user_path"))
 	if err != nil {
 		return handleError(c, err)
 	}
@@ -350,6 +358,7 @@ func (h *Handler) AuditStats(c *echo.Context) error {
 	params := auditlog.RequestStatsParams{
 		StartDate: dateRange.StartDate,
 		EndDate:   dateRange.EndDate,
+		UserPath:  userPath,
 		Interval:  interval,
 		Location:  location,
 		Now:       timeNow(),
@@ -376,6 +385,7 @@ func (h *Handler) AuditStats(c *echo.Context) error {
 // @Success      200  {object}  auditLogEntryResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      404  {object}  core.GatewayError
 // @Failure      500  {object}  core.GatewayError
 // @Router       /admin/audit/detail [get]
@@ -392,7 +402,9 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, err)
 	}
-	if entry == nil {
+	// An entry outside the caller's scope is reported exactly like a
+	// missing one so IDs from other tenants cannot be probed.
+	if entry == nil || !requestScope(c).Allows(entry.UserPath) {
 		return handleError(c, core.NewNotFoundError("audit log not found: "+logID))
 	}
 
@@ -426,6 +438,7 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 // @Success      200  {object}  auditConversationResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/conversation [get]
 func (h *Handler) AuditConversation(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
@@ -474,6 +487,10 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 	if result.Entries == nil {
 		result.Entries = []auditlog.LogEntry{}
 	}
+	result.Entries, err = scopedConversationEntries(c, logID, result.Entries)
+	if err != nil {
+		return handleError(c, err)
+	}
 	enriched, err := h.auditLogResponse(ctx, &auditlog.LogListResult{Entries: result.Entries})
 	if err != nil {
 		return handleError(c, err)
@@ -487,4 +504,29 @@ func (h *Handler) AuditConversation(c *echo.Context) error {
 		Entries:   enriched.Entries,
 		Truncated: result.Truncated,
 	})
+}
+
+// scopedConversationEntries drops thread entries outside the caller's scope.
+// A scoped caller whose anchor entry lies outside its subtree gets the same
+// not-found answer a missing entry produces. Global scopes pass through.
+func scopedConversationEntries(c *echo.Context, anchorID string, entries []auditlog.LogEntry) ([]auditlog.LogEntry, error) {
+	scope := requestScope(c)
+	if scope.Global() {
+		return entries, nil
+	}
+	kept := make([]auditlog.LogEntry, 0, len(entries))
+	anchorVisible := false
+	for _, entry := range entries {
+		if !scope.Allows(entry.UserPath) {
+			continue
+		}
+		if entry.ID == anchorID {
+			anchorVisible = true
+		}
+		kept = append(kept, entry)
+	}
+	if !anchorVisible {
+		return nil, core.NewNotFoundError("audit log not found: " + anchorID)
+	}
+	return kept, nil
 }

@@ -5,6 +5,7 @@
   import { router } from "$lib/stores/router.svelte.js";
   import { sidebar } from "$lib/stores/ui.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
+  import { access } from "$lib/stores/access.svelte.js";
   import {
     MAX_SIDEBAR_WIDTH,
     MIN_SIDEBAR_WIDTH,
@@ -13,7 +14,7 @@
   import { gomodelPath } from "$lib/api/paths.js";
   import * as m from "$lib/paraglide/messages.js";
   import { NAV_ITEMS } from "./navigation.js";
-  import { LockKeyhole, LogOut, UserRound } from "lucide";
+  import { LockKeyhole, LogOut, Route, UserRound } from "lucide";
 
   // Visibility gates read the runtimeConfig store, so this re-filters when
   // the flags load.
@@ -115,6 +116,16 @@
   </nav>
   <div class="sidebar-footer">
     <ThemeToggle compact={sidebar.collapsed} />
+    {#if access.scoped}
+      <div
+        class="access-scope"
+        role="status"
+        title={m.sidebar_scoped_to_help({ path: access.userPath })}
+      >
+        <Icon icon={Route} class="api-key-open-icon" />
+        <span>{m.sidebar_scoped_to({ path: access.userPath })}</span>
+      </div>
+    {/if}
     {#if auth.externalLogoutURL}
       <div class="external-auth-section">
         {#if auth.externalUser}
@@ -317,6 +328,28 @@
     white-space: nowrap;
 }
 
+/* Scope indicator for a key bound to a user path: the subtree this
+   dashboard session administers. */
+.access-scope {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.access-scope span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sidebar.sidebar-collapsed .sidebar-footer .access-scope {
+    display: none;
+}
+
 .api-key-open-btn {
     width: 100%;
     display: inline-flex;
@@ -455,7 +488,8 @@
           display: grid;
         }
 
-  .sidebar-footer .external-auth-user {
+  .sidebar-footer .external-auth-user,
+  .sidebar-footer .access-scope {
           display: none;
         }
 

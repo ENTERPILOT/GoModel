@@ -5,6 +5,8 @@
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
+import { normalizeScopePath } from "$lib/stores/accessScope.js";
 import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import { displayModelSelector } from "$lib/utils/modelSelectors.js";
@@ -126,6 +128,8 @@ class AuthKeysStore {
     if (!this.issuedValue) {
       this.copyState.reset();
       this.form = defaultAuthKeyForm();
+      // A scoped key can only issue keys inside its own subtree: start there.
+      this.form.user_path = access.defaultPath(this.form.user_path);
     }
   }
 
@@ -152,6 +156,13 @@ class AuthKeysStore {
   }
 
   async submitForm() {
+    // The server rejects a path outside the key's scope; say so before the
+    // round trip. An empty path binds to the scope root server-side.
+    const userPath = normalizeScopePath(this.form.user_path);
+    if (userPath && !access.allows(userPath)) {
+      this.error = m.access_scope_path_outside({ root: access.userPath });
+      return;
+    }
     const built = buildCreateAuthKeyPayload(this.form);
     if (built.error) {
       this.error = built.error;

@@ -5,6 +5,8 @@
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
+import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import * as m from "$lib/paraglide/messages.js";
 import * as logic from "./rateLimitsLogic.js";
 
@@ -49,8 +51,13 @@ class RateLimitsStore {
     return logic.rateLimitScopeMeta(scope);
   }
 
+  // Provider and model rules are gateway-wide, so a key scoped to a user
+  // path only creates user-path rules inside its subtree.
   rateLimitScopeOptions() {
-    return logic.rateLimitScopeOptions();
+    const options = logic.rateLimitScopeOptions();
+    return access.scoped
+      ? options.filter((option) => option.value === "user_path")
+      : options;
   }
 
   rateLimitScope(item) {
@@ -261,6 +268,8 @@ class RateLimitsStore {
     } else {
       this.rateLimitEditingOriginal = null;
       this.rateLimitForm = logic.defaultRateLimitForm();
+      // A scoped key can only limit its own subtree: start there.
+      this.rateLimitForm.subject = access.defaultPath(this.rateLimitForm.subject);
     }
     this.rateLimitFormOpen = true;
   }
@@ -295,12 +304,27 @@ class RateLimitsStore {
   }
 
   async submitRateLimitForm() {
+    // A key change can leave the scope pending; settle it before reading the
+    // form, so the payload, the scope check, and the submit lock all see
+    // one consistent snapshot.
+    await access.ensureLoaded();
     if (this.rateLimitFormSubmitting) {
       return;
     }
     const { payload, error } = this.rateLimitFormPayload();
     if (error) {
       this.rateLimitFormError = error;
+      return;
+    }
+    if (
+      !scopedSubjectAllowed(
+        access.scoped,
+        access.userPath,
+        this.rateLimitForm.scope,
+        this.rateLimitForm.subject,
+      )
+    ) {
+      this.rateLimitFormError = m.access_scope_path_outside({ root: access.userPath });
       return;
     }
     const moved = this.rateLimitIdentityMoved(payload);

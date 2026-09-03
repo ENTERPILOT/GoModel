@@ -292,18 +292,36 @@ func (s *nativeResponseService) utilityRequest(c *echo.Context) (*core.Responses
 }
 
 func (s *nativeResponseService) loadStoredResponse(ctx context.Context, id string) (*responsestore.StoredResponse, error) {
+	// A scoped caller may only address responses the gateway tracks inside
+	// its scope; the provider lookup the callers fall back to on
+	// responsestore.ErrNotFound is not tenant-aware, so untracked ids are
+	// reported as missing with a GatewayError instead.
+	scoped := !core.AccessScopeFromContext(ctx).Global()
 	if s.responseStore == nil {
+		if scoped {
+			return nil, core.NewNotFoundError("response not found")
+		}
 		return nil, responsestore.ErrNotFound
 	}
 	stored, err := s.responseStore.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, responsestore.ErrNotFound) {
+			if scoped {
+				return nil, core.NewNotFoundError("response not found")
+			}
 			return nil, err
 		}
 		return nil, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to load response", err)
 	}
 	if stored == nil || stored.Response == nil {
 		return nil, core.NewProviderError("response_store", http.StatusInternalServerError, "stored response payload missing", nil)
+	}
+	// A tracked response outside the caller's user-path scope is reported
+	// exactly like a missing one. The error is deliberately not
+	// responsestore.ErrNotFound so callers do not fall through to the
+	// provider lookup, which would hand the same object back by ID.
+	if !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return nil, core.NewNotFoundError("response not found")
 	}
 	return stored, nil
 }

@@ -351,7 +351,7 @@ func (s *failingBatchStore) Get(context.Context, string) (*batchstore.StoredBatc
 	return nil, batchstore.ErrNotFound
 }
 
-func (s *failingBatchStore) List(context.Context, int, string) ([]*batchstore.StoredBatch, error) {
+func (s *failingBatchStore) List(context.Context, int, string, string) ([]*batchstore.StoredBatch, error) {
 	return nil, nil
 }
 
@@ -375,6 +375,10 @@ func (emptyProviderFileStore) Upsert(context.Context, *filestore.StoredFile) err
 
 func (emptyProviderFileStore) Get(_ context.Context, id string) (*filestore.StoredFile, error) {
 	return &filestore.StoredFile{ID: id}, nil
+}
+
+func (emptyProviderFileStore) List(context.Context, filestore.ListFilter, int, string) ([]*filestore.StoredFile, error) {
+	return nil, nil
 }
 
 func (emptyProviderFileStore) Delete(context.Context, string) error {
@@ -401,6 +405,10 @@ func (s failingFileStore) Upsert(context.Context, *filestore.StoredFile) error {
 }
 
 func (s failingFileStore) Get(context.Context, string) (*filestore.StoredFile, error) {
+	return nil, s.storeErr()
+}
+
+func (s failingFileStore) List(context.Context, filestore.ListFilter, int, string) ([]*filestore.StoredFile, error) {
 	return nil, s.storeErr()
 }
 

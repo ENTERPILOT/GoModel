@@ -48,6 +48,51 @@ If the API key has its own `user_path`, the key wins. GoModel overwrites the
 header value with the key-bound path before workflow matching, audit logging,
 usage tracking, and model access checks run.
 
+## Access scope
+
+The key-bound `user_path` is also the key's **access scope**: the subtree it
+may read and manage. A key bound to `/team/alpha` can reach `/team/alpha` and
+every descendant, but not `/team/beta`, not `/team`, and not rows recorded
+without a user path. The header never widens the scope; it only chooses the
+path a request is attributed to.
+
+| Credential                              | Scope                        |
+| --------------------------------------- | ---------------------------- |
+| Master key                              | Global                       |
+| Managed key without `user_path` (or `/`) | Global                      |
+| Managed key bound to `/team/alpha`      | `/team/alpha` and descendants |
+| SSO or other extension identity         | Its session user path, by the same rule |
+
+The rule is the same for every credential: the user path is the node you act
+as, and you can see that node and everything below it. An SSO session bound to
+`/users/alice` therefore administers only that subtree. An extension that wants
+to hand out gateway admins binds those sessions to `/`, and team admins to the
+team root such as `/team/alpha`, exactly as you would create an API key at
+that path.
+
+The scope applies in two places:
+
+- **Admin API and dashboard.** A key with dashboard access and a `user_path`
+  is a scoped admin of that subtree. See
+  [Scoped admin access](/advanced/admin-endpoints#scoped-admin-access).
+- **Object ownership** on `/v1` lifecycle endpoints, described next.
+
+## Object ownership
+
+Responses, conversations, batches, and uploaded files remember the `user_path`
+they were created under. Retrieving, listing, updating, cancelling, or deleting
+one of them by ID succeeds only when that path lies inside the caller's scope;
+otherwise the gateway answers `404`, exactly as for an unknown ID. A
+`/v1/responses` call that references a conversation from another subtree fails
+the same way.
+
+Scoped credentials can only address objects the gateway tracks: an ID the
+gateway has no record of is reported as missing, and `GET /v1/files` lists the
+caller's tracked files from the gateway's own records rather than from the
+provider. Global credentials see every object, including legacy rows recorded
+before the path was stored, and still fall back to the provider for untracked
+IDs. Use a persistent store so every object stays tracked across restarts.
+
 ## Model access
 
 Model access policies are enabled by default. A policy is a virtual model with

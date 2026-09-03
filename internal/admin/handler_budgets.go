@@ -21,6 +21,7 @@ import (
 // @Security     BearerAuth
 // @Success      200  {object}  budgetListResponse
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/budgets [get]
 func (h *Handler) ListBudgets(c *echo.Context) error {
@@ -32,6 +33,7 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, budgetServiceError("failed to list budgets", err))
 	}
+	statuses = scopedBudgetStatuses(requestScope(c), statuses)
 	return c.JSON(http.StatusOK, budgetListResponse{
 		Budgets:    budgetStatusResponses(statuses, now),
 		ServerTime: now,
@@ -48,6 +50,7 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 // @Success      200        {object}  budgetListResponse
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
+// @Failure      403        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
 // @Router       /admin/budgets [put]
 func (h *Handler) UpsertBudget(c *echo.Context) error {
@@ -64,6 +67,9 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 	scope, subject, periodSeconds, err := budgetRequestKey(req.Scope, req.Subject, req.UserPath, req.BudgetKey)
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
+	}
+	if err := requireScopedSubject(c, scope == budget.ScopeUserPath, subject); err != nil {
+		return handleError(c, err)
 	}
 	item, err := budget.NormalizeBudget(budget.Budget{
 		Scope:         scope,
@@ -92,6 +98,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 // @Success      200        {object}  budgetListResponse
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
+// @Failure      403        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
 // @Router       /admin/budgets [delete]
 //
@@ -108,6 +115,9 @@ func (h *Handler) DeleteBudget(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
+	if err := requireScopedSubject(c, scope == budget.ScopeUserPath, subject); err != nil {
+		return handleError(c, err)
+	}
 	if err := h.budgets.DeleteBudget(c.Request().Context(), scope, subject, periodSeconds); err != nil {
 		return handleError(c, budgetServiceError("failed to delete budget", err))
 	}
@@ -121,6 +131,7 @@ func (h *Handler) DeleteBudget(c *echo.Context) error {
 // @Security     BearerAuth
 // @Success      200  {object}  budget.Settings
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/budgets/settings [get]
 func (h *Handler) BudgetSettings(c *echo.Context) error {
@@ -140,6 +151,7 @@ func (h *Handler) BudgetSettings(c *echo.Context) error {
 // @Success      200       {object}  budget.Settings
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
+// @Failure      403       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
 // @Router       /admin/budgets/settings [put]
 func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
@@ -171,6 +183,7 @@ func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
 // @Success      200     {object}  budgetListResponse
 // @Failure      400     {object}  core.GatewayError
 // @Failure      401     {object}  core.GatewayError
+// @Failure      403     {object}  core.GatewayError
 // @Failure      503     {object}  core.GatewayError
 // @Router       /admin/budgets/reset-one [post]
 func (h *Handler) ResetBudget(c *echo.Context) error {
@@ -190,6 +203,9 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))
 	}
+	if err := requireScopedSubject(c, scope == budget.ScopeUserPath, subject); err != nil {
+		return handleError(c, err)
+	}
 	if err := h.budgets.ResetBudget(c.Request().Context(), scope, subject, periodSeconds, time.Now().UTC()); err != nil {
 		return handleError(c, budgetServiceError("failed to reset budget", err))
 	}
@@ -206,6 +222,7 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 // @Success      200           {object}  resetBudgetsResponse
 // @Failure      400           {object}  core.GatewayError
 // @Failure      401           {object}  core.GatewayError
+// @Failure      403           {object}  core.GatewayError
 // @Failure      503           {object}  core.GatewayError
 // @Router       /admin/budgets/reset [post]
 func (h *Handler) ResetBudgets(c *echo.Context) error {
@@ -444,4 +461,19 @@ func budgetRequestPeriodSeconds(period string, periodSeconds int64) (int64, erro
 		return parsed, nil
 	}
 	return 0, errors.New("period must be one of hourly, daily, weekly, monthly or period_seconds must be set")
+}
+
+// scopedBudgetStatuses keeps only the user_path budgets a scoped credential
+// may see; label budgets are gateway-wide. Global scopes pass through.
+func scopedBudgetStatuses(scope core.AccessScope, statuses []budget.CheckResult) []budget.CheckResult {
+	if scope.Global() {
+		return statuses
+	}
+	kept := make([]budget.CheckResult, 0, len(statuses))
+	for _, status := range statuses {
+		if status.Budget.Scope == budget.ScopeUserPath && scope.Allows(status.Budget.Subject) {
+			kept = append(kept, status)
+		}
+	}
+	return kept
 }

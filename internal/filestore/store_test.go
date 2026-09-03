@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -167,6 +168,78 @@ func TestStoreRejectsIncompleteMapping(t *testing.T) {
 		}
 		if err := store.Upsert(ctx, &StoredFile{ID: "file-1"}); err == nil {
 			t.Error("Upsert without a provider type succeeded, want failure")
+		}
+	})
+}
+
+func fileIDs(files []*StoredFile) []string {
+	ids := make([]string, 0, len(files))
+	for _, file := range files {
+		ids = append(ids, file.ID)
+	}
+	return ids
+}
+
+func TestStoreListFiltersByUserPathSubtree(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
+		ctx := context.Background()
+		rows := []struct {
+			id, userPath, provider, purpose string
+			createdAt                       int64
+		}{
+			{"file-beta", "/team/beta", "openai", "batch", 6},
+			{"file-alpha-new", "/team/alpha", "openai", "batch", 5},
+			{"file-alpha-anthropic", "/team/alpha", "anthropic", "batch", 4},
+			{"file-alpha-child", "/team/alpha/service", "openai", "assistants", 3},
+			{"file-alpha-sibling", "/team/alpha-2", "openai", "batch", 2},
+			{"file-legacy", "", "openai", "batch", 1},
+		}
+		for _, row := range rows {
+			if err := store.Upsert(ctx, &StoredFile{ID: row.id, ProviderType: row.provider, Purpose: row.purpose, UserPath: row.userPath, CreatedAt: row.createdAt}); err != nil {
+				t.Fatalf("upsert %s: %v", row.id, err)
+			}
+		}
+
+		tests := []struct {
+			name   string
+			filter ListFilter
+			after  string
+			want   []string
+			notFnd bool
+		}{
+			{name: "no filter", want: []string{"file-beta", "file-alpha-new", "file-alpha-anthropic", "file-alpha-child", "file-alpha-sibling", "file-legacy"}},
+			{name: "subtree", filter: ListFilter{UserPath: "/team/alpha"}, want: []string{"file-alpha-new", "file-alpha-anthropic", "file-alpha-child"}},
+			{name: "subtree and provider", filter: ListFilter{UserPath: "/team/alpha", ProviderType: "openai"}, want: []string{"file-alpha-new", "file-alpha-child"}},
+			{name: "subtree and purpose", filter: ListFilter{UserPath: "/team/alpha", Purpose: "assistants"}, want: []string{"file-alpha-child"}},
+			{name: "subtree after cursor", filter: ListFilter{UserPath: "/team/alpha"}, after: "file-alpha-new", want: []string{"file-alpha-anthropic", "file-alpha-child"}},
+			{name: "root keeps every tracked path", filter: ListFilter{UserPath: "/"}, want: []string{"file-beta", "file-alpha-new", "file-alpha-anthropic", "file-alpha-child", "file-alpha-sibling"}},
+			{name: "foreign cursor is missing", filter: ListFilter{UserPath: "/team/alpha"}, after: "file-beta", notFnd: true},
+			{name: "unknown cursor is missing", after: "nope", notFnd: true},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := store.List(ctx, tt.filter, 10, tt.after)
+				if tt.notFnd {
+					if !errors.Is(err, ErrNotFound) {
+						t.Fatalf("err = %v, want ErrNotFound", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("List: %v", err)
+				}
+				if ids := fileIDs(got); !slices.Equal(ids, tt.want) {
+					t.Fatalf("ids = %v, want %v", ids, tt.want)
+				}
+			})
+		}
+
+		page, err := store.List(ctx, ListFilter{UserPath: "/team/alpha"}, 2, "")
+		if err != nil {
+			t.Fatalf("List page: %v", err)
+		}
+		if ids := fileIDs(page); !slices.Equal(ids, []string{"file-alpha-new", "file-alpha-anthropic"}) {
+			t.Fatalf("page ids = %v", ids)
 		}
 	})
 }

@@ -4,6 +4,8 @@
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { access } from "$lib/stores/access.svelte.js";
+import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
@@ -130,6 +132,8 @@ class BudgetsStore {
       };
     } else {
       this.form = defaultBudgetForm();
+      // A scoped key can only budget its own subtree: start there.
+      this.form.subject = access.defaultPath(this.form.subject);
     }
     this.formOpen = true;
   }
@@ -168,12 +172,20 @@ class BudgetsStore {
   }
 
   async submitForm() {
+    // A key change can leave the scope pending; settle it before reading the
+    // form, so the payload, the scope check, and the submit lock all see
+    // one consistent snapshot.
+    await access.ensureLoaded();
     if (this.formSubmitting) {
       return;
     }
     const { payload, error } = buildBudgetFormPayload(this.form);
     if (!payload) {
       this.formError = error;
+      return;
+    }
+    if (!scopedSubjectAllowed(access.scoped, access.userPath, this.form.scope, this.form.subject)) {
+      this.formError = m.access_scope_path_outside({ root: access.userPath });
       return;
     }
     if (!this.editing) {

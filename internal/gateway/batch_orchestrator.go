@@ -332,7 +332,14 @@ func (o *BatchOrchestrator) List(ctx context.Context, params BatchListParams) (*
 	}
 	after := strings.TrimSpace(params.After)
 
-	items, err := o.batchStore.List(ctx, limit+1, after)
+	// Scoped callers see only their subtree; the store filters so paging
+	// stays exact and never exposes a foreign cursor.
+	scope := core.AccessScopeFromContext(ctx)
+	scopeFilter := ""
+	if !scope.Global() {
+		scopeFilter = scope.UserPath
+	}
+	items, err := o.batchStore.List(ctx, limit+1, after, scopeFilter)
 	if err != nil {
 		if errors.Is(err, batchstore.ErrNotFound) {
 			return nil, core.NewNotFoundError("after cursor batch not found: " + after)
@@ -535,6 +542,10 @@ func (o *BatchOrchestrator) requireStoredBatch(ctx context.Context, id string) (
 	}
 	if stored == nil || stored.Batch == nil {
 		return nil, core.NewProviderError("batch_store", http.StatusInternalServerError, "stored batch payload missing", nil)
+	}
+	// Another tenant's batch is indistinguishable from a missing one.
+	if !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return nil, core.NewNotFoundError("batch not found: " + id)
 	}
 	return stored, nil
 }

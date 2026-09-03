@@ -409,3 +409,32 @@ func TestUsageStatusSummaryErrorSurfacesAs503(t *testing.T) {
 		t.Fatalf("status = %d, want 503 (body: %s)", rec.Code, rec.Body.String())
 	}
 }
+
+// TestUsageStatusScopedKeyIgnoresHeaderPath pins that a key bound to a user
+// path reports its own subtree even when the request names another path in
+// the header: the bound path is the key's access scope and the header cannot
+// widen or move it.
+func TestUsageStatusScopedKeyIgnoresHeaderPath(t *testing.T) {
+	summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{}}
+	cfg := &Config{
+		Authenticator: mockAuthenticator{
+			enabled:   true,
+			tokenToID: map[string]string{"sk_gom_test": "key-1"},
+			tokenPath: map[string]string{"sk_gom_test": "/team/alice"},
+		},
+		UsageSummarizer: summarizer,
+	}
+
+	for _, header := range []string{"/team/bob", "/", "/team"} {
+		rec, body := getUsageStatus(t, cfg, "/v1/usage", map[string]string{
+			"Authorization":     "Bearer sk_gom_test",
+			core.UserPathHeader: header,
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("header %q: status = %d, want 200 (body: %s)", header, rec.Code, rec.Body.String())
+		}
+		if body.UserPath != "/team/alice" || summarizer.gotParams.UserPath != "/team/alice" {
+			t.Fatalf("header %q: reported %q, queried %q, want /team/alice for both", header, body.UserPath, summarizer.gotParams.UserPath)
+		}
+	}
+}

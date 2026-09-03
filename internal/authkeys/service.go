@@ -286,6 +286,14 @@ func (s *Service) UpdateDashboardAccess(ctx context.Context, id string, allowed 
 	return s.viewByID(id)
 }
 
+// View returns the admin-facing view of one cached key, or ErrNotFound.
+func (s *Service) View(id string) (*View, error) {
+	if s == nil {
+		return nil, ErrNotFound
+	}
+	return s.viewByID(normalizeID(id))
+}
+
 // viewByID returns the admin-facing view of one cached key.
 func (s *Service) viewByID(id string) (*View, error) {
 	s.mu.RLock()
