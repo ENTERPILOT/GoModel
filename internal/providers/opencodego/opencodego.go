@@ -65,6 +65,10 @@ type Provider struct {
 	*openai.ChatCompatible
 	messages       messagesProvider
 	messagesModels map[string]struct{}
+	// headers yields the session/client identification headers (session.go).
+	// Typed requests receive them through the ChatCompatible and Anthropic
+	// hooks; Passthrough merges them under the caller's opaque headers.
+	headers func(context.Context) http.Header
 }
 
 var _ core.Provider = (*Provider)(nil)
@@ -72,14 +76,19 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new OpenCode Go provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
-	chat := openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL))
+	headers := requestHeaders(loadSessionHeaderEnabled())
+	chat := openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL, headers))
 	// opts carries the shared keyring, so the /messages client rotates in step
 	// with the chat client above rather than pinning the primary key.
 	messages := anthropic.New(providers.ProviderConfig{APIKey: cfg.APIKey, APIKeys: cfg.APIKeys, BaseURL: baseURL}, opts)
+	if native, ok := messages.(*anthropic.Provider); ok {
+		native.SetRequestHeaders(headers)
+	}
 	return &Provider{
 		ChatCompatible: chat,
 		messages:       messages,
 		messagesModels: loadMessagesModels(),
+		headers:        headers,
 	}
 }
 
@@ -87,25 +96,30 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	resolved := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(resolved))
+	headers := requestHeaders(loadSessionHeaderEnabled())
+	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(resolved, headers))
 	messages := anthropic.NewWithHTTPClient(apiKey, httpClient, hooks)
 	messages.SetBaseURL(resolved)
+	messages.SetRequestHeaders(headers)
 	return &Provider{
 		ChatCompatible: chat,
 		messages:       messages,
 		messagesModels: loadMessagesModels(),
+		headers:        headers,
 	}
 }
 
 // compatibleConfig describes the OpenAI-compatible /chat/completions half of
 // the provider. The AdaptChatRequest hook carries OpenCode Zen's reasoning
-// quirk (see reasoning.go), so /v1/responses picks it up through
-// ResponsesViaChat as well.
-func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+// quirk (see reasoning.go) and ChatRequestHeaders its session/client
+// identification headers (see session.go), so /v1/responses picks both up
+// through ResponsesViaChat as well.
+func compatibleConfig(baseURL string, headers func(context.Context) http.Header) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
-		ProviderName:     "opencode_go",
-		BaseURL:          baseURL,
-		AdaptChatRequest: adaptChatRequest(loadDefaultReasoningEffort()),
+		ProviderName:       "opencode_go",
+		BaseURL:            baseURL,
+		AdaptChatRequest:   adaptChatRequest(loadDefaultReasoningEffort()),
+		ChatRequestHeaders: chatRequestHeaders(headers),
 	}
 }
 
@@ -163,6 +177,47 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 // /v1/responses honors the per-model /messages routing.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
 	return providers.StreamResponsesViaChat(ctx, p, req, "opencode_go")
+}
+
+// Passthrough forwards an opaque request with the identification headers
+// filled in wherever the caller did not send its own. Passthrough is opaque
+// by contract, so a caller-provided x-opencode-session, x-opencode-client, or
+// User-Agent always wins over the gateway's value.
+func (p *Provider) Passthrough(ctx context.Context, req *core.PassthroughRequest) (*core.PassthroughResponse, error) {
+	if req == nil || p.headers == nil {
+		return p.ChatCompatible.Passthrough(ctx, req)
+	}
+	merged := *req
+	merged.Headers = withDefaultHeaders(req.Headers, p.headers(ctx))
+	return p.ChatCompatible.Passthrough(ctx, &merged)
+}
+
+// withDefaultHeaders returns a copy of headers with every entry of defaults
+// added that headers does not already carry. Names are compared
+// case-insensitively so a non-canonical caller key still counts as present.
+func withDefaultHeaders(headers, defaults http.Header) http.Header {
+	merged := headers.Clone()
+	if merged == nil {
+		merged = make(http.Header, len(defaults))
+	}
+	for name, values := range defaults {
+		if hasHeader(merged, name) {
+			continue
+		}
+		merged[http.CanonicalHeaderKey(name)] = values
+	}
+	return merged
+}
+
+// hasHeader reports whether headers carries a non-empty entry for name under
+// any casing of the key.
+func hasHeader(headers http.Header, name string) bool {
+	for key, values := range headers {
+		if strings.EqualFold(key, name) && len(values) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Embeddings returns an error because OpenCode Go does not expose an embeddings endpoint.

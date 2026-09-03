@@ -37,7 +37,8 @@ const (
 // fields). Sources: Claude Code documents x-claude-code-session-id for
 // gateways; Codex CLI sends session-id (older releases session_id, which Roo
 // Code also uses on Responses API providers); OpenCode and Kilo Code send
-// x-session-id; Goose sends agent-session-id; x-litellm-session-id and
+// x-session-id; clients speaking OpenCode Zen's dialect (OpenCode, pi) send
+// x-opencode-session; Goose sends agent-session-id; x-litellm-session-id and
 // helicone-session-id are gateway conventions. Body fields: metadata.user_id
 // (Claude Code via /v1/messages), session_id (OpenRouter convention),
 // litellm_session_id (LiteLLM), prompt_cache_key (Zed and other OpenAI
@@ -45,6 +46,7 @@ const (
 // conversation references.
 var builtinRules = []Rule{
 	{Source: SourceHeader, Header: "X-Session-Id"},
+	{Source: SourceHeader, Header: "X-Opencode-Session"},
 	{Source: SourceHeader, Header: "X-Claude-Code-Session-Id"},
 	{Source: SourceHeader, Header: "Session-Id"},
 	{Source: SourceHeader, Header: "Session_id"},

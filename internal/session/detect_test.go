@@ -43,6 +43,14 @@ func TestDetectPrecedence(t *testing.T) {
 			want: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 		},
 		{
+			name: "opencode zen session header",
+			headers: map[string][]string{
+				"X-Opencode-Session": {"ses_0123456789abcdef"},
+			},
+			body: body,
+			want: "ses_0123456789abcdef",
+		},
+		{
 			name: "codex session-id header",
 			headers: map[string][]string{
 				"Session-Id": {"99999999-8888-7777-6666-555555555555"},
