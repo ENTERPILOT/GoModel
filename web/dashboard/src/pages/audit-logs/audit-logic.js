@@ -633,12 +633,20 @@ function auditAttemptResponsePane(entry, attempt) {
   // With only one response tab the seq/type/status chips are just noise (it's
   // the whole response); show them only to tell apart multiple attempt tabs.
   const single = auditAttempts(entry).length <= 1;
+  // The tried model is the tab badge's reason to exist: without it the tabs
+  // only say which ordinal failed, not which model. Hidden on the single tab
+  // (the row's model column already shows it) and for entries that predate
+  // per-attempt model capture ("-" placeholder).
+  const triedModel = single ? "" : auditAttemptModel(attempt);
 
   return {
     title: m.audit_response_title(),
     direction: "response",
     seq: single ? 0 : Number((attempt && attempt.seq) || 0),
     kind: single ? "" : kind === "attempt" ? "" : kind,
+    model: triedModel === "-" ? "" : triedModel,
+    modelTitle:
+      triedModel && triedModel !== "-" ? auditAttemptSegmentTitle(attempt) : "",
     statusCode: single ? null : auditAttemptStatusCode(attempt),
     layout: "split",
     entry,

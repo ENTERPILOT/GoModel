@@ -696,6 +696,96 @@ test("entries without revisions render no revision tabs", () => {
   assert.equal(auditRequestRevisions(entry).length, 0);
 });
 
+test("per-attempt response panes carry the tried model for the tab badge", () => {
+  const entry = {
+    data: {
+      request_body: { model: "forge/subagent" },
+      response_body: { ok: true },
+      attempts: [
+        {
+          seq: 1,
+          kind: "primary",
+          provider_name: "hetzner-weselben",
+          model: "hetzner-weselben/Qwen/Qwen3.6-35B-A3B-FP8",
+          status_code: 503,
+          success: false,
+        },
+        {
+          seq: 2,
+          kind: "failover",
+          provider_name: "zai-weselben",
+          model: "zai-weselben/glm-5.3-flash",
+          status_code: 400,
+          success: false,
+        },
+        {
+          seq: 3,
+          kind: "failover",
+          provider_name: "zai-weselben",
+          model: "zai-weselben/glm-5.3-flash",
+          status_code: 200,
+          success: true,
+        },
+      ],
+    },
+  };
+
+  const panes = auditPanes(entry);
+  assert.equal(
+    panes.map((p) => p.id).join(","),
+    "request,response-1,response-2,response-3",
+  );
+
+  // Each failover tab names the model that attempt targeted, and the tooltip
+  // carries the full segment summary (#n · kind · status · provider · model).
+  const first = panes.find((p) => p.id === "response-1").pane;
+  assert.equal(first.model, "hetzner-weselben/Qwen/Qwen3.6-35B-A3B-FP8");
+  assert.match(first.modelTitle, /#1/);
+  assert.match(first.modelTitle, /primary/);
+  assert.match(first.modelTitle, /503/);
+  assert.match(first.modelTitle, /Qwen3\.6-35B-A3B-FP8/);
+  const second = panes.find((p) => p.id === "response-2").pane;
+  assert.equal(second.model, "zai-weselben/glm-5.3-flash");
+
+  // A single successful attempt collapses to the plain response tab, which
+  // carries no model chip (the row's model column already names it).
+  const single = {
+    data: {
+      request_body: { model: "m" },
+      response_body: { ok: true },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 200, success: true }],
+    },
+  };
+  const singlePanes = auditPanes(single);
+  assert.equal(singlePanes.map((p) => p.id).join(","), "request,response");
+  assert.ok(!singlePanes.find((p) => p.id === "response").pane.model);
+
+  // A single FAILED attempt keeps the per-attempt path but still hides the
+  // chip — the same `single` rule as the seq/kind/status chips.
+  const loneFailure = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 503, success: false }],
+    },
+  };
+  const lonePanes = auditPanes(loneFailure);
+  assert.equal(lonePanes.map((p) => p.id).join(","), "request,response-1");
+  assert.equal(lonePanes.find((p) => p.id === "response-1").pane.model, "");
+
+  // Entries that predate per-attempt model capture render no badge instead of
+  // the "-" placeholder.
+  const legacy = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [
+        { seq: 1, kind: "primary", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "m", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.equal(auditPanes(legacy).find((p) => p.id === "response-1").pane.model, "");
+});
+
 test("formatJSON pretty-prints JSON strings and objects, passing other text through", () => {
   assert.equal(formatJSON(null), "Not captured");
   assert.equal(formatJSON(""), "Not captured");
