@@ -137,7 +137,17 @@ func localPath(location string) (string, bool) {
 // content, so an unchanged file reports NotModified exactly like a 304 and
 // callers skip the reparse and re-enrichment.
 func readLocal(path, etag string) (FetchResult, error) {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("reading model list file: %w", err)
+	}
+	defer f.Close()
+	// Reject an oversized file from its metadata before allocating anything,
+	// and keep the read itself bounded in case the file grows in between.
+	if info, err := f.Stat(); err == nil && info.Size() > maxBodySize {
+		return FetchResult{}, fmt.Errorf("model list file too large (%d bytes exceeds %d)", info.Size(), maxBodySize)
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maxBodySize+1))
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("reading model list file: %w", err)
 	}

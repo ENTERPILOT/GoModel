@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -496,5 +497,31 @@ func TestLocalPath(t *testing.T) {
 		if gotOK != tt.wantOK || gotPath != tt.wantPath {
 			t.Errorf("localPath(%q) = (%q, %v), want (%q, %v)", tt.in, gotPath, gotOK, tt.wantPath, tt.wantOK)
 		}
+	}
+}
+
+func TestFetchIfChanged_LocalFileOversizedIsRejectedBeforeAllocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.json")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A sparse file well past the limit costs no disk and no memory to
+	// create; a full read would allocate the whole thing.
+	if err := f.Truncate(maxBodySize * 8); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err = FetchIfChanged(context.Background(), path, "")
+	runtime.ReadMemStats(&after)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected size rejection, got %v", err)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > maxBodySize {
+		t.Fatalf("oversized file allocated %d bytes before rejection; must stay under %d", allocated, maxBodySize)
 	}
 }
