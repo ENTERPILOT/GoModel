@@ -241,11 +241,18 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Tool results may carry images (screenshots, image files read by a
+		// tool); Anthropic accepts text and image blocks inside tool_result,
+		// so structured content is forwarded as blocks rather than flattened.
+		content, err := convertMessageContentToAnthropic(msg.Content)
+		if err != nil {
+			return nil, err
+		}
 		return []anthropicContentBlock{
 			{
 				Type:         "tool_result",
 				ToolUseID:    toolUseID,
-				Content:      core.ExtractTextContent(msg.Content),
+				Content:      content,
 				CacheControl: cacheControl,
 			},
 		}, nil

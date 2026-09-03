@@ -1963,6 +1963,38 @@ func TestConvertToAnthropicRequest_ToolMessageRequiresToolCallID(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_ToolMessageWithImage(t *testing.T) {
+	req, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "tool", ToolCallID: "call_123", Content: []core.ContentPart{
+				{Type: "text", Text: "captured"},
+				{Type: "image_url", ImageURL: &core.ImageURLContent{URL: "data:image/png;base64,aGVsbG8="}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest: %v", err)
+	}
+	if len(req.Messages) != 1 || req.Messages[0].Role != "user" {
+		t.Fatalf("messages = %+v, want one user message", req.Messages)
+	}
+	toolBlocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
+	if !ok || len(toolBlocks) != 1 || toolBlocks[0].Type != "tool_result" || toolBlocks[0].ToolUseID != "call_123" {
+		t.Fatalf("content = %#v, want one tool_result block", req.Messages[0].Content)
+	}
+	inner, ok := toolBlocks[0].Content.([]anthropicContentBlock)
+	if !ok || len(inner) != 2 {
+		t.Fatalf("tool_result content = %#v, want text and image blocks", toolBlocks[0].Content)
+	}
+	if inner[0].Type != "text" || inner[0].Text != "captured" {
+		t.Errorf("inner[0] = %+v, want text block", inner[0])
+	}
+	if inner[1].Type != "image" || inner[1].Source == nil || inner[1].Source.Type != "base64" || inner[1].Source.MediaType != "image/png" || inner[1].Source.Data != "aGVsbG8=" {
+		t.Errorf("inner[1] = %+v, want base64 image block", inner[1])
+	}
+}
+
 func TestConvertToAnthropicRequest_ToolChoiceRequiresTools(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
