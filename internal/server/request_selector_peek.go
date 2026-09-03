@@ -117,8 +117,11 @@ func peekCompleteRequestBodySelectorHints(req *http.Request) requestBodySelector
 
 	originalBody := req.Body
 	body, err := io.ReadAll(originalBody)
+	// Chaining originalBody keeps a read error (such as the body limit being
+	// exceeded) visible to the next reader instead of a clean EOF after the
+	// partial bytes.
 	req.Body = &combinedReadCloser{
-		Reader: bytes.NewReader(body),
+		Reader: io.MultiReader(bytes.NewReader(body), originalBody),
 		rc:     originalBody,
 	}
 	if err != nil {

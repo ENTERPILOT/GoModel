@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -176,6 +177,48 @@ func TestSeedRequestBodySelectorHintsRejectsAmbiguousStreamBeforePeekLimit(t *te
 		t.Fatal("duplicate stream fields must not seed any hint")
 	}
 	assertBodyReplays(t, req, body)
+}
+
+type failingAfterReadCloser struct {
+	reader *strings.Reader
+	err    error
+}
+
+func (r *failingAfterReadCloser) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if err == io.EOF {
+		return n, r.err
+	}
+	return n, err
+}
+
+func (r *failingAfterReadCloser) Close() error { return nil }
+
+func TestSeedRequestBodySelectorHintsPreservesOpaqueBodyReadError(t *testing.T) {
+	// A body-limit error must reach the forwarding handler, not turn into a
+	// clean EOF after the bytes that were read before it.
+	readErr := errors.New("request entity too large")
+	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", nil)
+	req.Body = &failingAfterReadCloser{reader: strings.NewReader(`{"model":"gpt-4o-mini"`), err: readErr}
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	env := &core.WhiteBoxPrompt{}
+	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
+
+	if err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env); err != nil {
+		t.Fatalf("seedRequestBodySelectorHints() error = %v", err)
+	}
+
+	if env.JSONBodyParsed || env.RouteHints.Model != "" {
+		t.Fatalf("env = %+v, want no hints from an unreadable body", env)
+	}
+	got, err := io.ReadAll(req.Body)
+	if !errors.Is(err, readErr) {
+		t.Fatalf("replayed body error = %v, want %v", err, readErr)
+	}
+	if string(got) != `{"model":"gpt-4o-mini"` {
+		t.Fatalf("replayed body = %q, want the bytes read before the error", got)
+	}
 }
 
 func TestSeedRequestBodySelectorHintsRejectsDuplicateStreamBeyondPeekBoundary(t *testing.T) {
