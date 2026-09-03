@@ -19,13 +19,23 @@ import (
 // a minimal chat completion (or SSE stream) so both endpoint dialects succeed.
 func headerServer(t *testing.T) (*httptest.Server, func() http.Header) {
 	t.Helper()
+	server, last, _ := headerServerWithPath(t)
+	return server, last
+}
+
+// headerServerWithPath is headerServer with a third accessor for the request
+// path of the last call.
+func headerServerWithPath(t *testing.T) (*httptest.Server, func() http.Header, func() string) {
+	t.Helper()
 	var (
-		mu   sync.Mutex
-		last http.Header
+		mu       sync.Mutex
+		last     http.Header
+		lastSeen string
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		last = r.Header.Clone()
+		lastSeen = r.URL.Path
 		mu.Unlock()
 		if r.Header.Get("Accept") == "text/event-stream" {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -41,10 +51,14 @@ func headerServer(t *testing.T) (*httptest.Server, func() http.Header) {
 	}))
 	t.Cleanup(server.Close)
 	return server, func() http.Header {
-		mu.Lock()
-		defer mu.Unlock()
-		return last
-	}
+			mu.Lock()
+			defer mu.Unlock()
+			return last
+		}, func() string {
+			mu.Lock()
+			defer mu.Unlock()
+			return lastSeen
+		}
 }
 
 func snapshotContext(ctx context.Context, headers map[string][]string) context.Context {
@@ -156,16 +170,31 @@ func TestRequestHeaders_Disabled(t *testing.T) {
 }
 
 func TestNew_FactoryConstructorWiresHeadersOnBothPaths(t *testing.T) {
-	server, last := headerServer(t)
+	// Pin the env-driven defaults so an inherited override cannot disable the
+	// header or reroute the /messages model through /chat/completions.
+	t.Setenv(sessionHeaderEnvVar, "")
+	t.Setenv(messagesModelsEnvVar, "qwen3.7-max")
+	server, last, lastPath := headerServerWithPath(t)
 	ctx := core.WithSessionID(context.Background(), "session-factory")
 	provider := New(providers.ProviderConfig{APIKey: "sk-opencode", BaseURL: server.URL}, providers.ProviderOptions{})
 
-	for _, model := range []string{"glm-5.1", "qwen3.7-max"} {
-		t.Run(model, func(t *testing.T) {
-			if _, err := provider.ChatCompletion(ctx, chatRequest(model)); err != nil {
+	tests := []struct {
+		model    string
+		wantPath string
+	}{
+		{model: "glm-5.1", wantPath: "/chat/completions"},
+		{model: "qwen3.7-max", wantPath: "/messages"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			if _, err := provider.ChatCompletion(ctx, chatRequest(tt.model)); err != nil {
 				t.Fatalf("ChatCompletion() error = %v", err)
 			}
-			if v := last().Get(sessionHeader); v != "session-factory" {
+			got, path := last(), lastPath()
+			if path != tt.wantPath {
+				t.Fatalf("path = %q, want %s", path, tt.wantPath)
+			}
+			if v := got.Get(sessionHeader); v != "session-factory" {
 				t.Fatalf("%s = %q, want session-factory", sessionHeader, v)
 			}
 		})

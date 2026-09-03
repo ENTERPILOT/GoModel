@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -11,9 +12,14 @@ import (
 )
 
 func TestSetRequestHeaders_AddsHookHeadersToEveryRequest(t *testing.T) {
-	var got http.Header
+	var (
+		mu  sync.Mutex
+		got http.Header
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		got = r.Header.Clone()
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 	}))
@@ -35,6 +41,8 @@ func TestSetRequestHeaders_AddsHookHeadersToEveryRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChatCompletion() error = %v", err)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if v := got.Values("X-Extra"); len(v) != 2 || v[0] != "from-hook" || v[1] != "second" {
 		t.Fatalf("X-Extra = %v, want [from-hook second]", v)
 	}
