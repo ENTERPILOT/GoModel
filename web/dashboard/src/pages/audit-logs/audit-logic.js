@@ -638,15 +638,15 @@ function auditAttemptResponsePane(entry, attempt) {
   // (the row's model column already shows it) and for entries that predate
   // per-attempt model capture ("-" placeholder).
   const triedModel = single ? "" : auditAttemptModel(attempt);
+  const model = triedModel === "-" ? "" : triedModel;
 
   return {
     title: m.audit_response_title(),
     direction: "response",
     seq: single ? 0 : Number((attempt && attempt.seq) || 0),
     kind: single ? "" : kind === "attempt" ? "" : kind,
-    model: triedModel === "-" ? "" : triedModel,
-    modelTitle:
-      triedModel && triedModel !== "-" ? auditAttemptSegmentTitle(attempt) : "",
+    model,
+    modelTitle: model ? auditAttemptSegmentTitle(attempt) : "",
     statusCode: single ? null : auditAttemptStatusCode(attempt),
     layout: "split",
     entry,

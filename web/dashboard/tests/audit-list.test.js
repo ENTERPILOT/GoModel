@@ -705,24 +705,24 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
         {
           seq: 1,
           kind: "primary",
-          provider_name: "hetzner-weselben",
-          model: "hetzner-weselben/Qwen/Qwen3.6-35B-A3B-FP8",
+          provider_name: "provider-a",
+          model: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
           status_code: 503,
           success: false,
         },
         {
           seq: 2,
           kind: "failover",
-          provider_name: "zai-weselben",
-          model: "zai-weselben/glm-5.3-flash",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
           status_code: 400,
           success: false,
         },
         {
           seq: 3,
           kind: "failover",
-          provider_name: "zai-weselben",
-          model: "zai-weselben/glm-5.3-flash",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
           status_code: 200,
           success: true,
         },
@@ -739,13 +739,13 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
   // Each failover tab names the model that attempt targeted, and the tooltip
   // carries the full segment summary (#n · kind · status · provider · model).
   const first = panes.find((p) => p.id === "response-1").pane;
-  assert.equal(first.model, "hetzner-weselben/Qwen/Qwen3.6-35B-A3B-FP8");
+  assert.equal(first.model, "provider-a/Qwen/Qwen3.6-35B-A3B-FP8");
   assert.match(first.modelTitle, /#1/);
   assert.match(first.modelTitle, /primary/);
   assert.match(first.modelTitle, /503/);
   assert.match(first.modelTitle, /Qwen3\.6-35B-A3B-FP8/);
   const second = panes.find((p) => p.id === "response-2").pane;
-  assert.equal(second.model, "zai-weselben/glm-5.3-flash");
+  assert.equal(second.model, "provider-b/glm-5.3-flash");
 
   // A single successful attempt collapses to the plain response tab, which
   // carries no model chip (the row's model column already names it).
