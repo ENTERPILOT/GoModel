@@ -110,6 +110,22 @@ func TestModelValidation(t *testing.T) {
 			handlerCalled:  true,
 		},
 		{
+			name:           "duplicate model field is rejected before resolution",
+			method:         http.MethodPost,
+			path:           "/v1/chat/completions",
+			body:           `{"model":"gpt-4o-mini","model":"openai/gpt-oss-120b","messages":[{"role":"user","content":"hi"}]}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   `duplicate top-level \"model\" field`,
+		},
+		{
+			name:           "duplicate provider field is rejected before resolution",
+			method:         http.MethodPost,
+			path:           "/v1/responses",
+			body:           `{"provider":"openai","provider":"groq","model":"gpt-4o-mini","input":"hello"}`,
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   `duplicate top-level \"provider\" field`,
+		},
+		{
 			name:           "batch path skips root model validation",
 			method:         http.MethodPost,
 			path:           "/v1/batches",
@@ -923,11 +939,12 @@ func TestSelectorHintsFromJSONGJSON_MatchesStdlibSemantics(t *testing.T) {
 		wantModel    string
 		wantProvider string
 		wantParsed   bool
+		wantErr      string
 	}{
 		{name: "model and provider strings", body: `{"provider":"openai","model":"gpt-4o-mini"}`, wantModel: "gpt-4o-mini", wantProvider: "openai", wantParsed: true},
-		{name: "duplicate selector fields use first occurrence", body: `{"provider":"openai","provider":"anthropic","model":"blocked","model":"gpt-4o-mini"}`, wantModel: "blocked", wantProvider: "openai", wantParsed: true},
-		{name: "duplicate null selector keeps first string value", body: `{"provider":"openai","provider":null,"model":"gpt-4o-mini","model":null}`, wantModel: "gpt-4o-mini", wantProvider: "openai", wantParsed: true},
-		{name: "duplicate invalid selector field keeps first value", body: `{"provider":"openai","provider":123}`, wantProvider: "openai", wantParsed: true},
+		{name: "duplicate selector fields are rejected", body: `{"provider":"openai","provider":"anthropic","model":"blocked","model":"gpt-4o-mini"}`, wantErr: "provider"},
+		{name: "duplicate null selector is rejected", body: `{"provider":"openai","model":"gpt-4o-mini","model":null}`, wantErr: "model"},
+		{name: "duplicate invalid selector field is rejected", body: `{"provider":"openai","provider":123}`, wantErr: "provider"},
 		{name: "model only", body: `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`, wantModel: "gpt-4o-mini", wantParsed: true},
 		{name: "null selector fields", body: `{"provider":null,"model":null}`, wantParsed: true},
 		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`, wantParsed: true},
@@ -940,7 +957,12 @@ func TestSelectorHintsFromJSONGJSON_MatchesStdlibSemantics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotModel, gotProvider, gotParsed := selectorHintsFromJSONGJSON([]byte(tt.body))
+			gotModel, gotProvider, gotParsed, err := selectorHintsFromJSONGJSON([]byte(tt.body))
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, `duplicate top-level "`+tt.wantErr+`" field`)
+			} else {
+				require.NoError(t, err)
+			}
 			assert.Equal(t, tt.wantModel, gotModel)
 			assert.Equal(t, tt.wantProvider, gotProvider)
 			assert.Equal(t, tt.wantParsed, gotParsed)
@@ -951,8 +973,8 @@ func TestSelectorHintsFromJSONGJSON_MatchesStdlibSemantics(t *testing.T) {
 func BenchmarkSelectorHintsFromJSONGJSON(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		model, provider, parsed := selectorHintsFromJSONGJSON(benchmarkSelectorValidationBody)
-		if !parsed || model != "gpt-4o-mini" || provider != "openai" {
+		model, provider, parsed, err := selectorHintsFromJSONGJSON(benchmarkSelectorValidationBody)
+		if err != nil || !parsed || model != "gpt-4o-mini" || provider != "openai" {
 			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q", parsed, model, provider)
 		}
 	}

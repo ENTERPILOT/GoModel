@@ -21,15 +21,25 @@ type requestBodySelectorHints struct {
 	streamVerified bool
 	parsed         bool
 	complete       bool
+	// duplicate names a top-level selector field the peeked body repeats.
+	// The other fields are meaningless when it is set: the request is
+	// rejected rather than routed on either occurrence.
+	duplicate string
 }
 
-func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) {
+// seedRequestBodySelectorHints peeks selector hints from a body that ingress
+// did not capture. It returns an invalid-request error when the peek sees a
+// repeated top-level selector field.
+func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) error {
 	if !shouldPeekRequestBodySelectors(req, bodyMode, env) {
-		return
+		return nil
 	}
 
 	if bodyMode == core.BodyModeOpaque {
 		hints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
+		if hints.duplicate != "" {
+			return core.NewDuplicateSelectorFieldError(hints.duplicate)
+		}
 		if hints.complete {
 			core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 		} else if hints.streamParsed {
@@ -42,16 +52,20 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 		if !hints.streamParsed {
 			core.MarkPassthroughStreamUncertain(env)
 		}
-		return
+		return nil
 	}
 
 	hints := peekRequestBodySelectorHints(req, requestSelectorPeekLimit)
+	if hints.duplicate != "" {
+		return core.NewDuplicateSelectorFieldError(hints.duplicate)
+	}
 	if hints.parsed || hints.streamParsed {
 		core.ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 	}
 	if !hints.streamParsed {
 		core.MarkPassthroughStreamUncertain(env)
 	}
+	return nil
 }
 
 func shouldPeekRequestBodySelectors(req *http.Request, bodyMode core.BodyMode, env *core.WhiteBoxPrompt) bool {
@@ -91,10 +105,11 @@ func peekRequestBodySelectorHints(req *http.Request, limit int64) requestBodySel
 }
 
 // peekCompleteRequestBodySelectorHints returns authoritative selector hints
-// only when the entire body fits within limit and has no duplicate selector
-// fields. A unique stream hint may be returned independently from a bounded
-// oversized body. The body is restored before returning so passthrough
-// forwarding remains byte-for-byte unchanged.
+// only when the entire body fits within limit. A unique stream hint may be
+// returned independently from a bounded oversized body, and a duplicate
+// selector field seen anywhere within the window is reported as such. The
+// body is restored before returning so passthrough forwarding remains
+// byte-for-byte unchanged.
 func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) requestBodySelectorHints {
 	if req == nil || req.Body == nil || limit <= 0 {
 		return requestBodySelectorHints{}
@@ -111,6 +126,9 @@ func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) reques
 	}
 	if int64(len(body)) > limit {
 		hints := decodeCompleteRequestBodySelectorHints(bytes.NewReader(body[:limit]))
+		if hints.duplicate != "" {
+			return hints
+		}
 		return hints.independentStreamHint()
 	}
 	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body))
@@ -147,9 +165,8 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 
 	var hints requestBodySelectorHints
 	var modelSeen, providerSeen, streamSeen bool
-	var modelAmbiguous, providerAmbiguous, streamAmbiguous bool
 	partialHints := func() requestBodySelectorHints {
-		if !hints.streamParsed || streamAmbiguous {
+		if !hints.streamParsed {
 			return requestBodySelectorHints{}
 		}
 		return hints.independentStreamHint()
@@ -166,8 +183,8 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 
 		switch key {
 		case "model":
-			if requireComplete && modelSeen {
-				modelAmbiguous = true
+			if modelSeen {
+				return requestBodySelectorHints{duplicate: key}
 			}
 			modelSeen = true
 			model, ok, err := readOptionalJSONString(dec)
@@ -183,8 +200,8 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 				return hints
 			}
 		case "provider":
-			if requireComplete && providerSeen {
-				providerAmbiguous = true
+			if providerSeen {
+				return requestBodySelectorHints{duplicate: key}
 			}
 			providerSeen = true
 			provider, ok, err := readOptionalJSONString(dec)
@@ -198,7 +215,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 			}
 		case "stream":
 			if streamSeen {
-				streamAmbiguous = true
+				return requestBodySelectorHints{duplicate: key}
 			}
 			streamSeen = true
 			stream, ok, err := readOptionalJSONBool(dec)
@@ -221,15 +238,7 @@ func decodeRequestBodySelectorHintsWithMode(r io.Reader, requireComplete bool) r
 		if _, err := dec.Token(); err != io.EOF {
 			return requestBodySelectorHints{}
 		}
-		if streamAmbiguous {
-			return requestBodySelectorHints{}
-		}
 		hints.streamVerified = hints.streamParsed
-		if modelAmbiguous || providerAmbiguous {
-			hints.model = ""
-			hints.provider = ""
-			return hints
-		}
 	}
 
 	hints.parsed = true

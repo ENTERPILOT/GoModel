@@ -33,6 +33,9 @@ func RequestRewriteMiddleware(rewriters []ext.RequestRewriter, auditLogger audit
 
 			body, err := requestBodyBytes(c)
 			if err != nil {
+				if _, ok := errors.AsType[*core.GatewayError](err); ok {
+					return handleError(c, err)
+				}
 				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
 			}
 

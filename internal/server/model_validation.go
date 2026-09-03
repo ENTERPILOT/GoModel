@@ -146,7 +146,11 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		}
 	}
 
-	if hints := peekRequestBodySelectorHints(c.Request(), requestSelectorPeekLimit); hints.parsed && (hints.complete || hints.provider != "") {
+	hints := peekRequestBodySelectorHints(c.Request(), requestSelectorPeekLimit)
+	if hints.duplicate != "" {
+		return "", "", false, core.NewDuplicateSelectorFieldError(hints.duplicate)
+	}
+	if hints.parsed && (hints.complete || hints.provider != "") {
 		return hints.model, hints.provider, true, nil
 	}
 
@@ -160,35 +164,37 @@ func selectorHintsForValidation(c *echo.Context) (model, provider string, parsed
 		}
 	}
 
-	model, provider, ok := selectorHintsFromJSONGJSON(bodyBytes)
-	return model, provider, ok, nil
+	return selectorHintsFromJSONGJSON(bodyBytes)
 }
 
 func cachedCanonicalSelectorHints(env *core.WhiteBoxPrompt) (model, provider string, ok bool) {
 	return env.CanonicalSelectorFromCachedRequest()
 }
 
-func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed bool) {
+func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed bool, err error) {
 	if !gjson.ValidBytes(body) {
-		return "", "", false
+		return "", "", false, nil
 	}
 
 	root := gjson.ParseBytes(body)
 	if !root.IsObject() {
-		return "", "", false
+		return "", "", false, nil
 	}
 
-	// gjson returns the first matching top-level field. That differs from
-	// encoding/json on duplicate keys, but the hot-path speedup is worth it here:
-	// duplicate selector keys are not expected from real clients, and we accept
-	// the first-match behavior to keep workflow resolution fast.
+	// gjson returns the first matching top-level field while encoding/json
+	// keeps the last. A body that repeats a selector field is rejected here so
+	// the model that is authorized is always the model that is executed.
+	if field := core.DuplicateSelectorField(body); field != "" {
+		return "", "", false, core.NewDuplicateSelectorFieldError(field)
+	}
+
 	modelResult := root.Get("model")
 	if !selectorHintValueAllowed(modelResult) {
-		return "", "", false
+		return "", "", false, nil
 	}
 	providerResult := root.Get("provider")
 	if !selectorHintValueAllowed(providerResult) {
-		return "", "", false
+		return "", "", false, nil
 	}
 
 	if modelResult.Type == gjson.String {
@@ -197,7 +203,7 @@ func selectorHintsFromJSONGJSON(body []byte) (model, provider string, parsed boo
 	if providerResult.Type == gjson.String {
 		provider = providerResult.String()
 	}
-	return model, provider, true
+	return model, provider, true, nil
 }
 
 func selectorHintValueAllowed(result gjson.Result) bool {
