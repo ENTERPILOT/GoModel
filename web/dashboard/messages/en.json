@@ -630,6 +630,7 @@
   "models_weight": "weight",
   "models_weight_help": "Relative share of requests: 1 is a normal share, 2 gets twice as many, 3 three times (whole numbers, 1 or more).",
   "models_remove_target": "Remove target",
+  "models_move_target": "Drag to reorder (or focus and use the arrow keys)",
   "models_pricing_editor": "Model pricing editor",
   "models_pricing_save": "Save Pricing",
   "models_pricing_override": "Pricing override",

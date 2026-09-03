@@ -73,11 +73,15 @@
     />
   </FormField>
 
-  <!-- Every target renders the same; two or more turn the redirect into a load balancer. -->
+  <!-- Every target renders the same; two or more turn the redirect into a load balancer.
+       Rows carry their position in the flattened list (primary first) so the drag
+       handle can reorder across the primary/extra boundary. -->
   <div class="form-field">
     <span class="form-field-label">{m.models_targets()}</span>
     <VmTargetRow
       id="virtual-model-target"
+      index={0}
+      draggable={vm.vmTargetCount() > 1 && !vm.vmFormManaged}
       bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
@@ -87,6 +91,8 @@
     {#each vm.vmForm.targets as target, index (index)}
       <VmTargetRow
         placeholder="groq/llama"
+        index={index + 1}
+        draggable={vm.vmTargetCount() > 1 && !vm.vmFormManaged}
         bind:provider={target.provider}
         bind:model={target.model}
         bind:weight={target.weight}

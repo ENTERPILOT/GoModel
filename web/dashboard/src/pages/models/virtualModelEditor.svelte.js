@@ -21,9 +21,11 @@ import {
   aliasFormTargets,
   buildVirtualModelSavePayload,
   defaultVirtualModelForm,
+  moveFormTarget,
   normalizeUserPaths,
   removePrimaryTarget as removePrimaryTargetPure,
   virtualModelTargetOptions,
+  vmFormTargetCount,
   vmRoutingSummary,
 } from "./vmForm.js";
 import { virtualModels } from "./virtualModels.svelte.js";
@@ -46,6 +48,11 @@ class VirtualModelEditorStore {
   vmFormOriginalSource = $state("");
   vmFormManaged = $state(false);
   vmForm = $state(defaultVirtualModelForm());
+  // Drag-to-reorder state for the target rows: vmDragIndex is the flattened
+  // row being dragged, vmDropIndex the row currently under the cursor (for
+  // the drop highlight). Both reset when the drag ends.
+  vmDragIndex = $state(null);
+  vmDropIndex = $state(null);
 
   addVmTarget() {
     if (!Array.isArray(this.vmForm.targets)) {
@@ -63,6 +70,44 @@ class VirtualModelEditorStore {
 
   removePrimaryTarget() {
     removePrimaryTargetPure(this.vmForm);
+  }
+
+  // vmTargetCount feeds the drag handle: the handle shows only when there is
+  // more than one row to reorder.
+  vmTargetCount() {
+    return vmFormTargetCount(this.vmForm);
+  }
+
+  startVmTargetDrag(index) {
+    this.vmDragIndex = index;
+  }
+
+  // enterVmTargetDrop marks the row under the cursor as the current drop
+  // target; the editor calls it from the row's dragover (which must
+  // preventDefault for drop to fire).
+  enterVmTargetDrop(index) {
+    this.vmDropIndex = index;
+  }
+
+  leaveVmTargetDrop(index) {
+    if (this.vmDropIndex === index) {
+      this.vmDropIndex = null;
+    }
+  }
+
+  // dropVmTarget moves the dragged row onto `index` and clears the drag
+  // state. A no-op move (same index) just resets the highlight.
+  dropVmTarget(index) {
+    if (this.vmDragIndex != null) {
+      moveFormTarget(this.vmForm, this.vmDragIndex, index);
+    }
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+  }
+
+  endVmTargetDrag() {
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
   }
 
   // vmStrategyOptions builds the strategy dropdown from the strategies this

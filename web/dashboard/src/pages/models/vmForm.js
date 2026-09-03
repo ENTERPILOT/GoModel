@@ -78,6 +78,66 @@ export function vmFormHasPrimaryTarget(form) {
   return String((form && form.target_model) || "").trim() !== "";
 }
 
+// vmFormTargetCount is the total number of reorderable rows in the editor:
+// one for the primary target when present, plus every extra target. The drag
+// handle is shown only when this is greater than one.
+export function vmFormTargetCount(form) {
+  if (!form) return 0;
+  const primary = vmFormHasPrimaryTarget(form) ? 1 : 0;
+  return primary + (Array.isArray(form.targets) ? form.targets.length : 0);
+}
+
+// flattenFormTargets returns the full target list in display order: the
+// primary target (if any) followed by the extra targets. The move logic
+// treats the editor as one contiguous list so position 0 is the failover
+// primary / first round-robin slot.
+export function flattenFormTargets(form) {
+  if (!form) return [];
+  const list = [];
+  if (vmFormHasPrimaryTarget(form)) {
+    list.push({
+      provider: String(form.target_provider || ""),
+      model: String(form.target_model || "").trim(),
+      weight: form.target_weight || 1,
+    });
+  }
+  if (Array.isArray(form.targets)) {
+    for (const target of form.targets) {
+      list.push({
+        provider: String((target && target.provider) || ""),
+        model: String((target && target.model) || ""),
+        weight: (target && target.weight) || 1,
+      });
+    }
+  }
+  return list;
+}
+
+// moveFormTarget reorders the form's flattened target list in place: it
+// splices the entry at `from` to `to` and writes the result back into the
+// primary slot plus the extras array. Invalid bounds or no-op moves return
+// false; the editor uses that to skip needless writes.
+export function moveFormTarget(form, from, to) {
+  if (!form) return false;
+  const list = flattenFormTargets(form);
+  const length = list.length;
+  if (length < 2) return false;
+  if (from < 0 || to < 0 || from >= length || to >= length) return false;
+  if (from === to) return false;
+  const [entry] = list.splice(from, 1);
+  list.splice(to, 0, entry);
+  const first = list[0];
+  form.target_provider = String(first.provider || "");
+  form.target_model = first.model || "";
+  form.target_weight = first.weight || 1;
+  form.targets = list.slice(1).map((row) => ({
+    provider: row.provider || "",
+    model: row.model || "",
+    weight: row.weight || 1,
+  }));
+  return true;
+}
+
 // vmFormSelfOnly: the editor opened from a real model pins that model as its
 // first target so an added target becomes a fallback rather than a
 // replacement. With nothing added, the pinned row is not a redirect — the

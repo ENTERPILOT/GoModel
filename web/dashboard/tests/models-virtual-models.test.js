@@ -37,6 +37,8 @@ import {
   buildModelTogglePayload,
   buildVirtualModelSavePayload,
   defaultVirtualModelForm,
+  flattenFormTargets,
+  moveFormTarget,
   removePrimaryTarget,
   virtualModelTargetOptions,
   vmFormHasPrimaryTarget,
@@ -46,6 +48,7 @@ import {
   vmFormShowWeights,
   vmFormStrategyPending,
   vmFormSupportsSlowdown,
+  vmFormTargetCount,
   vmRoutingSummary,
 } from "../src/pages/models/vmForm.js";
 
@@ -1066,4 +1069,72 @@ test("rowAnchorID keeps distinct alias names on distinct DOM ids", () => {
   assert.notEqual(id("foo/bar"), id("foo-bar"));
   assert.match(id("team/cheap"), /^alias-row-[A-Za-z0-9%._~-]+$/);
   assert.equal(rowAnchorID({ is_alias: false, alias: { name: "x" } }), "");
+});
+
+test("moveFormTarget reorders the flattened target list across the primary boundary", () => {
+  const form = {
+    ...defaultVirtualModelForm(),
+    target_provider: "azure",
+    target_model: "azure/gpt-4o",
+    target_weight: 1,
+    targets: [
+      { provider: "", model: "gemini/gemini-2.5-pro", weight: 2 },
+      { provider: "", model: "groq/llama", weight: 1 },
+    ],
+  };
+  assert.equal(vmFormTargetCount(form), 3);
+  assert.deepEqual(
+    flattenFormTargets(form).map((t) => t.model),
+    ["azure/gpt-4o", "gemini/gemini-2.5-pro", "groq/llama"],
+  );
+
+  // Last fallback becomes the failover primary; the old primary demotes.
+  assert.equal(moveFormTarget(form, 2, 0), true);
+  assert.equal(form.target_model, "groq/llama");
+  assert.equal(form.target_weight, 1);
+  assert.deepEqual(
+    form.targets.map((t) => t.model),
+    ["azure/gpt-4o", "gemini/gemini-2.5-pro"],
+  );
+
+  // Extras reorder among themselves, weights riding along.
+  assert.equal(moveFormTarget(form, 2, 1), true);
+  assert.equal(form.target_model, "groq/llama");
+  assert.deepEqual(
+    form.targets.map((t) => `${t.model}:${t.weight}`),
+    ["gemini/gemini-2.5-pro:2", "azure/gpt-4o:1"],
+  );
+
+  // Explicit provider pins survive the move.
+  form.targets[1].provider = "azure";
+  assert.equal(moveFormTarget(form, 2, 0), true);
+  assert.equal(form.target_provider, "azure");
+  assert.equal(form.target_model, "azure/gpt-4o");
+  assert.equal(form.targets[0].provider, "");
+});
+
+test("moveFormTarget ignores no-op and out-of-bounds moves", () => {
+  const form = {
+    ...defaultVirtualModelForm(),
+    target_model: "azure/gpt-4o",
+    targets: [{ provider: "", model: "gemini/gemini-2.5-pro", weight: 1 }],
+  };
+  assert.equal(moveFormTarget(form, 0, 0), false);
+  assert.equal(moveFormTarget(form, -1, 1), false);
+  assert.equal(moveFormTarget(form, 0, 5), false);
+  assert.equal(moveFormTarget(form, 5, 0), false);
+  assert.equal(form.target_model, "azure/gpt-4o");
+  assert.deepEqual(
+    form.targets.map((t) => t.model),
+    ["gemini/gemini-2.5-pro"],
+  );
+
+  // A single target has nothing to reorder.
+  const single = {
+    ...defaultVirtualModelForm(),
+    target_model: "azure/gpt-4o",
+    targets: [],
+  };
+  assert.equal(vmFormTargetCount(single), 1);
+  assert.equal(moveFormTarget(single, 0, 0), false);
 });
