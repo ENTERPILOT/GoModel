@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/version"
 )
 
@@ -149,6 +150,23 @@ func TestRequestHeaders_Disabled(t *testing.T) {
 			}
 			if v := got.Get(clientHeader); v != defaultClient {
 				t.Fatalf("%s = %q, want %s (identification is not gated)", clientHeader, v, defaultClient)
+			}
+		})
+	}
+}
+
+func TestNew_FactoryConstructorWiresHeadersOnBothPaths(t *testing.T) {
+	server, last := headerServer(t)
+	ctx := core.WithSessionID(context.Background(), "session-factory")
+	provider := New(providers.ProviderConfig{APIKey: "sk-opencode", BaseURL: server.URL}, providers.ProviderOptions{})
+
+	for _, model := range []string{"glm-5.1", "qwen3.7-max"} {
+		t.Run(model, func(t *testing.T) {
+			if _, err := provider.ChatCompletion(ctx, chatRequest(model)); err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if v := last().Get(sessionHeader); v != "session-factory" {
+				t.Fatalf("%s = %q, want session-factory", sessionHeader, v)
 			}
 		})
 	}

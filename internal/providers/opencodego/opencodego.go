@@ -209,6 +209,8 @@ func withDefaultHeaders(headers, defaults http.Header) http.Header {
 	return merged
 }
 
+// hasHeader reports whether headers carries a non-empty entry for name under
+// any casing of the key.
 func hasHeader(headers http.Header, name string) bool {
 	for key, values := range headers {
 		if strings.EqualFold(key, name) && len(values) > 0 {
