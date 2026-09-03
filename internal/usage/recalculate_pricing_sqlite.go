@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 )
 
 const defaultSQLiteRecalculationBatchSize = 500
@@ -88,7 +89,7 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 	args = append(args, limit)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, '')
+		SELECT id, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data, COALESCE(costs_calculation_caveat, '')
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		ORDER BY id
 		LIMIT ?`, args...)
@@ -100,10 +101,12 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 	entries := make([]recalculationEntry, 0)
 	for rows.Next() {
 		var entry recalculationEntry
+		var timestamp string
 		var providerName sql.NullString
 		var rawData sql.NullString
 		if err := rows.Scan(
 			&entry.ID,
+			&timestamp,
 			&entry.Model,
 			&entry.Provider,
 			&providerName,
@@ -115,6 +118,11 @@ func (s *SQLiteStore) sqliteRecalculationEntries(ctx context.Context, tx *sql.Tx
 			&entry.Caveat,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite usage cost row: %w", err)
+		}
+		if parsed, ok := sqlutil.ParseSQLiteTimestamp(timestamp); ok {
+			entry.Timestamp = parsed
+		} else {
+			slog.Warn("failed to parse usage timestamp for pricing recalculation; using base rates", "id", entry.ID, "raw_timestamp", timestamp)
 		}
 		if providerName.Valid {
 			entry.ProviderName = providerName.String

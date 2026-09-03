@@ -136,6 +136,9 @@ func mergePricing(base *core.ModelPricing, override Pricing) *core.ModelPricing 
 	if len(overlay.Tiers) > 0 {
 		out.Tiers = overlay.Tiers
 	}
+	// An operator's rate replaces the catalog's base price and any catalog
+	// time-window discount published against it.
+	out.DropTimeWindowRatesOverriddenBy(overlay)
 	return out
 }
 

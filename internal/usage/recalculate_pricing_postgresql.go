@@ -66,7 +66,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data::text, COALESCE(costs_calculation_caveat, '')
+		SELECT id::text, timestamp, model, provider, provider_name, endpoint, input_tokens, output_tokens, rewrite_tokens_saved, raw_data::text, COALESCE(costs_calculation_caveat, '')
 		FROM usage`+sqlutil.BuildWhereClause(conditions)+`
 		FOR UPDATE`, args...)
 	if err != nil {
@@ -81,6 +81,7 @@ func postgresRecalculationEntries(ctx context.Context, tx pgx.Tx, params Recalcu
 		var rawData *string
 		if err := rows.Scan(
 			&entry.ID,
+			&entry.Timestamp,
 			&entry.Model,
 			&entry.Provider,
 			&providerName,

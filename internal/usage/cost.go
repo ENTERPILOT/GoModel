@@ -64,6 +64,9 @@ func tokenRatesAffectCost(pricing *core.ModelPricing) bool {
 	for _, tier := range pricing.Tiers {
 		rates = append(rates, tier.InputPerMtok, tier.OutputPerMtok)
 	}
+	for _, window := range pricing.TimeWindows {
+		rates = append(rates, window.Pricing.InputPerMtok, window.Pricing.OutputPerMtok)
+	}
 	for _, rate := range rates {
 		if rate != nil && *rate != 0 {
 			return true

@@ -147,7 +147,10 @@ import {
     </div>
   </td>
   {#each columns as col, i (i)}
-    <td class={col.class}>{col.value(row, pricing)}</td>
+    {@const hint = col.hint ? col.hint(row, pricing) : ""}
+    <td class={col.class} title={hint || undefined}>
+      {col.value(row, pricing)}{#if hint}<span class="price-hint" aria-hidden="true">*</span><span class="price-hint-text">{hint}</span>{/if}
+    </td>
   {/each}
   <td class="model-row-actions col-actions">
     {#if row.is_alias}

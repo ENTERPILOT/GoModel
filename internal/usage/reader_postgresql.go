@@ -137,7 +137,7 @@ func (r *PostgreSQLReader) usageCacheStats(ctx context.Context, params UsageQuer
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.pool.Query(ctx, `SELECT model, provider, provider_name, user_path, labels::text, cache_type, input_tokens, output_tokens, raw_data FROM "usage"`+where, args...)
+	rows, err := r.pool.Query(ctx, `SELECT model, provider, provider_name, user_path, labels::text, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM "usage"`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}

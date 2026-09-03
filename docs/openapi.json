@@ -13855,6 +13855,13 @@
             "items": {
               "$ref": "#/components/schemas/core.ModelPricingTier"
             }
+          },
+          "time_windows": {
+            "description": "TimeWindows carry rates that replace the base prices during recurring\nUTC windows (see ModelPricingTimeWindow). Base prices are the standard\n(peak) rates; use AtTime to resolve the rates in effect at a moment.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.ModelPricingTimeWindow"
+            }
           }
         }
       },
@@ -13873,6 +13880,57 @@
           "up_to_tokens": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "core.ModelPricingTimeWindow": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/core.ModelPricingTimeWindowRates"
+          },
+          "utc_ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/core.ModelPricingUTCRange"
+            }
+          }
+        }
+      },
+      "core.ModelPricingTimeWindowRates": {
+        "type": "object",
+        "properties": {
+          "cache_write_per_mtok": {
+            "type": "number"
+          },
+          "cached_input_per_mtok": {
+            "type": "number"
+          },
+          "input_per_mtok": {
+            "type": "number"
+          },
+          "output_per_mtok": {
+            "type": "number"
+          }
+        }
+      },
+      "core.ModelPricingUTCRange": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "end": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
           }
         }
       },

@@ -377,6 +377,7 @@ func (r *MongoDBReader) usageCacheStats(ctx context.Context, params UsageQueryPa
 			InputTokens  int            `bson:"input_tokens"`
 			OutputTokens int            `bson:"output_tokens"`
 			RawData      map[string]any `bson:"raw_data"`
+			Timestamp    time.Time      `bson:"timestamp"`
 		}
 		if err := cursor.Decode(&row); err != nil {
 			return nil, fmt.Errorf("failed to decode usage cache stat row: %w", err)
@@ -454,6 +455,7 @@ func mongoUsageCacheStatsPipeline(params UsageQueryParams, canonicalUserPath boo
 		{Key: "input_tokens", Value: 1},
 		{Key: "output_tokens", Value: 1},
 		{Key: "raw_data", Value: 1},
+		{Key: "timestamp", Value: 1},
 	}}})
 	return pipeline, nil
 }

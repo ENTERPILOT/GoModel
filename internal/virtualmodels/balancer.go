@@ -3,6 +3,7 @@ package virtualmodels
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -256,10 +257,13 @@ func normalizeWeight(weight float64) int {
 // strategy stays deterministic. Ties keep the earlier target in support order.
 // A chained target is priced at the cheapest concrete model behind it.
 func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported []resolvedTarget) resolvedTarget {
+	// One timestamp per decision so every candidate is priced in the same
+	// time-of-day pricing window.
+	now := time.Now()
 	best := supported[0]
-	bestCost, bestPriced := s.legCost(snap, entry, best)
+	bestCost, bestPriced := s.legCost(snap, entry, best, now)
 	for _, target := range supported[1:] {
-		cost, priced := s.legCost(snap, entry, target)
+		cost, priced := s.legCost(snap, entry, target, now)
 		if !priced {
 			continue
 		}
@@ -272,27 +276,28 @@ func (s *Service) cheapestTarget(snap *snapshot, entry *redirectEntry, supported
 
 // legCost prices one leg of a strategy: a concrete target's own price, or the
 // lowest price among the available concrete models behind a chained target.
-func (s *Service) legCost(snap *snapshot, entry *redirectEntry, target resolvedTarget) (float64, bool) {
+func (s *Service) legCost(snap *snapshot, entry *redirectEntry, target resolvedTarget, now time.Time) (float64, bool) {
 	if _, ok := snap.chained(entry.vm.Source, target); !ok {
-		return s.targetCost(target)
+		return s.targetCost(target, now)
 	}
 	bestCost, priced := 0.0, false
 	for _, leaf := range snap.leaves(entry, target, s.catalog) {
-		if cost, ok := s.targetCost(leaf); ok && (!priced || cost < bestCost) {
+		if cost, ok := s.targetCost(leaf, now); ok && (!priced || cost < bestCost) {
 			bestCost, priced = cost, true
 		}
 	}
 	return bestCost, priced
 }
 
-// targetCost returns a comparable per-token price for a concrete target — the sum of its
-// input and output per-million-token rates — and whether the registry priced it.
-func (s *Service) targetCost(target resolvedTarget) (float64, bool) {
+// targetCost returns a comparable per-token price for a concrete target at
+// now — the sum of its input and output per-million-token rates — and whether
+// the registry priced it.
+func (s *Service) targetCost(target resolvedTarget, now time.Time) (float64, bool) {
 	model, ok := s.catalog.LookupModel(target.qualified)
 	if !ok || model == nil || model.Metadata == nil || model.Metadata.Pricing == nil {
 		return 0, false
 	}
-	pricing := model.Metadata.Pricing
+	pricing := model.Metadata.Pricing.AtTime(now)
 	if pricing.InputPerMtok == nil && pricing.OutputPerMtok == nil {
 		return 0, false
 	}

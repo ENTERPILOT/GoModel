@@ -292,3 +292,22 @@ td.col-price {
     gap: 6px;
   }
 }
+
+/* Footnote marker on a price whose model has time-of-day pricing windows; the
+   cell's title carries the schedule and rates. */
+td.col-price .price-hint {
+  margin-left: 2px;
+  color: var(--accent, var(--text-muted));
+  cursor: help;
+}
+
+/* The schedule itself, visually hidden so assistive tech reads it in place
+   of the decorative marker. */
+td.col-price .price-hint-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

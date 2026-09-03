@@ -1278,6 +1278,7 @@
   ],
   "models_column_input_output": "Input / Output ($/MTok)",
   "models_column_cached": "Cached $/MTok",
+  "models_price_time_window_hint": "{label}: {prices} during {schedule} UTC",
   "models_column_input": "Input",
   "models_column_per_image": "$/Image",
   "models_column_per_second": "$/Second",
