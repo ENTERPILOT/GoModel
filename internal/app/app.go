@@ -132,6 +132,10 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 
 	// Outbound trust must be in place before any provider builds a transport,
 	// and a missing CA file is a startup error rather than a silent fallback.
+	// On a reload the generation that keeps serving must not inherit settings
+	// its replacement was rejected with, so the previous configuration is put
+	// back whenever construction fails after this point.
+	previousTLS := httpclient.SnapshotTLS()
 	tlsCfg := cfg.AppConfig.Config.HTTP.TLS
 	if err := httpclient.SetConfiguredTLS(httpclient.TLSSettings{
 		CAFile:             tlsCfg.CAFile,
@@ -145,6 +149,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	b := newBootstrap(ctx, cfg)
 	for _, phase := range b.phases() {
 		if err := phase(); err != nil {
+			httpclient.RestoreTLS(previousTLS)
 			return nil, b.fail(err)
 		}
 	}

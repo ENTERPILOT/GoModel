@@ -57,6 +57,18 @@ func ConfiguredTLS() *tls.Config {
 	return cfg.Clone()
 }
 
+// TLSSnapshot is an opaque handle to the installed configuration, taken with
+// SnapshotTLS and given back to RestoreTLS. A reload that fails after
+// installing replacement settings uses it to put the serving generation's
+// trust back, so a rejected configuration never leaks into new clients.
+type TLSSnapshot struct{ cfg *tls.Config }
+
+// SnapshotTLS captures the currently installed configuration.
+func SnapshotTLS() TLSSnapshot { return TLSSnapshot{cfg: configuredTLS.Load()} }
+
+// RestoreTLS reinstalls a configuration captured by SnapshotTLS.
+func RestoreTLS(s TLSSnapshot) { configuredTLS.Store(s.cfg) }
+
 func buildTLSConfig(settings TLSSettings) (*tls.Config, error) {
 	caFile := strings.TrimSpace(settings.CAFile)
 	certFile := strings.TrimSpace(settings.ClientCertFile)

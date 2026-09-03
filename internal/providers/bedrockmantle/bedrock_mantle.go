@@ -64,7 +64,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 	if keys.Len() == 0 {
 		awsCfg, loadErr := awsconfig.LoadDefaultConfig(context.Background(),
 			awsconfig.WithRegion(endpoint.region),
-			awsconfig.WithHTTPClient(httpclient.NewDefaultHTTPClient()))
+			awsconfig.WithHTTPClient(httpclient.NewAWSSDKClient()))
 		if loadErr != nil {
 			return &Provider{configErr: fmt.Errorf("load AWS config: %w", loadErr)}
 		}

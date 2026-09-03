@@ -251,7 +251,9 @@ catalog, the update check, MCP upstreams, vector stores, and embedding
 endpoints alike.
 
 **Proxy.** Set the standard `HTTPS_PROXY` (and `NO_PROXY` for local model
-servers). Nothing else is needed.
+servers). Nothing else is needed. If the proxy needs credentials, give it an
+`https://` URL: the scheme in `HTTPS_PROXY` describes the hop to the proxy,
+and an `http://` proxy URL sends `Proxy-Authorization` in cleartext.
 
 **Private CA.** Mount the CA bundle and point the gateway at it:
 

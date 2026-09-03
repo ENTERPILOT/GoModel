@@ -137,6 +137,25 @@ func NewDefaultHTTPClient() *http.Client {
 	return NewHTTPClient(nil)
 }
 
+// NewAWSSDKClient returns a client on the shared transport for use with
+// aws-sdk-go-v2's WithHTTPClient. The SDK's own client follows only 307 and
+// 308 redirects, because a 301/302 would replay a signed request against a
+// different host; a custom client must do the same.
+func NewAWSSDKClient() *http.Client {
+	client := NewDefaultHTTPClient()
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+		if req.Response == nil {
+			return http.ErrUseLastResponse
+		}
+		switch req.Response.StatusCode {
+		case http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+			return nil
+		}
+		return http.ErrUseLastResponse
+	}
+	return client
+}
+
 // NewClientWithTimeout returns a client on the shared transport settings
 // (proxy, TLS trust, dial and keep-alive tuning) whose overall request and
 // response-header timeouts are both bound to timeout. Auxiliary callers such

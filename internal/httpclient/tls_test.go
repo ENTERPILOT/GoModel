@@ -127,3 +127,36 @@ func TestNewClientWithTimeout(t *testing.T) {
 		t.Fatal("non-positive timeout should keep the default")
 	}
 }
+
+func TestSnapshotAndRestoreTLS(t *testing.T) {
+	resetTLS(t)
+	if err := SetConfiguredTLS(TLSSettings{InsecureSkipVerify: true}); err != nil {
+		t.Fatal(err)
+	}
+	serving := SnapshotTLS()
+	if err := SetConfiguredTLS(TLSSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	if ConfiguredTLS() != nil {
+		t.Fatal("replacement should have installed system defaults")
+	}
+	RestoreTLS(serving)
+	cfg := ConfiguredTLS()
+	if cfg == nil || !cfg.InsecureSkipVerify {
+		t.Fatal("restore should reinstall the serving generation's configuration")
+	}
+}
+
+func TestNewAWSSDKClientFollowsOnly307And308(t *testing.T) {
+	client := NewAWSSDKClient()
+	for code, follow := range map[int]bool{301: false, 302: false, 303: false, 307: true, 308: true} {
+		req := &http.Request{Response: &http.Response{StatusCode: code}}
+		err := client.CheckRedirect(req, nil)
+		if follow && err != nil {
+			t.Errorf("%d should be followed, got %v", code, err)
+		}
+		if !follow && err != http.ErrUseLastResponse {
+			t.Errorf("%d should not be followed, got %v", code, err)
+		}
+	}
+}

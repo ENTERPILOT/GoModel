@@ -70,7 +70,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 
 	region, endpoint := parseBaseURL(providerCfg.BaseURL)
 	// The SDK's own client would ignore the gateway's proxy and TLS trust.
-	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(httpclient.NewDefaultHTTPClient())}
+	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(httpclient.NewAWSSDKClient())}
 	if region != "" {
 		loadOpts = append(loadOpts, awsconfig.WithRegion(region))
 	}
