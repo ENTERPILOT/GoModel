@@ -172,6 +172,10 @@ class BudgetsStore {
   }
 
   async submitForm() {
+    // A key change can leave the scope pending; settle it before reading the
+    // form, so the payload, the scope check, and the submit lock all see
+    // one consistent snapshot.
+    await access.ensureLoaded();
     if (this.formSubmitting) {
       return;
     }
@@ -180,8 +184,6 @@ class BudgetsStore {
       this.formError = error;
       return;
     }
-    // A key change can leave the scope pending; settle it before trusting it.
-    await access.ensureLoaded();
     if (!scopedSubjectAllowed(access.scoped, access.userPath, this.form.scope, this.form.subject)) {
       this.formError = m.access_scope_path_outside({ root: access.userPath });
       return;

@@ -304,6 +304,10 @@ class RateLimitsStore {
   }
 
   async submitRateLimitForm() {
+    // A key change can leave the scope pending; settle it before reading the
+    // form, so the payload, the scope check, and the submit lock all see
+    // one consistent snapshot.
+    await access.ensureLoaded();
     if (this.rateLimitFormSubmitting) {
       return;
     }
@@ -312,8 +316,6 @@ class RateLimitsStore {
       this.rateLimitFormError = error;
       return;
     }
-    // A key change can leave the scope pending; settle it before trusting it.
-    await access.ensureLoaded();
     if (
       !scopedSubjectAllowed(
         access.scoped,
