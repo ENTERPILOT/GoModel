@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
@@ -226,7 +227,18 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
 		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting),
+		UserPathHeader:         dashboardUserPathHeader(cfg),
 	}
+}
+
+// dashboardUserPathHeader is the canonical user-path header name the public
+// API reads, so the Playground sends the configured USER_PATH_HEADER rather
+// than assuming the default.
+func dashboardUserPathHeader(cfg *config.Config) string {
+	if cfg == nil {
+		return core.UserPathHeader
+	}
+	return core.UserPathHeaderName(cfg.Server.UserPathHeader)
 }
 
 // dashboardVirtualModelStrategies lists the load-balancing strategies the

@@ -10750,6 +10750,10 @@
           "USAGE_PRICING_RECALCULATION_ENABLED": {
             "type": "string"
           },
+          "USER_PATH_HEADER": {
+            "description": "UserPathHeader is the canonical name of the inbound header the gateway\nreads user paths from (server.user_path_header), so the Playground sends\nthe header this deployment actually honors.",
+            "type": "string"
+          },
           "VIRTUAL_MODEL_STRATEGIES": {
             "description": "VirtualModelStrategies is the comma-separated list of load-balancing\nstrategies this deployment supports. \"adaptive\" appears only when a\nroute-selector extension is registered, so the dashboard never offers\na strategy that would silently fall back to round robin.",
             "type": "string"

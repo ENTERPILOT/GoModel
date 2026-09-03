@@ -23,15 +23,15 @@ Virtual models can be restricted to specific `user_paths`, and Playground reques
 authenticated with the master key can scope themselves to one of those paths with
 the **User path** field next to the model picker. When you select a model whose
 policy declares `user_paths`, the field is prefilled with the first entry; you can
-edit it before sending. On send, the value is carried on the
-`X-GoModel-User-Path` request header, exactly as an external client would send it,
-so the gateway records the path on the request snapshot and grants access to models
-restricted to that path — a request without the header is denied for those models.
+edit it before sending. On send, the value is carried on the user-path request
+header, exactly as an external client would send it, so the gateway records the
+path on the request snapshot and grants access to models restricted to that path —
+a request without the header is denied for those models.
 
-Note: the dashboard always sends the default `X-GoModel-User-Path` header name. If
-you customize the header through the `USER_PATH_HEADER` server configuration, the
-dashboard does not pick that up, and Playground requests stop carrying the scoped
-path.
+The header name is `X-GoModel-User-Path` by default. If you customize it through
+`USER_PATH_HEADER` (or `server.user_path_header`), the dashboard reads the
+effective name from `GET /admin/runtime/config` and sends the scoped path under
+that header, so no extra dashboard configuration is needed.
 
 <img
   src="/features/playground.png"

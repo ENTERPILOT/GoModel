@@ -82,6 +82,7 @@ const (
 	DashboardConfigLiveLogsEnabled      = "DASHBOARD_LIVE_LOGS_ENABLED"
 	DashboardConfigMCPEnabled           = "MCP_ENABLED"
 	DashboardConfigVMStrategies         = "VIRTUAL_MODEL_STRATEGIES"
+	DashboardConfigUserPathHeader       = "USER_PATH_HEADER"
 )
 
 // statusClientClosedRequest is the de facto status used by proxies for client-aborted requests.
@@ -109,6 +110,10 @@ type DashboardConfigResponse struct {
 	// route-selector extension is registered, so the dashboard never offers
 	// a strategy that would silently fall back to round robin.
 	VirtualModelStrategies string `json:"VIRTUAL_MODEL_STRATEGIES,omitempty"`
+	// UserPathHeader is the canonical name of the inbound header the gateway
+	// reads user paths from (server.user_path_header), so the Playground sends
+	// the header this deployment actually honors.
+	UserPathHeader string `json:"USER_PATH_HEADER,omitempty"`
 }
 
 type providerStatusSummaryResponse struct {
@@ -415,6 +420,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		LiveLogsEnabled:        strings.TrimSpace(values.LiveLogsEnabled),
 		MCPEnabled:             strings.TrimSpace(values.MCPEnabled),
 		VirtualModelStrategies: strings.TrimSpace(values.VirtualModelStrategies),
+		UserPathHeader:         strings.TrimSpace(values.UserPathHeader),
 	}
 }
 

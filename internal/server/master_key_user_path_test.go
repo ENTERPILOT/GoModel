@@ -17,9 +17,10 @@ import (
 
 // TestMasterKeyUserPathHeaderScopesRestrictedModelAccess pins the contract the
 // dashboard Playground relies on: a master-key request may scope itself to a
-// user path through the X-GoModel-User-Path header, and that path both lands
-// in the request snapshot and satisfies user_path-restricted virtual-model
-// policies. Without the header the same master-key request is denied.
+// user path through the user-path header (X-GoModel-User-Path by default, or
+// the configured USER_PATH_HEADER), and that path both lands in the request
+// snapshot and satisfies user_path-restricted virtual-model policies. Without
+// the header the same master-key request is denied.
 func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 	service, err := virtualmodels.NewService(newAliasesTestStore(virtualmodels.VirtualModel{
 		Source:    "openai/gpt-4o",
@@ -34,8 +35,14 @@ func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 	require.NoError(t, service.Refresh(context.Background()))
 	selector := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
 
+	const customHeader = "X-Tenant-Path"
+
 	tests := []struct {
-		name           string
+		name string
+		// configuredHeader is the server's USER_PATH_HEADER; empty keeps the default.
+		configuredHeader string
+		// sentHeader is the header name the request carries; empty means the default.
+		sentHeader     string
 		userPathHeader string
 		wantSnapshot   string
 		wantAllowed    bool
@@ -56,14 +63,26 @@ func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 			wantSnapshot:   "/team/y",
 			wantAllowed:    false,
 		},
+		{
+			name:             "configured header name passes restricted model",
+			configuredHeader: customHeader,
+			sentHeader:       customHeader,
+			userPathHeader:   "/team/x",
+			wantSnapshot:     "/team/x",
+			wantAllowed:      true,
+		},
+		{
+			name:             "default header is ignored when a custom name is configured",
+			configuredHeader: customHeader,
+			userPathHeader:   "/team/x",
+			wantAllowed:      false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := echo.New()
-			// This test uses the default header name; TestRequestSnapshotCapture_UsesConfiguredUserPathHeader
-			// covers the configured-name path.
-			chain := RequestSnapshotCapture()(AuthMiddleware("master-key", nil)(func(c *echo.Context) error {
+			chain := RequestSnapshotCapture(tt.configuredHeader)(AuthMiddleware("master-key", nil)(func(c *echo.Context) error {
 				ctx := c.Request().Context()
 				snapshot := core.GetRequestSnapshot(ctx)
 				require.NotNil(t, snapshot)
@@ -77,7 +96,7 @@ func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer master-key")
 			if tt.userPathHeader != "" {
-				req.Header.Set(core.UserPathHeader, tt.userPathHeader)
+				req.Header.Set(core.UserPathHeaderName(tt.sentHeader), tt.userPathHeader)
 			}
 			rec := httptest.NewRecorder()
 

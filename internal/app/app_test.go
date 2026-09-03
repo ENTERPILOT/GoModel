@@ -617,6 +617,30 @@ func TestDashboardRuntimeConfig_VirtualModelStrategies(t *testing.T) {
 	}
 }
 
+func TestDashboardRuntimeConfig_ExposesUserPathHeader(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.Config
+		want string
+	}{
+		{name: "nil config falls back to default", cfg: nil, want: "X-GoModel-User-Path"},
+		{name: "unset header falls back to default", cfg: &config.Config{}, want: "X-GoModel-User-Path"},
+		{
+			name: "custom header is canonicalized",
+			cfg:  &config.Config{Server: config.ServerConfig{UserPathHeader: "x-tenant-path"}},
+			want: "X-Tenant-Path",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := dashboardRuntimeConfig(tt.cfg, false, false, false)
+			if got := values.UserPathHeader; got != tt.want {
+				t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigUserPathHeader, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDashboardRuntimeConfig_HidesCacheAnalyticsWhenUsageDisabled(t *testing.T) {
 	cfg := &config.Config{
 		Usage: config.UsageConfig{
