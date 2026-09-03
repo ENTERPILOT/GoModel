@@ -128,6 +128,20 @@ For example, point `smart` at both `openai/gpt-4o` and `anthropic/claude-sonnet-
 with the round-robin strategy to split load, or at a premium and a budget model
 with the cost strategy to always take the cheaper one.
 
+## Reorder targets
+
+The target list is an ordered list, and the editor keeps it editable: drag the
+**grip handle** (☰) left of a target's remove button onto another row to change
+its position. The drop row is not replaced — the dragged row moves into its
+position and the rows in between shift. Keyboard users can focus the handle and
+press **ArrowUp** / **ArrowDown** for the same move.
+
+The handle shows only when the redirect has more than one target, and every
+strategy benefits: for **failover** the order is the priority chain (position
+`1` is tried first), for the balancing strategies position `1` is the first
+slot in the queue. Weights and explicit provider pins stay attached to their
+target when it moves.
+
 ## Chain virtual models
 
 A redirect target can name **another virtual model** instead of a concrete
