@@ -73,35 +73,6 @@
     }
   }}
 >
-  <SearchSelect
-    {id}
-    class="vm-target-model"
-    options={vm.vmTargetOptions()}
-    bind:value={model}
-    onchange={() => {
-      provider = "";
-    }}
-    {placeholder}
-    searchPlaceholder={m.models_target_search_placeholder()}
-    ariaLabel={m.models_target_model()}
-    disabled={vm.vmFormManaged}
-    allowCustom
-    mono
-  />
-  {#if vmFormShowWeights(vm.vmForm)}
-    <input
-      type="number"
-      min="1"
-      step="1"
-      class="mono vm-target-weight"
-      placeholder={m.models_weight()}
-      title={m.models_weight_help()}
-      bind:value={weight}
-      disabled={vm.vmFormManaged}
-      required
-      aria-label={m.models_target_weight()}
-    />
-  {/if}
   {#if draggable}
     <span
       bind:this={moveHandle}
@@ -134,6 +105,35 @@
     >
       <Icon icon={GripVertical} class="table-icon-svg" />
     </span>
+  {/if}
+  <SearchSelect
+    {id}
+    class="vm-target-model"
+    options={vm.vmTargetOptions()}
+    bind:value={model}
+    onchange={() => {
+      provider = "";
+    }}
+    {placeholder}
+    searchPlaceholder={m.models_target_search_placeholder()}
+    ariaLabel={m.models_target_model()}
+    disabled={vm.vmFormManaged}
+    allowCustom
+    mono
+  />
+  {#if vmFormShowWeights(vm.vmForm)}
+    <input
+      type="number"
+      min="1"
+      step="1"
+      class="mono vm-target-weight"
+      placeholder={m.models_weight()}
+      title={m.models_weight_help()}
+      bind:value={weight}
+      disabled={vm.vmFormManaged}
+      required
+      aria-label={m.models_target_weight()}
+    />
   {/if}
   {#if showRemove}
     <TableActionButton
