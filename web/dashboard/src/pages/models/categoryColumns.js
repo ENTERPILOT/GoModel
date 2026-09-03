@@ -11,13 +11,30 @@ function price(headerLines, value, hint) {
 }
 
 const DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
-// "mon,tue,wed,thu,fri" -> "mon–fri"; days outside the known set pass through.
+// parseDay mirrors the gateway's weekday parser: "mon" or "monday" (any
+// case), never other prefixes such as "monda". Returns null when unknown.
+function parseDay(value) {
+  const name = String(value || "").trim().toLowerCase();
+  const index = DAY_ORDER.indexOf(name.slice(0, 3));
+  if (index < 0 || (name.length > 3 && name !== DAY_NAMES[index])) {
+    return null;
+  }
+  return DAY_ORDER[index];
+}
+
+// formatDays renders "mon,tue,wed,thu,fri" as "mon–fri", "" when the range
+// has no day restriction, and null when it names days but none are known —
+// the gateway never applies such a range, so it must not be shown as daily.
 function formatDays(days) {
-  const known = (Array.isArray(days) ? days : [])
-    .map((d) => String(d || "").trim().toLowerCase().slice(0, 3))
-    .filter((d) => DAY_ORDER.includes(d))
-    .sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
+  const listed = Array.isArray(days) ? days : [];
+  const known = [...new Set(listed.map(parseDay).filter(Boolean))].sort(
+    (a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b),
+  );
+  if (listed.length > 0 && known.length === 0) {
+    return null;
+  }
   const runs = [];
   for (const day of known) {
     const last = runs[runs.length - 1];
@@ -30,8 +47,12 @@ function formatDays(days) {
   return runs.map((run) => (run.length > 2 ? run[0] + "–" + run[run.length - 1] : run.join(","))).join(", ");
 }
 
+// formatRange renders one UTC range, or null when it can never apply.
 function formatRange(range) {
   const days = formatDays(range?.days);
+  if (days === null) {
+    return null;
+  }
   const clock = String(range?.start || "") + "–" + String(range?.end || "");
   return days ? days + " " + clock : clock;
 }
@@ -49,7 +70,11 @@ export function timeWindowHint(pricing, fields, format = formatPrice) {
     const label = String(window?.label || "").replace(/_/g, " ");
     // A field the window does not override keeps its base price.
     const prices = fields.map((field) => format(rates[field] ?? pricing?.[field])).join(" / ");
-    const schedule = (Array.isArray(window?.utc_ranges) ? window.utc_ranges : []).map(formatRange).join(", ");
+    const ranges = (Array.isArray(window?.utc_ranges) ? window.utc_ranges : []).map(formatRange).filter(Boolean);
+    if (ranges.length === 0) {
+      continue; // a window with no applicable range never prices anything
+    }
+    const schedule = ranges.join(", ");
     lines.push(m.models_price_time_window_hint({ label, prices, schedule }));
   }
   return lines.join("\n");

@@ -100,6 +100,29 @@ test("timeWindowHint keeps wrapping ranges without days and skips unknown days",
   assert.match(hint, /night: \$0\.01 during 22:00–06:00, sun 00:00–24:00 UTC/);
 });
 
+test("timeWindowHint omits ranges and windows the gateway can never apply", () => {
+  const pricing = (utc_ranges) => ({
+    input_per_mtok: 0.44,
+    time_windows: [{ label: "off_peak", utc_ranges, pricing: { input_per_mtok: 0.22 } }],
+  });
+  // A day list with no recognized weekday matches no day, so it must not be
+  // rendered as an all-day schedule.
+  assert.equal(
+    timeWindowHint(pricing([{ days: ["someday"], start: "00:00", end: "24:00" }, { start: "22:00", end: "06:00" }]), [
+      "input_per_mtok",
+    ]),
+    "off peak: $0.22 during 22:00–06:00 UTC",
+  );
+  assert.equal(timeWindowHint(pricing([{ days: ["someday"], start: "00:00", end: "24:00" }]), ["input_per_mtok"]), "");
+  assert.equal(timeWindowHint(pricing([]), ["input_per_mtok"]), "");
+  // Only "mon" or "monday" name a day, never other prefixes such as "monda".
+  assert.equal(timeWindowHint(pricing([{ days: ["monda"], start: "10:00", end: "12:00" }]), ["input_per_mtok"]), "");
+  assert.match(
+    timeWindowHint(pricing([{ days: ["Monday", "MON", "tue"], start: "10:00", end: "12:00" }]), ["input_per_mtok"]),
+    /mon,tue 10:00–12:00/,
+  );
+});
+
 test("timeWindowHint shows the base price for fields a window does not override", () => {
   const [inputOutput] = categoryColumns("all");
   const hint = inputOutput.hint(
