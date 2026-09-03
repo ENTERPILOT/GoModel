@@ -71,7 +71,8 @@ func TestToChatRequestRejectsInvalidShapes(t *testing.T) {
 		{name: "malformed system", body: `{"model":"m","max_tokens":10,"system":42,"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "non-text system block", body: `{"model":"m","max_tokens":10,"system":[{"type":"image"}],"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "malformed tool_result content", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":42}]}]}`},
-		{name: "non-text tool_result block", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image"}]}]}]}`},
+		{name: "unsupported tool_result block", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"document"}]}]}]}`},
+		{name: "tool_result image without source", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image"}]}]}]}`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -414,6 +415,59 @@ func TestToChatRequestExtraFields(t *testing.T) {
 	// providers reject unknown request fields; it must be dropped, not carried.
 	if raw := chat.ExtraFields.Lookup("top_k"); len(raw) > 0 {
 		t.Errorf("ExtraFields[top_k] = %s, want dropped", raw)
+	}
+}
+
+func TestToChatRequestToolResultWithImage(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"assistant","content":[{"type":"tool_use","id":"tu_1","name":"screenshot","input":{}}]},
+			{"role":"user","content":[
+				{"type":"tool_result","tool_use_id":"tu_1","content":[
+					{"type":"text","text":"captured"},
+					{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGVsbG8="}}
+				]}
+			]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	if len(chat.Messages) != 2 {
+		t.Fatalf("messages = %d, want assistant, tool", len(chat.Messages))
+	}
+	tool := chat.Messages[1]
+	if tool.Role != "tool" || tool.ToolCallID != "tu_1" {
+		t.Fatalf("tool message = %+v", tool)
+	}
+	parts, ok := tool.Content.([]core.ContentPart)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("tool content = %T %#v, want two structured parts", tool.Content, tool.Content)
+	}
+	if parts[0].Type != "text" || parts[0].Text != "captured" {
+		t.Errorf("parts[0] = %+v, want text part", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "data:image/png;base64,aGVsbG8=" {
+		t.Errorf("parts[1] = %+v, want image_url data URL", parts[1])
+	}
+	if got := EstimateInputTokens(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"captured"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGVsbG8="}}]}]}]}`)); got != 2 {
+		t.Errorf("EstimateInputTokens = %d, want 2 (text only)", got)
+	}
+}
+
+func TestToChatRequestToolResultTextOnlyStaysString(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}
+		]}]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	if got := chat.Messages[0].Content; got != "a\nb" {
+		t.Errorf("tool content = %#v, want joined string", got)
 	}
 }
 

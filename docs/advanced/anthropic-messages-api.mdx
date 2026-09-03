@@ -193,6 +193,10 @@ features that have no canonical equivalent are not preserved end to end:
 - **`top_k`** is dropped — it has no portable OpenAI-compatible equivalent, and
   OpenAI-family providers reject unknown request fields. `temperature` and `top_p`
   are forwarded.
+- **Images inside `tool_result` blocks** (screenshots, image files read by a
+  tool — Claude Code returns them this way) are forwarded as native image blocks
+  when routed to Anthropic. Other providers receive only the text portion of the
+  tool result.
 - **`document` and other non-text/image content blocks** are rejected with a clear
   `400` error rather than silently dropped.
 - **`stop_sequences`** are honored on every provider. Providers that report the
