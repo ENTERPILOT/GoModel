@@ -2,9 +2,14 @@ package modeldata
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -16,6 +21,9 @@ import (
 var httpClient = &http.Client{
 	Timeout: 60 * time.Second,
 }
+
+// maxBodySize caps a catalog, whether downloaded or read from disk.
+const maxBodySize = 10 * 1024 * 1024 // 10 MB
 
 // FetchResult carries the outcome of one conditional model list fetch.
 type FetchResult struct {
@@ -48,6 +56,9 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 	if url == "" {
 		return FetchResult{}, nil
 	}
+	if path, ok := localPath(url); ok {
+		return readLocal(path, etag)
+	}
 
 	client := httpClient
 
@@ -79,7 +90,6 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 		return FetchResult{}, fmt.Errorf("unexpected status %d from %s", resp.StatusCode, url)
 	}
 
-	const maxBodySize = 10 * 1024 * 1024 // 10 MB
 	limited := io.LimitReader(resp.Body, maxBodySize+1)
 	raw, err := io.ReadAll(limited)
 	if err != nil {
@@ -95,6 +105,55 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 	}
 
 	return FetchResult{List: list, Raw: raw, ETag: resp.Header.Get("ETag")}, nil
+}
+
+// localPath reports whether location names a file on the local filesystem
+// and returns the path. Both "file:///etc/gomodel/models.json" and a bare
+// "/etc/gomodel/models.json" (or a relative path) are accepted, so an
+// air-gapped install can ship the catalog next to the binary or mount it.
+func localPath(location string) (string, bool) {
+	trimmed := strings.TrimSpace(location)
+	lower := strings.ToLower(trimmed)
+	switch {
+	case strings.HasPrefix(lower, "file://"):
+		u, err := neturl.Parse(trimmed)
+		if err != nil || u.Path == "" {
+			// "file://relative/path" has a host and no path; treat the
+			// remainder as the path so the mistake still resolves.
+			return strings.TrimPrefix(trimmed[len("file://"):], "/"), true
+		}
+		if u.Host != "" && u.Host != "localhost" {
+			return u.Host + u.Path, true
+		}
+		return u.Path, true
+	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
+		return "", false
+	default:
+		return trimmed, true
+	}
+}
+
+// readLocal loads the catalog from disk. The validator is a digest of the
+// content, so an unchanged file reports NotModified exactly like a 304 and
+// callers skip the reparse and re-enrichment.
+func readLocal(path, etag string) (FetchResult, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("reading model list file: %w", err)
+	}
+	if len(raw) > maxBodySize {
+		return FetchResult{}, fmt.Errorf("model list file too large (exceeds %d bytes)", maxBodySize)
+	}
+	sum := sha256.Sum256(raw)
+	digest := `"sha256-` + hex.EncodeToString(sum[:]) + `"`
+	if etag != "" && etag == digest {
+		return FetchResult{ETag: digest, NotModified: true}, nil
+	}
+	list, err := Parse(raw)
+	if err != nil {
+		return FetchResult{}, err
+	}
+	return FetchResult{List: list, Raw: raw, ETag: digest}, nil
 }
 
 // Parse deserializes raw JSON bytes into a ModelList.

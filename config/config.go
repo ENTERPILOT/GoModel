@@ -44,6 +44,14 @@ type Config struct {
 	// release manifest. See VersionCheckConfig for what it sends.
 	VersionCheck VersionCheckConfig `yaml:"version_check"`
 
+	// Offline is the one switch for air-gapped installs. It turns off every
+	// outbound call the gateway makes on its own: the update check and the
+	// remote model catalog download. Calls to configured providers and to
+	// anything else the operator declared (OTLP, MCP upstreams, vector
+	// stores) are untouched. A catalog served from a local file keeps working.
+	// Default: false
+	Offline bool `yaml:"offline" env:"GOMODEL_OFFLINE"`
+
 	// Extensions holds configuration owned by custom distributions. Core keeps
 	// the values opaque; an extension decodes its named section with
 	// LoadResult.DecodeExtension.
