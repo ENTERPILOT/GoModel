@@ -65,7 +65,7 @@ path a request is attributed to.
 
 The rule is the same for every credential: the user path is the node you act
 as, and you can see that node and everything below it. An SSO session bound to
-`/users/alice` therefore administers only that node. An extension that wants
+`/users/alice` therefore administers only that subtree. An extension that wants
 to hand out gateway admins binds those sessions to `/`, and team admins to the
 team root such as `/team/alpha`, exactly as you would create an API key at
 that path.
