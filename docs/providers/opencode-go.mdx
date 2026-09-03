@@ -68,6 +68,33 @@ OPENCODE_GO_MESSAGES_MODELS=qwen3.7-max
   once the upstream model list distinguishes endpoints.
 </Note>
 
+## Session header
+
+OpenCode Zen asks every client to send an `x-opencode-session` header so it
+can route one conversation to the same upstream and keep its prompt cache
+warm. Upstream has announced that requests without it may start failing.
+GoModel adds the header to every OpenCode Go request by default, on both the
+`/chat/completions` and `/messages` paths, using the first available value:
+
+1. An `x-opencode-session` header sent by the client (OpenCode itself, pi, and
+   other tools that speak OpenCode Zen's dialect) is forwarded verbatim.
+2. Otherwise the session GoModel detected through
+   [session keeping](/features/session-keeping): OpenCode's `X-Session-Id`,
+   Claude Code's session id, a session body field, or the content-derived
+   `auto-…` id for agents that send no signal at all.
+
+A request with no detectable session is sent without the header. GoModel also
+identifies itself with `x-opencode-client` (forwarding the client's own value
+when present, `gomodel` otherwise) and a `gomodel/<version>` User-Agent, as
+the upstream [usage guidelines](https://opencode.ai/docs/go/#where-can-i-use-it)
+require.
+
+Disable session forwarding only if upstream asks you to:
+
+```bash
+OPENCODE_GO_SESSION_HEADER=false
+```
+
 ## Reasoning
 
 Some OpenCode Zen models always think and reject requests that leave the

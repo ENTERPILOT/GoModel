@@ -72,10 +72,14 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new OpenCode Go provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	baseURL := providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL)
-	chat := openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL))
+	headers := requestHeaders(loadSessionHeaderEnabled())
+	chat := openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(baseURL, headers))
 	// opts carries the shared keyring, so the /messages client rotates in step
 	// with the chat client above rather than pinning the primary key.
 	messages := anthropic.New(providers.ProviderConfig{APIKey: cfg.APIKey, APIKeys: cfg.APIKeys, BaseURL: baseURL}, opts)
+	if native, ok := messages.(*anthropic.Provider); ok {
+		native.SetRequestHeaders(headers)
+	}
 	return &Provider{
 		ChatCompatible: chat,
 		messages:       messages,
@@ -87,9 +91,11 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	resolved := providers.ResolveBaseURL(baseURL, defaultBaseURL)
-	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(resolved))
+	headers := requestHeaders(loadSessionHeaderEnabled())
+	chat := openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(resolved, headers))
 	messages := anthropic.NewWithHTTPClient(apiKey, httpClient, hooks)
 	messages.SetBaseURL(resolved)
+	messages.SetRequestHeaders(headers)
 	return &Provider{
 		ChatCompatible: chat,
 		messages:       messages,
@@ -99,13 +105,15 @@ func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, h
 
 // compatibleConfig describes the OpenAI-compatible /chat/completions half of
 // the provider. The AdaptChatRequest hook carries OpenCode Zen's reasoning
-// quirk (see reasoning.go), so /v1/responses picks it up through
-// ResponsesViaChat as well.
-func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+// quirk (see reasoning.go) and ChatRequestHeaders its session/client
+// identification headers (see session.go), so /v1/responses picks both up
+// through ResponsesViaChat as well.
+func compatibleConfig(baseURL string, headers func(context.Context) http.Header) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
-		ProviderName:     "opencode_go",
-		BaseURL:          baseURL,
-		AdaptChatRequest: adaptChatRequest(loadDefaultReasoningEffort()),
+		ProviderName:       "opencode_go",
+		BaseURL:            baseURL,
+		AdaptChatRequest:   adaptChatRequest(loadDefaultReasoningEffort()),
+		ChatRequestHeaders: chatRequestHeaders(headers),
 	}
 }
 

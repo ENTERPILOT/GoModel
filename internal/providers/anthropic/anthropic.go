@@ -59,6 +59,10 @@ var allowedAnthropicImageMediaTypes = map[string]struct{}{
 type Provider struct {
 	client *llmclient.Client
 	keys   *providers.Keyring
+	// requestHeaders optionally adds per-request headers to every outbound
+	// call; providers that reuse the Anthropic dialect behind another
+	// upstream (OpenCode Go) use it for their identification headers.
+	requestHeaders func(context.Context) http.Header
 
 	batchEndpointsMu sync.RWMutex
 	// batchResultEndpoints keeps endpoint hints by provider batch id and custom_id.
@@ -102,6 +106,12 @@ func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.H
 // SetBaseURL allows configuring a custom base URL for the provider
 func (p *Provider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
+}
+
+// SetRequestHeaders installs a hook whose headers are added to every outbound
+// request after the standard auth and version headers.
+func (p *Provider) SetRequestHeaders(fn func(context.Context) http.Header) {
+	p.requestHeaders = fn
 }
 
 func cloneBatchResultEndpoints(endpoints map[string]string) map[string]string {
@@ -196,6 +206,15 @@ func (p *Provider) setHeaders(req *http.Request) {
 	// Forward request ID if present in context
 	if requestID := core.GetRequestID(req.Context()); requestID != "" {
 		req.Header.Set("X-Request-Id", requestID)
+	}
+
+	if p.requestHeaders != nil {
+		for name, values := range p.requestHeaders(req.Context()) {
+			req.Header.Del(name)
+			for _, value := range values {
+				req.Header.Add(name, value)
+			}
+		}
 	}
 }
 
