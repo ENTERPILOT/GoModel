@@ -36,7 +36,7 @@ func seedRequestBodySelectorHints(req *http.Request, bodyMode core.BodyMode, env
 	}
 
 	if bodyMode == core.BodyModeOpaque {
-		hints := peekCompleteRequestBodySelectorHints(req, requestSelectorPeekLimit)
+		hints := peekCompleteRequestBodySelectorHints(req)
 		if hints.duplicate != "" {
 			return core.NewDuplicateSelectorFieldError(hints.duplicate)
 		}
@@ -104,32 +104,25 @@ func peekRequestBodySelectorHints(req *http.Request, limit int64) requestBodySel
 	return hints
 }
 
-// peekCompleteRequestBodySelectorHints returns authoritative selector hints
-// only when the entire body fits within limit. A unique stream hint may be
-// returned independently from a bounded oversized body, and a duplicate
-// selector field seen anywhere within the window is reported as such. The
-// body is restored before returning so passthrough forwarding remains
-// byte-for-byte unchanged.
-func peekCompleteRequestBodySelectorHints(req *http.Request, limit int64) requestBodySelectorHints {
-	if req == nil || req.Body == nil || limit <= 0 {
+// peekCompleteRequestBodySelectorHints reads the whole JSON body so the
+// selector hints it returns are authoritative for the exact bytes that will
+// be forwarded: a duplicate selector anywhere in the body is reported, and a
+// unique model is retained however large the body is. The body size is
+// already bounded by the body-limit middleware, and the body is restored
+// before returning so passthrough forwarding remains byte-for-byte unchanged.
+func peekCompleteRequestBodySelectorHints(req *http.Request) requestBodySelectorHints {
+	if req == nil || req.Body == nil {
 		return requestBodySelectorHints{}
 	}
 
 	originalBody := req.Body
-	body, err := io.ReadAll(io.LimitReader(originalBody, limit+1))
+	body, err := io.ReadAll(originalBody)
 	req.Body = &combinedReadCloser{
-		Reader: io.MultiReader(bytes.NewReader(body), originalBody),
+		Reader: bytes.NewReader(body),
 		rc:     originalBody,
 	}
 	if err != nil {
 		return requestBodySelectorHints{}
-	}
-	if int64(len(body)) > limit {
-		hints := decodeCompleteRequestBodySelectorHints(bytes.NewReader(body[:limit]))
-		if hints.duplicate != "" {
-			return hints
-		}
-		return hints.independentStreamHint()
 	}
 	return decodeCompleteRequestBodySelectorHints(bytes.NewReader(body))
 }

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -108,25 +107,26 @@ func TestSeedRequestBodySelectorHintsAppliesCompleteModelForOpaqueBody(t *testin
 	}
 }
 
-func TestSeedRequestBodySelectorHintsRejectsIncompleteOpaqueModel(t *testing.T) {
+func TestSeedRequestBodySelectorHintsScansOversizedOpaqueBodyCompletely(t *testing.T) {
+	padding := strings.Repeat("x", int(requestSelectorPeekLimit))
 	tests := []struct {
 		name          string
-		prefix        string
+		body          string
+		wantModel     string
 		wantStream    bool
-		wantUncertain bool
+		wantDuplicate string
 		knownLength   bool
 	}{
-		{name: "model first", prefix: `{"model":"allowed-model","padding":"`, wantUncertain: true},
-		{name: "stream first", prefix: `{"stream":true,"model":"allowed-model","padding":"`, wantStream: true, wantUncertain: true},
-		{name: "model before stream", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true, wantUncertain: true},
-		{name: "model before stream with known length", prefix: `{"model":"allowed-model","stream":true,"padding":"`, wantStream: true, wantUncertain: true, knownLength: true},
-		{name: "stream before oversized value", prefix: `{"stream":true,"padding":"`, wantStream: true, wantUncertain: true},
+		{name: "model past the peek window", body: `{"stream":true,"padding":"` + padding + `","model":"late-model"}`, wantModel: "late-model", wantStream: true},
+		{name: "model past the peek window with known length", body: `{"stream":false,"padding":"` + padding + `","model":"late-model"}`, wantModel: "late-model", knownLength: true},
+		{name: "duplicate model past the peek window", body: `{"model":"allowed-model","padding":"` + padding + `","model":"restricted-model"}`, wantDuplicate: "model"},
+		{name: "duplicate stream past the peek window", body: `{"stream":true,"padding":"` + padding + `","stream":false}`, wantDuplicate: "stream"},
+		{name: "duplicate provider past the peek window with known length", body: `{"provider":"a","padding":"` + padding + `","provider":"b"}`, wantDuplicate: "provider", knownLength: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			body := test.prefix + strings.Repeat("x", int(requestSelectorPeekLimit)) + `","model":"restricted-model"}`
-			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(test.body))
 			if !test.knownLength {
 				req.ContentLength = -1
 			}
@@ -134,26 +134,29 @@ func TestSeedRequestBodySelectorHintsRejectsIncompleteOpaqueModel(t *testing.T) 
 			env := &core.WhiteBoxPrompt{}
 			core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
-			if err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env); err != nil {
-				t.Fatalf("seedRequestBodySelectorHints() error = %v", err)
-			}
+			err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-			if env.JSONBodyParsed {
-				t.Fatal("JSONBodyParsed = true, want false for incomplete opaque body")
+			if test.wantDuplicate != "" {
+				assertDuplicateSelectorError(t, err, test.wantDuplicate)
+				if env.JSONBodyParsed || env.RouteHints.Model != "" {
+					t.Fatalf("env = %+v, want no hints seeded from a duplicate body", env)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("seedRequestBodySelectorHints() error = %v", err)
+				}
+				if !env.JSONBodyParsed {
+					t.Fatal("JSONBodyParsed = false, want true for a fully scanned body")
+				}
+				info := env.CachedPassthroughRouteInfo()
+				if info == nil {
+					t.Fatal("CachedPassthroughRouteInfo() = nil")
+				}
+				if info.Model != test.wantModel || info.Stream != test.wantStream || info.StreamUncertain {
+					t.Fatalf("passthrough info = model %q stream %v uncertain %v, want model %q stream %v certain", info.Model, info.Stream, info.StreamUncertain, test.wantModel, test.wantStream)
+				}
 			}
-			if env.RouteHints.Model != "" {
-				t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
-			}
-			info := env.CachedPassthroughRouteInfo()
-			if info == nil {
-				t.Fatal("CachedPassthroughRouteInfo() = nil")
-			}
-			if info.Model != "" {
-				t.Fatalf("PassthroughRouteInfo.Model = %q, want empty", info.Model)
-			}
-			if info.Stream != test.wantStream || info.StreamUncertain != test.wantUncertain {
-				t.Fatalf("stream state = stream %v uncertain %v, want stream %v uncertain %v", info.Stream, info.StreamUncertain, test.wantStream, test.wantUncertain)
-			}
+			assertBodyReplays(t, req, test.body)
 		})
 	}
 }
@@ -175,7 +178,7 @@ func TestSeedRequestBodySelectorHintsRejectsAmbiguousStreamBeforePeekLimit(t *te
 	assertBodyReplays(t, req, body)
 }
 
-func TestSeedRequestBodySelectorHintsMarksStreamBeyondPeekBoundaryUncertain(t *testing.T) {
+func TestSeedRequestBodySelectorHintsRejectsDuplicateStreamBeyondPeekBoundary(t *testing.T) {
 	body := `{"stream":true,"padding":"` + strings.Repeat("x", int(requestSelectorPeekLimit)) + `","stream":false}`
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(body))
 	req.ContentLength = -1
@@ -183,36 +186,13 @@ func TestSeedRequestBodySelectorHintsMarksStreamBeyondPeekBoundaryUncertain(t *t
 	env := &core.WhiteBoxPrompt{}
 	core.CachePassthroughRouteInfo(env, &core.PassthroughRouteInfo{Provider: "openai"})
 
-	if err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env); err != nil {
-		t.Fatalf("seedRequestBodySelectorHints() error = %v", err)
-	}
+	err := seedRequestBodySelectorHints(req, core.BodyModeOpaque, env)
 
-	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want observed prefix hint retained")
+	assertDuplicateSelectorError(t, err, "stream")
+	if env.StreamRequested {
+		t.Fatal("StreamRequested = true, want no hint from a duplicate body")
 	}
-	info := env.CachedPassthroughRouteInfo()
-	if info == nil {
-		t.Fatal("CachedPassthroughRouteInfo() = nil")
-	}
-	if !info.Stream || !info.StreamUncertain {
-		t.Fatalf("stream state = stream %v uncertain %v, want true and true", info.Stream, info.StreamUncertain)
-	}
-	restored, err := io.ReadAll(req.Body)
-	if err != nil {
-		t.Fatalf("read restored body: %v", err)
-	}
-	if string(restored) != body {
-		t.Fatal("restored body differs from original")
-	}
-	var forwarded struct {
-		Stream bool `json:"stream"`
-	}
-	if err := json.Unmarshal(restored, &forwarded); err != nil {
-		t.Fatalf("decode restored body: %v", err)
-	}
-	if forwarded.Stream {
-		t.Fatal("forwarded stream = true, want last duplicate false to demonstrate uncertainty")
-	}
+	assertBodyReplays(t, req, body)
 }
 
 func TestSeedRequestBodySelectorHintsRejectsCompleteDuplicateOpaqueFields(t *testing.T) {

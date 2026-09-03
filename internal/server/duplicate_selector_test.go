@@ -211,6 +211,17 @@ func TestDuplicateSelector_PassthroughRejectedBeforeForwarding(t *testing.T) {
 			body:  `{"model":"allowed-model","provider":"openai","provider":"groq"}`,
 			field: "provider",
 		},
+		{
+			name:  "oversized body with duplicate past the peek window",
+			body:  `{"model":"allowed-model","messages":[{"role":"user","content":"` + strings.Repeat("x", int(requestSelectorPeekLimit)) + `"}],"model":"blocked-model"}`,
+			field: "model",
+		},
+		{
+			name:          "oversized unknown length body with duplicate past the peek window",
+			body:          `{"model":"allowed-model","messages":[{"role":"user","content":"` + strings.Repeat("x", int(requestSelectorPeekLimit)) + `"}],"model":"blocked-model"}`,
+			field:         "model",
+			unknownLength: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -340,6 +351,11 @@ func TestDuplicateSelector_UniqueSelectorsStillServed(t *testing.T) {
 			name: "passthrough",
 			path: "/p/openai/chat/completions",
 			body: `{"model":"allowed-model","stream":false}`,
+		},
+		{
+			name: "oversized passthrough body authorizes the model past the peek window",
+			path: "/p/openai/chat/completions",
+			body: `{"messages":[{"role":"user","content":"` + strings.Repeat("x", int(requestSelectorPeekLimit)) + `"}],"model":"allowed-model"}`,
 		},
 	}
 
