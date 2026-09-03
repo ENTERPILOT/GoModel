@@ -47,13 +47,33 @@ function formatDays(days) {
   return runs.map((run) => (run.length > 2 ? run[0] + "–" + run[run.length - 1] : run.join(","))).join(", ");
 }
 
-// formatRange renders one UTC range, or null when it can never apply.
-function formatRange(range) {
-  const days = formatDays(range?.days);
-  if (days === null) {
+// parseClock mirrors the gateway's "HH:MM" grammar ("24:00" allowed as an
+// end-of-day bound). Returns the trimmed value, or null when the gateway
+// would reject it.
+function parseClock(value) {
+  const clock = String(value ?? "").trim();
+  const match = /^(\d{2}):(\d{2})$/.exec(clock);
+  if (!match) {
     return null;
   }
-  const clock = String(range?.start || "") + "–" + String(range?.end || "");
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (minute > 59 || hour > 24 || (hour === 24 && minute !== 0)) {
+    return null;
+  }
+  return clock;
+}
+
+// formatRange renders one UTC range, or null when the gateway can never
+// apply it (unknown days or an unparseable bound).
+function formatRange(range) {
+  const days = formatDays(range?.days);
+  const start = parseClock(range?.start);
+  const end = parseClock(range?.end);
+  if (days === null || start === null || end === null) {
+    return null;
+  }
+  const clock = start + "–" + end;
   return days ? days + " " + clock : clock;
 }
 

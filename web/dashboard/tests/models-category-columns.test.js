@@ -121,6 +121,21 @@ test("timeWindowHint omits ranges and windows the gateway can never apply", () =
     timeWindowHint(pricing([{ days: ["Monday", "MON", "tue"], start: "10:00", end: "12:00" }]), ["input_per_mtok"]),
     /mon,tue 10:00–12:00/,
   );
+  // Bounds must be "HH:MM" ("24:00" only as an end-of-day mark); anything
+  // else never matches in the gateway and is not advertised.
+  for (const [start, end] of [
+    ["", "12:00"],
+    [undefined, "12:00"],
+    ["9:00", "12:00"],
+    ["10:00", "12"],
+    ["10:60", "12:00"],
+    ["25:00", "12:00"],
+    ["24:30", "12:00"],
+    ["10:00", "noon"],
+  ]) {
+    assert.equal(timeWindowHint(pricing([{ start, end }]), ["input_per_mtok"]), "", `${start}–${end}`);
+  }
+  assert.match(timeWindowHint(pricing([{ start: " 10:00 ", end: "24:00" }]), ["input_per_mtok"]), /10:00–24:00 UTC/);
 });
 
 test("timeWindowHint shows the base price for fields a window does not override", () => {
