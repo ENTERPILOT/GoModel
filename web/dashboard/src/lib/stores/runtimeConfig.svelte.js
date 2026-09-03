@@ -23,6 +23,7 @@ const CONFIG_KEYS = [
   "DASHBOARD_LIVE_LOGS_ENABLED",
   "MCP_ENABLED",
   "VIRTUAL_MODEL_STRATEGIES",
+  "USER_PATH_HEADER",
 ];
 
 // Strategies every gateway supports; used when the backend predates the
@@ -59,6 +60,13 @@ class RuntimeConfigStore {
       .map((s) => s.trim())
       .filter(Boolean);
     return list.length > 0 ? list : DEFAULT_VM_STRATEGIES;
+  }
+
+  // userPathHeader is the canonical header name the gateway reads user paths
+  // from (USER_PATH_HEADER), or "" when the backend predates the key or the
+  // config has not loaded; callers fall back to the default name.
+  userPathHeader() {
+    return String((this.config && this.config.USER_PATH_HEADER) || "").trim();
   }
 
   // cacheVisible is a tri-source gate: an explicit CACHE_ENABLED wins;

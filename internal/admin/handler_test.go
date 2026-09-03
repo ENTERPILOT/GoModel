@@ -2435,6 +2435,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		LiveLogsEnabled:        "on",
 		MCPEnabled:             "off",
 		VirtualModelStrategies: "round_robin,cost,adaptive",
+		UserPathHeader:         " X-Tenant-Path ",
 	}))
 	c, rec := newHandlerContext("/admin/runtime/config")
 
@@ -2496,6 +2497,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.VirtualModelStrategies; got != "round_robin,cost,adaptive" {
 		t.Fatalf("VIRTUAL_MODEL_STRATEGIES = %q, want round_robin,cost,adaptive", got)
+	}
+	if got := body.UserPathHeader; got != "X-Tenant-Path" {
+		t.Fatalf("USER_PATH_HEADER = %q, want X-Tenant-Path", got)
 	}
 	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
 		t.Fatal("UNRELATED_FLAG should not be exposed")

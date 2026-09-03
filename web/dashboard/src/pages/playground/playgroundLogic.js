@@ -330,10 +330,14 @@ export function playgroundModelOptions(inventory) {
 
 // --- User-path picker --------------------------------------------------------
 
+// Header name the gateway reads user paths from unless USER_PATH_HEADER is
+// customized server-side.
+const DEFAULT_USER_PATH_HEADER = "X-GoModel-User-Path";
+
 // User paths the selected inventory entry is restricted to
 // (access.user_paths), as { value, label } objects; empty when the model is
-// unknown or unrestricted. The playground sends the chosen path as
-// X-GoModel-User-Path so a restricted model can be exercised from the picker.
+// unknown or unrestricted. The playground sends the chosen path on the
+// user-path header so a restricted model can be exercised from the picker.
 export function playgroundUserPathOptions(inventory, selector) {
   const id = String(selector || "").trim();
   const entry = (Array.isArray(inventory) ? inventory : []).find(
@@ -353,10 +357,17 @@ export function defaultUserPathForModel(inventory, selector) {
   return playgroundUserPathOptions(inventory, selector)[0]?.value || "";
 }
 
-// Build the header to send when a non-empty user path is selected.
-export function playgroundUserPathHeader(userPath) {
+// Effective user-path header name: the server-configured USER_PATH_HEADER
+// (from /admin/runtime/config) or the default when unset.
+export function effectiveUserPathHeaderName(configured) {
+  return String(configured || "").trim() || DEFAULT_USER_PATH_HEADER;
+}
+
+// Build the header to send when a non-empty user path is selected, under the
+// configured header name so a customized USER_PATH_HEADER is honored.
+export function playgroundUserPathHeader(userPath, headerName) {
   const path = String(userPath || "").trim();
-  return path ? { "X-GoModel-User-Path": path } : {};
+  return path ? { [effectiveUserPathHeaderName(headerName)]: path } : {};
 }
 
 // --- JSON panel sizing -------------------------------------------------------

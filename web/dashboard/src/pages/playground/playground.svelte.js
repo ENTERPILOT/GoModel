@@ -8,6 +8,7 @@ import { errorPayloadMessage, isGatewayAuthError } from "$lib/api/errors.js";
 import { consumeEventStream } from "$lib/api/eventStream.js";
 import { auth } from "$lib/stores/auth.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { readStored, writeStored } from "$lib/utils/storage.js";
 import { moveItem } from "$lib/utils/sortable.js";
 import * as m from "$lib/paraglide/messages.js";
@@ -15,6 +16,7 @@ import {
   buildPlaygroundRequest,
   createStreamAccumulator,
   defaultUserPathForModel,
+  effectiveUserPathHeaderName,
   endpointById,
   extractResponseText,
   extractUsage,
@@ -34,9 +36,9 @@ const STORAGE = {
 class PlaygroundStore {
   endpoint = $state(normalizeEndpoint(readStored(STORAGE.endpoint, "")));
   model = $state(readStored(STORAGE.model, "") || "");
-  // Session-only: the user path to send as X-GoModel-User-Path. Defaults to
-  // the selected model's first allowed path when setModel picks a
-  // restricted model; never persisted to localStorage.
+  // Session-only: the user path to send on the user-path header (see
+  // userPathHeaderName). Defaults to the selected model's first allowed path
+  // when setModel picks a restricted model; never persisted to localStorage.
   userPath = $state("");
   stream = $state(readStored(STORAGE.stream, "true") !== "false");
   // [{ id, role, content, pending }] — the conversation the user edits.
@@ -76,6 +78,12 @@ class PlaygroundStore {
 
   get canSend() {
     return !this.sending && (this.draft.trim() !== "" || this.messages.length > 0);
+  }
+
+  // Header name the selected user path is sent under: the deployment's
+  // USER_PATH_HEADER when customized, otherwise X-GoModel-User-Path.
+  get userPathHeaderName() {
+    return effectiveUserPathHeaderName(runtimeConfig.userPathHeader());
   }
 
   setEndpoint(id) {
@@ -171,10 +179,13 @@ class PlaygroundStore {
     const meta = { status: 0, durationMs: 0, streamed: false, events: 0, usage: null };
 
     try {
+      // A customized USER_PATH_HEADER only reaches the gateway under its
+      // configured name, so make sure the runtime config is known first.
+      await runtimeConfig.ensureLoaded();
       const options = {
         method: "POST",
         body: JSON.stringify(body),
-        headers: playgroundUserPathHeader(this.userPath),
+        headers: playgroundUserPathHeader(this.userPath, this.userPathHeaderName),
         signal: controller.signal,
       };
       const res = await apiFetch(endpoint.path, options);

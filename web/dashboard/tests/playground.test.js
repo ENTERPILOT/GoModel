@@ -8,6 +8,7 @@ import {
   clampJsonPanelWidth,
   createStreamAccumulator,
   defaultUserPathForModel,
+  effectiveUserPathHeaderName,
   extractResponseText,
   extractUsage,
   initialJsonPanelOpen,
@@ -366,14 +367,32 @@ test("defaultUserPathForModel returns the first allowed path or empty", () => {
   assert.equal(defaultUserPathForModel(undefined, "team-model"), "");
 });
 
-test("playgroundUserPathHeader sends X-GoModel-User-Path only when non-empty", () => {
+test("effectiveUserPathHeaderName falls back to the default header name", () => {
+  assert.equal(effectiveUserPathHeaderName(undefined), "X-GoModel-User-Path");
+  assert.equal(effectiveUserPathHeaderName(""), "X-GoModel-User-Path");
+  assert.equal(effectiveUserPathHeaderName("   "), "X-GoModel-User-Path");
+  // A customized USER_PATH_HEADER from /admin/runtime/config wins.
+  assert.equal(effectiveUserPathHeaderName("X-Tenant-Path"), "X-Tenant-Path");
+  assert.equal(effectiveUserPathHeaderName("  X-Tenant-Path  "), "X-Tenant-Path");
+});
+
+test("playgroundUserPathHeader sends the default header name only when non-empty", () => {
   assert.deepEqual(playgroundUserPathHeader("/team/alpha"), { "X-GoModel-User-Path": "/team/alpha" });
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha", ""), { "X-GoModel-User-Path": "/team/alpha" });
   // Surrounding whitespace is trimmed before the header is built.
   assert.deepEqual(playgroundUserPathHeader("  /team/alpha  "), { "X-GoModel-User-Path": "/team/alpha" });
   // Unrestricted selection or blank input drops the header.
   assert.deepEqual(playgroundUserPathHeader(""), {});
   assert.deepEqual(playgroundUserPathHeader("   "), {});
   assert.deepEqual(playgroundUserPathHeader(undefined), {});
+});
+
+test("playgroundUserPathHeader honors a customized USER_PATH_HEADER", () => {
+  assert.deepEqual(playgroundUserPathHeader("/team/alpha", "X-Tenant-Path"), { "X-Tenant-Path": "/team/alpha" });
+  assert.deepEqual(playgroundUserPathHeader("  /team/alpha  ", "X-Tenant-Path"), { "X-Tenant-Path": "/team/alpha" });
+  // A blank path still produces no header, whatever the configured name.
+  assert.deepEqual(playgroundUserPathHeader("", "X-Tenant-Path"), {});
+  assert.deepEqual(playgroundUserPathHeader("   ", "X-Tenant-Path"), {});
 });
 
 test("clampJsonPanelWidth keeps the panel inside the viewport", () => {
