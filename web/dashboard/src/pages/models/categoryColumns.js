@@ -71,7 +71,13 @@ const CATEGORY_COLUMNS = {
       (row, p) => timeWindowHint(p, ["cached_input_per_mtok"]),
     ),
   ],
-  embedding: [price([m.models_column_input(), "$/MTok"], (row, p) => formatPrice(p?.input_per_mtok))],
+  embedding: [
+    price(
+      [m.models_column_input(), "$/MTok"],
+      (row, p) => formatPrice(p?.input_per_mtok),
+      (row, p) => timeWindowHint(p, ["input_per_mtok"]),
+    ),
+  ],
   image: [price([m.models_column_per_image()], (row, p) => formatPriceFine(p?.per_image))],
   audio: [
     price([m.models_column_per_second()], (row, p) => formatPriceFine(p?.per_second_input)),

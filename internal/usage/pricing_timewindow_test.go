@@ -3,12 +3,17 @@ package usage
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	_ "modernc.org/sqlite"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
 
 // deepSeekOffPeakPricing mirrors the ai-model-list entry for deepseek-v4-flash:
@@ -125,6 +130,77 @@ func TestRecalculateEntryCostsUsesStoredTimestamp(t *testing.T) {
 	}
 }
 
+// timeWindowRecalculationEntries returns one stale-priced DeepSeek row per
+// pricing situation, keyed by the total each should be re-priced to. IDs are
+// UUIDs because PostgreSQL stores them in a UUID column.
+var timeWindowRecalculationEntries = []struct {
+	ID        string
+	At        time.Time
+	WantTotal float64
+}{
+	{"0d1b4c0a-1d3b-4c4f-9a1e-000000000001", mondayPeakUTC, 1.76},
+	{"0d1b4c0a-1d3b-4c4f-9a1e-000000000002", mondayOffPeakUTC, 0.88},
+	{"0d1b4c0a-1d3b-4c4f-9a1e-000000000003", saturdayUTC, 0.88},
+}
+
+// timeWindowRecalculationParams spans the week the fixture rows fall in.
+var timeWindowRecalculationParams = RecalculatePricingParams{
+	StartDate: time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC),
+	EndDate:   time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC),
+}
+
+// writeTimeWindowRecalculationEntries stores the fixture rows with a stale
+// total so a recalculation that does nothing is caught.
+func writeTimeWindowRecalculationEntries(t *testing.T, store UsageStore) {
+	t.Helper()
+	stale := 99.0
+	entries := make([]*UsageEntry, 0, len(timeWindowRecalculationEntries))
+	for _, row := range timeWindowRecalculationEntries {
+		entries = append(entries, &UsageEntry{
+			ID:           row.ID,
+			RequestID:    "req-" + row.ID,
+			ProviderID:   "deepseek",
+			Timestamp:    row.At,
+			Model:        "deepseek-v4-flash",
+			Provider:     "deepseek",
+			Endpoint:     "/v1/chat/completions",
+			InputTokens:  1_000_000,
+			OutputTokens: 1_000_000,
+			TotalTokens:  2_000_000,
+			TotalCost:    &stale,
+		})
+	}
+	if err := store.WriteBatch(context.Background(), entries); err != nil {
+		t.Fatalf("WriteBatch() error = %v", err)
+	}
+}
+
+// recalculatingStore is a usage store that can re-price its rows.
+type recalculatingStore interface {
+	UsageStore
+	PricingRecalculator
+}
+
+// assertTimeWindowRecalculation runs the recalculation and checks that every
+// fixture row was re-priced at the rate in effect at its stored timestamp.
+// readTotal returns the persisted total_cost for one row ID.
+func assertTimeWindowRecalculation(t *testing.T, store recalculatingStore, readTotal func(id string) float64) {
+	t.Helper()
+	result, err := store.RecalculatePricing(context.Background(), timeWindowRecalculationParams,
+		staticTestPricingResolver{"deepseek/deepseek-v4-flash": deepSeekOffPeakPricing()})
+	if err != nil {
+		t.Fatalf("RecalculatePricing() error = %v", err)
+	}
+	if want := int64(len(timeWindowRecalculationEntries)); result.Recalculated != want || result.WithPricing != want {
+		t.Fatalf("result = %+v, want %d recalculated rows with pricing", result, want)
+	}
+	for _, row := range timeWindowRecalculationEntries {
+		if got := readTotal(row.ID); !costsNearlyEqual(got, row.WantTotal) {
+			t.Fatalf("%s (%s) total_cost = %v, want %v", row.ID, row.At.Format(time.RFC3339), got, row.WantTotal)
+		}
+	}
+}
+
 func TestSQLiteStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -137,49 +213,66 @@ func TestSQLiteStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *
 		t.Fatalf("NewSQLiteStore() error = %v", err)
 	}
 
-	ctx := context.Background()
-	stale := 99.0
-	entry := func(id string, at time.Time) *UsageEntry {
-		return &UsageEntry{
-			ID:           id,
-			RequestID:    "req-" + id,
-			Timestamp:    at,
-			Model:        "deepseek-v4-flash",
-			Provider:     "deepseek",
-			Endpoint:     "/v1/chat/completions",
-			InputTokens:  1_000_000,
-			OutputTokens: 1_000_000,
-			TotalTokens:  2_000_000,
-			TotalCost:    &stale,
-		}
-	}
-	if err := store.WriteBatch(ctx, []*UsageEntry{
-		entry("peak", mondayPeakUTC),
-		entry("off-peak", mondayOffPeakUTC),
-		entry("weekend", saturdayUTC),
-	}); err != nil {
-		t.Fatalf("WriteBatch() error = %v", err)
-	}
-
-	result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{
-		StartDate: time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC),
-		EndDate:   time.Date(2026, 8, 30, 0, 0, 0, 0, time.UTC),
-	}, staticTestPricingResolver{"deepseek/deepseek-v4-flash": deepSeekOffPeakPricing()})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.Recalculated != 3 || result.WithPricing != 3 {
-		t.Fatalf("result = %+v, want 3 recalculated rows with pricing", result)
-	}
-
-	want := map[string]float64{"peak": 1.76, "off-peak": 0.88, "weekend": 0.88}
-	for id, wantTotal := range want {
+	writeTimeWindowRecalculationEntries(t, store)
+	assertTimeWindowRecalculation(t, store, func(id string) float64 {
 		var total float64
-		if err := db.QueryRowContext(ctx, "SELECT total_cost FROM usage WHERE id = ?", id).Scan(&total); err != nil {
+		if err := db.QueryRowContext(context.Background(), "SELECT total_cost FROM usage WHERE id = ?", id).Scan(&total); err != nil {
 			t.Fatalf("read %s: %v", id, err)
 		}
-		if !costsNearlyEqual(total, wantTotal) {
-			t.Fatalf("%s total_cost = %v, want %v", id, total, wantTotal)
-		}
+		return total
+	})
+}
+
+func TestPostgreSQLStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
+	pool := sqlxtest.NewPostgresPool(t)
+	if pool == nil {
+		return // skipped: no test server configured
 	}
+
+	store, err := NewPostgreSQLStore(pool, 0)
+	if err != nil {
+		t.Fatalf("NewPostgreSQLStore() error = %v", err)
+	}
+
+	writeTimeWindowRecalculationEntries(t, store)
+	assertTimeWindowRecalculation(t, store, func(id string) float64 {
+		var total float64
+		if err := pool.QueryRow(context.Background(), "SELECT total_cost FROM usage WHERE id = $1::uuid", id).Scan(&total); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		return total
+	})
+}
+
+func TestMongoDBStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
+	dsn := os.Getenv("MONGO_TEST_DSN")
+	if dsn == "" {
+		t.Skip("MONGO_TEST_DSN is not set")
+	}
+	ctx := context.Background()
+	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
+	if err != nil {
+		t.Fatalf("mongo.Connect: %v", err)
+	}
+	db := client.Database("gomodel_usage_test_" + time.Now().UTC().Format("20060102150405_000000000"))
+	t.Cleanup(func() {
+		_ = db.Drop(ctx)
+		_ = client.Disconnect(ctx)
+	})
+
+	store, err := NewMongoDBStore(db, 0)
+	if err != nil {
+		t.Fatalf("NewMongoDBStore() error = %v", err)
+	}
+
+	writeTimeWindowRecalculationEntries(t, store)
+	assertTimeWindowRecalculation(t, store, func(id string) float64 {
+		var doc struct {
+			TotalCost float64 `bson:"total_cost"`
+		}
+		if err := db.Collection("usage").FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&doc); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		return doc.TotalCost
+	})
 }

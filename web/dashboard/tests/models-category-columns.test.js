@@ -64,6 +64,26 @@ test("price cells hint at time-of-day pricing windows for their fields", () => {
   assert.equal(inputOutput.hint({}, undefined), "");
 });
 
+test("embedding input column hints at time-of-day pricing windows", () => {
+  const [input] = categoryColumns("embedding");
+  const pricing = {
+    input_per_mtok: 0.1,
+    time_windows: [
+      {
+        label: "off_peak",
+        utc_ranges: [{ days: ["sat", "sun"], start: "00:00", end: "24:00" }],
+        pricing: { input_per_mtok: 0.05 },
+      },
+    ],
+  };
+  assert.equal(input.value({}, pricing), "$0.10");
+  const hint = input.hint({}, pricing);
+  assert.match(hint, /off peak/);
+  assert.match(hint, /\$0\.05/);
+  assert.match(hint, /sat,sun 00:00–24:00/);
+  assert.equal(input.hint({}, { input_per_mtok: 0.1 }), "");
+});
+
 test("timeWindowHint keeps wrapping ranges without days and skips unknown days", () => {
   const hint = timeWindowHint(
     {
