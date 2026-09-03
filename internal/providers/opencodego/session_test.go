@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -150,6 +151,59 @@ func TestRequestHeaders_Disabled(t *testing.T) {
 				t.Fatalf("%s = %q, want %s (identification is not gated)", clientHeader, v, defaultClient)
 			}
 		})
+	}
+}
+
+func TestPassthrough_FillsMissingIdentificationHeaders(t *testing.T) {
+	server, last := headerServer(t)
+	ctx := core.WithSessionID(context.Background(), "session-pass")
+
+	resp, err := newTestProvider(server.URL, server.Client()).Passthrough(ctx, &core.PassthroughRequest{
+		Method:   http.MethodPost,
+		Endpoint: "chat/completions",
+		Body:     io.NopCloser(strings.NewReader(`{"model":"glm-5.1","messages":[{"role":"user","content":"hi"}]}`)),
+		Headers:  http.Header{"Content-Type": {"application/json"}, "X-Opencode-Client": {"curl-script"}},
+	})
+	if err != nil {
+		t.Fatalf("Passthrough() error = %v", err)
+	}
+	_ = resp.Body.Close()
+	got := last()
+	if v := got.Get(sessionHeader); v != "session-pass" {
+		t.Fatalf("%s = %q, want session-pass", sessionHeader, v)
+	}
+	if v := got.Get(clientHeader); v != "curl-script" {
+		t.Fatalf("%s = %q, want caller value curl-script", clientHeader, v)
+	}
+	if v := got.Get("User-Agent"); v != "gomodel/"+version.Version {
+		t.Fatalf("User-Agent = %q, want gomodel/%s", v, version.Version)
+	}
+}
+
+func TestWithDefaultHeaders(t *testing.T) {
+	defaults := http.Header{"X-Opencode-Session": {"gw"}, "User-Agent": {"gomodel/dev"}}
+	merged := withDefaultHeaders(nil, defaults)
+	if merged.Get("X-Opencode-Session") != "gw" || merged.Get("User-Agent") != "gomodel/dev" {
+		t.Fatalf("nil headers should take every default, got %v", merged)
+	}
+	// A non-canonical caller key still counts as present and is not duplicated.
+	caller := http.Header{}
+	caller[strings.ToLower("X-Opencode-Session")] = []string{"mine"}
+	merged = withDefaultHeaders(caller, defaults)
+	var sessionValues []string
+	for key, values := range merged {
+		if strings.EqualFold(key, "X-Opencode-Session") {
+			sessionValues = append(sessionValues, values...)
+		}
+	}
+	if len(sessionValues) != 1 || sessionValues[0] != "mine" {
+		t.Fatalf("caller value should win without duplication, got %v", merged)
+	}
+	if merged.Get("User-Agent") != "gomodel/dev" {
+		t.Fatalf("missing default should be added, got %v", merged)
+	}
+	if len(caller) != 1 {
+		t.Fatalf("caller headers must not be mutated, got %v", caller)
 	}
 }
 
