@@ -83,7 +83,7 @@ func TestSQLiteGetUsageByModelIncludesGroupCacheStats(t *testing.T) {
 		t.Fatalf("expected 100/20 local cached tokens, got %d/%d", row.LocalCachedInputTokens, row.LocalCachedOutputTokens)
 	}
 	// The fixture's cached row completed on Tuesday 2026-04-07 at 10:00 UTC.
-	key := CachedPricingKey{Model: "gpt-5", Provider: "openai", Weekday: time.Tuesday, Hour: 10}
+	key := CachedPricingKey{Model: "gpt-5", Provider: "openai", Timed: true, Weekday: time.Tuesday, Hour: 10}
 	if row.CachedTokensByPricing[key] != 60 {
 		t.Fatalf("expected 60 cached tokens under %+v, got %#v", key, row.CachedTokensByPricing)
 	}
@@ -250,6 +250,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), monday},
 		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, str(CacheTypeExact), 100, 20, nil, "2026-08-24T12:31:00Z"},
 		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, nil, 50, 20, str(`{"prompt_cached_tokens": 10}`), "2026-08-29T08:00:00Z"},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, nil, 30, 20, str(`{"prompt_cached_tokens": 5}`), "not a timestamp"},
 		{"gpt-4o", "openai", nil, nil, nil, nil, 40, 10, nil, nil},
 	}}
 
@@ -262,7 +263,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	if gpt5 == nil {
 		t.Fatalf("expected gpt-5 stats, got %#v", stats)
 	}
-	if gpt5.CachedInputTokens != 70 || gpt5.UncachedInputTokens != 80 {
+	if gpt5.CachedInputTokens != 75 || gpt5.UncachedInputTokens != 105 {
 		t.Fatalf("unexpected gpt-5 split: %+v", gpt5)
 	}
 	if gpt5.LocalCachedInputTokens != 100 || gpt5.LocalCachedOutputTokens != 20 || gpt5.LocalRequests != 1 {
@@ -271,9 +272,10 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	if gpt5.ProviderName != "primary" {
 		t.Fatalf("expected trimmed provider name identity, got %q", gpt5.ProviderName)
 	}
-	mondayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Weekday: time.Monday, Hour: 12}
-	saturdayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Weekday: time.Saturday, Hour: 8}
-	if gpt5.CachedTokensByPricing[mondayKey] != 60 || gpt5.CachedTokensByPricing[saturdayKey] != 10 || len(gpt5.CachedTokensByPricing) != 2 {
+	mondayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Timed: true, Weekday: time.Monday, Hour: 12}
+	saturdayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Timed: true, Weekday: time.Saturday, Hour: 8}
+	untimedKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary"}
+	if gpt5.CachedTokensByPricing[mondayKey] != 60 || gpt5.CachedTokensByPricing[saturdayKey] != 10 || gpt5.CachedTokensByPricing[untimedKey] != 5 || len(gpt5.CachedTokensByPricing) != 3 {
 		t.Fatalf("unexpected pricing breakdown: %#v", gpt5.CachedTokensByPricing)
 	}
 
@@ -374,16 +376,17 @@ func TestEstimateCachedInputCostAppliesTimeWindows(t *testing.T) {
 		},
 	}
 	key := func(day time.Weekday, hour int) CachedPricingKey {
-		return CachedPricingKey{Model: "deepseek-v4-flash", Provider: "deepseek", Weekday: day, Hour: hour}
+		return CachedPricingKey{Model: "deepseek-v4-flash", Provider: "deepseek", Timed: true, Weekday: day, Hour: hour}
 	}
 	cost := EstimateCachedInputCost(map[CachedPricingKey]int64{
 		key(time.Monday, 8):   1_000_000, // peak: 0.014
 		key(time.Monday, 12):  1_000_000, // off-peak: 0.007
 		key(time.Saturday, 8): 1_000_000, // weekend: 0.007
-		key(time.Sunday, 0):   1_000_000, // zero-value key from older buckets: Sunday is off-peak
+		key(time.Sunday, 0):   1_000_000, // Sunday midnight is a real weekend slot: 0.007
+		{Model: "deepseek-v4-flash", Provider: "deepseek"}: 1_000_000, // untimed: base 0.014
 	}, resolver)
-	if cost == nil || !costsNearlyEqual(*cost, 0.014+0.007+0.007+0.007) {
-		t.Fatalf("EstimateCachedInputCost = %v, want 0.035", cost)
+	if cost == nil || !costsNearlyEqual(*cost, 0.014+0.007+0.007+0.007+0.014) {
+		t.Fatalf("EstimateCachedInputCost = %v, want 0.049", cost)
 	}
 }
 

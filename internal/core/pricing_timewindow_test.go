@@ -160,6 +160,8 @@ func TestModelPricingUTCRangeContains(t *testing.T) {
 		{"wrapping range does not start on an unlisted day", ModelPricingUTCRange{Days: []string{"fri"}, Start: "10:00", End: "01:00"}, saturday(12, 0), false},
 		{"full day names and mixed case are accepted", ModelPricingUTCRange{Days: []string{"Monday"}, Start: "00:00", End: "24:00"}, monday(12, 0), true},
 		{"unknown day never matches", ModelPricingUTCRange{Days: []string{"someday"}, Start: "00:00", End: "24:00"}, monday(12, 0), false},
+		{"partial day name never matches", ModelPricingUTCRange{Days: []string{"monda"}, Start: "00:00", End: "24:00"}, monday(12, 0), false},
+		{"day name with a suffix never matches", ModelPricingUTCRange{Days: []string{"mondays"}, Start: "00:00", End: "24:00"}, monday(12, 0), false},
 		{"malformed start never matches", ModelPricingUTCRange{Start: "25:00", End: "01:00"}, monday(12, 0), false},
 		{"malformed end never matches", ModelPricingUTCRange{Start: "01:00", End: "1:00"}, monday(12, 0), false},
 		{"non-UTC time is converted", ModelPricingUTCRange{Start: "04:00", End: "06:00"}, time.Date(2026, 8, 24, 13, 0, 0, 0, time.FixedZone("CN", 8*3600)), true},
@@ -209,5 +211,14 @@ func TestModelPricingClone_DeepCopiesTimeWindows(t *testing.T) {
 	}
 	if sources := pricing.FieldSources("model_registry"); sources["time_windows"] != "model_registry" {
 		t.Fatalf("FieldSources = %v, want time_windows reported", sources)
+	}
+
+	nilRanges := (&ModelPricing{TimeWindows: []ModelPricingTimeWindow{{Label: "x"}}}).Clone()
+	if nilRanges.TimeWindows[0].UTCRanges != nil {
+		t.Fatal("Clone must keep nil UTCRanges nil")
+	}
+	emptyRanges := (&ModelPricing{TimeWindows: []ModelPricingTimeWindow{{Label: "x", UTCRanges: []ModelPricingUTCRange{}}}}).Clone()
+	if emptyRanges.TimeWindows[0].UTCRanges == nil {
+		t.Fatal("Clone must keep empty UTCRanges non-nil")
 	}
 }

@@ -300,3 +300,14 @@ td.col-price .price-hint {
   color: var(--accent, var(--text-muted));
   cursor: help;
 }
+
+/* The schedule itself, visually hidden so assistive tech reads it in place
+   of the decorative marker. */
+td.col-price .price-hint-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

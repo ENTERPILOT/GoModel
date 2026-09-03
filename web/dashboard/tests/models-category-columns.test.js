@@ -79,3 +79,18 @@ test("timeWindowHint keeps wrapping ranges without days and skips unknown days",
   );
   assert.match(hint, /night: \$0\.01 during 22:00–06:00, sun 00:00–24:00 UTC/);
 });
+
+test("timeWindowHint shows the base price for fields a window does not override", () => {
+  const [inputOutput] = categoryColumns("all");
+  const hint = inputOutput.hint(
+    {},
+    {
+      input_per_mtok: 0.44,
+      output_per_mtok: 1.32,
+      time_windows: [
+        { label: "off_peak", utc_ranges: [{ start: "10:00", end: "01:00" }], pricing: { input_per_mtok: 0.22 } },
+      ],
+    },
+  );
+  assert.match(hint, /\$0\.22 \/ \$1\.32/);
+});

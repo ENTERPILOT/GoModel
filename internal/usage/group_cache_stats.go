@@ -137,14 +137,16 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 			if stats.CachedTokensByPricing == nil {
 				stats.CachedTokensByPricing = map[CachedPricingKey]int64{}
 			}
-			at := row.Timestamp.UTC()
-			stats.CachedTokensByPricing[CachedPricingKey{
+			key := CachedPricingKey{
 				Model:        row.Model,
 				Provider:     row.Provider,
 				ProviderName: strings.TrimSpace(row.ProviderName),
-				Weekday:      at.Weekday(),
-				Hour:         at.Hour(),
-			}] += cached
+			}
+			if !row.Timestamp.IsZero() {
+				at := row.Timestamp.UTC()
+				key.Timed, key.Weekday, key.Hour = true, at.Weekday(), at.Hour()
+			}
+			stats.CachedTokensByPricing[key] += cached
 		}
 	}
 }

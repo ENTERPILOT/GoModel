@@ -136,7 +136,9 @@ func (r ModelPricingUTCRange) onDay(day time.Weekday) bool {
 	return false
 }
 
-// parseWeekday accepts "mon" … "sun" and full English names, case-insensitively.
+// parseWeekday accepts the three-letter forms "mon" … "sun" and full English
+// names, case-insensitively. Anything else (including other prefixes such as
+// "monda") is rejected so a catalog typo cannot activate a window.
 func parseWeekday(name string) (time.Weekday, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if len(name) < 3 {
@@ -146,7 +148,7 @@ func parseWeekday(name string) (time.Weekday, bool) {
 	if !ok {
 		return 0, false
 	}
-	if len(name) > 3 && !strings.HasPrefix(strings.ToLower(weekday.String()), name) {
+	if len(name) > 3 && name != strings.ToLower(weekday.String()) {
 		return 0, false
 	}
 	return weekday, true
@@ -222,7 +224,12 @@ func cloneTimeWindows(windows []ModelPricingTimeWindow) []ModelPricingTimeWindow
 	}
 	out := make([]ModelPricingTimeWindow, len(windows))
 	for i, w := range windows {
-		ranges := make([]ModelPricingUTCRange, len(w.UTCRanges))
+		// Preserve nil versus empty: utc_ranges has no omitempty, so the
+		// distinction is visible in serialized metadata.
+		var ranges []ModelPricingUTCRange
+		if w.UTCRanges != nil {
+			ranges = make([]ModelPricingUTCRange, len(w.UTCRanges))
+		}
 		for j, r := range w.UTCRanges {
 			ranges[j] = ModelPricingUTCRange{Start: r.Start, End: r.End}
 			if len(r.Days) > 0 {

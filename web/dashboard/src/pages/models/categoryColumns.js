@@ -47,7 +47,8 @@ export function timeWindowHint(pricing, fields, format = formatPrice) {
       continue;
     }
     const label = String(window?.label || "").replace(/_/g, " ");
-    const prices = fields.map((field) => format(rates[field])).join(" / ");
+    // A field the window does not override keeps its base price.
+    const prices = fields.map((field) => format(rates[field] ?? pricing?.[field])).join(" / ");
     const schedule = (Array.isArray(window?.utc_ranges) ? window.utc_ranges : []).map(formatRange).join(", ");
     lines.push(m.models_price_time_window_hint({ label, prices, schedule }));
   }

@@ -149,7 +149,7 @@ import {
   {#each columns as col, i (i)}
     {@const hint = col.hint ? col.hint(row, pricing) : ""}
     <td class={col.class} title={hint || undefined}>
-      {col.value(row, pricing)}{#if hint}<span class="price-hint" aria-label={hint}>*</span>{/if}
+      {col.value(row, pricing)}{#if hint}<span class="price-hint" aria-hidden="true">*</span><span class="price-hint-text">{hint}</span>{/if}
     </td>
   {/each}
   <td class="model-row-actions col-actions">
