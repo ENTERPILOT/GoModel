@@ -39,6 +39,7 @@
   "playground_sending": "Waiting for the model…",
   "playground_model_required": "Pick a model first.",
   "playground_request_failed": "The request failed. Check the gateway logs for details.",
+  "playground_config_unavailable": "Could not load the dashboard configuration needed to send the user path. Try again.",
   "playground_empty_response": "The model returned no text. See the Response JSON for the full payload.",
   "playground_json_show": "Show JSON",
   "playground_json_hide": "Hide JSON",

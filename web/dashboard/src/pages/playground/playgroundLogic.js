@@ -370,6 +370,21 @@ export function playgroundUserPathHeader(userPath, headerName) {
   return path ? { [effectiveUserPathHeaderName(headerName)]: path } : {};
 }
 
+// Resolve with `promise`, or reject with an AbortError as soon as `signal`
+// aborts, so a preflight that has no signal of its own still honors Stop.
+export function abortable(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException("Aborted", "AbortError"));
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 // --- JSON panel sizing -------------------------------------------------------
 
 export const DEFAULT_JSON_PANEL_WIDTH = 420;

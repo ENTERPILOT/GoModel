@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_MAX_TOKENS,
   ENDPOINTS,
+  abortable,
   buildPlaygroundRequest,
   clampJsonPanelWidth,
   createStreamAccumulator,
@@ -393,6 +394,24 @@ test("playgroundUserPathHeader honors a customized USER_PATH_HEADER", () => {
   // A blank path still produces no header, whatever the configured name.
   assert.deepEqual(playgroundUserPathHeader("", "X-Tenant-Path"), {});
   assert.deepEqual(playgroundUserPathHeader("   ", "X-Tenant-Path"), {});
+});
+
+test("abortable resolves normally while the signal stays live", async () => {
+  const controller = new AbortController();
+  assert.equal(await abortable(Promise.resolve("ok"), controller.signal), "ok");
+  // Without a signal the promise passes straight through.
+  assert.equal(await abortable(Promise.resolve("plain"), undefined), "plain");
+  // Rejections propagate unchanged.
+  await assert.rejects(abortable(Promise.reject(new Error("boom")), controller.signal), /boom/);
+});
+
+test("abortable rejects with an AbortError when the signal fires", async () => {
+  const controller = new AbortController();
+  const pending = abortable(new Promise(() => {}), controller.signal);
+  controller.abort();
+  await assert.rejects(pending, (error) => error.name === "AbortError");
+  // An already-aborted signal rejects without waiting on the promise.
+  await assert.rejects(abortable(new Promise(() => {}), controller.signal), (error) => error.name === "AbortError");
 });
 
 test("clampJsonPanelWidth keeps the panel inside the viewport", () => {

@@ -39,6 +39,7 @@
   "playground_sending": "Oczekiwanie na model…",
   "playground_model_required": "Najpierw wybierz model.",
   "playground_request_failed": "Żądanie nie powiodło się. Sprawdź logi bramki.",
+  "playground_config_unavailable": "Nie udało się wczytać konfiguracji panelu potrzebnej do wysłania ścieżki użytkownika. Spróbuj ponownie.",
   "playground_empty_response": "Model nie zwrócił tekstu. Pełną odpowiedź znajdziesz w JSON odpowiedzi.",
   "playground_json_show": "Pokaż JSON",
   "playground_json_hide": "Ukryj JSON",
