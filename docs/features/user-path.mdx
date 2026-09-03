@@ -61,6 +61,12 @@ path a request is attributed to.
 | Master key                              | Global                       |
 | Managed key without `user_path` (or `/`) | Global                      |
 | Managed key bound to `/team/alpha`      | `/team/alpha` and descendants |
+| SSO or other extension identity         | Global, unless the extension sets an access scope |
+
+An extension identity (for example a GoModel Pro SSO session) carries a
+personal user path such as `/users/alice` for attribution. That path never
+scopes the identity; an SSO admin keeps the whole gateway unless the extension
+sets an explicit access scope for the session.
 
 The scope applies in two places:
 

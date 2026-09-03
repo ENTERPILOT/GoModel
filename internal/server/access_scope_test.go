@@ -15,17 +15,21 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-type scopeRequestAuthenticator struct {
-	result *ext.Authentication
-}
+// scopeRequestAuthenticator resolves cookie sessions: "session=admin" is an
+// SSO admin with a personal user path and no access scope, "session=tenant"
+// an identity the extension confined to /team/beta.
+type scopeRequestAuthenticator struct{}
 
-func (a scopeRequestAuthenticator) Name() string { return "scope-test" }
+func (scopeRequestAuthenticator) Name() string { return "scope-test" }
 
-func (a scopeRequestAuthenticator) AuthenticateRequest(_ context.Context, r *http.Request) (*ext.Authentication, error) {
-	if r.Header.Get("Cookie") == "" {
-		return nil, nil
+func (scopeRequestAuthenticator) AuthenticateRequest(_ context.Context, r *http.Request) (*ext.Authentication, error) {
+	switch r.Header.Get("Cookie") {
+	case "session=admin":
+		return &ext.Authentication{PrincipalID: "alice", UserPath: "/users/alice", DashboardAccess: true}, nil
+	case "session=tenant":
+		return &ext.Authentication{PrincipalID: "bob", UserPath: "/users/bob", AccessScope: "/team/beta"}, nil
 	}
-	return a.result, nil
+	return nil, nil
 }
 
 // TestAuthMiddleware_AccessScopeFollowsCredential pins that the access scope
@@ -45,10 +49,7 @@ func TestAuthMiddleware_AccessScopeFollowsCredential(t *testing.T) {
 			"sk_gom_root":   "/",
 		},
 	}
-	extIdentity := scopeRequestAuthenticator{result: &ext.Authentication{
-		PrincipalID: "alice",
-		UserPath:    "/team/beta",
-	}}
+	extIdentity := scopeRequestAuthenticator{}
 
 	tests := []struct {
 		name       string
@@ -67,9 +68,11 @@ func TestAuthMiddleware_AccessScopeFollowsCredential(t *testing.T) {
 		{name: "root key is global", bearer: "sk_gom_root", wantGlobal: true},
 		{name: "scoped key is confined", bearer: "sk_gom_scoped", wantScope: "/team/alpha"},
 		{name: "scoped key header cannot widen", bearer: "sk_gom_scoped", pathHeader: "/", wantScope: "/team/alpha"},
-		{name: "extension identity is confined", cookie: "session=1", wantScope: "/team/beta"},
-		{name: "explicit bearer replaces extension scope", cookie: "session=1", bearer: "master-key", seedScope: "/team/beta", wantGlobal: true},
-		{name: "explicit scoped bearer replaces extension scope", cookie: "session=1", bearer: "sk_gom_scoped", seedScope: "/team/beta", wantScope: "/team/alpha"},
+		{name: "extension admin with personal path stays global", cookie: "session=admin", wantGlobal: true},
+		{name: "extension admin header cannot narrow attribution into a scope", cookie: "session=admin", pathHeader: "/team/alpha", wantGlobal: true},
+		{name: "extension identity with access scope is confined", cookie: "session=tenant", wantScope: "/team/beta"},
+		{name: "explicit bearer replaces extension scope", cookie: "session=tenant", bearer: "master-key", seedScope: "/team/beta", wantGlobal: true},
+		{name: "explicit scoped bearer replaces extension scope", cookie: "session=tenant", bearer: "sk_gom_scoped", seedScope: "/team/beta", wantScope: "/team/alpha"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
