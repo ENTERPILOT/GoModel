@@ -22,10 +22,8 @@ body to authorize and route the request. JSON parsers disagree on which value
 wins when an object repeats a member, so a body that repeats any of these three
 at the top level is rejected with `400 invalid_request_error` before anything
 is authorized, cached, or forwarded. This applies to the OpenAI-compatible and
-Anthropic-compatible `/v1` routes above and to provider passthrough. Endpoints
-that parse their own body (audio, images, realtime, MCP) decode it into a typed
-request and forward that, so they never route on a different value than they
-authorized. Repeated members nested inside other objects are left as sent.
+Anthropic-compatible `/v1` inference routes and to provider passthrough.
+Repeated members nested inside other objects are left as sent.
 
 | Endpoint                          | Method | Description                                                                                                  |
 | --------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
