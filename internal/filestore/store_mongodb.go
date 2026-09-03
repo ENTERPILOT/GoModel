@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -100,9 +99,11 @@ func (s *MongoDBStore) List(ctx context.Context, filter ListFilter, limit int, a
 	case "/":
 		conditions = append(conditions, bson.M{"user_path": bson.M{"$exists": true, "$ne": ""}})
 	default:
+		// Descendants sort in the half-open byte range [path+"/", path+"0"):
+		// '0' is the byte after '/', so no regex over caller input is needed.
 		conditions = append(conditions, bson.M{"$or": bson.A{
 			bson.M{"user_path": filter.UserPath},
-			bson.M{"user_path": bson.M{"$regex": "^" + regexp.QuoteMeta(filter.UserPath) + "/"}},
+			bson.M{"user_path": bson.M{"$gte": filter.UserPath + "/", "$lt": filter.UserPath + "0"}},
 		}})
 	}
 	if filter.ProviderType != "" {

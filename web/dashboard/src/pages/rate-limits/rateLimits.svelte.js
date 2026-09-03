@@ -312,6 +312,8 @@ class RateLimitsStore {
       this.rateLimitFormError = error;
       return;
     }
+    // A key change can leave the scope pending; settle it before trusting it.
+    await access.ensureLoaded();
     if (
       !scopedSubjectAllowed(
         access.scoped,

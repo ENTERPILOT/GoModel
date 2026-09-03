@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -49,34 +49,51 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	}
 
 	store := &MongoDBStore{collection: coll}
-	if err := store.backfillUserPath(ctx); err != nil {
-		return nil, fmt.Errorf("backfill batch user paths: %w", err)
-	}
+	store.backfillUserPath()
 	return store, nil
 }
 
+// backfillUserPathTimeout bounds the whole start-up pass independently of
+// the index deadline; backfillUserPathChunk (store_sql.go) bounds each pass.
+const backfillUserPathTimeout = 5 * time.Minute
+
 // backfillUserPath copies the user path out of payloads persisted before the
-// field existed so scoped listings can filter on it.
-func (s *MongoDBStore) backfillUserPath(ctx context.Context) error {
-	cursor, err := s.collection.Find(ctx, bson.M{"user_path": bson.M{"$exists": false}})
-	if err != nil {
-		return fmt.Errorf("query legacy batches: %w", err)
+// field existed, one bounded chunk at a time. Documents still lacking the
+// field after a failure are picked up on the next start, so a partial pass
+// is safe; it is logged rather than fatal because scoped listings merely
+// miss those rows until then.
+func (s *MongoDBStore) backfillUserPath() {
+	ctx, cancel := context.WithTimeout(context.Background(), backfillUserPathTimeout)
+	defer cancel()
+	for {
+		cursor, err := s.collection.Find(ctx, bson.M{"user_path": bson.M{"$exists": false}}, options.Find().SetLimit(backfillUserPathChunk))
+		if err != nil {
+			slog.Warn("batch user_path backfill paused", "error", err)
+			return
+		}
+		var docs []mongoBatchDocument
+		err = cursor.All(ctx, &docs)
+		if err != nil {
+			slog.Warn("batch user_path backfill paused", "error", err)
+			return
+		}
+		if len(docs) == 0 {
+			return
+		}
+		for _, doc := range docs {
+			userPath := ""
+			if batch, err := deserializeBatch(doc.Data); err == nil {
+				userPath = batch.UserPath
+			}
+			if _, err := s.collection.UpdateOne(ctx, bson.M{"_id": doc.ID}, bson.M{"$set": bson.M{"user_path": userPath}}); err != nil {
+				slog.Warn("batch user_path backfill paused", "batch_id", doc.ID, "error", err)
+				return
+			}
+		}
+		if len(docs) < backfillUserPathChunk {
+			return
+		}
 	}
-	defer cursor.Close(ctx)
-	for cursor.Next(ctx) {
-		var doc mongoBatchDocument
-		if err := cursor.Decode(&doc); err != nil {
-			return fmt.Errorf("decode legacy batch: %w", err)
-		}
-		userPath := ""
-		if batch, err := deserializeBatch(doc.Data); err == nil {
-			userPath = batch.UserPath
-		}
-		if _, err := s.collection.UpdateOne(ctx, bson.M{"_id": doc.ID}, bson.M{"$set": bson.M{"user_path": userPath}}); err != nil {
-			return fmt.Errorf("backfill batch %s: %w", doc.ID, err)
-		}
-	}
-	return cursor.Err()
 }
 
 // Create inserts a new batch.
@@ -128,9 +145,11 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after, userPath stri
 		// Root admits every tracked path, never the legacy rows without one.
 		conditions = append(conditions, bson.M{"user_path": bson.M{"$exists": true, "$ne": ""}})
 	default:
+		// Descendants sort in the half-open byte range [path+"/", path+"0"):
+		// '0' is the byte after '/', so no regex over caller input is needed.
 		conditions = append(conditions, bson.M{"$or": bson.A{
 			bson.M{"user_path": userPath},
-			bson.M{"user_path": bson.M{"$regex": "^" + regexp.QuoteMeta(userPath) + "/"}},
+			bson.M{"user_path": bson.M{"$gte": userPath + "/", "$lt": userPath + "0"}},
 		}})
 	}
 

@@ -180,6 +180,8 @@ class BudgetsStore {
       this.formError = error;
       return;
     }
+    // A key change can leave the scope pending; settle it before trusting it.
+    await access.ensureLoaded();
     if (!scopedSubjectAllowed(access.scoped, access.userPath, this.form.scope, this.form.subject)) {
       this.formError = m.access_scope_path_outside({ root: access.userPath });
       return;

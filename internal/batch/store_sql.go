@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -55,46 +56,61 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 		return nil, fmt.Errorf("failed to index batches table: %w", err)
 	}
 	store := &SQLStore{db: db}
-	if err := store.backfillUserPath(ctx); err != nil {
-		return nil, fmt.Errorf("failed to backfill batch user paths: %w", err)
-	}
+	store.backfillUserPath(ctx)
 	return store, nil
 }
 
+// backfillUserPathChunk bounds one backfill pass so start-up never holds a
+// large table in memory or a long write lock.
+const backfillUserPathChunk = 500
+
 // backfillUserPath copies the user path out of payloads persisted before the
-// column existed. Rows are read fully before the updates run so SQLite never
-// holds a read cursor open across its own writes.
-func (s *SQLStore) backfillUserPath(ctx context.Context) error {
-	rows, err := s.db.Query(ctx, "SELECT id, data FROM batches WHERE user_path IS NULL")
-	if err != nil {
-		return fmt.Errorf("query legacy batches: %w", err)
-	}
-	type legacyRow struct{ id, userPath string }
-	var legacy []legacyRow
-	for rows.Next() {
-		var id string
-		var payload []byte
-		if err := rows.Scan(&id, &payload); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan legacy batch: %w", err)
+// column existed, one bounded chunk at a time. Rows still NULL after a
+// failure are picked up on the next start, so a partial pass is safe; it is
+// logged rather than fatal because scoped listings merely miss those rows
+// until then, while every other operation works unchanged.
+func (s *SQLStore) backfillUserPath(ctx context.Context) {
+	for {
+		rows, err := s.db.Query(ctx, "SELECT id, data FROM batches WHERE user_path IS NULL LIMIT ?", backfillUserPathChunk)
+		if err != nil {
+			slog.Warn("batch user_path backfill paused", "error", err)
+			return
 		}
-		userPath := ""
-		if batch, err := deserializeBatch(payload); err == nil {
-			userPath = batch.UserPath
+		type legacyRow struct{ id, userPath string }
+		var legacy []legacyRow
+		for rows.Next() {
+			var id string
+			var payload []byte
+			if err := rows.Scan(&id, &payload); err != nil {
+				rows.Close()
+				slog.Warn("batch user_path backfill paused", "error", err)
+				return
+			}
+			userPath := ""
+			if batch, err := deserializeBatch(payload); err == nil {
+				userPath = batch.UserPath
+			}
+			legacy = append(legacy, legacyRow{id: id, userPath: userPath})
 		}
-		legacy = append(legacy, legacyRow{id: id, userPath: userPath})
-	}
-	if err := rows.Err(); err != nil {
+		err = rows.Err()
 		rows.Close()
-		return fmt.Errorf("iterate legacy batches: %w", err)
-	}
-	rows.Close()
-	for _, row := range legacy {
-		if _, err := s.db.Exec(ctx, "UPDATE batches SET user_path = ? WHERE id = ?", row.userPath, row.id); err != nil {
-			return fmt.Errorf("backfill batch %s: %w", row.id, err)
+		if err != nil {
+			slog.Warn("batch user_path backfill paused", "error", err)
+			return
+		}
+		if len(legacy) == 0 {
+			return
+		}
+		for _, row := range legacy {
+			if _, err := s.db.Exec(ctx, "UPDATE batches SET user_path = ? WHERE id = ?", row.userPath, row.id); err != nil {
+				slog.Warn("batch user_path backfill paused", "batch_id", row.id, "error", err)
+				return
+			}
+		}
+		if len(legacy) < backfillUserPathChunk {
+			return
 		}
 	}
-	return nil
 }
 
 // Create inserts a new batch.
