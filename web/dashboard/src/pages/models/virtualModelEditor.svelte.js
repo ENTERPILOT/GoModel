@@ -80,6 +80,7 @@ class VirtualModelEditorStore {
     return vmFormTargetCount(this.vmForm);
   }
 
+  // startVmTargetDrag records the flattened index of the row being dragged.
   startVmTargetDrag(index) {
     this.vmDragIndex = index;
   }
@@ -93,6 +94,7 @@ class VirtualModelEditorStore {
     }
   }
 
+  // leaveVmTargetDrop clears the drop highlight when the cursor leaves a row.
   leaveVmTargetDrop(index) {
     if (this.vmDropIndex === index) {
       this.vmDropIndex = null;
@@ -108,6 +110,7 @@ class VirtualModelEditorStore {
     this.vmDropIndex = null;
   }
 
+  // endVmTargetDrag clears drag state when the drag ends without a drop.
   endVmTargetDrag() {
     this.vmDragIndex = null;
     this.vmDropIndex = null;
@@ -118,6 +121,7 @@ class VirtualModelEditorStore {
     this.vmFocusHandle = index;
   }
 
+  // clearVmFocusHandle clears the pending focus request once it landed.
   clearVmFocusHandle() {
     this.vmFocusHandle = null;
   }
