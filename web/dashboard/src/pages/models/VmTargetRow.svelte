@@ -153,6 +153,9 @@
     align-items: center;
     justify-content: center;
     cursor: grab;
+    padding: 8px 4px 8px 10px;
+    width: 24px;
+    margin-left: -24px;
     color: var(--muted, var(--text));
     touch-action: none;
     user-select: none;
