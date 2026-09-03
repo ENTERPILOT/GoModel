@@ -131,7 +131,7 @@ func (r *SQLiteReader) usageCacheStats(ctx context.Context, params UsageQueryPar
 	conditions = append(conditions, extraConditions...)
 	where := sqlutil.BuildWhereClause(conditions)
 
-	rows, err := r.db.QueryContext(ctx, `SELECT model, provider, provider_name, user_path, labels, cache_type, input_tokens, output_tokens, raw_data FROM usage`+where, args...)
+	rows, err := r.db.QueryContext(ctx, `SELECT model, provider, provider_name, user_path, labels, cache_type, input_tokens, output_tokens, raw_data, timestamp FROM usage`+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query usage cache stats: %w", err)
 	}

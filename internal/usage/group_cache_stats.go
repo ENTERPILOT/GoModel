@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 )
 
 // GroupCacheStats aggregates the cache figures for one chart group (a model,
@@ -47,6 +50,7 @@ type usageCacheStatRow struct {
 	InputTokens  int
 	OutputTokens int
 	RawData      map[string]any
+	Timestamp    time.Time
 }
 
 // groupKeysFunc derives the fold keys one row contributes to. Most groupings
@@ -133,10 +137,13 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 			if stats.CachedTokensByPricing == nil {
 				stats.CachedTokensByPricing = map[CachedPricingKey]int64{}
 			}
+			at := row.Timestamp.UTC()
 			stats.CachedTokensByPricing[CachedPricingKey{
 				Model:        row.Model,
 				Provider:     row.Provider,
 				ProviderName: strings.TrimSpace(row.ProviderName),
+				Weekday:      at.Weekday(),
+				Hour:         at.Hour(),
 			}] += cached
 		}
 	}
@@ -153,7 +160,8 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 		var model, provider string
 		var providerName, userPath, labelsJSON, cacheType, rawDataJSON *string
 		var inputTokens, outputTokens int
-		if err := rows.Scan(&model, &provider, &providerName, &userPath, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &rawDataJSON); err != nil {
+		var timestamp any
+		if err := rows.Scan(&model, &provider, &providerName, &userPath, &labelsJSON, &cacheType, &inputTokens, &outputTokens, &rawDataJSON, &timestamp); err != nil {
 			return nil, fmt.Errorf("failed to scan usage cache stat row: %w", err)
 		}
 		row := usageCacheStatRow{
@@ -161,6 +169,7 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 			Provider:     provider,
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
+			Timestamp:    cacheStatTimestamp(timestamp),
 		}
 		if providerName != nil {
 			row.ProviderName = *providerName
@@ -184,6 +193,26 @@ func foldUsageCacheRows(rows inputSegmentRows, keysFor groupKeysFunc) (map[strin
 		accumulateGroupCacheStats(out, keysFor, row)
 	}
 	return out, rows.Err()
+}
+
+// cacheStatTimestamp reads the streamed timestamp column, which arrives as
+// time.Time from PostgreSQL and as stored text (or a driver-parsed time)
+// from SQLite. Unreadable values yield the zero time, which prices at the
+// base rates.
+func cacheStatTimestamp(value any) time.Time {
+	switch v := value.(type) {
+	case time.Time:
+		return v
+	case string:
+		if parsed, ok := sqlutil.ParseSQLiteTimestamp(v); ok {
+			return parsed
+		}
+	case []byte:
+		if parsed, ok := sqlutil.ParseSQLiteTimestamp(string(v)); ok {
+			return parsed
+		}
+	}
+	return time.Time{}
 }
 
 // assign copies the fold result onto a row's shared cache fields.
@@ -266,10 +295,9 @@ func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) 
 // current catalog pricing (CachedInputPerMtok per pricing identity). It is an
 // estimate: models without a cached-input rate contribute nothing, and it
 // reflects today's prices, not the prices at request time — the same
-// trade-off as pricing recalculation. Returns nil when nothing could be
-// EstimateCachedInputCost estimates cached-input cost using the applicable pricing.
-// It returns a pointer to the estimate when at least one token bucket can be priced,
-// or nil when no pricing is available.
+// trade-off as pricing recalculation. Time-of-day pricing windows are applied
+// per bucket at hour precision (see CachedPricingKey). Returns nil when
+// nothing could be priced.
 func EstimateCachedInputCost(byPricing map[CachedPricingKey]int64, resolver PricingResolver) *float64 {
 	if resolver == nil || len(byPricing) == 0 {
 		return nil
@@ -280,7 +308,7 @@ func EstimateCachedInputCost(byPricing map[CachedPricingKey]int64, resolver Pric
 		if tokens <= 0 {
 			continue
 		}
-		pricing := resolver.ResolvePricing(key.Model, effectiveRecalculationPricingProvider(key.Provider, key.ProviderName))
+		pricing := resolver.ResolvePricing(key.Model, effectiveRecalculationPricingProvider(key.Provider, key.ProviderName)).AtTime(key.slotTime())
 		if pricing == nil || pricing.CachedInputPerMtok == nil {
 			continue
 		}

@@ -202,11 +202,23 @@ type GroupCacheFields struct {
 }
 
 // CachedPricingKey identifies the catalog pricing row for a slice of a
-// group's prompt-cached tokens.
+// group's prompt-cached tokens. Weekday and Hour place the slice in the week
+// (UTC) so time-of-day pricing windows price each hour's tokens at the rate
+// that applied; hour precision is the estimate's granularity.
 type CachedPricingKey struct {
 	Model        string
 	Provider     string
 	ProviderName string
+	Weekday      time.Weekday
+	Hour         int
+}
+
+// slotTime returns a representative UTC moment for the key's weekday and
+// hour, on which pricing time windows can be evaluated.
+func (k CachedPricingKey) slotTime() time.Time {
+	// 2024-01-01 is a Monday; any week works since windows recur weekly.
+	days := (int(k.Weekday) - int(time.Monday) + 7) % 7
+	return time.Date(2024, 1, 1+days, k.Hour, 0, 0, 0, time.UTC)
 }
 
 // DailyUsage holds usage statistics for a single period.

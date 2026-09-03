@@ -53,7 +53,7 @@ Some providers charge different rates depending on when a request runs. DeepSeek
 }
 ```
 
-GoModel prices each request with the rates in effect at the moment it completed, evaluated in **UTC** regardless of the server's or the dashboard's timezone. Ranges are half-open (`start` inclusive, `end` exclusive); an `end` at or before `start` wraps past midnight, and `days` limits a range to weekdays (all days when omitted). Rates absent from a window keep their base price, and outside every window the base prices apply. Recalculating stored costs uses each row's stored timestamp, so historical rows are re-priced for the window they actually fell in.
+GoModel prices each request with the rates in effect at the moment it completed, evaluated in **UTC** regardless of the server's or the dashboard's timezone. Ranges are half-open (`start` inclusive, `end` exclusive); an `end` at or before `start` wraps past midnight, and `days` limits a range to weekdays (all days when omitted). Rates absent from a window keep their base price, and outside every window the base prices apply. Recalculating stored costs uses each row's stored timestamp, so historical rows are re-priced for the window they actually fell in. The dashboard's cached-input cost estimate applies windows at hour precision.
 
 On the **Models** page, a `*` next to a price marks a model with time windows; hover it to see the schedule and rates. Overriding a base rate (input, output, cached input, or cache write) replaces the catalog's discount for that rate as well: the override becomes the price at every hour. `config.yaml` model metadata may also declare its own `time_windows`, which replace the catalog's.
 

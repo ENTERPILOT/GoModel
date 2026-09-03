@@ -82,7 +82,8 @@ func TestSQLiteGetUsageByModelIncludesGroupCacheStats(t *testing.T) {
 	if row.LocalCachedInputTokens != 100 || row.LocalCachedOutputTokens != 20 {
 		t.Fatalf("expected 100/20 local cached tokens, got %d/%d", row.LocalCachedInputTokens, row.LocalCachedOutputTokens)
 	}
-	key := CachedPricingKey{Model: "gpt-5", Provider: "openai"}
+	// The fixture's cached row completed on Tuesday 2026-04-07 at 10:00 UTC.
+	key := CachedPricingKey{Model: "gpt-5", Provider: "openai", Weekday: time.Tuesday, Hour: 10}
 	if row.CachedTokensByPricing[key] != 60 {
 		t.Fatalf("expected 60 cached tokens under %+v, got %#v", key, row.CachedTokensByPricing)
 	}
@@ -241,11 +242,15 @@ func (f *fakePgxRows) Err() error { return nil }
 // label expansion, and the local-vs-provider row split.
 func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	str := func(s string) *string { return &s }
+	// 2026-08-24 is a Monday; PostgreSQL streams the timestamp as time.Time,
+	// SQLite as stored text.
+	monday := time.Date(2026, 8, 24, 12, 30, 0, 0, time.UTC)
 	rows := &fakePgxRows{rows: [][]any{
-		// model, provider, provider_name, user_path, labels, cache_type, input, output, raw_data
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`)},
-		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, str(CacheTypeExact), 100, 20, nil},
-		{"gpt-4o", "openai", nil, nil, nil, nil, 40, 10, nil},
+		// model, provider, provider_name, user_path, labels, cache_type, input, output, raw_data, timestamp
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), monday},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, str(CacheTypeExact), 100, 20, nil, "2026-08-24T12:31:00Z"},
+		{"gpt-5", "openai", str(" primary "), str("/team/alpha"), nil, nil, 50, 20, str(`{"prompt_cached_tokens": 10}`), "2026-08-29T08:00:00Z"},
+		{"gpt-4o", "openai", nil, nil, nil, nil, 40, 10, nil, nil},
 	}}
 
 	stats, err := foldUsageCacheRows(rows, modelGroupKeys)
@@ -257,7 +262,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	if gpt5 == nil {
 		t.Fatalf("expected gpt-5 stats, got %#v", stats)
 	}
-	if gpt5.CachedInputTokens != 60 || gpt5.UncachedInputTokens != 40 {
+	if gpt5.CachedInputTokens != 70 || gpt5.UncachedInputTokens != 80 {
 		t.Fatalf("unexpected gpt-5 split: %+v", gpt5)
 	}
 	if gpt5.LocalCachedInputTokens != 100 || gpt5.LocalCachedOutputTokens != 20 || gpt5.LocalRequests != 1 {
@@ -266,8 +271,9 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	if gpt5.ProviderName != "primary" {
 		t.Fatalf("expected trimmed provider name identity, got %q", gpt5.ProviderName)
 	}
-	key := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary"}
-	if gpt5.CachedTokensByPricing[key] != 60 {
+	mondayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Weekday: time.Monday, Hour: 12}
+	saturdayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Weekday: time.Saturday, Hour: 8}
+	if gpt5.CachedTokensByPricing[mondayKey] != 60 || gpt5.CachedTokensByPricing[saturdayKey] != 10 || len(gpt5.CachedTokensByPricing) != 2 {
 		t.Fatalf("unexpected pricing breakdown: %#v", gpt5.CachedTokensByPricing)
 	}
 
@@ -278,7 +284,7 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 
 	// The same rows folded per label: only the labelled row contributes.
 	labelRows := &fakePgxRows{rows: [][]any{
-		{"gpt-5", "openai", nil, nil, str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`)},
+		{"gpt-5", "openai", nil, nil, str(`["prod","batch"]`), nil, 100, 20, str(`{"prompt_cached_tokens": 60}`), nil},
 	}}
 	labelStats, err := foldUsageCacheRows(labelRows, labelGroupKeys)
 	if err != nil {
@@ -349,6 +355,35 @@ func TestEstimateCachedInputCost(t *testing.T) {
 				t.Fatalf("EstimateCachedInputCost = %v, want %v", *got, *tt.want)
 			}
 		})
+	}
+}
+
+func TestEstimateCachedInputCostAppliesTimeWindows(t *testing.T) {
+	peak, offPeak := 0.014, 0.007
+	resolver := mapPricingResolver{
+		"deepseek-v4-flash/deepseek": {
+			CachedInputPerMtok: &peak,
+			TimeWindows: []core.ModelPricingTimeWindow{{
+				Label: "off_peak",
+				UTCRanges: []core.ModelPricingUTCRange{
+					{Days: []string{"mon", "tue", "wed", "thu", "fri"}, Start: "10:00", End: "24:00"},
+					{Days: []string{"sat", "sun"}, Start: "00:00", End: "24:00"},
+				},
+				Pricing: core.ModelPricingTimeWindowRates{CachedInputPerMtok: &offPeak},
+			}},
+		},
+	}
+	key := func(day time.Weekday, hour int) CachedPricingKey {
+		return CachedPricingKey{Model: "deepseek-v4-flash", Provider: "deepseek", Weekday: day, Hour: hour}
+	}
+	cost := EstimateCachedInputCost(map[CachedPricingKey]int64{
+		key(time.Monday, 8):   1_000_000, // peak: 0.014
+		key(time.Monday, 12):  1_000_000, // off-peak: 0.007
+		key(time.Saturday, 8): 1_000_000, // weekend: 0.007
+		key(time.Sunday, 0):   1_000_000, // zero-value key from older buckets: Sunday is off-peak
+	}, resolver)
+	if cost == nil || !costsNearlyEqual(*cost, 0.014+0.007+0.007+0.007) {
+		t.Fatalf("EstimateCachedInputCost = %v, want 0.035", cost)
 	}
 }
 
