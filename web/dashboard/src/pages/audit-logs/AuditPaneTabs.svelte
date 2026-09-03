@@ -64,11 +64,6 @@
             >{p.pane.kind}</span
           >
         {/if}
-        {#if p.pane.model}
-          <span class="audit-pane-model mono" title={p.pane.modelTitle}
-            >{p.pane.model}</span
-          >
-        {/if}
         {#each p.pane.noChangeSteps || [] as step (step.id)}
           <span class="audit-step-pill" title={step.title}>{step.label}</span>
         {/each}
@@ -213,17 +208,6 @@
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 14%, var(--bg));
     border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
-  }
-
-  /* Tried model for a failover/retry attempt: the tab's answer to "which
-     model returned this status?". Truncated in the strip; the full attempt
-     summary (#n · kind · status · provider · model) rides the tooltip. */
-  .audit-pane-model {
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11px;
-    color: var(--text-muted);
   }
 
   /* Share of the request body removed by a rewrite (e.g. token compression),

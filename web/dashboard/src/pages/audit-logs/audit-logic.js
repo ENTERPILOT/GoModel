@@ -633,32 +633,29 @@ function auditAttemptResponsePane(entry, attempt) {
   // With only one response tab the seq/type/status chips are just noise (it's
   // the whole response); show them only to tell apart multiple attempt tabs.
   const single = auditAttempts(entry).length <= 1;
-  // The tried model is the tab badge's reason to exist: without it the tabs
-  // only say which ordinal failed, not which model. Hidden on the single tab
-  // (the row's model column already shows it) and for entries that predate
-  // per-attempt model capture ("-" placeholder).
+  // The tried model drives the in-pane virtual → tried strip. Hidden on the
+  // single tab (the row's model column already shows it) and for entries that
+  // predate per-attempt model capture ("-" placeholder).
   const triedModel = single ? "" : auditAttemptModel(attempt);
-  const model = triedModel === "-" ? "" : triedModel;
+  const tried = triedModel === "-" ? "" : triedModel;
 
   return {
     title: m.audit_response_title(),
     direction: "response",
     seq: single ? 0 : Number((attempt && attempt.seq) || 0),
     kind: single ? "" : kind === "attempt" ? "" : kind,
-    model,
-    modelTitle: model ? auditAttemptSegmentTitle(attempt) : "",
     // In-pane strip under the tab header: the virtual model the request
     // named and the concrete model this attempt actually tried, so a failed
     // step reads "virtual → tried" without hovering anything.
     modelStrip:
-      model && !single
+      tried && !single
         ? {
             virtual: String(
               (entry && entry.requested_model) ||
                 (data && data.request_body && data.request_body.model) ||
                 "",
             ).trim(),
-            tried: model,
+            tried,
           }
         : null,
     statusCode: single ? null : auditAttemptStatusCode(attempt),

@@ -736,31 +736,21 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
     "request,response-1,response-2,response-3",
   );
 
-  // Each failover tab names the model that attempt targeted, and the tooltip
-  // carries the full segment summary (#n · kind · status · provider · model).
+  // Each failover pane carries the virtual → tried model strip: the virtual
+  // model the request chose and the concrete model that attempt targeted.
   const first = panes.find((p) => p.id === "response-1").pane;
-  assert.equal(first.model, "provider-a/Qwen/Qwen3.6-35B-A3B-FP8");
-  assert.match(first.modelTitle, /#1/);
-  assert.match(first.modelTitle, /primary/);
-  assert.match(first.modelTitle, /503/);
-  assert.match(first.modelTitle, /Qwen3\.6-35B-A3B-FP8/);
+  assert.deepEqual(first.modelStrip, {
+    virtual: "forge/subagent",
+    tried: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
+  });
   const second = panes.find((p) => p.id === "response-2").pane;
-  assert.equal(second.model, "provider-b/glm-5.3-flash");
-
-  // In-pane model strip names the virtual model the request chose and the
-  // concrete model this attempt tried, so a failed leg reads "virtual → tried".
-  const strip = panes.find((p) => p.id === "response-3").pane.modelStrip;
-  assert.deepEqual(strip, {
+  assert.deepEqual(second.modelStrip, {
     virtual: "forge/subagent",
     tried: "provider-b/glm-5.3-flash",
   });
-  // Every attempt pane carries the strip — the virtual name is the same,
-  // only the tried model changes per attempt.
-  assert.equal(first.modelStrip.virtual, "forge/subagent");
-  assert.equal(first.modelStrip.tried, "provider-a/Qwen/Qwen3.6-35B-A3B-FP8");
 
   // A single successful attempt collapses to the plain response tab, which
-  // carries no model chip (the row's model column already names it).
+  // carries no model strip (the row's model column already names it).
   const single = {
     data: {
       request_body: { model: "m" },
@@ -770,10 +760,10 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
   };
   const singlePanes = auditPanes(single);
   assert.equal(singlePanes.map((p) => p.id).join(","), "request,response");
-  assert.ok(!singlePanes.find((p) => p.id === "response").pane.model);
+  assert.ok(!singlePanes.find((p) => p.id === "response").pane.modelStrip);
 
   // A single FAILED attempt keeps the per-attempt path but still hides the
-  // chip — the same `single` rule as the seq/kind/status chips.
+  // strip — the same `single` rule as the seq/kind/status chips.
   const loneFailure = {
     data: {
       request_body: { model: "m" },
@@ -782,9 +772,9 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
   };
   const lonePanes = auditPanes(loneFailure);
   assert.equal(lonePanes.map((p) => p.id).join(","), "request,response-1");
-  assert.equal(lonePanes.find((p) => p.id === "response-1").pane.model, "");
+  assert.ok(!lonePanes.find((p) => p.id === "response-1").pane.modelStrip);
 
-  // Entries that predate per-attempt model capture render no badge instead of
+  // Entries that predate per-attempt model capture render no strip instead of
   // the "-" placeholder.
   const legacy = {
     data: {
@@ -795,7 +785,12 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
       ],
     },
   };
-  assert.equal(auditPanes(legacy).find((p) => p.id === "response-1").pane.model, "");
+  const legacyPanes = auditPanes(legacy);
+  assert.ok(!legacyPanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.deepEqual(legacyPanes.find((p) => p.id === "response-2").pane.modelStrip, {
+    virtual: "m",
+    tried: "m",
+  });
 });
 
 test("formatJSON pretty-prints JSON strings and objects, passing other text through", () => {
