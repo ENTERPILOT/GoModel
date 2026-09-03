@@ -18,6 +18,7 @@ import {
   defaultVirtualModelForm,
   flattenFormTargets,
   moveFormTarget,
+  vmFormPopulatedTargetCount,
   vmFormTargetCount,
 } from "../src/pages/models/vmForm.js";
 
@@ -176,4 +177,36 @@ test("non-positive weights normalize to 1, matching the backend contract", () =>
   assert.equal(moveFormTarget(form, 1, 0), true);
   assert.equal(form.target_weight, 1);
   assert.equal(form.targets[0].weight, 1);
+
+  // Negative weights follow the same rule: the explicit `weight > 0`
+  // normalization maps them to 1.
+  const negative = {
+    ...defaultVirtualModelForm(),
+    source: "neg",
+    target_model: "a",
+    target_weight: -2,
+    targets: [{ provider: "", model: "b", weight: -1 }],
+  };
+  assert.equal(moveFormTarget(negative, 1, 0), true);
+  assert.equal(negative.target_weight, 1);
+  assert.equal(negative.targets[0].weight, 1);
+});
+
+test("vmFormPopulatedTargetCount ignores blank placeholder rows", () => {
+  const oneFilled = {
+    ...defaultVirtualModelForm(),
+    target_model: "a",
+    targets: [{ provider: "", model: "", weight: 1 }],
+  };
+  assert.equal(vmFormPopulatedTargetCount(oneFilled), 1);
+
+  const twoFilled = {
+    ...defaultVirtualModelForm(),
+    target_model: "a",
+    targets: [
+      { provider: "", model: "b", weight: 1 },
+      { provider: "", model: "", weight: 1 },
+    ],
+  };
+  assert.equal(vmFormPopulatedTargetCount(twoFilled), 2);
 });

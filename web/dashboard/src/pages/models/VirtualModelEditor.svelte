@@ -20,8 +20,9 @@
 
   const vm = virtualModelEditor;
 
-  // The handle shows only when there is more than one row to reorder.
-  const canReorder = $derived(vm.vmTargetCount() > 1 && !vm.vmFormManaged);
+  // The handle shows only when there is more than one populated row to
+  // reorder; blank placeholder rows do not count.
+  const canReorder = $derived(vm.vmPopulatedTargetCount() > 1 && !vm.vmFormManaged);
   // Row indices must match the flattened target list the move logic operates
   // on: an empty primary row is not in that list, so extras start at 0 then.
   const hasPrimary = $derived(vmFormHasPrimaryTarget(vm.vmForm));

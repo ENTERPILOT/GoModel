@@ -85,6 +85,19 @@ export function vmFormTargetCount(form) {
   return primary + (Array.isArray(form.targets) ? form.targets.length : 0);
 }
 
+// normalizedTargetWeight mirrors the backend contract: a non-positive or
+// unset weight counts as 1.
+function normalizedTargetWeight(value) {
+  const weight = Number(value);
+  return Number.isFinite(weight) && weight > 0 ? weight : 1;
+}
+
+// vmFormPopulatedTargetCount counts only targets that hold a model; blank
+// placeholder rows do not make reordering meaningful.
+export function vmFormPopulatedTargetCount(form) {
+  return flattenFormTargets(form).filter((target) => target.model !== "").length;
+}
+
 // flattenFormTargets returns the full target list in display order: primary
 // first, so position 0 is the failover primary / first round-robin slot.
 export function flattenFormTargets(form) {
@@ -94,7 +107,7 @@ export function flattenFormTargets(form) {
     list.push({
       provider: String(form.target_provider || ""),
       model: String(form.target_model || "").trim(),
-      weight: form.target_weight || 1,
+      weight: normalizedTargetWeight(form.target_weight),
     });
   }
   if (Array.isArray(form.targets)) {
@@ -102,7 +115,7 @@ export function flattenFormTargets(form) {
       list.push({
         provider: String((target && target.provider) || ""),
         model: String((target && target.model) || ""),
-        weight: (target && target.weight) || 1,
+        weight: normalizedTargetWeight((target && target.weight)),
       });
     }
   }
@@ -124,11 +137,11 @@ export function moveFormTarget(form, from, to) {
   const first = list[0];
   form.target_provider = String(first.provider || "");
   form.target_model = first.model || "";
-  form.target_weight = first.weight || 1;
+  form.target_weight = normalizedTargetWeight(first.weight);
   form.targets = list.slice(1).map((row) => ({
     provider: row.provider || "",
     model: row.model || "",
-    weight: row.weight || 1,
+    weight: normalizedTargetWeight(row.weight),
   }));
   return true;
 }

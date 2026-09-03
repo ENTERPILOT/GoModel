@@ -25,6 +25,7 @@ import {
   normalizeUserPaths,
   removePrimaryTarget as removePrimaryTargetPure,
   virtualModelTargetOptions,
+  vmFormPopulatedTargetCount,
   vmFormTargetCount,
   vmRoutingSummary,
 } from "./vmForm.js";
@@ -78,6 +79,12 @@ class VirtualModelEditorStore {
   // more than one row to reorder.
   vmTargetCount() {
     return vmFormTargetCount(this.vmForm);
+  }
+
+  // vmPopulatedTargetCount is the reorder gate: blank placeholder rows do not
+  // count, so one filled target plus blank extras stays non-draggable.
+  vmPopulatedTargetCount() {
+    return vmFormPopulatedTargetCount(this.vmForm);
   }
 
   // startVmTargetDrag records the flattened index of the row being dragged.
@@ -187,6 +194,10 @@ class VirtualModelEditorStore {
     this.vmFormSourceLocked = false;
     this.vmFormOriginalSource = "";
     this.vmFormManaged = false;
+    // Transient drag/focus state must not leak into the next form.
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+    this.vmFocusHandle = null;
     this.vmForm = defaultVirtualModelForm();
   }
 
