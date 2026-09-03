@@ -20,6 +20,13 @@
 
   const vm = virtualModelEditor;
 
+  // The handle shows only when there is more than one populated row to
+  // reorder; blank placeholder rows do not count.
+  const canReorder = $derived(vm.vmPopulatedTargetCount() > 1 && !vm.vmFormManaged);
+  // Row indices must match the flattened target list the move logic operates
+  // on: an empty primary row is not in that list, so extras start at 0 then.
+  const hasPrimary = $derived(vmFormHasPrimaryTarget(vm.vmForm));
+
   // The strategy dropdown is server-driven (VIRTUAL_MODEL_STRATEGIES); make
   // sure the runtime config is loaded by the time the editor shows it.
   $effect(() => {
@@ -73,11 +80,15 @@
     />
   </FormField>
 
-  <!-- Every target renders the same; two or more turn the redirect into a load balancer. -->
+  <!-- Every target renders the same; two or more turn the redirect into a load balancer.
+       Rows carry their position in the flattened list (primary first) so the drag
+       handle can reorder across the primary/extra boundary. -->
   <div class="form-field">
     <span class="form-field-label">{m.models_targets()}</span>
     <VmTargetRow
       id="virtual-model-target"
+      index={hasPrimary ? 0 : undefined}
+      draggable={canReorder && hasPrimary}
       bind:provider={vm.vmForm.target_provider}
       bind:model={vm.vmForm.target_model}
       bind:weight={vm.vmForm.target_weight}
@@ -87,6 +98,8 @@
     {#each vm.vmForm.targets as target, index (index)}
       <VmTargetRow
         placeholder="groq/llama"
+        index={(hasPrimary ? 1 : 0) + index}
+        draggable={canReorder && String(target.model || "").trim() !== ""}
         bind:provider={target.provider}
         bind:model={target.model}
         bind:weight={target.weight}

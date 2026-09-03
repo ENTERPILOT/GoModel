@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -649,3 +650,89 @@ func TestDeleteVirtualModelNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestUpsertVirtualModelTargetOrderRoundTrips pins the contract the
+// dashboard's drag-to-reorder relies on: the targets array travels in display
+// order (failover primary first), and a reorder save stores and returns the
+// targets in exactly the order the editor sent them.
+func TestUpsertVirtualModelTargetOrderRoundTrips(t *testing.T) {
+	catalog := newVMTestCatalog()
+	catalog.add("openai/gpt-4o", "openai")
+	catalog.add("openai/gpt-4o-mini", "openai")
+	catalog.add("anthropic/claude-haiku", "anthropic")
+	service := newVMService(t, catalog, newVMTestStore(redirectVM("smart", "openai/gpt-4o", true)), true)
+	h := NewHandler(nil, nil, WithVirtualModels(service))
+	e := echo.New()
+
+	put := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
+			t.Fatalf("UpsertVirtualModel() error = %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("put status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// Initial order: gpt-4o is the failover primary.
+	put(`{"source":"smart","strategy":"failover","targets":[{"model":"openai/gpt-4o"},{"model":"openai/gpt-4o-mini"},{"model":"anthropic/claude-haiku"}]}`)
+
+	vm, ok := service.Get("smart")
+	if !ok {
+		t.Fatal("stored virtual model missing after initial put")
+	}
+	want := []string{"openai/gpt-4o", "openai/gpt-4o-mini", "anthropic/claude-haiku"}
+	if !slices.Equal(qualifiedTargetNames(vm.Targets), want) {
+		t.Fatalf("stored order = %v, want %v", vm.Targets, want)
+	}
+
+	// Reorder save: what the editor sends after dragging the last target onto
+	// the first row. The new primary must land first, the rest keep their
+	// relative order.
+	put(`{"source":"smart","strategy":"failover","targets":[{"model":"anthropic/claude-haiku"},{"model":"openai/gpt-4o"},{"model":"openai/gpt-4o-mini"}]}`)
+
+	vm, ok = service.Get("smart")
+	if !ok {
+		t.Fatal("stored virtual model missing after reorder put")
+	}
+	want = []string{"anthropic/claude-haiku", "openai/gpt-4o", "openai/gpt-4o-mini"}
+	if !slices.Equal(qualifiedTargetNames(vm.Targets), want) {
+		t.Fatalf("stored order after reorder = %v, want %v", vm.Targets, want)
+	}
+
+	// The list view the dashboard renders must return the same order.
+	c, rec := newHandlerContext("/admin/virtual-models")
+	if err := h.ListVirtualModels(c); err != nil {
+		t.Fatalf("ListVirtualModels() error = %v", err)
+	}
+	var views []virtualmodels.View
+	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	for _, view := range views {
+		if view.Source != "smart" {
+			continue
+		}
+		if !slices.Equal(qualifiedTargetNames(view.Targets), want) {
+			t.Fatalf("view order after reorder = %v, want %v", view.Targets, want)
+		}
+		return
+	}
+	t.Fatal("smart missing from list views")
+}
+
+func qualifiedTargetNames(targets []virtualmodels.Target) []string {
+	names := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if target.Provider != "" {
+			names = append(names, target.Provider+"/"+target.Model)
+			continue
+		}
+		names = append(names, target.Model)
+	}
+	return names
+}
+

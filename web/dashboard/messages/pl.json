@@ -638,6 +638,7 @@
   "models_weight": "waga",
   "models_weight_help": "Względny udział żądań: 1 to zwykły udział, 2 dostaje dwa razy więcej, 3 trzy razy (liczby całkowite, co najmniej 1).",
   "models_remove_target": "Usuń cel",
+  "models_move_target": "Przeciągnij, aby zmienić kolejność (lub ustaw fokus na uchwycie i użyj klawiszy strzałek)",
   "models_pricing_editor": "Edytor cen modelu",
   "models_pricing_save": "Zapisz ceny",
   "models_pricing_override": "Nadpisanie cen",

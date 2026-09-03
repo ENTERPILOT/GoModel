@@ -21,9 +21,12 @@ import {
   aliasFormTargets,
   buildVirtualModelSavePayload,
   defaultVirtualModelForm,
+  moveFormTarget,
   normalizeUserPaths,
   removePrimaryTarget as removePrimaryTargetPure,
   virtualModelTargetOptions,
+  vmFormPopulatedTargetCount,
+  vmFormTargetCount,
   vmRoutingSummary,
 } from "./vmForm.js";
 import { virtualModels } from "./virtualModels.svelte.js";
@@ -46,6 +49,13 @@ class VirtualModelEditorStore {
   vmFormOriginalSource = $state("");
   vmFormManaged = $state(false);
   vmForm = $state(defaultVirtualModelForm());
+  // Drag state: vmDragIndex is the row being dragged, vmDropIndex the row
+  // currently under the cursor for the drop highlight.
+  vmDragIndex = $state(null);
+  vmDropIndex = $state(null);
+  // Set to the moved row's new index after a keyboard move so focus follows;
+  // VmTargetRow focuses the handle and clears it.
+  vmFocusHandle = $state(null);
 
   addVmTarget() {
     if (!Array.isArray(this.vmForm.targets)) {
@@ -63,6 +73,64 @@ class VirtualModelEditorStore {
 
   removePrimaryTarget() {
     removePrimaryTargetPure(this.vmForm);
+  }
+
+  // vmTargetCount feeds the drag handle: the handle shows only when there is
+  // more than one row to reorder.
+  vmTargetCount() {
+    return vmFormTargetCount(this.vmForm);
+  }
+
+  // vmPopulatedTargetCount is the reorder gate: blank placeholder rows do not
+  // count, so one filled target plus blank extras stays non-draggable.
+  vmPopulatedTargetCount() {
+    return vmFormPopulatedTargetCount(this.vmForm);
+  }
+
+  // startVmTargetDrag records the flattened index of the row being dragged.
+  startVmTargetDrag(index) {
+    this.vmDragIndex = index;
+  }
+
+  // enterVmTargetDrop marks the row under the cursor as the drop target.
+  // dragover fires continuously; only write on change so fast drags do not
+  // re-render the list on every event.
+  enterVmTargetDrop(index) {
+    if (this.vmDropIndex !== index) {
+      this.vmDropIndex = index;
+    }
+  }
+
+  // leaveVmTargetDrop clears the drop highlight when the cursor leaves a row.
+  leaveVmTargetDrop(index) {
+    if (this.vmDropIndex === index) {
+      this.vmDropIndex = null;
+    }
+  }
+
+  // dropVmTarget moves the dragged row onto `index` and clears drag state.
+  dropVmTarget(index) {
+    if (this.vmDragIndex != null) {
+      moveFormTarget(this.vmForm, this.vmDragIndex, index);
+    }
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+  }
+
+  // endVmTargetDrag clears drag state when the drag ends without a drop.
+  endVmTargetDrag() {
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+  }
+
+  // requestVmFocusHandle makes focus follow a keyboard move.
+  requestVmFocusHandle(index) {
+    this.vmFocusHandle = index;
+  }
+
+  // clearVmFocusHandle clears the pending focus request once it landed.
+  clearVmFocusHandle() {
+    this.vmFocusHandle = null;
   }
 
   // vmStrategyOptions builds the strategy dropdown from the strategies this
@@ -126,6 +194,10 @@ class VirtualModelEditorStore {
     this.vmFormSourceLocked = false;
     this.vmFormOriginalSource = "";
     this.vmFormManaged = false;
+    // Transient drag/focus state must not leak into the next form.
+    this.vmDragIndex = null;
+    this.vmDropIndex = null;
+    this.vmFocusHandle = null;
     this.vmForm = defaultVirtualModelForm();
   }
 
