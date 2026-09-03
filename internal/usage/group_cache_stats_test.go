@@ -83,7 +83,7 @@ func TestSQLiteGetUsageByModelIncludesGroupCacheStats(t *testing.T) {
 		t.Fatalf("expected 100/20 local cached tokens, got %d/%d", row.LocalCachedInputTokens, row.LocalCachedOutputTokens)
 	}
 	// The fixture's cached row completed on Tuesday 2026-04-07 at 10:00 UTC.
-	key := CachedPricingKey{Model: "gpt-5", Provider: "openai", Timed: true, Weekday: time.Tuesday, Hour: 10}
+	key := CachedPricingKey{Model: "gpt-5", Provider: "openai", Timed: true, Weekday: time.Tuesday, Minute: 10 * 60}
 	if row.CachedTokensByPricing[key] != 60 {
 		t.Fatalf("expected 60 cached tokens under %+v, got %#v", key, row.CachedTokensByPricing)
 	}
@@ -272,8 +272,8 @@ func TestFoldUsageCacheRowsScansNullableColumns(t *testing.T) {
 	if gpt5.ProviderName != "primary" {
 		t.Fatalf("expected trimmed provider name identity, got %q", gpt5.ProviderName)
 	}
-	mondayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Timed: true, Weekday: time.Monday, Hour: 12}
-	saturdayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Timed: true, Weekday: time.Saturday, Hour: 8}
+	mondayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Timed: true, Weekday: time.Monday, Minute: 12*60 + 30}
+	saturdayKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary", Timed: true, Weekday: time.Saturday, Minute: 8 * 60}
 	untimedKey := CachedPricingKey{Model: "gpt-5", Provider: "openai", ProviderName: "primary"}
 	if gpt5.CachedTokensByPricing[mondayKey] != 60 || gpt5.CachedTokensByPricing[saturdayKey] != 10 || gpt5.CachedTokensByPricing[untimedKey] != 5 || len(gpt5.CachedTokensByPricing) != 3 {
 		t.Fatalf("unexpected pricing breakdown: %#v", gpt5.CachedTokensByPricing)
@@ -376,7 +376,7 @@ func TestEstimateCachedInputCostAppliesTimeWindows(t *testing.T) {
 		},
 	}
 	key := func(day time.Weekday, hour int) CachedPricingKey {
-		return CachedPricingKey{Model: "deepseek-v4-flash", Provider: "deepseek", Timed: true, Weekday: day, Hour: hour}
+		return CachedPricingKey{Model: "deepseek-v4-flash", Provider: "deepseek", Timed: true, Weekday: day, Minute: hour * 60}
 	}
 	cost := EstimateCachedInputCost(map[CachedPricingKey]int64{
 		key(time.Monday, 8):   1_000_000, // peak: 0.014
@@ -387,6 +387,28 @@ func TestEstimateCachedInputCostAppliesTimeWindows(t *testing.T) {
 	}, resolver)
 	if cost == nil || !costsNearlyEqual(*cost, 0.014+0.007+0.007+0.007+0.014) {
 		t.Fatalf("EstimateCachedInputCost = %v, want 0.049", cost)
+	}
+}
+
+func TestEstimateCachedInputCostResolvesMinuteLevelWindowBoundaries(t *testing.T) {
+	base, discounted := 0.02, 0.01
+	resolver := mapPricingResolver{
+		"m/p": {
+			CachedInputPerMtok: &base,
+			TimeWindows: []core.ModelPricingTimeWindow{{
+				Label:     "half-hour",
+				UTCRanges: []core.ModelPricingUTCRange{{Start: "10:30", End: "11:00"}},
+				Pricing:   core.ModelPricingTimeWindowRates{CachedInputPerMtok: &discounted},
+			}},
+		},
+	}
+	// Rows on opposite sides of a mid-hour boundary must not share a rate.
+	cost := EstimateCachedInputCost(map[CachedPricingKey]int64{
+		{Model: "m", Provider: "p", Timed: true, Weekday: time.Monday, Minute: 10*60 + 29}: 1_000_000,
+		{Model: "m", Provider: "p", Timed: true, Weekday: time.Monday, Minute: 10*60 + 30}: 1_000_000,
+	}, resolver)
+	if cost == nil || !costsNearlyEqual(*cost, 0.02+0.01) {
+		t.Fatalf("EstimateCachedInputCost = %v, want 0.03", cost)
 	}
 }
 

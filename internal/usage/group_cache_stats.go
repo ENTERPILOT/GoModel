@@ -144,7 +144,7 @@ func accumulateGroupCacheStats(out map[string]*GroupCacheStats, keysFor groupKey
 			}
 			if !row.Timestamp.IsZero() {
 				at := row.Timestamp.UTC()
-				key.Timed, key.Weekday, key.Hour = true, at.Weekday(), at.Hour()
+				key.Timed, key.Weekday, key.Minute = true, at.Weekday(), at.Hour()*60+at.Minute()
 			}
 			stats.CachedTokensByPricing[key] += cached
 		}
@@ -298,7 +298,7 @@ func applyLabelCacheStats(rows []LabelUsage, stats map[string]*GroupCacheStats) 
 // estimate: models without a cached-input rate contribute nothing, and it
 // reflects today's prices, not the prices at request time — the same
 // trade-off as pricing recalculation. Time-of-day pricing windows are applied
-// per bucket at hour precision (see CachedPricingKey). Returns nil when
+// per bucket at minute precision (see CachedPricingKey). Returns nil when
 // nothing could be priced.
 func EstimateCachedInputCost(byPricing map[CachedPricingKey]int64, resolver PricingResolver) *float64 {
 	if resolver == nil || len(byPricing) == 0 {
