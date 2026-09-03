@@ -302,6 +302,22 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 				MimeType: mimeTypeForAudioFormat(part.InputAudio.Format),
 				Data:     part.InputAudio.Data,
 			}})
+		case "file":
+			if part.File == nil {
+				continue
+			}
+			rawURL := strings.TrimSpace(part.File.FileData)
+			if !strings.HasPrefix(rawURL, "data:") {
+				return nil, core.NewInvalidRequestError(
+					"gemini native file content supports only data: URLs; file_id and remote URLs are not supported",
+					nil,
+				)
+			}
+			mimeType, data, err := parseDataURL(rawURL)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, geminiPart{InlineData: &geminiBlob{MimeType: mimeType, Data: data}})
 		}
 	}
 	return out, nil

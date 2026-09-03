@@ -179,6 +179,73 @@ func TestMessages_NativeAnthropicForwarding(t *testing.T) {
 	}
 }
 
+func TestMessages_NativeForwardingSurvivesUntranslatableContent(t *testing.T) {
+	// Server-tool history (Claude Code's WebSearch) has no canonical
+	// equivalent. On an Anthropic route the body is forwarded verbatim, so
+	// the translation gap must not fail the request.
+	nativeResponse := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"native"}],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	provider := &mockProvider{
+		supportedModels: []string{"claude-test"},
+		providerTypes:   map[string]string{"claude-test": "anthropic"},
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    map[string][]string{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(nativeResponse)),
+		},
+	}
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"claude-test","max_tokens":64,"tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"search"},{"role":"assistant","content":[{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"q"}},{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[]}]},{"role":"user","content":"and?"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if provider.lastPassthroughReq == nil {
+		t.Fatal("provider did not receive a passthrough request")
+	}
+	forwardedBody, err := io.ReadAll(provider.lastPassthroughReq.Body)
+	if err != nil {
+		t.Fatalf("read forwarded body: %v", err)
+	}
+	if string(forwardedBody) != reqBody {
+		t.Errorf("forwarded body = %s, want original request verbatim", forwardedBody)
+	}
+}
+
+func TestMessages_TranslatedPipelineStillRejectsUntranslatableContent(t *testing.T) {
+	provider := &mockProvider{
+		supportedModels: []string{"gpt-test"},
+		providerTypes:   map[string]string{"gpt-test": "openai"},
+	}
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"gpt-test","max_tokens":64,"messages":[{"role":"user","content":[{"type":"container_upload","file_id":"file_1"}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "container_upload") {
+		t.Errorf("body = %s, want the strict translation error", rec.Body.String())
+	}
+	if provider.lastPassthroughReq != nil {
+		t.Error("request must not be forwarded natively to a non-Anthropic provider")
+	}
+}
+
 func TestRewriteMessagesModel(t *testing.T) {
 	tests := []struct {
 		name  string

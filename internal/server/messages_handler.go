@@ -151,9 +151,21 @@ func (h *Handler) MessagesBatchResults(c *echo.Context) error {
 // Messages translates an Anthropic Messages request and dispatches it through
 // the shared chat-completions pipeline (workflow resolution, response cache).
 func (s *translatedInferenceService) Messages(c *echo.Context) error {
-	req, err := decodeMessagesChatRequest(c)
+	decoded, err := decodeMessagesRequest(c)
 	if err != nil {
 		return handleError(c, err)
+	}
+	req, translateErr := anthropicapi.ToChatRequest(decoded)
+	if translateErr != nil {
+		// Content the canonical translation cannot represent (server-tool
+		// history, container uploads, …) is still fine to forward natively:
+		// the original body reaches Anthropic byte-for-byte. Resolve the
+		// route from a lenient translation and report the strict error only
+		// when the request has to go through the translated pipeline.
+		req, err = anthropicapi.ToChatRequestLenient(decoded)
+		if err != nil {
+			return handleError(c, translateErr)
+		}
 	}
 
 	ctx := core.WithRequestDialect(c.Request().Context(), core.RequestDialectAnthropicMessages)
@@ -165,6 +177,9 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 
 	if s.canForwardMessagesNatively(workflow) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
+	}
+	if translateErr != nil {
+		return handleError(c, translateErr)
 	}
 	return handleWithCache(s, c, prepared, workflow, s.dispatchMessages)
 }
@@ -234,9 +249,9 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	return c.JSON(http.StatusOK, anthropicapi.FromChatResponse(result.Response))
 }
 
-// decodeMessagesChatRequest reads the request body, decodes the Anthropic
-// Messages request, and translates it to the canonical chat request.
-func decodeMessagesChatRequest(c *echo.Context) (*core.ChatRequest, error) {
+// decodeMessagesRequest reads and decodes the Anthropic Messages request body
+// without translating it.
+func decodeMessagesRequest(c *echo.Context) (*anthropicapi.MessagesRequest, error) {
 	body, err := requestBodyBytes(c)
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
@@ -245,5 +260,5 @@ func decodeMessagesChatRequest(c *echo.Context) (*core.ChatRequest, error) {
 	if err != nil {
 		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
 	}
-	return anthropicapi.ToChatRequest(req)
+	return req, nil
 }

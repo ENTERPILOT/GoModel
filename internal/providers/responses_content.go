@@ -85,6 +85,29 @@ func convertResponsesContentParts(parts []any) (any, bool) {
 				InputAudio:  inputAudio,
 				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, "type", "input_audio")),
 			})
+		case "input_file", "file":
+			// Responses carries file fields flat on the part; chat nests them
+			// under "file". Accept both shapes.
+			fileMap := partMap
+			if nested, ok := partMap["file"].(map[string]any); ok {
+				fileMap = nested
+			}
+			fileData, _ := fileMap["file_data"].(string)
+			fileID, _ := fileMap["file_id"].(string)
+			filename, _ := fileMap["filename"].(string)
+			file := &core.FileContent{
+				FileData: strings.TrimSpace(fileData),
+				FileID:   strings.TrimSpace(fileID),
+				Filename: strings.TrimSpace(filename),
+			}
+			if !core.ValidFilePayload(file) {
+				return nil, false
+			}
+			typedParts = append(typedParts, core.ContentPart{
+				Type:        "file",
+				File:        file,
+				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, "type", "file", "file_data", "file_id", "filename")),
+			})
 		default:
 			if nested, ok := partMap["content"]; ok {
 				text := ExtractContentFromInput(nested)
@@ -148,6 +171,20 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 				Data:        data,
 				Format:      format,
 				ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
+			},
+			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
+		}, true
+	case "file", "input_file":
+		if !core.ValidFilePayload(part.File) {
+			return core.ContentPart{}, false
+		}
+		return core.ContentPart{
+			Type: "file",
+			File: &core.FileContent{
+				FileData:    strings.TrimSpace(part.File.FileData),
+				FileID:      strings.TrimSpace(part.File.FileID),
+				Filename:    strings.TrimSpace(part.File.Filename),
+				ExtraFields: core.CloneUnknownJSONFields(part.File.ExtraFields),
 			},
 			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
 		}, true

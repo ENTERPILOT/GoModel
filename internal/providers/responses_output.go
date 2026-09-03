@@ -104,6 +104,16 @@ func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.Respon
 					ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
 				},
 			})
+		case "file":
+			if !core.ValidFilePayload(part.File) {
+				continue
+			}
+			items = append(items, core.ResponsesContentItem{
+				Type:     "input_file",
+				FileData: strings.TrimSpace(part.File.FileData),
+				FileID:   strings.TrimSpace(part.File.FileID),
+				Filename: strings.TrimSpace(part.File.Filename),
+			})
 		}
 	}
 	return items

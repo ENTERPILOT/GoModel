@@ -217,6 +217,10 @@ type ResponsesContentItem struct {
 	Text       string             `json:"text,omitempty"`
 	ImageURL   *ImageURLContent   `json:"image_url,omitempty"`
 	InputAudio *InputAudioContent `json:"input_audio,omitempty"`
+	// input_file items carry their file fields flat, unlike chat file parts.
+	FileData string `json:"file_data,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	Filename string `json:"filename,omitempty"`
 	// Providers can return structured annotation objects here (for example
 	// citations from native tools), so keep the payload shape liberal.
 	Annotations []json.RawMessage `json:"annotations,omitempty" swaggertype:"array,object"`

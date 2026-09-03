@@ -988,6 +988,39 @@ func TestAdaptAnthropicCacheControl_PreservesSupportedProviders(t *testing.T) {
 	}
 }
 
+func TestAdaptAnthropicCacheControl_StripsAnthropicOnlyMessageFields(t *testing.T) {
+	req := &core.ChatRequest{Messages: []core.Message{
+		{Role: "assistant", Content: "x", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			core.ThinkingBlocksField: json.RawMessage(`[{"type":"thinking","thinking":"t","signature":"s"}]`),
+			"x_keep":                 json.RawMessage("true"),
+		})},
+		{Role: "tool", ToolCallID: "c1", Content: "boom", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			core.ToolResultIsErrorField: json.RawMessage("true"),
+		})},
+	}}
+	if got := adaptAnthropicCacheControl(req, "anthropic"); got != req {
+		t.Fatal("anthropic must receive thinking_blocks and is_error untouched")
+	}
+	for _, providerType := range []string{"openai", "openrouter", "gemini"} {
+		got := adaptAnthropicCacheControl(req, providerType)
+		if got == req {
+			t.Fatalf("provider %q did not adapt the request", providerType)
+		}
+		if raw := got.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) != 0 {
+			t.Errorf("provider %q kept thinking_blocks: %s", providerType, raw)
+		}
+		if raw := got.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(raw) != 0 {
+			t.Errorf("provider %q kept is_error: %s", providerType, raw)
+		}
+		if raw := got.Messages[0].ExtraFields.Lookup("x_keep"); string(raw) != "true" {
+			t.Errorf("provider %q dropped unrelated extra: %s", providerType, raw)
+		}
+	}
+	if raw := req.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) == 0 {
+		t.Error("adaptation mutated the caller's request")
+	}
+}
+
 func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 	westResp := &core.ChatResponse{ID: "west", Model: "gpt-4o"}
 	west := &mockProvider{name: "openai-west", chatResponse: westResp}
