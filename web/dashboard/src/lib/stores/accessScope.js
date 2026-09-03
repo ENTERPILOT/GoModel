@@ -75,3 +75,13 @@ export function scopeAllows(root, path) {
 export function pageVisibleForScope(page, scoped) {
   return !scoped || !GLOBAL_ONLY_PAGES.includes(page);
 }
+
+// scopedSubjectAllowed reports whether a budget or rate-limit form may be
+// submitted under the credential's scope: global credentials may send any
+// rule, scoped ones only user-path rules whose subject lies inside the scope.
+export function scopedSubjectAllowed(scoped, root, scope, subject) {
+  if (!scoped) {
+    return true;
+  }
+  return scope === "user_path" && scopeAllows(root, subject);
+}

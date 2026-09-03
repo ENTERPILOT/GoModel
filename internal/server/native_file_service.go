@@ -64,9 +64,11 @@ func (s *nativeFileService) fileByID(
 		// through to a provider lookup that ignores tenancy.
 		return handleError(c, core.NewProviderError("file_store", http.StatusInternalServerError, "failed to look up file provider mapping", lookupErr))
 	}
-	if tracked && !core.AccessScopeFromContext(c.Request().Context()).Allows(stored.UserPath) {
-		// A tracked file outside the caller's scope is reported like a
-		// missing one; no provider is consulted, so the ID leaks nothing.
+	scope := core.AccessScopeFromContext(c.Request().Context())
+	if !scope.Global() && (!tracked || !scope.Allows(stored.UserPath)) {
+		// A scoped caller may only address files the gateway tracks inside
+		// its scope. Anything else is reported like a missing file and no
+		// provider is consulted, so the ID leaks nothing.
 		auditlog.EnrichEntry(c, "file", "")
 		return handleError(c, core.NewNotFoundError("file not found: "+id))
 	}
@@ -102,6 +104,10 @@ func (s *nativeFileService) fileByID(
 		}
 		if err := s.deleteStoredFileMapping(c.Request().Context(), id); err != nil {
 			slog.Warn("failed to delete stale file provider mapping", "file_id", id, "provider", providerType, "error", err)
+		}
+		if !scope.Global() {
+			// The record was stale; the provider sweep below is not tenant-aware.
+			return handleError(c, core.NewNotFoundError("file not found: "+id))
 		}
 	}
 
@@ -231,17 +237,20 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 	ctx := c.Request().Context()
 	scope := core.AccessScopeFromContext(ctx)
 
+	if !scope.Global() {
+		// A scoped caller lists its own tracked files, whichever provider
+		// holds them; provider listings cannot tell tenants apart.
+		auditlog.EnrichEntry(c, "file", providerType)
+		resp, err := s.listScopedFiles(ctx, scope, providerType, purpose, limit, after)
+		if err != nil {
+			return handleError(c, err)
+		}
+		return c.JSON(http.StatusOK, resp)
+	}
+
 	if providerType != "" {
 		auditlog.EnrichEntry(c, "file", providerType)
-		fetch := func(cursor string) (*core.FileListResponse, error) {
-			return nativeRouter.ListFiles(ctx, providerType, purpose, limit, cursor)
-		}
-		var resp *core.FileListResponse
-		if scope.Global() {
-			resp, err = fetch(after)
-		} else {
-			resp, err = s.listScopedFiles(ctx, scope, fetch, limit, after)
-		}
+		resp, err := nativeRouter.ListFiles(ctx, providerType, purpose, limit, after)
 		if err != nil {
 			return handleError(c, err)
 		}
@@ -259,15 +268,7 @@ func (s *nativeFileService) ListFiles(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntry(c, "file", "")
-	fetch := func(cursor string) (*core.FileListResponse, error) {
-		return s.listMergedFiles(ctx, nativeRouter, providers, purpose, limit, cursor)
-	}
-	var resp *core.FileListResponse
-	if scope.Global() {
-		resp, err = fetch(after)
-	} else {
-		resp, err = s.listScopedFiles(ctx, scope, fetch, limit, after)
-	}
+	resp, err := s.listMergedFiles(ctx, nativeRouter, providers, purpose, limit, after)
 	if err != nil {
 		return handleError(c, err)
 	}

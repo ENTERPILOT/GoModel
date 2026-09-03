@@ -43,8 +43,10 @@
   <div class="settings-panel">
     <TimezoneSettings />
     <LocaleSelector />
-    {#if !access.scoped}
-      <!-- Gateway-wide settings: hidden for a key scoped to a user path. -->
+    {#if access.loaded && !access.scoped}
+      <!-- Gateway-wide settings: hidden for a key scoped to a user path, and
+           not mounted until the scope is known so they never fire requests
+           a scoped credential would be refused. -->
       <BudgetSettings />
       <BudgetResetSettings />
       <TaggingSettings />

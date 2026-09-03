@@ -57,7 +57,9 @@ class AccessStore {
     try {
       const result = await getJSON("/admin/access", { label: "access scope" });
       if (result.stale) {
-        return;
+        // The key changed while this request was in flight: the answer
+        // belongs to the old credential, so load again for the new one.
+        return this.#load();
       }
       if (result.ok) {
         parsed = parseAccessScope(result.data);

@@ -21,6 +21,7 @@ import (
 // @Security     BearerAuth
 // @Success      200  {object}  rateLimitListResponse
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/rate-limits [get]
 func (h *Handler) ListRateLimits(c *echo.Context) error {
@@ -44,6 +45,7 @@ func (h *Handler) ListRateLimits(c *echo.Context) error {
 // @Success      200   {object}  rateLimitListResponse
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
+// @Failure      403   {object}  core.GatewayError
 // @Failure      503   {object}  core.GatewayError
 // @Router       /admin/rate-limits [put]
 func (h *Handler) UpsertRateLimit(c *echo.Context) error {
@@ -92,6 +94,7 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 // @Success      200   {object}  rateLimitListResponse
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
+// @Failure      403   {object}  core.GatewayError
 // @Failure      503   {object}  core.GatewayError
 // @Router       /admin/rate-limits [delete]
 //
@@ -127,6 +130,7 @@ func (h *Handler) DeleteRateLimit(c *echo.Context) error {
 // @Success      200   {object}  rateLimitListResponse
 // @Failure      400   {object}  core.GatewayError
 // @Failure      401   {object}  core.GatewayError
+// @Failure      403   {object}  core.GatewayError
 // @Failure      503   {object}  core.GatewayError
 // @Router       /admin/rate-limits/reset-one [post]
 func (h *Handler) ResetRateLimit(c *echo.Context) error {
@@ -160,6 +164,7 @@ func (h *Handler) ResetRateLimit(c *echo.Context) error {
 // @Success      200           {object}  resetRateLimitsResponse
 // @Failure      400           {object}  core.GatewayError
 // @Failure      401           {object}  core.GatewayError
+// @Failure      403           {object}  core.GatewayError
 // @Failure      503           {object}  core.GatewayError
 // @Router       /admin/rate-limits/reset [post]
 func (h *Handler) ResetRateLimits(c *echo.Context) error {

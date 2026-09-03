@@ -78,10 +78,12 @@ otherwise the gateway answers `404`, exactly as for an unknown ID. A
 `/v1/responses` call that references a conversation from another subtree fails
 the same way.
 
-Global credentials see every object, including legacy rows recorded before the
-path was stored. Objects the gateway has no record of (an ID stored only by the
-upstream provider) are still looked up at the provider as before; use a
-persistent store so every object stays tracked.
+Scoped credentials can only address objects the gateway tracks: an ID the
+gateway has no record of is reported as missing, and `GET /v1/files` lists the
+caller's tracked files from the gateway's own records rather than from the
+provider. Global credentials see every object, including legacy rows recorded
+before the path was stored, and still fall back to the provider for untracked
+IDs. Use a persistent store so every object stays tracked across restarts.
 
 ## Model access
 

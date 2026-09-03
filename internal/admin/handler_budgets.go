@@ -21,6 +21,7 @@ import (
 // @Security     BearerAuth
 // @Success      200  {object}  budgetListResponse
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/budgets [get]
 func (h *Handler) ListBudgets(c *echo.Context) error {
@@ -49,6 +50,7 @@ func (h *Handler) ListBudgets(c *echo.Context) error {
 // @Success      200        {object}  budgetListResponse
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
+// @Failure      403        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
 // @Router       /admin/budgets [put]
 func (h *Handler) UpsertBudget(c *echo.Context) error {
@@ -96,6 +98,7 @@ func (h *Handler) UpsertBudget(c *echo.Context) error {
 // @Success      200        {object}  budgetListResponse
 // @Failure      400        {object}  core.GatewayError
 // @Failure      401        {object}  core.GatewayError
+// @Failure      403        {object}  core.GatewayError
 // @Failure      503        {object}  core.GatewayError
 // @Router       /admin/budgets [delete]
 //
@@ -128,6 +131,7 @@ func (h *Handler) DeleteBudget(c *echo.Context) error {
 // @Security     BearerAuth
 // @Success      200  {object}  budget.Settings
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/budgets/settings [get]
 func (h *Handler) BudgetSettings(c *echo.Context) error {
@@ -147,6 +151,7 @@ func (h *Handler) BudgetSettings(c *echo.Context) error {
 // @Success      200       {object}  budget.Settings
 // @Failure      400       {object}  core.GatewayError
 // @Failure      401       {object}  core.GatewayError
+// @Failure      403       {object}  core.GatewayError
 // @Failure      503       {object}  core.GatewayError
 // @Router       /admin/budgets/settings [put]
 func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
@@ -178,6 +183,7 @@ func (h *Handler) UpdateBudgetSettings(c *echo.Context) error {
 // @Success      200     {object}  budgetListResponse
 // @Failure      400     {object}  core.GatewayError
 // @Failure      401     {object}  core.GatewayError
+// @Failure      403     {object}  core.GatewayError
 // @Failure      503     {object}  core.GatewayError
 // @Router       /admin/budgets/reset-one [post]
 func (h *Handler) ResetBudget(c *echo.Context) error {
@@ -216,6 +222,7 @@ func (h *Handler) ResetBudget(c *echo.Context) error {
 // @Success      200           {object}  resetBudgetsResponse
 // @Failure      400           {object}  core.GatewayError
 // @Failure      401           {object}  core.GatewayError
+// @Failure      403           {object}  core.GatewayError
 // @Failure      503           {object}  core.GatewayError
 // @Router       /admin/budgets/reset [post]
 func (h *Handler) ResetBudgets(c *echo.Context) error {

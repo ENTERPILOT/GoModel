@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -325,7 +326,8 @@ func TestFiles_ScopedCredentialCannotAddressForeignFile(t *testing.T) {
 		{name: "descendant file", token: scopeTokenAlpha, id: "file_child", want: http.StatusOK},
 		{name: "sibling tenant hidden", token: scopeTokenAlpha, id: "file_beta", want: http.StatusNotFound},
 		{name: "legacy mapping hidden from scoped", token: scopeTokenAlpha, id: "file_legacy", want: http.StatusNotFound},
-		{name: "untracked file keeps provider fallback", token: scopeTokenAlpha, id: "file_untracked", want: http.StatusOK},
+		{name: "untracked file hidden from scoped", token: scopeTokenAlpha, id: "file_untracked", want: http.StatusNotFound},
+		{name: "master key keeps provider fallback for untracked file", token: scopeTokenMaster, id: "file_untracked", want: http.StatusOK},
 		{name: "master key sees tenant file", token: scopeTokenMaster, id: "file_beta", want: http.StatusOK},
 		{name: "master key sees legacy mapping", token: scopeTokenMaster, id: "file_legacy", want: http.StatusOK},
 	}
@@ -347,8 +349,10 @@ func TestFiles_ScopedCredentialCannotAddressForeignFile(t *testing.T) {
 			assert.Equal(t, tt.want, rec.Code, rec.Body.String())
 			if tt.want == http.StatusNotFound {
 				assert.Empty(t, provider.capturedFileDeleteIDs, "hidden file must not reach the provider")
-				_, err := fileStore.Get(context.Background(), tt.id)
-				assert.NoError(t, err, "hidden mapping must not be deleted")
+				if tt.id != "file_untracked" {
+					_, err := fileStore.Get(context.Background(), tt.id)
+					assert.NoError(t, err, "hidden mapping must not be deleted")
+				}
 			}
 		})
 	}
@@ -358,24 +362,27 @@ func fileObject(id string, createdAt int64) core.FileObject {
 	return core.FileObject{ID: id, Object: "file", Bytes: 10, CreatedAt: createdAt, Filename: id + ".jsonl", Purpose: "batch", Provider: "openai"}
 }
 
-func TestFiles_ListFiltersProviderListingThroughOwnedMappings(t *testing.T) {
+func TestFiles_ScopedListServesOwnedMappings(t *testing.T) {
 	fileStore := filestore.NewMemoryStore()
-	for id, userPath := range map[string]string{
-		"file_alpha_1": "/team/alpha",
-		"file_alpha_2": "/team/alpha/service",
-		"file_alpha_3": "/team/alpha",
-		"file_beta":    "/team/beta",
+	for _, row := range []struct {
+		id, userPath, provider string
+		createdAt              int64
+	}{
+		{"file_beta", "/team/beta", "openai", 50},
+		{"file_alpha_1", "/team/alpha", "openai", 30},
+		{"file_alpha_anthropic", "/team/alpha", "anthropic", 25},
+		{"file_alpha_2", "/team/alpha/service", "openai", 20},
+		{"file_alpha_3", "/team/alpha", "openai", 10},
 	} {
-		require.NoError(t, fileStore.Upsert(context.Background(), &filestore.StoredFile{ID: id, ProviderType: "openai", UserPath: userPath}))
+		require.NoError(t, fileStore.Upsert(context.Background(), &filestore.StoredFile{
+			ID: row.id, ProviderType: row.provider, UserPath: row.userPath, CreatedAt: row.createdAt, Purpose: "batch", Filename: row.id + ".jsonl", Bytes: 10,
+		}))
 	}
-	// Two provider pages; the first holds only one alpha file, so a scoped
-	// page of two must read on to the second page.
+	// The provider listing is what global callers see; it is never consulted
+	// for a scoped caller, whose files come from the ownership records.
 	pages := map[string]*core.FileListResponse{
 		"": {Object: "list", HasMore: true, Data: []core.FileObject{
 			fileObject("file_beta", 50), fileObject("file_untracked", 40), fileObject("file_alpha_1", 30),
-		}},
-		"file_alpha_1": {Object: "list", HasMore: false, Data: []core.FileObject{
-			fileObject("file_alpha_2", 20), fileObject("file_alpha_3", 10),
 		}},
 	}
 	provider := &mockProvider{
@@ -397,17 +404,20 @@ func TestFiles_ListFiltersProviderListingThroughOwnedMappings(t *testing.T) {
 		return ids, resp.HasMore
 	}
 
-	for _, query := range []string{"?limit=2&provider=openai", "?limit=2"} {
-		t.Run("scoped "+query, func(t *testing.T) {
-			ids, hasMore := listIDs(t, scopeTokenAlpha, query)
-			assert.Equal(t, []string{"file_alpha_1", "file_alpha_2"}, ids)
-			assert.True(t, hasMore)
-		})
-	}
+	ids, hasMore := listIDs(t, scopeTokenAlpha, "?limit=2")
+	assert.Equal(t, []string{"file_alpha_1", "file_alpha_anthropic"}, ids, "newest owned files across providers")
+	assert.True(t, hasMore)
 
-	ids, hasMore := listIDs(t, scopeTokenAlpha, "?limit=5&provider=openai")
-	assert.Equal(t, []string{"file_alpha_1", "file_alpha_2", "file_alpha_3"}, ids)
+	ids, hasMore = listIDs(t, scopeTokenAlpha, "?limit=2&after=file_alpha_anthropic")
+	assert.Equal(t, []string{"file_alpha_2", "file_alpha_3"}, ids)
 	assert.False(t, hasMore)
+
+	ids, hasMore = listIDs(t, scopeTokenAlpha, "?limit=5&provider=openai")
+	assert.Equal(t, []string{"file_alpha_1", "file_alpha_2", "file_alpha_3"}, ids, "provider filter applies to owned files")
+	assert.False(t, hasMore)
+
+	rec := scopedRequest(t, srv, http.MethodGet, "/v1/files?after=file_beta", scopeTokenAlpha, "")
+	assert.Equal(t, http.StatusNotFound, rec.Code, "a foreign cursor is indistinguishable from a missing one")
 
 	ids, hasMore = listIDs(t, scopeTokenMaster, "?limit=5&provider=openai")
 	assert.Equal(t, []string{"file_beta", "file_untracked", "file_alpha_1"}, ids, "global scope gets the raw provider page")
@@ -454,6 +464,32 @@ func TestFiles_LookupOutageFailsClosedForScopedCredential(t *testing.T) {
 			srv := scopedObjectServer(provider, &Config{FileStore: outageFileStore{Store: filestore.NewMemoryStore()}})
 			rec := scopedRequest(t, srv, http.MethodGet, "/v1/files/file_any", tt.token, "")
 			assert.Equal(t, tt.want, rec.Code, rec.Body.String())
+		})
+	}
+}
+
+// TestResponses_UntrackedIDHiddenFromScopedCredential pins that a scoped
+// caller cannot reach the tenancy-blind provider lookup for an id the gateway
+// has no record of, while global callers keep that fallback.
+func TestResponses_UntrackedIDHiddenFromScopedCredential(t *testing.T) {
+	for _, withStore := range []bool{true, false} {
+		t.Run(fmt.Sprintf("store=%v", withStore), func(t *testing.T) {
+			provider := &mockProvider{providerTypes: map[string]string{"gpt-5-mini": "mock"}}
+			cfg := &Config{}
+			if withStore {
+				cfg.ResponseStore = responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+			}
+			srv := scopedObjectServer(provider, cfg)
+
+			rec := scopedRequest(t, srv, http.MethodGet, "/v1/responses/resp_untracked", scopeTokenAlpha, "")
+			assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+			rec = scopedRequest(t, srv, http.MethodDelete, "/v1/responses/resp_untracked", scopeTokenAlpha, "")
+			assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+			assert.Empty(t, provider.responseGetCalls, "scoped caller must not reach the provider")
+			assert.Empty(t, provider.responseDeleteCalls)
+
+			scopedRequest(t, srv, http.MethodGet, "/v1/responses/resp_untracked", scopeTokenMaster, "")
+			assert.NotEmpty(t, provider.responseGetCalls, "global caller keeps the provider fallback")
 		})
 	}
 }

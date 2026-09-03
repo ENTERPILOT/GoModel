@@ -5,6 +5,7 @@ import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { access } from "$lib/stores/access.svelte.js";
+import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { confirmDialog } from "$lib/stores/confirm.svelte.js";
 import {
@@ -177,6 +178,10 @@ class BudgetsStore {
     const { payload, error } = buildBudgetFormPayload(this.form);
     if (!payload) {
       this.formError = error;
+      return;
+    }
+    if (!scopedSubjectAllowed(access.scoped, access.userPath, this.form.scope, this.form.subject)) {
+      this.formError = m.access_scope_path_outside({ root: access.userPath });
       return;
     }
     if (!this.editing) {

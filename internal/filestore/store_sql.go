@@ -3,9 +3,9 @@ package filestore
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -73,37 +73,63 @@ func (s *SQLStore) Get(ctx context.Context, id string) (*StoredFile, error) {
 	`, id))
 }
 
-// GetMany retrieves the mappings present for the given ids in one query.
-func (s *SQLStore) GetMany(ctx context.Context, ids []string) (map[string]*StoredFile, error) {
-	result := make(map[string]*StoredFile, len(ids))
-	if len(ids) == 0 {
-		return result, nil
+// List returns the mappings matching filter, newest first, after the cursor.
+func (s *SQLStore) List(ctx context.Context, filter ListFilter, limit int, after string) ([]*StoredFile, error) {
+	limit = listLimit(limit)
+	var conditions []string
+	var args []any
+	switch filter.UserPath {
+	case "":
+	case "/":
+		conditions = append(conditions, "user_path <> ''")
+	default:
+		conditions = append(conditions, "(user_path = ? OR user_path LIKE ? ESCAPE '\\')")
+		args = append(args, filter.UserPath, sqlutil.EscapeLikeWildcards(filter.UserPath)+"/%")
 	}
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
+	if filter.ProviderType != "" {
+		conditions = append(conditions, "provider_type = ?")
+		args = append(args, filter.ProviderType)
 	}
+	if filter.Purpose != "" {
+		conditions = append(conditions, "purpose = ?")
+		args = append(args, filter.Purpose)
+	}
+	if after != "" {
+		cursor, err := s.Get(ctx, after)
+		if err != nil {
+			return nil, err
+		}
+		if !filter.matches(cursor) {
+			// A cursor outside the filter is indistinguishable from a missing one.
+			return nil, ErrNotFound
+		}
+		conditions = append(conditions, "((created_at < ?) OR (created_at = ? AND id < ?))")
+		args = append(args, cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+	}
+	args = append(args, limit)
+
 	rows, err := s.db.Query(ctx, `
 		SELECT id, provider_type, purpose, filename, bytes, created_at, user_path
-		FROM file_mappings
-		WHERE id IN (`+placeholders+`)
+		FROM file_mappings`+sqlutil.BuildWhereClause(conditions)+`
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
 	`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query file mappings: %w", err)
+		return nil, fmt.Errorf("list file mappings: %w", err)
 	}
 	defer rows.Close()
+	items := make([]*StoredFile, 0, limit)
 	for rows.Next() {
 		file, err := scanStoredFile(rows)
 		if err != nil {
 			return nil, err
 		}
-		result[file.ID] = file
+		items = append(items, file)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate file mappings: %w", err)
 	}
-	return result, nil
+	return items, nil
 }
 
 // Delete removes one file mapping by id.

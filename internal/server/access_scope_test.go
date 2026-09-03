@@ -55,6 +55,9 @@ func TestAuthMiddleware_AccessScopeFollowsCredential(t *testing.T) {
 		bearer     string
 		cookie     string
 		pathHeader string
+		// seedScope simulates an outer extension middleware that already
+		// installed a scope before the auth middleware runs.
+		seedScope  string
 		wantScope  string
 		wantGlobal bool
 	}{
@@ -65,7 +68,8 @@ func TestAuthMiddleware_AccessScopeFollowsCredential(t *testing.T) {
 		{name: "scoped key is confined", bearer: "sk_gom_scoped", wantScope: "/team/alpha"},
 		{name: "scoped key header cannot widen", bearer: "sk_gom_scoped", pathHeader: "/", wantScope: "/team/alpha"},
 		{name: "extension identity is confined", cookie: "session=1", wantScope: "/team/beta"},
-		{name: "explicit bearer replaces extension scope", cookie: "session=1", bearer: "master-key", wantGlobal: true},
+		{name: "explicit bearer replaces extension scope", cookie: "session=1", bearer: "master-key", seedScope: "/team/beta", wantGlobal: true},
+		{name: "explicit scoped bearer replaces extension scope", cookie: "session=1", bearer: "sk_gom_scoped", seedScope: "/team/beta", wantScope: "/team/alpha"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -84,6 +88,9 @@ func TestAuthMiddleware_AccessScopeFollowsCredential(t *testing.T) {
 			}
 			if tt.pathHeader != "" {
 				req.Header.Set(core.UserPathHeader, tt.pathHeader)
+			}
+			if tt.seedScope != "" {
+				req = req.WithContext(core.WithAccessScope(req.Context(), core.AccessScope{UserPath: tt.seedScope}))
 			}
 			rec := httptest.NewRecorder()
 			c := echo.New().NewContext(req, rec)

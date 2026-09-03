@@ -57,6 +57,7 @@ const conversationBuildTimeout = 10 * time.Second
 // @Success      200  {object}  auditLogListResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/log [get]
 func (h *Handler) AuditLog(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
@@ -216,6 +217,7 @@ func parseAuditLogQueryParams(c *echo.Context) (auditlog.LogQueryParams, error) 
 // @Success      200  {object}  auditSessionsListResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/sessions [get]
 func (h *Handler) AuditSessions(c *echo.Context) error {
 	params, err := parseAuditLogQueryParams(c)
@@ -328,6 +330,7 @@ const auditStatsHourlyRangeDays = 3
 // @Success      200  {object}  auditlog.RequestStats
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/stats [get]
 func (h *Handler) AuditStats(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
@@ -382,6 +385,7 @@ func (h *Handler) AuditStats(c *echo.Context) error {
 // @Success      200  {object}  auditLogEntryResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      404  {object}  core.GatewayError
 // @Failure      500  {object}  core.GatewayError
 // @Router       /admin/audit/detail [get]
@@ -434,6 +438,7 @@ func (h *Handler) AuditLogDetail(c *echo.Context) error {
 // @Success      200  {object}  auditConversationResponse
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/audit/conversation [get]
 func (h *Handler) AuditConversation(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers

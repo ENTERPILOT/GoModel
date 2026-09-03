@@ -26,6 +26,14 @@
       : budgetScopeOptions(),
   );
 
+  // The scope select only offers user_path once the credential turns out to
+  // be scoped; a form opened before that answer arrived must follow suit.
+  $effect(() => {
+    if (access.scoped && store.form.scope !== "user_path") {
+      store.form.scope = "user_path";
+    }
+  });
+
   function onSubjectInput(event) {
     store.setFormSubject(event.target.value);
     // Keep the input strictly controlled.

@@ -2,6 +2,8 @@ package filestore
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"sync"
 )
 
@@ -42,23 +44,37 @@ func (s *MemoryStore) Get(_ context.Context, id string) (*StoredFile, error) {
 	return cloneStoredFile(file)
 }
 
-// GetMany retrieves the mappings present for the given ids.
-func (s *MemoryStore) GetMany(_ context.Context, ids []string) (map[string]*StoredFile, error) {
-	result := make(map[string]*StoredFile, len(ids))
+// List returns the mappings matching filter, newest first, after the cursor.
+func (s *MemoryStore) List(_ context.Context, filter ListFilter, limit int, after string) ([]*StoredFile, error) {
+	limit = listLimit(limit)
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, id := range ids {
-		file, ok := s.items[id]
-		if !ok {
+	all := make([]*StoredFile, 0, len(s.items))
+	for _, file := range s.items {
+		if !filter.matches(file) {
 			continue
 		}
 		cloned, err := cloneStoredFile(file)
 		if err != nil {
+			s.mu.RUnlock()
 			return nil, err
 		}
-		result[id] = cloned
+		all = append(all, cloned)
 	}
-	return result, nil
+	s.mu.RUnlock()
+	sort.Slice(all, func(i, j int) bool { return newerThan(all[i], all[j]) })
+
+	start := 0
+	if after != "" {
+		idx := slices.IndexFunc(all, func(file *StoredFile) bool { return file.ID == after })
+		if idx < 0 {
+			return nil, ErrNotFound
+		}
+		start = idx + 1
+	}
+	if start >= len(all) {
+		return []*StoredFile{}, nil
+	}
+	return all[start:min(start+limit, len(all))], nil
 }
 
 // Delete removes one file mapping by id.

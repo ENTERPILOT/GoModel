@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/core"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -17,6 +21,7 @@ type mongoBatchDocument struct {
 	UpdatedAt int64  `bson:"updated_at"`
 	Status    string `bson:"status"`
 	Data      []byte `bson:"data"`
+	UserPath  string `bson:"user_path"`
 }
 
 // MongoDBStore stores batches in MongoDB.
@@ -37,12 +42,41 @@ func NewMongoDBStore(database *mongo.Database) (*MongoDBStore, error) {
 	indexes := []mongo.IndexModel{
 		{Keys: bson.D{{Key: "created_at", Value: -1}}},
 		{Keys: bson.D{{Key: "status", Value: 1}}},
+		{Keys: bson.D{{Key: "user_path", Value: 1}}},
 	}
 	if _, err := coll.Indexes().CreateMany(ctx, indexes); err != nil {
 		return nil, fmt.Errorf("create batches indexes: %w", err)
 	}
 
-	return &MongoDBStore{collection: coll}, nil
+	store := &MongoDBStore{collection: coll}
+	if err := store.backfillUserPath(ctx); err != nil {
+		return nil, fmt.Errorf("backfill batch user paths: %w", err)
+	}
+	return store, nil
+}
+
+// backfillUserPath copies the user path out of payloads persisted before the
+// field existed so scoped listings can filter on it.
+func (s *MongoDBStore) backfillUserPath(ctx context.Context) error {
+	cursor, err := s.collection.Find(ctx, bson.M{"user_path": bson.M{"$exists": false}})
+	if err != nil {
+		return fmt.Errorf("query legacy batches: %w", err)
+	}
+	defer cursor.Close(ctx)
+	for cursor.Next(ctx) {
+		var doc mongoBatchDocument
+		if err := cursor.Decode(&doc); err != nil {
+			return fmt.Errorf("decode legacy batch: %w", err)
+		}
+		userPath := ""
+		if batch, err := deserializeBatch(doc.Data); err == nil {
+			userPath = batch.UserPath
+		}
+		if _, err := s.collection.UpdateOne(ctx, bson.M{"_id": doc.ID}, bson.M{"$set": bson.M{"user_path": userPath}}); err != nil {
+			return fmt.Errorf("backfill batch %s: %w", doc.ID, err)
+		}
+	}
+	return cursor.Err()
 }
 
 // Create inserts a new batch.
@@ -58,6 +92,7 @@ func (s *MongoDBStore) Create(ctx context.Context, batch *StoredBatch) error {
 		UpdatedAt: time.Now().Unix(),
 		Status:    batch.Batch.Status,
 		Data:      payload,
+		UserPath:  strings.TrimSpace(batch.UserPath),
 	}
 	if _, err := s.collection.InsertOne(ctx, doc); err != nil {
 		return fmt.Errorf("insert batch: %w", err)
@@ -84,9 +119,20 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredBatch, error)
 }
 
 // List returns batches ordered by created_at desc, id desc.
-func (s *MongoDBStore) List(ctx context.Context, limit int, after string) ([]*StoredBatch, error) {
+func (s *MongoDBStore) List(ctx context.Context, limit int, after, userPath string) ([]*StoredBatch, error) {
 	limit = normalizeLimit(limit)
-	filter := bson.M{}
+	var conditions bson.A
+	switch userPath {
+	case "":
+	case "/":
+		// Root admits every tracked path, never the legacy rows without one.
+		conditions = append(conditions, bson.M{"user_path": bson.M{"$exists": true, "$ne": ""}})
+	default:
+		conditions = append(conditions, bson.M{"$or": bson.A{
+			bson.M{"user_path": userPath},
+			bson.M{"user_path": bson.M{"$regex": "^" + regexp.QuoteMeta(userPath) + "/"}},
+		}})
+	}
 
 	if after != "" {
 		var cursorDoc mongoBatchDocument
@@ -97,7 +143,11 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after string) ([]*St
 			}
 			return nil, fmt.Errorf("query after cursor: %w", err)
 		}
-		filter = bson.M{
+		if userPath != "" && !core.UserPathContains(userPath, cursorDoc.UserPath) {
+			// A cursor outside the subtree is indistinguishable from a missing one.
+			return nil, ErrNotFound
+		}
+		conditions = append(conditions, bson.M{
 			"$or": bson.A{
 				bson.M{"created_at": bson.M{"$lt": cursorDoc.CreatedAt}},
 				bson.M{
@@ -105,7 +155,11 @@ func (s *MongoDBStore) List(ctx context.Context, limit int, after string) ([]*St
 					"_id":        bson.M{"$lt": cursorDoc.ID},
 				},
 			},
-		}
+		})
+	}
+	filter := bson.M{}
+	if len(conditions) > 0 {
+		filter = bson.M{"$and": conditions}
 	}
 
 	opts := options.Find().
@@ -149,6 +203,7 @@ func (s *MongoDBStore) Update(ctx context.Context, batch *StoredBatch) error {
 			"updated_at": time.Now().Unix(),
 			"status":     batch.Batch.Status,
 			"data":       payload,
+			"user_path":  strings.TrimSpace(batch.UserPath),
 		}},
 	)
 	if err != nil {

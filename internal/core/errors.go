@@ -109,6 +109,8 @@ func (e *GatewayError) HTTPStatusCode() int {
 		return http.StatusUnauthorized
 	case ErrorTypeNotFound:
 		return http.StatusNotFound
+	case ErrorTypePermission:
+		return http.StatusForbidden
 	case ErrorTypeProvider:
 		return http.StatusBadGateway
 	default:

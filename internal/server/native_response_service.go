@@ -292,12 +292,23 @@ func (s *nativeResponseService) utilityRequest(c *echo.Context) (*core.Responses
 }
 
 func (s *nativeResponseService) loadStoredResponse(ctx context.Context, id string) (*responsestore.StoredResponse, error) {
+	// A scoped caller may only address responses the gateway tracks inside
+	// its scope; the provider lookup the callers fall back to on
+	// responsestore.ErrNotFound is not tenant-aware, so untracked ids are
+	// reported as missing with a GatewayError instead.
+	scoped := !core.AccessScopeFromContext(ctx).Global()
 	if s.responseStore == nil {
+		if scoped {
+			return nil, core.NewNotFoundError("response not found")
+		}
 		return nil, responsestore.ErrNotFound
 	}
 	stored, err := s.responseStore.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, responsestore.ErrNotFound) {
+			if scoped {
+				return nil, core.NewNotFoundError("response not found")
+			}
 			return nil, err
 		}
 		return nil, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to load response", err)

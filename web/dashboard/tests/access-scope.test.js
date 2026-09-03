@@ -7,6 +7,7 @@ import {
   pageVisibleForScope,
   parseAccessScope,
   scopeAllows,
+  scopedSubjectAllowed,
 } from "../src/lib/stores/accessScope.js";
 
 test("parseAccessScope treats anything but a scoped payload as global", () => {
@@ -57,4 +58,15 @@ test("pageVisibleForScope hides gateway-wide pages from scoped admins only", () 
   for (const page of ["overview", "usage", "budgets", "rate-limits", "auth-keys", "users", "audit-logs", "settings", "playground"]) {
     assert.equal(pageVisibleForScope(page, true), true, page);
   }
+});
+
+test("scopedSubjectAllowed gates budget and rate-limit forms by scope", () => {
+  assert.equal(scopedSubjectAllowed(false, "", "label", "team"), true);
+  assert.equal(scopedSubjectAllowed(false, "", "provider", "openai"), true);
+  assert.equal(scopedSubjectAllowed(true, "/team/alpha", "user_path", "/team/alpha"), true);
+  assert.equal(scopedSubjectAllowed(true, "/team/alpha", "user_path", "/team/alpha/svc"), true);
+  assert.equal(scopedSubjectAllowed(true, "/team/alpha", "user_path", "/team/beta"), false);
+  assert.equal(scopedSubjectAllowed(true, "/team/alpha", "user_path", "/team/alpha-2"), false);
+  assert.equal(scopedSubjectAllowed(true, "/team/alpha", "label", "/team/alpha"), false);
+  assert.equal(scopedSubjectAllowed(true, "/team/alpha", "provider", "openai"), false);
 });

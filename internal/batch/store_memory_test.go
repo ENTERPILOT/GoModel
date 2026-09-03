@@ -74,7 +74,7 @@ func TestMemoryStoreListAfter(t *testing.T) {
 		}
 	}
 
-	list, err := store.List(ctx, 2, "")
+	list, err := store.List(ctx, 2, "", "")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestMemoryStoreListAfter(t *testing.T) {
 		t.Fatalf("unexpected order: %s, %s", list[0].Batch.ID, list[1].Batch.ID)
 	}
 
-	next, err := store.List(ctx, 2, "batch-b")
+	next, err := store.List(ctx, 2, "batch-b", "")
 	if err != nil {
 		t.Fatalf("list after: %v", err)
 	}

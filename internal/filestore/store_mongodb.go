@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -90,17 +91,53 @@ func (s *MongoDBStore) Get(ctx context.Context, id string) (*StoredFile, error) 
 	})
 }
 
-// GetMany retrieves the mappings present for the given ids in one query.
-func (s *MongoDBStore) GetMany(ctx context.Context, ids []string) (map[string]*StoredFile, error) {
-	result := make(map[string]*StoredFile, len(ids))
-	if len(ids) == 0 {
-		return result, nil
+// List returns the mappings matching filter, newest first, after the cursor.
+func (s *MongoDBStore) List(ctx context.Context, filter ListFilter, limit int, after string) ([]*StoredFile, error) {
+	limit = listLimit(limit)
+	var conditions bson.A
+	switch filter.UserPath {
+	case "":
+	case "/":
+		conditions = append(conditions, bson.M{"user_path": bson.M{"$exists": true, "$ne": ""}})
+	default:
+		conditions = append(conditions, bson.M{"$or": bson.A{
+			bson.M{"user_path": filter.UserPath},
+			bson.M{"user_path": bson.M{"$regex": "^" + regexp.QuoteMeta(filter.UserPath) + "/"}},
+		}})
 	}
-	cursor, err := s.collection.Find(ctx, bson.M{"_id": bson.M{"$in": ids}})
+	if filter.ProviderType != "" {
+		conditions = append(conditions, bson.M{"provider_type": filter.ProviderType})
+	}
+	if filter.Purpose != "" {
+		conditions = append(conditions, bson.M{"purpose": filter.Purpose})
+	}
+	if after != "" {
+		cursorFile, err := s.Get(ctx, after)
+		if err != nil {
+			return nil, err
+		}
+		if !filter.matches(cursorFile) {
+			// A cursor outside the filter is indistinguishable from a missing one.
+			return nil, ErrNotFound
+		}
+		conditions = append(conditions, bson.M{"$or": bson.A{
+			bson.M{"created_at": bson.M{"$lt": cursorFile.CreatedAt}},
+			bson.M{"created_at": cursorFile.CreatedAt, "_id": bson.M{"$lt": cursorFile.ID}},
+		}})
+	}
+	query := bson.M{}
+	if len(conditions) > 0 {
+		query = bson.M{"$and": conditions}
+	}
+	opts := options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "_id", Value: -1}}).
+		SetLimit(int64(limit))
+	cursor, err := s.collection.Find(ctx, query, opts)
 	if err != nil {
-		return nil, fmt.Errorf("query file mappings: %w", err)
+		return nil, fmt.Errorf("list file mappings: %w", err)
 	}
 	defer func() { _ = cursor.Close(ctx) }()
+	items := make([]*StoredFile, 0, limit)
 	for cursor.Next(ctx) {
 		var doc mongoFileDocument
 		if err := cursor.Decode(&doc); err != nil {
@@ -118,12 +155,12 @@ func (s *MongoDBStore) GetMany(ctx context.Context, ids []string) (map[string]*S
 		if err != nil {
 			return nil, err
 		}
-		result[file.ID] = file
+		items = append(items, file)
 	}
 	if err := cursor.Err(); err != nil {
 		return nil, fmt.Errorf("iterate file mappings: %w", err)
 	}
-	return result, nil
+	return items, nil
 }
 
 // Delete removes one file mapping by id.

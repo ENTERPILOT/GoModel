@@ -6,6 +6,7 @@ import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { access } from "$lib/stores/access.svelte.js";
+import { scopedSubjectAllowed } from "$lib/stores/accessScope.js";
 import * as m from "$lib/paraglide/messages.js";
 import * as logic from "./rateLimitsLogic.js";
 
@@ -309,6 +310,17 @@ class RateLimitsStore {
     const { payload, error } = this.rateLimitFormPayload();
     if (error) {
       this.rateLimitFormError = error;
+      return;
+    }
+    if (
+      !scopedSubjectAllowed(
+        access.scoped,
+        access.userPath,
+        this.rateLimitForm.scope,
+        this.rateLimitForm.subject,
+      )
+    ) {
+      this.rateLimitFormError = m.access_scope_path_outside({ root: access.userPath });
       return;
     }
     const moved = this.rateLimitIdentityMoved(payload);

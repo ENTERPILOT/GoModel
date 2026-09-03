@@ -46,6 +46,7 @@ const (
 // @Success      200  {object}  usage.UsageSummary
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/summary [get]
 func (h *Handler) UsageSummary(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
@@ -115,6 +116,7 @@ func usageSliceResponse[T any](
 // @Success      200  {array}   usage.DailyUsage
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/daily [get]
 func (h *Handler) DailyUsage(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.DailyUsage, error) {
@@ -140,6 +142,7 @@ func (h *Handler) DailyUsage(c *echo.Context) error {
 // @Success      200  {array}   usage.ModelUsage
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/models [get]
 func (h *Handler) UsageByModel(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.ModelUsage, error) {
@@ -169,6 +172,7 @@ func (h *Handler) UsageByModel(c *echo.Context) error {
 // @Success      200  {array}   usage.UserPathUsage
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/user-paths [get]
 func (h *Handler) UsageByUserPath(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.UserPathUsage, error) {
@@ -201,6 +205,7 @@ func (h *Handler) UsageByUserPath(c *echo.Context) error {
 // @Success      200  {array}   usage.LabelUsage
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/labels [get]
 func (h *Handler) UsageByLabel(c *echo.Context) error {
 	return usageSliceResponse(c, h.usageReader, func(ctx context.Context, params usage.UsageQueryParams) ([]usage.LabelUsage, error) {
@@ -235,6 +240,7 @@ func (h *Handler) UsageByLabel(c *echo.Context) error {
 // @Success      200  {object}  usage.SessionUsageResult
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/sessions [get]
 func (h *Handler) UsageBySession(c *echo.Context) error {
 	baseParams, err := parseUsageParams(c)
@@ -302,6 +308,7 @@ func (h *Handler) UsageBySession(c *echo.Context) error {
 // @Success      200  {object}  usage.UsageLogResult
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/log [get]
 func (h *Handler) UsageLog(c *echo.Context) error {
 	// Validate request shape before the disabled-reader fast path so callers
@@ -377,6 +384,7 @@ func (h *Handler) UsageLog(c *echo.Context) error {
 // @Success      200      {object}  usage.RecalculatePricingResult
 // @Failure      400      {object}  core.GatewayError
 // @Failure      401      {object}  core.GatewayError
+// @Failure      403      {object}  core.GatewayError
 // @Failure      500      {object}  core.GatewayError
 // @Failure      503      {object}  core.GatewayError
 // @Router       /admin/usage/recalculate-pricing [post]
@@ -436,6 +444,7 @@ func (h *Handler) RecalculateUsagePricing(c *echo.Context) error {
 // @Success      200  {object}  usage.CacheOverview
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Failure      503  {object}  core.GatewayError
 // @Router       /admin/cache/overview [get]
 func (h *Handler) CacheOverview(c *echo.Context) error {
@@ -486,6 +495,7 @@ func (h *Handler) CacheOverview(c *echo.Context) error {
 // @Success      200  {object}  usage.TokenThroughput
 // @Failure      400  {object}  core.GatewayError
 // @Failure      401  {object}  core.GatewayError
+// @Failure      403  {object}  core.GatewayError
 // @Router       /admin/usage/throughput [get]
 func (h *Handler) TokenThroughput(c *echo.Context) error {
 	gran, err := usage.ParseThroughputGranularity(c.QueryParam("granularity"))

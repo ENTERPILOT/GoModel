@@ -351,7 +351,7 @@ func (s *failingBatchStore) Get(context.Context, string) (*batchstore.StoredBatc
 	return nil, batchstore.ErrNotFound
 }
 
-func (s *failingBatchStore) List(context.Context, int, string) ([]*batchstore.StoredBatch, error) {
+func (s *failingBatchStore) List(context.Context, int, string, string) ([]*batchstore.StoredBatch, error) {
 	return nil, nil
 }
 
@@ -377,12 +377,8 @@ func (emptyProviderFileStore) Get(_ context.Context, id string) (*filestore.Stor
 	return &filestore.StoredFile{ID: id}, nil
 }
 
-func (emptyProviderFileStore) GetMany(_ context.Context, ids []string) (map[string]*filestore.StoredFile, error) {
-	result := make(map[string]*filestore.StoredFile, len(ids))
-	for _, id := range ids {
-		result[id] = &filestore.StoredFile{ID: id}
-	}
-	return result, nil
+func (emptyProviderFileStore) List(context.Context, filestore.ListFilter, int, string) ([]*filestore.StoredFile, error) {
+	return nil, nil
 }
 
 func (emptyProviderFileStore) Delete(context.Context, string) error {
@@ -412,7 +408,7 @@ func (s failingFileStore) Get(context.Context, string) (*filestore.StoredFile, e
 	return nil, s.storeErr()
 }
 
-func (s failingFileStore) GetMany(context.Context, []string) (map[string]*filestore.StoredFile, error) {
+func (s failingFileStore) List(context.Context, filestore.ListFilter, int, string) ([]*filestore.StoredFile, error) {
 	return nil, s.storeErr()
 }
 
