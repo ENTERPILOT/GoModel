@@ -1,7 +1,9 @@
 package core
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -355,18 +357,22 @@ func TestDeriveWhiteBoxPrompt_BatchResultsMetadata(t *testing.T) {
 
 func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
 	tests := []struct {
-		name         string
-		body         string
-		wantModel    string
-		wantProvider string
-		wantStream   bool
-		wantParsed   bool
+		name          string
+		body          string
+		wantModel     string
+		wantProvider  string
+		wantStream    bool
+		wantParsed    bool
+		wantDuplicate string
 	}{
 		{name: "valid selector fields", body: `{"provider":"openai","model":"gpt-5-mini","stream":true}`, wantModel: "gpt-5-mini", wantProvider: "openai", wantStream: true, wantParsed: true},
-		{name: "duplicate selector fields use first occurrence", body: `{"model":"blocked","model":"gpt-5-mini","provider":"x","provider":"openai","stream":false,"stream":true}`, wantModel: "blocked", wantProvider: "x", wantStream: false, wantParsed: true},
-		{name: "duplicate null string keeps first value and null stream keeps first bool", body: `{"model":"gpt-5-mini","model":null,"provider":"openai","provider":null,"stream":true,"stream":null}`, wantModel: "gpt-5-mini", wantProvider: "openai", wantStream: true, wantParsed: true},
-		{name: "duplicate invalid selector field keeps first value", body: `{"model":"gpt-5-mini","model":123}`, wantModel: "gpt-5-mini", wantParsed: true},
-		{name: "duplicate invalid stream field keeps first value", body: `{"stream":true,"stream":"yes"}`, wantStream: true, wantParsed: true},
+		{name: "duplicate model is reported instead of picking an occurrence", body: `{"model":"blocked","model":"gpt-5-mini","provider":"x","provider":"openai","stream":false,"stream":true}`, wantDuplicate: "model"},
+		{name: "duplicate provider is reported", body: `{"model":"gpt-5-mini","provider":"x","provider":"openai"}`, wantDuplicate: "provider"},
+		{name: "duplicate stream is reported", body: `{"model":"gpt-5-mini","stream":false,"stream":true}`, wantDuplicate: "stream"},
+		{name: "duplicate null selector is still a duplicate", body: `{"model":"gpt-5-mini","model":null}`, wantDuplicate: "model"},
+		{name: "duplicate invalid selector is still a duplicate", body: `{"model":"gpt-5-mini","model":123}`, wantDuplicate: "model"},
+		{name: "nested duplicate selectors are not top-level", body: `{"model":"gpt-5-mini","messages":[{"model":"a","model":"b"}],"metadata":{"stream":true,"stream":false}}`, wantModel: "gpt-5-mini", wantParsed: true},
+		{name: "duplicate non-selector fields are tolerated", body: `{"model":"gpt-5-mini","n":1,"n":2}`, wantModel: "gpt-5-mini", wantParsed: true},
 		{name: "missing selector fields", body: `{"messages":[{"role":"user","content":"hi"}]}`, wantParsed: true},
 		{name: "null selector fields", body: `{"provider":null,"model":null,"stream":null}`, wantParsed: true},
 		{name: "invalid json", body: `not json`, wantParsed: false},
@@ -379,20 +385,74 @@ func TestDeriveSnapshotSelectorHintsGJSON_MatchesStdlibSemantics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotModel, gotProvider, gotStream, gotParsed := deriveSnapshotSelectorHintsGJSON([]byte(tt.body))
-			if tt.wantModel != gotModel || tt.wantProvider != gotProvider || tt.wantStream != gotStream || tt.wantParsed != gotParsed {
-				t.Fatalf("gjson mismatch: want (%q, %q, %v, %v), got (%q, %q, %v, %v)", tt.wantModel, tt.wantProvider, tt.wantStream, tt.wantParsed, gotModel, gotProvider, gotStream, gotParsed)
+			got := deriveSnapshotSelectorHintsGJSON([]byte(tt.body))
+			want := snapshotSelectorHints{model: tt.wantModel, provider: tt.wantProvider, stream: tt.wantStream, parsed: tt.wantParsed, duplicate: tt.wantDuplicate}
+			if got != want {
+				t.Fatalf("gjson mismatch: want %+v, got %+v", want, got)
 			}
 		})
+	}
+}
+
+func TestDeriveWhiteBoxPrompt_FlagsDuplicateSelectorFields(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		body string
+		want string
+	}{
+		{name: "chat duplicate model", path: "/v1/chat/completions", body: `{"model":"allowed","model":"blocked","messages":[]}`, want: "model"},
+		{name: "responses duplicate provider", path: "/v1/responses", body: `{"model":"gpt-5-mini","provider":"a","provider":"b","input":"hi"}`, want: "provider"},
+		{name: "passthrough duplicate stream", path: "/p/openai/chat/completions", body: `{"model":"gpt-5-mini","stream":true,"stream":false}`, want: "stream"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := NewRequestSnapshot(http.MethodPost, tt.path, nil, nil, nil, "application/json", []byte(tt.body), false, "", nil)
+			env := DeriveWhiteBoxPrompt(snapshot)
+			if env == nil {
+				t.Fatal("DeriveWhiteBoxPrompt() = nil")
+			}
+			if env.DuplicateSelectorField != tt.want {
+				t.Fatalf("DuplicateSelectorField = %q, want %q", env.DuplicateSelectorField, tt.want)
+			}
+			if env.JSONBodyParsed {
+				t.Fatal("JSONBodyParsed = true, want false: a duplicate body yields no selector hints")
+			}
+			if env.RouteHints.Model != "" {
+				t.Fatalf("RouteHints.Model = %q, want empty", env.RouteHints.Model)
+			}
+			err := env.DuplicateSelectorError()
+			if err == nil {
+				t.Fatal("DuplicateSelectorError() = nil, want invalid request error")
+			}
+			var gatewayErr *GatewayError
+			if !errors.As(err, &gatewayErr) || gatewayErr.StatusCode != http.StatusBadRequest {
+				t.Fatalf("DuplicateSelectorError() = %v, want 400 gateway error", err)
+			}
+			if !strings.Contains(err.Error(), `"`+tt.want+`"`) {
+				t.Fatalf("error %q does not name field %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestWhiteBoxPrompt_DuplicateSelectorErrorNilWhenUnique(t *testing.T) {
+	var env *WhiteBoxPrompt
+	if err := env.DuplicateSelectorError(); err != nil {
+		t.Fatalf("nil env error = %v, want nil", err)
+	}
+	if err := (&WhiteBoxPrompt{}).DuplicateSelectorError(); err != nil {
+		t.Fatalf("unique env error = %v, want nil", err)
 	}
 }
 
 func BenchmarkDeriveSnapshotSelectorHintsGJSON(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		model, provider, stream, parsed := deriveSnapshotSelectorHintsGJSON(benchmarkSemanticSelectorBody)
-		if !parsed || model != "gpt-5-mini" || provider != "openai" || !stream {
-			b.Fatalf("unexpected selector hints: parsed=%v model=%q provider=%q stream=%v", parsed, model, provider, stream)
+		hints := deriveSnapshotSelectorHintsGJSON(benchmarkSemanticSelectorBody)
+		if !hints.parsed || hints.model != "gpt-5-mini" || hints.provider != "openai" || !hints.stream {
+			b.Fatalf("unexpected selector hints: %+v", hints)
 		}
 	}
 }

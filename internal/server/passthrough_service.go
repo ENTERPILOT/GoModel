@@ -33,6 +33,12 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
 	}
+	// The body is forwarded byte-for-byte, so it must not carry a repeated
+	// selector field that the upstream parser could resolve differently from
+	// the selector authorized below.
+	if err := duplicateSelectorError(c); err != nil {
+		return handleError(c, err)
+	}
 	if s.modelAuthorizer != nil {
 		if selector, ok := passthroughAccessSelector(s.provider, info); ok {
 			if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {

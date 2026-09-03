@@ -83,8 +83,15 @@ func RequestSnapshotCapture(userPathHeader ...string) echo.MiddlewareFunc {
 			ctx := core.WithUserPathHeaderName(req.Context(), userPathHeaderName)
 			ctx = core.WithRequestSnapshot(ctx, snapshot)
 			if semantics := core.DeriveWhiteBoxPrompt(snapshot); semantics != nil {
+				// A body that repeats model, provider, or stream is rejected
+				// before any routing, authorization, or forwarding reads it.
+				if err := semantics.DuplicateSelectorError(); err != nil {
+					return handleError(c, err)
+				}
 				if !bodyCaptured {
-					seedRequestBodySelectorHints(req, desc.BodyMode, semantics)
+					if err := seedRequestBodySelectorHints(req, desc.BodyMode, semantics); err != nil {
+						return handleError(c, err)
+					}
 				}
 				ctx = core.WithWhiteBoxPrompt(ctx, semantics)
 			}
@@ -222,9 +229,16 @@ func (c *combinedReadCloser) Close() error {
 	return c.rc.Close()
 }
 
+// requestBodyBytes returns the full request body, reading and caching it on
+// the snapshot when ingress only peeked. It fails with an invalid-request
+// error when the body repeats a top-level selector field, so late readers
+// never act on a body whose model, provider, or stream is ambiguous.
 func requestBodyBytes(c *echo.Context) ([]byte, error) {
 	if snapshot := core.GetRequestSnapshot(c.Request().Context()); snapshot != nil {
 		if body := snapshot.CapturedBodyView(); body != nil {
+			if err := duplicateSelectorError(c); err != nil {
+				return nil, err
+			}
 			return body, nil
 		}
 	}
@@ -243,7 +257,14 @@ func requestBodyBytes(c *echo.Context) ([]byte, error) {
 	}
 	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	storeRequestBodySnapshot(c, bodyBytes)
+	if err := duplicateSelectorError(c); err != nil {
+		return nil, err
+	}
 	return bodyBytes, nil
+}
+
+func duplicateSelectorError(c *echo.Context) error {
+	return core.GetWhiteBoxPrompt(c.Request().Context()).DuplicateSelectorError()
 }
 
 func storeRequestBodySnapshot(c *echo.Context, bodyBytes []byte) {
