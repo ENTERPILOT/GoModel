@@ -260,6 +260,10 @@
   "audit_rewritten_title": "Rewritten",
   "audit_what_changed_title": "What changed",
   "audit_attempt_failed": "Provider attempt failed",
+  "audit_model_strip_requested": "requested",
+  "audit_model_strip_tried": "tried",
+  "audit_model_strip_virtual": "virtual",
+  "audit_model_strip_copy_label": "Copy {label} model {model}",
   "audit_provider_attempts": [
     {
       "declarations": ["input count", "local count_plural = count: plural"],

@@ -18,6 +18,16 @@
   const copyBodyState = createCopyState({
     logPrefix: "Failed to copy audit payload:",
   });
+  const copyModelState = createCopyState({
+    logPrefix: "Failed to copy model name:",
+  });
+
+  // The model-strip chips are buttons whose activation copies the full model
+  // name, so the complete value is reachable by keyboard and touch (the
+  // visual text may be ellipsized).
+  function copyModelValue(value) {
+    copyModelState.copy(value, (v) => v);
+  }
   const copyHeadersState = createCopyState({
     logPrefix: "Failed to copy audit payload:",
   });
@@ -62,19 +72,36 @@
   {#if pane.modelStrip}
     <div class="audit-pane-model-strip">
       {#if pane.modelStrip.source}
-        <span
+        <!-- Chip is a button so the full value is keyboard-focusable and
+             touch-operable: activate copies the complete model name. -->
+        <button
+          type="button"
           class="audit-pane-model-strip-chip"
           title={pane.modelStrip.source}
+          aria-label={m.audit_model_strip_copy_label({
+            label: pane.modelStrip.label,
+            model: pane.modelStrip.source,
+          })}
+          onclick={() => copyModelValue(pane.modelStrip.source)}
         >
           <span class="audit-pane-model-strip-label">{pane.modelStrip.label}</span>
           <span class="mono">{pane.modelStrip.source}</span>
-        </span>
+        </button>
         <span class="audit-pane-model-strip-arrow" aria-hidden="true">→</span>
       {/if}
-      <span class="audit-pane-model-strip-chip" title={pane.modelStrip.tried}>
-        <span class="audit-pane-model-strip-label">tried</span>
+      <button
+        type="button"
+        class="audit-pane-model-strip-chip"
+        title={pane.modelStrip.tried}
+        aria-label={m.audit_model_strip_copy_label({
+          label: m.audit_model_strip_tried(),
+          model: pane.modelStrip.tried,
+        })}
+        onclick={() => copyModelValue(pane.modelStrip.tried)}
+      >
+        <span class="audit-pane-model-strip-label">{m.audit_model_strip_tried()}</span>
         <span class="mono">{pane.modelStrip.tried}</span>
-      </span>
+      </button>
     </div>
   {/if}
   {#if pane.showErrorMessage}
@@ -196,7 +223,16 @@
     border: 1px solid var(--border);
     border-radius: 999px;
     background: var(--bg-surface);
+    font-family: inherit;
     font-size: 11px;
+    text-align: left;
+    appearance: none;
+    cursor: pointer;
+  }
+
+  .audit-pane-model-strip-chip:hover {
+    background: color-mix(in srgb, var(--text) 6%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--border) 60%, var(--text) 40%);
   }
 
   .audit-pane-model-strip-chip .mono {

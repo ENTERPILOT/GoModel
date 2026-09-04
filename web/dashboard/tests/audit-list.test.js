@@ -789,6 +789,21 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
     tried: "provider-a/qwen-35b",
   });
 
+  // Without any request-model value anywhere, no strip renders at all — a
+  // lone "tried" chip would read as if the request model were unknown by
+  // design, which it is not.
+  const noSource = {
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  const noSourcePanes = auditPanes(noSource);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-2").pane.modelStrip);
+
   // A single successful attempt collapses to the plain response tab, which
   // carries no model strip (the row's model column already names it).
   const single = {
