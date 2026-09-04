@@ -171,9 +171,17 @@ test("providerDocUrl links provider types with docs and stays empty otherwise", 
     providerDocUrl({ type: "sglang" }),
     "https://gomodel.enterpilot.io/docs/providers/sglang?utm_source=gomodel_dashboard",
   );
-  // Types without a provider-specific doc → no link (no icon).
-  assert.equal(providerDocUrl({ type: "openai" }), "");
-  assert.equal(providerDocUrl({ type: "ollama" }), "");
+  // Types registered but without a provider-specific doc page → fall back
+  // to the providers overview so every card still surfaces a help link.
+  assert.equal(
+    providerDocUrl({ type: "openai" }),
+    "https://gomodel.enterpilot.io/docs/providers/overview?utm_source=gomodel_dashboard",
+  );
+  assert.equal(
+    providerDocUrl({ type: "ollama" }),
+    "https://gomodel.enterpilot.io/docs/providers/overview?utm_source=gomodel_dashboard",
+  );
+  // Provider with no type at all → no link.
   assert.equal(providerDocUrl({ name: "mystery" }), "");
   assert.equal(providerDocUrl(null), "");
 });
