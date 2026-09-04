@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
@@ -50,6 +51,7 @@ type Handler struct {
 	runtimeSettings     *runtimesettings.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
+	pluginCatalog       *plugins.Catalog
 	liveBroker          *live.Broker
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
@@ -321,6 +323,13 @@ func WithQuotaTemplatesEnabled(enabled bool) Option {
 func WithTagging(service *tagging.Service) Option {
 	return func(h *Handler) {
 		h.tagging = service
+	}
+}
+
+// WithPluginCatalog enables the plugin listing endpoint.
+func WithPluginCatalog(catalog *plugins.Catalog) Option {
+	return func(h *Handler) {
+		h.pluginCatalog = catalog
 	}
 }
 

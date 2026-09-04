@@ -42,3 +42,6 @@
 # locally and by the CI `frontend` job; see docs/adr/0010-dashboard-built-in-ci.md.
 /web/dashboard/node_modules/
 /internal/admin/dashboard/static/dist/
+
+# Example plugin shared objects built by `make example-plugins`.
+/plugins/

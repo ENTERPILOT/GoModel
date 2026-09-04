@@ -28,6 +28,8 @@ func configModel(entry config.VirtualModelConfig) VirtualModel {
 	return VirtualModel{
 		Source:          entry.Source,
 		Strategy:        entry.Strategy,
+		StrategyPlugin:  entry.StrategyPlugin,
+		StrategyConfig:  cloneStrategyConfig(entry.StrategyConfig),
 		SessionAffinity: entry.SessionAffinity,
 		Failover:        entry.Failover,
 		Targets:         configTargets(entry),

@@ -7,6 +7,7 @@
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
+  import { phaseLabel } from "$lib/utils/pluginPhases.js";
   import { Pencil, Plus, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
@@ -67,6 +68,11 @@
                 <span class="settings-guardrail-type-pill"
                   >{store.typeLabel(guardrail.type)}</span
                 >
+                <div class="settings-guardrail-phases" aria-label={m.guardrails_phases()}>
+                  {#each store.phases(guardrail) as phase (phase)}
+                    <span class="settings-guardrail-phase">{phaseLabel(phase)}</span>
+                  {/each}
+                </div>
               </td>
               <td class="mono font-size-md">{guardrail.user_path || "—"}</td>
               <td>
@@ -128,6 +134,29 @@
     font-size: 12px;
     font-weight: 600;
     white-space: nowrap;
+  }
+
+  .settings-guardrail-phases {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .settings-guardrail-phase {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    line-height: 1.5;
   }
 
   .settings-guardrail-summary {

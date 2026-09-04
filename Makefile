@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check frontend frontend-check test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data
+.PHONY: all build run demo clean tidy mod-check frontend frontend-check test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
 
 all: frontend build
 
@@ -71,6 +71,29 @@ infra:
 # Docker Compose: full stack (GoModel + Prometheus; builds app image when needed)
 image: frontend
 	docker compose --profile app up -d
+
+# Shared-object plugin support (Go's plugin package) needs a cgo-enabled
+# binary; the default `build` and the release binaries are static. These
+# targets produce the cgo variants. Plugins must be built with the same Go
+# toolchain and flags as the binary that loads them: `gomodel plugin build`
+# copies the flags of the gomodel binary that runs it.
+build-plugins: frontend
+	CGO_ENABLED=1 go build -ldflags '$(LDFLAGS)' -o bin/gomodel-plugins ./cmd/gomodel
+
+# Docker image with plugin support (Dockerfile.plugins). Tag: gomodel:<version>-plugins.
+image-plugins: frontend
+	docker build -f Dockerfile.plugins -t gomodel:$(VERSION)-plugins -t gomodel:plugins \
+		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg DATE=$(DATE) .
+
+# Build every example plugin under examples/plugins into ./plugins/<name>.so
+# using the toolchain of this checkout (matches `make build-plugins`).
+example-plugins:
+	@mkdir -p plugins
+	@for dir in examples/plugins/*/; do \
+		name=$$(basename $$dir); \
+		echo "building $$dir -> plugins/$$name.so"; \
+		go run ./cmd/gomodel plugin build -o plugins/$$name.so $$dir || exit 1; \
+	done
 
 # Seed rolling demo telemetry and dashboard configuration into SQLite.
 # Usage: SQLITE_PATH=data/gomodel.db make seed-demo-data

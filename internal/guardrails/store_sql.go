@@ -21,6 +21,8 @@ var sqlTable = `CREATE TABLE IF NOT EXISTS guardrail_definitions (
 		description TEXT NOT NULL DEFAULT '',
 		user_path TEXT,
 		config ` + sqlx.TypeJSON + ` NOT NULL,
+		fail_mode TEXT NOT NULL DEFAULT '',
+		timeout_ms ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0,
 		created_at ` + sqlx.TypeInt64 + ` NOT NULL,
 		updated_at ` + sqlx.TypeInt64 + ` NOT NULL
 	)`
@@ -33,21 +35,25 @@ var sqlIndexes = []string{
 // sqlMigrations backfill columns added after the table's first release.
 var sqlMigrations = []string{
 	`ALTER TABLE guardrail_definitions ADD COLUMN user_path TEXT`,
+	`ALTER TABLE guardrail_definitions ADD COLUMN fail_mode TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE guardrail_definitions ADD COLUMN timeout_ms ` + sqlx.TypeInt64 + ` NOT NULL DEFAULT 0`,
 }
 
 const selectDefinitionColumns = `
-	SELECT name, type, description, user_path, config, created_at, updated_at
+	SELECT name, type, description, user_path, config, fail_mode, timeout_ms, created_at, updated_at
 	FROM guardrail_definitions
 `
 
 const upsertDefinitionSQL = `
-	INSERT INTO guardrail_definitions (name, type, description, user_path, config, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO guardrail_definitions (name, type, description, user_path, config, fail_mode, timeout_ms, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(name) DO UPDATE SET
 		type = excluded.type,
 		description = excluded.description,
 		user_path = excluded.user_path,
 		config = excluded.config,
+		fail_mode = excluded.fail_mode,
+		timeout_ms = excluded.timeout_ms,
 		updated_at = excluded.updated_at
 `
 
@@ -138,7 +144,7 @@ func (s *SQLStore) Close() error {
 // prepareDefinitionUpsert validates a definition and stamps its timestamps.
 // created_at is only set when absent, so a re-upsert keeps the original.
 func prepareDefinitionUpsert(definition Definition, now time.Time) (Definition, error) {
-	normalized, err := normalizeDefinition(definition)
+	normalized, err := normalizeDefinitionIdentity(definition)
 	if err != nil {
 		return Definition{}, err
 	}
@@ -157,6 +163,8 @@ func definitionUpsertArgs(definition Definition) []any {
 		definition.Description,
 		sqlutil.NullableString(definition.UserPath),
 		string(definition.Config),
+		definition.FailMode,
+		int64(definition.TimeoutMS),
 		definition.CreatedAt.Unix(),
 		definition.UpdatedAt.Unix(),
 	}
@@ -167,6 +175,8 @@ func scanSQLDefinition(scanner definitionScanner) (Definition, error) {
 		definition    Definition
 		userPath      *string
 		configJSON    []byte
+		failMode      string
+		timeoutMS     int64
 		createdAtUnix int64
 		updatedAtUnix int64
 	)
@@ -176,6 +186,8 @@ func scanSQLDefinition(scanner definitionScanner) (Definition, error) {
 		&definition.Description,
 		&userPath,
 		&configJSON,
+		&failMode,
+		&timeoutMS,
 		&createdAtUnix,
 		&updatedAtUnix,
 	); err != nil {
@@ -183,6 +195,8 @@ func scanSQLDefinition(scanner definitionScanner) (Definition, error) {
 	}
 	definition.UserPath = sqlutil.DerefTrimmed(userPath)
 	definition.Config = configJSON
+	definition.FailMode = failMode
+	definition.TimeoutMS = int(timeoutMS)
 	definition.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
 	definition.UpdatedAt = time.Unix(updatedAtUnix, 0).UTC()
 	return definition, nil

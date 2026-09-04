@@ -42,6 +42,11 @@ type e2eServerOptions struct {
 	failoverResolver server.RequestFailoverResolver
 	// mcpGateway enables the /mcp routes when set.
 	mcpGateway *mcpgateway.Service
+	// workflowPolicyResolver, translatedRequestPatcher and pluginChains wire
+	// persisted workflows and their plugin chains the way the app does.
+	workflowPolicyResolver   server.RequestWorkflowPolicyResolver
+	translatedRequestPatcher server.TranslatedRequestPatcher
+	pluginChains             server.PluginChainsResolver
 }
 
 type e2eUsageFixture struct {
@@ -101,6 +106,11 @@ func setupE2EServer(t *testing.T, opts e2eServerOptions) *server.Server {
 		ModelResolver:         opts.modelResolver,
 		FailoverResolver:      opts.failoverResolver,
 		AdminEndpointsEnabled: opts.adminEndpointsEnabled,
+	}
+	if opts.workflowPolicyResolver != nil {
+		cfg.WorkflowPolicyResolver = opts.workflowPolicyResolver
+		cfg.TranslatedRequestPatcher = opts.translatedRequestPatcher
+		cfg.PluginChainsResolver = opts.pluginChains
 	}
 	if opts.mcpGateway != nil {
 		cfg.MCPEnabled = true

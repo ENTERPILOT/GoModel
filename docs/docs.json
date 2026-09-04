@@ -144,6 +144,7 @@
                             "advanced/images-api",
                             "advanced/usage-api",
                             "advanced/guardrails",
+                            "advanced/plugins",
                             "advanced/workflows",
                             "advanced/admin-endpoints"
                         ]

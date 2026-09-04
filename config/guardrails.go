@@ -23,7 +23,9 @@ type GuardrailRuleConfig struct {
 	// Name is a unique identifier for this guardrail instance (used in logs and errors)
 	Name string `yaml:"name"`
 
-	// Type selects the guardrail implementation: "system_prompt" or "llm_based_altering"
+	// Type selects the plugin the instance is built from: a built-in such as
+	// "system_prompt", "llm_based_altering", "string_replace", "header_edit",
+	// "llm_judge", or the manifest name of a loaded plugin.
 	Type string `yaml:"type"`
 
 	// UserPath scopes internal auxiliary guardrail requests for workflow
@@ -34,6 +36,26 @@ type GuardrailRuleConfig struct {
 	// Guardrails with the same order run in parallel; different orders run sequentially.
 	// Default: 0
 	Order int `yaml:"order"`
+
+	// Phase selects where the default workflow runs this instance:
+	// "prompt" (before the provider call), "response" (on the complete
+	// response), or "stream" (per streamed event).
+	// Default: "prompt"
+	Phase string `yaml:"phase"`
+
+	// Config is the plugin's own configuration, validated against the
+	// plugin's config schema (see GET /admin/guardrails/types). The typed
+	// system_prompt and llm_based_altering blocks below are folded into it.
+	Config map[string]any `yaml:"config"`
+
+	// FailMode selects what happens when the instance errors or times out:
+	// "closed" rejects the request with HTTP 500, "open" continues without it.
+	// Default: empty (closed for prompt/response/stream phases)
+	FailMode string `yaml:"fail_mode"`
+
+	// TimeoutMS bounds every hook call of the instance in milliseconds.
+	// Default: 0 (no per-instance timeout)
+	TimeoutMS int `yaml:"timeout_ms"`
 
 	// SystemPrompt holds settings when Type is "system_prompt"
 	SystemPrompt SystemPromptSettings `yaml:"system_prompt"`

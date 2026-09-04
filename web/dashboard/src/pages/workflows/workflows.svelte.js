@@ -9,14 +9,15 @@ import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
+import { normalizeWorkflowPhase } from "$lib/utils/pluginPhases.js";
 import {
   defaultWorkflowForm,
   emptyHydratedScope,
   defaultWorkflowGuardrailStep,
-  parseWorkflowGuardrailStep,
   workflowNormalizedFeatures,
   workflowSourceFeatures,
   workflowSourceGuardrails,
+  workflowGuardrailRefOptions,
   workflowScopeProviderValue,
   workflowProviderOptions,
   workflowModelOptions,
@@ -100,6 +101,12 @@ class WorkflowsStore {
     return workflowPreview(this.form, this.featureCaps());
   }
 
+  // refOptions lists the guardrail instances a step row may pick for its
+  // phase, keeping the row's current ref selectable.
+  refOptions(phase, current) {
+    return workflowGuardrailRefOptions(this.guardrailRefs, phase, current);
+  }
+
   // ─── Editor form ───
 
   openCreate(workflow) {
@@ -126,16 +133,8 @@ class WorkflowsStore {
       workflow.workflow_payload && workflow.workflow_payload.features
         ? workflowNormalizedFeatures(workflow.workflow_payload.features)
         : workflowSourceFeatures(workflow, this.featureCaps());
-    const storedGuardrails = Array.isArray(
-      workflow.workflow_payload && workflow.workflow_payload.guardrails,
-    )
-      ? workflow.workflow_payload.guardrails
-          .map((step) => ({
-            ref: String((step && step.ref) || "").trim(),
-            step: parseWorkflowGuardrailStep(step && step.step),
-          }))
-          .filter((step) => Number.isInteger(step.step) && step.step >= 0)
-      : workflowSourceGuardrails(workflow);
+    // Accepts both v2 `steps` and legacy `guardrails` (mapped to prompt).
+    const storedGuardrails = workflowSourceGuardrails(workflow);
     this.form = {
       scope_provider: workflowScopeProviderValue(workflow.scope),
       scope_model: String((workflow.scope && workflow.scope.scope_model) || ""),
@@ -152,6 +151,7 @@ class WorkflowsStore {
       },
       guardrails: storedGuardrails.map((step) => ({
         ref: String((step && step.ref) || ""),
+        phase: normalizeWorkflowPhase(step && step.phase),
         step: Number.isFinite(step && step.step) ? step.step : 10,
       })),
     };
@@ -191,6 +191,26 @@ class WorkflowsStore {
   removeGuardrailStep(index) {
     if (!Array.isArray(this.form.guardrails)) return;
     this.form.guardrails.splice(index, 1);
+  }
+
+  // setGuardrailStepPhase switches a row's phase and clears a ref that is
+  // known not to support it, so the select shows a valid choice again. A ref
+  // the list does not know (unregistered, typed by hand) is kept.
+  setGuardrailStepPhase(index, phase) {
+    const step = Array.isArray(this.form.guardrails) ? this.form.guardrails[index] : null;
+    if (!step) return;
+    step.phase = normalizeWorkflowPhase(phase);
+    const ref = String(step.ref || "").trim();
+    if (!ref) return;
+    const known = workflowGuardrailRefOptions(this.guardrailRefs, step.phase, "").some(
+      (option) => option.value === ref,
+    );
+    const registered = (this.guardrailRefs || []).some((entry) =>
+      typeof entry === "string" ? entry.trim() === ref : entry && entry.name === ref,
+    );
+    if (registered && !known) {
+      step.ref = "";
+    }
   }
 
   buildRequest() {

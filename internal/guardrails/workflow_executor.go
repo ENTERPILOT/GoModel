@@ -4,73 +4,95 @@ import (
 	"context"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/exchange"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
-// ContextPipelineResolver resolves a request-scoped guardrails pipeline.
-type ContextPipelineResolver interface {
-	PipelineForContext(ctx context.Context) *Pipeline
+// ContextChainsResolver resolves the request-scoped plugin chains.
+type ContextChainsResolver interface {
+	ChainsForContext(ctx context.Context) *plugins.Chains
 }
 
-// WorkflowRequestPatcher applies the guardrails pipeline selected by the current workflow.
+// WorkflowRequestPatcher runs the prompt chain selected by the current
+// workflow over translated requests.
 type WorkflowRequestPatcher struct {
-	resolver ContextPipelineResolver
+	resolver ContextChainsResolver
 }
 
 // NewWorkflowRequestPatcher creates a translated-request patcher that resolves
-// its pipeline from the request context on each call.
-func NewWorkflowRequestPatcher(resolver ContextPipelineResolver) *WorkflowRequestPatcher {
+// its chains from the request context on each call.
+func NewWorkflowRequestPatcher(resolver ContextChainsResolver) *WorkflowRequestPatcher {
 	return &WorkflowRequestPatcher{resolver: resolver}
 }
 
-// PatchChatRequest applies the request-scoped guardrails pipeline to a translated chat request.
+// PatchChatRequest runs the prompt chain over a translated chat request.
 func (p *WorkflowRequestPatcher) PatchChatRequest(ctx context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
-	return processGuardedChat(ctx, p.pipeline(ctx), req)
+	return processGuardedChat(ctx, p.chain(ctx), req)
 }
 
-// PatchResponsesRequest applies the request-scoped guardrails pipeline to a translated responses request.
+// PatchResponsesRequest runs the prompt chain over a translated responses request.
 func (p *WorkflowRequestPatcher) PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
-	return processGuardedResponses(ctx, p.pipeline(ctx), req)
+	return processGuardedResponses(ctx, p.chain(ctx), req)
 }
 
-func (p *WorkflowRequestPatcher) pipeline(ctx context.Context) *Pipeline {
-	if p == nil || p.resolver == nil {
+func (p *WorkflowRequestPatcher) chain(ctx context.Context) *plugins.Chain {
+	return promptChain(p.resolver, ctx)
+}
+
+func promptChain(resolver ContextChainsResolver, ctx context.Context) *plugins.Chain {
+	if resolver == nil {
 		return nil
 	}
-	return p.resolver.PipelineForContext(ctx)
-}
-
-// WorkflowBatchPreparer applies the guardrails pipeline selected by the current workflow.
-type WorkflowBatchPreparer struct {
-	provider core.RoutableProvider
-	resolver ContextPipelineResolver
-}
-
-// NewWorkflowBatchPreparer creates a native-batch preparer that resolves its pipeline per request.
-func NewWorkflowBatchPreparer(provider core.RoutableProvider, resolver ContextPipelineResolver) *WorkflowBatchPreparer {
-	return &WorkflowBatchPreparer{
-		provider: provider,
-		resolver: resolver,
-	}
-}
-
-// PrepareBatchRequest applies the request-scoped guardrails pipeline to native batch items.
-func (p *WorkflowBatchPreparer) PrepareBatchRequest(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchRewriteResult, error) {
-	return processGuardedBatchRequest(ctx, providerType, req, p.pipeline(ctx), p.batchFileTransport())
-}
-
-func (p *WorkflowBatchPreparer) batchFileTransport() core.BatchFileTransport {
-	if p == nil || p.provider == nil {
+	chains := resolver.ChainsForContext(ctx)
+	if chains == nil {
 		return nil
 	}
-	if files, ok := p.provider.(core.NativeFileRoutableProvider); ok {
-		return files
-	}
-	return nil
+	return chains.Prompt
 }
 
-func (p *WorkflowBatchPreparer) pipeline(ctx context.Context) *Pipeline {
-	if p == nil || p.resolver == nil {
-		return nil
+func processGuardedChat(ctx context.Context, chain *plugins.Chain, req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req == nil {
+		return nil, nil
 	}
-	return p.resolver.PipelineForContext(ctx)
+	return processGuarded(ctx, chain, req, "chat", exchange.FromChatRequest, exchange.ApplyToChatRequest)
+}
+
+func processGuardedResponses(ctx context.Context, chain *plugins.Chain, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
+	if req == nil {
+		return nil, nil
+	}
+	return processGuarded(ctx, chain, req, "responses", exchange.FromResponsesRequest, exchange.ApplyToResponsesRequest)
+}
+
+// processGuarded maps req to a prompt, runs the chain and applies the edits
+// back. The request is returned as-is when nothing changed.
+func processGuarded[Req any](
+	ctx context.Context,
+	chain *plugins.Chain,
+	req Req,
+	kind string,
+	from func(Req) (*pluginapi.Prompt, error),
+	apply func(Req, *pluginapi.Prompt) (Req, error),
+) (Req, error) {
+	var zero Req
+	if chain.Empty() {
+		return req, nil
+	}
+	prompt, err := from(req)
+	if err != nil {
+		return zero, core.NewInvalidRequestError("invalid "+kind+" request for guardrails", err)
+	}
+	edited, err := newPromptRun(ctx, chain).run(ctx, prompt)
+	if err != nil {
+		return zero, err
+	}
+	if !edited {
+		return req, nil
+	}
+	applied, err := apply(req, prompt)
+	if err != nil {
+		return zero, core.NewInvalidRequestError("guardrails produced an invalid "+kind+" request: "+err.Error(), err)
+	}
+	return applied, nil
 }

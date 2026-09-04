@@ -1,8 +1,29 @@
 # Plugins and Guardrails: Architecture Proposal
 
-Status: draft for review. Not yet an ADR; once agreed, the decisions in
-sections 3 to 7 become ADR-0012 and the phases in section 10 become the
-implementation tickets.
+Status: implemented (2026-09-04). The decisions are recorded in
+`docs/adr/0012-plugin-system.md`; user documentation lives in
+`docs/advanced/plugins.mdx` and `docs/advanced/guardrails.mdx`. This document
+is kept as the design rationale. Where the implementation deviates from the
+text below, the code and the ADR win:
+
+- `pluginapi` is a package in the main module, not a separate module. A
+  `.so` therefore pins `github.com/enterpilot/gomodel` at the host version;
+  splitting it into its own module remains a tag-time option for v1.
+- Instances live only in `guardrails.rules[]` and the dashboard; the
+  `plugins:` section only loads `.so` files (`search_paths`, `load[]` with
+  `file` and `sha256`). Per-instance timeouts are `timeout_ms`; the
+  `concurrent` step flag (LiteLLM-style during-call) is not implemented.
+- `request` and `complete` hooks are part of the contract but not called yet;
+  `ext.RequestRewriter` stays the request-phase mechanism.
+- `Headers.Upstream` is collected but not forwarded; `Host.History` is
+  unavailable; `Meta.Cache.PlannedPrefixMessages` is not populated; the
+  response phase does not run on response-cache hits.
+- `gomodel plugin build` mirrors the host's build flags instead of forcing
+  `-trimpath` (a mismatch either way is refused by `plugin.Open`), and stamps
+  build info through a `GoModelBuildInfo` symbol in the plugin's main package.
+- Route strategies receive `RouteRequest.Prompt == nil` in this version and
+  take instance-scoped settings from a guardrail definition named after the
+  plugin.
 
 ## 1. Problem
 

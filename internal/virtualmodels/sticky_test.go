@@ -30,7 +30,7 @@ func upsertBalancedVM(t *testing.T, svc *Service, strategy string, affinity *boo
 // resolveSession resolves source once with a session id and returns the chosen target.
 func resolveSession(t *testing.T, svc *Service, source, sessionID string) string {
 	t.Helper()
-	resolution, _, err := svc.resolveRequested(core.NewRequestedModelSelector(source, ""), "", false, sessionID)
+	resolution, _, err := svc.resolveRequested(context.Background(), core.NewRequestedModelSelector(source, ""), "", false, sessionID)
 	if err != nil {
 		t.Fatalf("resolveRequested() error = %v", err)
 	}
@@ -228,7 +228,7 @@ func TestSticky_ConcurrentFirstRequestsAgree(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range workers {
 		wg.Go(func() {
-			resolution, _, err := svc.resolveRequested(
+			resolution, _, err := svc.resolveRequested(context.Background(),
 				core.NewRequestedModelSelector("smart", ""), "", false, "sess-a")
 			if err != nil {
 				errs[i] = err

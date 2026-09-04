@@ -12,14 +12,13 @@ import {
   defaultGuardrailForm,
   defaultGuardrailType,
   filterGuardrails,
-  guardrailArrayFieldSelected,
-  guardrailFieldValue,
+  guardrailEditForm,
+  guardrailPhases,
   guardrailTypeFields,
   guardrailTypeLabel,
   normalizeGuardrailConfig,
+  parseGuardrailTimeoutMs,
   resolvedGuardrailType,
-  setGuardrailFieldValue,
-  toggleGuardrailArrayValue,
 } from "./guardrails-logic.js";
 
 class GuardrailsStore {
@@ -43,6 +42,8 @@ class GuardrailsStore {
     description: "",
     user_path: "",
     config: {},
+    fail_mode: "",
+    timeout_ms: "",
   });
 
   get filtered() {
@@ -57,35 +58,14 @@ class GuardrailsStore {
     return guardrailTypeFields(this.types, type);
   }
 
-  fieldValue(field) {
-    return guardrailFieldValue(this.form && this.form.config, field);
+  phases(guardrail) {
+    return guardrailPhases(this.types, guardrail);
   }
 
-  setFieldValue(field, value) {
-    this.form = {
-      ...this.form,
-      config: setGuardrailFieldValue(this.form.config, field, value),
-    };
-  }
-
-  arrayFieldSelected(field, optionValue) {
-    return guardrailArrayFieldSelected(
-      this.form && this.form.config,
-      field,
-      optionValue,
-    );
-  }
-
-  toggleArrayFieldValue(field, optionValue, checked) {
-    this.form = {
-      ...this.form,
-      config: toggleGuardrailArrayValue(
-        this.form.config,
-        field,
-        optionValue,
-        checked,
-      ),
-    };
+  // setConfig replaces the schema-driven config (SchemaFields emits a new
+  // object per edit).
+  setConfig(config) {
+    this.form = { ...this.form, config };
   }
 
   openCreate() {
@@ -97,24 +77,10 @@ class GuardrailsStore {
   }
 
   openEdit(guardrail) {
-    const resolvedType = resolvedGuardrailType(
-      this.types,
-      guardrail && guardrail.type,
-    );
     this.formMode = "edit";
     this.formOriginalName = String((guardrail && guardrail.name) || "").trim();
     this.error = "";
-    this.form = {
-      name: this.formOriginalName,
-      type: resolvedType,
-      description: String((guardrail && guardrail.description) || "").trim(),
-      user_path: String((guardrail && guardrail.user_path) || "").trim(),
-      config: normalizeGuardrailConfig(
-        this.types,
-        guardrail && guardrail.config,
-        resolvedType,
-      ),
-    };
+    this.form = guardrailEditForm(this.types, guardrail);
     this.formOpen = true;
   }
 
@@ -211,6 +177,10 @@ class GuardrailsStore {
     }
     if (!type) {
       this.error = m.guardrails_type_required();
+      return;
+    }
+    if (Number.isNaN(parseGuardrailTimeoutMs(this.form.timeout_ms))) {
+      this.error = m.guardrails_timeout_invalid();
       return;
     }
 

@@ -495,6 +495,22 @@ Returns all registered models with both provider type and configured provider na
 
 This differs from the standard `/v1/models` endpoint: the admin version includes both `provider_type` and `provider_name` for each model, making it useful for understanding both the provider family and the concrete configured provider instance that serves the model.
 
+### Plugin, guardrail, and workflow endpoints
+
+| Method | Path | Description |
+| ------ | ---- | ----------- |
+| `GET` | `/admin/plugins` | Every loaded plugin type: manifest, hook kinds, config schema, source, health |
+| `GET` | `/admin/guardrails/types` | Guardrail types with their editor schema, `phases`, `source`, and `mutates` |
+| `GET` | `/admin/guardrails` | Guardrail instances with `fail_mode`, `timeout_ms`, `phases`, and `summary` |
+| `PUT` | `/admin/guardrails` | Create or update one instance (accepts `fail_mode` and `timeout_ms`) |
+| `DELETE` | `/admin/guardrails` | Delete one instance (refused while an active workflow references it) |
+| `GET` | `/admin/workflows/guardrails` | Instances available to workflow steps, with the `phases` each supports |
+| `GET` | `/admin/workflows` | Active workflows; views carry per-phase `chain_hashes` |
+| `POST` | `/admin/workflows` | Create a workflow version (`schema_version: 2` with `steps[].phase`; version 1 still accepted) |
+
+Response shapes are documented in [Plugins](/advanced/plugins#admin-endpoints)
+and [Workflows](/advanced/workflows#guardrail-steps).
+
 ## Admin Dashboard
 
 The dashboard is a server-rendered HTML page embedded in the GoModel binary. Access it at:

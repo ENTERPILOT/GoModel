@@ -25,6 +25,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -63,6 +64,7 @@ type App struct {
 	authKeys            *authkeys.Result
 	users               *users.Result
 	guardrails          *guardrails.Result
+	pluginCatalog       *plugins.Catalog
 	workflows           *workflows.Result
 	live                *live.Broker
 	server              *server.Server

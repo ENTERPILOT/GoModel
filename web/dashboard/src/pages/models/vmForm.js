@@ -3,6 +3,7 @@
 // relative imports keep it loadable outside Vite.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { cloneSchemaConfig } from "../../lib/utils/schemaFields.js";
 import {
   GLOBAL_OVERRIDE_SELECTOR,
   qualifiedModelName,
@@ -65,6 +66,10 @@ export function defaultVirtualModelForm() {
     target_weight: 1,
     targets: [],
     strategy: "round_robin",
+    // A "plugin" strategy names its routing plugin and carries that plugin's
+    // route-scoped settings (see GET /admin/plugins route_fields).
+    strategy_plugin: "",
+    strategy_config: {},
     session_affinity: true,
     failover: true,
     user_paths: "",
@@ -72,6 +77,24 @@ export function defaultVirtualModelForm() {
     slowdown: "",
     enabled: true,
   };
+}
+
+// vmFormPluginStrategy reports whether the form routes through a plugin.
+export function vmFormPluginStrategy(form) {
+  return String((form && form.strategy) || "").toLowerCase() === "plugin";
+}
+
+// pluginStrategyFields returns the strategy_plugin/strategy_config pair to
+// persist for a plugin strategy; an empty config is omitted.
+function pluginStrategyFields(source) {
+  const fields = {
+    strategy_plugin: String((source && source.strategy_plugin) || "").trim(),
+  };
+  const config = cloneSchemaConfig(source && source.strategy_config);
+  if (Object.keys(config).length > 0) {
+    fields.strategy_config = config;
+  }
+  return fields;
 }
 
 export function vmFormHasPrimaryTarget(form) {
@@ -230,7 +253,7 @@ export function vmRoutingSummary(form, sourceIsModel) {
   );
   if (!source || targets.length === 0) return { text: "", replaces: false };
 
-  const strategy = strategyLabel(form.strategy);
+  const strategy = strategyLabel(form.strategy, form.strategy_plugin);
   const failover = isFailoverStrategy(form && form.strategy);
   const others = targets.filter((target) => target !== source);
   const selfFirst = targets[0] === source;
@@ -406,6 +429,9 @@ export function buildVirtualModelSavePayload(form, originalSource, mode) {
         ? targets
         : targets.map(weightless);
       payload.strategy = strategy;
+      if (vmFormPluginStrategy(form)) {
+        Object.assign(payload, pluginStrategyFields(form));
+      }
       // Affinity defaults to on server-side; only an explicit opt-out is sent.
       if (form && form.session_affinity === false) {
         payload.session_affinity = false;
@@ -444,6 +470,9 @@ export function buildAliasTogglePayload(alias) {
   const lbTargets = Array.isArray(alias.targets) ? alias.targets : [];
   if (lbTargets.length > 1) {
     payload.strategy = alias.strategy || "round_robin";
+    if (vmFormPluginStrategy(alias)) {
+      Object.assign(payload, pluginStrategyFields(alias));
+    }
     if (alias.session_affinity === false) {
       payload.session_affinity = false;
     }

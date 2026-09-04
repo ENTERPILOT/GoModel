@@ -1351,7 +1351,7 @@
   "workflows_model_invalid": "Wybierz zarejestrowany model dla wybranego dostawcy.",
   "workflows_guardrail_ref_required": "Każdy krok Guardrail wymaga referencji Guardrail.",
   "workflows_guardrail_step_invalid": "Każdy krok Guardrail musi mieć nieujemny całkowity numer.",
-  "workflows_guardrail_ref_unique": "Każda referencja Guardrail może wystąpić tylko raz w Workflow.",
+  "workflows_guardrail_ref_unique": "Każda referencja Guardrail może wystąpić tylko raz w danej fazie.",
   "guardrails_unknown": "Nieznany",
   "guardrails_name_required": "Nazwa jest wymagana.",
   "guardrails_type_required": "Typ jest wymagany.",
@@ -1533,5 +1533,61 @@
   "models_source_conflict": "Model wirtualny dla „{source}” już istnieje. Wybierz inne Źródło.",
   "models_mask_rename_confirm": "Model „{name}” już istnieje. Zmiana nazwy przesłoni go na liście. Kontynuować?",
   "models_remove_policy_confirm": "Usunąć model wirtualny dla „{source}”? Przywróci to zachowanie dziedziczone/domyślne.",
-  "models_pricing_remove_confirm": "Usunąć nadpisanie cen modelu dla „{selector}”?"
+  "models_pricing_remove_confirm": "Usunąć nadpisanie cen modelu dla „{selector}”?",
+  "guardrails_phases": "Fazy",
+  "guardrails_advanced": "Zaawansowane",
+  "guardrails_advanced_help": "Tryb awarii i limit czasu dotyczą tej instancji w każdym Workflow, który się do niej odwołuje.",
+  "guardrails_fail_mode": "Tryb awarii",
+  "guardrails_fail_mode_default": "Domyślny",
+  "guardrails_fail_mode_closed": "Zamknięty — odrzuć request, gdy Guardrail zawiedzie",
+  "guardrails_fail_mode_open": "Otwarty — przepuść request, gdy Guardrail zawiedzie",
+  "guardrails_timeout_ms": "Limit czasu (ms)",
+  "guardrails_timeout_placeholder": "Domyślny",
+  "guardrails_timeout_help": "Zostaw puste, aby użyć wartości domyślnej. Przekroczenie limitu czasu obsługuje tryb awarii.",
+  "guardrails_timeout_invalid": "Limit czasu musi być liczbą całkowitą milisekund (0 lub więcej).",
+  "schema_fields_secret_stored": "Wartość jest zapisana. Zostaw bez zmian, aby ją zachować, albo wpisz nową, aby ją zastąpić.",
+  "schema_fields_model_placeholder": "provider/model lub alias",
+  "plugins_title": "Wtyczki",
+  "plugins_help": "Wtyczki załadowane przez bramkę. Dodają typy Guardrails i strategie routingu; wbudowane są częścią GoModel, a wtyczki plikowe są ładowane ze skonfigurowanego katalogu wtyczek.",
+  "plugins_count": [
+    {
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
+      "match": {
+        "count_plural=one": "{count} wtyczka",
+        "count_plural=few": "{count} wtyczki",
+        "count_plural=many": "{count} wtyczek",
+        "count_plural=*": "{count} wtyczki"
+      }
+    }
+  ],
+  "plugins_show": "Pokaż wtyczki",
+  "plugins_hide": "Ukryj wtyczki",
+  "plugins_name": "Nazwa",
+  "plugins_version": "Wersja",
+  "plugins_kinds": "Hooki",
+  "plugins_source": "Źródło",
+  "plugins_health": "Stan",
+  "plugins_source_builtin": "Wbudowana",
+  "plugins_health_ok": "OK",
+  "plugins_health_error": "Błąd",
+  "plugins_phase_request": "Request",
+  "plugins_phase_prompt": "Prompt",
+  "plugins_phase_response": "Odpowiedź",
+  "plugins_phase_stream": "Strumień",
+  "plugins_phase_route": "Routing",
+  "plugins_phase_complete": "Zakończenie",
+  "workflows_phase": "Faza",
+  "workflows_phase_help": "Kroki fazy Prompt działają przed wywołaniem modelu, kroki fazy Odpowiedź na gotowej odpowiedzi, a kroki fazy Strumień na każdym fragmencie strumienia. Guardrail może wystąpić raz w każdej fazie.",
+  "workflows_select_guardrail": "Wybierz Guardrail…",
+  "workflows_no_phase_guardrails": "Żaden zarejestrowany Guardrail nie obsługuje fazy {phase}.",
+  "workflows_guardrail_phase_invalid": "Każdy krok Guardrail musi używać fazy prompt, response lub stream.",
+  "models_strategy_plugin": "{name} (wtyczka routingu)",
+  "models_strategy_name_plugin": "Wtyczka",
+  "models_strategy_plugin_fields_help": "Ustawienia wtyczki routingu {name}, zapisywane razem z tym modelem wirtualnym."
 }

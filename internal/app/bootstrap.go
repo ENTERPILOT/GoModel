@@ -12,6 +12,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/httpclient"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/providers/health"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/server"
@@ -35,6 +36,7 @@ type bootstrap struct {
 	// Decided in the prologue, read by several phases.
 	quotaTemplatesEnabled bool
 	routeSelector         ext.RouteSelector
+	routeStrategies       *plugins.RouteResolver
 	requestHealth         *health.Tracker
 
 	// Produced by the catalog phases for the server phases.
@@ -46,6 +48,7 @@ type bootstrap struct {
 	// Produced by the server phases.
 	provider                 core.RoutableProvider
 	translatedRequestPatcher server.TranslatedRequestPatcher
+	pluginChains             server.PluginChainsResolver
 	batchRequestPreparer     server.BatchRequestPreparer
 	swaggerEnabled           bool
 	serverUsageLogger        usage.LoggerInterface

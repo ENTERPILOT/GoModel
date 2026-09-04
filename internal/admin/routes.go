@@ -98,6 +98,7 @@ func (h *Handler) RegisterRoutes(g RouteRegistrar) {
 	g.PUT("/users", h.UpsertUser)
 	g.DELETE("/users", h.DeleteUser)
 
+	g.GET("/plugins", h.ListPlugins, global)
 	g.GET("/guardrails/types", h.ListGuardrailTypes, global)
 	g.GET("/guardrails", h.ListGuardrails, global)
 	g.PUT("/guardrails", h.UpsertGuardrail, global)

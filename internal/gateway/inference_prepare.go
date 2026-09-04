@@ -77,6 +77,12 @@ func prepareTranslated[Req any, Prepared any](
 	model, provider := spec.selector(req)
 	ctx, req, workflow, err := prepareTranslatedRequest(o, ctx, req, meta, model, provider, spec.patch(o), spec.valid, spec.patchNilMessage)
 	if err != nil {
+		if workflow != nil {
+			// A patch-phase error (a guardrail block or short-circuit) still
+			// reports the resolved workflow so the caller can render the
+			// outcome with routing context.
+			return spec.build(ctx, req, workflow), err
+		}
 		return zero, err
 	}
 	return spec.build(ctx, req, workflow), nil
@@ -104,7 +110,7 @@ func prepareTranslatedRequest[Req any](
 		req, err = patch(ctx, req)
 		if err != nil {
 			var zero Req
-			return ctx, zero, nil, err
+			return ctx, zero, workflow, err
 		}
 		if valid != nil && !valid(req) {
 			var zero Req

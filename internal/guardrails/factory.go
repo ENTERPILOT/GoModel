@@ -9,6 +9,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
@@ -48,26 +49,17 @@ func (r *Result) Close() error {
 	return r.closeErr
 }
 
-// New creates a guardrails subsystem using an existing storage connection.
-func New(ctx context.Context, shared storage.Storage, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
+// New creates a guardrails subsystem using an existing storage connection,
+// building instances from the plugin catalog.
+func New(ctx context.Context, shared storage.Storage, refreshInterval time.Duration, catalog *plugins.Catalog, deps plugins.HostDeps) (*Result, error) {
 	if shared == nil {
 		return nil, fmt.Errorf("shared storage is required")
 	}
-	if err := validateExecutorCount(executors); err != nil {
-		return nil, err
-	}
-	return newResult(ctx, shared, refreshInterval, executors...)
-}
-
-func newResult(ctx context.Context, storeConn storage.Storage, refreshInterval time.Duration, executors ...ChatCompletionExecutor) (*Result, error) {
-	if err := validateExecutorCount(executors); err != nil {
-		return nil, err
-	}
-	store, err := createStore(ctx, storeConn)
+	store, err := createStore(ctx, shared)
 	if err != nil {
 		return nil, err
 	}
-	service, err := NewService(store, executors...)
+	service, err := NewService(store, catalog, deps)
 	if err != nil {
 		return nil, err
 	}
@@ -135,11 +127,4 @@ func startGuardrailRefreshLoop(parent context.Context, service *Service, interva
 			<-done
 		})
 	}, errs
-}
-
-func validateExecutorCount(executors []ChatCompletionExecutor) error {
-	if len(executors) > 1 {
-		return fmt.Errorf("only one ChatCompletionExecutor is supported")
-	}
-	return nil
 }

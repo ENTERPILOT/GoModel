@@ -81,6 +81,9 @@ type RequestDialect string
 const (
 	RequestOriginExternal  RequestOrigin = "external"
 	RequestOriginGuardrail RequestOrigin = "guardrail"
+	// RequestOriginPlugin marks gateway-internal inference issued by a plugin
+	// instance through its Host (for example an LLM-based guardrail).
+	RequestOriginPlugin RequestOrigin = "plugin"
 
 	RequestDialectAnthropicMessages RequestDialect = "anthropic_messages"
 )

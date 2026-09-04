@@ -65,7 +65,7 @@ models:
 #     target: anthropic/claude-sonnet-4-6
 #     slowdown: 0.5 # add 50%; use 0 to disable inherited slowdown (active range: 0.1-10)
 #   - source: smart # weighted round-robin load balancer
-#     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin)
+#     strategy: round_robin # round_robin (default) | cost | failover | adaptive (uses a routing extension when registered; otherwise falls back to round_robin) | plugin (see smart-router below)
 #     targets:
 #       - { model: openai/gpt-4o, weight: 2 }
 #       - { model: anthropic/claude-sonnet-4-6 }
@@ -86,6 +86,16 @@ models:
 #       - { model: gpt-4o }
 #       - { model: azure/gpt-4o }
 #       - { model: gemini/gemini-2.5-pro }
+#   - source: smart-router # plugin: a routing-strategy plugin picks the target; weights are ignored
+#     strategy: plugin
+#     strategy_plugin: cheapest_healthy # built in; GET /admin/plugins lists loaded plugins with kind "route"
+#     strategy_config: # the plugin's route_fields, validated at startup; defaults apply when omitted
+#       prefer: cheapest # cheapest | fastest
+#       max_error_rate: 0.2
+#     targets:
+#       - { model: openai/gpt-4o }
+#       - { model: anthropic/claude-sonnet-4-6 }
+#       - { model: groq/llama-3.3-70b }
 
 # Users as infrastructure-as-code: per user-path model allowlists (groups and
 # users are the user paths behind your API keys). A node with no allowed_models
@@ -318,15 +328,33 @@ guardrails:
   enabled: false
   enable_for_batch_processing: false
   rules:
-    # Each entry is a guardrail instance. Multiple instances of the same type are supported.
-    # Guardrails with the same "order" run in parallel; different orders run sequentially.
+    # Each entry is a guardrail instance built from a plugin (`type`). Built-in
+    # plugins: system_prompt, llm_based_altering, string_replace, header_edit,
+    # llm_judge; loaded .so plugins are referenced by their manifest name.
+    # Instances are seeded into the guardrails store and referenced by the
+    # default workflow at `order` in `phase` (prompt | response | stream,
+    # default prompt). Guardrails with the same "order" run in parallel;
+    # different orders run sequentially. `config` is validated against the
+    # plugin's schema (GET /admin/guardrails/types). `fail_mode` (closed |
+    # open, default closed) and `timeout_ms` (default 0 = none) bound failures.
 
     - name: "safety-prompt"
       type: "system_prompt"
       order: 0
-      system_prompt:
+      system_prompt: # typed shorthand; equivalent to config: {mode: ..., content: ...}
         mode: "decorator" # "inject", "override", or "decorator"
         content: "Always be safe and respectful."
+
+    # Example: redact a pattern from responses (response phase, generic config).
+    # - name: "mask-keys"
+    #   type: "string_replace"
+    #   phase: "response"
+    #   order: 10
+    #   fail_mode: "open"
+    #   config:
+    #     mode: "regex"                 # literal (default) | regex
+    #     rules: |                      # one "find => replace" per line (a YAML list also works)
+    #       sk-[A-Za-z0-9]{20,} => [redacted]
 
     # Example: a second system_prompt instance running at the same order (parallel)
     # - name: "compliance-prompt"
@@ -343,12 +371,6 @@ guardrails:
     #   system_prompt:
     #     mode: "decorator"
     #     content: "Соблюдайте все правила безопасности."
-    # - name: "安全検査"
-    #   type: "system_prompt"
-    #   order: 1
-    #   system_prompt:
-    #     mode: "inject"
-    #     content: "Follow safety guidelines."
 
     # Example: rewrite user messages with an auxiliary model before the main call.
     # The default prompt is a LiteLLM-derived anonymization prompt; override it to
@@ -357,12 +379,23 @@ guardrails:
     #   type: "llm_based_altering"
     #   user_path: "/team/privacy" # optional base path for internal rewrite calls and audit logs
     #   order: 1
+    #   timeout_ms: 20000
     #   llm_based_altering:
     #     model: "gpt-4o-mini"
     #     roles: ["user"]
     #     max_tokens: 4096
     #     skip_content_prefix: "### safe"
     #     # prompt: "Custom rewrite instructions here."
+
+# Shared-object plugins (.so). Needs a cgo build of GoModel (make build-plugins
+# or the gomodel:<version>-plugins image). A .so is trusted code: keep
+# search_paths root-owned and pin sha256 in production.
+plugins:
+  search_paths: [] # PLUGINS_SEARCH_PATHS (comma-separated). Default: empty (no .so loading)
+  load: []
+  # load:
+  #   - file: keyword_block.so        # relative to search_paths, or absolute
+  #     sha256: ""                    # optional pin; mismatch fails startup
 
 # Failover is a load-balancing behaviour of virtual models: when the target a
 # request was sent to fails, the redirect's remaining targets are tried in

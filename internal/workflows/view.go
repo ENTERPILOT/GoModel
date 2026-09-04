@@ -27,6 +27,7 @@ type View struct {
 	ScopeDisplay      string                `json:"scope_display"`
 	EffectiveFeatures core.WorkflowFeatures `json:"effective_features"`
 	GuardrailsHash    string                `json:"guardrails_hash,omitempty"`
+	ChainHashes       map[string]string     `json:"chain_hashes,omitempty"`
 	CompileError      string                `json:"compile_error,omitempty"`
 }
 

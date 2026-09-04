@@ -1323,7 +1323,7 @@
   "workflows_model_invalid": "Choose a registered model for the selected provider name.",
   "workflows_guardrail_ref_required": "Each guardrail step needs a guardrail ref.",
   "workflows_guardrail_step_invalid": "Each guardrail step must use a non-negative integer step number.",
-  "workflows_guardrail_ref_unique": "Each guardrail ref may appear only once in a workflow.",
+  "workflows_guardrail_ref_unique": "Each guardrail ref may appear only once per phase.",
   "guardrails_unknown": "Unknown",
   "guardrails_name_required": "Name is required.",
   "guardrails_type_required": "Type is required.",
@@ -1505,5 +1505,59 @@
   "models_source_conflict": "A virtual model for \"{source}\" already exists. Choose a different Source.",
   "models_mask_rename_confirm": "A model named \"{name}\" already exists. Renaming to that name will mask the model in the list. Continue?",
   "models_remove_policy_confirm": "Remove the virtual model for \"{source}\"? This reverts to inherited/default behavior.",
-  "models_pricing_remove_confirm": "Remove the model pricing override for \"{selector}\"?"
+  "models_pricing_remove_confirm": "Remove the model pricing override for \"{selector}\"?",
+  "guardrails_phases": "Phases",
+  "guardrails_advanced": "Advanced",
+  "guardrails_advanced_help": "Failure mode and timeout apply to this instance in every Workflow that references it.",
+  "guardrails_fail_mode": "Failure mode",
+  "guardrails_fail_mode_default": "Default",
+  "guardrails_fail_mode_closed": "Closed — reject the request when the Guardrail fails",
+  "guardrails_fail_mode_open": "Open — let the request through when the Guardrail fails",
+  "guardrails_timeout_ms": "Timeout (ms)",
+  "guardrails_timeout_placeholder": "Default",
+  "guardrails_timeout_help": "Leave empty for the default. A Guardrail that times out is handled by its failure mode.",
+  "guardrails_timeout_invalid": "Timeout must be a whole number of milliseconds (0 or more).",
+  "schema_fields_secret_stored": "A value is stored. Leave it unchanged to keep it, or type a new one to replace it.",
+  "schema_fields_model_placeholder": "provider/model or alias",
+  "plugins_title": "Plugins",
+  "plugins_help": "Plugins loaded by the gateway. They add Guardrail types and routing strategies; built-in plugins ship with GoModel, file plugins are loaded from the configured plugins directory.",
+  "plugins_count": [
+    {
+      "declarations": [
+        "input count",
+        "local count_plural = count: plural"
+      ],
+      "selectors": [
+        "count_plural"
+      ],
+      "match": {
+        "count_plural=one": "{count} plugin",
+        "count_plural=*": "{count} plugins"
+      }
+    }
+  ],
+  "plugins_show": "Show plugins",
+  "plugins_hide": "Hide plugins",
+  "plugins_name": "Name",
+  "plugins_version": "Version",
+  "plugins_kinds": "Hooks",
+  "plugins_source": "Source",
+  "plugins_health": "Health",
+  "plugins_source_builtin": "Built-in",
+  "plugins_health_ok": "OK",
+  "plugins_health_error": "Error",
+  "plugins_phase_request": "Request",
+  "plugins_phase_prompt": "Prompt",
+  "plugins_phase_response": "Response",
+  "plugins_phase_stream": "Stream",
+  "plugins_phase_route": "Route",
+  "plugins_phase_complete": "Complete",
+  "workflows_phase": "Phase",
+  "workflows_phase_help": "Prompt steps run before the model call, response steps on the completed response, stream steps on each streamed chunk. A Guardrail may appear once per phase.",
+  "workflows_select_guardrail": "Select a Guardrail…",
+  "workflows_no_phase_guardrails": "No registered Guardrail supports the {phase} phase.",
+  "workflows_guardrail_phase_invalid": "Each guardrail step must use the prompt, response, or stream phase.",
+  "models_strategy_plugin": "{name} (routing plugin)",
+  "models_strategy_name_plugin": "Plugin",
+  "models_strategy_plugin_fields_help": "Settings for the {name} routing plugin, stored with this virtual model."
 }

@@ -159,6 +159,12 @@ Usage records may continue to link back to audit records through `request_id`.
 
 ### 7. V1 Workflow Payload
 
+> **Amended by [ADR-0012](0012-plugin-system.md).** Payload `schema_version: 2`
+> renames the `guardrails` array to `steps` and adds `phase`
+> (`prompt` | `response` | `stream`, default `prompt`) to each step. Version 1
+> payloads stay valid and compile as prompt-phase steps. The rest of this
+> section describes the version 1 shape.
+
 The first slice keeps workflows intentionally simple.
 
 The gateway keeps the overall request-processing order predefined.

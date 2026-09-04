@@ -133,13 +133,18 @@ type ResolvedWorkflowPolicy struct {
 	VersionID string
 	Version   int
 	// ScopeProvider is the configured provider instance name stored on the matched workflow.
-	ScopeProvider  string
-	ScopeModel     string
-	ScopeUserPath  string
-	Name           string
-	WorkflowHash   string
-	Features       WorkflowFeatures
+	ScopeProvider string
+	ScopeModel    string
+	ScopeUserPath string
+	Name          string
+	WorkflowHash  string
+	Features      WorkflowFeatures
+	// GuardrailsHash is the prompt-phase plugin chain hash; it feeds the
+	// response cache key.
 	GuardrailsHash string
+	// ChainHashes holds the per-phase plugin chain hashes ("prompt",
+	// "response", "stream"), for diagnostics and the admin views.
+	ChainHashes map[string]string
 }
 
 // Workflow is the request-scoped control-plane result consumed by later

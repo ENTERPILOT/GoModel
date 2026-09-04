@@ -1,0 +1,75 @@
+# GoModel with shared-object plugin support (gomodel:<version>-plugins).
+#
+# Differences from the default Dockerfile:
+#   - CGO_ENABLED=1: Go's plugin package only works in cgo-enabled binaries.
+#   - Built natively for the target platform instead of cross-compiling from
+#     $BUILDPLATFORM: cgo cross-compilation needs a cross C toolchain, so
+#     multi-arch images are built per platform (docker buildx handles this).
+#   - Debian-based builder and a glibc runtime image. A cgo binary links the
+#     builder's libc; distroless/base-debian12 ships glibc, so the pair must be
+#     glibc on both sides. An alpine (musl) builder would need an alpine
+#     runtime, and the resulting binary would refuse plugins built against
+#     glibc. Plugins must be built with the same toolchain as this binary,
+#     which the plugin-builder stage below provides.
+#
+# Build the runtime image:
+#   docker build -f Dockerfile.plugins -t gomodel:plugins .
+#
+# Build a plugin with the exact toolchain of that image:
+#   docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
+#   docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
+#       gomodel-plugin-builder -o /out/my-plugin.so /src
+#
+# Run with plugins mounted:
+#   docker run -v "$PWD/plugins:/app/plugins:ro" -e PLUGINS_SEARCH_PATHS=/app/plugins ... gomodel:plugins
+FROM golang:1.27.0-bookworm AS builder
+
+WORKDIR /app
+
+# Download dependencies first for better layer caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source and build with cgo. No -trimpath: plugins must be built with the
+# same flags as the host, and `gomodel plugin build` copies this binary's
+# recorded flags.
+COPY . .
+ARG VERSION=dev
+ARG COMMIT=none
+ARG DATE=unknown
+RUN CGO_ENABLED=1 go build \
+	-ldflags="-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION} -X github.com/enterpilot/gomodel/internal/version.Commit=${COMMIT} -X github.com/enterpilot/gomodel/internal/version.Date=${DATE}" \
+	-o /gomodel ./cmd/gomodel
+
+# Create .cache, data, and plugins directories for runtime (with placeholder for COPY)
+RUN mkdir -p /app/.cache /app/data /app/plugins && touch /app/.cache/.keep /app/data/.keep /app/plugins/.keep
+
+# Plugin builder: the same toolchain, sources, and gomodel binary, so
+# `gomodel plugin build` reproduces the host's build exactly. Mount a plugin
+# package at /src (an in-tree example directory, or an external module that
+# `replace`s github.com/enterpilot/gomodel => /app) and an output dir at /out.
+FROM builder AS plugin-builder
+WORKDIR /src
+ENTRYPOINT ["/gomodel", "plugin", "build"]
+
+# Runtime stage: glibc, CA certificates, nonroot user, nothing else.
+FROM gcr.io/distroless/base-debian12:nonroot
+
+LABEL io.modelcontextprotocol.server.name="io.github.ENTERPILOT/gomodel"
+
+COPY --from=builder /gomodel /gomodel
+COPY --from=builder /app/config/*.yaml /app/config/
+
+# Create writable .cache and data directories for nonroot user (UID=65532);
+# /app/plugins is the conventional mount point for PLUGINS_SEARCH_PATHS.
+COPY --from=builder --chown=65532:65532 /app/.cache /app/.cache
+COPY --from=builder --chown=65532:65532 /app/data /app/data
+COPY --from=builder /app/plugins /app/plugins
+
+WORKDIR /app
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/gomodel", "--health"]
+
+ENTRYPOINT ["/gomodel"]

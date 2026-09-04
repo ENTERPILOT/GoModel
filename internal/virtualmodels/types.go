@@ -43,13 +43,19 @@ func (t Target) selector() (core.ModelSelector, error) {
 
 // VirtualModel is one operator-defined model entry.
 type VirtualModel struct {
-	Source       string   `json:"source" bson:"_id"`
-	Targets      []Target `json:"targets,omitempty" bson:"targets,omitempty"`
-	Strategy     string   `json:"strategy,omitempty" bson:"strategy,omitempty"`
-	ProviderName string   `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
-	Model        string   `json:"model,omitempty" bson:"model,omitempty"`
-	UserPaths    []string `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
-	Description  string   `json:"description,omitempty" bson:"description,omitempty"`
+	Source   string   `json:"source" bson:"_id"`
+	Targets  []Target `json:"targets,omitempty" bson:"targets,omitempty"`
+	Strategy string   `json:"strategy,omitempty" bson:"strategy,omitempty"`
+	// StrategyPlugin names the routing-strategy plugin consulted when Strategy
+	// is StrategyPlugin; StrategyConfig is that plugin's per-virtual-model
+	// configuration, validated against its route-scoped fields. Both are
+	// cleared for every other strategy.
+	StrategyPlugin string         `json:"strategy_plugin,omitempty" bson:"strategy_plugin,omitempty"`
+	StrategyConfig map[string]any `json:"strategy_config,omitempty" bson:"strategy_config,omitempty"`
+	ProviderName   string         `json:"provider_name,omitempty" bson:"provider_name,omitempty"`
+	Model          string         `json:"model,omitempty" bson:"model,omitempty"`
+	UserPaths      []string       `json:"user_paths,omitempty" bson:"user_paths,omitempty"`
+	Description    string         `json:"description,omitempty" bson:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it. Nil
 	// leaves the setting unspecified so an alias can inherit its target model.
 	Slowdown *float64 `json:"slowdown,omitempty" bson:"slowdown,omitempty"`
@@ -92,6 +98,12 @@ const (
 	// in declared order: the target list is a priority list, and lower legs
 	// serve only while every leg above them is unavailable or fails.
 	StrategyFailover = "failover"
+	// StrategyPlugin delegates target choice to the routing-strategy plugin
+	// named by VirtualModel.StrategyPlugin, configured per virtual model
+	// through StrategyConfig. Target weights are ignored: the plugin decides.
+	// When the plugin is missing, misconfigured, declines, panics, or times
+	// out, the redirect falls back to weighted round robin.
+	StrategyPlugin = "plugin"
 )
 
 // normalizeStrategy lower-cases and defaults a strategy string. An empty value
@@ -107,7 +119,7 @@ func normalizeStrategy(strategy string) string {
 // validStrategy reports whether strategy names a supported load-balancing mode.
 func validStrategy(strategy string) bool {
 	switch normalizeStrategy(strategy) {
-	case StrategyRoundRobin, StrategyCost, StrategyAdaptive, StrategyFailover:
+	case StrategyRoundRobin, StrategyCost, StrategyAdaptive, StrategyFailover, StrategyPlugin:
 		return true
 	default:
 		return false
@@ -135,6 +147,7 @@ func (v VirtualModel) clone() VirtualModel {
 	if len(v.Targets) > 0 {
 		v.Targets = append([]Target(nil), v.Targets...)
 	}
+	v.StrategyConfig = cloneStrategyConfig(v.StrategyConfig)
 	if len(v.UserPaths) > 0 {
 		v.UserPaths = append([]string(nil), v.UserPaths...)
 	}
@@ -149,6 +162,37 @@ func (v VirtualModel) clone() VirtualModel {
 	return v
 }
 
+// cloneStrategyConfig deep-copies a strategy config so snapshot consumers and
+// plugins cannot mutate stored rows through nested maps or slices.
+func cloneStrategyConfig(config map[string]any) map[string]any {
+	if config == nil {
+		return nil
+	}
+	cloned, _ := cloneConfigValue(config).(map[string]any)
+	return cloned
+}
+
+func cloneConfigValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = cloneConfigValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = cloneConfigValue(item)
+		}
+		return out
+	case []string:
+		return append([]string(nil), v...)
+	default:
+		return v
+	}
+}
+
 // Role kinds for the admin view.
 const (
 	KindRedirect = "redirect"
@@ -157,16 +201,18 @@ const (
 
 // View is the admin-facing representation of one virtual model.
 type View struct {
-	Source          string   `json:"source"`
-	Kind            string   `json:"kind"`
-	Targets         []Target `json:"targets,omitempty"`
-	Strategy        string   `json:"strategy,omitempty"`
-	SessionAffinity *bool    `json:"session_affinity,omitempty"`
-	Failover        *bool    `json:"failover,omitempty"`
-	ProviderName    string   `json:"provider_name,omitempty"`
-	Model           string   `json:"model,omitempty"`
-	UserPaths       []string `json:"user_paths,omitempty"`
-	Description     string   `json:"description,omitempty"`
+	Source          string         `json:"source"`
+	Kind            string         `json:"kind"`
+	Targets         []Target       `json:"targets,omitempty"`
+	Strategy        string         `json:"strategy,omitempty"`
+	StrategyPlugin  string         `json:"strategy_plugin,omitempty"`
+	StrategyConfig  map[string]any `json:"strategy_config,omitempty"`
+	SessionAffinity *bool          `json:"session_affinity,omitempty"`
+	Failover        *bool          `json:"failover,omitempty"`
+	ProviderName    string         `json:"provider_name,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	UserPaths       []string       `json:"user_paths,omitempty"`
+	Description     string         `json:"description,omitempty"`
 	// Slowdown is an extra-time factor from 0.1 to 10; zero disables it.
 	Slowdown      *float64  `json:"slowdown,omitempty"`
 	Enabled       bool      `json:"enabled"`

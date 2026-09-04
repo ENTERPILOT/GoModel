@@ -86,6 +86,7 @@ type Config struct {
 	FailoverResolver                RequestFailoverResolver                // Optional: translated-route failover resolver
 	FailoverPolicy                  *gateway.FailoverPolicy                // Optional: which errors trigger failover and how many targets to try; nil applies the defaults
 	TranslatedRequestPatcher        TranslatedRequestPatcher               // Optional: request patcher for translated routes after workflow resolution
+	PluginChainsResolver            PluginChainsResolver                   // Optional: response/stream phase plugin chains per request workflow
 	BatchRequestPreparer            BatchRequestPreparer                   // Optional: batch request preparer before native provider submission
 	ExposedModelLister              ExposedModelLister                     // Optional: additional public models to merge into GET /v1/models
 	KeepOnlyAliasesAtModelsEndpoint bool                                   // Whether GET /v1/models should hide concrete provider models
@@ -191,6 +192,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil {
 		handler.batchRequestPreparer = cfg.BatchRequestPreparer
+		handler.pluginChains = cfg.PluginChainsResolver
 		handler.exposedModelLister = cfg.ExposedModelLister
 		handler.keepOnlyAliasesAtModelsEndpoint = cfg.KeepOnlyAliasesAtModelsEndpoint
 		handler.responseCache = cfg.ResponseCacheMiddleware

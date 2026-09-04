@@ -106,7 +106,7 @@ test("workflowPreview mirrors the draft workflow card state from the editor form
     name: "Draft workflow",
     description: "Live preview of the edited workflow",
     workflow_payload: {
-      schema_version: 1,
+      schema_version: 2,
       features: {
         cache: true,
         audit: false,
@@ -115,7 +115,7 @@ test("workflowPreview mirrors the draft workflow card state from the editor form
         guardrails: true,
         failover: false,
       },
-      guardrails: [{ ref: "policy-system", step: 10 }],
+      steps: [{ ref: "policy-system", phase: "prompt", step: 10 }],
     },
   });
 });
@@ -163,7 +163,7 @@ test("workflowPreview does not coerce blank guardrail steps into step zero", () 
     guardrails: [{ ref: "policy-system", step: "   " }],
   };
 
-  assert.deepEqual(workflowPreview(form, ALL_CAPS).workflow_payload.guardrails, []);
+  assert.deepEqual(workflowPreview(form, ALL_CAPS).workflow_payload.steps, []);
 });
 
 test("workflowChart returns the shared chart contract for workflow sources", () => {
@@ -198,6 +198,13 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
       budgetStatusLabel: null,
       showGuardrails: true,
       guardrailLabel: "2 steps",
+      guardrailBadge: null,
+      showResponseGuardrails: false,
+      responseGuardrailLabel: "",
+      responseGuardrailBadge: null,
+      showStreamGuardrails: false,
+      streamGuardrailLabel: "",
+      streamGuardrailBadge: null,
       showCache: true,
       cacheNodeClass: "",
       cacheConnClass: "",
@@ -315,6 +322,13 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
       budgetStatusLabel: null,
       showGuardrails: true,
       guardrailLabel: "1 step",
+      guardrailBadge: null,
+      showResponseGuardrails: false,
+      responseGuardrailLabel: "",
+      responseGuardrailBadge: null,
+      showStreamGuardrails: false,
+      streamGuardrailLabel: "",
+      streamGuardrailBadge: null,
       showCache: true,
       cacheNodeClass: "workflow-node-success",
       cacheConnClass: "workflow-conn-hit",
@@ -771,7 +785,7 @@ test("buildWorkflowRequest emits provider-model payload and strips guardrails wh
     name: "OpenAI GPT-5",
     description: "Primary translated requests",
     workflow_payload: {
-      schema_version: 1,
+      schema_version: 2,
       features: {
         cache: true,
         audit: true,
@@ -780,7 +794,7 @@ test("buildWorkflowRequest emits provider-model payload and strips guardrails wh
         guardrails: false,
         failover: false,
       },
-      guardrails: [],
+      steps: [],
     },
   });
 });
@@ -975,7 +989,7 @@ test("buildWorkflowRequest clamps globally disabled features off even when enabl
     name: "OpenAI GPT-5",
     description: "Globally disabled features should be forced off",
     workflow_payload: {
-      schema_version: 1,
+      schema_version: 2,
       features: {
         cache: false,
         audit: false,
@@ -983,7 +997,7 @@ test("buildWorkflowRequest clamps globally disabled features off even when enabl
         budget: false,
         guardrails: false,
       },
-      guardrails: [],
+      steps: [],
     },
   });
 });
@@ -1007,7 +1021,7 @@ test("buildWorkflowRequest preserves blank guardrail steps as invalid so validat
 
   const payload = buildWorkflowRequest({ form, caps: ALL_CAPS });
 
-  assert.ok(Number.isNaN(payload.workflow_payload.guardrails[0].step));
+  assert.ok(Number.isNaN(payload.workflow_payload.steps[0].step));
   assert.equal(
     validateWorkflowRequest(payload, { models }),
     "Each guardrail step must use a non-negative integer step number.",
@@ -1037,7 +1051,7 @@ test("validateWorkflowRequest rejects negative guardrail steps and duplicate ref
         { ref: "policy-system", step: 20 },
       ]),
     ),
-    "Each guardrail ref may appear only once in a workflow.",
+    "Each guardrail ref may appear only once per phase.",
   );
   assert.equal(
     validateWorkflowRequest(basePayload([{ ref: "", step: 10 }])),
@@ -1199,8 +1213,8 @@ test("workflowSourceGuardrails keeps step zero but drops negative and fractional
       },
     }),
     [
-      { ref: "zero-step", step: 0 },
-      { ref: "valid", step: 10 },
+      { ref: "zero-step", phase: "prompt", step: 0 },
+      { ref: "valid", phase: "prompt", step: 10 },
     ],
   );
 });
@@ -1371,4 +1385,166 @@ test("a provider's authentication error leaves the gateway auth node green", () 
   });
   assert.equal(gatewayRejectedKey.authError, true);
   assert.equal(workflowAuthNodeClass(gatewayRejectedKey), "workflow-node-error");
+});
+
+// ─── Schema v2: phased steps ───
+
+import {
+  workflowGuardrailRefOptions,
+  workflowPayloadSteps,
+  workflowStepGroups,
+} from "../src/pages/workflows/workflowsLogic.js";
+
+test("buildWorkflowRequest posts schema_version 2 steps with phases", () => {
+  const form = {
+    ...defaultWorkflowForm(),
+    features: { ...defaultWorkflowForm().features, guardrails: true },
+    guardrails: [
+      { ref: "pii-redact", phase: "prompt", step: 10 },
+      { ref: "secret-scan", phase: "response", step: 10 },
+      { ref: "secret-scan", phase: "stream", step: "10" },
+      { ref: "legacy", step: 20 },
+    ],
+  };
+  const payload = buildWorkflowRequest({ form, caps: ALL_CAPS });
+  assert.equal(payload.workflow_payload.schema_version, 2);
+  assert.equal("guardrails" in payload.workflow_payload, false);
+  assert.deepEqual(payload.workflow_payload.steps, [
+    { ref: "pii-redact", phase: "prompt", step: 10 },
+    { ref: "secret-scan", phase: "response", step: 10 },
+    { ref: "secret-scan", phase: "stream", step: 10 },
+    { ref: "legacy", phase: "prompt", step: 20 },
+  ]);
+  assert.equal(validateWorkflowRequest(payload), "");
+});
+
+test("validateWorkflowRequest allows a ref once per phase and rejects unknown phases", () => {
+  const payload = (steps) => ({
+    scope_provider: "",
+    scope_model: "",
+    workflow_payload: {
+      schema_version: 2,
+      features: { guardrails: true },
+      steps,
+    },
+  });
+  assert.equal(
+    validateWorkflowRequest(
+      payload([
+        { ref: "scan", phase: "prompt", step: 10 },
+        { ref: "scan", phase: "response", step: 10 },
+      ]),
+    ),
+    "",
+  );
+  assert.equal(
+    validateWorkflowRequest(
+      payload([
+        { ref: "scan", phase: "response", step: 10 },
+        { ref: "scan", phase: "response", step: 20 },
+      ]),
+    ),
+    "Each guardrail ref may appear only once per phase.",
+  );
+  assert.equal(
+    validateWorkflowRequest(payload([{ ref: "scan", phase: "route", step: 10 }])),
+    "Each guardrail step must use the prompt, response, or stream phase.",
+  );
+});
+
+test("legacy v1 payloads load as prompt steps; v2 payloads keep their phases", () => {
+  assert.deepEqual(
+    workflowSourceGuardrails({
+      workflow_payload: { schema_version: 1, guardrails: [{ ref: "old", step: 10 }] },
+    }),
+    [{ ref: "old", phase: "prompt", step: 10 }],
+  );
+  assert.deepEqual(
+    workflowSourceGuardrails({
+      workflow_payload: {
+        schema_version: 2,
+        steps: [
+          { ref: "a", phase: "response", step: 10 },
+          { ref: "b", phase: "bogus", step: 20 },
+        ],
+      },
+    }),
+    [
+      { ref: "a", phase: "response", step: 10 },
+      { ref: "b", phase: "prompt", step: 20 },
+    ],
+  );
+  // The editor form keeps its rows under `guardrails` but carries phases.
+  assert.deepEqual(
+    workflowPayloadSteps({ guardrails: [{ ref: "x", phase: "stream", step: 5 }] }),
+    [{ ref: "x", phase: "stream", step: 5 }],
+  );
+});
+
+test("workflowGuardrailRefOptions filters instances by phase and keeps the current ref", () => {
+  const refs = [
+    { name: "pii-redact", phases: ["prompt", "response"] },
+    { name: "stream-scan", phases: ["stream"] },
+    { name: "legacy-object" },
+    "legacy-string",
+  ];
+  const names = (phase, current) =>
+    workflowGuardrailRefOptions(refs, phase, current).map((option) => option.value);
+
+  assert.deepEqual(names("prompt"), ["pii-redact", "legacy-object", "legacy-string"]);
+  assert.deepEqual(names("response"), ["pii-redact"]);
+  assert.deepEqual(names("stream"), ["stream-scan"]);
+  // A cloned workflow's ref stays selectable even when it no longer qualifies.
+  assert.deepEqual(names("stream", "pii-redact"), ["stream-scan", "pii-redact"]);
+  assert.deepEqual(names("prompt", ""), ["pii-redact", "legacy-object", "legacy-string"]);
+});
+
+test("workflowStepGroups orders phases prompt, response, stream and drops empty groups", () => {
+  const groups = workflowStepGroups([
+    { ref: "s", phase: "stream", step: 10 },
+    { ref: "p2", phase: "prompt", step: 20 },
+    { ref: "p1", step: 10 },
+  ]);
+  assert.deepEqual(
+    groups.map((group) => [group.phase, group.steps.map((step) => step.ref)]),
+    [
+      ["prompt", ["p2", "p1"]],
+      ["stream", ["s"]],
+    ],
+  );
+});
+
+test("workflowChart adds response and stream guardrail nodes after the model", () => {
+  const chart = workflowChart(
+    {
+      workflow_payload: {
+        schema_version: 2,
+        features: { guardrails: true },
+        steps: [
+          { ref: "pii", phase: "prompt", step: 10 },
+          { ref: "scan", phase: "response", step: 10 },
+          { ref: "scan", phase: "stream", step: 10 },
+          { ref: "scan2", phase: "stream", step: 20 },
+        ],
+      },
+    },
+    ALL_CAPS,
+  );
+  assert.equal(chart.showGuardrails, true);
+  assert.equal(chart.guardrailLabel, "1 step");
+  assert.equal(chart.guardrailBadge, "Prompt");
+  assert.equal(chart.showResponseGuardrails, true);
+  assert.equal(chart.responseGuardrailLabel, "1 step");
+  assert.equal(chart.responseGuardrailBadge, "Response");
+  assert.equal(chart.showStreamGuardrails, true);
+  assert.equal(chart.streamGuardrailLabel, "2 steps");
+  assert.equal(chart.streamGuardrailBadge, "Stream");
+
+  const promptOnly = workflowChart(
+    { workflow_payload: { features: { guardrails: true }, guardrails: [{ ref: "pii", step: 10 }] } },
+    ALL_CAPS,
+  );
+  assert.equal(promptOnly.guardrailBadge, null);
+  assert.equal(promptOnly.showResponseGuardrails, false);
+  assert.equal(promptOnly.showStreamGuardrails, false);
 });

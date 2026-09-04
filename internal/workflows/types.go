@@ -12,7 +12,17 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-const currentSchemaVersion = 1
+// currentSchemaVersion is the payload schema written by the dashboard.
+// Version 1 payloads (guardrails: [{ref, step}]) stay accepted and are stored
+// as-is; their steps compile as prompt-phase steps.
+const currentSchemaVersion = 2
+
+// Phase names accepted in a version 2 step.
+const (
+	PhasePrompt   = "prompt"
+	PhaseResponse = "response"
+	PhaseStream   = "stream"
+)
 
 // Scope identifies the request selector a persisted workflow applies to.
 // Provider stores the configured provider instance name, not the provider type.
@@ -57,9 +67,58 @@ func (s *Scope) UnmarshalJSON(data []byte) error {
 
 // Payload is the immutable persisted workflow JSON document.
 type Payload struct {
-	SchemaVersion int             `json:"schema_version" bson:"schema_version"`
-	Features      FeatureFlags    `json:"features" bson:"features"`
-	Guardrails    []GuardrailStep `json:"guardrails,omitempty" bson:"guardrails,omitempty"`
+	SchemaVersion int          `json:"schema_version" bson:"schema_version"`
+	Features      FeatureFlags `json:"features" bson:"features"`
+	// Guardrails is the version 1 step list (prompt phase only).
+	Guardrails []GuardrailStep `json:"guardrails,omitempty" bson:"guardrails,omitempty"`
+	// Steps is the version 2 step list with a phase per step.
+	Steps []Step `json:"steps,omitempty" bson:"steps,omitempty"`
+}
+
+// Step references one named guardrail instance in one phase at one step.
+type Step struct {
+	Ref   string `json:"ref" bson:"ref"`
+	Phase string `json:"phase,omitempty" bson:"phase,omitempty"`
+	Step  int    `json:"step" bson:"step"`
+}
+
+// EffectiveSteps returns the steps to compile regardless of schema version:
+// version 1 guardrails become prompt steps.
+func (p Payload) EffectiveSteps() []Step {
+	if len(p.Steps) > 0 {
+		return append([]Step(nil), p.Steps...)
+	}
+	steps := make([]Step, 0, len(p.Guardrails))
+	for _, guardrail := range p.Guardrails {
+		steps = append(steps, Step{Ref: guardrail.Ref, Phase: PhasePrompt, Step: guardrail.Step})
+	}
+	return steps
+}
+
+func phaseOrder(phase string) int {
+	switch phase {
+	case PhasePrompt:
+		return 0
+	case PhaseResponse:
+		return 1
+	case PhaseStream:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func normalizePhase(phase string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "", PhasePrompt:
+		return PhasePrompt, nil
+	case PhaseResponse:
+		return PhaseResponse, nil
+	case PhaseStream:
+		return PhaseStream, nil
+	default:
+		return "", newValidationError("invalid step phase: "+strings.TrimSpace(phase)+" (must be prompt, response, or stream)", nil)
+	}
 }
 
 // FeatureFlags configures gateway-owned behaviors for a request.
@@ -164,12 +223,87 @@ func scopeKey(scope Scope) string {
 func normalizePayload(payload Payload) (Payload, string, error) {
 	if payload.SchemaVersion == 0 {
 		payload.SchemaVersion = currentSchemaVersion
-	}
-	if payload.SchemaVersion != currentSchemaVersion {
-		return Payload{}, "", newValidationError("unsupported schema_version", nil)
+		if len(payload.Steps) == 0 && len(payload.Guardrails) > 0 {
+			payload.SchemaVersion = 1
+		}
 	}
 	payload.Features = payload.Features.canonicalize()
+	switch payload.SchemaVersion {
+	case 1:
+		if len(payload.Steps) > 0 {
+			return Payload{}, "", newValidationError("schema_version 1 payloads use guardrails, not steps", nil)
+		}
+		return normalizeLegacyPayload(payload)
+	case 2:
+		return normalizeStepsPayload(payload)
+	default:
+		return Payload{}, "", newValidationError("unsupported schema_version", nil)
+	}
+}
 
+// normalizeStepsPayload validates a version 2 payload: legacy guardrails are
+// folded into prompt steps, phases are validated, (ref, phase) pairs are
+// unique, and steps are sorted by phase, step, ref.
+func normalizeStepsPayload(payload Payload) (Payload, string, error) {
+	type indexedStep struct {
+		step  Step
+		index int
+	}
+	steps := payload.Steps
+	for _, guardrail := range payload.Guardrails {
+		steps = append(steps, Step{Ref: guardrail.Ref, Phase: PhasePrompt, Step: guardrail.Step})
+	}
+	payload.Guardrails = nil
+
+	indexed := make([]indexedStep, 0, len(steps))
+	seen := make(map[string]struct{}, len(steps))
+	for i, step := range steps {
+		step.Ref = strings.TrimSpace(step.Ref)
+		if step.Ref == "" {
+			return Payload{}, "", newValidationError("guardrail ref is required", nil)
+		}
+		phase, err := normalizePhase(step.Phase)
+		if err != nil {
+			return Payload{}, "", err
+		}
+		step.Phase = phase
+		key := phase + ":" + step.Ref
+		if _, exists := seen[key]; exists {
+			return Payload{}, "", newValidationError("duplicate guardrail ref in "+phase+" phase: "+step.Ref, nil)
+		}
+		seen[key] = struct{}{}
+		indexed = append(indexed, indexedStep{step: step, index: i})
+	}
+	sort.SliceStable(indexed, func(i, j int) bool {
+		left, right := indexed[i].step, indexed[j].step
+		if phaseOrder(left.Phase) != phaseOrder(right.Phase) {
+			return phaseOrder(left.Phase) < phaseOrder(right.Phase)
+		}
+		if left.Step != right.Step {
+			return left.Step < right.Step
+		}
+		if left.Ref != right.Ref {
+			return left.Ref < right.Ref
+		}
+		return indexed[i].index < indexed[j].index
+	})
+	payload.Steps = nil
+	for _, item := range indexed {
+		payload.Steps = append(payload.Steps, item.step)
+	}
+	return hashPayload(payload)
+}
+
+func hashPayload(payload Payload) (Payload, string, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return Payload{}, "", newValidationError("marshal workflow payload", err)
+	}
+	sum := sha256.Sum256(raw)
+	return payload, hex.EncodeToString(sum[:]), nil
+}
+
+func normalizeLegacyPayload(payload Payload) (Payload, string, error) {
 	type indexedGuardrail struct {
 		step  GuardrailStep
 		index int
@@ -203,13 +337,7 @@ func normalizePayload(payload Payload) (Payload, string, error) {
 	for _, item := range indexed {
 		payload.Guardrails = append(payload.Guardrails, item.step)
 	}
-
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return Payload{}, "", newValidationError("marshal workflow payload", err)
-	}
-	sum := sha256.Sum256(raw)
-	return payload, hex.EncodeToString(sum[:]), nil
+	return hashPayload(payload)
 }
 
 func normalizeCreateInput(input CreateInput) (CreateInput, string, string, error) {

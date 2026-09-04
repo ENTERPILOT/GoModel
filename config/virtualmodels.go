@@ -16,10 +16,21 @@ type VirtualModelConfig struct {
 	Source string `yaml:"source" json:"source"`
 
 	// Strategy selects load balancing across multiple targets: "round_robin"
-	// (default), "cost", or "adaptive" (delegates to a registered routing
-	// extension and falls back to round_robin without one). Ignored for
-	// single-target aliases and access policies.
+	// (default), "cost", "failover", "adaptive" (delegates to a registered
+	// routing extension and falls back to round_robin without one), or
+	// "plugin" (delegates to the routing-strategy plugin named by
+	// StrategyPlugin). Ignored for single-target aliases and access policies.
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+
+	// StrategyPlugin names the routing-strategy plugin used when Strategy is
+	// "plugin"; required then, ignored otherwise. Target weights have no
+	// effect under a plugin strategy: the plugin picks the target.
+	StrategyPlugin string `yaml:"strategy_plugin,omitempty" json:"strategy_plugin,omitempty"`
+
+	// StrategyConfig is the plugin's per-virtual-model configuration. Its keys
+	// are the plugin's route-scoped fields (see GET /admin/plugins,
+	// route_fields) and are validated against them at startup.
+	StrategyConfig map[string]any `yaml:"strategy_config,omitempty" json:"strategy_config,omitempty"`
 
 	// SessionAffinity keeps requests of one detected client session on the
 	// target that served it before, while that target stays available. Defaults

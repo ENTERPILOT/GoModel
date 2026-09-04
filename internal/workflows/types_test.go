@@ -1,6 +1,9 @@
 package workflows
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeScope_RejectsColonDelimitedFields(t *testing.T) {
 	t.Parallel()
@@ -210,5 +213,79 @@ func TestNormalizePayload_CanonicalizesFailoverForStableWorkflowHash(t *testing.
 	}
 	if implicitHash != explicitHash {
 		t.Fatalf("workflow hash mismatch: implicit=%q explicit=%q", implicitHash, explicitHash)
+	}
+}
+
+func TestNormalizePayload_V2Steps(t *testing.T) {
+	payload, hash, err := normalizePayload(Payload{
+		SchemaVersion: 2,
+		Features:      FeatureFlags{Guardrails: true},
+		Guardrails:    []GuardrailStep{{Ref: "legacy", Step: 5}},
+		Steps: []Step{
+			{Ref: "b", Phase: "stream", Step: 10},
+			{Ref: " a ", Phase: "", Step: 20},
+			{Ref: "b", Phase: "Response", Step: 10},
+			{Ref: "c", Phase: "prompt", Step: 10},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizePayload() error = %v", err)
+	}
+	if hash == "" || payload.SchemaVersion != 2 || payload.Guardrails != nil {
+		t.Fatalf("payload = %+v, hash = %q", payload, hash)
+	}
+	want := []Step{
+		{Ref: "legacy", Phase: "prompt", Step: 5},
+		{Ref: "c", Phase: "prompt", Step: 10},
+		{Ref: "a", Phase: "prompt", Step: 20},
+		{Ref: "b", Phase: "response", Step: 10},
+		{Ref: "b", Phase: "stream", Step: 10},
+	}
+	if len(payload.Steps) != len(want) {
+		t.Fatalf("steps = %+v, want %+v", payload.Steps, want)
+	}
+	for i := range want {
+		if payload.Steps[i] != want[i] {
+			t.Fatalf("steps[%d] = %+v, want %+v", i, payload.Steps[i], want[i])
+		}
+	}
+	if steps := payload.EffectiveSteps(); len(steps) != 5 {
+		t.Fatalf("EffectiveSteps() = %+v", steps)
+	}
+}
+
+func TestNormalizePayload_V2Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload Payload
+		want    string
+	}{
+		{"duplicate ref per phase", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Step: 1}, {Ref: "a", Phase: "prompt", Step: 2}}}, "duplicate guardrail ref in prompt phase"},
+		{"invalid phase", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Phase: "route", Step: 1}}}, "invalid step phase"},
+		{"empty ref", Payload{SchemaVersion: 2, Steps: []Step{{Ref: " ", Step: 1}}}, "ref is required"},
+		{"v1 with steps", Payload{SchemaVersion: 1, Steps: []Step{{Ref: "a", Step: 1}}}, "schema_version 1"},
+		{"unsupported version", Payload{SchemaVersion: 3}, "unsupported schema_version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := normalizePayload(tt.payload)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("normalizePayload() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizePayload_DefaultsSchemaVersion(t *testing.T) {
+	legacy, _, err := normalizePayload(Payload{Guardrails: []GuardrailStep{{Ref: "a", Step: 1}}})
+	if err != nil || legacy.SchemaVersion != 1 || len(legacy.Guardrails) != 1 {
+		t.Fatalf("legacy = %+v, %v", legacy, err)
+	}
+	if steps := legacy.EffectiveSteps(); len(steps) != 1 || steps[0].Phase != PhasePrompt {
+		t.Fatalf("EffectiveSteps() = %+v", steps)
+	}
+	fresh, _, err := normalizePayload(Payload{})
+	if err != nil || fresh.SchemaVersion != 2 {
+		t.Fatalf("fresh = %+v, %v", fresh, err)
 	}
 }

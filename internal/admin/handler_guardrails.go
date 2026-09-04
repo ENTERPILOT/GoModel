@@ -19,6 +19,8 @@ type upsertGuardrailRequest struct {
 	Description string          `json:"description,omitempty"`
 	UserPath    string          `json:"user_path,omitempty"`
 	Config      json.RawMessage `json:"config"`
+	FailMode    string          `json:"fail_mode,omitempty"`
+	TimeoutMS   int             `json:"timeout_ms,omitempty"`
 }
 
 type deleteGuardrailRequest struct {
@@ -73,6 +75,8 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 		Description: req.Description,
 		UserPath:    userPath,
 		Config:      req.Config,
+		FailMode:    req.FailMode,
+		TimeoutMS:   req.TimeoutMS,
 	}); err != nil {
 		return handleError(c, guardrailWriteError(err))
 	}
@@ -80,11 +84,11 @@ func (h *Handler) UpsertGuardrail(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	definition, ok := h.guardrailDefs.Get(name)
+	view, ok := h.guardrailDefs.GetView(name)
 	if !ok {
 		return c.NoContent(http.StatusNoContent)
 	}
-	return c.JSON(http.StatusOK, guardrails.ViewFromDefinition(*definition))
+	return c.JSON(http.StatusOK, view)
 }
 
 // DeleteGuardrail handles DELETE /admin/guardrails

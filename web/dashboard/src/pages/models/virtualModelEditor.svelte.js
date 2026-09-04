@@ -7,7 +7,9 @@ import { errorMessage, sendJSON } from "$lib/api/client.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
+import { pluginsStore } from "$lib/stores/plugins.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
+import { cloneSchemaConfig, schemaFieldDefaults } from "$lib/utils/schemaFields.js";
 import {
   modelOverridesDefaultEnabled,
   rowAccessSelector,
@@ -16,7 +18,12 @@ import {
   GLOBAL_OVERRIDE_SELECTOR,
   qualifiedModelName,
 } from "./modelIdentity.js";
-import { modelAccessUserPathsRestrict, strategyOptions } from "./routing.js";
+import {
+  modelAccessUserPathsRestrict,
+  parseStrategyDropdownValue,
+  strategyDropdownValue,
+  strategyOptions,
+} from "./routing.js";
 import {
   aliasFormTargets,
   buildVirtualModelSavePayload,
@@ -139,8 +146,47 @@ class VirtualModelEditorStore {
   vmStrategyOptions() {
     return strategyOptions(
       runtimeConfig.virtualModelStrategies(),
-      this.vmForm.strategy,
+      this.vmStrategySelection(),
     );
+  }
+
+  // vmStrategySelection is the dropdown value for the form's strategy:
+  // "plugin:<name>" for a plugin strategy, the strategy itself otherwise.
+  vmStrategySelection() {
+    return strategyDropdownValue(this.vmForm.strategy, this.vmForm.strategy_plugin);
+  }
+
+  // setVmStrategy applies a dropdown choice. Switching to another plugin
+  // resets strategy_config to that plugin's route-field defaults; leaving the
+  // plugin strategy keeps nothing plugin-specific.
+  setVmStrategy(value) {
+    const parsed = parseStrategyDropdownValue(value);
+    const previousPlugin = this.vmForm.strategy_plugin;
+    this.vmForm.strategy = parsed.strategy;
+    this.vmForm.strategy_plugin = parsed.strategy_plugin;
+    if (parsed.strategy !== "plugin") {
+      this.vmForm.strategy_config = {};
+      return;
+    }
+    if (parsed.strategy_plugin !== previousPlugin) {
+      this.vmForm.strategy_config = schemaFieldDefaults(
+        this.vmRouteFields(),
+      );
+    }
+  }
+
+  // vmRouteFields lists the chosen routing plugin's per-virtual-model
+  // fields; [] when no plugin strategy is selected or GET /admin/plugins is
+  // unavailable (the strategy can still be saved without them).
+  vmRouteFields() {
+    if (this.vmForm.strategy !== "plugin") {
+      return [];
+    }
+    return pluginsStore.routeFields(this.vmForm.strategy_plugin);
+  }
+
+  setVmStrategyConfig(config) {
+    this.vmForm.strategy_config = cloneSchemaConfig(config);
   }
 
   // vmRoutingSummary describes the form's effect; whether the source names a
@@ -250,6 +296,8 @@ class VirtualModelEditorStore {
       target_weight: primaryWeight,
       targets: extraTargets,
       strategy: alias.strategy || "round_robin",
+      strategy_plugin: String(alias.strategy_plugin || "").trim(),
+      strategy_config: cloneSchemaConfig(alias.strategy_config),
       session_affinity: alias.session_affinity !== false,
       failover: alias.failover !== false,
       user_paths: (Array.isArray(alias.user_paths)
@@ -310,6 +358,8 @@ class VirtualModelEditorStore {
       target_weight: primaryWeight,
       targets: extraTargets,
       strategy: (override && override.strategy) || "failover",
+      strategy_plugin: String((override && override.strategy_plugin) || "").trim(),
+      strategy_config: cloneSchemaConfig(override && override.strategy_config),
       session_affinity: !override || override.session_affinity !== false,
       failover: !override || override.failover !== false,
       user_paths: userPaths.join("\n"),

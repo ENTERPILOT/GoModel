@@ -1,8 +1,8 @@
 ---
 title: "Workflows"
-description: "How workflow matching works, including user_path-first precedence and provider-name scoping."
+description: "How workflow matching works, including user_path-first precedence, provider-name scoping, and guardrail steps per phase."
 icon: "workflow"
-keywords: ["workflows", "routing rules", "user_path precedence", "provider scoping"]
+keywords: ["workflows", "routing rules", "user_path precedence", "provider scoping", "guardrail steps"]
 ---
 
 ## Overview
@@ -15,7 +15,7 @@ They currently control gateway-owned behavior such as:
 - budgets
 - audit logging
 - usage tracking
-- guardrails
+- guardrails: which [plugin instances](/advanced/guardrails) run, in which phase, in what order
 - translated-route failover
 
 Each request matches exactly one active workflow.
@@ -65,6 +65,42 @@ In practice:
 - within the same path depth, provider+model is more specific than provider-only
 - if no path-scoped workflow matches, the gateway falls back to provider+model, then provider, then global
 
+## Guardrail Steps
+
+The workflow payload lists the guardrail instances to run as `steps`. Each
+step names an instance (`ref`), the phase it runs in, and its position:
+
+```json
+{
+  "schema_version": 2,
+  "features": { "cache": true, "audit": true, "usage": true, "budget": true, "guardrails": true, "failover": true },
+  "steps": [
+    { "ref": "pii-redact",   "phase": "prompt",   "step": 10 },
+    { "ref": "policy-judge", "phase": "prompt",   "step": 10 },
+    { "ref": "safety-prompt","phase": "prompt",   "step": 20 },
+    { "ref": "mask-keys",    "phase": "response", "step": 10 },
+    { "ref": "mask-keys",    "phase": "stream",   "step": 10 }
+  ]
+}
+```
+
+- `phase` is `prompt` (default when omitted), `response`, or `stream`. The
+  instance's plugin must implement that phase; `GET /admin/workflows/guardrails`
+  lists each instance with its `phases`.
+- Within a phase, steps run in ascending `step`; equal `step` values run in
+  parallel. At most one content-editing instance may share a `step`.
+- The same `ref` may appear once per phase.
+- `features.guardrails: false` disables every step of the workflow.
+
+Version 1 payloads (`"schema_version": 1` with `"guardrails": [{"ref", "step"}]`)
+are still accepted and compile as prompt-phase steps. Stored version 1
+workflows are returned unchanged; the dashboard always writes version 2.
+
+Workflow views (`GET /admin/workflows`, `GET /admin/workflows/:id`) expose the
+hash of each compiled chain as `chain_hashes` (`{"prompt": "...", "response": "...", "stream": "..."}`).
+The prompt hash is part of the semantic response cache key, so changing a
+prompt-phase guardrail invalidates cached answers produced under the old rules.
+
 ## Examples
 
 ### Path Inheritance
@@ -109,16 +145,19 @@ curl -X POST http://localhost:8080/admin/workflows \
     "name": "team-alpha-openai-primary",
     "description": "Disable cache for this tenant on the primary OpenAI provider",
     "workflow_payload": {
-      "schema_version": 1,
+      "schema_version": 2,
       "features": {
         "cache": false,
         "budget": true,
         "audit": true,
         "usage": true,
-        "guardrails": false,
+        "guardrails": true,
         "failover": true
       },
-      "guardrails": []
+      "steps": [
+        { "ref": "pii-redact", "phase": "prompt", "step": 10 },
+        { "ref": "mask-keys", "phase": "response", "step": 10 }
+      ]
     }
   }'
 ```
@@ -144,16 +183,19 @@ workflow = client.post(
         "name": "team-alpha-openai-primary",
         "description": "Disable cache for this tenant on the primary OpenAI provider",
         "workflow_payload": {
-            "schema_version": 1,
+            "schema_version": 2,
             "features": {
                 "cache": False,
                 "budget": True,
                 "audit": True,
                 "usage": True,
-                "guardrails": False,
+                "guardrails": True,
                 "failover": True,
             },
-            "guardrails": [],
+            "steps": [
+                {"ref": "pii-redact", "phase": "prompt", "step": 10},
+                {"ref": "mask-keys", "phase": "response", "step": 10},
+            ],
         },
     },
 )
@@ -177,16 +219,19 @@ const workflow = await client.post("/admin/workflows", {
     name: "team-alpha-openai-primary",
     description: "Disable cache for this tenant on the primary OpenAI provider",
     workflow_payload: {
-      schema_version: 1,
+      schema_version: 2,
       features: {
         cache: false,
         budget: true,
         audit: true,
         usage: true,
-        guardrails: false,
+        guardrails: true,
         failover: true,
       },
-      guardrails: [],
+      steps: [
+        { ref: "pii-redact", phase: "prompt", step: 10 },
+        { ref: "mask-keys", phase: "response", step: 10 },
+      ],
     },
   },
 });
@@ -202,3 +247,4 @@ console.log(workflow);
 - `scope_user_path` is normalized to canonical slash form
 - managed API keys can override the request user path header; workflow matching uses the effective request user path
 - budget enforcement runs only when the global budget feature and the matched workflow's `budget` feature are both enabled; see [Budgets](/features/budgets)
+- every `ref` must name an existing guardrail instance; a guardrail referenced by an active workflow cannot be deleted

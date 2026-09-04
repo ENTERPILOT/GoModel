@@ -81,6 +81,7 @@
       {@render node({
         icon: Shield,
         label: m.workflows_guardrails(),
+        badge: chart.guardrailBadge,
         sub: chart.guardrailLabel,
       })}
     {/if}
@@ -101,6 +102,26 @@
         state: chart.failoverNodeClass,
         badge: chart.failoverStatusLabel,
         sub: chart.failoverTargetLabel,
+      })}
+    {/if}
+
+    {#if chart.showResponseGuardrails}
+      <div class={["workflow-conn", chart.responseConnClass]}></div>
+      {@render node({
+        icon: Shield,
+        label: m.workflows_guardrails(),
+        badge: chart.responseGuardrailBadge,
+        sub: chart.responseGuardrailLabel,
+      })}
+    {/if}
+
+    {#if chart.showStreamGuardrails}
+      <div class={["workflow-conn", chart.responseConnClass]}></div>
+      {@render node({
+        icon: Shield,
+        label: m.workflows_guardrails(),
+        badge: chart.streamGuardrailBadge,
+        sub: chart.streamGuardrailLabel,
       })}
     {/if}
 

@@ -1,14 +1,22 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
 
+	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/tagging"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/users"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // initModelCatalog builds the services that decide which models exist and
@@ -56,7 +64,11 @@ func (b *bootstrap) initModelCatalog() error {
 	app.providerCredentials = providerCredentialsResult
 	app.register(subsystemProviderCredentials, ownedByShutdown, app.providerCredentials.Close)
 
-	virtualModelsResult, err := virtualmodels.New(b.ctx, b.appCfg, app.storage, providerResult.Registry, declaredProviders)
+	// The routing-strategy resolver was built with the provider hooks in
+	// initProviders; virtual models consult it for the plugin strategy.
+	routeStrategies := b.routeStrategies
+	virtualModelsResult, err := virtualmodels.New(b.ctx, b.appCfg, app.storage, providerResult.Registry, declaredProviders,
+		virtualmodels.WithRouteResolver(routeStrategies))
 	if err != nil {
 		return fmt.Errorf("failed to initialize virtual models: %w", err)
 	}
@@ -99,6 +111,50 @@ func (b *bootstrap) initModelCatalog() error {
 	app.register(subsystemUsers, ownedByShutdown, app.users.Close)
 	vm.SetAccessPolicy(usersResult.Service)
 	return nil
+}
+
+// guardrailInstanceConfig returns the instance-scoped config source for
+// routing-strategy plugins: the stored config of the guardrail definition
+// carrying the plugin's own name and type, when one exists. The guardrails
+// service is built in a later phase, so it is read at call time.
+func guardrailInstanceConfig(app *App) plugins.RouteConfigSource {
+	return func(name string) (json.RawMessage, bool) {
+		if app == nil || app.guardrails == nil || app.guardrails.Service == nil {
+			return nil, false
+		}
+		config, pluginType, ok := app.guardrails.Service.InstanceConfig(name)
+		if !ok || pluginType != name {
+			return nil, false
+		}
+		return config, true
+	}
+}
+
+// routeStrategyHooks adapts upstream client lifecycle events into
+// routing-strategy plugin outcomes, mirroring routeSelectorHooks. The
+// resolver recovers plugin panics itself.
+func routeStrategyHooks(resolver *plugins.RouteResolver) llmclient.Hooks {
+	return llmclient.Hooks{
+		OnRequestEnd: func(ctx context.Context, info llmclient.ResponseInfo) {
+			source, _ := routeAffinityContext(ctx)
+			resolver.ReportOutcome(routeOutcome(source, info))
+		},
+	}
+}
+
+// routeOutcome maps one completed upstream call to the plugin outcome shape.
+func routeOutcome(source string, info llmclient.ResponseInfo) pluginapi.RouteOutcome {
+	var netErr net.Error
+	timeout := errors.Is(info.Error, context.DeadlineExceeded) ||
+		(errors.As(info.Error, &netErr) && netErr.Timeout())
+	return pluginapi.RouteOutcome{
+		Source:     source,
+		Target:     pluginapi.RouteTarget{Provider: info.Provider, Model: info.Model},
+		Success:    info.Error == nil && (info.StatusCode == 0 || info.StatusCode < 400),
+		StatusCode: info.StatusCode,
+		Latency:    info.Duration,
+		Timeout:    timeout,
+	}
 }
 
 // initPricing builds request tagging and the model pricing overrides that

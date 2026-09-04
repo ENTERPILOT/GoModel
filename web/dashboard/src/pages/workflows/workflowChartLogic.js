@@ -11,9 +11,17 @@ import {
   workflowScopeProviderValue,
 } from "./workflowsLogic.js";
 import * as m from "../../lib/paraglide/messages.js";
+import { normalizeWorkflowPhase, phaseLabel } from "../../lib/utils/pluginPhases.js";
 
-export function workflowGuardrailLabel(source) {
-  const count = workflowSourceGuardrails(source).length;
+function workflowPhaseStepCount(source, phase) {
+  const wanted = normalizeWorkflowPhase(phase);
+  return workflowSourceGuardrails(source).filter((step) => step.phase === wanted).length;
+}
+
+// workflowGuardrailLabel is the step-count sublabel of a guardrail node for
+// one phase (prompt by default); "" when that phase has no steps.
+export function workflowGuardrailLabel(source, phase = "prompt") {
+  const count = workflowPhaseStepCount(source, phase);
   if (count === 0) return "";
   return count === 1
     ? m.workflows_one_step()
@@ -386,6 +394,13 @@ function workflowChartModel(source, runtime, options, caps) {
   const highlightAsyncPresent = !!config.highlightAsyncPresent;
   const showBudget = !!features.budget || workflowRuntimeBudgetExceeded(runtime);
   const showGuardrails = !!features.guardrails;
+  // Prompt guardrails run before the model call (the existing node);
+  // response and stream guardrails run after it, so they get their own nodes
+  // between the model/failover and the Response endpoint.
+  const showResponseGuardrails =
+    showGuardrails && workflowPhaseStepCount(source, "response") > 0;
+  const showStreamGuardrails =
+    showGuardrails && workflowPhaseStepCount(source, "stream") > 0;
   const showUsage = !!features.usage;
   const showAudit = forceAudit || !!features.audit;
   const showAsync = !!config.forceAsync || !!(showUsage || showAudit);
@@ -406,7 +421,18 @@ function workflowChartModel(source, runtime, options, caps) {
     ),
     budgetStatusLabel: workflowBudgetStatusLabel(runtime),
     showGuardrails,
-    guardrailLabel: showGuardrails ? workflowGuardrailLabel(source) : "",
+    guardrailLabel: showGuardrails ? workflowGuardrailLabel(source, "prompt") : "",
+    // The prompt node only needs a phase badge once other phases are shown.
+    guardrailBadge:
+      showResponseGuardrails || showStreamGuardrails ? phaseLabel("prompt") : null,
+    showResponseGuardrails,
+    responseGuardrailLabel: showResponseGuardrails
+      ? workflowGuardrailLabel(source, "response")
+      : "",
+    responseGuardrailBadge: showResponseGuardrails ? phaseLabel("response") : null,
+    showStreamGuardrails,
+    streamGuardrailLabel: showStreamGuardrails ? workflowGuardrailLabel(source, "stream") : "",
+    streamGuardrailBadge: showStreamGuardrails ? phaseLabel("stream") : null,
     showCache: !!config.forceCache || !!features.cache || workflowRuntimeHasCache(runtime),
     cacheNodeClass: workflowCacheNodeClass(runtime, liveStep === "cache"),
     cacheConnClass: workflowCacheConnClass(runtime),

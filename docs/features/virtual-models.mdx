@@ -96,6 +96,12 @@ them. Add more than one target in the editor (**Add target**) and pick a
   a session on the provider whose prompt cache is warm. See
   [Intelligent Routing](/pro/intelligent-routing). On an open-source build the
   strategy falls back to round-robin.
+- **Plugin** (`strategy: plugin`) delegates the choice to a loaded
+  [routing strategy plugin](/advanced/plugins#routing-strategy-plugins) named
+  by `strategy_plugin`, configured per redirect through `strategy_config`.
+  The built-in `cheapest_healthy` prefers the cheapest (or fastest) target
+  whose recent error rate is acceptable. Weights do not apply; if the plugin
+  fails or is missing, the redirect falls back to weighted round-robin.
 
 Targets that the gateway cannot currently serve (unknown model, provider down)
 are skipped automatically, so a redirect keeps working as long as one target is

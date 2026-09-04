@@ -2,25 +2,34 @@ package admin
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // upsertVirtualModelRequest is the unified admin upsert contract. Presence of
 // target_model or targets makes the row a redirect; absence makes it an access
 // policy. A single target_model is a plain alias; multiple targets are load
-// balanced across by strategy ("round_robin", "cost", or "adaptive").
+// balanced across by strategy ("round_robin", "cost", "failover", "adaptive",
+// or "plugin" with strategy_plugin naming the routing-strategy plugin).
 type upsertVirtualModelRequest struct {
 	Source      string                      `json:"source"`
 	OldSource   string                      `json:"old_source,omitempty"`
 	TargetModel string                      `json:"target_model,omitempty"`
 	Targets     []virtualModelTargetRequest `json:"targets,omitempty"`
 	Strategy    string                      `json:"strategy,omitempty"`
+	// StrategyPlugin names the routing-strategy plugin for strategy "plugin";
+	// StrategyConfig holds that plugin's route-scoped settings, validated
+	// against its schema (see GET /admin/plugins, route_fields).
+	StrategyPlugin string         `json:"strategy_plugin,omitempty"`
+	StrategyConfig map[string]any `json:"strategy_config,omitempty"`
 	// SessionAffinity keeps a detected session on the target that served it
 	// before. Omitted means enabled; false restores stateless balancing.
 	SessionAffinity *bool `json:"session_affinity,omitempty"`
@@ -164,6 +173,8 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 	vm := virtualmodels.VirtualModel{
 		Source:          source,
 		Strategy:        strings.TrimSpace(req.Strategy),
+		StrategyPlugin:  strings.TrimSpace(req.StrategyPlugin),
+		StrategyConfig:  req.StrategyConfig,
 		SessionAffinity: req.SessionAffinity,
 		Failover:        req.Failover,
 		UserPaths:       req.UserPaths,
@@ -177,7 +188,34 @@ func (h *Handler) buildVirtualModelUpsert(source string, req upsertVirtualModelR
 		return virtualmodels.VirtualModel{}, err
 	}
 	vm.Targets = targets
+	if err := h.validateStrategyPlugin(vm); err != nil {
+		return virtualmodels.VirtualModel{}, err
+	}
 	return vm, nil
+}
+
+// validateStrategyPlugin rejects a plugin-strategy redirect whose plugin is
+// not a loaded routing strategy, naming the loaded ones. The service then
+// validates strategy_config against the plugin's route-scoped fields.
+func (h *Handler) validateStrategyPlugin(vm virtualmodels.VirtualModel) error {
+	if !vm.IsRedirect() || strings.ToLower(vm.Strategy) != virtualmodels.StrategyPlugin {
+		return nil
+	}
+	if vm.StrategyPlugin == "" {
+		return core.NewInvalidRequestError("strategy_plugin is required with strategy \"plugin\"", nil)
+	}
+	if h.pluginCatalog == nil {
+		return nil
+	}
+	if entry, ok := h.pluginCatalog.Lookup(vm.StrategyPlugin); !ok || !entry.HasKind(pluginapi.KindRoute) {
+		names := plugins.RoutePluginNames(h.pluginCatalog)
+		known := "none"
+		if len(names) > 0 {
+			known = strings.Join(names, ", ")
+		}
+		return core.NewInvalidRequestError(fmt.Sprintf("unknown routing-strategy plugin %q (loaded: %s)", vm.StrategyPlugin, known), nil)
+	}
+	return nil
 }
 
 // buildVirtualModelTargets resolves the redirect targets from the request. The

@@ -21,10 +21,13 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/observability"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/exchange"
 	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // translatedInferenceService adapts Echo requests to the transport-independent
@@ -37,6 +40,7 @@ type translatedInferenceService struct {
 	failoverResolver         RequestFailoverResolver
 	failoverPolicy           *gateway.FailoverPolicy
 	translatedRequestPatcher TranslatedRequestPatcher
+	pluginChains             PluginChainsResolver
 	logger                   auditlog.LoggerInterface
 	usageLogger              usage.LoggerInterface
 	budgetChecker            BudgetChecker
@@ -132,7 +136,8 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		return s.handleStreamingReadCloser(c, workflow, result.Meta, result.Stream, func(stream io.ReadCloser) io.ReadCloser {
+		stream := s.wrapPluginStream(ctx, workflow, chatStreamDialect(includeStreamUsage(req)), chatPromptOf(req), result.Stream)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})
 	}
@@ -142,6 +147,10 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
+	result.Response, err = chatResponsePhase.run(s, c, workflow, req, result.Response)
+	if err != nil {
+		return handleError(c, err)
+	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -161,6 +170,7 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 		result.Meta.ProviderName,
 	)
 
+	applyPluginResponseHeaders(c)
 	return c.JSON(http.StatusOK, result.Response)
 }
 
@@ -184,13 +194,51 @@ func handleTranslatedJSON[Req any](
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	ctx, preparedReq, workflow, err := prepare(s, c.Request().Context(), req, translatedRequestMeta(c))
+	ctx, preparedReq, workflow, err := prepare(s, withPluginRequestState(c), req, translatedRequestMeta(c))
 	if err != nil {
+		if short := shortCircuitOf(err); short != nil {
+			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+			recordPromptPluginRevisions(c, nil, nil)
+			return shortCircuit(s, c, workflow, req, short)
+		}
+		recordPromptPluginRevisions(c, nil, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
+	recordPromptPluginRevisions(c, req, preparedReq)
+	applyPluginRequestHeaders(c)
 
 	return handleWithCache(s, c, preparedReq, workflow, dispatch)
+}
+
+// shortCircuit renders a prompt-phase respond decision for the request type.
+func shortCircuit[Req any](s *translatedInferenceService, c *echo.Context, workflow *core.Workflow, req Req, short *plugins.ShortCircuit) error {
+	switch typed := any(req).(type) {
+	case *core.ChatRequest:
+		return s.writeChatShortCircuit(c, workflow, typed, short, chatJSON, nil)
+	case *core.ResponsesRequest:
+		return s.writeResponsesShortCircuit(c, workflow, typed, short)
+	default:
+		return handleError(c, core.NewInvalidRequestError("plugin short-circuit is not supported for this request", nil))
+	}
+}
+
+func includeStreamUsage(req *core.ChatRequest) bool {
+	return req != nil && req.StreamOptions != nil && req.StreamOptions.IncludeUsage
+}
+
+// promptOf drops the mapping error: the prompt is a read-only view for
+// response-phase plugins and may be absent.
+func promptOf(prompt *pluginapi.Prompt, err error) *pluginapi.Prompt {
+	if err != nil {
+		return nil
+	}
+	return prompt
+}
+
+// chatPromptOf defers the request mapping until a stream wrapper needs it.
+func chatPromptOf(req *core.ChatRequest) func() *pluginapi.Prompt {
+	return func() *pluginapi.Prompt { return promptOf(exchange.FromChatRequest(req)) }
 }
 
 func prepareChatCompletionRequest(
@@ -226,19 +274,30 @@ func unpackPrepared[Prepared any, Req any](
 	err error,
 	fields func(Prepared) (context.Context, Req, *core.Workflow),
 ) (context.Context, Req, *core.Workflow, error) {
-	if err != nil {
-		var zero Req
-		return fallback, zero, nil, err
-	}
 	ctx, req, workflow := fields(prepared)
+	if err != nil {
+		// A patch-phase error still reports the resolved workflow (and its
+		// context) so the caller can render a plugin outcome with it.
+		var zero Req
+		if ctx == nil {
+			ctx = fallback
+		}
+		return ctx, zero, workflow, err
+	}
 	return ctx, req, workflow, nil
 }
 
 func chatPreparedFields(prepared *gateway.PreparedChatRequest) (context.Context, *core.ChatRequest, *core.Workflow) {
+	if prepared == nil {
+		return nil, nil, nil
+	}
 	return prepared.Context, prepared.Request, prepared.Workflow
 }
 
 func responsesPreparedFields(prepared *gateway.PreparedResponsesRequest) (context.Context, *core.ResponsesRequest, *core.Workflow) {
+	if prepared == nil {
+		return nil, nil, nil
+	}
 	return prepared.Context, prepared.Request, prepared.Workflow
 }
 
@@ -299,7 +358,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		stream := result.Stream
+		stream := s.wrapPluginStream(ctx, workflow, responsesStreamDialect(), func() *pluginapi.Prompt { return promptOf(exchange.FromResponsesRequest(req)) }, result.Stream)
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}
@@ -313,6 +372,10 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
+	result.Response, err = responsesResponsePhase.run(s, c, workflow, req, result.Response)
+	if err != nil {
+		return handleError(c, err)
+	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -343,6 +406,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	}
 	s.storeResponseSnapshotAsync(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 
+	applyPluginResponseHeaders(c)
 	return c.JSON(http.StatusOK, result.Response)
 }
 
@@ -622,6 +686,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		_ = wrappedStream.Close() //nolint:errcheck
 	}()
 
+	applyPluginResponseHeaders(c)
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")

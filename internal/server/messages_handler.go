@@ -156,14 +156,22 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 		return handleError(c, err)
 	}
 
-	ctx := core.WithRequestDialect(c.Request().Context(), core.RequestDialectAnthropicMessages)
+	ctx := core.WithRequestDialect(withPluginRequestState(c), core.RequestDialectAnthropicMessages)
 	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, ctx, req, translatedRequestMeta(c))
 	if err != nil {
+		if short := shortCircuitOf(err); short != nil {
+			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+			recordPromptPluginRevisions(c, nil, nil)
+			return s.writeChatShortCircuit(c, workflow, req, short, messagesJSON, messagesOuterWrap(req, resolvedModelFromWorkflow(workflow, req.Model)))
+		}
+		recordPromptPluginRevisions(c, nil, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
+	recordPromptPluginRevisions(c, req, prepared)
+	applyPluginRequestHeaders(c)
 
-	if s.canForwardMessagesNatively(workflow) {
+	if s.canForwardMessagesNatively(ctx, workflow) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
 	}
 	return handleWithCache(s, c, prepared, workflow, s.dispatchMessages)
@@ -209,7 +217,8 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		if result.Meta.UsedFailover {
 			markRequestFailoverUsed(c)
 		}
-		return s.handleStreamingReadCloser(c, workflow, result.Meta, result.Stream, func(stream io.ReadCloser) io.ReadCloser {
+		stream := s.wrapPluginStream(ctx, workflow, chatStreamDialect(false), chatPromptOf(req), result.Stream)
+		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
 			converted := anthropicapi.NewStreamConverter(stream, result.Meta.Model, anthropicapi.EstimateChatInputTokens(req))
 			return result.WrapDeliveryStream(ctx, converted)
 		})
@@ -220,6 +229,10 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		return handleError(c, err)
 	}
 	enrichAuditEntryWithProviderAttempts(c)
+	result.Response, err = chatResponsePhase.run(s, c, workflow, req, result.Response)
+	if err != nil {
+		return handleError(c, err)
+	}
 	if result.Meta.UsedFailover {
 		markRequestFailoverUsed(c)
 		auditlog.EnrichEntryWithFailover(c, result.Meta.FailoverModel)
@@ -231,6 +244,7 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 		result.Meta.ProviderName,
 	)
 
+	applyPluginResponseHeaders(c)
 	return c.JSON(http.StatusOK, anthropicapi.FromChatResponse(result.Response))
 }
 

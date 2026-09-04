@@ -1,0 +1,508 @@
+---
+title: "Plugins"
+description: "One plugin contract for guardrails, response and stream filters, header edits, and routing strategies: built in, compiled in, or loaded from a .so file."
+icon: "puzzle"
+keywords: ["plugins", "pluginapi", "guardrails", "shared object", "routing strategy", "streaming"]
+---
+
+## Overview
+
+A plugin is a Go value that implements `pluginapi.Plugin` plus one or more
+optional hook interfaces. Every [guardrail](/advanced/guardrails) is an
+instance of a plugin, and so is a custom routing strategy for a
+[virtual model](/features/virtual-models). There is one contract, in the
+`github.com/enterpilot/gomodel/pluginapi` package, and three ways to ship a
+plugin:
+
+| How | When to use it | Registered by |
+| --- | --- | --- |
+| **Built in** | Ships with GoModel: `system_prompt`, `llm_based_altering`, `string_replace`, `header_edit`, `llm_judge`, and the `cheapest_healthy` routing strategy | nothing to do |
+| **Compiled in** | You build your own binary from the `run` package | `ext.RegisterPlugin(func() pluginapi.Plugin { ... })` before `run.Run` |
+| **Shared object** (`.so`) | You run the stock binary and want to add code at startup | `plugins.load` in `config.yaml` (needs the cgo build, see [Shared-object plugins](#shared-object-plugins)) |
+
+Whichever way it arrives, a plugin type shows up under its manifest name on
+the dashboard's Guardrails page, in `GET /admin/plugins`, and as a `type` in
+`guardrails.rules`.
+
+`pluginapi` depends on the standard library only. A plugin imports it and
+nothing else from GoModel.
+
+## Phases
+
+A plugin declares which hooks it implements in `Manifest.Kinds`. GoModel runs
+the content phases from the matched [workflow](/advanced/workflows):
+
+| Phase | Hook | Runs | Sees |
+| --- | --- | --- | --- |
+| `prompt` | `PromptHook.OnPrompt` | after routing, before the provider call | `Prompt`, resolved provider and model in `Meta` |
+| `response` | `ResponseHook.OnResponse` | on a complete non-streaming response, or on the assembled response of a buffered stream | `Prompt`, `Response`, `Meta.Attempts` |
+| `stream` | `StreamHook.OnStreamEvent` / `OnStreamEnd` | per streamed event, then once at the end | `Prompt`, `Stream` (text so far), each event |
+
+Which instance runs in which phase, and in what order, is a workflow decision
+(`steps[].phase` and `steps[].step`). The same instance may appear once per
+phase.
+
+Two more hook kinds exist in the contract but are not run by this release:
+`request` (before model resolution) and `complete` (after the client response
+is written). A manifest may declare them; GoModel validates that the
+interfaces are implemented and ignores them at runtime. The `route` kind is
+used by virtual models, see [Routing strategy plugins](#routing-strategy-plugins).
+
+Phases apply to `/v1/chat/completions`, `/v1/responses`, and `/v1/messages`.
+Anthropic requests are translated to the chat form before any hook runs, so a
+plugin sees one shape; `Meta.Dialect` reports `anthropic_messages` when it
+matters. Inline `/v1/batches` items go through the `prompt` phase when
+`guardrails.enable_for_batch_processing` is on.
+
+## Chain execution
+
+Within one phase, instances are grouped by `step`:
+
+- Steps run in ascending order. A later step sees the edits of an earlier one.
+- Within a step, instances whose manifest says `Mutates: false` run
+  **concurrently** on a shallow copy of the exchange (their `Values` and
+  response headers are merged back). The step may hold **at most one**
+  instance with `Mutates: true`, which runs after the readers. Two mutating
+  instances at the same step is a configuration error.
+- Decisions of a step merge by severity: `block` > `respond` > `warn` >
+  `allow`. The first blocking decision ends the chain after its step.
+
+## Decisions
+
+Every hook returns a `pluginapi.Decision`:
+
+| Action | Effect | Defaults |
+| --- | --- | --- |
+| `allow` | continue with the edits already made to the exchange | zero value of `Decision` |
+| `block` | reject with `Status`, `Code`, and `Message` in the endpoint's native error format | `Status` 400 in the prompt phase, 502 in the response and stream phases; `Code` `guardrail_blocked` |
+| `respond` | answer the request with `Response` as an ordinary assistant turn, HTTP 200 (a synthesized one-turn stream for streaming requests) | `pluginapi.Respond(text)` builds a one-choice completion |
+| `warn` | continue; record `Code`, `Message`, and `Detail` in the audit trail and add `X-GoModel-Guardrail: warn; code=<code>` to the client response | `Code` `guardrail_warning` |
+
+`respond` is the "block with a safe message" most guardrail products offer:
+agent loops keep running instead of surfacing a 4xx. Use `block` when the
+caller should see an error.
+
+`Detail` is stored in the audit record and must not contain secrets.
+Prompt-phase decisions are appended to the request's revision chain (the same
+place request rewrites are recorded); response and stream decisions are
+logged with the request id.
+
+## Fail modes and timeouts
+
+Each instance has a `fail_mode` and a `timeout_ms`:
+
+| Setting | Values | Default |
+| --- | --- | --- |
+| `fail_mode` | `closed`: an error, panic, or timeout rejects the request with HTTP 500 and code `plugin_failure`; `open`: log and continue as if the instance allowed | `closed` for `prompt`, `response`, and `stream` |
+| `timeout_ms` | upper bound for every hook call of the instance | `0` (no per-instance timeout) |
+
+The instance name of a fail-closed failure goes to the logs and the audit
+record, never to the client. `Init` runs with a fixed 10 s timeout. Panics
+inside a plugin are recovered and treated as errors.
+
+Keep the default. Switch an instance to `open` only when it is an observer
+whose absence is acceptable (a header tagger, a warn-only classifier).
+
+## Streaming
+
+Bytes already sent to the client cannot be recalled, so a stream plugin picks
+one of three modes in `StreamHook.StreamPolicy()`:
+
+| Mode | What the plugin can do | Latency cost |
+| --- | --- | --- |
+| `observe` | read every event; decisions are ignored except `terminate` | none |
+| `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice |
+| `buffer` | nothing per event; GoModel collects the whole stream and runs the plugin's `OnResponse` on the assembled completion | time-to-first-token becomes time-to-last-token |
+
+**Lookbehind** (`transform` only): GoModel withholds the last `LookbehindChars`
+characters of text per choice and presents each delta together with that
+tail, so a pattern spanning two chunks (a phone number, an API key) is
+visible in one event before any of it reaches the client. A pattern of up to
+`LookbehindChars + 1` characters is always caught. `0` disables it.
+
+**Buffering**: the upstream is drained into a bounded buffer
+(`MaxBufferBytes`, default 4 MiB; exceeding it fails closed with code
+`response_too_large`). While draining, GoModel sends the SSE comment
+`: gomodel-buffering` every 15 s so proxies and clients do not time out; SDKs
+ignore comment lines. After the response chain runs, the original bytes are
+replayed unchanged (`allow`, `warn`), a stream is synthesized from the edited
+completion (`allow` with edits, `respond`), or a single error chunk is sent
+(`block`).
+
+**Mixed chains**: if any stream instance asks for `buffer`, or the workflow has
+any `response` step, the whole stream is buffered and `transform` instances run
+over the replay.
+
+**Cutting a stream**: a `terminate` decision in `transform` mode, or a
+`block`/`respond` from `OnStreamEnd`, ends the stream with
+`finish_reason: "content_filter"` (`stop_reason: "end_turn"` for Anthropic)
+followed by `[DONE]`. The client keeps what it already received. If nothing
+may leak before the decision, the plugin must use `buffer` mode; the built-in
+`string_replace` and `llm_judge` do exactly that for `block` and `respond`.
+
+## The Exchange
+
+Every hook receives one `*pluginapi.Exchange`, the same object in every phase
+of a request:
+
+| Field | Type | Contents |
+| --- | --- | --- |
+| `Meta` | `Meta` | read-only request facts: request id, dialect, endpoint, user path, key id, labels, session id, requested and resolved model, provider, workflow version and features, `Stream`, provider `Attempts` (response phases), prompt-cache planning |
+| `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam` |
+| `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason` |
+| `Stream` | `*StreamState` | text accumulated so far per choice and the event count; `nil` for non-streaming requests |
+| `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (appended to the client response), `Upstream` (recorded, not forwarded in this release) |
+| `Values` | `Values` | per-request bag shared by every hook of the request; prefix keys with the plugin name |
+
+Edits go through methods, not field assignment, so GoModel re-encodes only
+what changed and untouched messages keep every provider-specific field
+(`cache_control`, multi-part content, extra fields). Removing a message that
+carries a tool call whose result is still present (or the reverse) returns a
+`DanglingToolError` naming the partner message; the request is rejected if
+the pair stays broken.
+
+`Meta.Cache.PlannedPrefixMessages` tells a prompt plugin how many leading
+messages the provider cache planner will mark as the cached prefix. Appending
+keeps the cache; editing inside the prefix invalidates it for the session.
+
+## Configuration
+
+### Instances
+
+Instances are declared in `guardrails.rules` or created on the dashboard;
+both land in the same store. See [Guardrails](/advanced/guardrails) for the
+per-type settings.
+
+```yaml
+guardrails:
+  enabled: true
+  rules:
+    - name: "mask-keys"
+      type: "string_replace"      # a built-in, or the manifest name of a loaded plugin
+      phase: "response"           # prompt (default) | response | stream
+      order: 10                   # step within the phase
+      fail_mode: "open"           # closed (default) | open
+      timeout_ms: 500             # 0 = no per-instance timeout (default)
+      config:                     # validated against the plugin's ConfigSchema
+        mode: "regex"
+        rules: |
+          sk-[A-Za-z0-9]{20,} => [redacted]
+```
+
+Rules from `config.yaml` are seeded into the managed default workflow at
+`order` in `phase`. `type` accepts an optional `plugin:` prefix.
+
+### Loading `.so` files
+
+```yaml
+plugins:
+  search_paths: ["/etc/gomodel/plugins"]   # PLUGINS_SEARCH_PATHS, comma-separated; default: empty
+  load:
+    - file: acme_guard.so                  # relative to a search path, or absolute
+      sha256: "3b1f..."                    # optional pin; a mismatch fails startup
+```
+
+A relative `file` must resolve inside one of the `search_paths` (symlinks are
+followed and checked). A file that cannot be resolved, verified, or opened is
+a startup error naming the file.
+
+`GUARDRAILS_ENABLED` remains the switch that decides whether configured
+instances run on traffic.
+
+## Dashboard
+
+- **Guardrails page**: *Create Guardrail* lists every plugin that implements a
+  `prompt`, `response`, or `stream` hook. The form is generated from the
+  plugin's `ConfigSchema`: `text`, `textarea`, `number`, `select`,
+  `checkboxes`, `secret` (masked; `GET` returns `********` and sending that
+  literal back keeps the stored value), and `model` (a provider/model or alias
+  picker). The **Advanced** section holds *Fail mode* (Default, Closed, Open)
+  and *Timeout (ms)*; they apply to the instance in every workflow that
+  references it.
+- **Plugins list**: at the bottom of the Guardrails page, every loaded plugin
+  type with its version, hooks, source (built-in, registered, or the `.so`
+  path), and health. A plugin that failed to load is listed with its error.
+- **Workflows page**: each step has a *Phase* selector; the instance dropdown
+  only offers instances whose plugin implements that phase.
+
+## Shared-object plugins
+
+Go's `plugin` package sets the rules, and they are strict:
+
+- **Platform**: Linux, macOS, and FreeBSD, and only in a binary built with
+  `CGO_ENABLED=1`. The default GoModel binary and image are static and
+  refuse `.so` files with an error that says so. Use `make build-plugins`
+  (`bin/gomodel-plugins`) or the `gomodel:<version>-plugins` image
+  (`make image-plugins`, built from `Dockerfile.plugins`, glibc runtime).
+- **Exact toolchain**: the plugin must be built with the **same Go version**,
+  the **same build flags** (`-trimpath`, `-race`, `-tags`), and **identical
+  sources of every shared package**. Only the standard library and
+  `pluginapi` are shared, so internal GoModel changes never affect a plugin,
+  but every GoModel release and every Go toolchain update (patch releases
+  included) needs a rebuild. Make it a CI step.
+- **No unload**: a `.so` stays loaded until restart. Changing a loaded file
+  takes effect on restart; editing an instance's config re-runs `Init` on a
+  fresh value without a restart.
+- **Trusted code**: loading a `.so` is equivalent to changing the binary. Keep
+  `search_paths` root-owned and pin `sha256` in production.
+
+### Build and inspect
+
+```sh
+gomodel plugin build ./examples/plugins/keywordblock -o plugins/keyword_block.so
+gomodel plugin inspect plugins/keyword_block.so
+shasum -a 256 plugins/keyword_block.so     # value for plugins.load[].sha256
+```
+
+`plugin build` runs `go build -buildmode=plugin` with the flags recorded in
+the `gomodel` binary that runs it, forces `CGO_ENABLED=1`, pins `GOTOOLCHAIN`
+to the host's Go version, stamps a `GoModelBuildInfo` variable into the
+plugin, and refuses an output whose Go version differs from the host's.
+Always build with the binary that will load the plugin. `plugin inspect`
+opens the file and prints its manifest, config schema, and build info. A
+refused load names both sides:
+
+```
+plugin file /app/plugins/x.so was built with a different toolchain, flags, or
+pluginapi sources: it was built with go1.27.0, gomodel v0.1.90, flags -trimpath;
+this binary was built with go1.27.0, gomodel v0.1.91, flags (none). Rebuild it
+with `gomodel plugin build` from this GoModel version
+```
+
+In Docker, build the `plugin-builder` target of `Dockerfile.plugins` and run
+it against your plugin directory:
+
+```sh
+docker build -f Dockerfile.plugins --target plugin-builder -t gomodel-plugin-builder .
+docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
+  gomodel-plugin-builder -o /out/my-plugin.so /src
+```
+
+`gomodel --version` prints the Go and `pluginapi` versions of the binary.
+`examples/plugins/README.md` covers building a plugin in its own Go module.
+
+## Writing a plugin
+
+A `package main` that exports `func GoModelPlugin() pluginapi.Plugin` is a
+shared-object plugin; the same type registered with `ext.RegisterPlugin` is a
+compiled-in one. This one blocks a request when the last user message
+contains a configured word:
+
+```go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+
+	"github.com/enterpilot/gomodel/pluginapi"
+)
+
+type wordBlock struct{ words []string }
+
+func (p *wordBlock) Manifest() pluginapi.Manifest {
+	return pluginapi.Manifest{
+		Name:    "word_block",
+		Version: "1.0.0",
+		Kinds:   []pluginapi.Kind{pluginapi.KindPrompt},
+		ConfigSchema: []pluginapi.Field{{
+			Key: "words", Label: "Blocked words", Input: pluginapi.InputTextarea,
+			Required: true, Help: "One word per line.",
+		}},
+	}
+}
+
+func (p *wordBlock) Init(_ context.Context, cfg json.RawMessage, _ pluginapi.Host) error {
+	var c struct{ Words string `json:"words"` }
+	if err := json.Unmarshal(cfg, &c); err != nil {
+		return err
+	}
+	p.words = strings.Fields(strings.ToLower(c.Words))
+	return nil
+}
+
+func (p *wordBlock) Close(context.Context) error { return nil }
+
+func (p *wordBlock) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	if x.Prompt == nil || x.Prompt.LastUser() == nil {
+		return pluginapi.Allow(), nil
+	}
+	text := strings.ToLower(x.Prompt.LastUser().Text())
+	for _, w := range p.words {
+		if strings.Contains(text, w) {
+			return pluginapi.Block(0, "word_block", "request blocked by policy"), nil
+		}
+	}
+	return pluginapi.Allow(), nil
+}
+
+func GoModelPlugin() pluginapi.Plugin { return &wordBlock{} }
+
+func main() {}
+```
+
+Notes for authors:
+
+- `Init` receives the config after validation against `ConfigSchema`:
+  defaults applied, numbers and lists coerced, unknown keys rejected,
+  required keys checked. Line-oriented `textarea` fields accept a YAML list
+  of strings as well as a block scalar. It is called once per configured
+  instance and again when the instance is edited.
+- Export a **constructor** (`func GoModelPlugin() pluginapi.Plugin`) so one
+  file can back several instances. A `var GoModelPlugin pluginapi.Plugin`
+  works too but limits the file to a single instance.
+- Set `Mutates: true` when the plugin edits `Prompt`, `Response`, or the
+  stream. Non-mutating plugins may share a step and run concurrently.
+- The `Host` passed to `Init` offers `Logger()` (pre-tagged with plugin and
+  instance), `Inference().Complete(...)` (a chat completion through the
+  gateway with origin `plugin`, scoped to `<user path>/guardrails/<instance>`
+  for budgets and audit), and `Metrics()` (names prefixed `plugin_<name>_`).
+  `History()` returns an error in this release.
+- Add `Summarize(config json.RawMessage) string` to render a one-line summary
+  in the guardrails list, and `Normalize(config) (json.RawMessage, error)` to
+  canonicalize a config before it is stored. Both are optional.
+- Field inputs `secret` and `model` exist for API keys of external classifiers
+  and for model pickers; a `secret` value is masked in every admin response.
+- Add `Scope: pluginapi.ScopeRoute` to fields that belong to a virtual model
+  rather than to the instance (routing strategies only).
+
+`examples/plugins/keywordblock/main.go` is a fuller, commented example with
+`prompt` and `response` hooks, and the built-ins under
+`internal/plugins/builtin/` are reference implementations of every hook kind.
+
+## Routing strategy plugins
+
+A plugin that implements `pluginapi.RouteStrategy` is a load-balancing
+strategy for [virtual models](/features/virtual-models#load-balance-across-models):
+
+```go
+type RouteStrategy interface {
+	Select(ctx context.Context, req RouteRequest) (RouteChoice, error)
+	OnAttemptEnd(outcome RouteOutcome)
+}
+```
+
+`RouteRequest` carries the virtual model `Source`, the `Candidates` in
+configured order (provider, model, `provider/model`, weight, and prices per
+million tokens when known), the session id and sticky `SessionTarget`,
+`Meta`, and the virtual model's `strategy_config` as JSON (`Prompt` is `nil`
+in this release). `Select` returns the chosen `Qualified` target and an
+optional `Reason` (debug logs only); `OnAttemptEnd` reports success, status,
+latency, and timeouts so the strategy can adapt. Failover chains, capacity
+probes, and session pinning stay GoModel's job.
+
+Select the strategy on the virtual model:
+
+```yaml
+virtual_models:
+  - source: smart-router
+    strategy: plugin                    # round_robin | cost | failover | adaptive | plugin
+    strategy_plugin: cheapest_healthy   # plugin name; required with strategy: plugin
+    strategy_config:                    # the plugin's Scope: route fields; defaults apply when omitted
+      prefer: cheapest                  # cheapest | fastest
+      max_error_rate: 0.2
+    targets:
+      - openai/gpt-4o-mini
+      - anthropic/claude-haiku-4-5
+```
+
+- `strategy_config` is validated against the plugin's route-scoped fields
+  (`route_fields` in `GET /admin/plugins`). `strategy: plugin` without
+  `strategy_plugin` is a validation error, and `PUT /admin/virtual-models`
+  rejects a name that is not a loaded plugin with a `route` hook.
+- Target `weight` is ignored under the plugin strategy.
+- Instance-scoped fields of a route plugin (an endpoint, an API key) come
+  from a guardrail definition whose **name and type both equal the plugin
+  name**; without one the plugin is initialized with `{}`. Instance-scoped
+  `secret` values currently reach a route plugin redacted.
+- GoModel falls back to weighted round robin, logging one warning per
+  virtual model, when the plugin is missing, is not a route plugin, failed to
+  initialize, `strategy_config` is invalid, or `Select` errors, panics, takes
+  longer than 250 ms, or returns a target outside the viable pool.
+
+On the dashboard, the virtual model editor's strategy dropdown lists one
+`plugin:<name>` entry per loaded route plugin (`VIRTUAL_MODEL_STRATEGIES` in
+the runtime config is `round_robin,cost,failover[,adaptive],plugin:<name>,...`);
+choosing it renders the plugin's route fields under the targets table.
+
+`cheapest_healthy` is the built-in reference strategy
+(`internal/plugins/builtin/routeexample`). It keeps the last 50 outcomes per
+target and picks the cheapest (`prefer: cheapest`, the default) or the
+lowest-median-latency (`prefer: fastest`) target whose error rate is at or
+below `max_error_rate` (default `0.2`), keeps a healthy `SessionTarget`, and
+considers every candidate when none is healthy.
+
+## Admin endpoints
+
+All endpoints require the same admin credentials as the rest of `/admin`.
+
+### GET /admin/plugins
+
+Every plugin type known to the gateway, including ones that failed to load:
+
+```json
+[
+  {
+    "name": "string_replace",
+    "version": "1.0.0",
+    "description": "Replaces, flags, or blocks text matching literal or regex rules in prompts, responses, and streams.",
+    "kinds": ["prompt", "response", "stream"],
+    "mutates": true,
+    "source": "builtin",
+    "fields": [{ "key": "rules", "label": "Rules", "input": "textarea", "required": true }],
+    "route_fields": [],
+    "health": "ok",
+    "error": ""
+  }
+]
+```
+
+`source` is `builtin`, `registered` (compiled in through `ext`), or the
+absolute path of the `.so`. `fields` are the instance-scoped schema fields,
+`route_fields` the route-scoped ones. A `.so` built with `gomodel plugin
+build` also reports `built_with` (Go and `pluginapi` versions).
+
+### GET /admin/guardrails/types
+
+One entry per plugin that implements a `prompt`, `response`, or `stream`
+hook, in the shape the guardrail editor renders:
+
+```json
+{
+  "type": "llm_judge",
+  "label": "LLM Judge",
+  "description": "Asks a judge model whether prompts and responses violate a policy, then blocks, answers, or flags them.",
+  "defaults": { "action": "block", "max_tokens": 256, "target": "auto" },
+  "fields": [{ "key": "model", "label": "Judge model", "input": "model", "required": true }],
+  "phases": ["prompt", "response", "stream"],
+  "source": "builtin",
+  "mutates": false
+}
+```
+
+`phases`, `source`, and `mutates` are new; `fields[].input` may now be
+`secret` or `model`, and `fields[].scope` is `""` (instance) or `"route"`.
+
+### GET, PUT, DELETE /admin/guardrails
+
+Definitions gain `fail_mode` (`closed` | `open`, empty for the phase default)
+and `timeout_ms` (`0` for none); views additionally carry `phases` (from the
+plugin manifest) and `summary`. `PUT` accepts both new fields. A stored
+`secret` value is returned as `********`; send it back unchanged to keep it,
+or `""` to clear it.
+
+### GET /admin/workflows/guardrails
+
+The instances available to workflow steps, with the phases each supports:
+
+```json
+[{ "name": "pii-redact", "type": "llm_based_altering", "phases": ["prompt", "response"], "summary": "openai/gpt-4o-mini • user • default prompt" }]
+```
+
+### Workflow payload version 2
+
+`POST /admin/workflows` accepts `schema_version: 2` with `steps[]` carrying a
+`phase`; version 1 payloads (`guardrails: [{ref, step}]`) stay valid and are
+returned unchanged. Workflow views expose the per-phase chain hashes as
+`chain_hashes`. See [Workflows](/advanced/workflows#guardrail-steps).

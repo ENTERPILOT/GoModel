@@ -69,8 +69,9 @@ export function collectExtraTargets(rows) {
 }
 
 // strategyLabel is the short strategy name used in list cells and summaries
-// (the editor dropdown carries the long, explanatory labels).
-export function strategyLabel(strategy) {
+// (the editor dropdown carries the long, explanatory labels). A plugin
+// strategy is named after its plugin.
+export function strategyLabel(strategy, pluginName = "") {
   switch (String(strategy || "").toLowerCase()) {
     case "cost":
       return m.models_strategy_name_cost();
@@ -78,12 +79,39 @@ export function strategyLabel(strategy) {
       return m.models_strategy_name_failover();
     case "adaptive":
       return m.models_strategy_name_adaptive();
+    case "plugin":
+      return String(pluginName || "").trim() || m.models_strategy_name_plugin();
     case "round_robin":
     case "":
       return m.models_strategy_name_round_robin();
     default:
       return strategy;
   }
+}
+
+// Routing-strategy plugins appear in VIRTUAL_MODEL_STRATEGIES as
+// "plugin:<name>"; the virtual model stores them as strategy "plugin" plus
+// strategy_plugin "<name>". These two map between the dropdown value and the
+// stored pair.
+export const PLUGIN_STRATEGY_PREFIX = "plugin:";
+
+export function strategyDropdownValue(strategy, pluginName) {
+  const value = String(strategy || "").trim().toLowerCase();
+  if (value === "plugin") {
+    return PLUGIN_STRATEGY_PREFIX + String(pluginName || "").trim();
+  }
+  return value;
+}
+
+export function parseStrategyDropdownValue(value) {
+  const raw = String(value || "").trim();
+  if (raw.toLowerCase().startsWith(PLUGIN_STRATEGY_PREFIX)) {
+    return {
+      strategy: "plugin",
+      strategy_plugin: raw.slice(PLUGIN_STRATEGY_PREFIX.length).trim(),
+    };
+  }
+  return { strategy: raw.toLowerCase(), strategy_plugin: "" };
 }
 
 // Strategies where per-target weight has no effect: cost always routes to the
@@ -105,21 +133,33 @@ const STRATEGY_OPTION_LABELS = {
   failover: m.models_strategy_failover(),
 };
 
+function strategyOptionLabel(value) {
+  if (STRATEGY_OPTION_LABELS[value]) {
+    return STRATEGY_OPTION_LABELS[value];
+  }
+  const parsed = parseStrategyDropdownValue(value);
+  if (parsed.strategy === "plugin" && parsed.strategy_plugin) {
+    return m.models_strategy_plugin({ name: parsed.strategy_plugin });
+  }
+  return value;
+}
+
 // strategyOptions builds the editor dropdown from the deployment's supported
-// strategies, always including the edited row's current value so an existing
-// virtual model never renders a blank select (and never gets silently
-// rewritten to another strategy on save).
+// strategies, always including the edited row's current value (a dropdown
+// value: "round_robin", "plugin:<name>", ...) so an existing virtual model
+// never renders a blank select (and never gets silently rewritten to another
+// strategy on save). Plugin names keep their case; built-ins are lowercased.
 export function strategyOptions(supported, current) {
-  const values = Array.isArray(supported) ? [...supported] : [];
-  const active = String(current || "")
-    .trim()
-    .toLowerCase();
+  const values = (Array.isArray(supported) ? supported : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  const active = String(current || "").trim();
   if (active && !values.includes(active)) {
     values.push(active);
   }
   return values.map((value) => ({
     value,
-    label: STRATEGY_OPTION_LABELS[value] || value,
+    label: strategyOptionLabel(value),
   }));
 }
 
@@ -142,6 +182,13 @@ export function mapRedirectView(view) {
     target_model: target.model || "",
     targets,
     strategy: view.strategy || "",
+    strategy_plugin: String(view.strategy_plugin || "").trim(),
+    strategy_config:
+      view.strategy_config &&
+      typeof view.strategy_config === "object" &&
+      !Array.isArray(view.strategy_config)
+        ? view.strategy_config
+        : {},
     // Tri-state on the wire; only explicit false disables session affinity.
     session_affinity: view.session_affinity !== false,
     failover: view.failover !== false,
@@ -213,7 +260,9 @@ export function aliasTargetLabel(alias) {
   const targets = aliasTargets(alias);
   if (targets.length > 1) {
     return (
-      targetListLabel(targets, ", ") + " · " + strategyLabel(alias.strategy)
+      targetListLabel(targets, ", ") +
+      " · " +
+      strategyLabel(alias.strategy, alias.strategy_plugin)
     );
   }
   if (alias.resolved_model) return alias.resolved_model;
@@ -272,7 +321,7 @@ export function maskingRoutingLabel(alias, kind) {
       return (
         targetListLabel(others, ", ") +
         " · " +
-        strategyLabel(alias && alias.strategy)
+        strategyLabel(alias && alias.strategy, alias && alias.strategy_plugin)
       );
     default:
       return aliasTargetLabel(alias);

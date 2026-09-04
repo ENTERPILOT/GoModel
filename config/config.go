@@ -40,6 +40,9 @@ type Config struct {
 	Session       SessionConfig       `yaml:"session"`
 	MCP           MCPConfig           `yaml:"mcp"`
 
+	// Plugins controls which plugin shared objects (.so) are loaded at startup.
+	Plugins PluginsConfig `yaml:"plugins"`
+
 	// VersionCheck controls the daily update check against the public
 	// release manifest. See VersionCheckConfig for what it sends.
 	VersionCheck VersionCheckConfig `yaml:"version_check"`

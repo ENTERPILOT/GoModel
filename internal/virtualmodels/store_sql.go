@@ -20,6 +20,8 @@ var sqlSchema = []string{
 		source TEXT PRIMARY KEY,
 		targets TEXT NOT NULL DEFAULT '[]',
 		strategy TEXT NOT NULL DEFAULT '',
+		strategy_plugin TEXT NOT NULL DEFAULT '',
+		strategy_config TEXT NOT NULL DEFAULT '{}',
 		session_affinity TEXT NOT NULL DEFAULT '',
 		failover TEXT NOT NULL DEFAULT '',
 		provider_name TEXT NOT NULL DEFAULT '',
@@ -42,22 +44,26 @@ var virtualModelMigrations = []string{
 	"ALTER TABLE virtual_models ADD COLUMN session_affinity TEXT NOT NULL DEFAULT ''",
 	"ALTER TABLE virtual_models ADD COLUMN slowdown DOUBLE PRECISION DEFAULT NULL",
 	"ALTER TABLE virtual_models ADD COLUMN failover TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE virtual_models ADD COLUMN strategy_plugin TEXT NOT NULL DEFAULT ''",
+	"ALTER TABLE virtual_models ADD COLUMN strategy_config TEXT NOT NULL DEFAULT '{}'",
 }
 
 const selectVirtualModelColumns = `
-	SELECT source, targets, strategy, session_affinity, failover, provider_name, model, user_paths,
+	SELECT source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths,
 		description, slowdown, enabled, created_at, updated_at
 	FROM virtual_models
 `
 
 const upsertVirtualModelSQL = `
 	INSERT INTO virtual_models (
-		source, targets, strategy, session_affinity, failover, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
+		source, targets, strategy, strategy_plugin, strategy_config, session_affinity, failover, provider_name, model, user_paths, description, slowdown, enabled, created_at, updated_at
 	)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(source) DO UPDATE SET
 		targets = excluded.targets,
 		strategy = excluded.strategy,
+		strategy_plugin = excluded.strategy_plugin,
+		strategy_config = excluded.strategy_config,
 		session_affinity = excluded.session_affinity,
 		failover = excluded.failover,
 		provider_name = excluded.provider_name,
@@ -153,10 +159,16 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	configJSON, err := encodeStrategyConfig(vm.StrategyConfig)
+	if err != nil {
+		return nil, err
+	}
 	return []any{
 		strings.TrimSpace(vm.Source),
 		targetsJSON,
 		vm.Strategy,
+		vm.StrategyPlugin,
+		configJSON,
 		encodeTriStateBool(vm.SessionAffinity),
 		encodeTriStateBool(vm.Failover),
 		vm.ProviderName,
@@ -172,13 +184,15 @@ func virtualModelUpsertArgs(vm VirtualModel) ([]any, error) {
 
 func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	var vm VirtualModel
-	var targets, userPaths []byte
+	var targets, userPaths, strategyConfig []byte
 	var sessionAffinity, failover string
 	var createdAt, updatedAt int64
 	if err := scanner.Scan(
 		&vm.Source,
 		&targets,
 		&vm.Strategy,
+		&vm.StrategyPlugin,
+		&strategyConfig,
 		&sessionAffinity,
 		&failover,
 		&vm.ProviderName,
@@ -197,6 +211,9 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 		return VirtualModel{}, err
 	}
 	if vm.UserPaths, err = decodeUserPaths(userPaths); err != nil {
+		return VirtualModel{}, err
+	}
+	if vm.StrategyConfig, err = decodeStrategyConfig(strategyConfig); err != nil {
 		return VirtualModel{}, err
 	}
 	vm.SessionAffinity = decodeTriStateBool(sessionAffinity)

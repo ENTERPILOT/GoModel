@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/plugins"
 )
 
 const (
@@ -23,9 +23,11 @@ const (
 
 // CompiledWorkflow is the immutable runtime projection cached in the hot-path snapshot.
 type CompiledWorkflow struct {
-	Version  Version
-	Policy   *core.ResolvedWorkflowPolicy
-	Pipeline *guardrails.Pipeline
+	Version Version
+	Policy  *core.ResolvedWorkflowPolicy
+	// Chains holds the compiled plugin chain of every phase; nil when the
+	// workflow runs no guardrails.
+	Chains *plugins.Chains
 }
 
 // Compiler turns one persisted workflow version into its runtime projection.
@@ -312,8 +314,8 @@ func (s *Service) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowP
 	return &policy, nil
 }
 
-// PipelineForContext resolves the active guardrails pipeline for the request context.
-func (s *Service) PipelineForContext(ctx context.Context) *guardrails.Pipeline {
+// ChainsForContext resolves the active plugin chains for the request context.
+func (s *Service) ChainsForContext(ctx context.Context) *plugins.Chains {
 	if s == nil || ctx == nil {
 		return nil
 	}
@@ -321,11 +323,11 @@ func (s *Service) PipelineForContext(ctx context.Context) *guardrails.Pipeline {
 	if workflow == nil {
 		return nil
 	}
-	return s.PipelineForWorkflow(workflow)
+	return s.ChainsForWorkflow(workflow)
 }
 
-// PipelineForWorkflow resolves the active guardrails pipeline for one request workflow.
-func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipeline {
+// ChainsForWorkflow resolves the active plugin chains for one request workflow.
+func (s *Service) ChainsForWorkflow(workflow *core.Workflow) *plugins.Chains {
 	if s == nil || workflow == nil || workflow.Policy == nil || !workflow.GuardrailsEnabled() {
 		return nil
 	}
@@ -338,7 +340,7 @@ func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipel
 	if compiled == nil {
 		return nil
 	}
-	return compiled.Pipeline
+	return compiled.Chains
 }
 
 // StartBackgroundRefresh periodically reloads active workflows until stopped.
@@ -449,6 +451,7 @@ func (s *Service) viewForVersion(version Version) (View, error) {
 	view.ScopeDisplay = scopeDisplay(scope)
 	view.EffectiveFeatures = compiled.Policy.Features
 	view.GuardrailsHash = compiled.Policy.GuardrailsHash
+	view.ChainHashes = compiled.Policy.ChainHashes
 	return view, nil
 }
 
@@ -548,8 +551,8 @@ func compiledWorkflowForVersion(compiled *CompiledWorkflow, version Version) *Co
 		return nil
 	}
 	next := &CompiledWorkflow{
-		Version:  version,
-		Pipeline: compiled.Pipeline,
+		Version: version,
+		Chains:  compiled.Chains,
 	}
 	if compiled.Policy != nil {
 		policy := *compiled.Policy

@@ -80,7 +80,9 @@ func (e *InternalChatCompletionExecutor) ChatCompletion(ctx context.Context, req
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = core.WithRequestOrigin(ctx, core.RequestOriginGuardrail)
+	if core.GetRequestOrigin(ctx) != core.RequestOriginPlugin {
+		ctx = core.WithRequestOrigin(ctx, core.RequestOriginGuardrail)
+	}
 	ctx = gateway.WithAttemptRecorder(ctx)
 
 	requestID := strings.TrimSpace(core.GetRequestID(ctx))

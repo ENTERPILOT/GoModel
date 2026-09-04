@@ -37,6 +37,7 @@ func (b *bootstrap) initServerDependencies() error {
 	if b.featureCaps.Guardrails {
 		if app.guardrails != nil && app.guardrails.Service != nil {
 			b.translatedRequestPatcher = guardrails.NewWorkflowRequestPatcher(app.workflows.Service)
+			b.pluginChains = app.workflows.Service
 			if appCfg.Guardrails.EnableForBatchProcessing {
 				batchRequestPreparers = append(batchRequestPreparers, guardrails.NewWorkflowBatchPreparer(b.provider, app.workflows.Service))
 			}
@@ -133,6 +134,7 @@ func (b *bootstrap) initServerConfig() error {
 		FailoverPolicy:                  gateway.NewFailoverPolicy(appCfg.Failover),
 		WorkflowPolicyResolver:          app.workflows.Service,
 		TranslatedRequestPatcher:        b.translatedRequestPatcher,
+		PluginChainsResolver:            b.pluginChains,
 		BatchRequestPreparer:            b.batchRequestPreparer,
 		ExposedModelLister:              vm,
 		KeepOnlyAliasesAtModelsEndpoint: appCfg.Models.KeepOnlyAliasesAtModelsEndpoint,
@@ -220,12 +222,8 @@ func (b *bootstrap) initResponseCache() error {
 		PricingResolver: b.pricingResolver,
 		ResponseCache:   rcm,
 	})
-	if err := app.guardrails.Service.SetExecutor(b.ctx, internalGuardrailExecutor); err != nil {
-		return fmt.Errorf("failed to wire internal guardrail executor: %w", err)
-	}
-	if err := app.workflows.Service.Refresh(b.ctx); err != nil {
-		return fmt.Errorf("failed to refresh workflows after wiring internal guardrail executor: %w", err)
-	}
+	// Instances pick the executor up on their next call; no rebuild needed.
+	app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
 	return nil
 }
 
