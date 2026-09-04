@@ -699,7 +699,7 @@ test("entries without revisions render no revision tabs", () => {
 test("per-attempt response panes carry the tried model for the tab badge", () => {
   const entry = {
     data: {
-      request_body: { model: "forge/subagent" },
+      request_body: { model: "virtual-model-a" },
       response_body: { ok: true },
       attempts: [
         {
@@ -740,12 +740,12 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
   // model the request chose and the concrete model that attempt targeted.
   const first = panes.find((p) => p.id === "response-1").pane;
   assert.deepEqual(first.modelStrip, {
-    virtual: "forge/subagent",
+    virtual: "virtual-model-a",
     tried: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
   });
   const second = panes.find((p) => p.id === "response-2").pane;
   assert.deepEqual(second.modelStrip, {
-    virtual: "forge/subagent",
+    virtual: "virtual-model-a",
     tried: "provider-b/glm-5.3-flash",
   });
 
