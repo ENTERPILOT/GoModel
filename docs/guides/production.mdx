@@ -243,6 +243,43 @@ If a Bedrock provider is configured, the AWS SDK may also probe the link-local
 instance metadata endpoint (`169.254.169.254`) for credentials. An air-gapped
 install would not configure Bedrock, but it is worth knowing.
 
+## Private CAs and proxies
+
+Every outbound connection the gateway opens shares one HTTP transport, so
+proxy and trust settings are configured once and apply to providers, the model
+catalog, the update check, MCP upstreams, vector stores, and embedding
+endpoints alike.
+
+**Proxy.** Set the standard `HTTPS_PROXY` and `HTTP_PROXY` (each covers
+upstreams of its own scheme; most deployments only talk to `https://`
+upstreams, but a plain-HTTP model server would bypass a proxy set only through
+`HTTPS_PROXY`), plus `NO_PROXY` for local model servers. Nothing else is
+needed. If the proxy needs credentials, give it an `https://` URL: the scheme
+in the proxy variable describes the hop to the proxy, and an `http://` proxy
+URL sends `Proxy-Authorization` in cleartext.
+
+**Private CA.** Mount the CA bundle and point the gateway at it:
+
+```bash
+HTTP_TLS_CA_FILE=/etc/gomodel/ca.pem
+```
+
+The bundle is appended to the system store, so public providers keep working
+next to internal ones. A missing or empty file fails startup rather than
+silently trusting less than you asked for.
+
+**Mutual TLS.** When an internal model server or egress proxy requires a client
+certificate:
+
+```bash
+HTTP_TLS_CLIENT_CERT_FILE=/etc/gomodel/tls.crt
+HTTP_TLS_CLIENT_KEY_FILE=/etc/gomodel/tls.key
+```
+
+The same settings live under `http.tls` in `config.yaml`. Avoid
+`HTTP_TLS_INSECURE_SKIP_VERIFY=true` outside a lab: it disables verification
+for every upstream, and the gateway warns about it at startup.
+
 ## Running more than one replica
 
 Request handling is stateless, so replicas need no affinity for ordinary

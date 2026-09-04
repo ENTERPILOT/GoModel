@@ -126,10 +126,7 @@ func TestNewHTTPClient(t *testing.T) {
 				return
 			}
 
-			transport, ok := client.Transport.(*http.Transport)
-			if !ok {
-				t.Fatal("Expected transport to be *http.Transport")
-			}
+			transport := underlyingTransport(t, client)
 
 			expectedConfig := tt.config
 			if expectedConfig == nil {
@@ -188,10 +185,7 @@ func TestNewDefaultHTTPClient(t *testing.T) {
 		return
 	}
 
-	transport, ok := client.Transport.(*http.Transport)
-	if !ok {
-		t.Fatal("Expected transport to be *http.Transport")
-	}
+	transport := underlyingTransport(t, client)
 
 	defaultConfig := DefaultConfig()
 
@@ -220,8 +214,8 @@ func TestHTTPClientIsReusable(t *testing.T) {
 	}
 
 	// But they should have the same configuration
-	transport1 := client1.Transport.(*http.Transport)
-	transport2 := client2.Transport.(*http.Transport)
+	transport1 := underlyingTransport(t, client1)
+	transport2 := underlyingTransport(t, client2)
 
 	if transport1.MaxIdleConns != transport2.MaxIdleConns {
 		t.Error("Expected same MaxIdleConns configuration")
@@ -246,7 +240,7 @@ func TestClientConfigZeroValues(t *testing.T) {
 	}
 
 	client := NewHTTPClient(config)
-	transport := client.Transport.(*http.Transport)
+	transport := underlyingTransport(t, client)
 
 	// Zero values should be preserved (not replaced with defaults)
 	if transport.MaxIdleConns != 0 {
@@ -294,4 +288,14 @@ func TestDefaultConfigTimeoutPrecedence(t *testing.T) {
 	if got := DefaultConfig().Timeout; got != 600*time.Second {
 		t.Fatalf("cleared Timeout = %v, want 600s", got)
 	}
+}
+
+// underlyingTransport unwraps the *http.Transport a client currently uses.
+func underlyingTransport(t *testing.T, client *http.Client) *http.Transport {
+	t.Helper()
+	dt, ok := client.Transport.(*dynamicTransport)
+	if !ok {
+		t.Fatalf("Transport is %T, want *dynamicTransport", client.Transport)
+	}
+	return dt.current()
 }
