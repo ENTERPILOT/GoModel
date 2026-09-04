@@ -10,6 +10,7 @@ import (
 	neturl "net/url"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -137,25 +138,27 @@ func localPath(location string) (string, bool) {
 // content, so an unchanged file reports NotModified exactly like a 304 and
 // callers skip the reparse and re-enrichment.
 func readLocal(path, etag string) (FetchResult, error) {
-	// Stat before Open: opening a FIFO or device blocks with no context to
-	// cancel it, and an oversized file is cheaper to reject from metadata
-	// than after allocating it. The read stays bounded in case the file
-	// changes between the check and the read.
-	info, err := os.Stat(path)
+	// Open non-blocking so a FIFO or device at the path returns immediately
+	// instead of hanging with no context to cancel it, then validate the
+	// descriptor we actually hold rather than a path that may have been
+	// swapped underneath us. O_NONBLOCK has no effect on regular files.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return FetchResult{}, fmt.Errorf("reading model list file: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("reading model list file: %w", err)
 	}
 	if !info.Mode().IsRegular() {
 		return FetchResult{}, fmt.Errorf("model list file %s is not a regular file (%s)", path, info.Mode().Type())
 	}
+	// Reject an oversized file from its metadata before allocating anything,
+	// and keep the read itself bounded in case the file grows in between.
 	if info.Size() > maxBodySize {
 		return FetchResult{}, fmt.Errorf("model list file too large (%d bytes exceeds %d)", info.Size(), maxBodySize)
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return FetchResult{}, fmt.Errorf("reading model list file: %w", err)
-	}
-	defer f.Close()
 	raw, err := io.ReadAll(io.LimitReader(f, maxBodySize+1))
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("reading model list file: %w", err)

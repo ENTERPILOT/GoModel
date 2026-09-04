@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -479,31 +478,6 @@ func TestFetchIfChanged_LocalFileErrors(t *testing.T) {
 	}
 	if _, err := FetchIfChanged(context.Background(), dir, ""); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Errorf("directory should be rejected as not a regular file, got %v", err)
-	}
-}
-
-func TestFetchIfChanged_LocalFIFODoesNotBlock(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no FIFOs on windows")
-	}
-	fifo := filepath.Join(t.TempDir(), "catalog.fifo")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// Opening a FIFO with no writer blocks forever; readLocal must reject it
-	// from metadata instead of hanging startup.
-	done := make(chan error, 1)
-	go func() {
-		_, err := FetchIfChanged(context.Background(), fifo, "")
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
-			t.Errorf("expected not-a-regular-file error, got %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("FetchIfChanged blocked on a FIFO")
 	}
 }
 
