@@ -62,13 +62,16 @@
   {#if pane.modelStrip}
     <div class="audit-pane-model-strip">
       {#if pane.modelStrip.source}
-        <span class="audit-pane-model-strip-chip">
+        <span
+          class="audit-pane-model-strip-chip"
+          title={pane.modelStrip.source}
+        >
           <span class="audit-pane-model-strip-label">{pane.modelStrip.label}</span>
           <span class="mono">{pane.modelStrip.source}</span>
         </span>
         <span class="audit-pane-model-strip-arrow" aria-hidden="true">→</span>
       {/if}
-      <span class="audit-pane-model-strip-chip">
+      <span class="audit-pane-model-strip-chip" title={pane.modelStrip.tried}>
         <span class="audit-pane-model-strip-label">tried</span>
         <span class="mono">{pane.modelStrip.tried}</span>
       </span>
