@@ -557,7 +557,7 @@ func handleError(c *echo.Context, err error) error {
 	}
 
 	fallback := &core.GatewayError{
-		Type:       "internal_error",
+		Type:       core.ErrorTypeInternal,
 		Message:    "an unexpected error occurred",
 		StatusCode: http.StatusInternalServerError,
 		Err:        err,

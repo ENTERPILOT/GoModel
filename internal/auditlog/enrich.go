@@ -411,6 +411,14 @@ func EnrichEntryWithError(c *echo.Context, errorType, errorMessage string, error
 	publishLiveAuditUpdate(c, entry)
 }
 
+// HasRecordedError reports whether the request's audit entry already carries an
+// error. Late failure paths consult it so a generic follow-up error cannot
+// replace the original cause on the audit row.
+func HasRecordedError(c *echo.Context) bool {
+	entry := entryFromContext(c)
+	return entry != nil && entry.ErrorType != ""
+}
+
 // EnrichEntryWithGatewayError records a gateway error on the log entry:
 // type, message and code as EnrichEntryWithError does, plus the upstream
 // provider the error originated from (empty for gateway-raised errors).

@@ -320,7 +320,7 @@ func scanSQLVersion(scanner versionRowScanner) (Version, error) {
 		Model:    sqlutil.DerefTrimmed(scopeModel),
 		UserPath: storedScopeUserPath(version.ScopeKey, sqlutil.DerefTrimmed(scopeUserPath)),
 	}
-	version.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
+	version.CreatedAt = sqlutil.TimeFromUnix(createdAtUnix)
 	if err := json.Unmarshal(payloadJSON, &version.Payload); err != nil {
 		return Version{}, fmt.Errorf("decode workflow payload %q: %w", version.ID, err)
 	}

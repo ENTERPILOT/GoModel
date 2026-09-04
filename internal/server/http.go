@@ -143,6 +143,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 			NotFoundHandler:       handleRouteNotFound,
 		}),
 		JSONSerializer: goJSONSerializer{},
+		// Errors no handler reported (recovered panics, responses the JSON
+		// serializer could not encode) get the canonical envelope and a log
+		// line instead of echo's silent, bare "Internal Server Error".
+		HTTPErrorHandler: gatewayErrorHandler,
 	})
 	e.Logger = slog.Default()
 	basePath := configuredBasePath(cfg)

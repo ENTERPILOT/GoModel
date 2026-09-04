@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -201,8 +201,8 @@ func scanSQLVirtualModel(scanner sqlx.Row) (VirtualModel, error) {
 	}
 	vm.SessionAffinity = decodeTriStateBool(sessionAffinity)
 	vm.Failover = decodeTriStateBool(failover)
-	vm.CreatedAt = time.Unix(createdAt, 0).UTC()
-	vm.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	vm.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	vm.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return vm, nil
 }
 

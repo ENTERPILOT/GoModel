@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -317,8 +318,8 @@ func scanSQLRule(scanner sqlx.Row) (Rule, error) {
 	}
 	rule.MaxRequests = maxRequests
 	rule.MaxTokens = maxTokens
-	rule.CreatedAt = time.Unix(createdAt, 0).UTC()
-	rule.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	rule.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	rule.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return rule, nil
 }
 

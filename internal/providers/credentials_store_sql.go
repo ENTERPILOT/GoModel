@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -205,7 +205,7 @@ func scanSQLCredential(scanner sqlx.Row) (ManagedProviderCredential, error) {
 	if cred.Models, err = decodeCredentialList(models); err != nil {
 		return ManagedProviderCredential{}, err
 	}
-	cred.CreatedAt = time.Unix(createdAt, 0).UTC()
-	cred.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	cred.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	cred.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return cred, nil
 }
