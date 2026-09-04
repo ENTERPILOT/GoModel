@@ -262,6 +262,9 @@ func normalizeStepsPayload(payload Payload) (Payload, string, error) {
 		if step.Ref == "" {
 			return Payload{}, "", newValidationError("guardrail ref is required", nil)
 		}
+		if step.Step < 0 {
+			return Payload{}, "", newValidationError("guardrail step must not be negative: "+step.Ref, nil)
+		}
 		phase, err := normalizePhase(step.Phase)
 		if err != nil {
 			return Payload{}, "", err
@@ -315,6 +318,9 @@ func normalizeLegacyPayload(payload Payload) (Payload, string, error) {
 		guardrail.Ref = strings.TrimSpace(guardrail.Ref)
 		if guardrail.Ref == "" {
 			return Payload{}, "", newValidationError("guardrail ref is required", nil)
+		}
+		if guardrail.Step < 0 {
+			return Payload{}, "", newValidationError("guardrail step must not be negative: "+guardrail.Ref, nil)
 		}
 		if _, exists := seenRefs[guardrail.Ref]; exists {
 			return Payload{}, "", newValidationError("duplicate guardrail ref: "+guardrail.Ref, nil)

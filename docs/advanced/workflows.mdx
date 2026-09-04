@@ -87,8 +87,9 @@ step names an instance (`ref`), the phase it runs in, and its position:
 - `phase` is `prompt` (default when omitted), `response`, or `stream`. The
   instance's plugin must implement that phase; `GET /admin/workflows/guardrails`
   lists each instance with its `phases`.
-- Within a phase, steps run in ascending `step`; equal `step` values run in
-  parallel. At most one content-editing instance may share a `step`.
+- Within a phase, steps run in ascending `step` (a non-negative integer);
+  equal `step` values run in parallel. At most one content-editing instance
+  may share a `step`.
 - The same `ref` may appear once per phase.
 - `features.guardrails: false` disables every step of the workflow.
 

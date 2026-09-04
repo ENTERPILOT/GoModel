@@ -263,6 +263,9 @@ func TestNormalizePayload_V2Validation(t *testing.T) {
 		{"duplicate ref per phase", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Step: 1}, {Ref: "a", Phase: "prompt", Step: 2}}}, "duplicate guardrail ref in prompt phase"},
 		{"invalid phase", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Phase: "route", Step: 1}}}, "invalid step phase"},
 		{"empty ref", Payload{SchemaVersion: 2, Steps: []Step{{Ref: " ", Step: 1}}}, "ref is required"},
+		{"negative step", Payload{SchemaVersion: 2, Steps: []Step{{Ref: "a", Step: -1}}}, "step must not be negative"},
+		{"negative legacy step", Payload{SchemaVersion: 1, Guardrails: []GuardrailStep{{Ref: "a", Step: -1}}}, "step must not be negative"},
+		{"negative folded legacy step", Payload{SchemaVersion: 2, Guardrails: []GuardrailStep{{Ref: "a", Step: -5}}}, "step must not be negative"},
 		{"v1 with steps", Payload{SchemaVersion: 1, Steps: []Step{{Ref: "a", Step: 1}}}, "schema_version 1"},
 		{"unsupported version", Payload{SchemaVersion: 3}, "unsupported schema_version"},
 	}
