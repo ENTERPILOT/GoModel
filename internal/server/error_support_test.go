@@ -364,14 +364,22 @@ func TestGatewayErrorHandler_LogsPanicWithStackAndRoute(t *testing.T) {
 	}
 
 	logOutput := buf.String()
-	for _, want := range []string{`"level":"ERROR"`, `"path":"/admin/virtual-models"`, `"request_id":"panic-req-1"`, "listing blew up", "PANIC RECOVER"} {
+	for _, want := range []string{`"level":"ERROR"`, `"path":"/admin/virtual-models"`, `"request_id":"panic-req-1"`, `"panic":"listing blew up"`, `"stack":"goroutine `} {
 		if !strings.Contains(logOutput, want) {
 			t.Errorf("log missing %q, got %q", want, logOutput)
 		}
 	}
+	if strings.Contains(logOutput, "PANIC RECOVER") {
+		t.Errorf("panic value and stack should be separate attributes, not one error string: %q", logOutput)
+	}
 }
 
 func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
 	rec := httptest.NewRecorder()
@@ -387,5 +395,9 @@ func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
 	}
 	if rec.Body.String() != "streamed" {
 		t.Fatalf("body = %q, want the already-written body", rec.Body.String())
+	}
+	// The response is untouchable, but the operator still needs to know.
+	if !strings.Contains(buf.String(), "failed after the first chunk") {
+		t.Fatalf("error after a committed response was not logged: %q", buf.String())
 	}
 }

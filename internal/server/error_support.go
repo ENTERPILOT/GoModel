@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -48,16 +49,16 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	if err == nil {
 		return
 	}
+	gatewayErr := escapedGatewayError(err)
+	// Log before checking whether the response can still be changed: a panic
+	// after the first streamed chunk must still reach the operator.
+	logHandledError(c, gatewayErr)
+
 	// Once the status line and body are on the wire nothing can be changed;
 	// the response stands as the handler left it.
 	if response, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil && response.Committed {
 		return
 	}
-
-	gatewayErr := escapedGatewayError(err)
-	// gatewayErr.Err carries the original error, which for a recovered panic is
-	// echo's PanicStackError: its message is the panic value plus the stack.
-	logHandledError(c, gatewayErr)
 	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
 		slog.Error("failed to send error response", "error", writeErr)
 	}
@@ -167,7 +168,12 @@ func logHandledError(c *echo.Context, gatewayErr *core.GatewayError) {
 	if gatewayErr.Code != nil {
 		attrs = append(attrs, "code", *gatewayErr.Code)
 	}
-	if gatewayErr.Err != nil {
+	// A recovered panic arrives as echo's PanicStackError, whose message is
+	// the panic value followed by the whole stack; split them so the message
+	// stays readable and the stack lands in its own attribute.
+	if panicErr, ok := errors.AsType[*middleware.PanicStackError](gatewayErr.Err); ok {
+		attrs = append(attrs, "panic", panicErr.Err, "stack", string(panicErr.Stack))
+	} else if gatewayErr.Err != nil {
 		attrs = append(attrs, "error", gatewayErr.Err)
 	}
 	if c != nil && c.Request() != nil {
