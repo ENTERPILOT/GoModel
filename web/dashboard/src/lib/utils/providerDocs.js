@@ -66,7 +66,12 @@ export function providerDocsUrl(type) {
   if (!normalized) {
     return "";
   }
-  const override = PROVIDER_DOC_SLUG_OVERRIDES[normalized];
+  const override = Object.prototype.hasOwnProperty.call(
+    PROVIDER_DOC_SLUG_OVERRIDES,
+    normalized,
+  )
+    ? PROVIDER_DOC_SLUG_OVERRIDES[normalized]
+    : undefined;
   const slug =
     override ??
     (PROVIDER_DOC_SLUGS.has(normalized)

@@ -88,3 +88,15 @@ test("providerDocsUrl returns an empty string for blank input", () => {
   assert.equal(providerDocsUrl(null), "");
   assert.equal(providerDocsUrl(undefined), "");
 });
+
+test("providerDocsUrl ignores inherited object keys on the override map", () => {
+  // "constructor"/"toString" must fall back to overview, not read the
+  // inherited property off PROVIDER_DOC_SLUG_OVERRIDES.
+  for (const inherited of ["constructor", "toString", "__proto__"]) {
+    assert.equal(
+      providerDocsUrl(inherited),
+      PROVIDER_DOCS_BASE_URL + PROVIDER_DOCS_OVERVIEW_SLUG + "?" + UTM,
+      "expected " + inherited + " to fall back to overview",
+    );
+  }
+});
