@@ -190,6 +190,7 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 			Type: "file",
 			File: &core.FileContent{
 				FileData:    strings.TrimSpace(part.File.FileData),
+				FileURL:     strings.TrimSpace(part.File.FileURL),
 				FileID:      strings.TrimSpace(part.File.FileID),
 				Filename:    strings.TrimSpace(part.File.Filename),
 				ExtraFields: core.CloneUnknownJSONFields(part.File.ExtraFields),

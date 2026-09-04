@@ -73,6 +73,7 @@ func TestToChatRequestRejectsInvalidShapes(t *testing.T) {
 		{name: "malformed tool_result content", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":42}]}]}`},
 		{name: "unsupported tool_result block", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"browser_state"}]}]}]}`},
 		{name: "tool_result document without source", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"document"}]}]}]}`},
+		{name: "document content source without content", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"content"}}]}]}`},
 		{name: "tool_result image without source", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image"}]}]}]}`},
 	}
 	for _, tc := range tests {

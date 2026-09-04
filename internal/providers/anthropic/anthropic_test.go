@@ -2042,6 +2042,21 @@ func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unsupported document media type")
 	}
+
+	for _, file := range []core.FileContent{
+		{FileURL: "ftp://example.com/a.pdf"},
+		{FileURL: "not a url"},
+		{FileData: "ftp://example.com/a.pdf"},
+		{FileData: "/relative/a.pdf"},
+	} {
+		_, err := convertToAnthropicRequest(&core.ChatRequest{
+			Model:    "claude-sonnet-4-5-20250929",
+			Messages: []core.Message{{Role: "user", Content: []core.ContentPart{{Type: "file", File: &file}}}},
+		})
+		if gatewayErr, ok := err.(*core.GatewayError); !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
+			t.Errorf("file %+v: error = %v, want invalid_request_error", file, err)
+		}
+	}
 }
 
 func TestConvertToAnthropicRequest_ToolMessageIsError(t *testing.T) {

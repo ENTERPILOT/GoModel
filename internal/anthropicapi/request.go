@@ -331,6 +331,9 @@ func documentPart(block ContentBlock, extra core.UnknownJSONFields) (core.Conten
 		}
 		file.FileID = strings.TrimSpace(source.FileID)
 	case "content":
+		if core.IsJSONNull(bytes.TrimSpace(source.Content)) {
+			return core.ContentPart{}, false, fmt.Errorf("content document source requires content")
+		}
 		text, err := textBlocksText(source.Content)
 		if err != nil {
 			return core.ContentPart{}, false, fmt.Errorf("document content: %v", err)

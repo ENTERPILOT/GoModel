@@ -66,3 +66,16 @@ func TestBuildResponsesContentItemsFromParts_FileURLAndData(t *testing.T) {
 		t.Errorf("file id item = %+v", items[2])
 	}
 }
+
+func TestConvertResponsesContentToChatContent_TypedFileURLSurvives(t *testing.T) {
+	content, ok := ConvertResponsesContentToChatContent([]core.ContentPart{
+		{Type: "input_file", File: &core.FileContent{FileURL: " https://example.com/a.pdf ", Filename: "a.pdf"}},
+	})
+	if !ok {
+		t.Fatal("conversion failed")
+	}
+	parts, isParts := content.([]core.ContentPart)
+	if !isParts || len(parts) != 1 || parts[0].File == nil || parts[0].File.FileURL != "https://example.com/a.pdf" {
+		t.Fatalf("content = %#v, want a file part keeping file_url", content)
+	}
+}
