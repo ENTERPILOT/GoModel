@@ -28,21 +28,37 @@ type TLSSettings struct {
 	InsecureSkipVerify bool
 }
 
-// configuredTLS holds the *tls.Config built by SetConfiguredTLS. Nil means
-// "system defaults", which is also what a zero TLSSettings produces.
-var configuredTLS atomic.Pointer[tls.Config]
+// trustState is one installed trust configuration. Each SetConfiguredTLS
+// call installs a fresh value, so the pointer doubles as a generation
+// marker: a transport bound to a different pointer than the one currently
+// installed is stale and rebuilds itself on its next request (see
+// dynamicTransport). A nil cfg means system defaults.
+type trustState struct{ cfg *tls.Config }
+
+func (s *trustState) tlsConfig() *tls.Config {
+	if s == nil || s.cfg == nil {
+		return nil
+	}
+	return s.cfg.Clone()
+}
+
+// trust holds the installed configuration. Nil means "system defaults",
+// which is also what a zero TLSSettings produces.
+var trust atomic.Pointer[trustState]
 
 // SetConfiguredTLS builds and installs the client TLS configuration used by
-// every HTTP client this package creates. App startup calls it once, before
-// any provider constructs a transport. It returns an error when a referenced
-// file is missing, unreadable, or holds no usable certificate, so a typo in
-// the path fails startup instead of silently trusting nothing extra.
+// every HTTP client this package creates, including clients that already
+// exist: transports pick the change up on their next request. App startup
+// calls it before any provider constructs a transport. It returns an error
+// when a referenced file is missing, unreadable, or holds no usable
+// certificate, so a typo in the path fails startup instead of silently
+// trusting nothing extra.
 func SetConfiguredTLS(settings TLSSettings) error {
 	cfg, err := buildTLSConfig(settings)
 	if err != nil {
 		return err
 	}
-	configuredTLS.Store(cfg)
+	trust.Store(&trustState{cfg: cfg})
 	return nil
 }
 
@@ -50,24 +66,23 @@ func SetConfiguredTLS(settings TLSSettings) error {
 // nil when the gateway runs on system defaults. Callers that build their own
 // transport (websocket dialers, SDK clients) should install it.
 func ConfiguredTLS() *tls.Config {
-	cfg := configuredTLS.Load()
-	if cfg == nil {
-		return nil
-	}
-	return cfg.Clone()
+	return trust.Load().tlsConfig()
 }
 
 // TLSSnapshot is an opaque handle to the installed configuration, taken with
 // SnapshotTLS and given back to RestoreTLS. A reload that fails after
 // installing replacement settings uses it to put the serving generation's
-// trust back, so a rejected configuration never leaks into new clients.
-type TLSSnapshot struct{ cfg *tls.Config }
+// trust back. Because every transport re-checks the installed configuration
+// per request, the rollback also reaches clients that were created while the
+// rejected settings were installed.
+type TLSSnapshot struct{ state *trustState }
 
 // SnapshotTLS captures the currently installed configuration.
-func SnapshotTLS() TLSSnapshot { return TLSSnapshot{cfg: configuredTLS.Load()} }
+func SnapshotTLS() TLSSnapshot { return TLSSnapshot{state: trust.Load()} }
 
-// RestoreTLS reinstalls a configuration captured by SnapshotTLS.
-func RestoreTLS(s TLSSnapshot) { configuredTLS.Store(s.cfg) }
+// RestoreTLS reinstalls a configuration captured by SnapshotTLS. Transports
+// bound to that same configuration keep their connection pools.
+func RestoreTLS(s TLSSnapshot) { trust.Store(s.state) }
 
 func buildTLSConfig(settings TLSSettings) (*tls.Config, error) {
 	caFile := strings.TrimSpace(settings.CAFile)

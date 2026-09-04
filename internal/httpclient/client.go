@@ -104,13 +104,76 @@ func DefaultConfig() ClientConfig {
 
 // NewHTTPClient creates a new HTTP client with the provided configuration.
 // If config is nil, DefaultConfig() is used.
+//
+// The client's transport follows the process-wide TLS trust installed with
+// SetConfiguredTLS: a change or rollback applies to the next request on every
+// client, so a client created while a later-rejected reload had its settings
+// installed does not keep them.
 func NewHTTPClient(config *ClientConfig) *http.Client {
 	if config == nil {
 		cfg := DefaultConfig()
 		config = &cfg
 	}
 
-	transport := &http.Transport{
+	dt := &dynamicTransport{config: *config}
+	dt.current()
+	return &http.Client{
+		Transport: dt,
+		Timeout:   config.Timeout,
+	}
+}
+
+// dynamicTransport is the RoundTripper behind every client this package
+// creates. It owns one *http.Transport bound to the trust configuration that
+// was installed when it was built, and swaps in a fresh one when the
+// installed configuration changes. Pooled connections opened under the old
+// trust are closed with it.
+type dynamicTransport struct {
+	config ClientConfig
+	active atomic.Pointer[boundTransport]
+}
+
+type boundTransport struct {
+	trust *trustState
+	rt    *http.Transport
+}
+
+// current returns the transport for the installed trust configuration,
+// building it first if the configuration changed since the last request.
+func (d *dynamicTransport) current() *http.Transport {
+	state := trust.Load()
+	if b := d.active.Load(); b != nil && b.trust == state {
+		return b.rt
+	}
+	fresh := &boundTransport{trust: state, rt: newTransport(&d.config, state)}
+	for {
+		old := d.active.Load()
+		if old != nil && old.trust == state {
+			// Another request rebuilt it first.
+			return old.rt
+		}
+		if d.active.CompareAndSwap(old, fresh) {
+			if old != nil {
+				old.rt.CloseIdleConnections()
+			}
+			return fresh.rt
+		}
+	}
+}
+
+func (d *dynamicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return d.current().RoundTrip(req)
+}
+
+// CloseIdleConnections lets http.Client.CloseIdleConnections reach the pool.
+func (d *dynamicTransport) CloseIdleConnections() {
+	if b := d.active.Load(); b != nil {
+		b.rt.CloseIdleConnections()
+	}
+}
+
+func newTransport(config *ClientConfig, state *trustState) *http.Transport {
+	return &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   config.DialTimeout,
@@ -123,12 +186,7 @@ func NewHTTPClient(config *ClientConfig) *http.Client {
 		ResponseHeaderTimeout: config.ResponseHeaderTimeout,
 		ForceAttemptHTTP2:     true,
 		ExpectContinueTimeout: 1 * time.Second,
-		TLSClientConfig:       ConfiguredTLS(),
-	}
-
-	return &http.Client{
-		Transport: transport,
-		Timeout:   config.Timeout,
+		TLSClientConfig:       state.tlsConfig(),
 	}
 }
 
