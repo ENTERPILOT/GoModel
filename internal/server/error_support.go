@@ -86,16 +86,20 @@ func escapedGatewayError(err error) *core.GatewayError {
 	// Echo carries the intended status on the error itself — BodyLimit's 413,
 	// the router's 405, any middleware's echo.NewHTTPError. An error without
 	// one is a failure inside the gateway.
-	status, message := http.StatusInternalServerError, "an unexpected error occurred"
-	if code := echo.StatusCode(err); code > 0 {
-		status, message = code, echoErrorMessage(err, code)
+	status := echo.StatusCode(err)
+	if status <= 0 {
+		status = http.StatusInternalServerError
 	}
 	if status < http.StatusInternalServerError {
-		return core.NewInvalidRequestErrorWithStatus(status, message, err)
+		return core.NewInvalidRequestErrorWithStatus(status, echoErrorMessage(err, status), err)
 	}
+	// A 5xx message describes what broke inside the gateway and can quote an
+	// internal error verbatim (echo's own Decompress middleware answers with
+	// err.Error()), so the client gets the same opaque text every other
+	// gateway 500 uses. The cause travels in Err, which only the logs read.
 	return &core.GatewayError{
 		Type:       core.ErrorTypeInternal,
-		Message:    message,
+		Message:    "an unexpected error occurred",
 		StatusCode: status,
 		Err:        err,
 	}

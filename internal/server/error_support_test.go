@@ -273,10 +273,11 @@ func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 
 func TestGatewayErrorHandler_RendersCanonicalEnvelope(t *testing.T) {
 	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
-		wantType   string
+		name        string
+		err         error
+		wantStatus  int
+		wantType    string
+		wantMessage string
 	}{
 		{
 			name:       "recovered panic",
@@ -301,6 +302,15 @@ func TestGatewayErrorHandler_RendersCanonicalEnvelope(t *testing.T) {
 			err:        echo.ErrStatusRequestEntityTooLarge,
 			wantStatus: http.StatusRequestEntityTooLarge,
 			wantType:   "invalid_request_error",
+		},
+		{
+			// echo's Decompress middleware answers 500 with err.Error(); a
+			// message describing gateway internals must not reach the client.
+			name:        "echo server error stays opaque",
+			err:         echo.NewHTTPError(http.StatusInternalServerError, "dial tcp 10.0.0.1:5432: connection refused"),
+			wantStatus:  http.StatusInternalServerError,
+			wantType:    "internal_error",
+			wantMessage: "an unexpected error occurred",
 		},
 		{
 			name:       "gateway error passes through",
@@ -335,6 +345,9 @@ func TestGatewayErrorHandler_RendersCanonicalEnvelope(t *testing.T) {
 			}
 			if body.Error.Message == "" {
 				t.Errorf("error message is empty, body %s", rec.Body.String())
+			}
+			if tc.wantMessage != "" && body.Error.Message != tc.wantMessage {
+				t.Errorf("error message = %q, want %q", body.Error.Message, tc.wantMessage)
 			}
 		})
 	}
