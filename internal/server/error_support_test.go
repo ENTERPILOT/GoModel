@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
@@ -399,5 +400,97 @@ func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
 	// The response is untouchable, but the operator still needs to know.
 	if !strings.Contains(buf.String(), "failed after the first chunk") {
 		t.Fatalf("error after a committed response was not logged: %q", buf.String())
+	}
+}
+
+// The direct gatewayErrorHandler tests stub the error; this one drives the real
+// server so the goccy serializer, echo's dispatch and the handler are all in
+// the path — the shape that produced the opaque 500 in #881.
+func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) {
+	logs := &bytes.Buffer{}
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	// A year beyond 9999 is what time.Time refuses to marshal, which is how one
+	// stored row turned a whole admin listing into a 500.
+	type row struct {
+		CreatedAt time.Time `json:"created_at"`
+	}
+	srv := New(&mockProvider{}, nil)
+	srv.echo.GET("/admin/rows", func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, []row{{CreatedAt: time.Unix(1<<40, 0).UTC()}})
+	})
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/rows", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body %q)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body %q is not a gateway error envelope: %v", rec.Body.String(), err)
+	}
+	if body.Error.Type != "internal_error" || body.Error.Message != "an unexpected error occurred" {
+		t.Fatalf("error = %+v, want the canonical internal_error envelope", body.Error)
+	}
+	if strings.Contains(rec.Body.String(), "year outside") {
+		t.Errorf("serializer detail leaked to the client: %s", rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), "year outside of range") {
+		t.Errorf("log should name the serialization failure, got %q", logs.String())
+	}
+}
+
+func TestGatewayErrorHandler_FinalizesHeadersAndAudit(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	gatewayErrorHandler(c, &gatewayErrorWithResponseHeaders{
+		GatewayError: core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded"),
+		headers:      http.Header{"Retry-After": []string{"30"}},
+	})
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "30" {
+		t.Errorf("Retry-After = %q, want 30", got)
+	}
+	if entry.ErrorType != string(core.ErrorTypeRateLimit) || entry.Data.ErrorCode != "budget_exceeded" {
+		t.Errorf("audit entry = %q/%q, want rate_limit_error/budget_exceeded", entry.ErrorType, entry.Data.ErrorCode)
+	}
+}
+
+func TestGatewayErrorHandler_KeepsTheOriginalAuditedError(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	// handleError records the real cause and returns its own write failure,
+	// which then escapes here; that follow-up must not overwrite the cause.
+	if err := handleError(c, core.NewNotFoundError("no such model")); err != nil {
+		t.Fatalf("handleError() error = %v", err)
+	}
+	gatewayErrorHandler(c, errors.New("writing the error response failed"))
+
+	if entry.ErrorType != string(core.ErrorTypeNotFound) {
+		t.Errorf("entry.ErrorType = %q, want not_found_error", entry.ErrorType)
+	}
+	if entry.Data.ErrorMessage != "no such model" {
+		t.Errorf("entry.Data.ErrorMessage = %q, want the original cause", entry.Data.ErrorMessage)
 	}
 }

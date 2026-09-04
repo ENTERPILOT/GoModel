@@ -130,3 +130,30 @@ func TestEnrichEntryWithGatewayError(t *testing.T) {
 		})
 	}
 }
+
+func TestHasRecordedError(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry *LogEntry
+		want  bool
+	}{
+		{name: "no entry on the context", entry: nil, want: false},
+		{name: "entry without an error", entry: &LogEntry{Data: &LogData{}}, want: false},
+		{name: "entry carrying an error", entry: &LogEntry{ErrorType: "not_found_error", Data: &LogData{}}, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			c := e.NewContext(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), httptest.NewRecorder())
+			if tc.entry != nil {
+				c.Set(string(LogEntryKey), tc.entry)
+			}
+			if got := HasRecordedError(c); got != tc.want {
+				t.Fatalf("HasRecordedError() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if HasRecordedError(nil) {
+		t.Fatal("HasRecordedError(nil) = true, want false")
+	}
+}

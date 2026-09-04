@@ -65,6 +65,11 @@ func TestTimeFromUnix(t *testing.T) {
 			if !got.Equal(tt.want) {
 				t.Fatalf("TimeFromUnix(%d) = %s, want %s", tt.value, got, tt.want)
 			}
+			// Equal compares instants only; a stray location would change the
+			// offset every API response serializes.
+			if got.Location() != time.UTC {
+				t.Errorf("TimeFromUnix(%d) location = %s, want UTC", tt.value, got.Location())
+			}
 			// The whole point of the clamp: the result must be encodable, or
 			// one bad row takes down every listing that includes it.
 			if _, err := json.Marshal(got); err != nil {

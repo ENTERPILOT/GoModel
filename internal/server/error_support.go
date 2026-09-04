@@ -53,6 +53,17 @@ func gatewayErrorHandler(c *echo.Context, err error) {
 	// Log before checking whether the response can still be changed: a panic
 	// after the first streamed chunk must still reach the operator.
 	logHandledError(c, gatewayErr)
+	// Finalize as handleError does, so an error that never passed through it —
+	// a panic, a rate-limit error returned rather than rendered — still lands
+	// on the audit row and keeps headers such as Retry-After. The audit half is
+	// skipped once an error is recorded: handleError returns its own response
+	// write failures here, and re-enriching would replace the real cause with
+	// this generic one.
+	if !auditlog.HasRecordedError(c) {
+		enrichAuditEntryWithProviderAttempts(c)
+		auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
+	}
+	applyErrorResponseHeaders(c, err)
 
 	// Once the status line and body are on the wire nothing can be changed;
 	// the response stands as the handler left it.
