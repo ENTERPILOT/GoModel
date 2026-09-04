@@ -2,6 +2,7 @@
 package httpclient
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -137,13 +138,20 @@ func NewDefaultHTTPClient() *http.Client {
 	return NewHTTPClient(nil)
 }
 
+// maxRedirects mirrors net/http's default redirect limit, which is lost as
+// soon as a custom CheckRedirect is installed.
+const maxRedirects = 10
+
 // NewAWSSDKClient returns a client on the shared transport for use with
 // aws-sdk-go-v2's WithHTTPClient. The SDK's own client follows only 307 and
 // 308 redirects, because a 301/302 would replay a signed request against a
 // different host; a custom client must do the same.
 func NewAWSSDKClient() *http.Client {
 	client := NewDefaultHTTPClient()
-	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+		}
 		if req.Response == nil {
 			return http.ErrUseLastResponse
 		}

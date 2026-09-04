@@ -25,10 +25,11 @@ func TestNewRestoresTLSWhenBootstrapFails(t *testing.T) {
 
 	// The serving generation trusts nothing extra but skips verification;
 	// distinctive enough to detect whether it survives a failed reload.
+	preTest := httpclient.SnapshotTLS()
+	t.Cleanup(func() { httpclient.RestoreTLS(preTest) })
 	if err := httpclient.SetConfiguredTLS(httpclient.TLSSettings{InsecureSkipVerify: true}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = httpclient.SetConfiguredTLS(httpclient.TLSSettings{}) })
 
 	// The replacement asks for system defaults and then fails a bootstrap
 	// phase: an unusable storage backend trips the first one.

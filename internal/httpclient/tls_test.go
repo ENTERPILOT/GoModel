@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -158,5 +160,27 @@ func TestNewAWSSDKClientFollowsOnly307And308(t *testing.T) {
 		if !follow && err != http.ErrUseLastResponse {
 			t.Errorf("%d should not be followed, got %v", code, err)
 		}
+	}
+}
+
+func TestNewAWSSDKClientBoundsRedirectLoops(t *testing.T) {
+	var hops atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hops.Add(1)
+		http.Redirect(w, r, "/loop", http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+
+	client := NewAWSSDKClient()
+	client.Timeout = 10 * time.Second
+	resp, err := client.Get(srv.URL)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Fatalf("expected redirect limit error, got %v", err)
+	}
+	if got := hops.Load(); got != maxRedirects {
+		t.Errorf("server saw %d requests, want %d", got, maxRedirects)
 	}
 }
