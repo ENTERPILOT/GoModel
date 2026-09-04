@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -266,5 +267,125 @@ func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), `"provider"`) {
 		t.Fatalf("gateway auth error body should omit provider: %s", rec.Body.String())
+	}
+}
+
+func TestGatewayErrorHandler_RendersCanonicalEnvelope(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantType   string
+	}{
+		{
+			name:       "recovered panic",
+			err:        errors.New("runtime error: invalid memory address"),
+			wantStatus: http.StatusInternalServerError,
+			wantType:   "internal_error",
+		},
+		{
+			name:       "unencodable response body",
+			err:        &json.UnsupportedValueError{Str: "+Inf"},
+			wantStatus: http.StatusInternalServerError,
+			wantType:   "internal_error",
+		},
+		{
+			name:       "echo client error keeps its status",
+			err:        echo.NewHTTPError(http.StatusMethodNotAllowed, "Method Not Allowed"),
+			wantStatus: http.StatusMethodNotAllowed,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "middleware sentinel keeps its status",
+			err:        echo.ErrStatusRequestEntityTooLarge,
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "gateway error passes through",
+			err:        core.NewNotFoundError("no such model"),
+			wantStatus: http.StatusNotFound,
+			wantType:   "not_found_error",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, "/admin/virtual-models", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			gatewayErrorHandler(c, tc.err)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+			var body struct {
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal %q: %v", rec.Body.String(), err)
+			}
+			if body.Error.Type != tc.wantType {
+				t.Errorf("error type = %q, want %q (body %s)", body.Error.Type, tc.wantType, rec.Body.String())
+			}
+			if body.Error.Message == "" {
+				t.Errorf("error message is empty, body %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestGatewayErrorHandler_LogsPanicWithStackAndRoute(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	e := echo.NewWithConfig(echo.Config{HTTPErrorHandler: gatewayErrorHandler})
+	e.Use(middleware.Recover())
+	e.GET("/admin/virtual-models", func(*echo.Context) error {
+		panic("listing blew up")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/virtual-models", nil)
+	req = req.WithContext(core.WithRequestID(req.Context(), "panic-req-1"))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"type":"internal_error"`) {
+		t.Errorf("body = %s, want the canonical error envelope", rec.Body.String())
+	}
+
+	logOutput := buf.String()
+	for _, want := range []string{`"level":"ERROR"`, `"path":"/admin/virtual-models"`, `"request_id":"panic-req-1"`, "listing blew up", "PANIC RECOVER"} {
+		if !strings.Contains(logOutput, want) {
+			t.Errorf("log missing %q, got %q", want, logOutput)
+		}
+	}
+}
+
+func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := c.String(http.StatusOK, "streamed"); err != nil {
+		t.Fatalf("String() error = %v", err)
+	}
+	gatewayErrorHandler(c, errors.New("failed after the first chunk"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (response already committed)", rec.Code)
+	}
+	if rec.Body.String() != "streamed" {
+		t.Fatalf("body = %q, want the already-written body", rec.Body.String())
 	}
 }

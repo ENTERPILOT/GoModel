@@ -37,6 +37,70 @@ func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
 }
 
+// gatewayErrorHandler renders every error that escapes a handler — a recovered
+// panic, a response body the JSON serializer could not encode, or an
+// echo.HTTPError raised by middleware — in the caller's wire dialect, and logs
+// it. Echo's default handler answers with a bare
+// {"message": "Internal Server Error"} and logs nothing at all, so such a
+// failure reaches the operator as a 500 naming neither the endpoint nor the
+// cause, and reaches the client in an envelope no OpenAI SDK can parse.
+func gatewayErrorHandler(c *echo.Context, err error) {
+	if err == nil {
+		return
+	}
+	// Once the status line and body are on the wire nothing can be changed;
+	// the response stands as the handler left it.
+	if response, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil && response.Committed {
+		return
+	}
+
+	gatewayErr := escapedGatewayError(err)
+	// gatewayErr.Err carries the original error, which for a recovered panic is
+	// echo's PanicStackError: its message is the panic value plus the stack.
+	logHandledError(c, gatewayErr)
+	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
+		slog.Error("failed to send error response", "error", writeErr)
+	}
+}
+
+// escapedGatewayError classifies an error that reached the central handler. A
+// gateway error is already shaped; an echo.HTTPError keeps its status; anything
+// else is a failure inside the gateway and stays opaque to the client.
+func escapedGatewayError(err error) *core.GatewayError {
+	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+		return gatewayErr
+	}
+
+	// Echo carries the intended status on the error itself — BodyLimit's 413,
+	// the router's 405, any middleware's echo.NewHTTPError. An error without
+	// one is a failure inside the gateway.
+	status, message := http.StatusInternalServerError, "an unexpected error occurred"
+	if code := echo.StatusCode(err); code > 0 {
+		status, message = code, echoErrorMessage(err, code)
+	}
+	if status < http.StatusInternalServerError {
+		return core.NewInvalidRequestErrorWithStatus(status, message, err)
+	}
+	return &core.GatewayError{
+		Type:       core.ErrorTypeInternal,
+		Message:    message,
+		StatusCode: status,
+		Err:        err,
+	}
+}
+
+// echoErrorMessage is the client-facing text of an echo error: its own message
+// when it carries one, else the status text.
+func echoErrorMessage(err error, status int) string {
+	if httpErr, ok := errors.AsType[*echo.HTTPError](err); ok && httpErr.Message != "" {
+		return httpErr.Message
+	}
+	if text := http.StatusText(status); text != "" {
+		return text
+	}
+	return "request failed"
+}
+
 // handleRouteNotFound renders unknown-route 404s in the caller's wire dialect
 // so SDK clients raise clean typed errors instead of parsing echo's default
 // {"message": "Not Found"} body. Anthropic SDK clients are recognized by the
