@@ -14,7 +14,28 @@ type ContentPart struct {
 	Text        string             `json:"text,omitempty"`
 	ImageURL    *ImageURLContent   `json:"image_url,omitempty"`
 	InputAudio  *InputAudioContent `json:"input_audio,omitempty"`
+	File        *FileContent       `json:"file,omitempty"`
 	ExtraFields UnknownJSONFields  `json:"-" swaggerignore:"true"`
+}
+
+// FileContent carries a document attachment for file parts, mirroring the
+// OpenAI Chat Completions file input. FileData is inline content as a data:
+// URL (PDF or plain text); FileURL is a remote http(s) document (the Responses
+// API input_file.file_url); FileID references a provider-side uploaded file.
+// Anthropic document blocks translate to and from this part.
+type FileContent struct {
+	FileData    string            `json:"file_data,omitempty"`
+	FileURL     string            `json:"file_url,omitempty"`
+	FileID      string            `json:"file_id,omitempty"`
+	Filename    string            `json:"filename,omitempty"`
+	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
+}
+
+// ValidFilePayload reports whether a file part carries an attachment: inline
+// file_data, a remote file_url, or a provider file_id.
+func ValidFilePayload(file *FileContent) bool {
+	return file != nil && (strings.TrimSpace(file.FileData) != "" ||
+		strings.TrimSpace(file.FileURL) != "" || strings.TrimSpace(file.FileID) != "")
 }
 
 // ImageURLContent contains an image reference for image_url parts.
@@ -118,9 +139,49 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 			Type:       "input_audio",
 			InputAudio: p.InputAudio,
 		}, p.ExtraFields)
+	case "file", "input_file":
+		if !ValidFilePayload(p.File) {
+			return nil, fmt.Errorf("file part is missing file.file_data, file.file_url, or file.file_id")
+		}
+		return marshalWithUnknownJSONFields(struct {
+			Type string       `json:"type"`
+			File *FileContent `json:"file"`
+		}{
+			Type: "file",
+			File: p.File,
+		}, p.ExtraFields)
 	default:
 		return nil, fmt.Errorf("unsupported content part type %q", p.Type)
 	}
+}
+
+func (c *FileContent) UnmarshalJSON(data []byte) error {
+	type plain FileContent
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	extraFields, err := extractUnknownJSONFields(data, "file_data", "file_url", "file_id", "filename")
+	if err != nil {
+		return err
+	}
+	*c = FileContent(decoded)
+	c.ExtraFields = extraFields
+	return nil
+}
+
+func (c FileContent) MarshalJSON() ([]byte, error) {
+	return marshalWithUnknownJSONFields(struct {
+		FileData string `json:"file_data,omitempty"`
+		FileURL  string `json:"file_url,omitempty"`
+		FileID   string `json:"file_id,omitempty"`
+		Filename string `json:"filename,omitempty"`
+	}{
+		FileData: c.FileData,
+		FileURL:  c.FileURL,
+		FileID:   c.FileID,
+		Filename: c.Filename,
+	}, c.ExtraFields)
 }
 
 func (c *ImageURLContent) UnmarshalJSON(data []byte) error {
@@ -383,6 +444,7 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 		Text       *string         `json:"text,omitempty"`
 		ImageURL   json.RawMessage `json:"image_url,omitempty"`
 		InputAudio json.RawMessage `json:"input_audio,omitempty"`
+		File       *FileContent    `json:"file,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return ContentPart{}, err
@@ -392,6 +454,7 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 		"text",
 		"image_url",
 		"input_audio",
+		"file",
 	)
 	if err != nil {
 		return ContentPart{}, err
@@ -425,6 +488,15 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 		return ContentPart{
 			Type:        "input_audio",
 			InputAudio:  audio,
+			ExtraFields: extraFields,
+		}, nil
+	case "file", "input_file":
+		if !ValidFilePayload(raw.File) {
+			return ContentPart{}, fmt.Errorf("file part is missing file.file_data, file.file_url, or file.file_id")
+		}
+		return ContentPart{
+			Type:        "file",
+			File:        raw.File,
 			ExtraFields: extraFields,
 		}, nil
 	default:
@@ -471,6 +543,17 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 				Format:      part.InputAudio.Format,
 				ExtraFields: CloneUnknownJSONFields(part.InputAudio.ExtraFields),
 			},
+			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
+		}, nil
+	case "file", "input_file":
+		if !ValidFilePayload(part.File) {
+			return ContentPart{}, fmt.Errorf("file part is missing file.file_data, file.file_url, or file.file_id")
+		}
+		file := *part.File
+		file.ExtraFields = CloneUnknownJSONFields(part.File.ExtraFields)
+		return ContentPart{
+			Type:        "file",
+			File:        &file,
 			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
 		}, nil
 	default:

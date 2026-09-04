@@ -16,6 +16,37 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/admin/access": {
+            "get": {
+                "description": "Reports whether the credential administers the whole gateway\nor only one user-path subtree, so clients can adapt what\nthey offer before hitting scoped endpoints.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Describe the caller's admin scope",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.accessResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/admin/audit/conversation": {
             "get": {
                 "description": "Thread entries carry the request/response bodies the\ntranscript is built from; attempts, request revisions, and\nresponse headers are omitted; redacted request headers and\nper-request usage summaries are retained for continuation\nand prompt-cache visualization.",
@@ -56,6 +87,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -102,6 +139,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -246,6 +289,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 },
                 "security": [
@@ -369,6 +418,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 },
                 "security": [
@@ -406,6 +461,12 @@ const docTemplate = `{
                         "description": "End date (YYYY-MM-DD)",
                         "name": "end_date",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by tracked user path subtree",
+                        "name": "user_path",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -423,6 +484,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -453,6 +520,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -511,6 +584,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -561,6 +640,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -621,6 +706,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -677,6 +768,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -709,6 +806,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -763,6 +866,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -867,6 +976,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -1625,6 +1740,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -1679,6 +1800,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -1729,6 +1856,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -1789,6 +1922,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/core.GatewayError"
                         }
                     },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -1841,6 +1980,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -2071,6 +2216,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 },
                 "security": [
@@ -2164,6 +2315,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -2277,6 +2434,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 },
                 "security": [
@@ -2372,6 +2535,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 },
                 "security": [
@@ -2419,6 +2588,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -2533,6 +2708,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 },
                 "security": [
@@ -2625,6 +2806,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
                     }
                 },
                 "security": [
@@ -2668,6 +2855,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -2763,6 +2956,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.GatewayError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/core.GatewayError"
                         }
@@ -7200,6 +7399,19 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.accessResponse": {
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "description": "Scope is \"global\" for the master key and unscoped credentials, or\n\"user_path\" for a credential confined to one user-path subtree.",
+                    "type": "string"
+                },
+                "user_path": {
+                    "description": "UserPath is the subtree root of a user_path-scoped credential.",
+                    "type": "string"
+                }
+            }
+        },
         "admin.auditConversationResponse": {
             "type": "object",
             "properties": {
@@ -9281,6 +9493,9 @@ const docTemplate = `{
         "core.ContentPart": {
             "type": "object",
             "properties": {
+                "file": {
+                    "$ref": "#/definitions/core.FileContent"
+                },
                 "image_url": {
                     "$ref": "#/definitions/core.ImageURLContent"
                 },
@@ -9475,15 +9690,34 @@ const docTemplate = `{
                 "rate_limit_error",
                 "invalid_request_error",
                 "authentication_error",
-                "not_found_error"
+                "not_found_error",
+                "permission_error"
             ],
             "x-enum-varnames": [
                 "ErrorTypeProvider",
                 "ErrorTypeRateLimit",
                 "ErrorTypeInvalidRequest",
                 "ErrorTypeAuthentication",
-                "ErrorTypeNotFound"
+                "ErrorTypeNotFound",
+                "ErrorTypePermission"
             ]
+        },
+        "core.FileContent": {
+            "type": "object",
+            "properties": {
+                "file_data": {
+                    "type": "string"
+                },
+                "file_id": {
+                    "type": "string"
+                },
+                "file_url": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                }
+            }
         },
         "core.FileDeleteResponse": {
             "type": "object",
@@ -10384,6 +10618,19 @@ const docTemplate = `{
                     "items": {
                         "type": "object"
                     }
+                },
+                "file_data": {
+                    "description": "input_file items carry their file fields flat, unlike chat file parts.",
+                    "type": "string"
+                },
+                "file_id": {
+                    "type": "string"
+                },
+                "file_url": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
                 },
                 "image_url": {
                     "$ref": "#/definitions/core.ImageURLContent"

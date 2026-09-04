@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -253,12 +254,17 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 				Type:         "tool_result",
 				ToolUseID:    toolUseID,
 				Content:      content,
+				IsError:      bytes.Equal(bytes.TrimSpace(msg.ExtraFields.Lookup(core.ToolResultIsErrorField)), []byte("true")),
 				CacheControl: cacheControl,
 			},
 		}, nil
 	}
 
 	content, err := convertMessageContentToAnthropic(msg.Content)
+	if err != nil {
+		return nil, err
+	}
+	content, err = prependThinkingBlocks(msg, content)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +314,38 @@ func buildAnthropicMessageContent(msg core.Message) (any, error) {
 			Input:        input,
 			CacheControl: cacheControl,
 		})
+	}
+	return blocks, nil
+}
+
+// prependThinkingBlocks restores the thinking blocks the Anthropic ingress
+// preserved on an assistant message. They must lead the content, unchanged,
+// so a thinking-enabled tool-use turn can continue; Anthropic ignores them
+// on models other than the one that produced them.
+func prependThinkingBlocks(msg core.Message, content any) (any, error) {
+	if msg.Role != "assistant" {
+		return content, nil
+	}
+	raw := msg.ExtraFields.Lookup(core.ThinkingBlocksField)
+	if len(bytes.TrimSpace(raw)) == 0 || core.IsJSONNull(bytes.TrimSpace(raw)) {
+		return content, nil
+	}
+	var thinking []anthropicContentBlock
+	if err := json.Unmarshal(raw, &thinking); err != nil {
+		return nil, core.NewInvalidRequestError("invalid "+core.ThinkingBlocksField+" payload", err)
+	}
+	if len(thinking) == 0 {
+		return content, nil
+	}
+	blocks := make([]anthropicContentBlock, 0, len(thinking)+1)
+	blocks = append(blocks, thinking...)
+	switch c := content.(type) {
+	case string:
+		if strings.TrimSpace(c) != "" {
+			blocks = append(blocks, anthropicContentBlock{Type: "text", Text: c})
+		}
+	case []anthropicContentBlock:
+		blocks = append(blocks, c...)
 	}
 	return blocks, nil
 }
@@ -794,6 +832,17 @@ func convertMessageContentToAnthropic(content any) (any, error) {
 				Source:       source,
 				CacheControl: cacheControl,
 			})
+		case "file":
+			source, err := anthropicDocumentSource(part.File)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, anthropicContentBlock{
+				Type:         "document",
+				Source:       source,
+				Title:        strings.TrimSpace(part.File.Filename),
+				CacheControl: cacheControl,
+			})
 		case "input_audio":
 			return nil, core.NewInvalidRequestError("anthropic chat does not support input_audio content", nil)
 		default:
@@ -859,6 +908,72 @@ func anthropicImageSource(raw, mediaTypeHint string) (*anthropicContentSource, e
 		Type: "url",
 		URL:  raw,
 	}, nil
+}
+
+// anthropicDocumentSource maps a canonical file part onto an Anthropic
+// document source: a provider file_id, a base64 data: URL (PDF stays base64,
+// plain text is decoded into a text source), or an http(s) URL.
+func anthropicDocumentSource(file *core.FileContent) (*anthropicContentSource, error) {
+	if !core.ValidFilePayload(file) {
+		return nil, core.NewInvalidRequestError("anthropic document content requires file.file_data, file.file_url, or file.file_id", nil)
+	}
+	if fileID := strings.TrimSpace(file.FileID); fileID != "" {
+		return &anthropicContentSource{Type: "file", FileID: fileID}, nil
+	}
+	if fileURL := strings.TrimSpace(file.FileURL); fileURL != "" {
+		return anthropicURLDocumentSource(fileURL, "anthropic file.file_url must be an http/https URL")
+	}
+	raw := strings.TrimSpace(file.FileData)
+	if strings.HasPrefix(raw, "data:") {
+		comma := strings.IndexByte(raw, ',')
+		if comma < 0 {
+			return nil, core.NewInvalidRequestError("invalid anthropic document data URL", nil)
+		}
+		tokens := strings.Split(raw[len("data:"):comma], ";")
+		mediaType := strings.ToLower(strings.TrimSpace(tokens[0]))
+		hasBase64 := false
+		for _, token := range tokens[1:] {
+			if strings.EqualFold(strings.TrimSpace(token), "base64") {
+				hasBase64 = true
+				break
+			}
+		}
+		data := raw[comma+1:]
+		if data == "" {
+			return nil, core.NewInvalidRequestError("anthropic document data URL is missing file data", nil)
+		}
+		switch {
+		case mediaType == "application/pdf" && hasBase64:
+			return &anthropicContentSource{Type: "base64", MediaType: mediaType, Data: data}, nil
+		case mediaType == "text/plain" || strings.HasPrefix(mediaType, "text/"):
+			text := data
+			if hasBase64 {
+				decoded, err := base64.StdEncoding.DecodeString(data)
+				if err != nil {
+					return nil, core.NewInvalidRequestError("anthropic document data URL is not valid base64", err)
+				}
+				text = string(decoded)
+			} else if unescaped, err := url.PathUnescape(data); err == nil {
+				text = unescaped
+			}
+			return &anthropicContentSource{Type: "text", MediaType: "text/plain", Data: text}, nil
+		default:
+			return nil, core.NewInvalidRequestError("anthropic document media type is not supported: "+mediaType, nil)
+		}
+	}
+	// Remote URLs in file_data are accepted leniently for clients that never
+	// adopted file_url.
+	return anthropicURLDocumentSource(raw, "anthropic file.file_data must be a data: URL or http/https URL")
+}
+
+// anthropicURLDocumentSource builds a url document source, rejecting anything
+// that is not an absolute http(s) URL with the given message.
+func anthropicURLDocumentSource(raw, rejectMessage string) (*anthropicContentSource, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || !parsed.IsAbs() || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, core.NewInvalidRequestError(rejectMessage, nil)
+	}
+	return &anthropicContentSource{Type: "url", URL: raw}, nil
 }
 
 func isAllowedAnthropicImageMediaType(mediaType string) bool {

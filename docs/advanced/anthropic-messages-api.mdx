@@ -39,6 +39,11 @@ when a feature that operates on the canonical request is in play: guardrails
 request patching, the response cache, or failover routing. Requests resolving
 to any non-Anthropic provider always translate.
 
+Because the body is forwarded verbatim, none of the [translation limitations](#limitations)
+apply on this path: server-tool history (`server_tool_use`, `web_search_tool_result`, …),
+container uploads, and any other block the canonical request cannot represent reach
+Anthropic unchanged.
+
 ## Supported endpoints
 
 | Endpoint | Behavior |
@@ -187,18 +192,31 @@ features that have no canonical equivalent are not preserved end to end:
   (Claude Code appends system reminders this way, and its prompt caching
   depends on them staying in place). On older Claude models, which reject the
   role, their text is hoisted into the top-level system prompt instead.
-- **Extended-thinking signatures** and `thinking` blocks on input messages are dropped.
-- **Server/built-in tools** (web search, code execution, …) are rejected with a clear
+- **`thinking` and `redacted_thinking` blocks** on assistant turns are replayed
+  verbatim (signatures included) when routed to Anthropic, so thinking-enabled
+  tool-use turns continue correctly. Other providers never see them.
+- **`tool_result.is_error`** is preserved when routed to Anthropic. Other
+  providers have no equivalent flag and receive the result content only.
+- **Server/built-in tools** (web search, code execution, …) and their history
+  blocks (`server_tool_use`, `web_search_tool_result`, …) are rejected with a clear
   `400`; only custom tools (`type` absent or `"custom"`) translate.
 - **`top_k`** is dropped — it has no portable OpenAI-compatible equivalent, and
   OpenAI-family providers reject unknown request fields. `temperature` and `top_p`
   are forwarded.
-- **Images inside `tool_result` blocks** (screenshots, image files read by a
-  tool — Claude Code returns them this way) are forwarded as native image blocks
-  when routed to Anthropic. Other providers receive only the text portion of the
-  tool result.
-- **`document` and other non-text/image content blocks** are rejected with a clear
-  `400` error rather than silently dropped.
+- **Images and documents inside `tool_result` blocks** (screenshots, image and
+  PDF files read by a tool — Claude Code returns them this way) are forwarded as
+  native `image` and `document` blocks when routed to Anthropic. Other providers
+  receive only the text portion of the tool result.
+- **`document` blocks** (PDF, plain text, URL, or Files API `file_id` sources)
+  translate to the OpenAI-style `file` content part (`file_data` for inline
+  content, `file_url` for remote URLs, `file_id` for uploads). Anthropic gets the
+  document back natively with its `title`; Gemini receives inline data only;
+  OpenAI-compatible providers receive the `file` part as-is. Citation settings and `context` are
+  dropped. The custom-content variant (`source.type: "content"`) degrades to text.
+- **`search_result` blocks** degrade to text (title, source URL, and content);
+  citation metadata is dropped.
+- **Other content blocks** (`container_upload`, `tool_reference`, …) are rejected
+  with a clear `400` error rather than silently dropped.
 - **`stop_sequences`** are honored on every provider. Providers that report the
   matched sequence natively (Anthropic) get the full contract back:
   `stop_reason: "stop_sequence"` plus the `stop_sequence` value. OpenAI-family

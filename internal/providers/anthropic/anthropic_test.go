@@ -1995,6 +1995,134 @@ func TestConvertToAnthropicRequest_ToolMessageWithImage(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
+	tests := []struct {
+		name string
+		file core.FileContent
+		want anthropicContentSource
+	}{
+		{name: "pdf", file: core.FileContent{FileData: "data:application/pdf;base64,JVBERi0=", Filename: "a.pdf"}, want: anthropicContentSource{Type: "base64", MediaType: "application/pdf", Data: "JVBERi0="}},
+		{name: "text", file: core.FileContent{FileData: "data:text/plain;base64,aGVsbG8="}, want: anthropicContentSource{Type: "text", MediaType: "text/plain", Data: "hello"}},
+		{name: "url", file: core.FileContent{FileURL: "https://example.com/a.pdf"}, want: anthropicContentSource{Type: "url", URL: "https://example.com/a.pdf"}},
+		{name: "url in file_data", file: core.FileContent{FileData: "https://example.com/a.pdf"}, want: anthropicContentSource{Type: "url", URL: "https://example.com/a.pdf"}},
+		{name: "file id", file: core.FileContent{FileID: "file_123"}, want: anthropicContentSource{Type: "file", FileID: "file_123"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			file := tc.file
+			req, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model: "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
+					{Type: "text", Text: "read"},
+					{Type: "file", File: &file},
+				}}},
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest: %v", err)
+			}
+			blocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
+			if !ok || len(blocks) != 2 || blocks[1].Type != "document" || blocks[1].Source == nil {
+				t.Fatalf("content = %#v, want text + document blocks", req.Messages[0].Content)
+			}
+			if *blocks[1].Source != tc.want {
+				t.Errorf("source = %+v, want %+v", *blocks[1].Source, tc.want)
+			}
+			if blocks[1].Title != tc.file.Filename {
+				t.Errorf("title = %q, want %q", blocks[1].Title, tc.file.Filename)
+			}
+		})
+	}
+
+	_, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{{Role: "user", Content: []core.ContentPart{
+			{Type: "file", File: &core.FileContent{FileData: "data:image/png;base64,aGVsbG8="}},
+		}}},
+	})
+	if err == nil {
+		t.Error("expected error for unsupported document media type")
+	}
+
+	for _, file := range []core.FileContent{
+		{FileURL: "ftp://example.com/a.pdf"},
+		{FileURL: "not a url"},
+		{FileData: "ftp://example.com/a.pdf"},
+		{FileData: "/relative/a.pdf"},
+	} {
+		_, err := convertToAnthropicRequest(&core.ChatRequest{
+			Model:    "claude-sonnet-4-5-20250929",
+			Messages: []core.Message{{Role: "user", Content: []core.ContentPart{{Type: "file", File: &file}}}},
+		})
+		if gatewayErr, ok := err.(*core.GatewayError); !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
+			t.Errorf("file %+v: error = %v, want invalid_request_error", file, err)
+		}
+	}
+}
+
+func TestConvertToAnthropicRequest_ToolMessageIsError(t *testing.T) {
+	req, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "tool", ToolCallID: "call_1", Content: "boom", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				core.ToolResultIsErrorField: json.RawMessage("true"),
+			})},
+			{Role: "tool", ToolCallID: "call_2", Content: "fine"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest: %v", err)
+	}
+	first := req.Messages[0].Content.([]anthropicContentBlock)[0]
+	second := req.Messages[1].Content.([]anthropicContentBlock)[0]
+	if !first.IsError || first.Content != "boom" {
+		t.Errorf("first tool_result = %+v, want is_error", first)
+	}
+	if second.IsError {
+		t.Errorf("second tool_result = %+v, want no is_error", second)
+	}
+}
+
+func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
+	req, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "hi"},
+			{
+				Role:      "assistant",
+				Content:   "calling",
+				ToolCalls: []core.ToolCall{{ID: "tu_1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: "{}"}}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					core.ThinkingBlocksField: json.RawMessage(`[{"type":"thinking","thinking":"","signature":"sig1"},{"type":"redacted_thinking","data":"opaque"}]`),
+				}),
+			},
+			{Role: "tool", ToolCallID: "tu_1", Content: "result"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest: %v", err)
+	}
+	blocks, ok := req.Messages[1].Content.([]anthropicContentBlock)
+	if !ok || len(blocks) != 4 {
+		t.Fatalf("assistant content = %#v, want thinking, redacted_thinking, text, tool_use", req.Messages[1].Content)
+	}
+	if blocks[0].Type != "thinking" || blocks[0].Thinking == nil || *blocks[0].Thinking != "" || blocks[0].Signature != "sig1" {
+		t.Errorf("blocks[0] = %+v", blocks[0])
+	}
+	if blocks[1].Type != "redacted_thinking" || blocks[1].Data != "opaque" {
+		t.Errorf("blocks[1] = %+v", blocks[1])
+	}
+	if blocks[2].Type != "text" || blocks[3].Type != "tool_use" {
+		t.Errorf("blocks[2:] = %+v", blocks[2:])
+	}
+	encoded, err := json.Marshal(blocks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"type":"thinking","thinking":"","signature":"sig1"}` {
+		t.Errorf("encoded thinking block = %s, want empty thinking text kept", encoded)
+	}
+}
+
 func TestConvertToAnthropicRequest_ToolChoiceRequiresTools(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",

@@ -302,6 +302,22 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 				MimeType: mimeTypeForAudioFormat(part.InputAudio.Format),
 				Data:     part.InputAudio.Data,
 			}})
+		case "file":
+			if part.File == nil {
+				continue
+			}
+			rawURL := strings.TrimSpace(part.File.FileData)
+			if !strings.HasPrefix(rawURL, "data:") || part.File.FileURL != "" || part.File.FileID != "" {
+				return nil, core.NewInvalidRequestError(
+					"gemini native file content supports only inline data: URLs in file_data; file_url and file_id are not supported",
+					nil,
+				)
+			}
+			mimeType, data, err := parseDataURL(rawURL, "file_data")
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, geminiPart{InlineData: &geminiBlob{MimeType: mimeType, Data: data}})
 		}
 	}
 	return out, nil
@@ -310,7 +326,7 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 func geminiPartFromImageURL(image *core.ImageURLContent) (geminiPart, error) {
 	rawURL := strings.TrimSpace(image.URL)
 	if strings.HasPrefix(rawURL, "data:") {
-		mimeType, data, err := parseDataURL(rawURL)
+		mimeType, data, err := parseDataURL(rawURL, "image_url")
 		if err != nil {
 			return geminiPart{}, err
 		}
@@ -329,10 +345,12 @@ func geminiPartFromImageURL(image *core.ImageURLContent) (geminiPart, error) {
 	)
 }
 
-func parseDataURL(rawURL string) (string, string, error) {
+// parseDataURL splits a data: URL into media type and base64 payload; field
+// names the request field reported in validation errors.
+func parseDataURL(rawURL, field string) (string, string, error) {
 	header, data, ok := strings.Cut(rawURL, ",")
 	if !ok {
-		return "", "", core.NewInvalidRequestError("invalid data URL in image_url", nil)
+		return "", "", core.NewInvalidRequestError("invalid data URL in "+field, nil)
 	}
 	mediaType := strings.TrimPrefix(header, "data:")
 	mediaType = strings.TrimSuffix(mediaType, ";base64")
@@ -340,7 +358,7 @@ func parseDataURL(rawURL string) (string, string, error) {
 		mediaType = parsed
 	}
 	if _, err := base64.StdEncoding.DecodeString(data); err != nil {
-		return "", "", core.NewInvalidRequestError("invalid base64 data in image_url", err)
+		return "", "", core.NewInvalidRequestError("invalid base64 data in "+field, err)
 	}
 	return mediaType, data, nil
 }

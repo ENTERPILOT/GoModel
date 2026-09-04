@@ -315,7 +315,7 @@ func markOpenAIChatBreakpoint(messages *[]core.Message) bool {
 			return true
 		case []core.ContentPart:
 			for j := len(content) - 1; j >= 0; j-- {
-				if content[j].Type == "text" || content[j].Type == "image_url" || content[j].Type == "input_audio" {
+				if content[j].Type == "text" || content[j].Type == "image_url" || content[j].Type == "input_audio" || content[j].Type == "file" {
 					parts := slices.Clone(content)
 					parts[j].ExtraFields = mergeCacheExtras(parts[j].ExtraFields, map[string]json.RawMessage{
 						"prompt_cache_breakpoint": json.RawMessage(`{"mode":"explicit"}`),

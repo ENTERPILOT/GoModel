@@ -988,6 +988,39 @@ func TestAdaptAnthropicCacheControl_PreservesSupportedProviders(t *testing.T) {
 	}
 }
 
+func TestAdaptAnthropicCacheControl_StripsAnthropicOnlyMessageFields(t *testing.T) {
+	req := &core.ChatRequest{Messages: []core.Message{
+		{Role: "assistant", Content: "x", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			core.ThinkingBlocksField: json.RawMessage(`[{"type":"thinking","thinking":"t","signature":"s"}]`),
+			"x_keep":                 json.RawMessage("true"),
+		})},
+		{Role: "tool", ToolCallID: "c1", Content: "boom", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			core.ToolResultIsErrorField: json.RawMessage("true"),
+		})},
+	}}
+	if got := adaptAnthropicCacheControl(req, "anthropic"); got != req {
+		t.Fatal("anthropic must receive thinking_blocks and is_error untouched")
+	}
+	for _, providerType := range []string{"openai", "openrouter", "gemini"} {
+		got := adaptAnthropicCacheControl(req, providerType)
+		if got == req {
+			t.Fatalf("provider %q did not adapt the request", providerType)
+		}
+		if raw := got.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) != 0 {
+			t.Errorf("provider %q kept thinking_blocks: %s", providerType, raw)
+		}
+		if raw := got.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(raw) != 0 {
+			t.Errorf("provider %q kept is_error: %s", providerType, raw)
+		}
+		if raw := got.Messages[0].ExtraFields.Lookup("x_keep"); string(raw) != "true" {
+			t.Errorf("provider %q dropped unrelated extra: %s", providerType, raw)
+		}
+	}
+	if raw := req.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) == 0 {
+		t.Error("adaptation mutated the caller's request")
+	}
+}
+
 func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 	westResp := &core.ChatResponse{ID: "west", Model: "gpt-4o"}
 	west := &mockProvider{name: "openai-west", chatResponse: westResp}
@@ -1935,5 +1968,45 @@ func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
 	want := registry.GetProviderName("gpt-5")
 	if resp.Data[1].ID != "gpt-5" || resp.Data[1].OwnedBy != want {
 		t.Errorf("expected gpt-5 owned by routing winner %q, got %+v", want, resp.Data[1])
+	}
+}
+
+func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpenRouter(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-5","messages":[
+		{"role":"assistant","content":"x","thinking_blocks":[{"type":"thinking","thinking":"t","signature":"s"}],"cache_control":{"type":"ephemeral"}},
+		{"role":"tool","tool_call_id":"c1","content":"boom","is_error":true}
+	]}`
+	request := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{{
+			CustomID: "item-1",
+			Method:   http.MethodPost,
+			URL:      "/v1/chat/completions",
+			Body:     json.RawMessage(body),
+		}},
+	}
+	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
+
+	if got, err := adaptAnthropicBatchCacheControl(ctx, request, "anthropic"); err != nil || got != request {
+		t.Fatalf("anthropic batch = %#v, %v; want the request untouched", got, err)
+	}
+
+	adapted, err := adaptAnthropicBatchCacheControl(ctx, request, "openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := core.DecodeKnownBatchItemRequest(adapted.Endpoint, adapted.Requests[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := decoded.Request.(*core.ChatRequest)
+	if raw := chat.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) != 0 {
+		t.Errorf("openrouter batch kept thinking_blocks: %s", raw)
+	}
+	if raw := chat.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(raw) != 0 {
+		t.Errorf("openrouter batch kept is_error: %s", raw)
+	}
+	if got := string(chat.Messages[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
+		t.Errorf("openrouter batch lost cache_control: %s", got)
 	}
 }
