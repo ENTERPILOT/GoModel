@@ -2,6 +2,8 @@
 package openai
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,12 +29,29 @@ const (
 	defaultBaseURL = "https://api.openai.com/v1"
 )
 
+// apiModeResponsesViaChat lists the APIMode values that switch the Responses
+// API from native upstream passthrough to translation over chat completions.
+// OpenAI-compatible upstreams such as SGLang or older vLLM builds expose
+// /v1/responses but reject or fail on tool-bearing requests; routing through
+// chat completions keeps function calling working on those upstreams.
+var apiModeResponsesViaChat = map[string]bool{
+	"chat":               true,
+	"chat_completions":   true,
+	"chat-compatible":    true,
+	"chat_compatible":    true,
+	"responses_via_chat": true,
+	"responses-via-chat": true,
+}
+
 // Provider implements the core.Provider interface for OpenAI.
 // Credentials and the realtime base URL are both read live from the embedded
 // CompatibleProvider, so SetBaseURL overrides and key rotation are honored on
 // the realtime websocket dial target too (see realtime.go).
 type Provider struct {
 	*CompatibleProvider
+	// responsesViaChat translates Responses API calls through chat
+	// completions instead of forwarding to the upstream /responses endpoint.
+	responsesViaChat bool
 }
 
 // New creates a new OpenAI provider.
@@ -44,7 +63,27 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			BaseURL:      baseURL,
 			SetHeaders:   setHeaders,
 		}),
+		responsesViaChat: apiModeResponsesViaChat[strings.ToLower(strings.TrimSpace(cfg.APIMode))],
 	}
+}
+
+// Responses sends a Responses API request. With APIMode set to a
+// chat-compatible value the request is translated through chat completions;
+// otherwise it is forwarded to the upstream /responses endpoint.
+func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	if p.responsesViaChat {
+		return providers.ResponsesViaChat(ctx, p, req)
+	}
+	return p.CompatibleProvider.Responses(ctx, req)
+}
+
+// StreamResponses streams a Responses API request, honoring the same APIMode
+// translation switch as Responses.
+func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	if p.responsesViaChat {
+		return providers.StreamResponsesViaChat(ctx, p, req, "openai")
+	}
+	return p.CompatibleProvider.StreamResponses(ctx, req)
 }
 
 // NewWithHTTPClient creates a new OpenAI provider with a custom HTTP client.

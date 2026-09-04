@@ -37,6 +37,108 @@ func TestNew_ReturnsProvider(t *testing.T) {
 	}
 }
 
+func TestResponses_APIModeChatCompatibleTranslatesViaChat(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("failed to decode request body: %v", err)
+		}
+		if r.URL.Path == "/responses" {
+			// Simulate an upstream (e.g. SGLang) whose native /responses
+			// endpoint cannot serve tool-bearing requests.
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`Internal Server Error`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "chatcmpl_123",
+			"object": "chat.completion",
+			"created": 1677652288,
+			"model": "glm-5.2",
+			"choices": [{
+				"index": 0,
+				"message": {"role": "assistant", "content": "OK"},
+				"finish_reason": "stop"
+			}],
+			"usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := New(providers.ProviderConfig{
+		APIKey:  "test-api-key",
+		BaseURL: server.URL,
+		APIMode: "chat_compatible",
+	}, providers.ProviderOptions{})
+
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model: "glm-5.2",
+		Input: "Reply exactly: OK",
+		Tools: []map[string]any{{
+			"type":        "function",
+			"name":        "get_weather",
+			"description": "Get weather",
+			"parameters":  map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Responses returned error: %v", err)
+	}
+	if gotPath != "/chat/completions" {
+		t.Fatalf("request path = %q, want /chat/completions", gotPath)
+	}
+	tools, ok := gotBody["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("translated chat request tools = %v, want exactly one tool", gotBody["tools"])
+	}
+	tool := tools[0].(map[string]any)
+	fn, ok := tool["function"].(map[string]any)
+	if !ok {
+		t.Fatalf("translated tool = %v, want chat-completions function shape", tool)
+	}
+	if fn["name"] != "get_weather" {
+		t.Errorf("translated tool name = %q, want get_weather", fn["name"])
+	}
+	if resp == nil || resp.Model != "glm-5.2" {
+		t.Fatalf("response = %+v, want model glm-5.2", resp)
+	}
+}
+
+func TestResponses_APIModeDefaultKeepsNativePassthrough(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "resp_123",
+			"object": "response",
+			"created_at": 1677652288,
+			"model": "gpt-4o",
+			"status": "completed",
+			"output": []
+		}`))
+	}))
+	defer server.Close()
+
+	provider := New(providers.ProviderConfig{
+		APIKey:  "test-api-key",
+		BaseURL: server.URL,
+	}, providers.ProviderOptions{})
+
+	if _, err := provider.Responses(context.Background(), &core.ResponsesRequest{
+		Model: "gpt-4o",
+		Input: "ping",
+	}); err != nil {
+		t.Fatalf("Responses returned error: %v", err)
+	}
+	if gotPath != "/responses" {
+		t.Fatalf("request path = %q, want native /responses passthrough", gotPath)
+	}
+}
+
 func TestNilRequests_ReturnInvalidRequestError(t *testing.T) {
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 
