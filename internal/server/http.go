@@ -145,6 +145,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		JSONSerializer: goJSONSerializer{},
 	})
 	e.Logger = slog.Default()
+	// Errors that escape the handler chain (recovered panics, response
+	// serialization failures) are logged and rendered in the gateway envelope
+	// instead of echo's silent {"message": "Internal Server Error"}.
+	e.HTTPErrorHandler = unhandledErrorHandler(e.HTTPErrorHandler)
 	basePath := configuredBasePath(cfg)
 	if basePath != "/" {
 		e.Pre(stripBasePathMiddleware(basePath))
