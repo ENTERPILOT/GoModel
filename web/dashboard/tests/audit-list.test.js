@@ -736,17 +736,57 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
     "request,response-1,response-2,response-3",
   );
 
-  // Each failover pane carries the virtual → tried model strip: the virtual
-  // model the request chose and the concrete model that attempt targeted.
+  // Each failover pane carries the requested → tried model strip: the model
+  // the request named and the concrete model that attempt targeted. Without
+  // an alias resolution the source chip reads "requested", not "virtual".
   const first = panes.find((p) => p.id === "response-1").pane;
   assert.deepEqual(first.modelStrip, {
-    virtual: "virtual-model-a",
+    label: "requested",
+    source: "virtual-model-a",
     tried: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
   });
   const second = panes.find((p) => p.id === "response-2").pane;
   assert.deepEqual(second.modelStrip, {
-    virtual: "virtual-model-a",
+    label: "requested",
+    source: "virtual-model-a",
     tried: "provider-b/glm-5.3-flash",
+  });
+
+  // Alias-resolved entries label the source "virtual" and prefer top-level
+  // requested_model over entry.model and the request body (the same
+  // precedence the metadata row uses).
+  const aliased = {
+    requested_model: "smart-vm",
+    model: "entry-model",
+    alias_used: true,
+    data: {
+      request_body: { model: "body-model" },
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(auditPanes(aliased).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "virtual",
+    source: "smart-vm",
+    tried: "provider-a/qwen-35b",
+  });
+
+  // Without requested_model, top-level entry.model steps in before the body.
+  const entryModel = {
+    model: "entry-model",
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(auditPanes(entryModel).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "requested",
+    source: "entry-model",
+    tried: "provider-a/qwen-35b",
   });
 
   // A single successful attempt collapses to the plain response tab, which
@@ -788,7 +828,8 @@ test("per-attempt response panes carry the tried model for the tab badge", () =>
   const legacyPanes = auditPanes(legacy);
   assert.ok(!legacyPanes.find((p) => p.id === "response-1").pane.modelStrip);
   assert.deepEqual(legacyPanes.find((p) => p.id === "response-2").pane.modelStrip, {
-    virtual: "m",
+    label: "requested",
+    source: "m",
     tried: "m",
   });
 });

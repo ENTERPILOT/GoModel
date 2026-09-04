@@ -644,14 +644,19 @@ function auditAttemptResponsePane(entry, attempt) {
     direction: "response",
     seq: single ? 0 : Number((attempt && attempt.seq) || 0),
     kind: single ? "" : kind === "attempt" ? "" : kind,
-    // In-pane strip under the tab header: the virtual model the request
-    // named and the concrete model this attempt actually tried, so a failed
-    // step reads "virtual → tried" without hovering anything.
+    // In-pane strip under the tab header: the model the request named and
+    // the concrete model this attempt actually tried, so a failed step reads
+    // "requested → tried" without hovering anything. The source is only
+    // called "virtual" when an alias actually resolved — failover rules also
+    // apply to plain concrete models, so a bare requested name must not
+    // mislabel itself as a virtual model.
     modelStrip:
       tried && !single
         ? {
-            virtual: String(
+            label: entry && entry.alias_used ? "virtual" : "requested",
+            source: String(
               (entry && entry.requested_model) ||
+                (entry && entry.model) ||
                 (data && data.request_body && data.request_body.model) ||
                 "",
             ).trim(),
