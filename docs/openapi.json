@@ -13439,6 +13439,9 @@
           "file_id": {
             "type": "string"
           },
+          "file_url": {
+            "type": "string"
+          },
           "filename": {
             "type": "string"
           }
@@ -14372,6 +14375,9 @@
             "type": "string"
           },
           "file_id": {
+            "type": "string"
+          },
+          "file_url": {
             "type": "string"
           },
           "filename": {

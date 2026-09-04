@@ -208,9 +208,10 @@ features that have no canonical equivalent are not preserved end to end:
   native `image` and `document` blocks when routed to Anthropic. Other providers
   receive only the text portion of the tool result.
 - **`document` blocks** (PDF, plain text, URL, or Files API `file_id` sources)
-  translate to the OpenAI-style `file` content part. Anthropic gets the document
-  back natively with its `title`; Gemini receives inline data; OpenAI-compatible
-  providers receive the `file` part as-is. Citation settings and `context` are
+  translate to the OpenAI-style `file` content part (`file_data` for inline
+  content, `file_url` for remote URLs, `file_id` for uploads). Anthropic gets the
+  document back natively with its `title`; Gemini receives inline data only;
+  OpenAI-compatible providers receive the `file` part as-is. Citation settings and `context` are
   dropped. The custom-content variant (`source.type: "content"`) degrades to text.
 - **`search_result` blocks** degrade to text (title, source URL, and content);
   citation metadata is dropped.

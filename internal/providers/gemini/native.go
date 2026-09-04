@@ -307,9 +307,9 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 				continue
 			}
 			rawURL := strings.TrimSpace(part.File.FileData)
-			if !strings.HasPrefix(rawURL, "data:") {
+			if !strings.HasPrefix(rawURL, "data:") || part.File.FileURL != "" || part.File.FileID != "" {
 				return nil, core.NewInvalidRequestError(
-					"gemini native file content supports only data: URLs; file_id and remote URLs are not supported",
+					"gemini native file content supports only inline data: URLs in file_data; file_url and file_id are not supported",
 					nil,
 				)
 			}

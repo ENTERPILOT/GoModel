@@ -1970,3 +1970,43 @@ func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
 		t.Errorf("expected gpt-5 owned by routing winner %q, got %+v", want, resp.Data[1])
 	}
 }
+
+func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpenRouter(t *testing.T) {
+	body := `{"model":"claude-sonnet-4-5","messages":[
+		{"role":"assistant","content":"x","thinking_blocks":[{"type":"thinking","thinking":"t","signature":"s"}],"cache_control":{"type":"ephemeral"}},
+		{"role":"tool","tool_call_id":"c1","content":"boom","is_error":true}
+	]}`
+	request := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{{
+			CustomID: "item-1",
+			Method:   http.MethodPost,
+			URL:      "/v1/chat/completions",
+			Body:     json.RawMessage(body),
+		}},
+	}
+	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
+
+	if got, err := adaptAnthropicBatchCacheControl(ctx, request, "anthropic"); err != nil || got != request {
+		t.Fatalf("anthropic batch = %#v, %v; want the request untouched", got, err)
+	}
+
+	adapted, err := adaptAnthropicBatchCacheControl(ctx, request, "openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := core.DecodeKnownBatchItemRequest(adapted.Endpoint, adapted.Requests[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := decoded.Request.(*core.ChatRequest)
+	if raw := chat.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) != 0 {
+		t.Errorf("openrouter batch kept thinking_blocks: %s", raw)
+	}
+	if raw := chat.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(raw) != 0 {
+		t.Errorf("openrouter batch kept is_error: %s", raw)
+	}
+	if got := string(chat.Messages[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
+		t.Errorf("openrouter batch lost cache_control: %s", got)
+	}
+}

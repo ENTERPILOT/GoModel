@@ -74,8 +74,12 @@ func hasAnthropicOnlyMessageFields(req *core.ChatRequest) bool {
 // canonical chat items produced by the Anthropic Message Batches ingress.
 // Ordinary OpenAI-compatible batches remain opaque and caller-owned.
 func adaptAnthropicBatchCacheControl(ctx context.Context, req *core.BatchRequest, providerType string) (*core.BatchRequest, error) {
-	if req == nil || core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages ||
-		providerAcceptsAnthropicCacheControl(providerType) {
+	if req == nil || core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
+		return req, nil
+	}
+	// Only Anthropic itself accepts every Anthropic extra; OpenRouter accepts
+	// cache_control but still needs the message-level extras removed.
+	if providerAcceptsAnthropicCacheControl(providerType) && normalizedProviderType(providerType) == "anthropic" {
 		return req, nil
 	}
 

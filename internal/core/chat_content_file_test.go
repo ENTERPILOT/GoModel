@@ -71,3 +71,33 @@ func TestNormalizeMessageContentFilePart(t *testing.T) {
 		t.Errorf("ExtractTextContent = %q", ExtractTextContent(parts))
 	}
 }
+
+func TestContentPartFileURLRoundTrip(t *testing.T) {
+	raw := `{"type":"input_file","file":{"file_url":"https://example.com/a.pdf","filename":"a.pdf","x_file":1}}`
+	var part ContentPart
+	if err := json.Unmarshal([]byte(raw), &part); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if part.Type != "file" || part.File == nil || part.File.FileURL != "https://example.com/a.pdf" || part.File.FileData != "" {
+		t.Fatalf("part = %+v", part)
+	}
+	if got := string(part.File.ExtraFields.Lookup("x_file")); got != "1" {
+		t.Errorf("x_file = %s, want 1", got)
+	}
+	encoded, err := json.Marshal(part)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded struct {
+		File map[string]any `json:"file"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if decoded.File["file_url"] != "https://example.com/a.pdf" || decoded.File["x_file"] != float64(1) {
+		t.Errorf("encoded = %s", encoded)
+	}
+	if _, ok := decoded.File["file_data"]; ok {
+		t.Errorf("encoded emitted empty file_data: %s", encoded)
+	}
+}

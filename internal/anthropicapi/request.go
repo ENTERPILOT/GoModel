@@ -324,7 +324,7 @@ func documentPart(block ContentBlock, extra core.UnknownJSONFields) (core.Conten
 		if source.URL == "" {
 			return core.ContentPart{}, false, fmt.Errorf("url document source requires url")
 		}
-		file.FileData = source.URL
+		file.FileURL = source.URL
 	case "file":
 		if strings.TrimSpace(source.FileID) == "" {
 			return core.ContentPart{}, false, fmt.Errorf("file document source requires file_id")

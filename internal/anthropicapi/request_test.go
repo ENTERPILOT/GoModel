@@ -689,7 +689,7 @@ func TestToChatRequestDocumentBlocks(t *testing.T) {
 			block:    `{"type":"document","source":{"type":"url","url":"https://example.com/a.pdf"}}`,
 			wantType: "file",
 			check: func(t *testing.T, part core.ContentPart) {
-				if part.File.FileData != "https://example.com/a.pdf" {
+				if part.File.FileURL != "https://example.com/a.pdf" || part.File.FileData != "" {
 					t.Errorf("file = %+v", part.File)
 				}
 			},

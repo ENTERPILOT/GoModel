@@ -219,6 +219,7 @@ type ResponsesContentItem struct {
 	InputAudio *InputAudioContent `json:"input_audio,omitempty"`
 	// input_file items carry their file fields flat, unlike chat file parts.
 	FileData string `json:"file_data,omitempty"`
+	FileURL  string `json:"file_url,omitempty"`
 	FileID   string `json:"file_id,omitempty"`
 	Filename string `json:"filename,omitempty"`
 	// Providers can return structured annotation objects here (for example

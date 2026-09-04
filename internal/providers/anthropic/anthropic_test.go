@@ -2003,7 +2003,8 @@ func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
 	}{
 		{name: "pdf", file: core.FileContent{FileData: "data:application/pdf;base64,JVBERi0=", Filename: "a.pdf"}, want: anthropicContentSource{Type: "base64", MediaType: "application/pdf", Data: "JVBERi0="}},
 		{name: "text", file: core.FileContent{FileData: "data:text/plain;base64,aGVsbG8="}, want: anthropicContentSource{Type: "text", MediaType: "text/plain", Data: "hello"}},
-		{name: "url", file: core.FileContent{FileData: "https://example.com/a.pdf"}, want: anthropicContentSource{Type: "url", URL: "https://example.com/a.pdf"}},
+		{name: "url", file: core.FileContent{FileURL: "https://example.com/a.pdf"}, want: anthropicContentSource{Type: "url", URL: "https://example.com/a.pdf"}},
+		{name: "url in file_data", file: core.FileContent{FileData: "https://example.com/a.pdf"}, want: anthropicContentSource{Type: "url", URL: "https://example.com/a.pdf"}},
 		{name: "file id", file: core.FileContent{FileID: "file_123"}, want: anthropicContentSource{Type: "file", FileID: "file_123"}},
 	}
 	for _, tc := range tests {
@@ -2072,8 +2073,8 @@ func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
 		Messages: []core.Message{
 			{Role: "user", Content: "hi"},
 			{
-				Role:    "assistant",
-				Content: "calling",
+				Role:      "assistant",
+				Content:   "calling",
 				ToolCalls: []core.ToolCall{{ID: "tu_1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: "{}"}}},
 				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 					core.ThinkingBlocksField: json.RawMessage(`[{"type":"thinking","thinking":"","signature":"sig1"},{"type":"redacted_thinking","data":"opaque"}]`),

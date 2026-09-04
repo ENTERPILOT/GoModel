@@ -9711,6 +9711,9 @@ const docTemplate = `{
                 "file_id": {
                     "type": "string"
                 },
+                "file_url": {
+                    "type": "string"
+                },
                 "filename": {
                     "type": "string"
                 }
@@ -10621,6 +10624,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "file_id": {
+                    "type": "string"
+                },
+                "file_url": {
                     "type": "string"
                 },
                 "filename": {

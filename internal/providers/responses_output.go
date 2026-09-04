@@ -111,6 +111,7 @@ func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.Respon
 			items = append(items, core.ResponsesContentItem{
 				Type:     "input_file",
 				FileData: strings.TrimSpace(part.File.FileData),
+				FileURL:  strings.TrimSpace(part.File.FileURL),
 				FileID:   strings.TrimSpace(part.File.FileID),
 				Filename: strings.TrimSpace(part.File.Filename),
 			})

@@ -19,20 +19,23 @@ type ContentPart struct {
 }
 
 // FileContent carries a document attachment for file parts, mirroring the
-// OpenAI Chat Completions file input. FileData is a data: URL (PDF or plain
-// text) or an http(s) URL; FileID references a provider-side uploaded file.
+// OpenAI Chat Completions file input. FileData is inline content as a data:
+// URL (PDF or plain text); FileURL is a remote http(s) document (the Responses
+// API input_file.file_url); FileID references a provider-side uploaded file.
 // Anthropic document blocks translate to and from this part.
 type FileContent struct {
 	FileData    string            `json:"file_data,omitempty"`
+	FileURL     string            `json:"file_url,omitempty"`
 	FileID      string            `json:"file_id,omitempty"`
 	Filename    string            `json:"filename,omitempty"`
 	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
-// ValidFilePayload reports whether a file part carries an attachment: either
-// inline/remote file_data or a provider file_id.
+// ValidFilePayload reports whether a file part carries an attachment: inline
+// file_data, a remote file_url, or a provider file_id.
 func ValidFilePayload(file *FileContent) bool {
-	return file != nil && (strings.TrimSpace(file.FileData) != "" || strings.TrimSpace(file.FileID) != "")
+	return file != nil && (strings.TrimSpace(file.FileData) != "" ||
+		strings.TrimSpace(file.FileURL) != "" || strings.TrimSpace(file.FileID) != "")
 }
 
 // ImageURLContent contains an image reference for image_url parts.
@@ -138,7 +141,7 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 		}, p.ExtraFields)
 	case "file", "input_file":
 		if !ValidFilePayload(p.File) {
-			return nil, fmt.Errorf("file part is missing file.file_data or file.file_id")
+			return nil, fmt.Errorf("file part is missing file.file_data, file.file_url, or file.file_id")
 		}
 		return marshalWithUnknownJSONFields(struct {
 			Type string       `json:"type"`
@@ -158,7 +161,7 @@ func (c *FileContent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	extraFields, err := extractUnknownJSONFields(data, "file_data", "file_id", "filename")
+	extraFields, err := extractUnknownJSONFields(data, "file_data", "file_url", "file_id", "filename")
 	if err != nil {
 		return err
 	}
@@ -170,10 +173,12 @@ func (c *FileContent) UnmarshalJSON(data []byte) error {
 func (c FileContent) MarshalJSON() ([]byte, error) {
 	return marshalWithUnknownJSONFields(struct {
 		FileData string `json:"file_data,omitempty"`
+		FileURL  string `json:"file_url,omitempty"`
 		FileID   string `json:"file_id,omitempty"`
 		Filename string `json:"filename,omitempty"`
 	}{
 		FileData: c.FileData,
+		FileURL:  c.FileURL,
 		FileID:   c.FileID,
 		Filename: c.Filename,
 	}, c.ExtraFields)
@@ -487,7 +492,7 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 		}, nil
 	case "file", "input_file":
 		if !ValidFilePayload(raw.File) {
-			return ContentPart{}, fmt.Errorf("file part is missing file.file_data or file.file_id")
+			return ContentPart{}, fmt.Errorf("file part is missing file.file_data, file.file_url, or file.file_id")
 		}
 		return ContentPart{
 			Type:        "file",
@@ -542,7 +547,7 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 		}, nil
 	case "file", "input_file":
 		if !ValidFilePayload(part.File) {
-			return ContentPart{}, fmt.Errorf("file part is missing file.file_data or file.file_id")
+			return ContentPart{}, fmt.Errorf("file part is missing file.file_data, file.file_url, or file.file_id")
 		}
 		file := *part.File
 		file.ExtraFields = CloneUnknownJSONFields(part.File.ExtraFields)

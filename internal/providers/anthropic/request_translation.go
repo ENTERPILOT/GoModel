@@ -915,10 +915,13 @@ func anthropicImageSource(raw, mediaTypeHint string) (*anthropicContentSource, e
 // plain text is decoded into a text source), or an http(s) URL.
 func anthropicDocumentSource(file *core.FileContent) (*anthropicContentSource, error) {
 	if !core.ValidFilePayload(file) {
-		return nil, core.NewInvalidRequestError("anthropic document content requires file.file_data or file.file_id", nil)
+		return nil, core.NewInvalidRequestError("anthropic document content requires file.file_data, file.file_url, or file.file_id", nil)
 	}
 	if fileID := strings.TrimSpace(file.FileID); fileID != "" {
 		return &anthropicContentSource{Type: "file", FileID: fileID}, nil
+	}
+	if fileURL := strings.TrimSpace(file.FileURL); fileURL != "" {
+		return anthropicURLDocumentSource(fileURL, "anthropic file.file_url must be an http/https URL")
 	}
 	raw := strings.TrimSpace(file.FileData)
 	if strings.HasPrefix(raw, "data:") {
@@ -958,9 +961,17 @@ func anthropicDocumentSource(file *core.FileContent) (*anthropicContentSource, e
 			return nil, core.NewInvalidRequestError("anthropic document media type is not supported: "+mediaType, nil)
 		}
 	}
+	// Remote URLs in file_data are accepted leniently for clients that never
+	// adopted file_url.
+	return anthropicURLDocumentSource(raw, "anthropic file.file_data must be a data: URL or http/https URL")
+}
+
+// anthropicURLDocumentSource builds a url document source, rejecting anything
+// that is not an absolute http(s) URL with the given message.
+func anthropicURLDocumentSource(raw, rejectMessage string) (*anthropicContentSource, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil || !parsed.IsAbs() || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, core.NewInvalidRequestError("anthropic file.file_data must be a data: URL or http/https URL", nil)
+		return nil, core.NewInvalidRequestError(rejectMessage, nil)
 	}
 	return &anthropicContentSource{Type: "url", URL: raw}, nil
 }
