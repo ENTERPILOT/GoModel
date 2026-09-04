@@ -45,6 +45,13 @@ const PROVIDER_DOC_SLUGS = new Set([
   "xiaomi",
 ]);
 
+// Normalized registry type → docs slug, for the cases where the docs page
+// slug does not match the provider type. `ollama` is documented under the
+// "multiple-ollama" page (its frontmatter title is "Ollama").
+const PROVIDER_DOC_SLUG_OVERRIDES = {
+  ollama: "multiple-ollama",
+};
+
 export const PROVIDER_DOCS_OVERVIEW_SLUG = "overview";
 
 function normalizeProviderType(type) {
@@ -59,8 +66,11 @@ export function providerDocsUrl(type) {
   if (!normalized) {
     return "";
   }
-  const slug = PROVIDER_DOC_SLUGS.has(normalized)
-    ? normalized
-    : PROVIDER_DOCS_OVERVIEW_SLUG;
+  const override = PROVIDER_DOC_SLUG_OVERRIDES[normalized];
+  const slug =
+    override ??
+    (PROVIDER_DOC_SLUGS.has(normalized)
+      ? normalized
+      : PROVIDER_DOCS_OVERVIEW_SLUG);
   return PROVIDER_DOCS_BASE_URL + slug + "?" + PROVIDER_DOCS_UTM;
 }

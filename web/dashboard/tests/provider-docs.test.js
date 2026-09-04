@@ -21,6 +21,11 @@ test("providerDocsUrl normalizes the registry type", () => {
     providerDocsUrl("  GEMINI  "),
     PROVIDER_DOCS_BASE_URL + "gemini?" + UTM,
   );
+  // Ollama's docs page slug differs from the registry type.
+  assert.equal(
+    providerDocsUrl("ollama"),
+    PROVIDER_DOCS_BASE_URL + "multiple-ollama?" + UTM,
+  );
 });
 
 test("providerDocsUrl links every documented provider to its own page", () => {
@@ -66,7 +71,6 @@ test("providerDocsUrl falls back to overview for registered types without a page
     "groq",
     "kilo",
     "meta",
-    "ollama",
     "zai",
   ];
   for (const type of fallback) {

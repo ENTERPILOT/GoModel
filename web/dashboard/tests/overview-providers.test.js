@@ -179,7 +179,7 @@ test("providerDocUrl links provider types with docs and stays empty otherwise", 
   );
   assert.equal(
     providerDocUrl({ type: "ollama" }),
-    "https://gomodel.enterpilot.io/docs/providers/overview?utm_source=gomodel_dashboard",
+    "https://gomodel.enterpilot.io/docs/providers/multiple-ollama?utm_source=gomodel_dashboard",
   );
   // Provider with no type at all → no link.
   assert.equal(providerDocUrl({ name: "mystery" }), "");
