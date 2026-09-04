@@ -250,10 +250,13 @@ proxy and trust settings are configured once and apply to providers, the model
 catalog, the update check, MCP upstreams, vector stores, and embedding
 endpoints alike.
 
-**Proxy.** Set the standard `HTTPS_PROXY` (and `NO_PROXY` for local model
-servers). Nothing else is needed. If the proxy needs credentials, give it an
-`https://` URL: the scheme in `HTTPS_PROXY` describes the hop to the proxy,
-and an `http://` proxy URL sends `Proxy-Authorization` in cleartext.
+**Proxy.** Set the standard `HTTPS_PROXY` and `HTTP_PROXY` (each covers
+upstreams of its own scheme; most deployments only talk to `https://`
+upstreams, but a plain-HTTP model server would bypass a proxy set only through
+`HTTPS_PROXY`), plus `NO_PROXY` for local model servers. Nothing else is
+needed. If the proxy needs credentials, give it an `https://` URL: the scheme
+in the proxy variable describes the hop to the proxy, and an `http://` proxy
+URL sends `Proxy-Authorization` in cleartext.
 
 **Private CA.** Mount the CA bundle and point the gateway at it:
 

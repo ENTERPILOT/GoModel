@@ -25,6 +25,12 @@ const fetchTimeout = 60 * time.Second
 // maxBodySize caps a catalog, whether downloaded or read from disk.
 const maxBodySize = 10 * 1024 * 1024 // 10 MB
 
+// httpClient is shared by every catalog download so refreshes reuse one
+// connection pool. Its transport follows the trust settings (private CA,
+// mTLS) installed at startup or by a reload, so creating it at package init
+// is safe.
+var httpClient = httpclient.NewClientWithTimeout(fetchTimeout)
+
 // FetchResult carries the outcome of one conditional model list fetch.
 type FetchResult struct {
 	List *ModelList
@@ -60,10 +66,6 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 		return readLocal(path, etag)
 	}
 
-	// Built per fetch so the client picks up the trust settings installed at
-	// startup (private CA, mTLS) and the proxy environment.
-	client := httpclient.NewClientWithTimeout(fetchTimeout)
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("creating request: %w", err)
@@ -73,7 +75,7 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 		req.Header.Set("If-None-Match", etag)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("fetching model list: %w", err)
 	}
