@@ -154,9 +154,94 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
   assert.equal(m.rate_limits_title({}, { locale: "pl" }), "Rate Limits");
 });
 
+test("Paraglide compiles German interpolation and locale-aware plurals", () => {
+  assert.equal(
+    m.pagination_summary(
+      { start: 1, end: 25, total: 80 },
+      { locale: "de" },
+    ),
+    "1–25 von 80 werden angezeigt",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 1 }, { locale: "de" }),
+    "Letzter 1 Tag",
+  );
+  assert.equal(
+    m.date_picker_last_days({ count: 14 }, { locale: "de" }),
+    "Letzte 14 Tage",
+  );
+  assert.equal(m.date_picker_days({ count: 1 }, { locale: "de" }), "1 Tag");
+  assert.equal(m.date_picker_days({ count: 2 }, { locale: "de" }), "2 Tage");
+  assert.equal(
+    m.audit_provider_attempts({ count: 1 }, { locale: "de" }),
+    "1 Anbieterversuch",
+  );
+  assert.equal(
+    m.audit_provider_attempts({ count: 2 }, { locale: "de" }),
+    "2 Anbieterversuche",
+  );
+  assert.equal(
+    m.settings_pricing_summary(
+      { matched: 1, recalculated: 1 },
+      { locale: "de" },
+    ),
+    "Preise für 1 von 1 Nutzungseintrag neu berechnet.",
+  );
+  assert.equal(
+    m.settings_pricing_missing({ count: 2 }, { locale: "de" }),
+    "2 Nutzungseinträge haben weiterhin keine Preis-Metadaten.",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_models({ count: 2 }, { locale: "de" }),
+    "2 Modelle",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_providers({ count: 5 }, { locale: "de" }),
+    "5 Anbieter",
+  );
+  assert.equal(
+    m.settings_pricing_confirmation({}, { locale: "de" }),
+    "neu berechnen",
+  );
+  assert.equal(
+    m.providers_keys_count({ count: 1 }, { locale: "de" }),
+    "1 Schlüssel",
+  );
+  assert.equal(
+    m.providers_keys_count({ count: 2 }, { locale: "de" }),
+    "2 Schlüssel",
+  );
+  assert.equal(
+    m.providers_models_count({ count: 5 }, { locale: "de" }),
+    "5 Modelle",
+  );
+  assert.equal(m.models_count({ count: 5 }, { locale: "de" }), "5 Modelle");
+  assert.equal(
+    m.models_alias_count({ count: 5 }, { locale: "de" }),
+    "5 Aliase",
+  );
+  assert.equal(
+    m.overview_total_requests({}, { locale: "de" }),
+    "Anfragen gesamt",
+  );
+  assert.equal(
+    m.overview_live_token_throughput({}, { locale: "de" }),
+    "Live-Token-Durchsatz",
+  );
+  assert.equal(
+    m.overview_provider_status({}, { locale: "de" }),
+    "Anbieterstatus",
+  );
+  assert.equal(
+    m.overview_input_tokens({}, { locale: "de" }),
+    "Eingabe-Tokens",
+  );
+  assert.equal(m.rate_limits_title({}, { locale: "de" }), "Rate-Limits");
+});
+
 test("the browser locale strategy persists overrides without changing routes", () => {
   assert.equal(baseLocale, "en");
-  assert.deepEqual(locales, ["en", "pl"]);
+  assert.deepEqual(locales, ["en", "pl", "de"]);
   assert.deepEqual(strategy, [
     "custom-dashboard",
     "preferredLanguage",
