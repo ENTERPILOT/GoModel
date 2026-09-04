@@ -21,11 +21,7 @@ type promptRun struct {
 }
 
 func newPromptRun(ctx context.Context, chain *plugins.Chain) promptRun {
-	state := plugins.RequestStateFromContext(ctx)
-	if state == nil {
-		state = plugins.NewRequestState()
-	}
-	return promptRun{chain: chain, state: state, meta: plugins.MetaFromContext(ctx, core.GetWorkflow(ctx))}
+	return promptRun{chain: chain, state: plugins.RequestStateFor(ctx), meta: plugins.MetaFromContext(ctx, core.GetWorkflow(ctx))}
 }
 
 func (r promptRun) run(ctx context.Context, prompt *pluginapi.Prompt) (edited bool, err error) {

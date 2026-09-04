@@ -50,6 +50,7 @@ const (
 	subsystemStorage             = "storage"
 	subsystemRuntimeSettings     = "runtime settings"
 	subsystemProviders           = "providers"
+	subsystemRouteStrategies     = "routing-strategy plugins"
 	subsystemAudit               = "audit"
 	subsystemUsage               = "usage"
 	subsystemBudgets             = "budgets"
@@ -113,6 +114,8 @@ func (a *App) shutdownOrder() []registeredSubsystem {
 		{name: subsystemRuntimeSettings, close: closerOf(a.runtimeSettings)},
 		// Stops model refresh and provider-owned resources.
 		{name: subsystemProviders, close: closerOf(a.providers)},
+		// Closes routing-strategy plugin instances once no provider selects.
+		{name: subsystemRouteStrategies, close: a.closeRouteStrategies},
 		// Terminates upstream MCP sessions.
 		{name: subsystemMCPGateway, close: closerOf(a.mcpGateway)},
 		{name: subsystemProviderCredentials, close: closerOf(a.providerCredentials)},

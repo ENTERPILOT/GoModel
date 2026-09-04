@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/goccy/go-json"
 
@@ -32,10 +35,25 @@ type serviceSnapshot struct {
 	order       []string
 	instances   map[string]*plugins.Instance
 	summaries   map[string]string
+	// keys identifies what each instance was built from, so a refresh can
+	// keep instances whose definition did not change.
+	keys map[string]string
+}
+
+// defaultRetireAfter is how long a replaced instance stays open after the
+// swap: compiled workflows are rebuilt on their own refresh and in-flight
+// requests finish in the meantime.
+const defaultRetireAfter = 2 * time.Minute
+
+// retiredInstance is an instance a swap replaced, waiting to be closed.
+type retiredInstance struct {
+	inst *plugins.Instance
+	at   time.Time
 }
 
 // Service keeps reusable guardrail instances cached in memory and refreshes
-// them from storage.
+// them from storage. Instances whose definition is unchanged survive a
+// refresh; replaced ones are closed once compiled workflows have moved on.
 type Service struct {
 	store   Store
 	catalog *plugins.Catalog
@@ -45,6 +63,11 @@ type Service struct {
 	refreshMu sync.Mutex
 	mu        sync.RWMutex
 	snapshot  serviceSnapshot
+	retired   []retiredInstance
+	// retireAfter is the delay before a replaced instance is closed.
+	retireAfter time.Duration
+	// now is the clock; tests replace it.
+	now func() time.Time
 }
 
 // chatCompleterRef lets the internal executor be swapped after instances are
@@ -77,11 +100,13 @@ func NewService(store Store, catalog *plugins.Catalog, deps plugins.HostDeps) (*
 	chat := &chatCompleterRef{chat: deps.Chat}
 	deps.Chat = chat
 	return &Service{
-		store:    store,
-		catalog:  catalog,
-		deps:     deps,
-		chat:     chat,
-		snapshot: emptySnapshot(),
+		store:       store,
+		catalog:     catalog,
+		deps:        deps,
+		chat:        chat,
+		snapshot:    emptySnapshot(),
+		retireAfter: defaultRetireAfter,
+		now:         time.Now,
 	}, nil
 }
 
@@ -91,6 +116,7 @@ func emptySnapshot() serviceSnapshot {
 		order:       []string{},
 		instances:   map[string]*plugins.Instance{},
 		summaries:   map[string]string{},
+		keys:        map[string]string{},
 	}
 }
 
@@ -121,14 +147,82 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 	if err != nil {
 		return guardrailServiceError("load guardrails", err)
 	}
-	s.swap(next)
+	s.swap(ctx, next)
 	return nil
 }
 
-func (s *Service) swap(next serviceSnapshot) {
+// swap installs next, retires the instances it replaced, and closes retired
+// instances whose grace period has passed.
+func (s *Service) swap(ctx context.Context, next serviceSnapshot) {
+	now := s.now()
 	s.mu.Lock()
+	previous := s.snapshot
 	s.snapshot = next
+	for name, inst := range previous.instances {
+		if next.instances[name] != inst {
+			s.retired = append(s.retired, retiredInstance{inst: inst, at: now})
+		}
+	}
+	var due []*plugins.Instance
+	kept := s.retired[:0]
+	for _, r := range s.retired {
+		if now.Sub(r.at) >= s.retireAfter {
+			due = append(due, r.inst)
+			continue
+		}
+		kept = append(kept, r)
+	}
+	s.retired = kept
 	s.mu.Unlock()
+	_ = closeInstances(ctx, due) // failures are logged
+}
+
+// discard closes the instances of a snapshot that never served: those built
+// for it rather than reused from the current one.
+func (s *Service) discard(ctx context.Context, next serviceSnapshot) {
+	s.mu.RLock()
+	current := s.snapshot.instances
+	s.mu.RUnlock()
+	var fresh []*plugins.Instance
+	for name, inst := range next.instances {
+		if current[name] != inst {
+			fresh = append(fresh, inst)
+		}
+	}
+	_ = closeInstances(ctx, fresh) // failures are logged
+}
+
+// Close closes every active and retired instance. The service keeps an empty
+// snapshot afterwards; call it after request handling and refreshes stopped.
+func (s *Service) Close(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	s.mu.Lock()
+	var all []*plugins.Instance
+	for _, inst := range s.snapshot.instances {
+		all = append(all, inst)
+	}
+	for _, r := range s.retired {
+		all = append(all, r.inst)
+	}
+	s.snapshot = emptySnapshot()
+	s.retired = nil
+	s.mu.Unlock()
+	return closeInstances(ctx, all)
+}
+
+func closeInstances(ctx context.Context, instances []*plugins.Instance) error {
+	var errs []error
+	for _, inst := range instances {
+		if err := inst.Close(ctx); err != nil {
+			slog.Warn("guardrail instance close failed", "instance", inst.Name, "plugin", inst.Type, "error", err)
+			errs = append(errs, fmt.Errorf("close %q: %w", inst.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // UpsertDefinitions validates and upserts a definition set (configuration
@@ -206,9 +300,10 @@ func (s *Service) commit(ctx context.Context, mutate func(map[string]Definition)
 		return err
 	}
 	if err := persist(); err != nil {
+		s.discard(ctx, next)
 		return guardrailServiceError(action, err)
 	}
-	s.swap(next)
+	s.swap(ctx, next)
 	return nil
 }
 
@@ -417,8 +512,20 @@ func normalize(normalizer Normalizer, config json.RawMessage) (normalized json.R
 	return normalizer.Normalize(config)
 }
 
-func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition) (serviceSnapshot, error) {
-	next := emptySnapshot()
+// buildSnapshot builds the snapshot for definitions, reusing every current
+// instance whose definition is unchanged (see instanceKey). On error the
+// instances built so far are closed.
+func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition) (next serviceSnapshot, err error) {
+	s.mu.RLock()
+	current := s.snapshot
+	s.mu.RUnlock()
+	next = emptySnapshot()
+	var built []*plugins.Instance
+	defer func() {
+		if err != nil {
+			_ = closeInstances(ctx, built) // failures are logged
+		}
+	}()
 	perType := map[string]int{}
 	for _, definition := range definitions {
 		normalized, err := s.normalizeDefinition(definition)
@@ -433,18 +540,30 @@ func (s *Service) buildSnapshot(ctx context.Context, definitions []Definition) (
 		if entry.SingleInstance && perType[entry.Name] > 1 {
 			return serviceSnapshot{}, fmt.Errorf("load guardrail %q: plugin %q (%s) supports a single configured instance", normalized.Name, entry.Name, entry.Source)
 		}
-		host := plugins.NewHost(s.deps, plugins.HostInfo{PluginName: entry.Name, InstanceName: normalized.Name, UserPath: normalized.UserPath})
-		inst, err := plugins.NewInstance(ctx, entry, instanceSpec(normalized), host)
-		if err != nil {
-			return serviceSnapshot{}, newValidationError(fmt.Sprintf("load guardrail %q: %v", normalized.Name, err), err)
+		key := instanceKey(normalized)
+		inst := current.instances[normalized.Name]
+		if inst == nil || current.keys[normalized.Name] != key {
+			host := plugins.NewHost(s.deps, plugins.HostInfo{PluginName: entry.Name, InstanceName: normalized.Name, UserPath: normalized.UserPath})
+			inst, err = plugins.NewInstance(ctx, entry, instanceSpec(normalized), host)
+			if err != nil {
+				return serviceSnapshot{}, newValidationError(fmt.Sprintf("load guardrail %q: %v", normalized.Name, err), err)
+			}
+			built = append(built, inst)
 		}
 		next.definitions[normalized.Name] = normalized
 		next.instances[normalized.Name] = inst
+		next.keys[normalized.Name] = key
 		next.summaries[normalized.Name] = summarize(inst.Plugin, normalized.Config)
 		next.order = append(next.order, normalized.Name)
 	}
 	sort.Strings(next.order)
 	return next, nil
+}
+
+// instanceKey captures everything an instance is built from; a definition
+// change outside these fields (say the description) keeps the instance.
+func instanceKey(def Definition) string {
+	return def.Type + "\x00" + def.UserPath + "\x00" + def.FailMode + "\x00" + strconv.Itoa(def.TimeoutMS) + "\x00" + string(def.Config)
 }
 
 func summarize(plugin pluginapi.Plugin, config json.RawMessage) (summary string) {

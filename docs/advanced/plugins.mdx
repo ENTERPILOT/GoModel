@@ -97,11 +97,37 @@ Each instance has a `fail_mode` and a `timeout_ms`:
 | `timeout_ms` | upper bound for every hook call of the instance | `0` (no per-instance timeout) |
 
 The instance name of a fail-closed failure goes to the logs and the audit
-record, never to the client. `Init` runs with a fixed 10 s timeout. Panics
-inside a plugin are recovered and treated as errors.
+record, never to the client. Panics inside a plugin are recovered and
+treated as errors.
+
+**Timeouts are enforced at the deadline.** A hook receives a context that
+ends at `timeout_ms` (and when the client disconnects); GoModel stops
+waiting at that moment whether or not the hook has returned. A hook that
+ignores its context keeps running in the background with no effect on the
+request, so honour `ctx.Done()` in anything that blocks. An abandoned hook
+counts as a failure. It fails open only when it could not touch what the
+request continues with: a non-mutating hook runs on its own copy of the
+exchange, which is discarded. A mutating hook, or an in-flight stream hook,
+that outlives its deadline always fails the request, even with
+`fail_mode: open`, because its edits can no longer be trusted. `Init` has a
+fixed 10 s deadline handled the same way: an `Init` that has not returned by
+then fails the instance.
 
 Keep the default. Switch an instance to `open` only when it is an observer
 whose absence is acceptable (a header tagger, a warn-only classifier).
+
+## Instance lifecycle
+
+GoModel builds one plugin value per guardrail definition and calls `Init`
+once. Definitions are reloaded from storage periodically
+(`workflows.refresh_interval`, default 1 minute) and on every admin change;
+an instance whose type, config, `user_path`, `fail_mode`, and `timeout_ms`
+are unchanged survives the reload, so state a plugin accumulates (counters,
+caches, connections) is kept. A replaced or deleted instance is closed two
+refresh intervals later, once compiled workflows have been rebuilt against
+the new set and in-flight requests have finished. Every instance is closed
+on shutdown. `Close` may therefore run while a late request still holds the
+instance: release resources, do not panic on a call after `Close`.
 
 ## Streaming
 
@@ -112,7 +138,7 @@ one of three modes in `StreamHook.StreamPolicy()`:
 | --- | --- | --- |
 | `observe` | read every event; decisions are ignored except `terminate` | none |
 | `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice |
-| `buffer` | nothing per event; GoModel collects the whole stream and runs the plugin's `OnResponse` on the assembled completion | time-to-first-token becomes time-to-last-token |
+| `buffer` | nothing per event; GoModel collects the whole stream and runs the plugin's `OnResponse` on the assembled completion (a `buffer` plugin must implement `ResponseHook`; loading fails otherwise) | time-to-first-token becomes time-to-last-token |
 
 **Lookbehind** (`transform` only): GoModel withholds the last `LookbehindChars`
 characters of text per choice and presents each delta together with that
@@ -132,6 +158,14 @@ completion (`allow` with edits, `respond`), or a single error chunk is sent
 **Mixed chains**: if any stream instance asks for `buffer`, or the workflow has
 any `response` step, the whole stream is buffered and `transform` instances run
 over the replay.
+
+**Warnings on streams**: when response or stream plugins run, GoModel commits
+the HTTP headers with the first bytes of the body rather than up front, so a
+`warn` decided over a buffered response reaches the client as the
+`X-GoModel-Guardrail` header as long as buffering finished before the first
+keep-alive comment (15 s). A warn decided later (in `OnStreamEnd` of a
+`transform` stream, or after a keep-alive went out) cannot change headers
+already sent; it is still recorded in the audit trail and the logs.
 
 **Cutting a stream**: a `terminate` decision in `transform` mode, or a
 `block`/`respond` from `OnStreamEnd`, ends the stream with

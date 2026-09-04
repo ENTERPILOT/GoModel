@@ -37,6 +37,11 @@ func (r *Result) Close() error {
 		}
 
 		var errs []error
+		if r.Service != nil {
+			if err := r.Service.Close(context.Background()); err != nil {
+				errs = append(errs, fmt.Errorf("instances close: %w", err))
+			}
+		}
 		if r.Store != nil {
 			if err := r.Store.Close(); err != nil {
 				errs = append(errs, fmt.Errorf("store close: %w", err))
@@ -62,6 +67,11 @@ func New(ctx context.Context, shared storage.Storage, refreshInterval time.Durat
 	service, err := NewService(store, catalog, deps)
 	if err != nil {
 		return nil, err
+	}
+	if refreshInterval > 0 {
+		// Workflows recompile on the same interval; two cycles later no
+		// compiled workflow references a replaced instance any more.
+		service.retireAfter = 2 * refreshInterval
 	}
 	if err := service.Refresh(ctx); err != nil {
 		return nil, err

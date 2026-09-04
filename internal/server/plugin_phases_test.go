@@ -311,3 +311,17 @@ func TestChatCompletion_TwoBufferedMutatingInstances(t *testing.T) {
 		t.Fatalf("body = %s, want the second editor's text and no plugin_failure", body)
 	}
 }
+
+func TestChatCompletion_StreamWarnHeaderCommitsWithFirstBytes(t *testing.T) {
+	chains := phaseChains(t, map[string]string{"response": "warn"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1})
+	rec := doChat(t, phaseHandler(t, phaseProvider(), chains), chatStreamBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get(plugins.GuardrailHeader); got != "warn; code=pii" {
+		t.Fatalf("header = %q, want the buffered response's warn", got)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "secret answer") || !strings.HasSuffix(strings.TrimSpace(body), "[DONE]") {
+		t.Fatalf("body = %s", body)
+	}
+}

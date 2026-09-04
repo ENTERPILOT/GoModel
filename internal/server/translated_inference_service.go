@@ -194,7 +194,7 @@ func handleTranslatedJSON[Req any](
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	ctx, preparedReq, workflow, err := prepare(s, withPluginRequestState(c), req, translatedRequestMeta(c))
+	ctx, preparedReq, workflow, err := prepare(s, c.Request().Context(), req, translatedRequestMeta(c))
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
@@ -686,6 +686,12 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 		_ = wrappedStream.Close() //nolint:errcheck
 	}()
 
+	// Response and stream phase plugins decide while the body is read. When
+	// the request runs any, the headers wait for the first bytes, so a warn
+	// from a buffered response still reaches the client as a header.
+	if s.hasPostResponsePlugins(c.Request().Context()) {
+		wrappedStream = primeStream(wrappedStream)
+	}
 	applyPluginResponseHeaders(c)
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")

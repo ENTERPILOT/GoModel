@@ -156,6 +156,25 @@ closed failure produces HTTP 500 with code `plugin_failure`; the instance
 name goes to the logs and audit record, never to the client message. Panics
 are recovered. `Init` has a fixed 10 s timeout.
 
+Timeouts are enforced at the deadline: `plugins.Call` runs the hook in a
+goroutine and returns when the hook returns or the context ends, whichever
+is first, so a hook that ignores its context bounds neither latency nor
+shutdown. An abandoned hook may still be running, so it fails open only when
+it ran on its own copy of the exchange (a non-mutating hook in a step; the
+copy is dropped instead of merged). A mutating hook or an in-flight stream
+hook that is abandoned always fails the request. `Init` uses the same
+mechanism against its 10 s deadline.
+
+Instances are long-lived. A guardrail refresh reuses every instance whose
+type, config, `user_path`, `fail_mode`, and `timeout_ms` are unchanged, so
+plugin state survives reloads; replaced and deleted instances are retired
+and closed two refresh intervals later, after workflows (which recompile on
+the same interval) stopped referencing them and in-flight requests finished.
+The guardrails subsystem closes every active and retired instance on
+shutdown; the routing-strategy resolver is registered for shutdown as well.
+A build of a stream plugin whose `StreamPolicy` is `buffer` fails unless the
+plugin also implements `ResponseHook`, since buffering runs `OnResponse`.
+
 Prompt-phase decisions are appended to the audit request-revision chain that
 request rewriters already write; response and stream decisions are logged
 with the request id, since the revision chain is request-only.
@@ -186,7 +205,10 @@ three modes in its `StreamPolicy`, and the host does the work:
 
 Mixed chains: if any stream instance asks for `buffer`, or the workflow has
 any `response` step, the whole stream is buffered and `transform` instances
-run over the replay. A stream cut by `terminate`, or by a `block`/`respond`
+run over the replay. When such plugins run, the handler reads the first chunk
+before committing the response headers, so a `warn` decided over a buffered
+response is delivered as the `X-GoModel-Guardrail` header when buffering
+finished before the first keep-alive; a later warn is audit-only. A stream cut by `terminate`, or by a `block`/`respond`
 from `OnStreamEnd`, ends with `finish_reason: "content_filter"` (mapped to
 `stop_reason: "end_turn"` in the Anthropic dialect) and `[DONE]`; the client
 keeps what it already received. That is the documented cost of `transform`,
@@ -300,6 +322,9 @@ Declared in the contract or the spec but not run by this release:
   answer was cached applies once the prompt-chain hash changes the key.
 - A `concurrent` prompt step (running a non-mutating check alongside the
   provider call) is not implemented.
+- A `warn` decided after the stream headers went out (a `transform` stream's
+  `OnStreamEnd`, or buffering longer than the 15 s keep-alive) is not
+  delivered to the client; trailers are not used.
 - Audio, realtime, and MCP tool-call hooks.
 
 ## Consequences

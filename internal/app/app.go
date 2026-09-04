@@ -65,6 +65,7 @@ type App struct {
 	users               *users.Result
 	guardrails          *guardrails.Result
 	pluginCatalog       *plugins.Catalog
+	routeStrategies     *plugins.RouteResolver
 	workflows           *workflows.Result
 	live                *live.Broker
 	server              *server.Server
@@ -458,4 +459,12 @@ func nilInterface(value any) bool {
 	default:
 		return false
 	}
+}
+
+// closeRouteStrategies closes the routing-strategy plugin instances.
+func (a *App) closeRouteStrategies() error {
+	if a.routeStrategies == nil {
+		return nil
+	}
+	return a.routeStrategies.Close(context.Background())
 }

@@ -148,10 +148,7 @@ func (s *translatedInferenceService) wrapPluginStream(ctx context.Context, workf
 	if chains == nil || (chains.Stream.Empty() && chains.Response.Empty()) {
 		return stream
 	}
-	state := plugins.RequestStateFromContext(ctx)
-	if state == nil {
-		state = plugins.NewRequestState()
-	}
+	state := plugins.RequestStateFor(ctx)
 	x := state.NewExchange(ctx, pluginMeta(ctx, workflow))
 	if prompt != nil {
 		x.Prompt = prompt()
@@ -251,6 +248,7 @@ func (ps *pluginStream) runResponse(completion *pluginapi.Completion, buffered [
 	outcome, err := chain.RunResponse(ps.ctx, ps.x)
 	ps.state.Finish(ps.x)
 	logResponseDecisions(ps.requestID, pluginapi.KindResponse, outcome, ps.state)
+	ps.recordWarn(outcome)
 	if err != nil {
 		if pluginErr, ok := errors.AsType[*plugins.PluginError](err); ok {
 			slog.Warn("response plugin failed closed", "request_id", ps.requestID, "instance", pluginErr.Instance, "error", pluginErr.Err)
@@ -279,7 +277,7 @@ func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error)
 			return hook.OnStreamEvent(ctx, ps.x, pev)
 		})
 		if err != nil {
-			if inst.EffectiveFailMode(pluginapi.KindStream) == plugins.FailOpen {
+			if inst.FailsOpen(pluginapi.KindStream, err, true) {
 				slog.Warn("stream plugin failed; continuing (fail_open)", "request_id", ps.requestID, "instance", inst.Name, "error", err)
 				continue
 			}
@@ -326,10 +324,20 @@ func (ps *pluginStream) OnEnd() (*streaming.Termination, error) {
 	}
 	outcome, err := chain.RunStreamEnd(ps.ctx, ps.x)
 	logResponseDecisions(ps.requestID, pluginapi.KindStream, outcome, ps.state)
+	ps.recordWarn(outcome)
 	if err != nil {
 		return nil, err
 	}
 	return terminationFor(outcome.Decision), nil
+}
+
+// recordWarn adds the warn header for a warn outcome. It reaches the client
+// only when the headers are not committed yet: a buffered stream that
+// finished before its first keep-alive. Later warns stay in the audit trail.
+func (ps *pluginStream) recordWarn(outcome plugins.Outcome) {
+	if outcome.Decision.Action == pluginapi.ActionWarn {
+		ps.state.AddResponseHeader(plugins.GuardrailHeader, plugins.WarnHeaderValue(outcome.Decision))
+	}
 }
 
 // appendState records the new text of an event in the exchange stream state.

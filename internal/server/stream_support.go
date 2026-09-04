@@ -43,3 +43,33 @@ func flushStream(w io.Writer, stream io.Reader) error {
 		}
 	}
 }
+
+// primedStream is a stream whose first chunk was read ahead of the response
+// headers being committed.
+type primedStream struct {
+	io.ReadCloser
+	head []byte
+	err  error
+}
+
+// primeStream reads the first chunk of stream synchronously and returns a
+// stream that replays it before the rest.
+func primeStream(stream io.ReadCloser) io.ReadCloser {
+	buf := make([]byte, 32*1024)
+	n, err := stream.Read(buf)
+	return &primedStream{ReadCloser: stream, head: buf[:n], err: err}
+}
+
+func (p *primedStream) Read(b []byte) (int, error) {
+	if len(p.head) > 0 {
+		n := copy(b, p.head)
+		p.head = p.head[n:]
+		return n, nil
+	}
+	if p.err != nil {
+		err := p.err
+		p.err = nil
+		return 0, err
+	}
+	return p.ReadCloser.Read(b)
+}

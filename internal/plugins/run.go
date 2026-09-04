@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -69,10 +70,10 @@ func (c *Chain) RunStreamEnd(ctx context.Context, x *pluginapi.Exchange) (Outcom
 }
 
 // run executes the steps in order. Within a step the non-mutating instances
-// run concurrently on a shallow copy of the exchange (their Values and
-// response headers are merged back afterwards), then the mutating one runs
-// on the exchange itself. The first blocking decision ends the chain after
-// its step completes.
+// run concurrently, each on a shallow copy of the exchange (their Values and
+// header edits are merged back afterwards), then the mutating one runs on
+// the exchange itself. The first blocking decision ends the chain after its
+// step completes.
 func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, call hookCall) (Outcome, error) {
 	outcome := Outcome{Decision: pluginapi.Allow()}
 	if c.Empty() || x == nil {
@@ -98,7 +99,7 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, call hookCall) (
 			return outcome, err
 		}
 		if mutator != nil {
-			record, err := c.invoke(ctx, mutator, x, call)
+			record, err := c.invoke(ctx, mutator, x, call, true)
 			outcome.absorb([]Record{record})
 			if err != nil {
 				return outcome, err
@@ -111,13 +112,12 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, call hookCall) (
 	return outcome, nil
 }
 
+// runReaders runs the readers concurrently on copies of x. A reader the
+// runtime stopped waiting for (see ErrAbandoned) may still be writing its
+// copy, so that copy is dropped instead of merged.
 func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginapi.Exchange, call hookCall) ([]Record, error) {
-	switch len(readers) {
-	case 0:
+	if len(readers) == 0 {
 		return nil, nil
-	case 1:
-		record, err := c.invoke(ctx, readers[0], x, call)
-		return []Record{record}, err
 	}
 	records := make([]Record, len(readers))
 	errs := make([]error, len(readers))
@@ -129,11 +129,14 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 		wg.Add(1)
 		go func(i int, inst *Instance, xi *pluginapi.Exchange) {
 			defer wg.Done()
-			records[i], errs[i] = c.invoke(ctx, inst, xi, call)
+			records[i], errs[i] = c.invoke(ctx, inst, xi, call, false)
 		}(i, inst, copies[i])
 	}
 	wg.Wait()
-	for _, xi := range copies {
+	for i, xi := range copies {
+		if errors.Is(records[i].Err, ErrAbandoned) {
+			continue
+		}
 		mergeBack(x, xi, original)
 	}
 	for _, err := range errs {
@@ -146,8 +149,10 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 
 // invoke calls one instance with timeout, panic recovery and fail-mode
 // handling. A fail-closed failure returns a *PluginError; a fail-open one is
-// logged and recorded with an allow decision.
-func (c *Chain) invoke(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call hookCall) (Record, error) {
+// logged and recorded with an allow decision. shared says the instance ran
+// on the chain's own exchange, so an abandoned call cannot fail open: the
+// hook may still be editing what the next step would read.
+func (c *Chain) invoke(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call hookCall, shared bool) (Record, error) {
 	start := time.Now()
 	decision, err := callHook(ctx, inst, x, call)
 	record := Record{Instance: inst.Name, Decision: NormalizeDecision(decision), Duration: time.Since(start), Err: err}
@@ -155,7 +160,7 @@ func (c *Chain) invoke(ctx context.Context, inst *Instance, x *pluginapi.Exchang
 		return record, nil
 	}
 	record.Decision = pluginapi.Allow()
-	if inst.EffectiveFailMode(c.Phase) == FailOpen {
+	if inst.FailsOpen(c.Phase, err, shared) {
 		slog.Warn("plugin instance failed; continuing (fail_open)",
 			"plugin", inst.Type, "instance", inst.Name, "phase", string(c.Phase), "error", err)
 		return record, nil
@@ -169,24 +174,56 @@ func callHook(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call h
 	})
 }
 
-// Call runs fn under the instance's timeout with panic recovery. A call
-// that outlives its timeout reports an error even when fn returned nil.
-func Call[T any](ctx context.Context, inst *Instance, fn func(context.Context) (T, error)) (result T, err error) {
+// ErrAbandoned marks a hook call the runtime stopped waiting for because the
+// instance timeout expired or the request ended. The hook may still be
+// running: it received a cancelled context and is expected to return soon,
+// but nothing it does from then on reaches the request.
+var ErrAbandoned = errors.New("plugin call abandoned")
+
+// Call runs fn under the instance's timeout with panic recovery. It returns
+// when fn returns or when ctx ends, whichever comes first, so a hook that
+// ignores its context bounds neither request latency nor shutdown. A call
+// that returns after its deadline is reported as abandoned as well.
+func Call[T any](ctx context.Context, inst *Instance, fn func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if inst != nil && inst.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, inst.Timeout)
 		defer cancel()
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("plugin panicked: %v", r)
-		}
-	}()
-	result, err = fn(ctx)
-	if err == nil && inst != nil && inst.Timeout > 0 && ctx.Err() != nil {
-		err = fmt.Errorf("plugin exceeded its %s timeout", inst.Timeout)
+	type result struct {
+		value T
+		err   error
 	}
-	return result, err
+	done := make(chan result, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- result{err: fmt.Errorf("plugin panicked: %v", r)}
+			}
+		}()
+		value, err := fn(ctx)
+		done <- result{value: value, err: err}
+	}()
+	select {
+	case res := <-done:
+		if res.err == nil && ctx.Err() != nil {
+			return zero, abandoned(inst, ctx.Err())
+		}
+		return res.value, res.err
+	case <-ctx.Done():
+		return zero, abandoned(inst, ctx.Err())
+	}
+}
+
+func abandoned(inst *Instance, cause error) error {
+	if inst != nil && inst.Timeout > 0 && errors.Is(cause, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: exceeded its %s timeout", ErrAbandoned, inst.Timeout)
+	}
+	return fmt.Errorf("%w: %v", ErrAbandoned, cause)
 }
 
 func (o *Outcome) absorb(records []Record) {

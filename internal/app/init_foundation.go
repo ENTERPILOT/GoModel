@@ -85,9 +85,10 @@ func (b *bootstrap) initProviders() error {
 		return err
 	}
 	app.pluginCatalog = catalog
-	b.routeStrategies = plugins.NewRouteResolver(catalog, plugins.HostDeps{Logger: slog.Default()})
-	b.routeStrategies.SetInstanceConfigs(guardrailInstanceConfig(app))
-	b.cfg.Factory.AddHooks(routeStrategyHooks(b.routeStrategies))
+	app.routeStrategies = plugins.NewRouteResolver(catalog, plugins.HostDeps{Logger: slog.Default()})
+	app.routeStrategies.SetInstanceConfigs(guardrailInstanceConfig(app))
+	app.register(subsystemRouteStrategies, ownedByShutdown, app.closeRouteStrategies)
+	b.cfg.Factory.AddHooks(routeStrategyHooks(app.routeStrategies))
 	// OpenTelemetry instruments provider calls through the same hooks, so it
 	// too must exist before the first provider is constructed.
 	if b.appCfg.OpenTelemetry.Enabled {

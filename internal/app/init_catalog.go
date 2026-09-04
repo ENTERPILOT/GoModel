@@ -66,7 +66,7 @@ func (b *bootstrap) initModelCatalog() error {
 
 	// The routing-strategy resolver was built with the provider hooks in
 	// initProviders; virtual models consult it for the plugin strategy.
-	routeStrategies := b.routeStrategies
+	routeStrategies := app.routeStrategies
 	virtualModelsResult, err := virtualmodels.New(b.ctx, b.appCfg, app.storage, providerResult.Registry, declaredProviders,
 		virtualmodels.WithRouteResolver(routeStrategies))
 	if err != nil {

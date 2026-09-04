@@ -44,7 +44,9 @@ type DecisionRecord struct {
 
 type requestStateKey struct{}
 
-// WithRequestState ensures ctx carries a RequestState and returns it.
+// WithRequestState ensures ctx carries a RequestState and returns it. The
+// request path does not need it: RequestStateFor creates the state on the
+// request's workflow, so only tests and callers without a workflow use this.
 func WithRequestState(ctx context.Context) (context.Context, *RequestState) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -54,6 +56,21 @@ func WithRequestState(ctx context.Context) (context.Context, *RequestState) {
 	}
 	state := NewRequestState()
 	return context.WithValue(ctx, requestStateKey{}, state), state
+}
+
+// RequestStateFor returns the request's state, creating it on the request's
+// workflow the first time a plugin runs. Every later phase of the request
+// finds the same state through RequestStateFromContext. Without a workflow
+// the state is not shared; it lives only for the caller.
+func RequestStateFor(ctx context.Context) *RequestState {
+	if state := RequestStateFromContext(ctx); state != nil {
+		return state
+	}
+	state := NewRequestState()
+	if workflow := core.GetWorkflow(ctx); workflow != nil {
+		workflow.PluginState = state
+	}
+	return state
 }
 
 // NewRequestState allocates an empty state. Its maps are created on first
@@ -72,13 +89,20 @@ func (s *RequestState) ensureMaps() {
 	}
 }
 
-// RequestStateFromContext returns the request's state, or nil.
+// RequestStateFromContext returns the request's state, or nil when no plugin
+// has run for the request yet.
 func RequestStateFromContext(ctx context.Context) *RequestState {
 	if ctx == nil {
 		return nil
 	}
-	state, _ := ctx.Value(requestStateKey{}).(*RequestState)
-	return state
+	if state, ok := ctx.Value(requestStateKey{}).(*RequestState); ok {
+		return state
+	}
+	if workflow := core.GetWorkflow(ctx); workflow != nil {
+		state, _ := workflow.PluginState.(*RequestState)
+		return state
+	}
+	return nil
 }
 
 // Record appends decisions.

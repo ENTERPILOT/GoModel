@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -70,7 +71,8 @@ type Instance struct {
 	ConfigHash string
 }
 
-const initTimeout = 10 * time.Second
+// initTimeout bounds Init; a variable so tests can shorten it.
+var initTimeout = 10 * time.Second
 
 // NewInstance validates spec.Config against the entry's schema, builds a
 // fresh plugin value and initializes it. Init runs with a 10s timeout and
@@ -100,12 +102,10 @@ func NewInstance(ctx context.Context, entry Entry, spec InstanceSpec, host plugi
 	if plugin == nil {
 		return nil, fmt.Errorf("plugins: factory of %q returned nil", entry.Name)
 	}
-	initCtx, cancel := context.WithTimeout(ctx, initTimeout)
-	defer cancel()
-	if err := plugin.Init(initCtx, config, host); err != nil {
+	if err := initPlugin(ctx, plugin, config, host); err != nil {
 		return nil, fmt.Errorf("plugins: instance %q of %q: init: %w", name, entry.Name, err)
 	}
-	return &Instance{
+	inst = &Instance{
 		Name:       name,
 		Type:       entry.Name,
 		Manifest:   entry.Manifest,
@@ -114,7 +114,52 @@ func NewInstance(ctx context.Context, entry Entry, spec InstanceSpec, host plugi
 		FailMode:   spec.FailMode,
 		Timeout:    spec.Timeout,
 		ConfigHash: ConfigHash(config),
-	}, nil
+	}
+	if inst.HasKind(pluginapi.KindStream) && inst.StreamPolicy().Mode == pluginapi.StreamBuffer && !inst.HasKind(pluginapi.KindResponse) {
+		_ = inst.Close(ctx) //nolint:errcheck
+		return nil, fmt.Errorf("plugins: instance %q of %q: a buffer stream policy needs OnResponse, which %q does not implement", name, entry.Name, entry.Name)
+	}
+	return inst, nil
+}
+
+// initPlugin runs Init under the fixed init deadline. Init is expected to
+// honour its context; one that does not is abandoned once the deadline
+// passes and the instance is reported as failed.
+func initPlugin(ctx context.Context, plugin pluginapi.Plugin, config json.RawMessage, host pluginapi.Host) error {
+	initCtx, cancel := context.WithTimeout(ctx, initTimeout)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("panicked during init: %v", r)
+			}
+		}()
+		done <- plugin.Init(initCtx, config, host)
+	}()
+	select {
+	case err := <-done:
+		if err == nil && initCtx.Err() != nil {
+			return fmt.Errorf("%w after the %s init deadline", ErrAbandoned, initTimeout)
+		}
+		return err
+	case <-initCtx.Done():
+		if errors.Is(initCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("%w: exceeded the %s init deadline", ErrAbandoned, initTimeout)
+		}
+		return fmt.Errorf("%w: %v", ErrAbandoned, initCtx.Err())
+	}
+}
+
+// FailsOpen reports whether err from a hook of phase is absorbed under the
+// instance's fail mode. An abandoned call (ErrAbandoned) never fails open
+// when shared says the hook ran on the request's own exchange: it may still
+// be editing it, so the request cannot safely continue.
+func (i *Instance) FailsOpen(phase pluginapi.Kind, err error, shared bool) bool {
+	if i.EffectiveFailMode(phase) != FailOpen {
+		return false
+	}
+	return !shared || !errors.Is(err, ErrAbandoned)
 }
 
 // Close releases the plugin's resources, recovering panics.

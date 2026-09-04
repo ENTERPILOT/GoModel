@@ -37,13 +37,6 @@ func (s *translatedInferenceService) hasPostResponsePlugins(ctx context.Context)
 	return chains != nil && (!chains.Response.Empty() || !chains.Stream.Empty())
 }
 
-// withPluginRequestState ensures the request context carries the shared
-// plugin state before the prompt phase runs.
-func withPluginRequestState(c *echo.Context) context.Context {
-	ctx, _ := plugins.WithRequestState(c.Request().Context())
-	return ctx
-}
-
 // applyPluginResponseHeaders copies headers set by plugins (for example
 // X-GoModel-Guardrail warnings) onto the client response.
 func applyPluginResponseHeaders(c *echo.Context) {

@@ -159,6 +159,11 @@ type Workflow struct {
 	Passthrough  *PassthroughRouteInfo
 	Resolution   *RequestModelResolution
 	Policy       *ResolvedWorkflowPolicy
+	// PluginState is the per-request plugin state, created by the plugin
+	// runtime the first time a plugin runs for the request and nil otherwise.
+	// It lives here rather than in the context so a request that runs no
+	// plugin allocates nothing.
+	PluginState any
 }
 
 // RequestedQualifiedModel returns the requested model selector when present.

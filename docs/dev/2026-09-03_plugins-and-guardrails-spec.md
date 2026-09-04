@@ -24,6 +24,11 @@ text below, the code and the ADR win:
 - Route strategies receive `RouteRequest.Prompt == nil` in this version and
   take instance-scoped settings from a guardrail definition named after the
   plugin.
+- Hook and `Init` timeouts are enforced at the deadline (the call is
+  abandoned, not awaited); an abandoned mutating or in-flight stream hook
+  always fails the request. Guardrail instances survive refreshes when their
+  definition is unchanged and are closed two refresh intervals after being
+  replaced, and on shutdown.
 
 ## 1. Problem
 

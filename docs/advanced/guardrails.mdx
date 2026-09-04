@@ -173,7 +173,7 @@ export GUARDRAILS_ENABLED=true
 | `order` | No | Execution order within the phase. Default `0`. Same value = parallel, different = sequential. |
 | `config` | No | Plugin settings. Keys, defaults, and validation come from the plugin (`GET /admin/guardrails/types`). |
 | `fail_mode` | No | `closed` rejects the request with HTTP 500 when the guardrail errors or times out; `open` continues without it. Default `closed`. |
-| `timeout_ms` | No | Upper bound for each call of the guardrail. Default `0` (none). |
+| `timeout_ms` | No | Upper bound for each call of the guardrail, enforced at the deadline. Default `0` (none). A guardrail that edits content and overruns its timeout fails the request even with `fail_mode: open`; see [Fail modes and timeouts](/advanced/plugins#fail-modes-and-timeouts). |
 
 ## Guardrail Types
 
@@ -576,7 +576,7 @@ endpoints and `stop_reason: "end_turn"` on `/v1/messages`.
 | --- | --- |
 | **block** | An error in the endpoint's native format: HTTP 400 (prompt phase) or 502 (response and stream phases) unless the guardrail sets `block_status`; code `guardrail_blocked` unless the plugin sets its own. |
 | **respond** | An ordinary assistant reply with HTTP 200 (a one-turn stream for streaming requests). |
-| **warn** | The unchanged response plus an `X-GoModel-Guardrail: warn; code=<code>` header; the detail is stored in the audit trail. |
+| **warn** | The unchanged response plus an `X-GoModel-Guardrail: warn; code=<code>` header; the detail is stored in the audit trail. On a stream the header is sent only when the warn was decided before the first bytes went out (a buffered response); later warns are audit-only. |
 | **guardrail failure** (`fail_mode: closed`) | HTTP 500 with code `plugin_failure`. The guardrail's name is in the logs and audit record, not in the client message. |
 
 A blocked request never reaches the provider; a blocked response never
