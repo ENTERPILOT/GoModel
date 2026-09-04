@@ -211,7 +211,7 @@ func scanSQLAuthKey(scanner authKeyScanner) (AuthKey, error) {
 	}
 	key.ExpiresAt = sqlutil.TimeFromUnixPtr(expiresAt)
 	key.DeactivatedAt = sqlutil.TimeFromUnixPtr(deactivatedAt)
-	key.CreatedAt = time.Unix(createdAt, 0).UTC()
-	key.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	key.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	key.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return key, nil
 }

@@ -1,8 +1,10 @@
 package sqlutil
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestNullableJSONStrings(t *testing.T) {
@@ -42,5 +44,42 @@ func TestStringsFromJSON(t *testing.T) {
 				t.Fatalf("StringsFromJSON(%q) = %v, want %v", tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTimeFromUnix(t *testing.T) {
+	tests := []struct {
+		name  string
+		value int64
+		want  time.Time
+	}{
+		{name: "epoch", value: 0, want: time.Unix(0, 0).UTC()},
+		{name: "recent timestamp", value: 1788518356, want: time.Unix(1788518356, 0).UTC()},
+		{name: "zero time round trip", value: time.Time{}.Unix(), want: time.Time{}},
+		{name: "beyond year 9999 drops to zero time", value: 99999999999999, want: time.Time{}},
+		{name: "before year 0 drops to zero time", value: -99999999999999, want: time.Time{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TimeFromUnix(tt.value)
+			if !got.Equal(tt.want) {
+				t.Fatalf("TimeFromUnix(%d) = %s, want %s", tt.value, got, tt.want)
+			}
+			// The whole point of the clamp: the result must be encodable, or
+			// one bad row takes down every listing that includes it.
+			if _, err := json.Marshal(got); err != nil {
+				t.Fatalf("TimeFromUnix(%d) is not JSON-encodable: %v", tt.value, err)
+			}
+		})
+	}
+}
+
+func TestTimeFromUnixPtr(t *testing.T) {
+	if got := TimeFromUnixPtr(nil); got != nil {
+		t.Fatalf("TimeFromUnixPtr(nil) = %v, want nil", got)
+	}
+	out := int64(99999999999999)
+	if got := TimeFromUnixPtr(&out); got == nil || !got.IsZero() {
+		t.Fatalf("TimeFromUnixPtr(out-of-range) = %v, want zero time", got)
 	}
 }
