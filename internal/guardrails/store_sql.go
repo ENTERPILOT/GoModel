@@ -183,7 +183,7 @@ func scanSQLDefinition(scanner definitionScanner) (Definition, error) {
 	}
 	definition.UserPath = sqlutil.DerefTrimmed(userPath)
 	definition.Config = configJSON
-	definition.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
-	definition.UpdatedAt = time.Unix(updatedAtUnix, 0).UTC()
+	definition.CreatedAt = sqlutil.TimeFromUnix(createdAtUnix)
+	definition.UpdatedAt = sqlutil.TimeFromUnix(updatedAtUnix)
 	return definition, nil
 }

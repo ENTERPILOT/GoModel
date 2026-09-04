@@ -62,7 +62,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	for _, key := range []string{
 		"CONFIG_STRICT",
 		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
-		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL",
+		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
 		"SEMANTIC_CACHE_ENABLED", "SEMANTIC_CACHE_THRESHOLD", "SEMANTIC_CACHE_TTL", "SEMANTIC_CACHE_MAX_CONV_MESSAGES",
@@ -2196,5 +2196,98 @@ func TestModelFilterValidate(t *testing.T) {
 				t.Errorf("error = %q, want it to name the offending field", err)
 			}
 		})
+	}
+}
+
+func TestOfflineModeDisablesEveryUnsolicitedOutboundCall(t *testing.T) {
+	tests := []struct {
+		name        string
+		modelList   string
+		wantList    string
+		wantVersion bool
+	}{
+		{name: "RemoteCatalogIsDropped", modelList: "", wantList: "", wantVersion: false},
+		{name: "MirrorIsDropped", modelList: "https://mirror.internal/models.min.json", wantList: "", wantVersion: false},
+		{name: "FileURLIsKept", modelList: "file:///etc/gomodel/models.json", wantList: "file:///etc/gomodel/models.json", wantVersion: false},
+		{name: "BarePathIsKept", modelList: "/etc/gomodel/models.json", wantList: "/etc/gomodel/models.json", wantVersion: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(_ string) {
+				t.Setenv("GOMODEL_OFFLINE", "true")
+				if tt.modelList != "" {
+					t.Setenv("MODEL_LIST_URL", tt.modelList)
+				}
+				result, err := Load()
+				if err != nil {
+					t.Fatalf("Load() failed: %v", err)
+				}
+				if !result.Config.Offline {
+					t.Fatal("Offline should be true")
+				}
+				if got := result.Config.Cache.Model.ModelList.URL; got != tt.wantList {
+					t.Errorf("ModelList.URL = %q, want %q", got, tt.wantList)
+				}
+				if got := result.Config.VersionCheck.Enabled; got != tt.wantVersion {
+					t.Errorf("VersionCheck.Enabled = %v, want %v", got, tt.wantVersion)
+				}
+			})
+		})
+	}
+
+	t.Run("OfflineWinsOverExplicitVersionCheckEnable", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		withTempDir(t, func(dir string) {
+			yaml := "offline: true\nversion_check:\n  enabled: true\n"
+			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("GOMODEL_VERSION_CHECK_ENABLED", "true")
+			result, err := Load()
+			if err != nil {
+				t.Fatalf("Load() failed: %v", err)
+			}
+			if result.Config.VersionCheck.Enabled {
+				t.Error("offline mode must win over an explicit version_check.enabled")
+			}
+		})
+	})
+
+	t.Run("DefaultIsOnline", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		withTempDir(t, func(_ string) {
+			result, err := Load()
+			if err != nil {
+				t.Fatalf("Load() failed: %v", err)
+			}
+			if result.Config.Offline {
+				t.Error("Offline should default to false")
+			}
+			if !result.Config.VersionCheck.Enabled || result.Config.Cache.Model.ModelList.URL == "" {
+				t.Error("online defaults should be untouched")
+			}
+		})
+	})
+}
+
+func TestIsLocalModelListSource(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"https://example.com/models.json", false},
+		{"HTTP://example.com/models.json", false},
+		{"file:///etc/gomodel/models.json", true},
+		{"FILE:///etc/gomodel/models.json", true},
+		{"/etc/gomodel/models.json", true},
+		{"./models.json", true},
+		{"models.json", true},
+	}
+	for _, tt := range tests {
+		if got := IsLocalModelListSource(tt.in); got != tt.want {
+			t.Errorf("IsLocalModelListSource(%q) = %v, want %v", tt.in, got, tt.want)
+		}
 	}
 }

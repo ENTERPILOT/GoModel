@@ -9,6 +9,7 @@ TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-90}"
 KEEP_GOING=1
 LIST_ONLY=0
 KEEP_ARTIFACTS=0
+JOBS=1
 FROM_ID=""
 TO_ID=""
 MATCH_PATTERN=""
@@ -30,6 +31,7 @@ Options:
   --to ID                Run scenarios ending at ID
   --match REGEX          Run scenarios whose ID or title matches REGEX
   --timeout SECONDS      Per-scenario timeout in seconds (default: 90)
+  --jobs N               Run explicitly selected independent scenarios in parallel
   --qa-suffix VALUE      Reuse a specific QA suffix
   --output-dir DIR       Write logs and runner artifacts to DIR
   --stop-on-failure      Stop after the first failing scenario
@@ -41,6 +43,7 @@ Examples:
   tests/e2e/run-release-e2e.sh --list
   tests/e2e/run-release-e2e.sh --from S54 --to S58
   tests/e2e/run-release-e2e.sh --scenario S61,S62,S70 --keep-artifacts
+  tests/e2e/run-release-e2e.sh --scenario S137,S138,S139,S140,S141 --jobs 4
 EOF
 }
 
@@ -171,6 +174,11 @@ while [[ $# -gt 0 ]]; do
       TIMEOUT_SECONDS="$2"
       shift 2
       ;;
+    --jobs)
+      [[ $# -ge 2 ]] || die "--jobs requires a value"
+      JOBS="$2"
+      shift 2
+      ;;
     --qa-suffix)
       [[ $# -ge 2 ]] || die "--qa-suffix requires a value"
       QA_SUFFIX="$2"
@@ -201,6 +209,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || die "--timeout must be an integer number of seconds"
+[[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || die "--jobs must be a positive integer"
 [[ -f "$SCENARIO_DOC" ]] || die "missing scenario file: $SCENARIO_DOC"
 
 if (( OUTPUT_DIR_SET == 0 )); then
@@ -324,10 +333,99 @@ if [[ ${#SELECTED_INDEXES[@]} -eq 0 ]]; then
   die "no scenarios matched the selection"
 fi
 
+for index in "${SELECTED_INDEXES[@]}"; do
+  if [[ "${SCENARIO_IDS[$index]}" == "S227" ]]; then
+    command -v sqlite3 >/dev/null 2>&1 || die "S227 requires sqlite3"
+  fi
+done
+
 if (( LIST_ONLY == 1 )); then
   for index in "${SELECTED_INDEXES[@]}"; do
     printf '%s\t%s\n' "${SCENARIO_IDS[$index]}" "${SCENARIO_TITLES[$index]}"
   done
+  exit 0
+fi
+
+# Parallel execution is deliberately limited to scenarios whose setup, runtime
+# state, and cleanup are isolated by QA_SUFFIX. The remaining scenarios either
+# share artifacts across IDs or mutate gateway-global state (aliases, tagging
+# rules, MCP catalogs, rate limits, and reloads), so overlapping them would make
+# release results faster but nondeterministic.
+is_parallel_safe() {
+  local id="$1" number
+  number=$((10#${id#S}))
+  (( (number >= 1 && number <= 12) \
+    || (number >= 61 && number <= 63) \
+    || (number >= 86 && number <= 132) \
+    || (number >= 136 && number <= 141) \
+    || (number >= 149 && number <= 154) \
+    || (number >= 160 && number <= 162) \
+    || (number >= 173 && number <= 191) \
+    || (number >= 197 && number <= 204) \
+    || (number >= 208 && number <= 226) ))
+}
+
+if (( JOBS > 1 )); then
+  [[ -n "$SCENARIO_FILTER" && -z "$FROM_ID" && -z "$TO_ID" && -z "$MATCH_PATTERN" ]] \
+    || die "--jobs requires an explicit --scenario list (stateful ranges remain sequential)"
+  for index in "${SELECTED_INDEXES[@]}"; do
+    is_parallel_safe "${SCENARIO_IDS[$index]}" \
+      || die "${SCENARIO_IDS[$index]} is stateful or mutates shared gateway state and cannot run with --jobs"
+  done
+
+  RAW_LOG="$OUTPUT_DIR/release-e2e.raw.log"
+  SUMMARY_LOG="$OUTPUT_DIR/release-e2e.summary.tsv"
+  printf 'id\ttitle\texit_code\ttimed_out\tduration_s\tstdout_bytes\tstderr_bytes\n' >"$SUMMARY_LOG"
+  {
+    printf '# Release E2E raw log\n'
+    printf '# source=%s\n' "$SCENARIO_DOC"
+    printf '# qa_suffix=%s\n' "$QA_SUFFIX"
+    printf '# output_dir=%s\n\n' "$OUTPUT_DIR"
+  } >"$RAW_LOG"
+
+  PARALLEL_DIR="$OUTPUT_DIR/parallel"
+  mkdir -p "$PARALLEL_DIR"
+  FAILURES=0
+  cursor=0
+  while (( cursor < ${#SELECTED_INDEXES[@]} )); do
+    PIDS=()
+    CHILD_DIRS=()
+    for ((slot = 0; slot < JOBS && cursor < ${#SELECTED_INDEXES[@]}; slot++, cursor++)); do
+      index="${SELECTED_INDEXES[$cursor]}"
+      scenario_id="${SCENARIO_IDS[$index]}"
+      child_dir="$PARALLEL_DIR/$scenario_id"
+      mkdir -p "$child_dir"
+      "$SCRIPT_DIR/run-release-e2e.sh" \
+        --scenario "$scenario_id" \
+        --timeout "$TIMEOUT_SECONDS" \
+        --qa-suffix "$QA_SUFFIX" \
+        --output-dir "$child_dir" \
+        --keep-artifacts \
+        >"$child_dir/runner.stdout.log" 2>&1 &
+      PIDS+=("$!")
+      CHILD_DIRS+=("$child_dir")
+    done
+
+    BATCH_FAILED=0
+    for ((slot = 0; slot < ${#PIDS[@]}; slot++)); do
+      if ! wait "${PIDS[$slot]}"; then
+        FAILURES=$((FAILURES + 1))
+        BATCH_FAILED=1
+      fi
+      child_dir="${CHILD_DIRS[$slot]}"
+      cat "$child_dir/runner.stdout.log"
+      tail -n +2 "$child_dir/release-e2e.summary.tsv" >>"$SUMMARY_LOG"
+      sed -n '/^## S/,$p' "$child_dir/release-e2e.raw.log" >>"$RAW_LOG"
+    done
+    if (( BATCH_FAILED == 1 && KEEP_GOING == 0 )); then
+      break
+    fi
+  done
+
+  printf 'RAW_LOG=%s\n' "$RAW_LOG"
+  printf 'SUMMARY_LOG=%s\n' "$SUMMARY_LOG"
+  printf 'QA_SUFFIX=%s\n' "$QA_SUFFIX"
+  (( FAILURES == 0 )) || exit 1
   exit 0
 fi
 

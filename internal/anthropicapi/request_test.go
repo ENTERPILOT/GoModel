@@ -71,7 +71,9 @@ func TestToChatRequestRejectsInvalidShapes(t *testing.T) {
 		{name: "malformed system", body: `{"model":"m","max_tokens":10,"system":42,"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "non-text system block", body: `{"model":"m","max_tokens":10,"system":[{"type":"image"}],"messages":[{"role":"user","content":"hi"}]}`},
 		{name: "malformed tool_result content", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":42}]}]}`},
-		{name: "unsupported tool_result block", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"document"}]}]}]}`},
+		{name: "unsupported tool_result block", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"browser_state"}]}]}]}`},
+		{name: "tool_result document without source", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"document"}]}]}]}`},
+		{name: "document content source without content", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"content"}}]}]}`},
 		{name: "tool_result image without source", body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image"}]}]}]}`},
 	}
 	for _, tc := range tests {
@@ -538,17 +540,17 @@ func TestToChatRequestRejectsUnsupportedContentBlock(t *testing.T) {
 		"model":"m","max_tokens":10,
 		"messages":[{"role":"user","content":[
 			{"type":"text","text":"summarize"},
-			{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"eA=="}}
+			{"type":"container_upload","file_id":"file_1"}
 		]}]
 	}`))
 	if err == nil {
-		t.Fatal("expected error for unsupported document content block")
+		t.Fatal("expected error for unsupported container_upload content block")
 	}
 	gatewayErr, ok := err.(*core.GatewayError)
 	if !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
 		t.Fatalf("expected invalid_request_error, got %T: %v", err, err)
 	}
-	if !strings.Contains(gatewayErr.Message, "document") {
+	if !strings.Contains(gatewayErr.Message, "container_upload") {
 		t.Errorf("error message should name the block type: %q", gatewayErr.Message)
 	}
 }
@@ -649,5 +651,210 @@ func TestEstimateChatInputTokens(t *testing.T) {
 				t.Errorf("estimate = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestToChatRequestDocumentBlocks(t *testing.T) {
+	tests := []struct {
+		name     string
+		block    string
+		wantType string
+		wantText string
+		check    func(t *testing.T, part core.ContentPart)
+	}{
+		{
+			name:     "base64 pdf",
+			block:    `{"type":"document","title":"report.pdf","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="},"cache_control":{"type":"ephemeral"}}`,
+			wantType: "file",
+			check: func(t *testing.T, part core.ContentPart) {
+				if part.File.FileData != "data:application/pdf;base64,JVBERi0=" || part.File.Filename != "report.pdf" {
+					t.Errorf("file = %+v", part.File)
+				}
+				if got := string(part.ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
+					t.Errorf("cache_control = %s", got)
+				}
+			},
+		},
+		{
+			name:     "plain text",
+			block:    `{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hello"}}`,
+			wantType: "file",
+			check: func(t *testing.T, part core.ContentPart) {
+				if part.File.FileData != "data:text/plain;base64,aGVsbG8=" {
+					t.Errorf("file = %+v", part.File)
+				}
+			},
+		},
+		{
+			name:     "url",
+			block:    `{"type":"document","source":{"type":"url","url":"https://example.com/a.pdf"}}`,
+			wantType: "file",
+			check: func(t *testing.T, part core.ContentPart) {
+				if part.File.FileURL != "https://example.com/a.pdf" || part.File.FileData != "" {
+					t.Errorf("file = %+v", part.File)
+				}
+			},
+		},
+		{
+			name:     "file id",
+			block:    `{"type":"document","source":{"type":"file","file_id":"file_123"}}`,
+			wantType: "file",
+			check: func(t *testing.T, part core.ContentPart) {
+				if part.File.FileID != "file_123" || part.File.FileData != "" {
+					t.Errorf("file = %+v", part.File)
+				}
+			},
+		},
+		{
+			name:     "custom content degrades to text",
+			block:    `{"type":"document","title":"Notes","source":{"type":"content","content":[{"type":"text","text":"one"},{"type":"text","text":"two"}]}}`,
+			wantType: "text",
+			wantText: "Notes\n\none\ntwo",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			chat, err := ToChatRequest(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"read"},`+tc.block+`]}]}`))
+			if err != nil {
+				t.Fatalf("ToChatRequest: %v", err)
+			}
+			if tc.wantType == "text" {
+				// Text-only content collapses to a string.
+				if got := chat.Messages[0].Content; got != "read\n"+tc.wantText {
+					t.Fatalf("content = %#v, want %q", got, "read\n"+tc.wantText)
+				}
+				return
+			}
+			parts, ok := chat.Messages[0].Content.([]core.ContentPart)
+			if !ok || len(parts) != 2 {
+				t.Fatalf("content = %#v, want two parts", chat.Messages[0].Content)
+			}
+			if parts[1].Type != tc.wantType {
+				t.Fatalf("parts[1].Type = %q, want %q", parts[1].Type, tc.wantType)
+			}
+			tc.check(t, parts[1])
+		})
+	}
+}
+
+func TestToChatRequestDocumentInsideToolResult(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"tu_1","content":[
+				{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}}
+			]}
+		]}]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	parts, ok := chat.Messages[0].Content.([]core.ContentPart)
+	if !ok || len(parts) != 1 || parts[0].Type != "file" || parts[0].File.FileData != "data:application/pdf;base64,JVBERi0=" {
+		t.Fatalf("tool content = %#v, want one file part", chat.Messages[0].Content)
+	}
+}
+
+func TestToChatRequestSearchResultBlock(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"tu_1","content":[
+				{"type":"search_result","source":"https://example.com/doc","title":"Doc","content":[{"type":"text","text":"body"}],"citations":{"enabled":true}}
+			]}
+		]}]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	if got := chat.Messages[0].Content; got != "Title: Doc\nSource: https://example.com/doc\n\nbody" {
+		t.Errorf("tool content = %#v", got)
+	}
+}
+
+func TestToChatRequestToolResultIsError(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"tu_1","content":"boom","is_error":true,"cache_control":{"type":"ephemeral"}},
+			{"type":"tool_result","tool_use_id":"tu_2","content":"fine"}
+		]}]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	if got := string(chat.Messages[0].ExtraFields.Lookup(core.ToolResultIsErrorField)); got != "true" {
+		t.Errorf("is_error = %q, want true", got)
+	}
+	if got := string(chat.Messages[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
+		t.Errorf("cache_control = %s, want preserved alongside is_error", got)
+	}
+	if got := chat.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(got) != 0 {
+		t.Errorf("messages[1] is_error = %s, want absent", got)
+	}
+}
+
+func TestToChatRequestPreservesAssistantThinkingBlocks(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"user","content":"hi"},
+			{"role":"assistant","content":[
+				{"type":"thinking","thinking":"","signature":"sig1"},
+				{"type":"redacted_thinking","data":"opaque"},
+				{"type":"tool_use","id":"tu_1","name":"lookup","input":{}}
+			]},
+			{"role":"user","content":[{"type":"thinking","thinking":"stray"},{"type":"text","text":"ok"}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	assistant := chat.Messages[1]
+	want := `[{"type":"thinking","thinking":"","signature":"sig1"},{"type":"redacted_thinking","data":"opaque"}]`
+	if got := string(assistant.ExtraFields.Lookup(core.ThinkingBlocksField)); got != want {
+		t.Errorf("thinking_blocks = %s, want %s", got, want)
+	}
+	if len(assistant.ToolCalls) != 1 {
+		t.Errorf("tool calls = %+v", assistant.ToolCalls)
+	}
+	if got := chat.Messages[2].ExtraFields.Lookup(core.ThinkingBlocksField); len(got) != 0 {
+		t.Errorf("user thinking_blocks = %s, want dropped", got)
+	}
+	if chat.Messages[2].Content != "ok" {
+		t.Errorf("user content = %#v", chat.Messages[2].Content)
+	}
+}
+
+func TestToChatRequestLenientDropsUnsupportedContent(t *testing.T) {
+	body := `{
+		"model":"m","max_tokens":10,
+		"system":[{"type":"text","text":"sys"},{"type":"image","source":{"type":"url","url":"https://x/y.png"}}],
+		"tools":[{"type":"web_search_20250305","name":"web_search"},{"name":"lookup","input_schema":{"type":"object"}}],
+		"messages":[
+			{"role":"user","content":"search"},
+			{"role":"assistant","content":[
+				{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"q"}},
+				{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[]},
+				{"type":"text","text":"found"}
+			]},
+			{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"tool_reference","tool_name":"x"}]}]}
+		]
+	}`
+	if _, err := ToChatRequest(mustDecode(t, body)); err == nil {
+		t.Fatal("strict translation should reject server tools and server-tool blocks")
+	}
+	chat, err := ToChatRequestLenient(mustDecode(t, body))
+	if err != nil {
+		t.Fatalf("ToChatRequestLenient: %v", err)
+	}
+	if chat.Model != "m" || len(chat.Tools) != 1 {
+		t.Errorf("model = %q tools = %d, want m and one custom tool", chat.Model, len(chat.Tools))
+	}
+	if len(chat.Messages) != 4 || chat.Messages[0].Content != "sys" || chat.Messages[2].Content != "found" || chat.Messages[3].Role != "tool" {
+		t.Errorf("messages = %+v", chat.Messages)
+	}
+	if _, err := ToChatRequestLenient(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":42}]}`)); err == nil {
+		t.Error("lenient translation should still reject malformed content")
 	}
 }

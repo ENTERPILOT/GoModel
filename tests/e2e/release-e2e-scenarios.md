@@ -1,6 +1,6 @@
 # Release E2E Curl Matrix
 
-This file contains 224 end-to-end curl scenarios for release validation.
+This file contains end-to-end curl scenarios for release validation.
 These scenarios are prepared for execution across these local gateways:
 
 - `http://localhost:18080` - SQLite-backed main test gateway
@@ -23,6 +23,7 @@ tests/e2e/run-release-e2e.sh
 tests/e2e/run-release-e2e.sh --list
 tests/e2e/run-release-e2e.sh --from S54 --to S58
 tests/e2e/run-release-e2e.sh --scenario S61,S62,S70 --keep-artifacts
+tests/e2e/run-release-e2e.sh --scenario S137,S138,S139,S140,S141 --jobs 4
 tests/e2e/manage-release-e2e-stack.sh status
 tests/e2e/manage-release-e2e-stack.sh stop
 ```
@@ -54,8 +55,9 @@ Stateful note:
   them, so they are self-contained and rerunnable in any order
 - `S126`-`S132` exercise token throughput and cache analytics; they are
   read-mostly (`S128`/`S132` add a little usage/cache traffic) and self-contained
-- `S133`-`S136` exercise the failover load-balancing strategy of virtual
-  models (create, resolve, validation negatives, and auth gating); each positive
+- `S133`-`S141` exercise failover and chained virtual models (create, resolve,
+  cycle and dependency validation, disabled-leg skipping, persisted target
+  ordering, and auth gating); each positive
   scenario creates `$QA_SUFFIX`-scoped virtual models and deletes them, so they
   are self-contained and rerunnable in any order
 - `S142`-`S148` exercise header tagging (admin rule CRUD, validation negatives,
@@ -153,6 +155,11 @@ Stateful note:
   defaults `OPENROUTER_MODEL_FILTER_INCLUDE` to `*:free`, which leaves models
   used by the rest of the matrix untouched; the scenario is read-only and
   rerunnable in any order
+- `S225`-`S227` cover recent release regressions: image content nested in an
+  Anthropic `tool_result`, time-window pricing merged with an operator override,
+  and tolerant admin listing of a virtual model with corrupt SQL timestamps.
+  They create and clean up their own artifacts and are rerunnable in any order;
+  `S227` reloads the SQLite gateway and therefore stays sequential
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -161,6 +168,9 @@ Stateful note:
 - For stateful partial reruns, prefer a contiguous range that includes the
   prerequisite setup scenarios, or rerun with the same `--qa-suffix` and
   `--keep-artifacts`
+- `--jobs N` is available for explicit `--scenario` lists made entirely of
+  runner-approved independent scenarios. The runner rejects shared-state IDs;
+  full-matrix and stateful-range runs remain sequential
 
 ## Common environment
 
@@ -2474,18 +2484,19 @@ jq -e '.type == "error" and .error.type == "not_found_error" and (.error.message
 ### S108 Unsupported content block type is rejected (negative)
 
 Checks that a content block type without a canonical chat equivalent (e.g.
-`document`) is rejected rather than silently dropped.
+`browser_state`) is rejected rather than silently dropped. Document blocks are
+supported and therefore must not be used as the negative probe.
 
 ```bash
 HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s108.headers.XXXXXX")
 BODY_FILE=$(mktemp "$QA_RUN_DIR/s108.body.XXXXXX")
 curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/messages" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-4.1-nano","max_tokens":16,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"url","url":"https://example.com/contract.pdf"}}]}]}'
+  -d '{"model":"gpt-4.1-nano","max_tokens":16,"messages":[{"role":"user","content":[{"type":"browser_state"}]}]}'
 sed -n '1,20p' "$HEADERS_FILE"
 jq '.' "$BODY_FILE"
 grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.type == "error" and .error.type == "invalid_request_error" and (.error.message | test("document"))' "$BODY_FILE" >/dev/null
+jq -e '.type == "error" and .error.type == "invalid_request_error" and (.error.message | test("browser_state|unsupported"; "i"))' "$BODY_FILE" >/dev/null
 ```
 
 ### S109 Messages request is visible in the audit log
@@ -3092,6 +3103,342 @@ admin key.
 curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/virtual-models" | grep -q '^401$'
 curl -fsS "$AUTH_BASE_URL/admin/virtual-models" -H "$ADMIN_AUTH_HEADER" | jq -e 'type == "array"' >/dev/null
 ```
+
+### S137 Chained virtual models resolve through the inner redirect
+
+Creates an inner alias and an outer alias that targets it by name. The admin
+view and a real request must both resolve to the inner concrete model.
+
+```bash
+INNER="qa-chain-inner-$QA_SUFFIX"
+OUTER="qa-chain-outer-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$INNER\",\"target_model\":\"openai/gpt-4.1-nano\"}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$OUTER\",\"target_model\":\"$INNER\"}" \
+  | jq -e --arg outer "$OUTER" '.source == $outer and .resolved_model == "openai/gpt-4.1-nano"' >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$OUTER\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_CHAIN_OK\"}],\"max_tokens\":20}" \
+  | jq -e '.provider == "openai" and (.model | test("gpt-4.1-nano"))' >/dev/null
+for SRC in "$OUTER" "$INNER"; do
+  curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SRC\"}" >/dev/null
+done
+```
+
+### S138 A chained virtual-model cycle is rejected (negative)
+
+Creates `A -> concrete` and `B -> A`, then verifies that repointing A to B is
+rejected with the cycle spelled out and leaves A's prior target intact.
+
+```bash
+A="qa-cycle-a-$QA_SUFFIX"
+B="qa-cycle-b-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$A\",\"target_model\":\"openai/gpt-4.1-nano\"}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$B\",\"target_model\":\"$A\"}" >/dev/null
+BODY_FILE="$QA_RUN_DIR/s138.body.json"
+curl -sS -o "$BODY_FILE" -w '%{http_code}' -X PUT "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$A\",\"target_model\":\"$B\"}" \
+  | jq -R -e '. == "400"' >/dev/null
+jq -e '.error.type == "invalid_request_error" and (.error.message | test("cycle"; "i"))' "$BODY_FILE" >/dev/null
+curl -fsS "$BASE_URL/admin/virtual-models" \
+  | jq -e --arg a "$A" 'any(.[]; .source == $a and .resolved_model == "openai/gpt-4.1-nano")' >/dev/null
+for SRC in "$B" "$A"; do
+  curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SRC\"}" >/dev/null
+done
+```
+
+### S139 A referenced chained target cannot be deleted (negative)
+
+An inner redirect remains protected while an outer redirect depends on it. Once
+the outer redirect is removed, normal inner cleanup succeeds.
+
+```bash
+INNER="qa-dep-inner-$QA_SUFFIX"
+OUTER="qa-dep-outer-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$INNER\",\"target_model\":\"openai/gpt-4.1-nano\"}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$OUTER\",\"target_model\":\"$INNER\"}" >/dev/null
+BODY_FILE="$QA_RUN_DIR/s139.body.json"
+HTTP=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' -X DELETE "$BASE_URL/admin/virtual-models" \
+  -H 'Content-Type: application/json' -d "{\"source\":\"$INNER\"}")
+[ "$HTTP" -ge 400 ]
+jq -e '.error.message | test("target of|repoint|referenc|depend"; "i")' "$BODY_FILE" >/dev/null
+curl -fsS "$BASE_URL/admin/virtual-models" \
+  | jq -e --arg inner "$INNER" 'any(.[]; .source == $inner)' >/dev/null
+for SRC in "$OUTER" "$INNER"; do
+  curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SRC\"}" >/dev/null
+done
+```
+
+### S140 A disabled chained leg is skipped
+
+A failover redirect whose first leg is a disabled virtual model must route to
+the next available concrete target.
+
+```bash
+DISABLED="qa-chain-disabled-$QA_SUFFIX"
+OUTER="qa-chain-skip-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$DISABLED\",\"target_model\":\"openai/gpt-4.1-nano\",\"enabled\":false}" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$OUTER\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"$DISABLED\"},{\"model\":\"gemini/gemini-2.5-flash-lite\"}]}" >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$OUTER\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_CHAIN_SKIP_OK\"}],\"max_tokens\":20}" \
+  | jq -e '.provider == "gemini" and (.model | test("gemini-2.5-flash-lite"))' >/dev/null
+for SRC in "$OUTER" "$DISABLED"; do
+  curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$SRC\"}" >/dev/null
+done
+```
+
+### S141 Reordering failover targets persists and changes the primary
+
+Re-saves one failover redirect with its targets reversed, then verifies both
+the stored order and the provider selected from the new first position.
+
+```bash
+NAME="qa-reorder-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"openai/gpt-4.1-nano\"},{\"model\":\"gemini/gemini-2.5-flash-lite\"}]}" >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_REORDER_ONE\"}],\"max_tokens\":20}" \
+  | jq -e '.provider == "openai"' >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"strategy\":\"failover\",\"targets\":[{\"model\":\"gemini/gemini-2.5-flash-lite\"},{\"model\":\"openai/gpt-4.1-nano\"}]}" \
+  | jq -e '(.targets | map(.model)) == ["gemini/gemini-2.5-flash-lite","openai/gpt-4.1-nano"]' >/dev/null
+curl -fsS "$BASE_URL/admin/virtual-models" \
+  | jq -e --arg name "$NAME" 'any(.[]; .source == $name and (.targets | map(.model)) == ["gemini/gemini-2.5-flash-lite","openai/gpt-4.1-nano"])' >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly QA_REORDER_TWO\"}],\"max_tokens\":20}" \
+  | jq -e '.provider == "gemini"' >/dev/null
+curl -fsS -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\"}" >/dev/null
+```
+
+### S142 Tagging settings CRUD, canonicalization, and validation negatives
+
+Operator tagging rules are readable and replaceable through the admin API:
+header names are canonicalized, the default delimiter is applied, and
+credential-bearing, duplicate, or malformed headers are rejected with `400`
+without clobbering the saved rule set. The scenario restores an empty operator
+rule set at the end.
+
+```bash
+TAG_HDR_RAW="x-qa-tag-$QA_SUFFIX"
+TAG_HDR="X-Qa-Tag-$QA_SUFFIX"
+curl -fsS "$BASE_URL/admin/tagging/settings" \
+  | jq -e '.editable == true and ((.headers // []) | type == "array")' >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' \
+  -d "{\"headers\":[{\"header\":\"$TAG_HDR_RAW\",\"prefix\":\"qa-\",\"do_not_pass\":true,\"delimiter\":\";\"},{\"header\":\"$TAG_HDR_RAW-b\"}]}" \
+  | jq -e --arg h "$TAG_HDR" '
+      ([.headers[] | select(.managed | not)] | length) == 2
+      and (.headers[0].header | ascii_downcase) == ($h | ascii_downcase)
+      and .headers[0].prefix == "qa-"
+      and .headers[0].do_not_pass == true
+      and .headers[0].delimiter == ";"
+      and (.headers[1].header | ascii_downcase) == (($h + "-b") | ascii_downcase)
+      and .headers[1].delimiter == ","
+      and ((.headers[1].do_not_pass // false) == false)
+    ' >/dev/null
+curl -fsS "$BASE_URL/admin/tagging/settings" \
+  | jq -e --arg h "$TAG_HDR" 'any(.headers[]; (.header | ascii_downcase) == ($h | ascii_downcase) and .do_not_pass == true)' >/dev/null
+for BAD in \
+  '{"headers":[{"header":"Authorization"}]}' \
+  '{"headers":[{"header":"Cookie"}]}' \
+  '{"headers":[{"header":"x-api-key"}]}' \
+  "{\"headers\":[{\"header\":\"$TAG_HDR_RAW\"},{\"header\":\"$TAG_HDR\"}]}" \
+  '{"headers":[{"header":"bad header name"}]}'; do
+  STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$BASE_URL/admin/tagging/settings" \
+    -H 'Content-Type: application/json' -d "$BAD")
+  [ "$STATUS" = "400" ]
+done
+curl -fsS "$BASE_URL/admin/tagging/settings" \
+  | jq -e '([.headers[] | select(.managed | not)] | length) == 2' >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' -d '{"headers":[]}' \
+  | jq -e '((.headers // []) | map(select(.managed | not)) | length) == 0' >/dev/null
+```
+
+### S143 Chat request labels land on the usage entry
+
+Labels are extracted with prefix trimming (values without the prefix are kept
+as-is), custom delimiters, repeated header values, and cross-rule dedupe, and
+are recorded on the usage entry in rule order.
+
+```bash
+TEAM_HDR="X-Qa-Team-$QA_SUFFIX"
+ENV_HDR="X-Qa-Env-$QA_SUFFIX"
+RID="qa-tag-usage-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' \
+  -d "{\"headers\":[{\"header\":\"$TEAM_HDR\",\"prefix\":\"team-\"},{\"header\":\"$ENV_HDR\",\"delimiter\":\";\"}]}" >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -H "$TEAM_HDR: team-alpha, beta ,team-alpha" \
+  -H "$TEAM_HDR: team-gamma" \
+  -H "$ENV_HDR: prod;staging" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_USAGE_OK"}],"max_tokens":20}' >/dev/null
+USAGE_FILE="$QA_RUN_DIR/s143.usage.json"
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
+  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg r "$RID" '
+  any(.entries[]?; .request_id == $r
+    and .labels == ["alpha","beta","gamma","prod","staging"])
+' "$USAGE_FILE" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+```
+
+### S144 Audit log records request labels in `data.labels`
+
+The audit entry for a labelled request carries the extracted labels in
+`data.labels`, with the prefix trimmed.
+
+```bash
+AUD_HDR="X-Qa-Audit-$QA_SUFFIX"
+RID="qa-tag-audit-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' \
+  -d "{\"headers\":[{\"header\":\"$AUD_HDR\",\"prefix\":\"aud-\"}]}" >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -H "$AUD_HDR: aud-billing, aud-experiment" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_AUDIT_OK"}],"max_tokens":20}' >/dev/null
+AUDIT_FILE="$QA_RUN_DIR/s144.audit.json"
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/audit/log?search=$RID&limit=3" > "$AUDIT_FILE"
+  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r)' "$AUDIT_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg r "$RID" '
+  any(.entries[]?; .request_id == $r and .data.labels == ["billing","experiment"])
+' "$AUDIT_FILE" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+```
+
+### S145 Streaming chat records labels on the usage entry
+
+Labels ride the shared stream observers, so a streamed completion records them
+on its usage entry too.
+
+```bash
+STREAM_HDR="X-Qa-Stream-$QA_SUFFIX"
+RID="qa-tag-stream-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' \
+  -d "{\"headers\":[{\"header\":\"$STREAM_HDR\"}]}" >/dev/null
+STREAM_FILE="$QA_RUN_DIR/s145.stream.log"
+curl -fsSN "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -H "$STREAM_HDR: sse-check" \
+  -d '{"model":"gpt-4.1-nano","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"Reply with exactly QA_TAG_STREAM_OK"}],"max_tokens":20}' \
+  > "$STREAM_FILE"
+grep -qF 'data: [DONE]' "$STREAM_FILE"
+assert_chat_stream_has_usage "$STREAM_FILE"
+USAGE_FILE="$QA_RUN_DIR/s145.usage.json"
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
+  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg r "$RID" '
+  any(.entries[]?; .request_id == $r and .labels == ["sse-check"])
+' "$USAGE_FILE" >/dev/null
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+```
+
+### S146 Usage labels are recorded on PostgreSQL and MongoDB backends
+
+The tagging settings store and the usage `labels` column exist on all three
+storage backends; this exercises the PostgreSQL and MongoDB gateways.
+
+```bash
+BACKEND_HDR="X-Qa-Backend-$QA_SUFFIX"
+for TARGET in "$PG_BASE_URL|pg" "$MONGO_BASE_URL|mongo"; do
+  URL="${TARGET%%|*}"
+  TAG="${TARGET##*|}"
+  RID="qa-tag-$TAG-$QA_SUFFIX"
+  curl -fsS -X PUT "$URL/admin/tagging/settings" \
+    -H 'Content-Type: application/json' \
+    -d "{\"headers\":[{\"header\":\"$BACKEND_HDR\"}]}" \
+    | jq -e --arg h "$BACKEND_HDR" 'any(.headers[]; (.header | ascii_downcase) == ($h | ascii_downcase))' >/dev/null
+  curl -fsS "$URL/v1/chat/completions" -H 'Content-Type: application/json' \
+    -H "X-Request-ID: $RID" \
+    -H "$BACKEND_HDR: $TAG-check" \
+    -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_BACKEND_OK"}],"max_tokens":20}' >/dev/null
+  USAGE_FILE="$QA_RUN_DIR/s146.$TAG.usage.json"
+  for _ in $(seq 1 15); do
+    curl -fsS "$URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
+    if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+  jq -e --arg r "$RID" --arg l "$TAG-check" '
+    any(.entries[]?; .request_id == $r and .labels == [$l])
+  ' "$USAGE_FILE" >/dev/null
+  curl -fsS -X PUT "$URL/admin/tagging/settings" \
+    -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+done
+```
+
+### S147 No labels are recorded without a matching rule
+
+With an empty operator rule set, a request carrying would-be label headers
+records a usage entry without any `labels` field.
+
+```bash
+RID="qa-tag-norules-$QA_SUFFIX"
+curl -fsS -X PUT "$BASE_URL/admin/tagging/settings" \
+  -H 'Content-Type: application/json' -d '{"headers":[]}' >/dev/null
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -H "X-Qa-Team-$QA_SUFFIX: team-alpha" \
+  -d '{"model":"gpt-4.1-nano","messages":[{"role":"user","content":"Reply with exactly QA_TAG_NORULES_OK"}],"max_tokens":20}' >/dev/null
+USAGE_FILE="$QA_RUN_DIR/s147.usage.json"
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
+  if jq -e --arg r "$RID" 'any(.entries[]?; .request_id == $r and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg r "$RID" '
+  any(.entries[]?; .request_id == $r and (has("labels") | not))
+' "$USAGE_FILE" >/dev/null
+```
+
+### S148 Tagging settings admin requires authentication
+
+On the auth-enabled gateway the tagging settings endpoints are gated behind the
+master key: an unauthenticated read is rejected with `401`, while the same read
+with the admin bearer succeeds.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}' "$AUTH_BASE_URL/admin/tagging/settings" \
+  | jq -R -e '. == "401"' >/dev/null
+curl -fsS "$AUTH_BASE_URL/admin/tagging/settings" -H "$ADMIN_AUTH_HEADER" \
+  | jq -e '.editable == true and ((.headers // []) | type == "array")' >/dev/null
+```
+
 
 ## 20. Post-v0.1.48 provider regressions
 
@@ -5659,4 +6006,103 @@ jq -e '
   | ($models | length) > 0
     and all($models[]; .id | endswith(":free"))
 ' "$PUBLIC_MODELS_FILE" >/dev/null
+```
+
+## 34. Recent release regressions
+
+### S225 Anthropic accepts an image nested in a `tool_result`
+
+Claude Code and similar agents return screenshots inside tool results. This
+request exercises the native Anthropic history shape through the public
+Messages endpoint and verifies that the gateway no longer rejects or drops it.
+
+```bash
+RESP_FILE="$QA_RUN_DIR/s225.message.json"
+curl -fsS "$BASE_URL/v1/messages" -H 'Content-Type: application/json' \
+  -d '{
+    "model":"claude-sonnet-4-6",
+    "max_tokens":32,
+    "tools":[{"name":"inspect_image","description":"Inspect an image","input_schema":{"type":"object","properties":{}}}],
+    "messages":[
+      {"role":"assistant","content":[{"type":"tool_use","id":"toolu_qa_image","name":"inspect_image","input":{}}]},
+      {"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_qa_image","content":[
+        {"type":"text","text":"The image is a single white pixel. Reply with exactly QA_TOOL_IMAGE_OK."},
+        {"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}}
+      ]}]}
+    ]
+  }' > "$RESP_FILE"
+jq -e '
+  .type == "message"
+  and .role == "assistant"
+  and any(.content[]?; .type == "text" and (.text | contains("QA_TOOL_IMAGE_OK")))
+  and (.usage.input_tokens > 0)
+' "$RESP_FILE" >/dev/null
+```
+
+### S226 Pricing overrides supersede time-window rates in recorded cost
+
+DeepSeek publishes lower off-peak input and output rates. Explicit operator
+overrides must win at every hour, which is verified against the token counts and
+costs persisted for a real request.
+
+```bash
+SELECTOR="deepseek/deepseek-v4-flash"
+cleanup_s226() {
+  curl -sS -X DELETE "$BASE_URL/admin/model-pricing-overrides" \
+    -H 'Content-Type: application/json' -d "{\"selector\":\"$SELECTOR\"}" >/dev/null || true
+}
+trap cleanup_s226 EXIT
+curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" \
+  -H 'Content-Type: application/json' \
+  -d "{\"selector\":\"$SELECTOR\",\"pricing\":{\"input_per_mtok\":100,\"output_per_mtok\":200}}" \
+  | jq -e '.selector == "deepseek/deepseek-v4-flash" and .pricing.input_per_mtok == 100 and .pricing.output_per_mtok == 200' >/dev/null
+RID="qa-pricing-window-$QA_SUFFIX"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -H "X-Request-ID: $RID" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_PRICING_WINDOW_OK"}],"max_tokens":2000}' >/dev/null
+USAGE_FILE="$QA_RUN_DIR/s226.usage.json"
+for _ in $(seq 1 15); do
+  curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
+  if jq -e --arg rid "$RID" 'any(.entries[]?; .request_id == $rid and (.total_tokens // 0) > 0)' "$USAGE_FILE" >/dev/null; then
+    break
+  fi
+  sleep 1
+done
+jq -e --arg rid "$RID" '
+  any(.entries[]?;
+    .request_id == $rid
+    and .input_tokens > 0 and .output_tokens > 0
+    and ((.input_cost - (.input_tokens * 100 / 1000000)) | fabs) < 0.000000001
+    and ((.output_cost - (.output_tokens * 200 / 1000000)) | fabs) < 0.000000001)
+' "$USAGE_FILE" >/dev/null
+cleanup_s226
+trap - EXIT
+```
+
+### S227 One corrupt virtual-model timestamp does not fail the listing
+
+Simulates a row written with a wildly incorrect host clock. The SQL store must
+drop the unrepresentable timestamps while keeping the complete admin listing
+JSON-encodable and available.
+
+```bash
+NAME="qa_corrupt_ts_$QA_BUDGET_SUFFIX"
+DB="$RELEASE_STACK_DIR/sqlite-main/data/gomodel.db"
+cleanup_s227() {
+  curl -sS -X DELETE "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+    -d "{\"source\":\"$NAME\"}" >/dev/null || true
+  sqlite3 "$DB" "DELETE FROM virtual_models WHERE source = '$NAME';" || true
+}
+trap cleanup_s227 EXIT
+curl -fsS -X PUT "$BASE_URL/admin/virtual-models" -H 'Content-Type: application/json' \
+  -d "{\"source\":\"$NAME\",\"target_model\":\"openai/gpt-4.1-nano\"}" >/dev/null
+sqlite3 "$DB" "UPDATE virtual_models SET created_at = 99999999999999, updated_at = 99999999999999 WHERE source = '$NAME';"
+reload_release_gateway sqlite-main "$BASE_URL"
+curl -fsS "$BASE_URL/admin/virtual-models" \
+  | jq -e --arg name "$NAME" '
+      type == "array"
+      and any(.[]; .source == $name and .created_at == "0001-01-01T00:00:00Z" and .updated_at == "0001-01-01T00:00:00Z")
+    ' >/dev/null
+cleanup_s227
+trap - EXIT
 ```

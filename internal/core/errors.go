@@ -30,6 +30,9 @@ const (
 	// ErrorTypePermission indicates an authenticated caller lacks the
 	// permission for the operation (403)
 	ErrorTypePermission ErrorType = "permission_error"
+	// ErrorTypeInternal indicates a failure inside the gateway itself (500),
+	// as opposed to one an upstream provider reported
+	ErrorTypeInternal ErrorType = "internal_error"
 )
 
 // GatewayError is the base error type for all gateway errors
