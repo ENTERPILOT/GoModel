@@ -298,7 +298,7 @@
   "audit_image_role_output": "Ausgabe",
   "interaction_resize_label": "Interaktions-Panel in der Größe ändern",
   "interaction_title": "Interaktionen",
-  "interaction_following_latest": "Neuester Interaktion folgen",
+  "interaction_following_latest": "Der neuesten Interaktion folgen",
   "interaction_viewing_history": "Historische Interaktion wird angezeigt",
   "interaction_following_latest_help": "Der neuesten Interaktion wird gefolgt, wenn neue Events eintreffen",
   "interaction_viewing_history_help": "Eine historische Interaktion wird angezeigt; Live-Updates werden nicht verfolgt",
@@ -997,7 +997,7 @@
       "declarations": ["input count", "local count_plural = count: plural"],
       "selectors": ["count_plural"],
       "match": {
-        "count_plural=one": "Letzter {count} Tag",
+        "count_plural=one": "Letzter Tag",
         "count_plural=*": "Letzte {count} Tage"
       }
     }

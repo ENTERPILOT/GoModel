@@ -164,7 +164,7 @@ test("Paraglide compiles German interpolation and locale-aware plurals", () => {
   );
   assert.equal(
     m.date_picker_last_days({ count: 1 }, { locale: "de" }),
-    "Letzter 1 Tag",
+    "Letzter Tag",
   );
   assert.equal(
     m.date_picker_last_days({ count: 14 }, { locale: "de" }),
