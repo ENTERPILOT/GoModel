@@ -16,7 +16,37 @@ func applyEnvOverrides(cfg *Config) error {
 		return err
 	}
 	normalizeModelListURL(cfg)
+	applyOfflineMode(cfg)
 	return nil
+}
+
+// applyOfflineMode enforces the offline switch after every other source has
+// been applied, so neither config.yaml nor an env var can re-enable an
+// outbound call underneath it. A model catalog read from the local
+// filesystem is kept: it makes no network request.
+func applyOfflineMode(cfg *Config) {
+	if !cfg.Offline {
+		return
+	}
+	cfg.VersionCheck.Enabled = false
+	if url := cfg.Cache.Model.ModelList.URL; url != "" && !IsLocalModelListSource(url) {
+		cfg.Cache.Model.ModelList.URL = ""
+	}
+}
+
+// IsLocalModelListSource reports whether a model list location names a file
+// on the local filesystem ("file://..." or a bare path) rather than an HTTP
+// URL. It mirrors what the catalog fetcher accepts.
+func IsLocalModelListSource(location string) bool {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return false
+	}
+	lower := strings.ToLower(location)
+	if strings.HasPrefix(lower, "file://") {
+		return true
+	}
+	return !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://")
 }
 
 // normalizeModelListURL maps the sentinel "off" (case-insensitive) to an empty
