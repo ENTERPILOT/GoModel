@@ -66,6 +66,10 @@ class LiveLogsStore {
     readStored("gomodel_audit_group_sessions", "true") !== "false",
   );
   auditThreadChildren = $state({});
+  // Sessionless live rows held off-screen (grouped mode) until their session
+  // id arrives or the grace period elapses; see live-logs-logic.js.
+  auditLiveHeld = [];
+  auditLiveHoldTimers = null;
   usageLogSearch = $state("");
   usageFilterModel = $state("");
   usageFilterProvider = $state("");

@@ -13,6 +13,10 @@ import {
   isLiveAuditRecordChange,
 } from "./audit-records.js";
 import {
+  conversationAnchorScrollTop,
+  conversationPinnedToBottom,
+} from "./conversation-panel.js";
+import {
   REQUEST_STEP_FINAL,
   buildConversationView,
   buildFollowUpHeaders,
@@ -63,7 +67,13 @@ class ConversationDrawerStore {
 
   conversationDialogEl = $state(null);
   conversationCloseBtnEl = $state(null);
+  conversationContentEl = $state(null);
   conversationThreadEl = $state(null);
+  // Whether the transcript view sits at its bottom edge. Tracked from the
+  // content's scroll events (user or programmatic) rather than measured on
+  // demand: by the time a record change reaches the drawer, Svelte has
+  // already grown the DOM, so a fresh measurement always reads "scrolled up".
+  conversationPinned = true;
 
   get conversationEntries() {
     return (this.conversationEntryIDs || [])
@@ -178,6 +188,7 @@ class ConversationDrawerStore {
     this.followUpText = "";
     this.followUpError = "";
     this.followUpRequestID = "";
+    this.conversationPinned = true;
     requestAnimationFrame(() => this._focusConversationDrawer());
 
     // A live entry has no persisted row to fetch yet — render it from the
@@ -288,7 +299,9 @@ class ConversationDrawerStore {
       this.conversationFollowLatest = true;
     }
 
-    this._addConversationRecord(entry);
+    // The operator's own follow-up always comes into view; every other live
+    // update only keeps following while the view is already at the bottom.
+    this._addConversationRecord(entry, !!match.submittedChild);
     const state = String(eventType || entry._live_state || "").trim();
     // A sibling flush says nothing about whether the mutable selected anchor
     // is queryable. Hydrate only when that anchor itself is persisted.
@@ -299,7 +312,7 @@ class ConversationDrawerStore {
     }
   }
 
-  _addConversationRecord(entry) {
+  _addConversationRecord(entry, forceScroll = false) {
     const id = auditRecordKey(entry);
     if (id && !this.conversationEntryIDs.includes(id)) {
       this._setConversationEntryIDs([...this.conversationEntryIDs, id]);
@@ -308,7 +321,7 @@ class ConversationDrawerStore {
       this.conversationSessionID = String(entry.session_id).trim();
     }
     this._applyConversationView();
-    if (this.conversationFollowLatest) this._scheduleLatestScroll();
+    if (this.conversationFollowLatest) this._scheduleLatestScroll(forceScroll);
   }
 
   // conversationLiveWaiting reports whether the open live conversation is
@@ -388,7 +401,11 @@ class ConversationDrawerStore {
       if (anchor && anchor.session_id) this.conversationSessionID = String(anchor.session_id).trim();
       this.conversationTruncated = !!payload.truncated;
       this._applyConversationView();
-      if (this.conversationFollowLatest) this._scheduleLatestScroll();
+      // Opening the drawer (scrollToAnchor) positions the view on the latest
+      // turn or the anchor. The re-hydration after a live flush redraws the
+      // same transcript from storage and must not move a reader who has
+      // scrolled up, so it only keeps an existing pin.
+      if (this.conversationFollowLatest) this._scheduleLatestScroll(scrollToAnchor);
       else if (scrollToAnchor) this._scheduleAnchorScroll();
     } catch (e) {
       if (requestToken !== this.conversationRequestToken) return;
@@ -511,7 +528,7 @@ class ConversationDrawerStore {
           if (child.session_id) this.conversationSessionID = String(child.session_id).trim();
           this._applyConversationView();
           this.conversationFollowLatest = true;
-          this._scheduleLatestScroll();
+          this._scheduleLatestScroll(true);
           return;
         }
       }
@@ -522,26 +539,53 @@ class ConversationDrawerStore {
     }
   }
 
+  // Both scroll helpers move the drawer's own scroll container instead of
+  // calling scrollIntoView: scrollIntoView also scrolls every scrollable
+  // ancestor, so each streamed chunk used to drag the audit list behind the
+  // drawer along with it.
   _scheduleAnchorScroll() {
     requestAnimationFrame(() => {
+      const content = this.conversationContentEl;
       const thread = this.conversationThreadEl;
-      if (!thread) return;
+      if (!content || !thread) return;
       const anchors = thread.querySelectorAll('[data-conversation-anchor="true"]');
       const target = anchors[anchors.length - 1];
-      if (target && typeof target.scrollIntoView === "function") {
-        target.scrollIntoView({ block: "center" });
-      }
+      if (!target) return;
+      const contentRect = content.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      content.scrollTop = conversationAnchorScrollTop(
+        content.scrollTop,
+        content.clientHeight,
+        contentRect.top,
+        targetRect.top,
+        targetRect.height,
+      );
     });
   }
 
-  _scheduleLatestScroll() {
+  // noteConversationScroll records whether the view is at the bottom after
+  // every scroll of the drawer content — the operator reading history
+  // unpins it, scrolling back down (or our own follow scroll) re-pins it.
+  noteConversationScroll() {
+    const content = this.conversationContentEl;
+    if (!content) return;
+    this.conversationPinned = conversationPinnedToBottom(
+      content.scrollTop,
+      content.scrollHeight,
+      content.clientHeight,
+    );
+  }
+
+  // _scheduleLatestScroll keeps a followed transcript pinned to its newest
+  // content. Once the operator has scrolled up to read, a streamed chunk
+  // must not pull the view back down. `force` (a fresh hydration, the
+  // operator's own follow-up) re-pins unconditionally.
+  _scheduleLatestScroll(force = false) {
+    if (!force && !this.conversationPinned) return;
+    this.conversationPinned = true;
     requestAnimationFrame(() => {
-      const thread = this.conversationThreadEl;
-      if (!thread) return;
-      const target = thread.lastElementChild;
-      if (target && typeof target.scrollIntoView === "function") {
-        target.scrollIntoView({ block: "end" });
-      }
+      const el = this.conversationContentEl;
+      if (el) el.scrollTop = el.scrollHeight;
     });
   }
 }

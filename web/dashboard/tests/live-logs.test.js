@@ -33,6 +33,7 @@ function createLiveLogsApp(overrides = {}) {
     usageLogHideCached: false,
     auditGroupSessions: false,
     auditThreadChildren: {},
+    auditLiveHeld: [],
     auditRecords: {},
     auditRecordChanges: [],
     customStartDate: null,
@@ -922,10 +923,11 @@ test("parent headers do not assign sessions before the server resolves them", ()
     data: { request_headers: { "X-GoModel-Interaction-Parent": "head-a" } },
   }, "audit.started");
 
-  assert.equal(app.auditLog.entries.length, 2);
-  assert.equal(app.auditLog.entries[0].id, "live-3");
-  assert.equal(app.auditLog.entries[0].session_id, undefined);
-  assert.equal(app.auditLog.entries[1].id, "head-a");
+  // Sessionless in grouped mode: the row waits off-screen for the server's
+  // session update instead of guessing from the parent header.
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["head-a"]);
+  assert.deepEqual(app.auditLiveHeld.map((entry) => entry.id), ["live-3"]);
+  assert.equal(app.auditLiveHeld[0].session_id, undefined);
 });
 
 test("grouped fold retains the displaced head of an unexpanded thread", () => {
@@ -1125,10 +1127,13 @@ test("a sessionless live row re-folds on the pre-response session update", () =>
   };
 
   // audit.started fires before session detection: the row arrives sessionless
-  // and prepends as its own singleton thread.
+  // and is held off-screen so the list does not shift twice.
   app.mergeLiveAuditEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
-  assert.equal(app.auditLog.entries.length, 2);
-  assert.equal(app.auditLog.total, 2);
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["head-a"]);
+  assert.equal(app.auditLog.total, 1);
+  assert.deepEqual(app.auditLiveHeld.map((entry) => entry.id), ["live-1"]);
+  // The cache still received the held row (an open drawer keeps following).
+  assert.equal(app.auditRecords["live-1"]._live_state, "audit.started");
 
   // SessionCapture delivers audit.updated before the provider handler runs:
   // the row folds without waiting for a response or terminal event.
@@ -1139,11 +1144,125 @@ test("a sessionless live row re-folds on the pre-response session update", () =>
 
   assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1"]);
   assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.equal(app.auditLog.entries[0]._live_state, "audit.updated");
   assert.equal(app.auditLog.total, 1);
+  assert.deepEqual(app.auditLiveHeld, []);
   // The displaced head moved into the loaded children.
   assert.deepEqual(
     app.auditThreadChildren["s-a"].entries.map((entry) => entry.id),
     ["head-a", "old-child"],
+  );
+});
+
+test("a held sessionless row is placed when its grace period runs out", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
+  app.auditLog.total = 1;
+
+  app.mergeLiveAuditEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["head-a"]);
+
+  // No session ever arrives: the timer places it as its own thread.
+  app.expireHeldLiveAudit("live-1");
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1", "head-a"]);
+  assert.equal(app.auditLog.total, 2);
+  assert.deepEqual(app.auditLiveHeld, []);
+  assert.equal(app.expireHeldLiveAudit("live-1"), null);
+
+  // A late session id still folds the placed row into its thread.
+  app.mergeLiveAuditEntry(
+    { id: "live-1", request_id: "req-1", session_id: "s-a" },
+    "audit.updated",
+  );
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1"]);
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.equal(app.auditLog.total, 1);
+});
+
+test("sessionless rows that cannot gain a session are not held", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.total = 0;
+
+  // Model resolution runs after session detection: a stamped model with no
+  // session means the request has none.
+  app.mergeLiveAuditEntry(
+    { id: "modelled", requested_model: "gpt-5" },
+    "audit.updated",
+  );
+  // A settled request is past every chance of a session update.
+  app.mergeLiveAuditEntry({ id: "done", status_code: 200 }, "audit.completed");
+  // Flat mode never holds.
+  const flat = createLiveLogsApp({ auditGroupSessions: false });
+  flat.mergeLiveAuditEntry({ id: "flat-1" }, "audit.started");
+
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["done", "modelled"]);
+  assert.deepEqual(app.auditLiveHeld, []);
+  assert.deepEqual(flat.auditLog.entries.map((entry) => entry.id), ["flat-1"]);
+  assert.deepEqual(flat.auditLiveHeld, []);
+});
+
+test("a held row that settles without a session is placed at once", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.mergeLiveAuditEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
+  assert.deepEqual(app.auditLog.entries, []);
+
+  app.mergeLiveAuditEntry(
+    { id: "live-1", request_id: "req-1", status_code: 500 },
+    "audit.failed",
+  );
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1"]);
+  assert.equal(app.auditLog.entries[0]._live_state, "audit.failed");
+  assert.equal(app.auditLog.entries[0].status_code, 500);
+  assert.deepEqual(app.auditLiveHeld, []);
+});
+
+test("audit.removed drops a held row without touching the list", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [{ id: "head-a", session_id: "s-a", session_count: 2 }];
+  app.auditLog.total = 1;
+  app.mergeLiveAuditEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
+
+  app.removeLiveAuditEntry({ id: "live-1", request_id: "req-1" });
+  assert.deepEqual(app.auditLiveHeld, []);
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["head-a"]);
+  assert.equal(app.auditLog.total, 1);
+  assert.equal(app.expireHeldLiveAudit("live-1"), null);
+});
+
+test("the persisted row of a held request wins when a refetch lands it first", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.mergeLiveAuditEntry({ id: "live-1", request_id: "req-1" }, "audit.started");
+  // The page refetch delivered the row before the session update arrived.
+  app.auditLog.entries = [{ id: "live-1", request_id: "req-1", session_id: "s-a" }];
+  app.auditLog.total = 1;
+
+  app.mergeLiveAuditEntry(
+    { id: "live-1", request_id: "req-1", session_id: "s-a", status_code: 200 },
+    "audit.completed",
+  );
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["live-1"]);
+  assert.equal(app.auditLog.entries[0].status_code, 200);
+  assert.deepEqual(app.auditLiveHeld, []);
+  assert.equal(app.expireHeldLiveAudit("live-1"), null);
+});
+
+test("an older request folds under the current head instead of replacing it", () => {
+  const app = createLiveLogsApp({ auditGroupSessions: true });
+  app.auditLog.entries = [
+    { id: "head-a", session_id: "s-a", session_count: 2, timestamp: "2026-07-28T10:00:05Z" },
+  ];
+  app.auditLog.total = 1;
+
+  app.mergeLiveAuditEntry(
+    { id: "late", session_id: "s-a", timestamp: "2026-07-28T10:00:00Z" },
+    "audit.updated",
+  );
+  assert.deepEqual(app.auditLog.entries.map((entry) => entry.id), ["head-a"]);
+  assert.equal(app.auditLog.entries[0].session_count, 3);
+  assert.equal(app.auditLog.total, 1);
+  assert.deepEqual(
+    app.auditThreadChildren["s-a"].entries.map((entry) => entry.id),
+    ["late"],
   );
 });
 
@@ -1169,6 +1288,8 @@ test("interleaved first-session requests do not inflate the thread count", () =>
   // events. Before the fix each late event for a displaced (and dropped) row
   // re-counted it as a new session member, inflating the badge 2x-3x.
   const app = createLiveLogsApp({ auditGroupSessions: true });
+  // Sessionless requests are held (default mode) — apply the session updates
+  // to the held rows to exercise the placement path.
 
   app.mergeLiveAuditEntry(
     { id: "a", request_id: "req-a", timestamp: "2026-07-28T10:00:00Z" },

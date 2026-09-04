@@ -5,7 +5,8 @@
 // implementation. The host (`this`) must provide:
 //   - state: auditLog {entries,total,limit,offset}, usageLog {…},
 //     skippedLiveUsageByRequestId, liveLogsLastSeq, auditGroupSessions,
-//     auditThreadChildren ({ [session_id]: {loading, entries, total} })
+//     auditThreadChildren ({ [session_id]: {loading, entries, total} }),
+//     auditLiveHeld (sessionless live rows waiting for placement)
 //   - insert-gate fields: auditSearch, auditMethod, auditStatusCode,
 //     auditStream, customStartDate, customEndDate, usageLogSearch,
 //     usageFilterModel, usageFilterProvider, usageFilterLabel,
@@ -21,6 +22,12 @@ import { consumeEventStream } from "../../lib/api/eventStream.js";
 import * as m from "../../lib/paraglide/messages.js";
 
 const LIVE_LOGS_STREAM_PATH = "/admin/live/logs?types=audit,usage";
+
+// How long a sessionless live row waits off-screen in grouped mode for the
+// session id that SessionCapture publishes right after authentication. Long
+// enough to cover the gateway's own middleware chain plus stream delivery,
+// short enough that a request with no session at all still appears promptly.
+export const LIVE_AUDIT_SESSION_GRACE_MS = 300;
 
 function matchesLiveAuditKey(entry, id, requestID) {
     return (!!id && String(entry && entry.id || '').trim() === id) ||
@@ -131,7 +138,10 @@ export function liveLogsMethods() {
             const requestID = String(incoming.request_id || '').trim();
             const currentEntries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
             const index = currentEntries.findIndex((entry) => matchesLiveAuditKey(entry, key, requestID));
-            const previous = index >= 0 ? currentEntries[index] || {} : {};
+            const heldIndex = this.heldLiveAuditIndex(key, requestID);
+            const previous = index >= 0
+                ? currentEntries[index] || {}
+                : heldIndex >= 0 ? this.auditLiveHeld[heldIndex] : {};
             // A detail event IS the fetched detail: re-triggering the detail
             // fetch for it would loop.
             const isDetail = eventType === 'audit.detail';
@@ -141,6 +151,9 @@ export function liveLogsMethods() {
                 ? { ...incoming, _detail_loaded: true, _response_partial: false, bodies_omitted: false }
                 : this.liveAuditPatch(previous, incoming, eventType);
             if (index >= 0) {
+                // A page refetch can land the persisted row while its live
+                // copy is still held; the on-screen row wins.
+                if (heldIndex >= 0) this.releaseHeldLiveAudit(heldIndex);
                 const merged = this.mergeLiveAuditPatch(previous, patch);
                 currentEntries.splice(index, 1, merged);
                 this.auditLog.entries = [...currentEntries];
@@ -151,12 +164,28 @@ export function liveLogsMethods() {
                 this.cacheMergedAuditRecord(merged, eventType);
                 return merged;
             }
+            if (heldIndex >= 0) {
+                // The row is waiting for its session: fold the event in and
+                // re-evaluate placement (the session id may just have landed).
+                const merged = this.mergeLiveAuditPatch(previous, patch);
+                this.releaseHeldLiveAudit(heldIndex);
+                return this.placeLiveAuditEntry(merged, eventType, true);
+            }
             const child = this.mergeLiveAuditChild(incoming, patch);
             if (child) {
                 if (!isDetail) this.fetchExpandedAuditDetailIfReady(child);
                 this.cacheMergedAuditRecord(child, eventType);
                 return child;
             }
+            return this.placeLiveAuditEntry(patch, eventType, true);
+        },
+
+        // placeLiveAuditEntry inserts a live row the list does not hold yet:
+        // folded into its on-screen thread, prepended as a new head, or (in
+        // grouped mode, while still sessionless) held back for a moment.
+        placeLiveAuditEntry(patch, eventType, allowHold) {
+            const isDetail = eventType === 'audit.detail';
+            const currentEntries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
             // List filters and pagination gate visual insertion only. The
             // normalized cache still receives every event so an already-open
             // Interactions drawer cannot lose its live continuation.
@@ -165,6 +194,11 @@ export function liveLogsMethods() {
                 return;
             }
             if (!isDetail && this.auditGroupSessions) {
+                if (allowHold && this.shouldHoldLiveAudit(patch)) {
+                    this.holdLiveAudit(patch);
+                    this.cacheMergedAuditRecord(patch, eventType);
+                    return patch;
+                }
                 const folded = this.foldLiveAuditIntoThread(patch);
                 if (folded) {
                     this.fetchExpandedAuditDetailIfReady(folded);
@@ -178,6 +212,74 @@ export function liveLogsMethods() {
             if (!isDetail) this.fetchExpandedAuditDetailIfReady(inserted);
             this.cacheMergedAuditRecord(inserted, eventType);
             return inserted;
+        },
+
+        // --- Sessionless hold ----------------------------------------------
+        // audit.started fires before session detection, so in grouped mode a
+        // brand-new live row cannot know its thread yet. Inserting it as a
+        // singleton head and re-folding it milliseconds later on the session
+        // update shifts the whole list twice per request. Such rows wait
+        // off-screen until a session id arrives, the request settles, or the
+        // grace period elapses — whichever comes first.
+
+        shouldHoldLiveAudit(entry) {
+            if (!entry || String(entry.session_id || '').trim()) return false;
+            if (this.liveAuditStateSettled(entry._live_state)) return false;
+            // Model/workflow resolution runs after session detection in the
+            // gateway's middleware chain, so once either is stamped a still
+            // missing session id means the request simply has none.
+            return !(entry.requested_model || entry.resolved_model || entry.workflow_version_id);
+        },
+
+        heldLiveAuditIndex(id, requestID) {
+            const held = Array.isArray(this.auditLiveHeld) ? this.auditLiveHeld : [];
+            return held.findIndex((entry) => matchesLiveAuditKey(entry, id, requestID));
+        },
+
+        holdLiveAudit(entry) {
+            const held = Array.isArray(this.auditLiveHeld) ? this.auditLiveHeld : [];
+            this.auditLiveHeld = [...held, entry];
+            if (typeof setTimeout !== 'function') return;
+            const key = String(entry.id || entry.request_id || '').trim();
+            if (!this.auditLiveHoldTimers) this.auditLiveHoldTimers = new Map();
+            if (this.auditLiveHoldTimers.has(key)) return;
+            const timer = setTimeout(() => {
+                this.auditLiveHoldTimers.delete(key);
+                this.expireHeldLiveAudit(key);
+            }, LIVE_AUDIT_SESSION_GRACE_MS);
+            // Under node --test a pending timer must not keep the runner alive.
+            if (timer && typeof timer.unref === 'function') timer.unref();
+            this.auditLiveHoldTimers.set(key, timer);
+        },
+
+        // releaseHeldLiveAudit takes a row out of the hold (its caller decides
+        // where it goes) and cancels its grace timer.
+        releaseHeldLiveAudit(index) {
+            const held = Array.isArray(this.auditLiveHeld) ? this.auditLiveHeld : [];
+            const entry = held[index];
+            if (!entry) return null;
+            this.auditLiveHeld = held.filter((_, i) => i !== index);
+            const key = String(entry.id || entry.request_id || '').trim();
+            const timer = this.auditLiveHoldTimers && this.auditLiveHoldTimers.get(key);
+            if (timer) {
+                clearTimeout(timer);
+                this.auditLiveHoldTimers.delete(key);
+            }
+            return entry;
+        },
+
+        // expireHeldLiveAudit places a row whose grace period ran out without
+        // a session id: it shows as its own thread, and regroupLiveAuditHead
+        // still folds it should the session arrive later.
+        expireHeldLiveAudit(key) {
+            const index = this.heldLiveAuditIndex(key, key);
+            if (index < 0) return null;
+            const entry = this.releaseHeldLiveAudit(index);
+            const id = String(entry.id || '').trim();
+            const requestID = String(entry.request_id || '').trim();
+            const entries = (this.auditLog && Array.isArray(this.auditLog.entries)) ? this.auditLog.entries : [];
+            if (entries.some((row) => matchesLiveAuditKey(row, id, requestID))) return null;
+            return this.placeLiveAuditEntry(entry, entry._live_state, false);
         },
 
         // liveAuditPatch stamps the live lifecycle state onto an incoming
@@ -234,9 +336,9 @@ export function liveLogsMethods() {
 
         // regroupLiveAuditHead folds a list row into another on-screen head of
         // the same session after an in-place merge. This is how a live row
-        // inserted sessionless (audit.started fires before session detection
-        // stamps the context) joins its thread once a later event delivers the
-        // session id: the NEWEST of the two rows becomes the thread head — the
+        // that was placed sessionless (its hold expired before session
+        // detection stamped the context) joins its thread once a later event
+        // delivers the session id: the NEWEST of the two rows becomes the thread head — the
         // event that happens to complete last is not necessarily the newest
         // request — the other is retained in the thread's children slot, and
         // the two rows collapse into one thread (total shrinks by one).
@@ -273,10 +375,13 @@ export function liveLogsMethods() {
             return merged;
         },
 
-        // foldLiveAuditIntoThread makes a fresh live request the new head of
-        // its on-screen thread: the old head moves into the loaded children
-        // list (or waits for the lazy fetch) and the thread bubbles to the
-        // top with its count bumped. Total is unchanged (same thread count).
+        // foldLiveAuditIntoThread joins a fresh live request to its on-screen
+        // thread. A newer request becomes the new head: the old head moves
+        // into the loaded children list (or waits for the lazy fetch) and the
+        // thread bubbles to the top with its count bumped. A request OLDER
+        // than the current head (its events arrived late) slips into the
+        // children instead, and the head stays where it is. Total is
+        // unchanged either way (same thread count).
         foldLiveAuditIntoThread(patch) {
             const sessionId = String((patch && patch.session_id) || '').trim();
             if (!sessionId) return null;
@@ -285,10 +390,18 @@ export function liveLogsMethods() {
             if (headIndex < 0) return null;
             const oldHead = entries[headIndex];
             const oldCount = Number(oldHead.session_count);
-            const newHead = this.mergeLiveAuditUsagePatch({
-                ...patch,
-                session_count: (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + 1
-            });
+            const count = (Number.isFinite(oldCount) && oldCount > 0 ? oldCount : 1) + 1;
+            const headTime = Date.parse(oldHead && oldHead.timestamp);
+            const patchTime = Date.parse(patch && patch.timestamp);
+            if (Number.isFinite(headTime) && Number.isFinite(patchTime) && headTime > patchTime) {
+                const child = this.mergeLiveAuditUsagePatch({ ...patch });
+                const next = [...entries];
+                next.splice(headIndex, 1, { ...oldHead, session_count: count });
+                this.auditLog.entries = next;
+                this.prependLiveAuditThreadChild(sessionId, child);
+                return child;
+            }
+            const newHead = this.mergeLiveAuditUsagePatch({ ...patch, session_count: count });
             const next = [...entries];
             next.splice(headIndex, 1);
             next.unshift(newHead);
@@ -436,6 +549,8 @@ export function liveLogsMethods() {
             const id = String(incoming.id || '').trim();
             const requestID = String(incoming.request_id || '').trim();
             if (!id && !requestID) return;
+            const heldIndex = this.heldLiveAuditIndex(id, requestID);
+            if (heldIndex >= 0) this.releaseHeldLiveAudit(heldIndex);
             const current = this.auditLog.entries;
             const next = [];
             let removedCount = 0;

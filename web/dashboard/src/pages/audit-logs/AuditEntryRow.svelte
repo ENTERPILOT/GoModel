@@ -98,13 +98,17 @@
       border-color 0.12s ease-out;
   }
 
+  /* A ring rather than a thicker border: a border-width change shifts every
+     row below by a pixel each time the Interactions drawer moves to another
+     entry. */
   .audit-entry-interactions-open {
-    border-width: 2px;
     border-color: color-mix(
       in srgb,
       var(--prompt-cache-color) 38%,
       var(--border)
     );
+    box-shadow: 0 0 0 1px
+      color-mix(in srgb, var(--prompt-cache-color) 38%, var(--border));
   }
 
   .audit-entry-details {

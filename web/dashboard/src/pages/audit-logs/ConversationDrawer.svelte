@@ -131,7 +131,7 @@
   }
 
   function scrollToConversationMessage(direction) {
-    const content = document.getElementById("interactions-drawer-content");
+    const content = drawer.conversationContentEl;
     const thread = drawer.conversationThreadEl;
     if (!content || !thread) return;
     const messages = [...thread.querySelectorAll('[data-conversation-message="true"]')];
@@ -377,7 +377,11 @@
     {/if}
   </div>
 
-  <div id="interactions-drawer-content">
+  <div
+    id="interactions-drawer-content"
+    bind:this={drawer.conversationContentEl}
+    onscroll={() => drawer.noteConversationScroll()}
+  >
     {#if drawer.conversationMessages.length > 1}
       <div
         class="conversation-message-navigation"

@@ -59,6 +59,31 @@ export function conversationMessageNavigationTarget(
   };
 }
 
+// conversationPinnedToBottom reports whether a scroll container sits close
+// enough to its bottom edge that a live transcript should keep following new
+// content. Once the operator scrolls up to read history, appends must not
+// yank the view back down.
+export const CONVERSATION_FOLLOW_THRESHOLD_PX = 48;
+
+export function conversationPinnedToBottom(scrollTop, scrollHeight, clientHeight) {
+  const remaining = finite(scrollHeight) - finite(scrollTop) - finite(clientHeight);
+  return remaining <= CONVERSATION_FOLLOW_THRESHOLD_PX;
+}
+
+// conversationAnchorScrollTop returns the scrollTop that centers a message
+// inside its scroll container. Scrolling the container directly — instead of
+// scrollIntoView — leaves the page behind the drawer where it was.
+export function conversationAnchorScrollTop(
+  scrollTop,
+  clientHeight,
+  containerTop,
+  targetTop,
+  targetHeight,
+) {
+  const offset = finite(targetTop) - finite(containerTop) + finite(scrollTop);
+  return Math.max(0, offset - (finite(clientHeight) - finite(targetHeight)) / 2);
+}
+
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
