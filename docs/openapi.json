@@ -14456,6 +14456,10 @@
           "type": {
             "description": "\"message\", \"function_call\", etc.",
             "type": "string"
+          },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       },
@@ -15862,6 +15866,10 @@
           "call_id": {
             "description": "Function call fields (type=\"function_call\")",
             "type": "string"
+          },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
           },
           "content": {
             "description": "Can be string or []ContentPart",

@@ -10705,6 +10705,10 @@ const docTemplate = `{
                 "type": {
                     "description": "\"message\", \"function_call\", etc.",
                     "type": "string"
+                },
+                "extra_content": {
+                    "type": "object",
+                    "additionalProperties": true
                 }
             }
         },

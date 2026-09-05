@@ -1,7 +1,10 @@
 package providers
 
 import (
+	"maps"
 	"slices"
+
+	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -47,6 +50,79 @@ func adaptExtraContent(req *core.ChatRequest, providerType string) *core.ChatReq
 		}
 		adapted.Messages[i] = message
 	}
+	return &adapted
+}
+
+// adaptResponsesExtraContent is adaptExtraContent for a Responses request:
+// the foreign vendors are removed from every input item's extra_content
+// before the provider (native or chat-backed) sees the items. The caller's
+// request and its items remain unchanged.
+func adaptResponsesExtraContent(req *core.ResponsesRequest, providerType string) *core.ResponsesRequest {
+	if req == nil {
+		return req
+	}
+	vendor := extraContentVendorFor(providerType)
+	var items []any
+	switch in := req.Input.(type) {
+	case []any:
+		items = in
+	case []map[string]any:
+		items = make([]any, len(in))
+		for i, item := range in {
+			items[i] = item
+		}
+	case []core.ResponsesInputElement:
+		if !slices.ContainsFunc(in, func(item core.ResponsesInputElement) bool {
+			return item.ExtraFields.HasForeignExtraContent(vendor)
+		}) {
+			return req
+		}
+		adapted := *req
+		elements := append([]core.ResponsesInputElement(nil), in...)
+		for i := range elements {
+			elements[i].ExtraFields = elements[i].ExtraFields.WithoutForeignExtraContent(vendor)
+		}
+		adapted.Input = elements
+		return &adapted
+	default:
+		return req
+	}
+
+	changed := false
+	adaptedItems := make([]any, len(items))
+	for i, item := range items {
+		adaptedItems[i] = item
+		object, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		raw, ok := object[core.ExtraContentField]
+		if !ok {
+			continue
+		}
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			continue
+		}
+		fields := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: encoded})
+		if !fields.HasForeignExtraContent(vendor) {
+			continue
+		}
+		cloned := make(map[string]any, len(object))
+		maps.Copy(cloned, object)
+		if kept := core.KeepExtraContentVendor(encoded, vendor); kept != nil {
+			cloned[core.ExtraContentField] = kept
+		} else {
+			delete(cloned, core.ExtraContentField)
+		}
+		adaptedItems[i] = cloned
+		changed = true
+	}
+	if !changed {
+		return req
+	}
+	adapted := *req
+	adapted.Input = adaptedItems
 	return &adapted
 }
 

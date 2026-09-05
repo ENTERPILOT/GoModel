@@ -141,6 +141,10 @@ function ensureAnthropicContentBlockSchema() {
   };
 }
 
+function applyResponsesReplayStateSchema() {
+  schema("core.ResponsesOutputItem").properties.extra_content = freeFormObjectSchema();
+}
+
 function applyAnthropicMessageSchemas() {
   ensureAnthropicContentBlockSchema();
   schema("anthropicapi.Message").properties.content = anthropicContentSchema();
@@ -150,6 +154,7 @@ function applyAnthropicMessageSchemas() {
 }
 
 applyAnthropicMessageSchemas();
+applyResponsesReplayStateSchema();
 ensureRequiredProperty("core.ResponsesConversationRef", "id");
 
 // Virtual-models admin contract: mirror the required field and array bounds the

@@ -22,11 +22,11 @@ func forwardChatRequest(ctx context.Context, req *core.ChatRequest, route resolv
 	return adaptAnthropicCacheControl(forward, route.providerType)
 }
 
-func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
+func forwardResponsesRequest(req *core.ResponsesRequest, route resolvedRoute) *core.ResponsesRequest {
 	forwardReq := *req
-	forwardReq.Model = selector.Model
+	forwardReq.Model = route.selector.Model
 	forwardReq.Provider = ""
-	return &forwardReq
+	return adaptResponsesExtraContent(&forwardReq, route.providerType)
 }
 
 func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, route resolvedRoute) *core.ChatRequest {
@@ -38,7 +38,7 @@ func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, 
 }
 
 func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, route resolvedRoute) *core.ResponsesRequest {
-	forward := forwardResponsesRequest(req, route.selector)
+	forward := forwardResponsesRequest(req, route)
 	if r.cachePlanner == nil {
 		return forward
 	}

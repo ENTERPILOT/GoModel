@@ -100,6 +100,7 @@ function ensureResponsesInputElementSchema() {
         description: 'Function call fields (type="function_call")',
         type: "string",
       },
+      extra_content: freeFormObjectSchema(),
       content: {
         description: "Can be string or []ContentPart",
         oneOf: [
@@ -177,6 +178,10 @@ function ensureAnthropicContentBlockSchema() {
       type: { type: "string" },
     },
   };
+}
+
+function applyResponsesReplayStateSchema() {
+  schema("core.ResponsesOutputItem").properties.extra_content = freeFormObjectSchema();
 }
 
 function applyAnthropicMessageSchemas() {
@@ -511,6 +516,7 @@ function applyBudgetKeySchemaConstraints() {
 spec.servers = parseServers(process.env.DOCS_API_SERVERS);
 ensureResponsesInputElementSchema();
 applyAnthropicMessageSchemas();
+applyResponsesReplayStateSchema();
 applyAnthropicMessagesStreamSchema();
 applyAudioTranscriptionTextSchema();
 applyImageEditMultiImageSchema();

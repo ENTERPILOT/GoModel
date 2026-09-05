@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"slices"
@@ -42,37 +43,60 @@ func adaptAnthropicCacheControl(req *core.ChatRequest, providerType string) *cor
 	return &adapted
 }
 
-// adaptAnthropicBatchCacheControl applies the same post-routing policy
-// (cache directives and extra_content) to canonical chat items produced by
-// the Anthropic Message Batches ingress. Ordinary OpenAI-compatible batches
-// remain opaque and caller-owned. The request is returned as-is when no item
-// changes.
-func adaptAnthropicBatchCacheControl(ctx context.Context, req *core.BatchRequest, providerType string) (*core.BatchRequest, error) {
-	if req == nil || core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
+// adaptBatchRequest applies the post-routing policy to batch items. Items
+// from the Anthropic Message Batches ingress get the cache-directive and
+// extra_content treatment of a chat request. Ordinary OpenAI-compatible
+// batches stay opaque and caller-owned except for foreign extra_content,
+// which is removed from the chat and Responses items that carry it. The
+// request is returned as-is when no item changes.
+func adaptBatchRequest(ctx context.Context, req *core.BatchRequest, providerType string) (*core.BatchRequest, error) {
+	if req == nil {
 		return req, nil
 	}
+	anthropicDialect := core.RequestDialectFromContext(ctx) == core.RequestDialectAnthropicMessages
 
 	adapted := *req
 	adapted.Requests = append([]core.BatchRequestItem(nil), req.Requests...)
 	changed := false
 	for i, item := range req.Requests {
+		if !anthropicDialect && !bytes.Contains(item.Body, []byte(core.ExtraContentField)) {
+			continue
+		}
 		decoded, err := core.DecodeKnownBatchItemRequest(req.Endpoint, item)
 		if err != nil {
-			return nil, core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: %v", i, err), err)
+			if anthropicDialect {
+				return nil, core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: %v", i, err), err)
+			}
+			continue
 		}
-		chat, ok := decoded.Request.(*core.ChatRequest)
-		if !ok {
-			return nil, core.NewInvalidRequestError(
-				fmt.Sprintf("requests[%d]: Anthropic Message Batch item is not a chat completion", i), nil,
-			)
-		}
-		forward := adaptAnthropicCacheControl(adaptExtraContent(chat, providerType), providerType)
-		if forward == chat {
+		var forward any
+		switch request := decoded.Request.(type) {
+		case *core.ChatRequest:
+			chat := adaptExtraContent(request, providerType)
+			if anthropicDialect {
+				chat = adaptAnthropicCacheControl(chat, providerType)
+			}
+			if chat == request {
+				continue
+			}
+			forward = chat
+		case *core.ResponsesRequest:
+			responses := adaptResponsesExtraContent(request, providerType)
+			if responses == request {
+				continue
+			}
+			forward = responses
+		default:
+			if anthropicDialect {
+				return nil, core.NewInvalidRequestError(
+					fmt.Sprintf("requests[%d]: Anthropic Message Batch item is not a chat completion", i), nil,
+				)
+			}
 			continue
 		}
 		body, err := json.Marshal(forward)
 		if err != nil {
-			return nil, core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: failed to encode adapted chat request", i), err)
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: failed to encode adapted request", i), err)
 		}
 		adapted.Requests[i].Body = body
 		changed = true

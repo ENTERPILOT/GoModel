@@ -75,27 +75,33 @@ func (fields UnknownJSONFields) HasForeignExtraContent(keep string) bool {
 // other than keep removed. The member disappears when nothing remains, so a
 // provider with no state of its own (keep == "") never sees it.
 func (fields UnknownJSONFields) WithoutForeignExtraContent(keep string) UnknownJSONFields {
-	raw := fields.Lookup(ExtraContentField)
-	if len(raw) == 0 {
+	if !fields.HasForeignExtraContent(keep) {
 		return fields
 	}
-	vendors := extraContentVendors(raw)
-	kept, ok := vendors[keep]
-	if !ok || keep == "" {
+	kept := KeepExtraContentVendor(fields.Lookup(ExtraContentField), keep)
+	if kept == nil {
 		return fields.Without(ExtraContentField)
 	}
-	if len(vendors) == 1 {
-		return fields
-	}
-	encoded, err := json.Marshal(map[string]json.RawMessage{keep: kept})
-	if err != nil {
-		return fields.Without(ExtraContentField)
-	}
-	merged, err := MergeUnknownJSONFields(fields, map[string]json.RawMessage{ExtraContentField: encoded})
+	merged, err := MergeUnknownJSONFields(fields, map[string]json.RawMessage{ExtraContentField: kept})
 	if err != nil {
 		return fields.Without(ExtraContentField)
 	}
 	return merged
+}
+
+// KeepExtraContentVendor reduces a raw extra_content value to the keep
+// vendor's object. It returns nil when nothing should remain: the vendor is
+// absent, keep is empty, or the value is not an object.
+func KeepExtraContentVendor(raw json.RawMessage, keep string) json.RawMessage {
+	kept, ok := extraContentVendors(raw)[keep]
+	if !ok || keep == "" {
+		return nil
+	}
+	encoded, err := json.Marshal(map[string]json.RawMessage{keep: kept})
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 // extraContentVendors decodes an extra_content member. Anything but a JSON

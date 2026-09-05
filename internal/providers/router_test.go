@@ -1062,6 +1062,115 @@ func TestAdaptExtraContent_ReturnsRequestWithoutExtraContent(t *testing.T) {
 	}
 }
 
+func TestAdaptResponsesExtraContent_KeepsOwnVendorOnly(t *testing.T) {
+	item := func() map[string]any {
+		return map[string]any{
+			"type": "function_call", "call_id": "c1", "name": "f", "arguments": "{}",
+			"extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig"}, "anthropic": map[string]any{"is_error": true}},
+		}
+	}
+	inputs := map[string]any{
+		"any":  []any{"plain string item", item()},
+		"maps": []map[string]any{item()},
+		"elements": []core.ResponsesInputElement{{Type: "function_call", CallID: "c1", Name: "f", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"},"anthropic":{"is_error":true}}`),
+		})}},
+	}
+	extraContentOf := func(t *testing.T, input any) string {
+		t.Helper()
+		encoded, err := json.Marshal(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var items []any
+		if err := json.Unmarshal(encoded, &items); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(items[len(items)-1].(map[string]any)["extra_content"])
+		return string(raw)
+	}
+	for name, input := range inputs {
+		for _, tt := range []struct{ providerType, want string }{
+			{providerType: "gemini", want: `{"google":{"thought_signature":"sig"}}`},
+			{providerType: "anthropic", want: `{"anthropic":{"is_error":true}}`},
+			{providerType: "openai", want: `null`},
+		} {
+			t.Run(name+"/"+tt.providerType, func(t *testing.T) {
+				req := &core.ResponsesRequest{Model: "m", Input: input}
+				got := adaptResponsesExtraContent(req, tt.providerType)
+				if got == req {
+					t.Fatal("request was not adapted")
+				}
+				if raw := extraContentOf(t, got.Input); raw != tt.want {
+					t.Errorf("extra_content = %s, want %s", raw, tt.want)
+				}
+				if raw := extraContentOf(t, req.Input); raw == tt.want {
+					t.Error("adaptation mutated the caller's input")
+				}
+			})
+		}
+	}
+	for name, input := range map[string]any{
+		"string": "hello",
+		"clean":  []any{map[string]any{"type": "message", "role": "user", "content": "hi"}},
+		"own":    []any{map[string]any{"type": "function_call", "extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig"}}}},
+	} {
+		req := &core.ResponsesRequest{Model: "m", Input: input}
+		if got := adaptResponsesExtraContent(req, "gemini"); got != req {
+			t.Errorf("%s input must be returned as-is", name)
+		}
+	}
+}
+
+func TestForwardResponsesRequest_DropsForeignExtraContent(t *testing.T) {
+	req := &core.ResponsesRequest{Model: "m", Provider: "p", Input: []any{
+		map[string]any{"type": "function_call", "call_id": "c1", "name": "f", "arguments": "{}", "extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig"}}},
+	}}
+	got := forwardResponsesRequest(req, resolvedRoute{selector: core.ModelSelector{Model: "m"}, providerType: "openai"})
+	if item := got.Input.([]any)[0].(map[string]any); item["extra_content"] != nil {
+		t.Errorf("openai received foreign extra_content: %v", item["extra_content"])
+	}
+	if got.Provider != "" || got.Model != "m" {
+		t.Errorf("forwarded request = %+v", got)
+	}
+}
+
+func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testing.T) {
+	chatBody := `{"model":"gpt-4o","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig"}}}]},{"role":"tool","tool_call_id":"c1","content":"ok"}]}`
+	responsesBody := `{"model":"gpt-4o","input":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{}","extra_content":{"google":{"thought_signature":"sig"}}}]}`
+	opaqueBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],  "x": 1}`
+	request := &core.BatchRequest{
+		Endpoint: "/v1/chat/completions",
+		Requests: []core.BatchRequestItem{
+			{CustomID: "chat", Method: http.MethodPost, URL: "/v1/chat/completions", Body: json.RawMessage(chatBody)},
+			{CustomID: "responses", Method: http.MethodPost, URL: "/v1/responses", Body: json.RawMessage(responsesBody)},
+			{CustomID: "opaque", Method: http.MethodPost, URL: "/v1/chat/completions", Body: json.RawMessage(opaqueBody)},
+		},
+	}
+	adapted, err := adaptBatchRequest(context.Background(), request, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adapted == request {
+		t.Fatal("batch with foreign extra_content was not adapted")
+	}
+	for _, i := range []int{0, 1} {
+		if bytes.Contains(adapted.Requests[i].Body, []byte("extra_content")) {
+			t.Errorf("requests[%d] kept foreign extra_content: %s", i, adapted.Requests[i].Body)
+		}
+	}
+	if string(adapted.Requests[2].Body) != opaqueBody {
+		t.Errorf("opaque item was rewritten: %s", adapted.Requests[2].Body)
+	}
+	if !bytes.Contains(request.Requests[0].Body, []byte("thought_signature")) {
+		t.Error("adaptation mutated the caller's batch")
+	}
+
+	if got, err := adaptBatchRequest(context.Background(), request, "gemini"); err != nil || got != request {
+		t.Errorf("gemini batch = %#v, %v; want the request untouched", got, err)
+	}
+}
+
 func TestForwardChatRequest_DropsForeignExtraContentForEveryDialect(t *testing.T) {
 	req := &core.ChatRequest{Model: "m", Provider: "p", Messages: []core.Message{
 		{Role: "assistant", ContentNull: true, ToolCalls: []core.ToolCall{{
@@ -2057,11 +2166,11 @@ func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpen
 	}
 	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
 
-	if got, err := adaptAnthropicBatchCacheControl(ctx, request, "anthropic"); err != nil || got != request {
+	if got, err := adaptBatchRequest(ctx, request, "anthropic"); err != nil || got != request {
 		t.Fatalf("anthropic batch = %#v, %v; want the request untouched", got, err)
 	}
 
-	adapted, err := adaptAnthropicBatchCacheControl(ctx, request, "openrouter")
+	adapted, err := adaptBatchRequest(ctx, request, "openrouter")
 	if err != nil {
 		t.Fatal(err)
 	}
