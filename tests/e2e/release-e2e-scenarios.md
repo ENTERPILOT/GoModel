@@ -6106,3 +6106,40 @@ curl -fsS "$BASE_URL/admin/virtual-models" \
 cleanup_s227
 trap - EXIT
 ```
+
+### S228 Gemini 3 tool-call round trip preserves the thought signature
+
+Gemini 3 attaches a `thoughtSignature` to every function call and rejects a
+follow-up request whose history lacks it (HTTP 400). The gateway must expose
+it as `tool_calls[].extra_content.google.thought_signature` and send it back
+when the client echoes the assistant turn verbatim, as OpenAI SDK agent loops
+do.
+
+```bash
+CALL_FILE="$QA_RUN_DIR/s228.call.json"
+FOLLOW_FILE="$QA_RUN_DIR/s228.followup.json"
+TOOLS='[{"type":"function","function":{"name":"lookup_weather","description":"Get the current weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]'
+curl -fsS "$BASE_URL/v1/chat/completions" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"gemini-3.5-flash-lite\",\"tools\":$TOOLS,\"tool_choice\":{\"type\":\"function\",\"function\":{\"name\":\"lookup_weather\"}},\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather in Warsaw?\"}]}" \
+  > "$CALL_FILE"
+jq '{finish_reason:.choices[0].finish_reason,tool_calls:.choices[0].message.tool_calls}' "$CALL_FILE"
+jq -e '
+    .choices[0].finish_reason == "tool_calls"
+    and (.choices[0].message.tool_calls[0].function.name == "lookup_weather")
+    and (.choices[0].message.tool_calls[0].extra_content.google.thought_signature | type == "string" and length > 0)
+  ' "$CALL_FILE" >/dev/null
+jq -c --argjson tools "$TOOLS" '{
+    model: "gemini-3.5-flash-lite",
+    tools: $tools,
+    messages: [
+      {role: "user", content: "What is the weather in Warsaw?"},
+      .choices[0].message,
+      {role: "tool", tool_call_id: .choices[0].message.tool_calls[0].id, content: "sunny, 22C"}
+    ]
+  }' "$CALL_FILE" \
+  | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- \
+  > "$FOLLOW_FILE"
+jq '{provider,answer:.choices[0].message.content}' "$FOLLOW_FILE"
+assert_chat_response_contains "$FOLLOW_FILE" "gemini" "22"
+```

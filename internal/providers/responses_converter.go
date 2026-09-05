@@ -91,6 +91,7 @@ type openAIChunkToolCall struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+	ExtraContent json.RawMessage `json:"extra_content"`
 }
 
 func (sc *OpenAIResponsesStreamConverter) ensureToolCallState(index int) *ResponsesOutputToolCallState {
@@ -209,6 +210,9 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openA
 		}
 		if toolCall.Function.Name != "" {
 			state.Name = toolCall.Function.Name
+		}
+		if len(toolCall.ExtraContent) > 0 {
+			state.ExtraContent = toolCall.ExtraContent
 		}
 
 		arguments := toolCall.Function.Arguments
@@ -353,6 +357,9 @@ func chunkToolCallsFromAny(items []any) []openAIChunkToolCall {
 		if function, ok := toolCall["function"].(map[string]any); ok {
 			call.Function.Name, _ = function["name"].(string)
 			call.Function.Arguments, _ = function["arguments"].(string)
+		}
+		if extra, ok := toolCall["extra_content"]; ok && extra != nil {
+			call.ExtraContent, _ = json.Marshal(extra)
 		}
 		calls = append(calls, call)
 	}

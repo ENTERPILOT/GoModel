@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"io"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -77,6 +78,43 @@ data: [DONE]
 	}
 	if !foundItemDone {
 		t.Fatal("expected response.output_item.done for function_call")
+	}
+}
+
+// TestOpenAIResponsesStreamConverter_ToolCallExtraContent keeps a provider's
+// extra_content (Gemini's thought signature) on the function_call item so a
+// client that echoes the item restores it.
+func TestOpenAIResponsesStreamConverter_ToolCallExtraContent(t *testing.T) {
+	mockStream := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"test-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_123","type":"function","function":{"name":"lookup_weather","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig-1"}}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"test-model","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "gemini")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+
+	want := map[string]any{"google": map[string]any{"thought_signature": "sig-1"}}
+	seen := 0
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Name != "response.output_item.added" && event.Name != "response.output_item.done" {
+			continue
+		}
+		item, _ := event.Payload["item"].(map[string]any)
+		if item["type"] != "function_call" {
+			continue
+		}
+		seen++
+		if got := item["extra_content"]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s extra_content = %#v, want %#v", event.Name, got, want)
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("function_call item events = %d, want added and done", seen)
 	}
 }
 

@@ -74,6 +74,53 @@ type geminiFileData struct {
 	FileURI  string `json:"file_uri,omitempty"`
 }
 
+// Thought signatures cross the OpenAI-compatible API the way Google's own
+// OpenAI-compatible endpoint exposes them: a functionCall part's signature as
+// tool_calls[].extra_content.google.thought_signature and a text part's as
+// message.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
+// any functionCall in the history that comes back without its signature.
+const (
+	extraContentField = "extra_content"
+	// skipThoughtSignatureValidator is the placeholder Google documents for
+	// function calls that never had a signature: a history transferred from
+	// another model or a call injected by the client.
+	skipThoughtSignatureValidator = "skip_thought_signature_validator"
+)
+
+func thoughtSignatureExtraFields(signature string) core.UnknownJSONFields {
+	if signature == "" {
+		return core.UnknownJSONFields{}
+	}
+	encoded, err := json.Marshal(map[string]any{"google": map[string]any{"thought_signature": signature}})
+	if err != nil {
+		return core.UnknownJSONFields{}
+	}
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{extraContentField: encoded})
+}
+
+func thoughtSignatureFromExtraFields(fields core.UnknownJSONFields) string {
+	raw := fields.Lookup(extraContentField)
+	if len(raw) == 0 {
+		return ""
+	}
+	var extra struct {
+		Google struct {
+			ThoughtSignature string `json:"thought_signature"`
+		} `json:"google"`
+	}
+	if err := json.Unmarshal(raw, &extra); err != nil {
+		return ""
+	}
+	return extra.Google.ThoughtSignature
+}
+
+// requiresThoughtSignature reports whether Gemini validates that every
+// functionCall in the history carries a thought signature (Gemini 3 and later).
+func requiresThoughtSignature(model string) bool {
+	major, _, ok := geminiGeneration(model)
+	return ok && major >= 3
+}
+
 type geminiFunctionCall struct {
 	ID   string          `json:"id,omitempty"`
 	Name string          `json:"name,omitempty"`
@@ -151,6 +198,7 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 
 	systemParts := make([]geminiPart, 0)
 	toolCallNames := make(map[string]string)
+	signatureRequired := requiresThoughtSignature(req.Model)
 	for _, msg := range req.Messages {
 		var (
 			parts []geminiPart
@@ -159,7 +207,7 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 		if strings.TrimSpace(msg.Role) == "tool" {
 			parts, err = geminiPartsFromToolMessage(msg, toolCallNames[msg.ToolCallID])
 		} else {
-			parts, err = geminiPartsFromMessage(msg)
+			parts, err = geminiPartsFromMessage(msg, signatureRequired)
 		}
 		if err != nil {
 			return nil, err
@@ -200,27 +248,69 @@ func convertChatRequestToGemini(req *core.ChatRequest) (*geminiGenerateContentRe
 	return out, nil
 }
 
-func geminiPartsFromMessage(msg core.Message) ([]geminiPart, error) {
+// geminiPartsFromMessage converts a system, user or assistant message. With
+// signatureRequired set, assistant function calls that carry no thought
+// signature get Google's validator-skipping placeholder so a history that did
+// not originate from this Gemini model (another provider, a client that
+// dropped extra_content) is not rejected outright.
+func geminiPartsFromMessage(msg core.Message, signatureRequired bool) ([]geminiPart, error) {
 	if len(msg.ToolCalls) > 0 {
-		parts := make([]geminiPart, 0, len(msg.ToolCalls)+1)
-		if text := strings.TrimSpace(core.ExtractTextContent(msg.Content)); text != "" {
-			parts = append(parts, geminiPart{Text: text})
+		return geminiPartsFromToolCallMessage(msg, signatureRequired), nil
+	}
+	parts, err := geminiPartsFromContent(msg.Content)
+	if err != nil || strings.TrimSpace(msg.Role) != "assistant" {
+		return parts, err
+	}
+	return withThoughtSignature(parts, thoughtSignatureFromExtraFields(msg.ExtraFields)), nil
+}
+
+func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []geminiPart {
+	parts := make([]geminiPart, 0, len(msg.ToolCalls)+1)
+	if text := strings.TrimSpace(core.ExtractTextContent(msg.Content)); text != "" {
+		parts = append(parts, geminiPart{Text: text})
+	}
+	signed := false
+	for _, call := range msg.ToolCalls {
+		args := json.RawMessage(strings.TrimSpace(call.Function.Arguments))
+		if len(args) == 0 {
+			args = json.RawMessage(`{}`)
 		}
-		for _, call := range msg.ToolCalls {
-			args := json.RawMessage(strings.TrimSpace(call.Function.Arguments))
-			if len(args) == 0 {
-				args = json.RawMessage(`{}`)
-			}
-			parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{
+		signature := thoughtSignatureFromExtraFields(call.ExtraFields)
+		signed = signed || signature != ""
+		parts = append(parts, geminiPart{
+			FunctionCall: &geminiFunctionCall{
 				ID:   call.ID,
 				Name: call.Function.Name,
 				Args: args,
-			}})
-		}
-		return parts, nil
+			},
+			ThoughtSignature: signature,
+		})
 	}
+	// Only the first call of a parallel batch carries a signature, so a turn
+	// with at least one signed call is a genuine Gemini turn and is sent back
+	// exactly as received.
+	if signatureRequired && !signed {
+		for i := range parts {
+			if parts[i].FunctionCall != nil {
+				parts[i].ThoughtSignature = skipThoughtSignatureValidator
+			}
+		}
+	}
+	return parts
+}
 
-	switch content := msg.Content.(type) {
+// withThoughtSignature attaches a text turn's signature to its last part, the
+// position Gemini returned it in.
+func withThoughtSignature(parts []geminiPart, signature string) []geminiPart {
+	if signature == "" || len(parts) == 0 {
+		return parts
+	}
+	parts[len(parts)-1].ThoughtSignature = signature
+	return parts
+}
+
+func geminiPartsFromContent(content core.MessageContent) ([]geminiPart, error) {
+	switch content := content.(type) {
 	case nil:
 		return nil, nil
 	case string:
@@ -775,13 +865,21 @@ func nativeChatResponse(req *core.ChatRequest, geminiResp *geminiGenerateContent
 		if index == 0 && i > 0 {
 			index = i
 		}
-		content, toolCalls := openAIMessageFromGeminiParts(candidate.Content.Parts)
+		content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts)
+		// A tool-call-only turn carries content: null in OpenAI responses; an
+		// empty string would surface as an empty Responses message item that
+		// clients cannot echo back.
+		var messageContent core.MessageContent = content
+		if content == "" && len(toolCalls) > 0 {
+			messageContent = nil
+		}
 		resp.Choices = append(resp.Choices, core.Choice{
 			Index: index,
 			Message: core.ResponseMessage{
-				Role:      "assistant",
-				Content:   content,
-				ToolCalls: toolCalls,
+				Role:        "assistant",
+				Content:     messageContent,
+				ToolCalls:   toolCalls,
+				ExtraFields: thoughtSignatureExtraFields(signature),
 			},
 			FinishReason: finishReasonFromGemini(candidate.FinishReason, len(toolCalls) > 0),
 		})
@@ -820,14 +918,23 @@ func geminiPromptBlockReason(raw json.RawMessage) string {
 	}
 }
 
-func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall) {
+// openAIMessageFromGeminiParts flattens candidate parts into OpenAI text and
+// tool calls. A functionCall part's thought signature rides on its tool call;
+// the signature of a text turn (Gemini puts it on the last part) is returned
+// separately for the message.
+func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall, string) {
 	var text strings.Builder
+	var signature string
 	toolCalls := make([]core.ToolCall, 0)
 	for i, part := range parts {
 		if part.Text != "" && !part.Thought {
 			text.WriteString(part.Text)
 		}
-		if call := part.functionCall(); call != nil {
+		call := part.functionCall()
+		if call == nil && part.ThoughtSignature != "" {
+			signature = part.ThoughtSignature
+		}
+		if call != nil {
 			id := call.ID
 			if id == "" {
 				id = "call_" + strconv.Itoa(i)
@@ -848,10 +955,11 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall) 
 					Name:      call.Name,
 					Arguments: args,
 				},
+				ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
 			})
 		}
 	}
-	return text.String(), toolCalls
+	return text.String(), toolCalls, signature
 }
 
 func usageFromGemini(usage geminiUsageMetadata) core.Usage {

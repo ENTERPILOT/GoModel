@@ -158,13 +158,16 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 	}
 	for _, toolCall := range msg.ToolCalls {
 		callID := ResponsesFunctionCallCallID(toolCall.ID)
+		// Provider extensions on the tool call (Gemini's extra_content thought
+		// signature) stay on the item so a client echoing it back restores them.
 		output = append(output, core.ResponsesOutputItem{
-			ID:        ResponsesFunctionCallItemID(callID),
-			Type:      "function_call",
-			Status:    "completed",
-			CallID:    callID,
-			Name:      toolCall.Function.Name,
-			Arguments: toolCall.Function.Arguments,
+			ID:          ResponsesFunctionCallItemID(callID),
+			Type:        "function_call",
+			Status:      "completed",
+			CallID:      callID,
+			Name:        toolCall.Function.Name,
+			Arguments:   toolCall.Function.Arguments,
+			ExtraFields: core.CloneUnknownJSONFields(toolCall.ExtraFields),
 		})
 	}
 	return output

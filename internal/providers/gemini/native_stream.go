@@ -172,13 +172,16 @@ func (s *geminiStreamState) chatChunkChoice(candidate geminiCandidate, fallbackI
 		state.roleSent = true
 	}
 
-	content, toolCalls := openAIMessageFromGeminiParts(candidate.Content.Parts)
+	content, toolCalls, signature := openAIMessageFromGeminiParts(candidate.Content.Parts)
 	if content != "" {
 		delta["content"] = content
 	}
 	if len(toolCalls) > 0 {
 		state.sawToolCalls = true
 		delta["tool_calls"] = streamToolCalls(toolCalls)
+	}
+	if signature != "" {
+		delta[extraContentField] = thoughtSignatureExtraFields(signature).Lookup(extraContentField)
 	}
 
 	finish := finishReasonFromGemini(candidate.FinishReason, state.sawToolCalls)
@@ -219,7 +222,7 @@ func (s *geminiStreamState) choiceState(index int) *geminiChoiceStreamState {
 func streamToolCalls(toolCalls []core.ToolCall) []map[string]any {
 	out := make([]map[string]any, 0, len(toolCalls))
 	for i, call := range toolCalls {
-		out = append(out, map[string]any{
+		chunk := map[string]any{
 			"index": i,
 			"id":    call.ID,
 			"type":  "function",
@@ -227,7 +230,11 @@ func streamToolCalls(toolCalls []core.ToolCall) []map[string]any {
 				"name":      call.Function.Name,
 				"arguments": call.Function.Arguments,
 			},
-		})
+		}
+		if extra := call.ExtraFields.Lookup(extraContentField); len(extra) > 0 {
+			chunk[extraContentField] = extra
+		}
+		out = append(out, chunk)
 	}
 	return out
 }

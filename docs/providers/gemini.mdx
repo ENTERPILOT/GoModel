@@ -99,6 +99,38 @@ therefore drops those four fields for Gemini 3 and later (`gemini-3-*`,
 Gemma and other models. `max_tokens`, `stop`, penalties, `response_format` and
 thinking settings are unaffected.
 
+## Thought signatures
+
+Gemini 3 attaches an encrypted `thoughtSignature` to the function calls it
+emits and rejects a follow-up request (HTTP 400, "Function call is missing a
+thought_signature") when that call comes back in the history without it. In
+native mode GoModel exposes the signature the same way Google's own
+OpenAI-compatible endpoint does, so a client that echoes assistant messages
+back unchanged keeps working:
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+The same `extra_content` member appears on streamed `tool_calls` deltas, on
+Responses API `function_call` output items, and (for text-only turns) on the
+assistant message itself. Send it back verbatim; only the first call of a
+parallel batch carries a signature.
+
+When a Gemini 3 history contains a function call without any signature (the
+conversation started on another model, or the client dropped the field),
+GoModel sends Google's documented `skip_thought_signature_validator`
+placeholder instead of surfacing the 400. Reasoning continuity is reduced for
+that turn, so prefer echoing the real signature.
+
 ## Image input
 
 | Mode | OpenAI-style `image_url` |
