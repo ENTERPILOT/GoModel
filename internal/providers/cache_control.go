@@ -12,79 +12,49 @@ import (
 
 const anthropicCacheControlField = "cache_control"
 
-// anthropicOnlyMessageFields are message extras the Anthropic ingress sets for
-// the Anthropic provider alone. Every other provider forwards message extras
-// verbatim and would reject or misread them.
-var anthropicOnlyMessageFields = []string{core.ThinkingBlocksField, core.ToolResultIsErrorField}
-
-// adaptAnthropicCacheControl removes Anthropic-only cache directives and
-// message extras after the route is known unless the selected provider
-// accepts Anthropic request shapes. The caller's request remains unchanged.
+// adaptAnthropicCacheControl removes Anthropic cache directives after the
+// route is known unless the selected provider accepts them. The caller's
+// request remains unchanged. Anthropic-only message state (thinking blocks,
+// is_error) travels under extra_content and is handled by adaptExtraContent.
 func adaptAnthropicCacheControl(req *core.ChatRequest, providerType string) *core.ChatRequest {
-	if req == nil {
-		return req
-	}
-	stripCacheControl := !providerAcceptsAnthropicCacheControl(providerType) && hasAnthropicCacheControl(req)
-	stripMessageFields := normalizedProviderType(providerType) != "anthropic" && hasAnthropicOnlyMessageFields(req)
-	if !stripCacheControl && !stripMessageFields {
+	if req == nil || providerAcceptsAnthropicCacheControl(providerType) || !hasAnthropicCacheControl(req) {
 		return req
 	}
 
 	adapted := *req
-	if stripCacheControl {
-		adapted.ExtraFields = req.ExtraFields.Without(anthropicCacheControlField)
+	adapted.ExtraFields = req.ExtraFields.Without(anthropicCacheControlField)
 
-		adapted.Tools = make([]map[string]any, len(req.Tools))
-		for i, tool := range req.Tools {
-			cloned := make(map[string]any, len(tool))
-			for key, value := range tool {
-				if key != anthropicCacheControlField {
-					cloned[key] = value
-				}
+	adapted.Tools = make([]map[string]any, len(req.Tools))
+	for i, tool := range req.Tools {
+		cloned := make(map[string]any, len(tool))
+		for key, value := range tool {
+			if key != anthropicCacheControlField {
+				cloned[key] = value
 			}
-			adapted.Tools[i] = cloned
 		}
+		adapted.Tools[i] = cloned
 	}
 
 	adapted.Messages = make([]core.Message, len(req.Messages))
 	for i, message := range req.Messages {
-		if stripCacheControl {
-			message = withoutAnthropicMessageCacheControl(message)
-		}
-		if stripMessageFields {
-			message.ExtraFields = message.ExtraFields.Without(anthropicOnlyMessageFields...)
-		}
-		adapted.Messages[i] = message
+		adapted.Messages[i] = withoutAnthropicMessageCacheControl(message)
 	}
 	return &adapted
 }
 
-func hasAnthropicOnlyMessageFields(req *core.ChatRequest) bool {
-	return slices.ContainsFunc(req.Messages, func(message core.Message) bool {
-		for _, field := range anthropicOnlyMessageFields {
-			if len(message.ExtraFields.Lookup(field)) > 0 {
-				return true
-			}
-		}
-		return false
-	})
-}
-
-// adaptAnthropicBatchCacheControl applies the same post-routing policy to
-// canonical chat items produced by the Anthropic Message Batches ingress.
-// Ordinary OpenAI-compatible batches remain opaque and caller-owned.
+// adaptAnthropicBatchCacheControl applies the same post-routing policy
+// (cache directives and extra_content) to canonical chat items produced by
+// the Anthropic Message Batches ingress. Ordinary OpenAI-compatible batches
+// remain opaque and caller-owned. The request is returned as-is when no item
+// changes.
 func adaptAnthropicBatchCacheControl(ctx context.Context, req *core.BatchRequest, providerType string) (*core.BatchRequest, error) {
 	if req == nil || core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
-		return req, nil
-	}
-	// Only Anthropic itself accepts every Anthropic extra; OpenRouter accepts
-	// cache_control but still needs the message-level extras removed.
-	if providerAcceptsAnthropicCacheControl(providerType) && normalizedProviderType(providerType) == "anthropic" {
 		return req, nil
 	}
 
 	adapted := *req
 	adapted.Requests = append([]core.BatchRequestItem(nil), req.Requests...)
+	changed := false
 	for i, item := range req.Requests {
 		decoded, err := core.DecodeKnownBatchItemRequest(req.Endpoint, item)
 		if err != nil {
@@ -96,11 +66,19 @@ func adaptAnthropicBatchCacheControl(ctx context.Context, req *core.BatchRequest
 				fmt.Sprintf("requests[%d]: Anthropic Message Batch item is not a chat completion", i), nil,
 			)
 		}
-		body, err := json.Marshal(adaptAnthropicCacheControl(chat, providerType))
+		forward := adaptAnthropicCacheControl(adaptExtraContent(chat, providerType), providerType)
+		if forward == chat {
+			continue
+		}
+		body, err := json.Marshal(forward)
 		if err != nil {
 			return nil, core.NewInvalidRequestError(fmt.Sprintf("requests[%d]: failed to encode adapted chat request", i), err)
 		}
 		adapted.Requests[i].Body = body
+		changed = true
+	}
+	if !changed {
+		return req, nil
 	}
 	return &adapted, nil
 }

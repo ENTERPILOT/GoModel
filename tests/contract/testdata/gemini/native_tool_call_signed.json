@@ -1,0 +1,30 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "functionCall": {
+              "name": "get_weather",
+              "args": {
+                "city": "Paris"
+              }
+            },
+            "thoughtSignature": "CoUBAdHtim9Zf3Q4b2N0ZXQtc2lnbmF0dXJlLWZpeHR1cmUtZm9yLWNvbnRyYWN0LXRlc3RzAQ=="
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 42,
+    "candidatesTokenCount": 12,
+    "totalTokenCount": 71,
+    "thoughtsTokenCount": 17
+  },
+  "modelVersion": "gemini-3.5-flash",
+  "responseId": "c2lnbmVkLXRvb2wtY2FsbA"
+}

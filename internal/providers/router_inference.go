@@ -9,14 +9,17 @@ import (
 
 // Provider is gateway routing metadata on OpenAI-compatible request structs and
 // must be removed before dispatching to an upstream provider implementation.
+// Replay state another provider owns (extra_content) is dropped for every
+// dialect; Anthropic cache directives only reach providers that accept them.
 func forwardChatRequest(ctx context.Context, req *core.ChatRequest, route resolvedRoute) *core.ChatRequest {
 	forwardReq := *req
 	forwardReq.Model = route.selector.Model
 	forwardReq.Provider = ""
+	forward := adaptExtraContent(&forwardReq, route.providerType)
 	if core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
-		return &forwardReq
+		return forward
 	}
-	return adaptAnthropicCacheControl(&forwardReq, route.providerType)
+	return adaptAnthropicCacheControl(forward, route.providerType)
 }
 
 func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {

@@ -79,23 +79,29 @@ type geminiFileData struct {
 // tool_calls[].extra_content.google.thought_signature and a text part's as
 // message.extra_content.google.thought_signature. Gemini 3 rejects (HTTP 400)
 // any functionCall in the history that comes back without its signature.
-const (
-	extraContentField = "extra_content"
-	// skipThoughtSignatureValidator is the placeholder Google documents for
-	// function calls that never had a signature: a history transferred from
-	// another model or a call injected by the client.
-	skipThoughtSignatureValidator = "skip_thought_signature_validator"
-)
+// skipThoughtSignatureValidator is the placeholder Google documents for
+// function calls that never had a signature: a history transferred from
+// another model or a call injected by the client.
+const skipThoughtSignatureValidator = "skip_thought_signature_validator"
+
+// googleExtraContent is the extra_content.google object.
+type googleExtraContent struct {
+	ThoughtSignature string `json:"thought_signature"`
+}
 
 func thoughtSignatureExtraFields(signature string) core.UnknownJSONFields {
 	if signature == "" {
 		return core.UnknownJSONFields{}
 	}
-	encoded, err := json.Marshal(map[string]any{"google": map[string]any{"thought_signature": signature}})
+	encoded, err := json.Marshal(googleExtraContent{ThoughtSignature: signature})
 	if err != nil {
 		return core.UnknownJSONFields{}
 	}
-	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{extraContentField: encoded})
+	fields, err := core.UnknownJSONFields{}.WithExtraContent(core.ExtraContentVendorGoogle, encoded)
+	if err != nil {
+		return core.UnknownJSONFields{}
+	}
+	return fields
 }
 
 // thoughtSignatureFromExtraFields reads a replayed signature. The canonical
@@ -103,14 +109,10 @@ func thoughtSignatureExtraFields(signature string) core.UnknownJSONFields {
 // or thoughtSignature member is accepted too, because other gateways and SDKs
 // emit the signature that way.
 func thoughtSignatureFromExtraFields(fields core.UnknownJSONFields) string {
-	if raw := fields.Lookup(extraContentField); len(raw) > 0 {
-		var extra struct {
-			Google struct {
-				ThoughtSignature string `json:"thought_signature"`
-			} `json:"google"`
-		}
-		if err := json.Unmarshal(raw, &extra); err == nil && extra.Google.ThoughtSignature != "" {
-			return extra.Google.ThoughtSignature
+	if raw := fields.ExtraContent(core.ExtraContentVendorGoogle); len(raw) > 0 {
+		var extra googleExtraContent
+		if err := json.Unmarshal(raw, &extra); err == nil && extra.ThoughtSignature != "" {
+			return extra.ThoughtSignature
 		}
 	}
 	for _, key := range [...]string{"thought_signature", "thoughtSignature"} {

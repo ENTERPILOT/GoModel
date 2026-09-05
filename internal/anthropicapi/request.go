@@ -162,9 +162,9 @@ func convertMessages(req *MessagesRequest, lenient bool) ([]core.Message, error)
 // blocks become standalone role:"tool" messages that precede the remaining
 // content, matching the OpenAI ordering where tool responses follow the
 // assistant tool call and any user follow-up comes after. Assistant thinking
-// blocks are preserved verbatim on the message so the Anthropic provider can
-// replay them; they have no meaning for other providers and are stripped
-// before the request reaches one.
+// blocks are preserved verbatim under extra_content.anthropic so the Anthropic
+// provider can replay them; the router strips them before any other provider
+// sees the request.
 func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]core.Message, error) {
 	var (
 		toolMessages []core.Message
@@ -190,6 +190,10 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			if strings.TrimSpace(block.Name) == "" {
 				return nil, fmt.Errorf("tool_use block is missing name")
 			}
+			extra, err = toolUseExtra(extra, block.ExtraContent)
+			if err != nil {
+				return nil, err
+			}
 			toolCalls = append(toolCalls, core.ToolCall{
 				ID:          block.ID,
 				Type:        "function",
@@ -205,11 +209,15 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			if err != nil {
 				return nil, err
 			}
+			extra, err = toolResultExtra(extra, block.IsError)
+			if err != nil {
+				return nil, err
+			}
 			toolMessages = append(toolMessages, core.Message{
 				Role:        "tool",
 				ToolCallID:  id,
 				Content:     content,
-				ExtraFields: toolResultExtra(extra, block.IsError),
+				ExtraFields: extra,
 			})
 		case "thinking", "redacted_thinking":
 			// Only assistant turns carry thinking; anywhere else it is an
@@ -238,13 +246,14 @@ func convertBlockMessage(role string, blocks []ContentBlock, lenient bool) ([]co
 			ToolCalls: toolCalls,
 		}
 		if len(thinking) > 0 {
-			raw, err := json.Marshal(thinking)
+			raw, err := json.Marshal(map[string][]json.RawMessage{core.ThinkingBlocksField: thinking})
 			if err != nil {
 				return nil, fmt.Errorf("thinking blocks: %v", err)
 			}
-			msg.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-				core.ThinkingBlocksField: raw,
-			})
+			msg.ExtraFields, err = msg.ExtraFields.WithExtraContent(core.ExtraContentVendorAnthropic, raw)
+			if err != nil {
+				return nil, fmt.Errorf("thinking blocks: %v", err)
+			}
 		}
 		messages = append(messages, msg)
 	}
@@ -421,16 +430,31 @@ func thinkingBlockJSON(block ContentBlock) json.RawMessage {
 	return raw
 }
 
-// toolResultExtra adds the is_error marker to a tool message's extras.
-func toolResultExtra(extra core.UnknownJSONFields, isError bool) core.UnknownJSONFields {
+// toolResultExtra adds the is_error marker to a tool message's extras under
+// extra_content.anthropic.
+func toolResultExtra(extra core.UnknownJSONFields, isError bool) (core.UnknownJSONFields, error) {
 	if !isError {
-		return extra
+		return extra, nil
 	}
-	fields := map[string]json.RawMessage{core.ToolResultIsErrorField: json.RawMessage("true")}
-	if raw := extra.Lookup("cache_control"); len(raw) > 0 {
-		fields["cache_control"] = raw
+	marker, err := json.Marshal(map[string]bool{core.ToolResultIsErrorField: true})
+	if err != nil {
+		return core.UnknownJSONFields{}, err
 	}
-	return core.UnknownJSONFieldsFromMap(fields)
+	return extra.WithExtraContent(core.ExtraContentVendorAnthropic, marker)
+}
+
+// toolUseExtra carries a tool_use block's extra_content (provider replay
+// state the client echoed back) onto the canonical tool call.
+func toolUseExtra(extra core.UnknownJSONFields, extraContent json.RawMessage) (core.UnknownJSONFields, error) {
+	trimmed := bytes.TrimSpace(extraContent)
+	if len(trimmed) == 0 || core.IsJSONNull(trimmed) {
+		return extra, nil
+	}
+	merged, err := core.MergeUnknownJSONFields(extra, map[string]json.RawMessage{core.ExtraContentField: trimmed})
+	if err != nil {
+		return core.UnknownJSONFields{}, fmt.Errorf("tool_use extra_content: %v", err)
+	}
+	return merged, nil
 }
 
 // decodeSource decodes an image/document source object. A nil result means

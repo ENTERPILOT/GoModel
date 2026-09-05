@@ -127,6 +127,7 @@ function ensureAnthropicContentBlockSchema() {
     type: "object",
     properties: {
       content: anthropicContentSchema(),
+      extra_content: freeFormObjectSchema(),
       id: { type: "string" },
       input: freeFormObjectSchema(),
       is_error: { type: "boolean" },

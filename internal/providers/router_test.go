@@ -988,36 +988,106 @@ func TestAdaptAnthropicCacheControl_PreservesSupportedProviders(t *testing.T) {
 	}
 }
 
-func TestAdaptAnthropicCacheControl_StripsAnthropicOnlyMessageFields(t *testing.T) {
+func TestAdaptExtraContent_KeepsOwnVendorOnly(t *testing.T) {
+	extra := func(members string) core.UnknownJSONFields {
+		return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"},"anthropic":{"is_error":true}}`),
+			"x_keep":               json.RawMessage(members),
+		})
+	}
+	req := &core.ChatRequest{Messages: []core.Message{
+		{Role: "assistant", Content: "x", ExtraFields: extra("1"), ToolCalls: []core.ToolCall{{
+			ID: "c1", Type: "function", ExtraFields: extra("2"),
+			Function: core.FunctionCall{Name: "f", Arguments: "{}", ExtraFields: extra("3")},
+		}}},
+		{Role: "tool", ToolCallID: "c1", Content: "boom", ExtraFields: extra("4")},
+	}}
+	tests := []struct {
+		providerType string
+		want         string
+	}{
+		{providerType: "gemini", want: `{"google":{"thought_signature":"sig"}}`},
+		{providerType: "vertex", want: `{"google":{"thought_signature":"sig"}}`},
+		{providerType: "Anthropic", want: `{"anthropic":{"is_error":true}}`},
+		{providerType: "openai", want: ""},
+		{providerType: "openrouter", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.providerType, func(t *testing.T) {
+			got := adaptExtraContent(req, tt.providerType)
+			if got == req {
+				t.Fatal("request was not adapted")
+			}
+			call := got.Messages[0].ToolCalls[0]
+			for name, fields := range map[string]core.UnknownJSONFields{
+				"assistant": got.Messages[0].ExtraFields,
+				"tool call": call.ExtraFields,
+				"function":  call.Function.ExtraFields,
+				"tool":      got.Messages[1].ExtraFields,
+			} {
+				if raw := string(fields.Lookup(core.ExtraContentField)); raw != tt.want {
+					t.Errorf("%s extra_content = %s, want %s", name, raw, tt.want)
+				}
+				if raw := fields.Lookup("x_keep"); len(raw) == 0 {
+					t.Errorf("%s dropped unrelated extra", name)
+				}
+			}
+		})
+	}
+	if raw := req.Messages[0].ToolCalls[0].ExtraFields.ExtraContent(core.ExtraContentVendorAnthropic); len(raw) == 0 {
+		t.Error("adaptation mutated the caller's request")
+	}
+}
+
+func TestAdaptExtraContent_ReturnsRequestWithoutExtraContent(t *testing.T) {
 	req := &core.ChatRequest{Messages: []core.Message{
 		{Role: "assistant", Content: "x", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-			core.ThinkingBlocksField: json.RawMessage(`[{"type":"thinking","thinking":"t","signature":"s"}]`),
-			"x_keep":                 json.RawMessage("true"),
-		})},
-		{Role: "tool", ToolCallID: "c1", Content: "boom", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-			core.ToolResultIsErrorField: json.RawMessage("true"),
-		})},
+			"x_keep": json.RawMessage("true"),
+		}), ToolCalls: []core.ToolCall{{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"}}}},
 	}}
-	if got := adaptAnthropicCacheControl(req, "anthropic"); got != req {
-		t.Fatal("anthropic must receive thinking_blocks and is_error untouched")
+	if got := adaptExtraContent(req, "openai"); got != req {
+		t.Error("request without extra_content must be returned as-is")
 	}
-	for _, providerType := range []string{"openai", "openrouter", "gemini"} {
-		got := adaptAnthropicCacheControl(req, providerType)
-		if got == req {
-			t.Fatalf("provider %q did not adapt the request", providerType)
+	own := &core.ChatRequest{Messages: []core.Message{
+		{Role: "assistant", ContentNull: true, ToolCalls: []core.ToolCall{{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"}}`),
+			})}}},
+	}}
+	if got := adaptExtraContent(own, "gemini"); got != own {
+		t.Error("request carrying only the provider's own extra_content must be returned as-is")
+	}
+	if got := adaptExtraContent(nil, "openai"); got != nil {
+		t.Error("nil request must stay nil")
+	}
+}
+
+func TestForwardChatRequest_DropsForeignExtraContentForEveryDialect(t *testing.T) {
+	req := &core.ChatRequest{Model: "m", Provider: "p", Messages: []core.Message{
+		{Role: "assistant", ContentNull: true, ToolCalls: []core.ToolCall{{
+			ID: "c1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"},
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"}}`),
+			}),
+		}}},
+	}}
+	route := resolvedRoute{selector: core.ModelSelector{Model: "m"}, providerType: "openai"}
+	for _, ctx := range []context.Context{
+		context.Background(),
+		core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages),
+	} {
+		got := forwardChatRequest(ctx, req, route)
+		if raw := got.Messages[0].ToolCalls[0].ExtraFields.Lookup(core.ExtraContentField); len(raw) != 0 {
+			t.Errorf("openai received foreign extra_content: %s", raw)
 		}
-		if raw := got.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) != 0 {
-			t.Errorf("provider %q kept thinking_blocks: %s", providerType, raw)
-		}
-		if raw := got.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(raw) != 0 {
-			t.Errorf("provider %q kept is_error: %s", providerType, raw)
-		}
-		if raw := got.Messages[0].ExtraFields.Lookup("x_keep"); string(raw) != "true" {
-			t.Errorf("provider %q dropped unrelated extra: %s", providerType, raw)
+		if got.Provider != "" {
+			t.Errorf("provider hint = %q, want cleared", got.Provider)
 		}
 	}
-	if raw := req.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) == 0 {
-		t.Error("adaptation mutated the caller's request")
+	route.providerType = "gemini"
+	got := forwardChatRequest(context.Background(), req, route)
+	if raw := got.Messages[0].ToolCalls[0].ExtraFields.ExtraContent(core.ExtraContentVendorGoogle); len(raw) == 0 {
+		t.Error("gemini lost its own extra_content")
 	}
 }
 
@@ -1973,8 +2043,8 @@ func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
 
 func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpenRouter(t *testing.T) {
 	body := `{"model":"claude-sonnet-4-5","messages":[
-		{"role":"assistant","content":"x","thinking_blocks":[{"type":"thinking","thinking":"t","signature":"s"}],"cache_control":{"type":"ephemeral"}},
-		{"role":"tool","tool_call_id":"c1","content":"boom","is_error":true}
+		{"role":"assistant","content":"x","extra_content":{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"t","signature":"s"}]}},"cache_control":{"type":"ephemeral"}},
+		{"role":"tool","tool_call_id":"c1","content":"boom","extra_content":{"anthropic":{"is_error":true}}}
 	]}`
 	request := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
@@ -2000,10 +2070,10 @@ func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpen
 		t.Fatal(err)
 	}
 	chat := decoded.Request.(*core.ChatRequest)
-	if raw := chat.Messages[0].ExtraFields.Lookup(core.ThinkingBlocksField); len(raw) != 0 {
+	if raw := chat.Messages[0].ExtraFields.Lookup(core.ExtraContentField); len(raw) != 0 {
 		t.Errorf("openrouter batch kept thinking_blocks: %s", raw)
 	}
-	if raw := chat.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(raw) != 0 {
+	if raw := chat.Messages[1].ExtraFields.Lookup(core.ExtraContentField); len(raw) != 0 {
 		t.Errorf("openrouter batch kept is_error: %s", raw)
 	}
 	if got := string(chat.Messages[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {

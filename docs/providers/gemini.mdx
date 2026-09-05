@@ -121,9 +121,11 @@ back unchanged keeps working:
 ```
 
 The same `extra_content` member appears on streamed `tool_calls` deltas, on
-Responses API `function_call` output items, and (for text-only turns) on the
-assistant message itself. Send it back verbatim; only the first call of a
-parallel batch carries a signature. A flat `thought_signature` (or
+Responses API `function_call` output items, on Anthropic Messages API
+`tool_use` blocks, and (for text-only turns) on the assistant message itself.
+Send it back verbatim; only the first call of a parallel batch carries a
+signature. Other providers never see it; see
+[Provider state](/advanced/extra-content) for the shared convention. A flat `thought_signature` (or
 `thoughtSignature`) on the tool call or its `function` object is accepted too,
 so clients built against other gateways keep working.
 

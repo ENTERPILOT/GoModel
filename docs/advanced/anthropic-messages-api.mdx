@@ -197,6 +197,10 @@ features that have no canonical equivalent are not preserved end to end:
   tool-use turns continue correctly. Other providers never see them.
 - **`tool_result.is_error`** is preserved when routed to Anthropic. Other
   providers have no equivalent flag and receive the result content only.
+- **`tool_use.extra_content`** carries another provider's replay state, such as
+  a Gemini 3 thought signature, back to that provider. GoModel sets it on
+  `tool_use` blocks it returns; echo it unchanged. See
+  [Provider state](/advanced/extra-content).
 - **Server/built-in tools** (web search, code execution, …) and their history
   blocks (`server_tool_use`, `web_search_tool_result`, …) are rejected with a clear
   `400`; only custom tools (`type` absent or `"custom"`) translate.
