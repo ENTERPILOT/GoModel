@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"slices"
@@ -47,7 +46,8 @@ func adaptAnthropicCacheControl(req *core.ChatRequest, providerType string) *cor
 // from the Anthropic Message Batches ingress get the cache-directive and
 // extra_content treatment of a chat request. Ordinary OpenAI-compatible
 // batches stay opaque and caller-owned except for foreign extra_content,
-// which is removed from the chat and Responses items that carry it. The
+// which is removed from the chat and Responses items that carry it; items
+// that do not decode, or change nothing, keep their original bytes. The
 // request is returned as-is when no item changes.
 func adaptBatchRequest(ctx context.Context, req *core.BatchRequest, providerType string) (*core.BatchRequest, error) {
 	if req == nil {
@@ -59,9 +59,6 @@ func adaptBatchRequest(ctx context.Context, req *core.BatchRequest, providerType
 	adapted.Requests = append([]core.BatchRequestItem(nil), req.Requests...)
 	changed := false
 	for i, item := range req.Requests {
-		if !anthropicDialect && !bytes.Contains(item.Body, []byte(core.ExtraContentField)) {
-			continue
-		}
 		decoded, err := core.DecodeKnownBatchItemRequest(req.Endpoint, item)
 		if err != nil {
 			if anthropicDialect {

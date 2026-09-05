@@ -1138,13 +1138,17 @@ func TestForwardResponsesRequest_DropsForeignExtraContent(t *testing.T) {
 func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testing.T) {
 	chatBody := `{"model":"gpt-4o","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig"}}}]},{"role":"tool","tool_call_id":"c1","content":"ok"}]}`
 	responsesBody := `{"model":"gpt-4o","input":[{"type":"function_call","call_id":"c1","name":"f","arguments":"{}","extra_content":{"google":{"thought_signature":"sig"}}}]}`
+	escapedBody := `{"model":"gpt-4o","messages":[{"role":"tool","tool_call_id":"c1","content":"ok","extra_\u0063ontent":{"anthropic":{"is_error":true}}}]}`
 	opaqueBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}],  "x": 1}`
+	malformedBody := `{"model":"gpt-4o","messages":"extra_content"`
 	request := &core.BatchRequest{
 		Endpoint: "/v1/chat/completions",
 		Requests: []core.BatchRequestItem{
 			{CustomID: "chat", Method: http.MethodPost, URL: "/v1/chat/completions", Body: json.RawMessage(chatBody)},
 			{CustomID: "responses", Method: http.MethodPost, URL: "/v1/responses", Body: json.RawMessage(responsesBody)},
+			{CustomID: "escaped", Method: http.MethodPost, URL: "/v1/chat/completions", Body: json.RawMessage(escapedBody)},
 			{CustomID: "opaque", Method: http.MethodPost, URL: "/v1/chat/completions", Body: json.RawMessage(opaqueBody)},
+			{CustomID: "malformed", Method: http.MethodPost, URL: "/v1/chat/completions", Body: json.RawMessage(malformedBody)},
 		},
 	}
 	adapted, err := adaptBatchRequest(context.Background(), request, "openai")
@@ -1154,20 +1158,24 @@ func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testi
 	if adapted == request {
 		t.Fatal("batch with foreign extra_content was not adapted")
 	}
-	for _, i := range []int{0, 1} {
-		if bytes.Contains(adapted.Requests[i].Body, []byte("extra_content")) {
+	for _, i := range []int{0, 1, 2} {
+		if bytes.Contains(adapted.Requests[i].Body, []byte("extra_content")) || bytes.Contains(adapted.Requests[i].Body, []byte("is_error")) {
 			t.Errorf("requests[%d] kept foreign extra_content: %s", i, adapted.Requests[i].Body)
 		}
 	}
-	if string(adapted.Requests[2].Body) != opaqueBody {
-		t.Errorf("opaque item was rewritten: %s", adapted.Requests[2].Body)
+	if string(adapted.Requests[3].Body) != opaqueBody {
+		t.Errorf("opaque item was rewritten: %s", adapted.Requests[3].Body)
+	}
+	if string(adapted.Requests[4].Body) != malformedBody {
+		t.Errorf("undecodable item was rewritten: %s", adapted.Requests[4].Body)
 	}
 	if !bytes.Contains(request.Requests[0].Body, []byte("thought_signature")) {
 		t.Error("adaptation mutated the caller's batch")
 	}
 
-	if got, err := adaptBatchRequest(context.Background(), request, "gemini"); err != nil || got != request {
-		t.Errorf("gemini batch = %#v, %v; want the request untouched", got, err)
+	own := &core.BatchRequest{Endpoint: request.Endpoint, Requests: []core.BatchRequestItem{request.Requests[0], request.Requests[1], request.Requests[3], request.Requests[4]}}
+	if got, err := adaptBatchRequest(context.Background(), own, "gemini"); err != nil || got != own {
+		t.Errorf("gemini batch = %v, %v; want the request untouched", got != own, err)
 	}
 }
 
