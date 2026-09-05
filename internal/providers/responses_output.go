@@ -159,15 +159,33 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 	for _, toolCall := range msg.ToolCalls {
 		callID := ResponsesFunctionCallCallID(toolCall.ID)
 		output = append(output, core.ResponsesOutputItem{
-			ID:        ResponsesFunctionCallItemID(callID),
-			Type:      "function_call",
-			Status:    "completed",
-			CallID:    callID,
-			Name:      toolCall.Function.Name,
-			Arguments: toolCall.Function.Arguments,
+			ID:          ResponsesFunctionCallItemID(callID),
+			Type:        "function_call",
+			Status:      "completed",
+			CallID:      callID,
+			Name:        toolCall.Function.Name,
+			Arguments:   toolCall.Function.Arguments,
+			ExtraFields: toolCallExtraContent(toolCall.ExtraFields),
 		})
 	}
 	return output
+}
+
+// toolCallExtraContentField is the OpenAI-compatible member holding provider
+// state a chat tool call needs back verbatim on the next turn, as used by
+// Google's OpenAI-compatible endpoint (extra_content.google.thought_signature).
+const toolCallExtraContentField = "extra_content"
+
+// toolCallExtraContent isolates the extra_content member of a chat tool call
+// so it survives on the Responses function_call item that clients replay. The
+// other unknown tool-call members are provider metadata, not replay state, so
+// only extra_content is forwarded.
+func toolCallExtraContent(fields core.UnknownJSONFields) core.UnknownJSONFields {
+	raw := fields.Lookup(toolCallExtraContentField)
+	if len(raw) == 0 {
+		return core.UnknownJSONFields{}
+	}
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{toolCallExtraContentField: raw})
 }
 
 func responseMessageReasoningContent(msg core.ResponseMessage) string {
