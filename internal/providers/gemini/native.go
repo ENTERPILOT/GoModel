@@ -98,20 +98,41 @@ func thoughtSignatureExtraFields(signature string) core.UnknownJSONFields {
 	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{extraContentField: encoded})
 }
 
+// thoughtSignatureFromExtraFields reads a replayed signature. The canonical
+// spelling is extra_content.google.thought_signature; a flat thought_signature
+// or thoughtSignature member is accepted too, because other gateways and SDKs
+// emit the signature that way.
 func thoughtSignatureFromExtraFields(fields core.UnknownJSONFields) string {
-	raw := fields.Lookup(extraContentField)
-	if len(raw) == 0 {
-		return ""
+	if raw := fields.Lookup(extraContentField); len(raw) > 0 {
+		var extra struct {
+			Google struct {
+				ThoughtSignature string `json:"thought_signature"`
+			} `json:"google"`
+		}
+		if err := json.Unmarshal(raw, &extra); err == nil && extra.Google.ThoughtSignature != "" {
+			return extra.Google.ThoughtSignature
+		}
 	}
-	var extra struct {
-		Google struct {
-			ThoughtSignature string `json:"thought_signature"`
-		} `json:"google"`
+	for _, key := range [...]string{"thought_signature", "thoughtSignature"} {
+		raw := fields.Lookup(key)
+		if len(raw) == 0 {
+			continue
+		}
+		var signature string
+		if err := json.Unmarshal(raw, &signature); err == nil && signature != "" {
+			return signature
+		}
 	}
-	if err := json.Unmarshal(raw, &extra); err != nil {
-		return ""
+	return ""
+}
+
+// toolCallThoughtSignature reads the signature a client replayed with an
+// assistant tool call, on the call itself or nested on its function object.
+func toolCallThoughtSignature(call core.ToolCall) string {
+	if signature := thoughtSignatureFromExtraFields(call.ExtraFields); signature != "" {
+		return signature
 	}
-	return extra.Google.ThoughtSignature
+	return thoughtSignatureFromExtraFields(call.Function.ExtraFields)
 }
 
 // requiresThoughtSignature reports whether Gemini validates that every
@@ -267,7 +288,9 @@ func geminiPartsFromMessage(msg core.Message, signatureRequired bool) ([]geminiP
 func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []geminiPart {
 	parts := make([]geminiPart, 0, len(msg.ToolCalls)+1)
 	if text := strings.TrimSpace(core.ExtractTextContent(msg.Content)); text != "" {
-		parts = append(parts, geminiPart{Text: text})
+		// A mixed turn keeps the text part's own signature (message-level
+		// extra_content) next to the per-call ones.
+		parts = append(parts, geminiPart{Text: text, ThoughtSignature: thoughtSignatureFromExtraFields(msg.ExtraFields)})
 	}
 	signed := false
 	for _, call := range msg.ToolCalls {
@@ -275,7 +298,7 @@ func geminiPartsFromToolCallMessage(msg core.Message, signatureRequired bool) []
 		if len(args) == 0 {
 			args = json.RawMessage(`{}`)
 		}
-		signature := thoughtSignatureFromExtraFields(call.ExtraFields)
+		signature := toolCallThoughtSignature(call)
 		signed = signed || signature != ""
 		parts = append(parts, geminiPart{
 			FunctionCall: &geminiFunctionCall{

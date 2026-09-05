@@ -155,11 +155,12 @@ Stateful note:
   defaults `OPENROUTER_MODEL_FILTER_INCLUDE` to `*:free`, which leaves models
   used by the rest of the matrix untouched; the scenario is read-only and
   rerunnable in any order
-- `S225`-`S227` cover recent release regressions: image content nested in an
+- `S225`-`S228` cover recent release regressions: image content nested in an
   Anthropic `tool_result`, time-window pricing merged with an operator override,
-  and tolerant admin listing of a virtual model with corrupt SQL timestamps.
-  They create and clean up their own artifacts and are rerunnable in any order;
-  `S227` reloads the SQLite gateway and therefore stays sequential
+  tolerant admin listing of a virtual model with corrupt SQL timestamps, and a
+  Gemini 3 tool call replayed with its thought signature. They create and clean
+  up their own artifacts and are rerunnable in any order; `S227` reloads the
+  SQLite gateway and therefore stays sequential
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on

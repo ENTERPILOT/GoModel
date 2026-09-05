@@ -211,8 +211,9 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openA
 		if toolCall.Function.Name != "" {
 			state.Name = toolCall.Function.Name
 		}
-		if len(toolCall.ExtraContent) > 0 {
-			state.ExtraContent = toolCall.ExtraContent
+		// A later delta's explicit null must not erase a signature already seen.
+		if extra := bytes.TrimSpace(toolCall.ExtraContent); len(extra) > 0 && !bytes.Equal(extra, []byte("null")) {
+			state.ExtraContent = extra
 		}
 
 		arguments := toolCall.Function.Arguments

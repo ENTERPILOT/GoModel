@@ -123,7 +123,9 @@ back unchanged keeps working:
 The same `extra_content` member appears on streamed `tool_calls` deltas, on
 Responses API `function_call` output items, and (for text-only turns) on the
 assistant message itself. Send it back verbatim; only the first call of a
-parallel batch carries a signature.
+parallel batch carries a signature. A flat `thought_signature` (or
+`thoughtSignature`) on the tool call or its `function` object is accepted too,
+so clients built against other gateways keep working.
 
 When a Gemini 3 history contains a function call without any signature (the
 conversation started on another model, or the client dropped the field),

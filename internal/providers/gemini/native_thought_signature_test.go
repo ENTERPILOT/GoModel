@@ -25,6 +25,14 @@ func toolCallWithSignature(id, name, signature string) core.ToolCall {
 	}
 }
 
+func rawFields(pairs map[string]string) core.UnknownJSONFields {
+	fields := make(map[string]json.RawMessage, len(pairs))
+	for key, value := range pairs {
+		fields[key] = json.RawMessage(value)
+	}
+	return core.UnknownJSONFieldsFromMap(fields)
+}
+
 func TestConvertChatRequestToGemini_ThoughtSignatures(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -64,6 +72,49 @@ func TestConvertChatRequestToGemini_ThoughtSignatures(t *testing.T) {
 				toolCallWithSignature("call_2", "lookup_weather", ""),
 			}},
 			wantSigs: []string{"", "sig-1", ""},
+		},
+		{
+			name:  "flat snake_case spelling on the tool call",
+			model: "gemini-3.5-flash",
+			message: core.Message{Role: "assistant", ToolCalls: []core.ToolCall{{
+				ID: "call_1", Type: "function",
+				Function:    core.FunctionCall{Name: "lookup_weather", Arguments: "{}"},
+				ExtraFields: rawFields(map[string]string{"thought_signature": `"sig-flat"`}),
+			}}},
+			wantSigs: []string{"sig-flat"},
+		},
+		{
+			name:  "flat camelCase spelling nested on the function object",
+			model: "gemini-3.5-flash",
+			message: core.Message{Role: "assistant", ToolCalls: []core.ToolCall{{
+				ID: "call_1", Type: "function",
+				Function: core.FunctionCall{
+					Name: "lookup_weather", Arguments: "{}",
+					ExtraFields: rawFields(map[string]string{"thoughtSignature": `"sig-func"`}),
+				},
+			}}},
+			wantSigs: []string{"sig-func"},
+		},
+		{
+			name:  "malformed extra_content falls back to the placeholder",
+			model: "gemini-3.5-flash",
+			message: core.Message{Role: "assistant", ToolCalls: []core.ToolCall{{
+				ID: "call_1", Type: "function",
+				Function:    core.FunctionCall{Name: "lookup_weather", Arguments: "{}"},
+				ExtraFields: rawFields(map[string]string{"extra_content": `{"google":"not-an-object"}`}),
+			}}},
+			wantSigs: []string{skipThoughtSignatureValidator},
+		},
+		{
+			name:  "mixed turn keeps the text signature and the call signature",
+			model: "gemini-3.5-flash",
+			message: core.Message{
+				Role:        "assistant",
+				Content:     "Checking.",
+				ExtraFields: thoughtSignatureExtraFields("sig-text"),
+				ToolCalls:   []core.ToolCall{toolCallWithSignature("call_1", "lookup_weather", "sig-1")},
+			},
+			wantSigs: []string{"sig-text", "sig-1"},
 		},
 		{
 			name:  "text turn signature lands on the last part",
