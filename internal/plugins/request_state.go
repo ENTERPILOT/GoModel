@@ -136,7 +136,9 @@ func (s *RequestState) AddResponseHeader(key, value string) {
 	s.ResponseHeaders.Add(key, value)
 }
 
-// ApplyResponseHeaders copies the collected headers onto a response.
+// ApplyResponseHeaders applies the collected headers to a response. A
+// header whose only value is the empty string is removed from dst (see
+// pluginapi.Headers.Response).
 func (s *RequestState) ApplyResponseHeaders(dst http.Header) {
 	if s == nil || dst == nil {
 		return
@@ -147,7 +149,12 @@ func (s *RequestState) ApplyResponseHeaders(dst http.Header) {
 		if len(values) == 0 {
 			continue
 		}
-		dst[key] = append([]string(nil), values...)
+		canonical := http.CanonicalHeaderKey(key)
+		if len(values) == 1 && values[0] == "" {
+			delete(dst, canonical)
+			continue
+		}
+		dst[canonical] = append([]string(nil), values...)
 	}
 }
 

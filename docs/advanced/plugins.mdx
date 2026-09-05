@@ -144,7 +144,22 @@ one of three modes in `StreamHook.StreamPolicy()`:
 characters of text per choice and presents each delta together with that
 tail, so a pattern spanning two chunks (a phone number, an API key) is
 visible in one event before any of it reaches the client. A pattern of up to
-`LookbehindChars + 1` characters is always caught. `0` disables it.
+`LookbehindChars + 1` characters is always caught. `0` disables it. The tail
+comes back already carrying the plugin's earlier edits, and
+`StreamEvent.Overlap` says how many leading characters it spans: a plugin
+must only edit matches that extend past `Overlap`, since a match inside it
+was handled the previous time (the built-in `string_replace` does this, so
+a rule like `a => aa` is applied once, not on its own output).
+
+**Chat chunks with several choices** are split into one chunk per choice
+before plugins see them, so every choice is inspected; provider `usage`
+stays on the last of them.
+
+**Restated text** (Responses API): after a delta was replaced or dropped,
+the events that repeat a part's full text (`response.output_text.done`,
+`response.content_part.done`, `response.output_item.done`, and the terminal
+`response.completed`) are rewritten to the text that was actually emitted,
+so clients reading the completion instead of the deltas see the same result.
 
 **Buffering**: the upstream is drained into a bounded buffer
 (`MaxBufferBytes`, default 4 MiB; exceeding it fails closed with code
@@ -185,7 +200,7 @@ of a request:
 | `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam` |
 | `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason` |
 | `Stream` | `*StreamState` | text accumulated so far per choice and the event count; `nil` for non-streaming requests |
-| `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (appended to the client response), `Upstream` (recorded, not forwarded in this release) |
+| `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (recorded, not forwarded in this release) |
 | `Values` | `Values` | per-request bag shared by every hook of the request; prefix keys with the plugin name |
 
 Edits go through methods, not field assignment, so GoModel re-encodes only

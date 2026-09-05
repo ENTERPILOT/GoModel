@@ -182,13 +182,15 @@ func (p *Plugin) apply(x *pluginapi.Exchange) pluginapi.Decision {
 	_, added := x.Values.Get(addKey)
 
 	detail := map[string][]string{}
-	if names := applyEdits(&x.Headers.Request, p.request, true); len(names) > 0 {
+	if names := applyEdits(&x.Headers.Request, p.request, true, false); len(names) > 0 {
 		detail["request"] = names
 	}
-	if names := applyEdits(&x.Headers.Response, p.response, !added); len(names) > 0 {
+	// Response headers do not exist yet when the plugin runs, so a removal is
+	// recorded as an empty value, which the gateway applies as a deletion.
+	if names := applyEdits(&x.Headers.Response, p.response, !added, true); len(names) > 0 {
 		detail["response"] = names
 	}
-	if names := applyEdits(&x.Headers.Upstream, p.upstream, true); len(names) > 0 {
+	if names := applyEdits(&x.Headers.Upstream, p.upstream, true, false); len(names) > 0 {
 		detail["upstream"] = names
 	}
 	if !added && x.Values != nil {
@@ -199,7 +201,10 @@ func (p *Plugin) apply(x *pluginapi.Exchange) pluginapi.Decision {
 
 // applyEdits applies edits to h (allocating it when nil) and returns the
 // canonical names of the headers it changed, in order, without duplicates.
-func applyEdits(h *http.Header, edits []edit, allowAdd bool) []string {
+// With markRemovals a remove sets the header to the empty string (the
+// pluginapi convention for removing a response header) instead of deleting
+// it from h.
+func applyEdits(h *http.Header, edits []edit, allowAdd, markRemovals bool) []string {
 	if len(edits) == 0 {
 		return nil
 	}
@@ -218,6 +223,10 @@ func applyEdits(h *http.Header, edits []edit, allowAdd bool) []string {
 			}
 			h.Add(e.name, e.value)
 		case opRemove:
+			if markRemovals {
+				h.Set(e.name, "")
+				break
+			}
 			if _, ok := (*h)[e.name]; !ok {
 				continue
 			}

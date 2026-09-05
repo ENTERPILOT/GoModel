@@ -55,6 +55,14 @@ type StreamEvent struct {
 	// Text is the delta text for text, tool-call argument, and reasoning
 	// deltas.
 	Text string
+	// Overlap is the number of leading characters (runes) of Text that were
+	// already presented in an earlier event of this choice: under a
+	// lookbehind StreamPolicy GoModel withholds a tail of text and shows it
+	// again in front of the next delta, after this plugin's earlier decision
+	// was applied to it. An edit whose match ends within the first Overlap
+	// characters was applied then and must not be applied again; edits that
+	// extend past Overlap are new. 0 when nothing was withheld.
+	Overlap int
 	// Raw is the event as received. Read-only.
 	Raw json.RawMessage
 }

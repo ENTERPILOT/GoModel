@@ -356,7 +356,7 @@ remove lines are a bare `Name`. Blank lines and `#` comments are ignored.
 | `request_remove` | Drop a header from the live request after the prompt phase. |
 | `response_set` | Replace a header on the response sent to the client. |
 | `response_add` | Append a value to a client response header, keeping existing values. Applied once per request even when the instance runs in both phases. |
-| `response_remove` | Drop a header from the client response. |
+| `response_remove` | Drop a header from the client response, including headers GoModel adds itself (for example `X-Request-Id`). |
 | `upstream_set` | Static headers for the provider call. Recorded but not forwarded in this release. |
 
 Credential headers (`Authorization`, `X-Api-Key`, `Cookie`, ...) can never be

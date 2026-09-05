@@ -59,6 +59,15 @@ type Codec interface {
 	// Terminate renders the final bytes that end a cut stream, [DONE]
 	// included.
 	Terminate(t Termination) [][]byte
+	// Split divides a raw event that carries several choices into one raw
+	// event per choice, so each is decoded and transformed on its own. It
+	// returns nil when raw needs no splitting.
+	Split(raw RawEvent) []RawEvent
+	// Restate rewrites an event that repeats text already streamed (the
+	// Responses *.done and response.completed events) so it carries the
+	// text that was actually emitted after transformation; ok reports that
+	// ev was changed. Codecs without such events return ev, false.
+	Restate(ev Event) (Event, bool)
 }
 
 // ErrNotTextEvent is returned by RewriteText for events without delta text.

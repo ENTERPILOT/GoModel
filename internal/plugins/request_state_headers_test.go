@@ -59,3 +59,17 @@ func TestCoerceTextareaAcceptsList(t *testing.T) {
 		t.Fatal("expected an error for a non-string item")
 	}
 }
+
+func TestApplyResponseHeadersRemovesEmptyValues(t *testing.T) {
+	state := NewRequestState()
+	state.AddResponseHeader("X-Extra", "1")
+	state.AddResponseHeader("x-request-id", "")
+	dst := http.Header{"X-Request-Id": {"req-1"}, "Content-Type": {"application/json"}}
+	state.ApplyResponseHeaders(dst)
+	if _, still := dst["X-Request-Id"]; still {
+		t.Fatalf("X-Request-Id not removed: %v", dst)
+	}
+	if dst.Get("X-Extra") != "1" || dst.Get("Content-Type") != "application/json" {
+		t.Fatalf("headers = %v", dst)
+	}
+}

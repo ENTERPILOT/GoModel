@@ -17,6 +17,7 @@ type responsesEventView struct {
 	Delta          string          `json:"delta"`
 	OutputIndex    int             `json:"output_index"`
 	ContentIndex   int             `json:"content_index"`
+	SummaryIndex   int             `json:"summary_index"`
 	SequenceNumber *int            `json:"sequence_number"`
 	Item           json.RawMessage `json:"item"`
 	Response       *struct {
@@ -39,6 +40,35 @@ type responsesItem struct {
 	contentIndex int
 	partOpen     bool
 	done         bool
+	// parts and summaries hold the text emitted into each content part
+	// (output_text, reasoning_text) and reasoning summary part, so the
+	// events that restate a part's full text can be rewritten to match.
+	parts     map[int]*strings.Builder
+	summaries map[int]*strings.Builder
+}
+
+func (item *responsesItem) part(index int) *strings.Builder {
+	if item.parts == nil {
+		item.parts = map[int]*strings.Builder{}
+	}
+	if b := item.parts[index]; b != nil {
+		return b
+	}
+	b := &strings.Builder{}
+	item.parts[index] = b
+	return b
+}
+
+func (item *responsesItem) summary(index int) *strings.Builder {
+	if item.summaries == nil {
+		item.summaries = map[int]*strings.Builder{}
+	}
+	if b := item.summaries[index]; b != nil {
+		return b
+	}
+	b := &strings.Builder{}
+	item.summaries[index] = b
+	return b
 }
 
 type responsesCodec struct {
@@ -49,8 +79,12 @@ type responsesCodec struct {
 	order               []int
 	// textIndex and argsIndex are the output_index of the most recently
 	// decoded text and function-call delta; emitted deltas (which may be
-	// re-segmented copies) are attributed to them by Track.
+	// re-segmented copies) are attributed to them by Track. textPart is
+	// the content or summary index of that text delta and textSummary says
+	// which of the two it is.
 	textIndex, argsIndex int
+	textPart             int
+	textSummary          bool
 }
 
 // ResponsesCodec returns a codec for Responses API event streams.
@@ -101,8 +135,10 @@ func (c *responsesCodec) remember(view *responsesEventView) {
 		}
 	}
 	switch view.Type {
-	case "response.output_text.delta":
-		c.textIndex = view.OutputIndex
+	case "response.output_text.delta", "response.reasoning_text.delta":
+		c.textIndex, c.textPart, c.textSummary = view.OutputIndex, view.ContentIndex, false
+	case "response.reasoning_summary_text.delta":
+		c.textIndex, c.textPart, c.textSummary = view.OutputIndex, view.SummaryIndex, true
 	case "response.function_call_arguments.delta":
 		c.argsIndex = view.OutputIndex
 	}
@@ -115,6 +151,16 @@ func (c *responsesCodec) Track(ev Event) {
 	case KindTextDelta:
 		if item := c.items[c.textIndex]; item != nil {
 			item.text.WriteString(ev.Text)
+			item.part(c.textPart).WriteString(ev.Text)
+		}
+		return
+	case KindReasoningDelta:
+		if item := c.items[c.textIndex]; item != nil {
+			if c.textSummary {
+				item.summary(c.textPart).WriteString(ev.Text)
+			} else {
+				item.part(c.textPart).WriteString(ev.Text)
+			}
 		}
 		return
 	case KindToolCallDelta:
@@ -181,6 +227,198 @@ func (c *responsesCodec) RewriteText(ev Event, text string) (Event, error) {
 	ev.Text = text
 	ev.Data = data
 	return ev, nil
+}
+
+// Split is a no-op: a Responses event carries one delta.
+func (c *responsesCodec) Split(RawEvent) []RawEvent { return nil }
+
+// Restate rewrites the events that repeat streamed text (the *.done events
+// of a part or item and the terminal response.* event) so their text is
+// what was emitted after transformation. An event whose text already
+// matches is returned unchanged.
+func (c *responsesCodec) Restate(ev Event) (Event, bool) {
+	if (ev.Kind != KindOther && ev.Kind != KindFinish) || len(ev.Data) == 0 || ev.Data[0] != '{' || !isResponsesRestatingEvent(ev) {
+		return ev, false
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(ev.Data, &top); err != nil {
+		return ev, false
+	}
+	var view responsesEventView
+	if err := json.Unmarshal(ev.Data, &view); err != nil {
+		return ev, false
+	}
+	changed := false
+	switch view.Type {
+	case "response.output_text.done", "response.reasoning_text.done":
+		changed = c.restateText(top, "text", view.OutputIndex, view.ContentIndex, false)
+	case "response.reasoning_summary_text.done":
+		changed = c.restateText(top, "text", view.OutputIndex, view.SummaryIndex, true)
+	case "response.content_part.done":
+		changed = c.restateNested(top, "part", func(part map[string]json.RawMessage) bool {
+			return c.restateText(part, "text", view.OutputIndex, view.ContentIndex, false)
+		})
+	case "response.reasoning_summary_part.done":
+		changed = c.restateNested(top, "part", func(part map[string]json.RawMessage) bool {
+			return c.restateText(part, "text", view.OutputIndex, view.SummaryIndex, true)
+		})
+	case "response.output_item.done":
+		changed = c.restateNested(top, "item", func(item map[string]json.RawMessage) bool {
+			return c.restateItem(item, c.items[view.OutputIndex])
+		})
+	case "response.completed", "response.incomplete", "response.failed":
+		changed = c.restateNested(top, "response", c.restateOutput)
+	}
+	if !changed {
+		return ev, false
+	}
+	data, err := json.Marshal(top)
+	if err != nil {
+		return ev, false
+	}
+	ev.Data = data
+	return ev, true
+}
+
+// restateText sets obj[key] to the emitted text of the part when one was
+// tracked and differs.
+func (c *responsesCodec) restateText(obj map[string]json.RawMessage, key string, output, part int, summary bool) bool {
+	item := c.items[output]
+	if item == nil {
+		return false
+	}
+	var b *strings.Builder
+	if summary {
+		b = item.summaries[part]
+	} else {
+		b = item.parts[part]
+	}
+	if b == nil {
+		return false
+	}
+	if current, ok := jsonStringOf(obj[key]); ok && current == b.String() {
+		return false
+	}
+	encoded, err := json.Marshal(b.String())
+	if err != nil {
+		return false
+	}
+	obj[key] = encoded
+	return true
+}
+
+// restateNested decodes obj[key] as an object, lets fn edit it, and writes
+// it back when fn reports a change.
+func (c *responsesCodec) restateNested(obj map[string]json.RawMessage, key string, fn func(map[string]json.RawMessage) bool) bool {
+	raw, ok := obj[key]
+	if !ok || len(raw) == 0 || raw[0] != '{' {
+		return false
+	}
+	var nested map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &nested); err != nil || !fn(nested) {
+		return false
+	}
+	encoded, err := json.Marshal(nested)
+	if err != nil {
+		return false
+	}
+	obj[key] = encoded
+	return true
+}
+
+// restateItem rewrites the content parts and reasoning summaries of an
+// output item object to the text emitted into them.
+func (c *responsesCodec) restateItem(obj map[string]json.RawMessage, item *responsesItem) bool {
+	if item == nil {
+		return false
+	}
+	changed := false
+	for _, member := range []struct {
+		key     string
+		emitted map[int]*strings.Builder
+	}{{"content", item.parts}, {"summary", item.summaries}} {
+		raw, ok := obj[member.key]
+		if !ok || len(member.emitted) == 0 || len(raw) == 0 || raw[0] != '[' {
+			continue
+		}
+		var entries []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			continue
+		}
+		entryChanged := false
+		for i, entry := range entries {
+			b := member.emitted[i]
+			if b == nil {
+				continue
+			}
+			if current, ok := jsonStringOf(entry["text"]); !ok || current == b.String() {
+				continue
+			}
+			encoded, err := json.Marshal(b.String())
+			if err != nil {
+				continue
+			}
+			entry["text"] = encoded
+			entryChanged = true
+		}
+		if !entryChanged {
+			continue
+		}
+		encoded, err := json.Marshal(entries)
+		if err != nil {
+			continue
+		}
+		obj[member.key] = encoded
+		changed = true
+	}
+	return changed
+}
+
+// restateOutput rewrites the items of a terminal response object, matched
+// to the tracked items by id and otherwise by position.
+func (c *responsesCodec) restateOutput(resp map[string]json.RawMessage) bool {
+	raw, ok := resp["output"]
+	if !ok || len(raw) == 0 || raw[0] != '[' {
+		return false
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return false
+	}
+	changed := false
+	for pos, entry := range entries {
+		item := c.items[pos]
+		if id, ok := jsonStringOf(entry["id"]); ok && id != "" {
+			for _, candidate := range c.items {
+				if candidate.id == id {
+					item = candidate
+					break
+				}
+			}
+		}
+		if c.restateItem(entry, item) {
+			changed = true
+		}
+	}
+	if !changed {
+		return false
+	}
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		return false
+	}
+	resp["output"] = encoded
+	return true
+}
+
+// isResponsesRestatingEvent reports whether ev may restate streamed text,
+// from its event name when present and otherwise from a byte scan.
+func isResponsesRestatingEvent(ev Event) bool {
+	if ev.Name != "" {
+		return strings.HasSuffix(ev.Name, ".done") || ev.Name == "response.completed" || ev.Name == "response.incomplete" || ev.Name == "response.failed"
+	}
+	return bytes.Contains(ev.Data, []byte(`.done"`)) || bytes.Contains(ev.Data, []byte(`"response.completed"`)) ||
+		bytes.Contains(ev.Data, []byte(`"response.incomplete"`)) || bytes.Contains(ev.Data, []byte(`"response.failed"`))
 }
 
 // emit appends one event with the next sequence_number.

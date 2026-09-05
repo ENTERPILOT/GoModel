@@ -193,7 +193,14 @@ three modes in its `StreamPolicy`, and the host does the work:
   tail of text per choice so a pattern spanning two chunks is visible in one
   event before any of it is sent; a non-text event or the upstream end
   flushes the tail. A pattern of up to N+1 characters is always caught at the
-  cost of N characters of delay.
+  cost of N characters of delay. The tail is re-presented after the plugin's
+  earlier edit, with `StreamEvent.Overlap` marking it; the contract requires
+  plugins to edit only matches extending past the overlap, which keeps
+  non-idempotent replacements from compounding. Chat chunks with several
+  choices are split per choice first so each is transformed. For Responses,
+  the codec tracks the emitted text per content part and rewrites the
+  `*.done` and terminal `response.*` events that restate it, so completion
+  events agree with the transformed deltas.
 - `buffer`: `streaming.BufferedSSEStream` drains upstream into a bounded
   buffer (default 4 MiB, exceeding it fails closed with
   `response_too_large`), sends the SSE comment `: gomodel-buffering` every

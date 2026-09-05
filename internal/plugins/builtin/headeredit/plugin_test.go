@@ -142,7 +142,7 @@ func TestApplyEdits(t *testing.T) {
 	if !reflect.DeepEqual(x.Headers.Request, wantReq) {
 		t.Errorf("request = %v, want %v", x.Headers.Request, wantReq)
 	}
-	wantResp := http.Header{"Cache-Control": {"no-store"}, "X-Served-By": {"upstream", "gomodel"}}
+	wantResp := http.Header{"Cache-Control": {"no-store"}, "X-Served-By": {"upstream", "gomodel"}, "X-Internal": {""}}
 	if !reflect.DeepEqual(x.Headers.Response, wantResp) {
 		t.Errorf("response = %v, want %v", x.Headers.Response, wantResp)
 	}

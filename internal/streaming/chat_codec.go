@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 
@@ -190,6 +191,46 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 	ev.Data = data
 	return ev, nil
 }
+
+// Split turns a chunk with several choices into one chunk per choice. Every
+// top-level member is copied; usage, when present, stays on the last chunk
+// only so downstream accounting sees it once.
+func (c *chatCodec) Split(raw RawEvent) []RawEvent {
+	if raw.Comment || raw.Oversized || len(raw.Data) == 0 || raw.Data[0] != '{' {
+		return nil
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw.Data, &top); err != nil {
+		return nil
+	}
+	var choices []json.RawMessage
+	if err := json.Unmarshal(top["choices"], &choices); err != nil || len(choices) <= 1 {
+		return nil
+	}
+	out := make([]RawEvent, 0, len(choices))
+	for i, choice := range choices {
+		part := make(map[string]json.RawMessage, len(top))
+		maps.Copy(part, top)
+		single, err := json.Marshal([]json.RawMessage{choice})
+		if err != nil {
+			return nil
+		}
+		part["choices"] = single
+		if i < len(choices)-1 {
+			delete(part, "usage")
+		}
+		data, err := json.Marshal(part)
+		if err != nil {
+			return nil
+		}
+		ev := Event{Name: raw.Name, Data: data}
+		out = append(out, RawEvent{Name: raw.Name, Data: data, Raw: ev.Encode()})
+	}
+	return out
+}
+
+// Restate is a no-op: chat chunks never repeat streamed text.
+func (c *chatCodec) Restate(ev Event) (Event, bool) { return ev, false }
 
 // chatChoicePosition finds the choice whose index member equals want, falling
 // back to the positional entry.

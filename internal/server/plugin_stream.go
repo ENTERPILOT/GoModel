@@ -264,7 +264,7 @@ func chainHas(chain *plugins.Chain, inst *plugins.Instance) bool {
 // OnEvent runs the in-flight stream instances over one event in step order.
 // A replace feeds the next instance; drop and terminate end the walk.
 func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error) {
-	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Text: ev.Text, Raw: ev.Data}
+	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Text: ev.Text, Overlap: ev.Overlap, Raw: ev.Data}
 	ps.appendState(pev, ev.Overlap)
 	result := streaming.Decision{Action: streaming.ActionPass}
 	for _, entry := range ps.inFlight {

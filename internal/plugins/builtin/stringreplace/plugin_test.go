@@ -160,7 +160,7 @@ func TestApplyRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, tt.cfg)
-			got, n := apply(p.rules, tt.in)
+			got, n := apply(p.rules, tt.in, 0)
 			if got != tt.want || n != tt.count {
 				t.Errorf("apply = %q (%d), want %q (%d)", got, n, tt.want, tt.count)
 			}
@@ -506,5 +506,87 @@ func sortStrings(s []string) {
 		for j := i; j > 0 && s[j] < s[j-1]; j-- {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
+	}
+}
+
+// TestStreamOverlapIsNotReprocessed replays the lookbehind windows GoModel
+// presents: the withheld tail comes back in front of the next delta with
+// Overlap set, already carrying the earlier replacement.
+func TestStreamOverlapIsNotReprocessed(t *testing.T) {
+	tests := []struct {
+		name   string
+		cfg    string
+		events []*pluginapi.StreamEvent
+		want   []pluginapi.StreamDecision
+		total  int
+	}{
+		{
+			name: "expanding rule is applied once",
+			cfg:  `{"rules": "a => aa"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "a"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "aa", Overlap: 2}, // the flushed tail
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("aa"), pluginapi.Pass()},
+			total: 1,
+		},
+		{
+			name: "match spanning the boundary is applied",
+			cfg:  `{"rules": "ab => X"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "a"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ab", Overlap: 1},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Replace("X")},
+			total: 1,
+		},
+		{
+			name: "match inside the overlap is skipped but a later one in the same window is not",
+			cfg:  `{"rules": "é => e"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "é"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "e é", Overlap: 1},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("e"), pluginapi.Replace("e e")},
+			total: 2,
+		},
+		{
+			name: "regex group expansion after the overlap",
+			cfg:  `{"rules": "(\\d+)-(\\d+) => $2-$1", "mode": "regex"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "12-34 "},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "34-12 56-78", Overlap: 6},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("34-12 "), pluginapi.Replace("34-12 78-56")},
+			total: 2,
+		},
+		{
+			name: "warn counts only new matches",
+			cfg:  `{"rules": "ACME => x", "on_match": "warn"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "ACME"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ACME ACME", Overlap: 4},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Pass()},
+			total: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newPlugin(t, tt.cfg)
+			x := exchange(nil, nil)
+			for i, ev := range tt.events {
+				d, err := p.OnStreamEvent(context.Background(), x, ev)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if d.Action != tt.want[i].Action || d.Text != tt.want[i].Text {
+					t.Errorf("event %d: decision = %+v, want %+v", ev.Seq, d, tt.want[i])
+				}
+			}
+			if got := p.streamCount(x); got != tt.total {
+				t.Errorf("stream matches = %d, want %d", got, tt.total)
+			}
+		})
 	}
 }

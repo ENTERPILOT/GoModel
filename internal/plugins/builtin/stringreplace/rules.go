@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // separator splits a rule line into its find and replace sides.
@@ -102,29 +105,77 @@ func unescape(s string) string {
 }
 
 // apply runs every rule in order over s and returns the result with the
-// total number of replacements.
-func apply(rules []rule, s string) (string, int) {
+// total number of replacements. Matches that end within the first skip
+// bytes are left alone: that prefix is streamed text an earlier window
+// already transformed (see pluginapi.StreamEvent.Overlap).
+func apply(rules []rule, s string, skip int) (string, int) {
 	total := 0
 	for _, r := range rules {
-		n := len(r.re.FindAllStringIndex(s, -1))
+		out, n, first := r.replaceAfter(s, skip)
 		if n == 0 {
 			continue
 		}
 		total += n
-		if r.literal {
-			s = r.re.ReplaceAllLiteralString(s, r.replace)
-		} else {
-			s = r.re.ReplaceAllString(s, r.replace)
-		}
+		s = out
+		// Everything from the first edit on is fresh output; the next rule
+		// may match it.
+		skip = min(skip, first)
 	}
 	return s, total
 }
 
-// count returns how many rule matches s contains without editing it.
-func count(rules []rule, s string) int {
+// replaceAfter applies r to every match ending after skip and returns the
+// result, the number of replacements, and the start of the first one.
+func (r rule) replaceAfter(s string, skip int) (string, int, int) {
+	var b strings.Builder
+	last, n, first := 0, 0, -1
+	for _, m := range r.re.FindAllStringSubmatchIndex(s, -1) {
+		if m[1] <= skip {
+			continue
+		}
+		if first < 0 {
+			first = m[0]
+		}
+		b.WriteString(s[last:m[0]])
+		if r.literal {
+			b.WriteString(r.replace)
+		} else {
+			b.Write(r.re.ExpandString(nil, r.replace, s, m))
+		}
+		last = m[1]
+		n++
+	}
+	if n == 0 {
+		return s, 0, -1
+	}
+	b.WriteString(s[last:])
+	return b.String(), n, first
+}
+
+// count returns how many rule matches end after the first skip bytes of s
+// without editing it.
+func count(rules []rule, s string, skip int) int {
 	total := 0
 	for _, r := range rules {
-		total += len(r.re.FindAllStringIndex(s, -1))
+		for _, m := range r.re.FindAllStringIndex(s, -1) {
+			if m[1] > skip {
+				total++
+			}
+		}
 	}
 	return total
+}
+
+// overlapBytes converts the event's Overlap (runes) to a byte offset in
+// its text.
+func overlapBytes(ev *pluginapi.StreamEvent) int {
+	if ev == nil || ev.Overlap <= 0 {
+		return 0
+	}
+	offset := 0
+	for i := 0; i < ev.Overlap && offset < len(ev.Text); i++ {
+		_, size := utf8.DecodeRuneInString(ev.Text[offset:])
+		offset += size
+	}
+	return offset
 }

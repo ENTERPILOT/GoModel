@@ -194,11 +194,27 @@ func (s *transformedSSEStream) pump() {
 	s.finalErr = err
 }
 
+// handle processes one raw event, first splitting a multi-choice chunk so
+// the transformer sees every choice.
 func (s *transformedSSEStream) handle(raw RawEvent) {
 	if raw.Comment || raw.Oversized {
 		s.write(raw.Raw)
 		return
 	}
+	parts := s.codec.Split(raw)
+	if parts == nil {
+		s.handleOne(raw)
+		return
+	}
+	for _, part := range parts {
+		s.handleOne(part)
+		if s.ended {
+			return
+		}
+	}
+}
+
+func (s *transformedSSEStream) handleOne(raw RawEvent) {
 	ev := s.codec.Decode(raw, s.seq)
 	if ev.Kind == KindDone {
 		s.flushPending()
@@ -225,6 +241,12 @@ func (s *transformedSSEStream) handle(raw RawEvent) {
 		ev.Seq = s.seq
 	}
 	s.seq++
+	// An event restating streamed text is rebuilt from what was emitted, so
+	// a client never sees text a plugin replaced or dropped.
+	if restated, changed := s.codec.Restate(ev); changed {
+		s.apply(restated, nil)
+		return
+	}
 	s.apply(ev, raw.Raw)
 }
 

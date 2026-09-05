@@ -21,7 +21,7 @@ func (p *Plugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.D
 			if !p.roles[m.Role] {
 				continue
 			}
-			if n := count(p.rules, m.Text()); n > 0 {
+			if n := count(p.rules, m.Text(), 0); n > 0 {
 				matches += n
 				messages++
 			}
@@ -53,7 +53,7 @@ func (p *Plugin) editMessage(prompt *pluginapi.Prompt, m *pluginapi.Message) (in
 	for j, part := range m.Parts {
 		switch part.Kind {
 		case pluginapi.PartText:
-			out, n := apply(p.rules, part.Text)
+			out, n := apply(p.rules, part.Text, 0)
 			if n == 0 {
 				continue
 			}
@@ -86,7 +86,7 @@ func (p *Plugin) editParts(parts []pluginapi.Part) ([]pluginapi.Part, int) {
 		if out[i].Kind != pluginapi.PartText {
 			continue
 		}
-		text, n := apply(p.rules, out[i].Text)
+		text, n := apply(p.rules, out[i].Text, 0)
 		out[i].Text = text
 		total += n
 	}
@@ -101,7 +101,7 @@ func (p *Plugin) OnResponse(_ context.Context, x *pluginapi.Exchange) (pluginapi
 	if p.onMatch != OnMatchReplace {
 		matches, choices := 0, 0
 		for i := range x.Response.Choices {
-			if n := count(p.rules, x.Response.Text(i)); n > 0 {
+			if n := count(p.rules, x.Response.Text(i), 0); n > 0 {
 				matches += n
 				choices++
 			}
@@ -115,7 +115,7 @@ func (p *Plugin) OnResponse(_ context.Context, x *pluginapi.Exchange) (pluginapi
 			if part.Kind != pluginapi.PartText {
 				continue
 			}
-			out, n := apply(p.rules, part.Text)
+			out, n := apply(p.rules, part.Text, 0)
 			if n == 0 {
 				continue
 			}
@@ -150,16 +150,17 @@ func (p *Plugin) OnStreamEvent(_ context.Context, x *pluginapi.Exchange, ev *plu
 	if ev == nil || ev.Kind != pluginapi.EventTextDelta || ev.Text == "" {
 		return pluginapi.Pass(), nil
 	}
+	skip := overlapBytes(ev)
 	switch p.onMatch {
 	case OnMatchReplace:
-		out, n := apply(p.rules, ev.Text)
+		out, n := apply(p.rules, ev.Text, skip)
 		if n == 0 {
 			return pluginapi.Pass(), nil
 		}
 		p.addCount(x, n)
 		return pluginapi.Replace(out), nil
 	case OnMatchWarn:
-		if n := count(p.rules, ev.Text); n > 0 {
+		if n := count(p.rules, ev.Text, skip); n > 0 {
 			p.addCount(x, n)
 		}
 	}
