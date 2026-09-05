@@ -12,10 +12,14 @@ import (
 
 // ResponsesOutputToolCallState tracks one function_call item in a Responses stream.
 type ResponsesOutputToolCallState struct {
-	ItemID            string
-	CallID            string
-	Name              string
-	OutputIndex       int
+	ItemID      string
+	CallID      string
+	Name        string
+	OutputIndex int
+	// ExtraContent is the streamed tool call's extra_content member: provider
+	// state the next turn has to replay verbatim, such as Gemini's
+	// function-call thought signature.
+	ExtraContent      json.RawMessage
 	Arguments         strings.Builder
 	Started           bool
 	Completed         bool
@@ -303,7 +307,7 @@ func (s *ResponsesOutputEventState) RenderToolCallItem(state *ResponsesOutputToo
 	if includePlaceholder {
 		arguments = s.ToolCallArguments(state)
 	}
-	return map[string]any{
+	item := map[string]any{
 		"id":        state.ItemID,
 		"type":      "function_call",
 		"status":    status,
@@ -311,6 +315,10 @@ func (s *ResponsesOutputEventState) RenderToolCallItem(state *ResponsesOutputToo
 		"name":      state.Name,
 		"arguments": arguments,
 	}
+	if len(state.ExtraContent) > 0 {
+		item["extra_content"] = state.ExtraContent
+	}
+	return item
 }
 
 // StartToolCall emits the function_call output_item.added event once the item metadata is available.

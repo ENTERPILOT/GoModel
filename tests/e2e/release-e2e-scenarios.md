@@ -155,11 +155,12 @@ Stateful note:
   defaults `OPENROUTER_MODEL_FILTER_INCLUDE` to `*:free`, which leaves models
   used by the rest of the matrix untouched; the scenario is read-only and
   rerunnable in any order
-- `S225`-`S227` cover recent release regressions: image content nested in an
+- `S225`-`S228` cover recent release regressions: image content nested in an
   Anthropic `tool_result`, time-window pricing merged with an operator override,
-  and tolerant admin listing of a virtual model with corrupt SQL timestamps.
-  They create and clean up their own artifacts and are rerunnable in any order;
-  `S227` reloads the SQLite gateway and therefore stays sequential
+  tolerant admin listing of a virtual model with corrupt SQL timestamps, and a
+  Gemini 3 multi-step tool call replaying its thought signature. They create and
+  clean up their own artifacts and are rerunnable in any order; `S227` reloads
+  the SQLite gateway and therefore stays sequential
 - `S218` exercises Gemini's native `batchEmbedContents` path (batch input,
   `dimensions`); read-only and rerunnable in any order
 - `S219` asserts the effective resilience configuration on
@@ -6105,4 +6106,47 @@ curl -fsS "$BASE_URL/admin/virtual-models" \
     ' >/dev/null
 cleanup_s227
 trap - EXIT
+```
+
+### S228 Gemini 3 multi-step tool call replays the thought signature
+
+Gemini 3 returns a thought signature on the function call it emits and rejects
+the next turn with HTTP 400 when the replayed call has lost it. This is the
+plain OpenAI-compatible agent loop: send tools, echo the assistant message back
+verbatim with the tool result, and the second turn must succeed.
+
+```bash
+TOOLS='[{"type":"function","function":{"name":"get_weather","description":"Get the current weather for a city","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]'
+FIRST_FILE="$QA_RUN_DIR/s228.turn1.json"
+SECOND_FILE="$QA_RUN_DIR/s228.turn2.json"
+PAYLOAD_FILE="$QA_RUN_DIR/s228.turn2.request.json"
+
+jq -n --argjson tools "$TOOLS" '{
+  model: "gemini-3.7-flash",
+  messages: [{role:"user", content:"What is the weather in Warsaw? Use the tool."}],
+  tools: $tools
+}' | curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' -d @- > "$FIRST_FILE"
+
+# The signature rides on the tool call as extra_content.google.thought_signature.
+jq -e '
+  .provider == "gemini"
+  and .choices[0].finish_reason == "tool_calls"
+  and (.choices[0].message.tool_calls[0].function.name == "get_weather")
+  and (.choices[0].message.tool_calls[0].extra_content.google.thought_signature | type == "string" and length > 0)
+' "$FIRST_FILE" >/dev/null
+
+# Replay the assistant message exactly as returned, as an agent would.
+jq -n --argjson tools "$TOOLS" --slurpfile first "$FIRST_FILE" '{
+  model: "gemini-3.7-flash",
+  messages: [
+    {role:"user", content:"What is the weather in Warsaw? Use the tool."},
+    $first[0].choices[0].message,
+    {role:"tool", tool_call_id: $first[0].choices[0].message.tool_calls[0].id, content:"{\"temperature_c\":21}"}
+  ],
+  tools: $tools
+}' > "$PAYLOAD_FILE"
+curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
+  -d @"$PAYLOAD_FILE" > "$SECOND_FILE"
+jq '{model,provider,finish_reason:.choices[0].finish_reason}' "$SECOND_FILE"
+jq -e '.provider == "gemini" and (.choices[0].message.content | type == "string" and length > 0)' "$SECOND_FILE" >/dev/null
 ```

@@ -211,11 +211,17 @@ func geminiPartsFromMessage(msg core.Message) ([]geminiPart, error) {
 			if len(args) == 0 {
 				args = json.RawMessage(`{}`)
 			}
-			parts = append(parts, geminiPart{FunctionCall: &geminiFunctionCall{
-				ID:   call.ID,
-				Name: call.Function.Name,
-				Args: args,
-			}})
+			parts = append(parts, geminiPart{
+				FunctionCall: &geminiFunctionCall{
+					ID:   call.ID,
+					Name: call.Function.Name,
+					Args: args,
+				},
+				// Gemini 3 rejects a replayed functionCall part whose
+				// thoughtSignature is missing, so restore it to the same part
+				// it was returned on.
+				ThoughtSignature: toolCallThoughtSignature(call),
+			})
 		}
 		return parts, nil
 	}
@@ -848,6 +854,9 @@ func openAIMessageFromGeminiParts(parts []geminiPart) (string, []core.ToolCall) 
 					Name:      call.Name,
 					Arguments: args,
 				},
+				// The signature sits next to the functionCall in the same
+				// part; keep it with the tool call so the client can replay it.
+				ExtraFields: thoughtSignatureExtraFields(part.ThoughtSignature),
 			})
 		}
 	}

@@ -219,7 +219,7 @@ func (s *geminiStreamState) choiceState(index int) *geminiChoiceStreamState {
 func streamToolCalls(toolCalls []core.ToolCall) []map[string]any {
 	out := make([]map[string]any, 0, len(toolCalls))
 	for i, call := range toolCalls {
-		out = append(out, map[string]any{
+		delta := map[string]any{
 			"index": i,
 			"id":    call.ID,
 			"type":  "function",
@@ -227,7 +227,13 @@ func streamToolCalls(toolCalls []core.ToolCall) []map[string]any {
 				"name":      call.Function.Name,
 				"arguments": call.Function.Arguments,
 			},
-		})
+		}
+		// Streamed tool calls carry the thought signature too: an agent that
+		// replays a streamed turn needs it just as much as a buffered one.
+		if extra := call.ExtraFields.Lookup(extraContentField); len(extra) > 0 {
+			delta[extraContentField] = extra
+		}
+		out = append(out, delta)
 	}
 	return out
 }

@@ -85,9 +85,13 @@ type responsesStreamUsage struct {
 }
 
 type openAIChunkToolCall struct {
-	Index    *int   `json:"index"`
-	ID       string `json:"id"`
-	Function struct {
+	Index *int   `json:"index"`
+	ID    string `json:"id"`
+	// ExtraContent relays provider tool-call state with no OpenAI-compatible
+	// field (Gemini's function-call thought signature) onto the function_call
+	// item, so a Responses client can replay the turn.
+	ExtraContent json.RawMessage `json:"extra_content"`
+	Function     struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
@@ -209,6 +213,9 @@ func (sc *OpenAIResponsesStreamConverter) handleToolCallDeltas(toolCalls []openA
 		}
 		if toolCall.Function.Name != "" {
 			state.Name = toolCall.Function.Name
+		}
+		if len(toolCall.ExtraContent) > 0 {
+			state.ExtraContent = toolCall.ExtraContent
 		}
 
 		arguments := toolCall.Function.Arguments
@@ -350,6 +357,11 @@ func chunkToolCallsFromAny(items []any) []openAIChunkToolCall {
 		}
 		call := openAIChunkToolCall{Index: &index}
 		call.ID, _ = toolCall["id"].(string)
+		if extra, ok := toolCall["extra_content"]; ok && extra != nil {
+			if raw, err := json.Marshal(extra); err == nil {
+				call.ExtraContent = raw
+			}
+		}
 		if function, ok := toolCall["function"].(map[string]any); ok {
 			call.Function.Name, _ = function["name"].(string)
 			call.Function.Arguments, _ = function["arguments"].(string)

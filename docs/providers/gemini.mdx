@@ -89,6 +89,38 @@ Flash reject `minimal`, so GoModel sends the lowest level those models accept
 instead of surfacing Google's 400. An explicit
 `extra_body.google.thinking_config` is always forwarded unchanged.
 
+## Tool calling and thought signatures
+
+Gemini returns a `thoughtSignature` alongside the function call it emits, and
+Gemini 3 requires that signature back, unchanged, on the same function call
+when the conversation history is sent again. A missing one fails the whole
+request with `400 Function call is missing a thought_signature in functionCall
+parts`.
+
+The OpenAI-compatible API has no field for it, so GoModel carries the signature
+on the tool call in `extra_content`, the same member Google's own
+OpenAI-compatible endpoint uses:
+
+```json
+{
+  "id": "call_1",
+  "type": "function",
+  "function": { "name": "ExecCommand", "arguments": "{\"cmd\":\"ls\"}" },
+  "extra_content": { "google": { "thought_signature": "..." } }
+}
+```
+
+Replay the assistant message (or, on the Responses API, the `function_call`
+item) exactly as GoModel returned it and multi-step tool calling works with no
+client change — most agent frameworks already echo tool calls back verbatim.
+Streaming carries the same member on the tool-call delta. Signatures sent as a
+flat `thought_signature` on the tool call are accepted too, so clients built
+against other gateways keep working.
+
+Signatures Gemini attaches to plain text parts are not replayed; Google
+validates those leniently, so they cost some reasoning continuity but never
+fail a request.
+
 ## Sampling parameters on Gemini 3
 
 Google's Gemini 3 migration guides say to remove `temperature`, `top_p` and
@@ -118,3 +150,4 @@ first and send the bytes to `generateContent`.
 
 - [Gemini image understanding](https://ai.google.dev/gemini-api/docs/image-understanding)
 - [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)
+- [Gemini thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures)
