@@ -2,6 +2,7 @@ package anthropicapi
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -62,6 +63,37 @@ func TestFromChatResponseToolCalls(t *testing.T) {
 	}
 	if resp.StopReason != "tool_use" {
 		t.Errorf("StopReason = %q, want tool_use", resp.StopReason)
+	}
+	if len(block.ExtraContent) != 0 {
+		t.Errorf("extra_content = %s, want absent", block.ExtraContent)
+	}
+}
+
+func TestFromChatResponseToolCallExtraContent(t *testing.T) {
+	extra := json.RawMessage(`{"google":{"thought_signature":"sig"}}`)
+	resp := FromChatResponse(&core.ChatResponse{
+		Choices: []core.Choice{{
+			Message: core.ResponseMessage{
+				Role: "assistant",
+				ToolCalls: []core.ToolCall{{
+					ID:          "tu_1",
+					Type:        "function",
+					Function:    core.FunctionCall{Name: "get_weather", Arguments: `{}`},
+					ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: extra}),
+				}},
+			},
+			FinishReason: "tool_calls",
+		}},
+	})
+	if len(resp.Content) != 1 || string(resp.Content[0].ExtraContent) != string(extra) {
+		t.Fatalf("content = %+v, want tool_use with extra_content", resp.Content)
+	}
+	encoded, err := json.Marshal(resp.Content[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"extra_content":{"google":{"thought_signature":"sig"}}`) {
+		t.Errorf("encoded block = %s", encoded)
 	}
 }
 

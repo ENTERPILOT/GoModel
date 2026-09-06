@@ -1,0 +1,63 @@
+---
+title: "Provider state (extra_content)"
+description: "How GoModel carries provider-specific replay state such as Gemini thought signatures and Anthropic thinking blocks through every API"
+---
+
+Some providers attach opaque state to a reply and expect it back, unchanged,
+on the next turn. Gemini 3 signs its function calls with a `thoughtSignature`
+and rejects a history that replays the call without it. Anthropic requires
+`thinking` blocks, signatures included, in front of a tool-use turn that
+continues. Such state has no OpenAI-compatible field, so GoModel carries it in
+one place: an `extra_content` object keyed by vendor.
+
+```json
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"},
+    "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+  }]
+}
+```
+
+This is the shape Google's own OpenAI-compatible endpoint uses, so clients
+built against it work unchanged.
+
+## Where it appears
+
+| API | Location |
+| --- | --- |
+| Chat Completions | `tool_calls[].extra_content` and, for text-only turns, `message.extra_content`; also on streamed `tool_calls` deltas |
+| Responses | `function_call` output items |
+| Anthropic Messages | `tool_use` content blocks |
+
+Send the member back exactly as you received it. Clients that copy assistant
+messages into the history verbatim, which is what the OpenAI, Anthropic, and
+Responses SDKs do, need no changes.
+
+## Rules
+
+- **Every translation copies it through.** Chat, Responses, and Anthropic
+  Messages ingress, streaming, and the assistant-turn echo carry
+  `extra_content` without looking inside.
+- **Only the owning provider sees its own vendor.** Before a request leaves
+  for a provider, GoModel drops every vendor object that provider does not
+  own. A Gemini signature never reaches Anthropic or OpenAI, and a history
+  that moved between providers does not fail on foreign fields.
+- **Only the owning adapter reads or writes inside it.** Nothing else in the
+  gateway interprets the contents.
+
+## Vendors
+
+| Vendor | Providers | Members |
+| --- | --- | --- |
+| `google` | `gemini`, `vertex` | `thought_signature`: the Gemini 3 signature of a function call or text turn. See [Gemini thought signatures](/providers/gemini#thought-signatures). |
+| `anthropic` | `anthropic` | `thinking_blocks`: the `thinking` and `redacted_thinking` blocks of an assistant turn; `is_error`: marks a tool result as failed. Set by the [Anthropic Messages API](/advanced/anthropic-messages-api) ingress. |
+
+When a history reaches Gemini 3 without a signature, because the conversation
+started on another provider or a client dropped the member, GoModel sends
+Google's documented placeholder instead of surfacing the 400. Echo the real
+value whenever you have it; the placeholder costs reasoning continuity for
+that turn.

@@ -91,8 +91,8 @@ func TestStreamConverterText(t *testing.T) {
 func TestStreamConverterToolCall(t *testing.T) {
 	chatStream := strings.Join([]string{
 		`data: {"id":"chatcmpl-2","model":"gpt","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}`,
-		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}`,
-		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":""},"extra_content":{"google":{"thought_signature":"sig"}}}]},"finish_reason":null}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"city\":"},"extra_content":null}]},"finish_reason":null}]}`,
 		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"paris\"}"}}]},"finish_reason":null}]}`,
 		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":4}}`,
 		`data: [DONE]`,
@@ -113,6 +113,10 @@ func TestStreamConverterToolCall(t *testing.T) {
 	block := events[1]["content_block"].(map[string]any)
 	if block["type"] != "tool_use" || block["id"] != "call_1" || block["name"] != "get_weather" {
 		t.Errorf("tool_use content_block = %+v", block)
+	}
+	extra, _ := json.Marshal(block["extra_content"])
+	if string(extra) != `{"google":{"thought_signature":"sig"}}` {
+		t.Errorf("tool_use extra_content = %s", extra)
 	}
 
 	args := events[2]["delta"].(map[string]any)

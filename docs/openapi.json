@@ -12418,6 +12418,10 @@
       "anthropicapi.ResponseContentBlock": {
         "type": "object",
         "properties": {
+          "extra_content": {
+            "description": "ExtraContent is provider replay state on a tool_use block; clients echo\nit back on the next turn (see core.ExtraContentField).",
+            "type": "object"
+          },
           "id": {
             "type": "string"
           },
@@ -13419,7 +13423,8 @@
           "invalid_request_error",
           "authentication_error",
           "not_found_error",
-          "permission_error"
+          "permission_error",
+          "internal_error"
         ],
         "x-enum-varnames": [
           "ErrorTypeProvider",
@@ -13427,7 +13432,8 @@
           "ErrorTypeInvalidRequest",
           "ErrorTypeAuthentication",
           "ErrorTypeNotFound",
-          "ErrorTypePermission"
+          "ErrorTypePermission",
+          "ErrorTypeInternal"
         ]
       },
       "core.FileContent": {
@@ -14450,6 +14456,10 @@
           "type": {
             "description": "\"message\", \"function_call\", etc.",
             "type": "string"
+          },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       },
@@ -15857,6 +15867,10 @@
             "description": "Function call fields (type=\"function_call\")",
             "type": "string"
           },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
+          },
           "content": {
             "description": "Can be string or []ContentPart",
             "oneOf": [
@@ -15906,6 +15920,10 @@
                 }
               }
             ]
+          },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
           },
           "id": {
             "type": "string"

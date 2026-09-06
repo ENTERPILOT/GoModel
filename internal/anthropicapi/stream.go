@@ -7,6 +7,7 @@ import (
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
@@ -34,6 +35,8 @@ type chatToolCallDelta struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 	} `json:"function"`
+	// ExtraContent is provider replay state on the first delta of a tool call.
+	ExtraContent json.RawMessage `json:"extra_content"`
 }
 
 type chatUsage struct {
@@ -201,12 +204,16 @@ func (sc *streamConverter) handleToolCall(call chatToolCallDelta) {
 	index, seen := sc.toolBlock[call.Index]
 	if !seen {
 		sc.closeBlock()
-		sc.openBlock("tool_use", map[string]any{
+		block := map[string]any{
 			"type":  "tool_use",
 			"id":    call.ID,
 			"name":  call.Function.Name,
 			"input": map[string]any{},
-		})
+		}
+		if extra := bytes.TrimSpace(call.ExtraContent); len(extra) > 0 && !core.IsJSONNull(extra) {
+			block[core.ExtraContentField] = json.RawMessage(extra)
+		}
+		sc.openBlock("tool_use", block)
 		sc.toolBlock[call.Index] = sc.curIndex
 		index = sc.curIndex
 	}

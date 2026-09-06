@@ -2064,9 +2064,11 @@ func TestConvertToAnthropicRequest_ToolMessageIsError(t *testing.T) {
 		Model: "claude-sonnet-4-5-20250929",
 		Messages: []core.Message{
 			{Role: "tool", ToolCallID: "call_1", Content: "boom", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-				core.ToolResultIsErrorField: json.RawMessage("true"),
+				core.ExtraContentField: json.RawMessage(`{"anthropic":{"is_error":true}}`),
 			})},
-			{Role: "tool", ToolCallID: "call_2", Content: "fine"},
+			{Role: "tool", ToolCallID: "call_2", Content: "fine", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				core.ExtraContentField: json.RawMessage(`{"google":{"is_error":true}}`),
+			})},
 		},
 	})
 	if err != nil {
@@ -2092,7 +2094,7 @@ func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
 				Content:   "calling",
 				ToolCalls: []core.ToolCall{{ID: "tu_1", Type: "function", Function: core.FunctionCall{Name: "lookup", Arguments: "{}"}}},
 				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-					core.ThinkingBlocksField: json.RawMessage(`[{"type":"thinking","thinking":"","signature":"sig1"},{"type":"redacted_thinking","data":"opaque"}]`),
+					core.ExtraContentField: json.RawMessage(`{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"","signature":"sig1"},{"type":"redacted_thinking","data":"opaque"}]}}`),
 				}),
 			},
 			{Role: "tool", ToolCallID: "tu_1", Content: "result"},
@@ -2120,6 +2122,21 @@ func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
 	}
 	if string(encoded) != `{"type":"thinking","thinking":"","signature":"sig1"}` {
 		t.Errorf("encoded thinking block = %s, want empty thinking text kept", encoded)
+	}
+}
+
+func TestConvertToAnthropicRequest_RejectsMalformedAnthropicExtraContent(t *testing.T) {
+	_, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model: "claude-sonnet-4-5-20250929",
+		Messages: []core.Message{
+			{Role: "user", Content: "hi"},
+			{Role: "assistant", Content: "x", ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				core.ExtraContentField: json.RawMessage(`{"anthropic":{"thinking_blocks":"nope"}}`),
+			})},
+		},
+	})
+	if gatewayErr, ok := err.(*core.GatewayError); !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
+		t.Fatalf("error = %v, want invalid_request_error", err)
 	}
 }
 
