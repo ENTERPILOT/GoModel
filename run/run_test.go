@@ -73,8 +73,11 @@ func TestConfigHooksRunSetupOnceThenReloadForEveryLaterGeneration(t *testing.T) 
 		t.Fatalf("SetupConfig ran %d times and ReloadConfig %d, want 1 and 2", setups, reloads)
 	}
 	// Without hooks every generation passes.
-	if err := configHooks(t.Context(), Options{})(result); err != nil {
-		t.Fatalf("no hooks: %v", err)
+	noHooks := configHooks(t.Context(), Options{})
+	for generation := 1; generation <= 2; generation++ {
+		if err := noHooks(result); err != nil {
+			t.Fatalf("no hooks, generation %d: %v", generation, err)
+		}
 	}
 }
 
