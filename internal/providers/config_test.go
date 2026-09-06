@@ -1654,6 +1654,7 @@ func TestApplyProviderEnvVars_PreservesUnknownYAMLProviders(t *testing.T) {
 func TestBuildProviderConfig_CircuitBreaker_InheritsGlobal(t *testing.T) {
 	global := globalResilience
 	global.CircuitBreaker = config.CircuitBreakerConfig{
+		Scope:            "provider",
 		FailureThreshold: 5,
 		SuccessThreshold: 2,
 		Timeout:          30 * time.Second,

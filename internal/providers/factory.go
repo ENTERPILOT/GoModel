@@ -123,6 +123,9 @@ func (f *ProviderFactory) Add(reg Registration) {
 
 // Create instantiates a provider based on its resolved configuration.
 func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
+	if err := config.ValidateResilience(cfg.Resilience); err != nil {
+		return nil, fmt.Errorf("invalid resilience configuration: %w", err)
+	}
 	f.mu.RLock()
 	builder, ok := f.builders[cfg.Type]
 	hooks := f.hooks

@@ -105,7 +105,16 @@ HTTP attempt, without retries.
 The circuit breaker is in-memory and per gateway process: each provider
 gets its own breaker by default. With `scope: model`, each model within a
 provider instance gets an independent breaker; requests without a model,
-such as discovery, use a separate provider breaker. State resets on restart
+such as discovery, use a separate provider breaker. Multipart audio uploads
+use their explicit model names.
+
+Each provider retains at most 1,024 model breakers. Idle closed entries expire
+after 10 minutes when a new model is looked up; the oldest idle closed entry
+is evicted sooner when the limit is reached. Active and open breakers are
+preserved. If every slot is protected, a new model receives a failover-eligible
+`503` until a slot becomes available.
+
+State resets on restart
 and nothing is shared between replicas.
 
 ## Environment Variables

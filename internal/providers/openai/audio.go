@@ -92,6 +92,7 @@ func (p *CompatibleProvider) createAudioTranscription(
 		Method:        http.MethodPost,
 		Endpoint:      endpoint,
 		RawBodyReader: body,
+		Model:         req.Model,
 		Headers:       http.Header{"Content-Type": {contentType}},
 	}))
 	if err != nil {

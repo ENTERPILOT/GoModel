@@ -22,7 +22,7 @@ func ParseResilienceStatuses(entries, defaults []string) (map[int]bool, error) {
 }
 
 func validateResilienceConfig(global ResilienceConfig, providers map[string]RawProviderConfig) error {
-	if err := validateResilience(global); err != nil {
+	if err := ValidateResilience(global); err != nil {
 		return fmt.Errorf("resilience: %w", err)
 	}
 	for name, provider := range providers {
@@ -41,14 +41,15 @@ func validateResilienceConfig(global ResilienceConfig, providers map[string]RawP
 				r.CircuitBreaker.Scope = *cb.Scope
 			}
 		}
-		if err := validateResilience(r); err != nil {
+		if err := ValidateResilience(r); err != nil {
 			return fmt.Errorf("providers.%s.resilience: %w", name, err)
 		}
 	}
 	return nil
 }
 
-func validateResilience(r ResilienceConfig) error {
+// ValidateResilience checks policies for both file loading and programmatic providers.
+func ValidateResilience(r ResilienceConfig) error {
 	if _, err := ParseResilienceStatuses(r.Retry.RetryOnStatuses, nil); err != nil {
 		return fmt.Errorf("retry.retry_on_statuses: %w", err)
 	}
@@ -61,4 +62,12 @@ func validateResilience(r ResilienceConfig) error {
 		return fmt.Errorf("circuit_breaker.scope must be provider or model")
 	}
 	return nil
+}
+
+// NormalizeBreakerScope resolves the empty scope to the provider default.
+func NormalizeBreakerScope(scope string) string {
+	if scope == "" {
+		return "provider"
+	}
+	return scope
 }

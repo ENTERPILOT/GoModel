@@ -23,6 +23,9 @@ type requestScope struct {
 }
 
 func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (requestScope, error) {
+	if c.configErr != nil {
+		return requestScope{}, core.NewInvalidRequestError("invalid resilience configuration: "+c.configErr.Error(), c.configErr)
+	}
 	scope := requestScope{
 		ctx:       ctx,
 		startedAt: time.Now(),
@@ -42,6 +45,11 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 	}
 
 	scope.breaker = c.breakerForModel(scope.requestInfo.Model)
+	if scope.breaker == nil && c.circuitBreaker != nil {
+		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable, "model circuit breaker capacity exhausted", nil)
+		c.finishRequest(scope, http.StatusServiceUnavailable, err)
+		return requestScope{}, err
+	}
 	if scope.breaker != nil {
 		allowed, probe := scope.breaker.acquire()
 		if !allowed {
@@ -64,6 +72,7 @@ func requestModel(req Request) string {
 }
 
 func (c *Client) finishRequest(scope requestScope, statusCode int, err error) {
+	c.releaseModelBreaker(scope.requestInfo.Model, scope.breaker)
 	if c.config.Hooks.OnRequestEnd == nil {
 		return
 	}

@@ -107,7 +107,9 @@ type Client struct {
 	config          Config
 	headerSetter    HeaderSetter
 	circuitBreaker  *circuitBreaker
-	modelBreakers   sync.Map // model name -> *circuitBreaker
+	modelBreakersMu sync.Mutex
+	modelBreakers   map[[32]byte]*modelBreakerEntry
+	configErr       error
 	retryStatuses   map[int]bool
 	failureStatuses map[int]bool
 }
@@ -120,10 +122,20 @@ func New(cfg Config, headerSetter HeaderSetter) *Client {
 		headerSetter: headerSetter,
 	}
 
-	// Config loading validates these lists. Programmatic callers receive the
-	// defaults for nil lists, and no matches for invalid lists.
-	c.retryStatuses, _ = config.ParseResilienceStatuses(cfg.Retry.RetryOnStatuses, config.DefaultRetryConfig().RetryOnStatuses)
-	c.failureStatuses, _ = config.ParseResilienceStatuses(cfg.CircuitBreaker.FailureOnStatuses, config.DefaultCircuitBreakerConfig().FailureOnStatuses)
+	// Keep the constructor API stable; direct callers receive invalid-config
+	// errors from request methods. ProviderFactory rejects them before creation.
+	c.configErr = config.ValidateResilience(config.ResilienceConfig{Retry: cfg.Retry, CircuitBreaker: cfg.CircuitBreaker})
+	if c.configErr != nil {
+		return c
+	}
+	c.retryStatuses, c.configErr = config.ParseResilienceStatuses(cfg.Retry.RetryOnStatuses, config.DefaultRetryConfig().RetryOnStatuses)
+	if c.configErr != nil {
+		return c
+	}
+	c.failureStatuses, c.configErr = config.ParseResilienceStatuses(cfg.CircuitBreaker.FailureOnStatuses, config.DefaultCircuitBreakerConfig().FailureOnStatuses)
+	if c.configErr != nil {
+		return c
+	}
 
 	// The breaker is off when explicitly disabled or when it can never trip.
 	if cfg.CircuitBreaker.Enabled && cfg.CircuitBreaker.FailureThreshold > 0 {

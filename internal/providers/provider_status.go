@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"github.com/enterpilot/gomodel/config"
 	"sort"
 	"strings"
 	"time"
@@ -119,7 +120,7 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 				},
 				CircuitBreaker: SanitizedCircuitBreakerConfig{
 					FailureOnStatuses: cfg.Resilience.CircuitBreaker.FailureOnStatuses,
-					Scope:             cfg.Resilience.CircuitBreaker.Scope,
+					Scope:             config.NormalizeBreakerScope(cfg.Resilience.CircuitBreaker.Scope),
 					Enabled:           cfg.Resilience.CircuitBreaker.Enabled,
 					FailureThreshold:  cfg.Resilience.CircuitBreaker.FailureThreshold,
 					SuccessThreshold:  cfg.Resilience.CircuitBreaker.SuccessThreshold,

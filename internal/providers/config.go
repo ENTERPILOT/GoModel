@@ -237,6 +237,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		resolved.FairnessFromUserPath = enabledByDefault(raw.FairnessFromUserPath)
 	}
 
+	resolved.Resilience.CircuitBreaker.Scope = config.NormalizeBreakerScope(resolved.Resilience.CircuitBreaker.Scope)
 	if raw.Resilience == nil {
 		return resolved
 	}
@@ -267,7 +268,7 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 			resolved.Resilience.CircuitBreaker.FailureOnStatuses = cb.FailureOnStatuses
 		}
 		if cb.Scope != nil {
-			resolved.Resilience.CircuitBreaker.Scope = *cb.Scope
+			resolved.Resilience.CircuitBreaker.Scope = config.NormalizeBreakerScope(*cb.Scope)
 		}
 		if cb.Enabled != nil {
 			resolved.Resilience.CircuitBreaker.Enabled = *cb.Enabled
