@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -458,7 +459,7 @@ func TestCredentialsService_ConfiguredProvidersCarryGlobalResilience(t *testing.
 	if got[0].Name != want.Name || got[0].Type != want.Type {
 		t.Errorf("ConfiguredProviders()[0] = %q/%q, want %q/%q", got[0].Name, got[0].Type, want.Name, want.Type)
 	}
-	if got[0].Resilience != want.Resilience {
+	if !reflect.DeepEqual(got[0].Resilience, want.Resilience) {
 		t.Errorf("ConfiguredProviders()[0].Resilience = %+v, want global defaults %+v", got[0].Resilience, want.Resilience)
 	}
 

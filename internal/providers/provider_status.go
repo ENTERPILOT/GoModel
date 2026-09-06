@@ -8,19 +8,22 @@ import (
 
 // SanitizedRetryConfig exposes effective retry settings without secrets.
 type SanitizedRetryConfig struct {
-	MaxRetries     int     `json:"max_retries"`
-	InitialBackoff string  `json:"initial_backoff"`
-	MaxBackoff     string  `json:"max_backoff"`
-	BackoffFactor  float64 `json:"backoff_factor"`
-	JitterFactor   float64 `json:"jitter_factor"`
+	RetryOnStatuses []string `json:"retry_on_statuses"`
+	MaxRetries      int      `json:"max_retries"`
+	InitialBackoff  string   `json:"initial_backoff"`
+	MaxBackoff      string   `json:"max_backoff"`
+	BackoffFactor   float64  `json:"backoff_factor"`
+	JitterFactor    float64  `json:"jitter_factor"`
 }
 
 // SanitizedCircuitBreakerConfig exposes effective circuit-breaker settings.
 type SanitizedCircuitBreakerConfig struct {
-	Enabled          bool   `json:"enabled"`
-	FailureThreshold int    `json:"failure_threshold"`
-	SuccessThreshold int    `json:"success_threshold"`
-	Timeout          string `json:"timeout"`
+	FailureOnStatuses []string `json:"failure_on_statuses"`
+	Scope             string   `json:"scope"`
+	Enabled           bool     `json:"enabled"`
+	FailureThreshold  int      `json:"failure_threshold"`
+	SuccessThreshold  int      `json:"success_threshold"`
+	Timeout           string   `json:"timeout"`
 }
 
 // SanitizedResilienceConfig exposes effective resilience settings.
@@ -107,17 +110,20 @@ func SanitizeProviderConfigs(configs map[string]ProviderConfig) []SanitizedProvi
 			SessionStickyKeys: cfg.SessionStickyKeys,
 			Resilience: SanitizedResilienceConfig{
 				Retry: SanitizedRetryConfig{
-					MaxRetries:     cfg.Resilience.Retry.MaxRetries,
-					InitialBackoff: cfg.Resilience.Retry.InitialBackoff.String(),
-					MaxBackoff:     cfg.Resilience.Retry.MaxBackoff.String(),
-					BackoffFactor:  cfg.Resilience.Retry.BackoffFactor,
-					JitterFactor:   cfg.Resilience.Retry.JitterFactor,
+					RetryOnStatuses: cfg.Resilience.Retry.RetryOnStatuses,
+					MaxRetries:      cfg.Resilience.Retry.MaxRetries,
+					InitialBackoff:  cfg.Resilience.Retry.InitialBackoff.String(),
+					MaxBackoff:      cfg.Resilience.Retry.MaxBackoff.String(),
+					BackoffFactor:   cfg.Resilience.Retry.BackoffFactor,
+					JitterFactor:    cfg.Resilience.Retry.JitterFactor,
 				},
 				CircuitBreaker: SanitizedCircuitBreakerConfig{
-					Enabled:          cfg.Resilience.CircuitBreaker.Enabled,
-					FailureThreshold: cfg.Resilience.CircuitBreaker.FailureThreshold,
-					SuccessThreshold: cfg.Resilience.CircuitBreaker.SuccessThreshold,
-					Timeout:          cfg.Resilience.CircuitBreaker.Timeout.String(),
+					FailureOnStatuses: cfg.Resilience.CircuitBreaker.FailureOnStatuses,
+					Scope:             cfg.Resilience.CircuitBreaker.Scope,
+					Enabled:           cfg.Resilience.CircuitBreaker.Enabled,
+					FailureThreshold:  cfg.Resilience.CircuitBreaker.FailureThreshold,
+					SuccessThreshold:  cfg.Resilience.CircuitBreaker.SuccessThreshold,
+					Timeout:           cfg.Resilience.CircuitBreaker.Timeout.String(),
 				},
 			},
 		})

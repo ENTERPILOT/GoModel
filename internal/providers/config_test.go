@@ -2,6 +2,7 @@ package providers
 
 import (
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -101,7 +102,7 @@ func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 	if got.Type != "openai" {
 		t.Errorf("Type = %q, want openai", got.Type)
 	}
-	if got.Resilience.Retry != globalRetry {
+	if !reflect.DeepEqual(got.Resilience.Retry, globalRetry) {
 		t.Errorf("expected global retry to be inherited\ngot:  %+v\nwant: %+v", got.Resilience.Retry, globalRetry)
 	}
 	if !got.SessionStickyKeys {
@@ -162,7 +163,7 @@ func TestBuildProviderConfig_NilResilience(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk", Resilience: nil}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if got.Resilience.Retry != globalRetry {
+	if !reflect.DeepEqual(got.Resilience.Retry, globalRetry) {
 		t.Error("nil Resilience should inherit global")
 	}
 }
@@ -175,7 +176,7 @@ func TestBuildProviderConfig_NilRetry(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if got.Resilience.Retry != globalRetry {
+	if !reflect.DeepEqual(got.Resilience.Retry, globalRetry) {
 		t.Error("nil Retry should inherit global")
 	}
 }
@@ -1660,7 +1661,7 @@ func TestBuildProviderConfig_CircuitBreaker_InheritsGlobal(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk"}
 	got := buildProviderConfig(raw, global)
 
-	if got.Resilience.CircuitBreaker != global.CircuitBreaker {
+	if !reflect.DeepEqual(got.Resilience.CircuitBreaker, global.CircuitBreaker) {
 		t.Errorf("expected global circuit breaker to be inherited\ngot:  %+v\nwant: %+v",
 			got.Resilience.CircuitBreaker, global.CircuitBreaker)
 	}
@@ -1676,7 +1677,7 @@ func TestBuildProviderConfig_CircuitBreaker_NilOverride(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, global)
 
-	if got.Resilience.CircuitBreaker != global.CircuitBreaker {
+	if !reflect.DeepEqual(got.Resilience.CircuitBreaker, global.CircuitBreaker) {
 		t.Error("nil CircuitBreaker override should inherit global")
 	}
 }

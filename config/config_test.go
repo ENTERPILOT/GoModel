@@ -269,12 +269,12 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 
 	expectedRetry := DefaultRetryConfig()
-	if cfg.Resilience.Retry != expectedRetry {
+	if !reflect.DeepEqual(cfg.Resilience.Retry, expectedRetry) {
 		t.Errorf("expected Resilience.Retry=%+v, got %+v", expectedRetry, cfg.Resilience.Retry)
 	}
 
 	expectedCB := DefaultCircuitBreakerConfig()
-	if cfg.Resilience.CircuitBreaker != expectedCB {
+	if !reflect.DeepEqual(cfg.Resilience.CircuitBreaker, expectedCB) {
 		t.Errorf("expected Resilience.CircuitBreaker=%+v, got %+v", expectedCB, cfg.Resilience.CircuitBreaker)
 	}
 }
