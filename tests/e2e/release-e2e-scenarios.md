@@ -5867,14 +5867,17 @@ jq -e '(.data[0].embedding | length) == 256' "$DIM_FILE" >/dev/null
 ### S219 Provider status exposes the circuit-breaker switch and its thresholds
 
 `/admin/providers/status` reports the effective resilience settings per
-provider, including the circuit-breaker enable switch (#729). The release stack
-sets no resilience overrides, so every provider must report the documented
-defaults: the breaker on, five failures to open, two successes to close, and a
-30s timeout. Turning the breaker off needs a gateway booted with
-`RESILIENCE_CIRCUIT_BREAKER_ENABLED=false`, so that path is covered by the
-`config` and `internal/llmclient` unit tests. The stack manager deletes every
-unmanaged (dashboard-registered) provider credential on `start`, so a leftover
-runtime credential cannot make this assertion nondeterministic.
+provider, including the circuit-breaker enable switch (#729) and the configurable
+status policies and breaker scope (#896). The release stack sets no resilience
+overrides, so every provider must report the documented defaults: the breaker on,
+five failures to open, two successes to close, a 30s timeout, `provider` scope,
+retries on `429,502,503,504,522,524`, and the breaker tripping on `429,5xx`.
+Turning the breaker off, narrowing the status lists, or switching a provider to
+`model` scope needs a gateway booted with `RESILIENCE_*` overrides, so those paths
+are covered by the `config`, `internal/providers` and `internal/llmclient` unit
+tests. The stack manager deletes every unmanaged (dashboard-registered) provider
+credential on `start`, so a leftover runtime credential cannot make this
+assertion nondeterministic.
 
 ```bash
 STATUS_FILE="$QA_RUN_DIR/s219.status.json"
@@ -5888,6 +5891,15 @@ jq -e '
     and .config.resilience.circuit_breaker.success_threshold == 2
     and .config.resilience.circuit_breaker.timeout == "30s"
     and (.config.resilience.retry.max_retries | type == "number"))
+' "$STATUS_FILE" >/dev/null
+# The status policies and the breaker scope are configurable, so the endpoint
+# must report the resolved values rather than omit them. An unset scope resolves
+# to "provider", never to an empty string.
+jq -e '
+  all(.providers[];
+    .config.resilience.circuit_breaker.scope == "provider"
+    and .config.resilience.circuit_breaker.failure_on_statuses == ["429", "5xx"]
+    and .config.resilience.retry.retry_on_statuses == ["429", "502", "503", "504", "522", "524"])
 ' "$STATUS_FILE" >/dev/null
 ```
 

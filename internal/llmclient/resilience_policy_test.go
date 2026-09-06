@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/enterpilot/gomodel/config"
 )
 
 func TestStatusPoliciesAndModelBreakers(t *testing.T) {
@@ -146,5 +148,53 @@ func TestExcludedStatusAllowsHalfOpenRecovery(t *testing.T) {
 	}
 	if got := client.circuitBreaker.State(); got != "closed" {
 		t.Fatalf("state=%s, excluded status must not reopen breaker", got)
+	}
+}
+
+func TestNilStatusPoliciesFallBackToDefaults(t *testing.T) {
+	// A programmatic caller that never sets the lists must still get the
+	// documented defaults rather than an empty, never-matching policy.
+	client := New(Config{ProviderName: "test"}, nil)
+	if client.configErr != nil {
+		t.Fatal(client.configErr)
+	}
+	for _, status := range config.DefaultRetryConfig().RetryOnStatuses {
+		code, err := strconv.Atoi(status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !client.isRetryable(code) {
+			t.Fatalf("%d must be retryable by default", code)
+		}
+	}
+	for _, status := range []int{400, 404, 500} {
+		if client.isRetryable(status) {
+			t.Fatalf("%d is not a default retry trigger", status)
+		}
+	}
+	for _, status := range []int{429, 500, 599} {
+		if !client.shouldTripCircuitBreaker(status) {
+			t.Fatalf("%d must trip the breaker by default", status)
+		}
+	}
+	for _, status := range []int{200, 400, 404} {
+		if client.shouldTripCircuitBreaker(status) {
+			t.Fatalf("%d must not trip the breaker", status)
+		}
+	}
+}
+
+func TestEmptyStatusPoliciesDisableStatusTriggers(t *testing.T) {
+	cfg := DefaultConfig("test", "")
+	cfg.Retry.RetryOnStatuses = []string{}
+	cfg.CircuitBreaker.FailureOnStatuses = []string{}
+	client := New(cfg, nil)
+	if client.configErr != nil {
+		t.Fatal(client.configErr)
+	}
+	for _, status := range []int{429, 500, 503, 524} {
+		if client.isRetryable(status) || client.shouldTripCircuitBreaker(status) {
+			t.Fatalf("%d must not trigger anything once the lists are explicitly empty", status)
+		}
 	}
 }

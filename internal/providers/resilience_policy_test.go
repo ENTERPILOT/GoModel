@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -61,5 +62,42 @@ func TestFactoryRejectsInvalidResilience(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "invalid resilience configuration") {
 			t.Fatalf("error=%v", err)
 		}
+	}
+}
+
+func TestSanitizedStatusListsDistinguishInheritFromDisabled(t *testing.T) {
+	global := config.ResilienceConfig{Retry: config.DefaultRetryConfig(), CircuitBreaker: config.DefaultCircuitBreakerConfig()}
+	var raw config.RawProviderConfig
+	body := "type: openai\nresilience:\n  retry:\n    retry_on_statuses: []\n"
+	if err := yaml.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatal(err)
+	}
+	sanitized := SanitizeProviderConfigs(map[string]ProviderConfig{"test": buildProviderConfig(raw, global)})[0]
+	encoded, err := json.Marshal(sanitized.Resilience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An operator reading the admin API must be able to tell "no status
+	// triggers" from "inherits the defaults"; both survive as distinct JSON.
+	if !strings.Contains(string(encoded), `"retry_on_statuses":[]`) {
+		t.Fatalf("disabled retry statuses must serialize as an empty list: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"failure_on_statuses":["429","5xx"]`) {
+		t.Fatalf("inherited breaker statuses must serialize as the defaults: %s", encoded)
+	}
+}
+
+func TestFactoryAcceptsValidResilience(t *testing.T) {
+	factory := NewProviderFactory()
+	cfg := ProviderConfig{Type: "not-registered", Resilience: config.ResilienceConfig{
+		Retry:          config.RetryConfig{RetryOnStatuses: []string{"429", "5xx"}},
+		CircuitBreaker: config.CircuitBreakerConfig{FailureOnStatuses: []string{}, Scope: "model"},
+	}}
+	_, err := factory.Create(cfg)
+	if err == nil || strings.Contains(err.Error(), "invalid resilience configuration") {
+		t.Fatalf("error=%v, want the policy accepted and the lookup to fail instead", err)
+	}
+	if !strings.Contains(err.Error(), "unknown provider type") {
+		t.Fatalf("error=%v", err)
 	}
 }
