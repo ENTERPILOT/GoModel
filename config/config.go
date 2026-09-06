@@ -300,6 +300,11 @@ func Load() (*LoadResult, error) {
 		return nil, fmt.Errorf("models.configured_provider_models_mode must be one of: fallback, allowlist, merge")
 	}
 
+	cfg.Resilience.CircuitBreaker.Scope = NormalizeBreakerScope(cfg.Resilience.CircuitBreaker.Scope)
+	if err := validateResilienceConfig(cfg.Resilience, rawProviders); err != nil {
+		return nil, err
+	}
+
 	if err := loadFailoverConfig(&cfg.Failover); err != nil {
 		return nil, err
 	}

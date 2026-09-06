@@ -1,7 +1,7 @@
 // Package llmclient provides a base HTTP client for LLM providers with:
 // - Request marshaling/unmarshaling
 // - Retries with exponential backoff and jitter
-// - Standardized error parsing (429, 502, 503, 504), including errors embedded in 200-status bodies
+// - Standardized error parsing, including errors embedded in 200-status bodies
 // - Circuit breaking with half-open state protection
 package llmclient
 
@@ -43,7 +43,7 @@ type ResponseInfo struct {
 	Stream          bool          // Whether this was a streaming request
 	StreamUncertain bool          // Whether request stream intent was unknown at dispatch
 	Error           error         // Error if request failed (nil on success)
-	// CircuitState is the provider's circuit breaker state after this request
+	// CircuitState is the selected provider or model breaker state after this request
 	// completed ("closed", "half-open", "open"); empty when the breaker is
 	// disabled. It reflects the moment of completion, so metrics built from it
 	// update as traffic flows.
@@ -102,11 +102,16 @@ type HeaderSetter func(req *http.Request)
 
 // Client is a base HTTP client for LLM providers
 type Client struct {
-	mu             sync.RWMutex
-	httpClient     *http.Client
-	config         Config
-	headerSetter   HeaderSetter
-	circuitBreaker *circuitBreaker
+	mu              sync.RWMutex
+	httpClient      *http.Client
+	config          Config
+	headerSetter    HeaderSetter
+	circuitBreaker  *circuitBreaker
+	modelBreakersMu sync.Mutex
+	modelBreakers   map[[32]byte]*modelBreakerEntry
+	configErr       error
+	retryStatuses   map[int]bool
+	failureStatuses map[int]bool
 }
 
 // New creates a new LLM client with the given configuration
@@ -115,6 +120,21 @@ func New(cfg Config, headerSetter HeaderSetter) *Client {
 		httpClient:   httpclient.NewDefaultHTTPClient(),
 		config:       cfg,
 		headerSetter: headerSetter,
+	}
+
+	// Keep the constructor API stable; direct callers receive invalid-config
+	// errors from request methods. ProviderFactory rejects them before creation.
+	c.configErr = config.ValidateResilience(config.ResilienceConfig{Retry: cfg.Retry, CircuitBreaker: cfg.CircuitBreaker})
+	if c.configErr != nil {
+		return c
+	}
+	c.retryStatuses, c.configErr = config.ParseResilienceStatuses(cfg.Retry.RetryOnStatuses, config.DefaultRetryConfig().RetryOnStatuses)
+	if c.configErr != nil {
+		return c
+	}
+	c.failureStatuses, c.configErr = config.ParseResilienceStatuses(cfg.CircuitBreaker.FailureOnStatuses, config.DefaultCircuitBreakerConfig().FailureOnStatuses)
+	if c.configErr != nil {
+		return c
 	}
 
 	// The breaker is off when explicitly disabled or when it can never trip.

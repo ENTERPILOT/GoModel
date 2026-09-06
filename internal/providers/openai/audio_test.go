@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 )
 
 func newSpeechTestProvider(t *testing.T, handler http.HandlerFunc) *CompatibleProvider {
@@ -148,5 +150,43 @@ func TestCreateTranslation_RejectsInvalidRequests(t *testing.T) {
 				t.Fatalf("CreateTranslation() message = %q, want %q", gatewayErr.Message, tt.wantMessage)
 			}
 		})
+	}
+}
+
+func TestMultipartAudioModelBreakerIsolation(t *testing.T) {
+	var models []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1024); err != nil {
+			t.Error(err)
+			return
+		}
+		defer func() {
+			if err := r.MultipartForm.RemoveAll(); err != nil {
+				t.Error(err)
+			}
+		}()
+		model := r.FormValue("model")
+		models = append(models, model)
+		if model == "transcribe" {
+			w.WriteHeader(503)
+			return
+		}
+		_, _ = w.Write([]byte(`{"text":"translated"}`))
+	}))
+	defer server.Close()
+	resilience := config.ResilienceConfig{Retry: config.DefaultRetryConfig(), CircuitBreaker: config.DefaultCircuitBreakerConfig()}
+	resilience.CircuitBreaker.Scope = "model"
+	resilience.CircuitBreaker.FailureThreshold = 1
+	provider := NewCompatibleProvider("test", providers.ProviderOptions{Resilience: resilience}, CompatibleProviderConfig{ProviderName: "test", BaseURL: server.URL})
+	_, err := provider.CreateTranscription(t.Context(), &core.AudioTranscriptionRequest{Model: "transcribe", File: []byte("audio")})
+	if err == nil {
+		t.Fatal("expected transcription failure")
+	}
+	_, err = provider.CreateTranslation(t.Context(), &core.AudioTranscriptionRequest{Model: "translate", File: []byte("audio")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0] != "transcribe" || models[1] != "translate" {
+		t.Fatalf("upstream models=%v", models)
 	}
 }
