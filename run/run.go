@@ -82,6 +82,13 @@ type Options struct {
 	// extensions. Configuration registered here is startup-only; reloads reuse
 	// the resulting extension instances.
 	SetupConfig func(ctx context.Context, result *config.LoadResult) error
+	// ReloadConfig runs for every configuration generation after the first,
+	// once a reload has re-read the configuration and before the replacement
+	// application is built. It lets a distribution apply to the reloaded
+	// configuration the same policy SetupConfig applied at startup, such as
+	// disabling a setting or rejecting an endpoint. A returned error rejects
+	// the reload; the serving generation keeps running.
+	ReloadConfig func(ctx context.Context, result *config.LoadResult) error
 }
 
 func (o Options) withDefaults() Options {
@@ -213,7 +220,7 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	setupConfigDone := false
+	configure := configHooks(ctx, opts)
 
 	// build produces one generation of the gateway from the configuration as it
 	// stands right now. It is called again for every reload, which is what lets
@@ -225,11 +232,8 @@ func Run(ctx context.Context, opts Options) error {
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load config: %w", err)
 		}
-		if !setupConfigDone && opts.SetupConfig != nil {
-			if err := opts.SetupConfig(ctx, result); err != nil {
-				return nil, nil, fmt.Errorf("failed to set up configured extensions: %w", err)
-			}
-			setupConfigDone = true
+		if err := configure(result); err != nil {
+			return nil, nil, err
 		}
 		opts.ConfigureSwaggerDocs(result.Config.Server.BasePath)
 
@@ -311,6 +315,29 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	return nil
+}
+
+// configHooks sequences a distribution's configuration hooks across
+// generations: SetupConfig for the first, ReloadConfig for every later one.
+func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) error {
+	first := true
+	return func(result *config.LoadResult) error {
+		if first {
+			first = false
+			if opts.SetupConfig != nil {
+				if err := opts.SetupConfig(ctx, result); err != nil {
+					return fmt.Errorf("failed to set up configured extensions: %w", err)
+				}
+			}
+			return nil
+		}
+		if opts.ReloadConfig != nil {
+			if err := opts.ReloadConfig(ctx, result); err != nil {
+				return fmt.Errorf("configured extensions rejected the reloaded configuration: %w", err)
+			}
+		}
+		return nil
+	}
 }
 
 func versionLine(productName string) string {

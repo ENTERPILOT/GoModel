@@ -46,6 +46,38 @@ func TestRunVersionSkipsSetup(t *testing.T) {
 	}
 }
 
+func TestConfigHooksRunSetupOnceThenReloadForEveryLaterGeneration(t *testing.T) {
+	var setups, reloads int
+	rejected := errors.New("endpoint outside the policy")
+	configure := configHooks(t.Context(), Options{
+		SetupConfig: func(context.Context, *config.LoadResult) error {
+			setups++
+			return nil
+		},
+		ReloadConfig: func(context.Context, *config.LoadResult) error {
+			reloads++
+			if reloads == 2 {
+				return rejected
+			}
+			return nil
+		},
+	})
+	result := &config.LoadResult{Config: &config.Config{}}
+	for i, wantErr := range []error{nil, nil, rejected} {
+		err := configure(result)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("generation %d: error = %v, want %v", i+1, err, wantErr)
+		}
+	}
+	if setups != 1 || reloads != 2 {
+		t.Fatalf("SetupConfig ran %d times and ReloadConfig %d, want 1 and 2", setups, reloads)
+	}
+	// Without hooks every generation passes.
+	if err := configHooks(t.Context(), Options{})(result); err != nil {
+		t.Fatalf("no hooks: %v", err)
+	}
+}
+
 func TestRunSetupConfigReceivesLoadedConfiguration(t *testing.T) {
 	t.Chdir(t.TempDir())
 	wantErr := errors.New("configured extension stopped startup")
