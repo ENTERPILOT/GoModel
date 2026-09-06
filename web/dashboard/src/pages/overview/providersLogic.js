@@ -3,37 +3,13 @@
 // and preference persistence are testable with node.
 
 import * as m from "../../lib/paraglide/messages.js";
+import { providerDocsUrl } from "../../lib/utils/providerDocs.js";
 
 const PROVIDER_STATUS_DETAILS_STORAGE_KEY =
   "gomodel_provider_status_details_expanded";
 const PROVIDER_CARD_OVERRIDES_STORAGE_KEY =
   "gomodel_provider_card_expanded_overrides";
 export const PROVIDER_STATUS_POLL_MS = 3000;
-
-// Provider types that have a dedicated docs page at
-// gomodel.enterpilot.io/docs/providers/. Keyed by provider type; the value is
-// the docs slug (identical to the type except opencode_go → opencode-go).
-// Types absent here get no help icon — that is the "doc exists" gate.
-const PROVIDER_DOCS_BASE_URL = "https://gomodel.enterpilot.io/docs/providers/";
-const PROVIDER_DOC_SLUGS = {
-  anthropic: "anthropic",
-  azure: "azure",
-  bailian: "bailian",
-  bedrock: "bedrock",
-  "bedrock-mantle": "bedrock-mantle",
-  cohere: "cohere",
-  deepseek: "deepseek",
-  elevenlabs: "elevenlabs",
-  gemini: "gemini",
-  llamacpp: "llamacpp",
-  llmd: "llmd",
-  opencode_go: "opencode-go",
-  oracle: "oracle",
-  sglang: "sglang",
-  vertex: "vertex",
-  vllm: "vllm",
-  xiaomi: "xiaomi",
-};
 
 export function emptyProviderStatus() {
   return {
@@ -206,21 +182,19 @@ export function providerTypeLabel(provider) {
   return type;
 }
 
-// Docs URL for a provider's type, or '' when no provider-specific page exists
-// (the help icon is shown only when this is non-empty). Uses the raw type so
-// it still resolves when the (type) label is hidden because the provider name
-// equals its type.
+// Docs URL for a provider's type, or '' when the provider has no type at all.
+// Every registered type gets a link — its own docs page when one exists, the
+// providers/overview page otherwise (see lib/utils/providerDocs.js). Uses the
+// raw type so it still resolves when the (type) label is hidden because the
+// provider name equals its type.
 export function providerDocUrl(provider) {
-  const type = String(
-    (provider && (provider.type || (provider.config && provider.config.type))) ||
-      "",
-  )
-    .trim()
-    .toLowerCase();
-  const slug = type ? PROVIDER_DOC_SLUGS[type] : "";
-  return slug
-    ? PROVIDER_DOCS_BASE_URL + slug + "?utm_source=gomodel_dashboard"
-    : "";
+  const type =
+    String(
+      (provider &&
+        (provider.type || (provider.config && provider.config.type))) ||
+        "",
+    ).trim() || "";
+  return providerDocsUrl(type);
 }
 
 export function providerRetrySummary(provider) {
