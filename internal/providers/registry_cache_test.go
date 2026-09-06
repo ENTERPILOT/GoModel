@@ -927,3 +927,129 @@ func TestCacheFile_ModelListETagRoundtrip(t *testing.T) {
 		t.Fatalf("currentModelListETag() for another URL = %q, want empty", got)
 	}
 }
+
+// A restart must not swap the provider's own report for the catalog's entry.
+// The catalog resolves plain IDs like "gpt-oss" for any provider type, and its
+// entry for one carries no context window, output limit, or capabilities — so a
+// cached inventory that lost the provider's report publishes a local model with
+// a truncated mode list and no limits at all until the next live fetch lands.
+func TestCacheRoundTripKeepsProviderReportedMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheFile := filepath.Join(tmpDir, "models.json")
+
+	raw := []byte(`{"version": 1, "providers": {}, "models": {"gpt-oss": {"display_name": "gpt-oss", "description": "open-weight models", "modes": ["chat"]}}, "provider_models": {}}`)
+	list, err := modeldata.Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	contextWindow := 922000
+	maxOutputTokens := 128000
+	mock := &registryMockProvider{
+		name: "local",
+		modelsResponse: &core.ModelsResponse{
+			Object: "list",
+			Data: []core.Model{{
+				ID: "gpt-oss", Object: "model", OwnedBy: "local",
+				Metadata: &core.ModelMetadata{
+					DisplayName:     "My Local gpt-oss",
+					Modes:           []string{"chat", "responses"},
+					ContextWindow:   &contextWindow,
+					MaxOutputTokens: &maxOutputTokens,
+					Capabilities:    map[string]bool{"function_calling": true, "reasoning": true},
+				},
+			}},
+		},
+	}
+
+	saving := NewModelRegistry()
+	saving.SetCache(modelcache.NewLocalCache(cacheFile))
+	saving.RegisterProviderWithNameAndType(mock, "local", "openai")
+	if err := saving.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	saving.setModelListAndEnrich(list, raw, "", "")
+	if err := saving.SaveToCache(context.Background()); err != nil {
+		t.Fatalf("SaveToCache() error = %v", err)
+	}
+
+	// A fresh registry that has not reached the provider yet: everything it
+	// publishes comes from the cache plus the cached catalog.
+	loading := NewModelRegistry()
+	loading.SetCache(modelcache.NewLocalCache(cacheFile))
+	loading.RegisterProviderWithNameAndType(mock, "local", "openai")
+	if _, err := loading.LoadFromCache(context.Background()); err != nil {
+		t.Fatalf("LoadFromCache() error = %v", err)
+	}
+
+	model, ok := loading.LookupModel("local/gpt-oss")
+	if !ok {
+		t.Fatal("expected local/gpt-oss in the restored inventory")
+	}
+	meta := model.Metadata
+	if meta == nil {
+		t.Fatal("expected restored metadata, got nil")
+	}
+	if meta.ContextWindow == nil || *meta.ContextWindow != contextWindow {
+		t.Errorf("ContextWindow = %v, want %d", meta.ContextWindow, contextWindow)
+	}
+	if meta.MaxOutputTokens == nil || *meta.MaxOutputTokens != maxOutputTokens {
+		t.Errorf("MaxOutputTokens = %v, want %d", meta.MaxOutputTokens, maxOutputTokens)
+	}
+	if !meta.Capabilities["function_calling"] || !meta.Capabilities["reasoning"] {
+		t.Errorf("Capabilities = %v, want the provider-reported flags", meta.Capabilities)
+	}
+	if len(meta.Modes) != 2 || meta.Modes[0] != "chat" || meta.Modes[1] != "responses" {
+		t.Errorf("Modes = %v, want [chat responses]", meta.Modes)
+	}
+	if meta.DisplayName != "My Local gpt-oss" {
+		t.Errorf("DisplayName = %q, want the provider's own", meta.DisplayName)
+	}
+	// The catalog still fills in what the provider never reported.
+	if meta.Description != "open-weight models" {
+		t.Errorf("Description = %q, want the catalog's", meta.Description)
+	}
+}
+
+// Caches written before provider metadata was persisted carry none; they must
+// still load, with the catalog supplying what it can until the next refresh.
+func TestLoadFromCacheAcceptsEntriesWithoutMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	cacheFile := filepath.Join(tmpDir, "models.json")
+
+	modelCache := modelcache.ModelCache{
+		UpdatedAt: time.Now().UTC(),
+		Providers: map[string]modelcache.CachedProvider{
+			"local": {
+				ProviderType: "openai",
+				OwnedBy:      "local",
+				Models:       []modelcache.CachedModel{{ID: "gpt-oss", Created: 1234567890}},
+			},
+		},
+	}
+	data, _ := json.Marshal(modelCache)
+	if err := os.WriteFile(cacheFile, data, 0o644); err != nil {
+		t.Fatalf("failed to write cache file: %v", err)
+	}
+
+	registry := NewModelRegistry()
+	registry.SetCache(modelcache.NewLocalCache(cacheFile))
+	registry.RegisterProviderWithNameAndType(&registryMockProvider{name: "local"}, "local", "openai")
+
+	loaded, err := registry.LoadFromCache(context.Background())
+	if err != nil {
+		t.Fatalf("LoadFromCache() error = %v", err)
+	}
+	if loaded != 1 {
+		t.Fatalf("LoadFromCache() = %d, want 1", loaded)
+	}
+	registry.mu.RLock()
+	info, ok := registry.models["gpt-oss"]
+	registry.mu.RUnlock()
+	if !ok {
+		t.Fatal("expected local/gpt-oss in the restored inventory")
+	}
+	if info.Discovered != nil {
+		t.Errorf("Discovered = %#v, want nil for a pre-upgrade cache entry", info.Discovered)
+	}
+}

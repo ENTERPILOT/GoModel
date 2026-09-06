@@ -61,13 +61,16 @@ func (r *ModelRegistry) LoadFromCache(ctx context.Context) (int, error) {
 		}
 		providerModels := make(map[string]*ModelInfo, len(cachedProv.Models))
 		for _, cached := range cachedProv.Models {
-			// The cache stores no metadata, so nothing was discovered yet; the
-			// next live refresh supplies it.
+			// Restore what the provider reported for the model, so enrichment
+			// merges the catalog under it exactly as it would after a live
+			// fetch. Caches written before this field existed carry none, and
+			// those models keep catalog-only metadata until the next refresh.
 			info := newModelInfo(core.Model{
-				ID:      cached.ID,
-				Object:  "model",
-				OwnedBy: cachedProv.OwnedBy,
-				Created: cached.Created,
+				ID:       cached.ID,
+				Object:   "model",
+				OwnedBy:  cachedProv.OwnedBy,
+				Created:  cached.Created,
+				Metadata: cached.Metadata.Clone(),
 			}, provider, providerName, providerType)
 			if _, exists := providerModels[info.Model.ID]; exists {
 				// Trimmed duplicates collapse to one record; first wins.
@@ -216,6 +219,11 @@ func (r *ModelRegistry) SaveToCache(ctx context.Context) error {
 			cachedModels = append(cachedModels, modelcache.CachedModel{
 				ID:      modelID,
 				Created: info.Model.Created,
+				// Persist the provider's own report, not Model.Metadata: that
+				// one carries whatever the catalog contributed at enrichment
+				// time, and storing it would pin a stale catalog entry across
+				// restarts instead of letting each pass re-merge.
+				Metadata: info.Discovered.Clone(),
 			})
 		}
 		mc.Providers[providerName] = modelcache.CachedProvider{
