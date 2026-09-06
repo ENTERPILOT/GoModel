@@ -2158,6 +2158,30 @@ func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
 	}
 }
 
+func TestAdaptBatchRequest_RejectsNonChatItemsInAnthropicBatches(t *testing.T) {
+	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
+	for _, tc := range []struct{ name, url, body string }{
+		{name: "responses", url: "/v1/responses", body: `{"model":"claude-sonnet-4-5","input":"hi"}`},
+		{name: "embeddings", url: "/v1/embeddings", body: `{"model":"claude-sonnet-4-5","input":"hi"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := &core.BatchRequest{
+				Endpoint: "/v1/chat/completions",
+				Requests: []core.BatchRequestItem{{CustomID: "item-1", Method: http.MethodPost, URL: tc.url, Body: json.RawMessage(tc.body)}},
+			}
+			for _, providerType := range []string{"anthropic", "openai"} {
+				_, err := adaptBatchRequest(ctx, request, providerType)
+				if err == nil || !strings.Contains(err.Error(), "not a chat completion") {
+					t.Errorf("%s batch error = %v; want non-chat item rejected", providerType, err)
+				}
+			}
+			if _, err := adaptBatchRequest(context.Background(), request, "openai"); err != nil {
+				t.Errorf("ordinary batch error = %v; want opaque item accepted", err)
+			}
+		})
+	}
+}
+
 func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpenRouter(t *testing.T) {
 	body := `{"model":"claude-sonnet-4-5","messages":[
 		{"role":"assistant","content":"x","extra_content":{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"t","signature":"s"}]}},"cache_control":{"type":"ephemeral"}},

@@ -78,6 +78,9 @@ func adaptBatchRequest(ctx context.Context, req *core.BatchRequest, providerType
 			}
 			forward = chat
 		case *core.ResponsesRequest:
+			if anthropicDialect {
+				return nil, batchItemNotChatError(i)
+			}
 			responses := adaptResponsesExtraContent(request, providerType)
 			if responses == request {
 				continue
@@ -85,9 +88,7 @@ func adaptBatchRequest(ctx context.Context, req *core.BatchRequest, providerType
 			forward = responses
 		default:
 			if anthropicDialect {
-				return nil, core.NewInvalidRequestError(
-					fmt.Sprintf("requests[%d]: Anthropic Message Batch item is not a chat completion", i), nil,
-				)
+				return nil, batchItemNotChatError(i)
 			}
 			continue
 		}
@@ -102,6 +103,12 @@ func adaptBatchRequest(ctx context.Context, req *core.BatchRequest, providerType
 		return req, nil
 	}
 	return &adapted, nil
+}
+
+func batchItemNotChatError(index int) error {
+	return core.NewInvalidRequestError(
+		fmt.Sprintf("requests[%d]: Anthropic Message Batch item is not a chat completion", index), nil,
+	)
 }
 
 func providerAcceptsAnthropicCacheControl(providerType string) bool {
