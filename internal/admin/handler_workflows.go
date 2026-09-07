@@ -209,6 +209,57 @@ func (h *Handler) activeWorkflowGuardrailReferences(ctx context.Context, name st
 	return references, nil
 }
 
+// activeWorkflowPhaseConflicts lists, as "<scope> (<phase>)", the steps of
+// active workflows that reference the named guardrail in a phase the given
+// type does not implement. An unknown type yields nothing; the guardrail
+// service reports it when the definition is saved.
+func (h *Handler) activeWorkflowPhaseConflicts(ctx context.Context, name, typeName string) ([]string, error) {
+	if h.workflows == nil || h.guardrailDefs == nil {
+		return nil, nil
+	}
+	name = strings.TrimSpace(name)
+	typeName = strings.TrimSpace(typeName)
+	if name == "" || typeName == "" {
+		return nil, nil
+	}
+	var supported []string
+	found := false
+	for _, def := range h.guardrailDefs.TypeDefinitions() {
+		if def.Type == typeName {
+			supported, found = def.Phases, true
+			break
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+
+	views, err := h.workflows.ListViews(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conflicts := make([]string, 0)
+	for _, view := range views {
+		if !view.Payload.Features.Guardrails {
+			continue
+		}
+		for _, step := range view.Payload.EffectiveSteps() {
+			if strings.TrimSpace(step.Ref) != name {
+				continue
+			}
+			phase := strings.ToLower(strings.TrimSpace(step.Phase))
+			if phase == "" {
+				phase = workflows.PhasePrompt
+			}
+			if !slices.Contains(supported, phase) {
+				conflicts = append(conflicts, view.ScopeDisplay+" ("+phase+")")
+			}
+		}
+	}
+	sort.Strings(conflicts)
+	return conflicts, nil
+}
+
 // validateWorkflowGuardrails checks every step reference against the loaded
 // instances and the phases their plugins implement.
 func (h *Handler) validateWorkflowGuardrails(payload workflows.Payload) error {
