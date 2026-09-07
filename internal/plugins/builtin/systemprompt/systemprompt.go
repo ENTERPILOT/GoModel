@@ -50,6 +50,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Description: "Injects, overrides, or decorates the system message before the request reaches the provider.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt},
 		Mutates:     true,
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key:      "mode",

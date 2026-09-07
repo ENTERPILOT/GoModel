@@ -96,7 +96,7 @@ func TestParseConfigAndSummarize(t *testing.T) {
 		t.Fatal("Summarize(invalid) should be empty")
 	}
 	m := p.Manifest()
-	if m.Name != Name || !m.Mutates || len(m.Kinds) != 1 || len(m.ConfigSchema) != 2 {
+	if m.Name != Name || !m.Mutates || !m.Guardrail || len(m.Kinds) != 1 || len(m.ConfigSchema) != 2 {
 		t.Fatalf("manifest = %+v", m)
 	}
 }

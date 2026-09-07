@@ -293,9 +293,9 @@ instances run on traffic.
   references it.
 - **Plugins list**: at the bottom of the Plugins & Guardrails page, every
   loaded plugin type with its version, hooks, source (built-in, registered,
-  or the `.so` path), and health. Guardrail plugins (those that may block,
-  answer, or warn) carry a shield and are listed first; header or prompt
-  modifiers and routing strategies are plugins too, but not guardrails. A
+  or the `.so` path), and health. Guardrail plugins (those whose instances
+  apply a policy to prompts, responses, or streams) carry a shield and are
+  listed first; routing strategies are plugins too, but not guardrails. A
   plugin that failed to load is listed with its error. The page is shown
   whenever the plugin system is on.
 - **Workflows page**: each step has a *Phase* selector; the instance dropdown
@@ -430,12 +430,13 @@ Notes for authors:
   works too but limits the file to a single instance.
 - Set `Mutates: true` when the plugin edits `Prompt`, `Response`, or the
   stream. Non-mutating plugins may share a step and run concurrently.
-- Set `Guardrail: true` when the plugin polices traffic, that is, it may
-  block, answer, or warn (`llm_judge`, `string_replace`). A plugin that only
-  edits traffic (`header_edit`, `system_prompt`, `llm_based_altering`) or
-  routes it leaves it false. The runtime ignores the flag; the dashboard
-  marks guardrail plugins and their instances with a shield and lists them
-  first.
+- Set `Guardrail: true` when the plugin's instances are guardrails: policies
+  applied to prompts, responses, or streams, whether they block, answer,
+  warn, or rewrite. Every built-in traffic plugin sets it (`llm_judge`,
+  `string_replace`, `header_edit`, `system_prompt`, `llm_based_altering`);
+  a routing strategy such as `cheapest_healthy` never touches traffic and
+  leaves it false. The runtime ignores the flag; the dashboard marks
+  guardrail plugins and their instances with a shield and lists them first.
 - The `Host` passed to `Init` offers `Logger()` (pre-tagged with plugin and
   instance), `Inference().Complete(...)` (a chat completion through the
   gateway with origin `plugin`, scoped to `<user path>/guardrails/<instance>`

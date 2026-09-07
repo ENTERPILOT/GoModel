@@ -39,6 +39,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Description: "Sets, adds, and removes HTTP headers on the request, the client response, and the upstream call.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse},
 		Mutates:     false,
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key: "request_set", Label: "Request headers to set", Input: pluginapi.InputTextarea, Default: "",

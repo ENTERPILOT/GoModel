@@ -180,8 +180,8 @@ func TestListGuardrailTypes(t *testing.T) {
 		if got := strings.TrimSpace(prompt); got == "" {
 			t.Fatalf("llm_based_altering defaults.prompt = %q, want built-in prompt", got)
 		}
-		if len(typeDef.Phases) != 2 || typeDef.Source != "builtin" || !typeDef.Mutates || typeDef.Guardrail {
-			t.Fatalf("llm_based_altering type = %#v, want prompt+response phases from a mutating, non-guardrail builtin", typeDef)
+		if len(typeDef.Phases) != 2 || typeDef.Source != "builtin" || !typeDef.Mutates || !typeDef.Guardrail {
+			t.Fatalf("llm_based_altering type = %#v, want prompt+response phases from a mutating guardrail builtin", typeDef)
 		}
 		for _, field := range typeDef.Fields {
 			if field.Key != "max_tokens" {

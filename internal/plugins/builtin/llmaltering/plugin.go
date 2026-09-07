@@ -38,6 +38,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Description: "Uses an auxiliary model to rewrite selected message roles before the main request reaches the provider, and assistant text on the way back.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse},
 		Mutates:     true,
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key:         "model",

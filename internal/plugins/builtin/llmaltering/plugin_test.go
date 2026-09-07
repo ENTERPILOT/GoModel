@@ -221,7 +221,7 @@ func TestSummarize(t *testing.T) {
 	if p.Summarize(json.RawMessage(`{}`)) != "" {
 		t.Fatal("invalid config should summarize empty")
 	}
-	if m := p.Manifest(); m.Name != Name || len(m.Kinds) != 2 || !m.Mutates {
+	if m := p.Manifest(); m.Name != Name || len(m.Kinds) != 2 || !m.Mutates || !m.Guardrail {
 		t.Fatalf("manifest = %+v", m)
 	}
 }

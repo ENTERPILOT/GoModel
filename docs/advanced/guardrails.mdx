@@ -68,10 +68,10 @@ timeout. `config.yaml` entries are seeded into the same store at startup and
 stay in sync with it, so dashboard-created and config-declared guardrails
 appear side by side. The **Plugins** list at the bottom of the page shows
 every loaded plugin type, its hooks, source, and health. Not every plugin is a guardrail:
-a plugin declares `Guardrail: true` in its manifest when it polices traffic
-(it may block, answer, or warn), and the dashboard marks those, and the
-instances built from them, with a shield. A `header_edit` or `system_prompt`
-instance is managed on the same page but only edits traffic.
+a plugin declares `Guardrail: true` in its manifest when its instances apply
+a policy to prompts, responses, or streams, and the dashboard marks those,
+and the instances built from them, with a shield. A routing strategy such as
+`cheapest_healthy` is listed on the same page but is not a guardrail.
 
 <Note>
   Runtime guardrail execution still depends on `GUARDRAILS_ENABLED`. With it
