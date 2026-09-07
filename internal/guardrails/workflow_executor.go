@@ -79,6 +79,8 @@ func processGuarded[Req any](
 	if chain.Empty() {
 		return req, nil
 	}
+	chain.Acquire()
+	defer chain.Release()
 	prompt, err := from(req)
 	if err != nil {
 		return zero, core.NewInvalidRequestError("invalid "+kind+" request for guardrails", err)

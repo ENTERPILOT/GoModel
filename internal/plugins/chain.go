@@ -121,11 +121,60 @@ func (c *Chain) Instances() []*Instance {
 	return out
 }
 
+// Acquire marks every instance of the chain held; pair it with Release.
+func (c *Chain) Acquire() {
+	for _, inst := range c.Instances() {
+		inst.Acquire()
+	}
+}
+
+// Release drops the hold taken by Acquire.
+func (c *Chain) Release() {
+	for _, inst := range c.Instances() {
+		inst.Release()
+	}
+}
+
 // Chains holds the compiled chain of every phase of one workflow.
 type Chains struct {
 	Prompt   *Chain
 	Response *Chain
 	Stream   *Chain
+}
+
+// Acquire marks every instance of every phase held, once per instance even
+// when it serves several phases; pair it with Release. A compiled workflow
+// holds its chains while it is live and a request while it runs them, so a
+// replaced instance is not closed underneath either.
+func (c *Chains) Acquire() {
+	for _, inst := range c.instances() {
+		inst.Acquire()
+	}
+}
+
+// Release drops the hold taken by Acquire.
+func (c *Chains) Release() {
+	for _, inst := range c.instances() {
+		inst.Release()
+	}
+}
+
+// instances lists the distinct instances across all phases.
+func (c *Chains) instances() []*Instance {
+	if c == nil {
+		return nil
+	}
+	var out []*Instance
+	seen := map[*Instance]bool{}
+	for _, chain := range []*Chain{c.Prompt, c.Response, c.Stream} {
+		for _, inst := range chain.Instances() {
+			if !seen[inst] {
+				seen[inst] = true
+				out = append(out, inst)
+			}
+		}
+	}
+	return out
 }
 
 // Hashes returns the non-empty chain hashes keyed by phase.

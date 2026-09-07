@@ -49,6 +49,8 @@ func processGuardedBatchRequest(
 	if chain.Empty() || req == nil {
 		return &core.BatchRewriteResult{Request: req}, nil
 	}
+	chain.Acquire()
+	defer chain.Release()
 	return core.RewriteBatchSource(
 		ctx,
 		providerType,

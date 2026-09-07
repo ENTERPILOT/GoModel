@@ -177,3 +177,33 @@ func TestServiceCloseClosesActiveAndRetiredInstances(t *testing.T) {
 		t.Fatal("snapshot not emptied by Close")
 	}
 }
+
+func TestServiceKeepsHeldRetiredInstanceOpen(t *testing.T) {
+	store := newTestStore(lifecycleDefinition("a", "one", ""))
+	service, tracker, clock := lifecycleService(t, store)
+	old := service.snapshot.instances["a"]
+	// A compiled workflow or a long-running stream still holds the instance.
+	old.Acquire()
+
+	if err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", "")); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	*clock = clock.Add(5 * time.Minute)
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if _, closed := tracker.counts(); closed != 0 {
+		t.Fatal("held instance closed after the grace period")
+	}
+	if old.Closed() {
+		t.Fatal("held instance marked closed")
+	}
+
+	old.Release()
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if _, closed := tracker.counts(); closed != 1 {
+		t.Fatalf("closed = %d, want the released instance closed", closed)
+	}
+}

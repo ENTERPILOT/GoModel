@@ -330,3 +330,28 @@ func TestChatCompletion_StreamWarnHeaderCommitsWithFirstBytes(t *testing.T) {
 		t.Fatalf("body = %s", body)
 	}
 }
+
+// Requests hold their plugin instances only while a phase runs (the whole
+// stream, for the stream phase) and release them afterwards, so a replaced
+// guardrail is not closed underneath a request and does not leak a hold.
+func TestChatCompletion_PluginChainsReleasedAfterRequest(t *testing.T) {
+	for _, tt := range []struct{ name, body string }{{"json", chatBody}, {"stream", chatStreamBody}} {
+		t.Run(tt.name, func(t *testing.T) {
+			chains := phaseChains(t, map[string]string{"prompt": "warn", "response": "warn", "stream": "replace", "text": "x"},
+				guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1},
+				guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1},
+				guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindStream, Step: 1})
+			rec := doChat(t, phaseHandler(t, phaseProvider(), chains), tt.body)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			for _, chain := range []*plugins.Chain{chains.Prompt, chains.Response, chains.Stream} {
+				for _, inst := range chain.Instances() {
+					if inst.Held() {
+						t.Fatalf("instance %q still held after the request", inst.Name)
+					}
+				}
+			}
+		})
+	}
+}

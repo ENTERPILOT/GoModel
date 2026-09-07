@@ -56,6 +56,8 @@ func (p responsePhase[Req, Resp]) run(s *translatedInferenceService, c *echo.Con
 	if chains == nil || chains.Response.Empty() {
 		return resp, nil
 	}
+	chains.Response.Acquire()
+	defer chains.Response.Release()
 	state := plugins.RequestStateFor(ctx)
 	x := state.NewExchange(ctx, pluginMeta(ctx, workflow))
 	if prompt, err := p.fromRequest(req); err == nil {

@@ -127,8 +127,40 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 		return fmt.Errorf("missing active global workflow")
 	}
 
-	s.current.Store(next)
+	s.install(next)
 	return nil
+}
+
+// install publishes next as the live snapshot. Compiled workflows hold their
+// plugin chains while live, so the guardrails service does not close an
+// instance a workflow still references; the diff against the previous
+// snapshot acquires the newcomers before the swap and releases the dropped
+// ones after it. Callers hold refreshMu.
+func (s *Service) install(next snapshot) {
+	previous := compiledSet(s.snapshot())
+	incoming := compiledSet(next)
+	for compiled := range incoming {
+		if !previous[compiled] {
+			compiled.Chains.Acquire()
+		}
+	}
+	s.current.Store(next)
+	for compiled := range previous {
+		if !incoming[compiled] {
+			compiled.Chains.Release()
+		}
+	}
+}
+
+func compiledSet(current snapshot) map[*CompiledWorkflow]bool {
+	set := make(map[*CompiledWorkflow]bool, len(current.byVersionID))
+	for _, compiled := range current.byScope {
+		set[compiled] = true
+	}
+	for _, compiled := range current.byVersionID {
+		set[compiled] = true
+	}
+	return set
 }
 
 // EnsureDefaultGlobal seeds or reconciles the managed active global workflow.
@@ -579,7 +611,7 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledWorkflow) {
 	}
 	next.byScope[ref] = compiled
 	next.byVersionID[compiled.Version.ID] = compiled
-	s.current.Store(next)
+	s.install(next)
 }
 
 func (s *Service) storeDeactivatedVersionLocked(version Version) {
@@ -589,5 +621,5 @@ func (s *Service) storeDeactivatedVersionLocked(version Version) {
 	next := cloneSnapshot(s.snapshot())
 	delete(next.byScope, refForScope(version.Scope))
 	delete(next.byVersionID, version.ID)
-	s.current.Store(next)
+	s.install(next)
 }

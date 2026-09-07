@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -193,7 +194,23 @@ func (s *translatedInferenceService) wrapPluginStream(ctx context.Context, workf
 			OnError:         ps.reportError("transform"),
 		})
 	}
-	return stream
+	// The instances stay held until the stream is closed, however long it
+	// runs, so a guardrail replaced meanwhile is not closed underneath it.
+	chains.Acquire()
+	return &releaseOnClose{ReadCloser: stream, release: chains.Release}
+}
+
+// releaseOnClose runs release once when the stream is closed.
+type releaseOnClose struct {
+	io.ReadCloser
+	release func()
+	once    sync.Once
+}
+
+func (r *releaseOnClose) Close() error {
+	err := r.ReadCloser.Close()
+	r.once.Do(r.release)
+	return err
 }
 
 // pluginStream drives the stream-phase instances of one request. It is the

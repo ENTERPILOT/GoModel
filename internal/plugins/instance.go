@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -69,6 +70,41 @@ type Instance struct {
 	Timeout  time.Duration
 	// ConfigHash digests the validated config for chain hashing.
 	ConfigHash string
+
+	// refs counts the holders of the instance: compiled workflows while
+	// they are in the workflow snapshot, and requests for the duration of a
+	// phase. A retired instance is closed only once unheld.
+	refs atomic.Int64
+	// closed is set by Close; a closed instance refuses hook calls.
+	closed atomic.Bool
+}
+
+// ErrInstanceClosed is returned by Call for an instance that was closed.
+var ErrInstanceClosed = errors.New("plugins: instance is closed")
+
+// Acquire records a holder of the instance; see Release.
+func (i *Instance) Acquire() {
+	if i != nil {
+		i.refs.Add(1)
+	}
+}
+
+// Release drops one holder recorded by Acquire.
+func (i *Instance) Release() {
+	if i != nil {
+		i.refs.Add(-1)
+	}
+}
+
+// Held reports whether a compiled workflow or an in-flight request still
+// holds the instance.
+func (i *Instance) Held() bool {
+	return i != nil && i.refs.Load() > 0
+}
+
+// Closed reports whether Close ran.
+func (i *Instance) Closed() bool {
+	return i != nil && i.closed.Load()
 }
 
 // initTimeout bounds Init; a variable so tests can shorten it.
@@ -162,9 +198,10 @@ func (i *Instance) FailsOpen(phase pluginapi.Kind, err error, shared bool) bool 
 	return !shared || !errors.Is(err, ErrAbandoned)
 }
 
-// Close releases the plugin's resources, recovering panics.
+// Close releases the plugin's resources, recovering panics. It runs once;
+// later calls return nil, and later hook calls fail with ErrInstanceClosed.
 func (i *Instance) Close(ctx context.Context) (err error) {
-	if i == nil || i.Plugin == nil {
+	if i == nil || i.Plugin == nil || !i.closed.CompareAndSwap(false, true) {
 		return nil
 	}
 	defer func() {

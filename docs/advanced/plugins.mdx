@@ -123,11 +123,13 @@ once. Definitions are reloaded from storage periodically
 (`workflows.refresh_interval`, default 1 minute) and on every admin change;
 an instance whose type, config, `user_path`, `fail_mode`, and `timeout_ms`
 are unchanged survives the reload, so state a plugin accumulates (counters,
-caches, connections) is kept. A replaced or deleted instance is closed two
-refresh intervals later, once compiled workflows have been rebuilt against
-the new set and in-flight requests have finished. Every instance is closed
-on shutdown. `Close` may therefore run while a late request still holds the
-instance: release resources, do not panic on a call after `Close`.
+caches, connections) is kept. A replaced or deleted instance is retired and
+closed later, no sooner than two refresh intervals after retirement and only
+once nothing holds it: compiled workflows hold their instances until the
+workflow snapshot drops them, and requests hold theirs for the duration of a
+phase (a long stream included). A hook is never called after `Close`; a call
+that reaches a closed instance fails under the instance's `fail_mode`
+instead. Every instance is closed on shutdown.
 
 ## Streaming
 

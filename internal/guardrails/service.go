@@ -152,7 +152,10 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 }
 
 // swap installs next, retires the instances it replaced, and closes retired
-// instances whose grace period has passed.
+// instances whose grace period has passed and that nothing holds any more:
+// compiled workflows hold their instances until the workflow snapshot drops
+// them, and requests for the duration of a phase (a long stream included),
+// so a late workflow refresh or a slow request never runs a closed plugin.
 func (s *Service) swap(ctx context.Context, next serviceSnapshot) {
 	now := s.now()
 	s.mu.Lock()
@@ -166,7 +169,7 @@ func (s *Service) swap(ctx context.Context, next serviceSnapshot) {
 	var due []*plugins.Instance
 	kept := s.retired[:0]
 	for _, r := range s.retired {
-		if now.Sub(r.at) >= s.retireAfter {
+		if now.Sub(r.at) >= s.retireAfter && !r.inst.Held() {
 			due = append(due, r.inst)
 			continue
 		}

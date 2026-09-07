@@ -168,9 +168,14 @@ mechanism against its 10 s deadline.
 Instances are long-lived. A guardrail refresh reuses every instance whose
 type, config, `user_path`, `fail_mode`, and `timeout_ms` are unchanged, so
 plugin state survives reloads; replaced and deleted instances are retired
-and closed two refresh intervals later, after workflows (which recompile on
-the same interval) stopped referencing them and in-flight requests finished.
-The guardrails subsystem closes every active and retired instance on
+and closed once two refresh intervals have passed and the instance is no
+longer held. Instances carry a reference count: a compiled workflow holds
+its chains while it is in the workflow snapshot (acquired on install,
+released when the snapshot drops it), and a request holds a chain for the
+duration of a phase, the whole stream for the stream phase. A delayed or
+failed workflow refresh therefore keeps the old instances open, and a
+closed instance refuses hook calls (`ErrInstanceClosed`, handled under the
+fail mode) as a safety net. The guardrails subsystem closes every active and retired instance on
 shutdown; the routing-strategy resolver is registered for shutdown as well.
 A build of a stream plugin whose `StreamPolicy` is `buffer` fails unless the
 plugin also implements `ResponseHook`, since buffering runs `OnResponse`.

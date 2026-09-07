@@ -186,6 +186,9 @@ var ErrAbandoned = errors.New("plugin call abandoned")
 // that returns after its deadline is reported as abandoned as well.
 func Call[T any](ctx context.Context, inst *Instance, fn func(context.Context) (T, error)) (T, error) {
 	var zero T
+	if inst.Closed() {
+		return zero, fmt.Errorf("%w: %q", ErrInstanceClosed, inst.Name)
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
