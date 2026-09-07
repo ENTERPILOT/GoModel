@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/egress"
 )
 
 type pgVecStore struct {
@@ -34,7 +35,19 @@ func newPGVectorStore(cfg config.PGVectorConfig) (*pgVecStore, error) {
 	if err := validatePGIdentifier(tbl); err != nil {
 		return nil, fmt.Errorf("vecstore pgvector: table: %w", err)
 	}
-	pool, err := pgxpool.New(context.Background(), cfg.URL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("vecstore pgvector: url: %w", err)
+	}
+	// See NewPostgreSQL: with an egress hook installed the name reaches it
+	// unresolved, so one place decides what it may resolve to.
+	poolCfg.ConnConfig.DialFunc = egress.DialContext
+	if egress.Installed() {
+		poolCfg.ConnConfig.LookupFunc = func(_ context.Context, host string) ([]string, error) {
+			return []string{host}, nil
+		}
+	}
+	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
 		return nil, fmt.Errorf("vecstore pgvector: connect: %w", err)
 	}
