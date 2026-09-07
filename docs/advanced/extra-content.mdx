@@ -1,14 +1,18 @@
 ---
-title: "Provider state (extra_content)"
-description: "How GoModel carries provider-specific replay state such as Gemini thought signatures and Anthropic thinking blocks through every API"
+title: "Extra content, thinking blocks, and thought signatures"
+description: "How GoModel preserves provider replay state such as Gemini 3 thought signatures and Anthropic thinking blocks across turns, APIs, and providers"
 ---
 
+## What extra content is
+
 Some providers attach opaque state to a reply and expect it back, unchanged,
-on the next turn. Gemini 3 signs its function calls with a `thoughtSignature`
-and rejects a history that replays the call without it. Anthropic requires
-`thinking` blocks, signatures included, in front of a tool-use turn that
-continues. Such state has no OpenAI-compatible field, so GoModel carries it in
-one place: an `extra_content` object keyed by vendor.
+on the next turn. Gemini 3 signs its function calls with a thought signature
+and rejects a history that replays the call without it. Anthropic requires the
+thinking blocks of an assistant turn, signatures included, in front of a
+tool-use turn that continues.
+
+Such state has no OpenAI-compatible field, so GoModel carries it in one place:
+an `extra_content` object keyed by vendor.
 
 ```json
 {
@@ -16,28 +20,33 @@ one place: an `extra_content` object keyed by vendor.
   "tool_calls": [{
     "id": "call_1",
     "type": "function",
-    "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"},
+    "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
     "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
   }]
 }
 ```
 
-This is the shape Google's own OpenAI-compatible endpoint uses, so clients
-built against it work unchanged.
+GoModel stores nothing. The state travels inside the response to the client
+and comes back inside the client's message history. Clients that copy
+assistant messages into the history verbatim, which is what the OpenAI,
+Anthropic, and Responses SDKs do, need no changes.
 
-## Where it appears
+The shape matches Google's own OpenAI-compatible endpoint, so clients built
+against it work unchanged.
+
+### Where it appears
 
 | API | Location |
 | --- | --- |
-| Chat Completions | `tool_calls[].extra_content` and, for text-only turns, `message.extra_content`; also on streamed `tool_calls` deltas |
+| Chat Completions | `tool_calls[].extra_content`; for text-only turns, `message.extra_content`; also on streamed `tool_calls` deltas |
 | Responses | `function_call` output items |
 | Anthropic Messages | `tool_use` content blocks |
 
-Send the member back exactly as you received it. Clients that copy assistant
-messages into the history verbatim, which is what the OpenAI, Anthropic, and
-Responses SDKs do, need no changes.
+State sits on the unit that maps to one provider part. A tool call becomes one
+Gemini `part`, so a per-call signature lives on the tool call. Thinking blocks
+belong to the whole assistant turn, so they live on the message.
 
-## Rules
+### Rules
 
 - **Every translation copies it through.** Chat, Responses, and Anthropic
   Messages ingress, streaming, and the assistant-turn echo carry
@@ -48,16 +57,216 @@ Responses SDKs do, need no changes.
   that moved between providers does not fail on foreign fields.
 - **Only the owning adapter reads or writes inside it.** Nothing else in the
   gateway interprets the contents.
+- **Echo it verbatim.** Do not rewrite, reorder, or trim the member.
 
-## Vendors
+## Thought signature preservation
+
+Gemini 3 attaches an encrypted `thoughtSignature` to the function calls it
+emits. The next request must carry the same signature on the same call, or
+Gemini answers with HTTP 400 "Function call is missing a thought_signature".
+One tool-call turn through Chat Completions looks like this. Only the fields
+that matter are shown.
+
+<Steps>
+  <Step title="The client asks a question with a tool available">
+    ```json
+    POST /v1/chat/completions
+    {
+      "model": "gemini-3.5-flash",
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"}
+      ],
+      "tools": [{
+        "type": "function",
+        "function": {"name": "get_weather", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}}
+      }]
+    }
+    ```
+  </Step>
+  <Step title="Gemini replies with a function call and a signature">
+    GoModel translates the request into Gemini's native `generateContent`
+    shape. Gemini returns a `functionCall` part that carries the signature.
+
+    ```json
+    {
+      "candidates": [{
+        "content": {
+          "role": "model",
+          "parts": [{
+            "functionCall": {"name": "get_weather", "args": {"city": "Kraków"}},
+            "thoughtSignature": "EvACCu0CARFNMg..."
+          }]
+        }
+      }]
+    }
+    ```
+  </Step>
+  <Step title="GoModel returns the call with the signature under extra_content">
+    ```json
+    {
+      "choices": [{
+        "message": {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+            "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+          }]
+        },
+        "finish_reason": "tool_calls"
+      }]
+    }
+    ```
+  </Step>
+  <Step title="The client runs the tool and sends the full history back">
+    The assistant message is appended as received, so `extra_content` comes
+    along for free.
+
+    ```json
+    POST /v1/chat/completions
+    {
+      "model": "gemini-3.5-flash",
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"},
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"},
+            "extra_content": {"google": {"thought_signature": "EvACCu0CARFNMg..."}}
+          }]
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "{\"temp_c\": 18, \"sky\": \"cloudy\"}"}
+      ],
+      "tools": ["..."]
+    }
+    ```
+  </Step>
+  <Step title="GoModel replays the signature on the matching Gemini part">
+    ```json
+    {
+      "contents": [
+        {"role": "user", "parts": [{"text": "What's the weather in Kraków?"}]},
+        {"role": "model", "parts": [{
+          "functionCall": {"name": "get_weather", "args": {"city": "Kraków"}},
+          "thoughtSignature": "EvACCu0CARFNMg..."
+        }]},
+        {"role": "user", "parts": [{
+          "functionResponse": {"name": "get_weather", "response": {"temp_c": 18, "sky": "cloudy"}}
+        }]}
+      ]
+    }
+    ```
+
+    Gemini accepts the replay and answers with text. GoModel returns a normal
+    chat completion.
+  </Step>
+</Steps>
+
+The same member appears on streamed `tool_calls` deltas, on Responses API
+`function_call` items, on Anthropic Messages `tool_use` blocks, and, for
+text-only turns, on the assistant message itself. Only the first call of a
+parallel batch carries a signature. A flat `thought_signature` or
+`thoughtSignature` on the tool call is accepted too, so clients built against
+other gateways keep working.
+
+When a Gemini 3 history contains a function call without any signature,
+because the conversation started on another provider or a client dropped the
+member, GoModel sends Google's documented placeholder instead of surfacing the
+400. Echo the real value whenever you have it; the placeholder costs reasoning
+continuity for that turn. See [Gemini thought
+signatures](/providers/gemini#thought-signatures) for provider details.
+
+## Thinking blocks
+
+Anthropic's extended thinking returns `thinking` and `redacted_thinking`
+content blocks on an assistant turn. When that turn ends in a tool call, the
+follow-up request must replay those blocks, signatures included, ahead of the
+`tool_use` block. Through the [Anthropic Messages API](/advanced/anthropic-messages-api)
+the flow is:
+
+<Steps>
+  <Step title="The client sends a history that contains thinking blocks">
+    ```json
+    POST /v1/messages
+    {
+      "model": "claude-sonnet-4-5",
+      "max_tokens": 1024,
+      "thinking": {"type": "enabled", "budget_tokens": 2048},
+      "messages": [
+        {"role": "user", "content": "What's the weather in Kraków?"},
+        {"role": "assistant", "content": [
+          {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."},
+          {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Kraków"}}
+        ]},
+        {"role": "user", "content": [
+          {"type": "tool_result", "tool_use_id": "toolu_1", "content": "weather service timed out", "is_error": true}
+        ]}
+      ],
+      "tools": ["..."]
+    }
+    ```
+  </Step>
+  <Step title="GoModel keeps the blocks under extra_content.anthropic">
+    Internally the history is chat-shaped. The thinking blocks ride on the
+    assistant message and `is_error` on the tool result. Neither has an
+    OpenAI-compatible field, so both live under the `anthropic` vendor.
+    `is_error` is only written when the result failed.
+
+    ```json
+    [
+      {"role": "user", "content": "What's the weather in Kraków?"},
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"Kraków\"}"}}],
+        "extra_content": {"anthropic": {"thinking_blocks": [
+          {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."}
+        ]}}
+      },
+      {
+        "role": "tool", "tool_call_id": "toolu_1", "content": "weather service timed out",
+        "extra_content": {"anthropic": {"is_error": true}}
+      }
+    ]
+    ```
+  </Step>
+  <Step title="Anthropic receives the blocks verbatim">
+    When the route lands on Anthropic, the thinking blocks are put back in
+    front of the `tool_use` block exactly as sent, and `is_error` is restored
+    on the `tool_result`. Any other provider receives the tool call and the
+    result text only.
+  </Step>
+</Steps>
+
+GoModel returns `thinking` blocks in Anthropic Messages responses as text
+only. The signature Anthropic issues is not yet carried back on the response
+side, so a replay with signed blocks currently works for histories captured
+from Anthropic directly or through a client that kept them.
+
+## Moving a history between providers
+
+A conversation may start on one provider and continue on another. The rule is
+simple: every vendor object that the target provider does not own is removed
+before dispatch, on every route, in every dialect.
+
+| History carries | Routed to | Provider receives |
+| --- | --- | --- |
+| `extra_content.google` | `gemini`, `vertex` | the signature, replayed on the matching part |
+| `extra_content.google` | any other provider | nothing; the member is dropped |
+| `extra_content.anthropic` | `anthropic` | thinking blocks and `is_error`, restored in place |
+| `extra_content.anthropic` | any other provider | nothing; the member is dropped |
+
+The client's own history is never modified. The filtering happens on the copy
+GoModel sends upstream.
+
+## Vendor reference
 
 | Vendor | Providers | Members |
 | --- | --- | --- |
-| `google` | `gemini`, `vertex` | `thought_signature`: the Gemini 3 signature of a function call or text turn. See [Gemini thought signatures](/providers/gemini#thought-signatures). |
-| `anthropic` | `anthropic` | `thinking_blocks`: the `thinking` and `redacted_thinking` blocks of an assistant turn; `is_error`: marks a tool result as failed. Set by the [Anthropic Messages API](/advanced/anthropic-messages-api) ingress. |
-
-When a history reaches Gemini 3 without a signature, because the conversation
-started on another provider or a client dropped the member, GoModel sends
-Google's documented placeholder instead of surfacing the 400. Echo the real
-value whenever you have it; the placeholder costs reasoning continuity for
-that turn.
+| `google` | `gemini`, `vertex` | `thought_signature`: the Gemini 3 signature of a function call or text turn. |
+| `anthropic` | `anthropic` | `thinking_blocks`: the `thinking` and `redacted_thinking` blocks of an assistant turn; `is_error`: marks a tool result as failed. Set by the Anthropic Messages API ingress. |
