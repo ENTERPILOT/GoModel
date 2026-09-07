@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -22,6 +23,8 @@ type fakeRoute struct {
 	outcomes []pluginapi.RouteOutcome
 	panicEnd bool
 	closed   int
+	// initGate, when set, blocks Init until it is closed.
+	initGate chan struct{}
 }
 
 func (f *fakeRoute) Manifest() pluginapi.Manifest {
@@ -29,6 +32,9 @@ func (f *fakeRoute) Manifest() pluginapi.Manifest {
 }
 
 func (f *fakeRoute) Init(_ context.Context, config json.RawMessage, _ pluginapi.Host) error {
+	if f.initGate != nil {
+		<-f.initGate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.config = config
@@ -136,19 +142,29 @@ func TestRouteResolver_StrategyBuildsLazilyFromInstanceConfig(t *testing.T) {
 	if string(route.config) != `{"endpoint":"http://a"}` {
 		t.Fatalf("instance config = %s", route.config)
 	}
-	again, _, err := resolver.Strategy("lat")
+	again, againInst, err := resolver.Strategy("lat")
 	if err != nil || again != strategy {
 		t.Fatalf("second Strategy = %v, %v; want the cached instance", again, err)
 	}
+	againInst.Release()
 
-	// A changed definition rebuilds the instance and closes the previous one.
+	// A changed definition rebuilds the instance. The previous one is still
+	// held by the first caller, so it stays open until that caller releases
+	// it and the resolver next looks.
 	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
-	if _, _, err := resolver.Strategy("lat"); err != nil {
+	_, rebuilt, err := resolver.Strategy("lat")
+	if err != nil {
 		t.Fatalf("Strategy after change: %v", err)
 	}
-	if string(route.config) != `{"endpoint":"http://b"}` || route.closed != 1 {
-		t.Fatalf("after change config = %s closed = %d, want rebuilt once", route.config, route.closed)
+	if string(route.config) != `{"endpoint":"http://b"}` || route.closed != 0 || inst.Closed() {
+		t.Fatalf("after change config = %s closed = %d, want the held instance kept open", route.config, route.closed)
 	}
+	inst.Release()
+	resolver.ReportOutcome(pluginapi.RouteOutcome{Source: "smart"})
+	if route.closed != 1 || !inst.Closed() || rebuilt.Closed() {
+		t.Fatalf("after release closed = %d (previous closed %v, current closed %v), want the previous instance closed", route.closed, inst.Closed(), rebuilt.Closed())
+	}
+	rebuilt.Release()
 
 	if names := resolver.Names(); len(names) != 1 || names[0] != "lat" {
 		t.Fatalf("Names() = %v, want [lat]", names)
@@ -210,5 +226,50 @@ func TestRouteResolver_ReportOutcomeFansOutAndRecovers(t *testing.T) {
 	resolver.ReportOutcome(outcome)
 	if len(good.outcomes) != 2 || good.outcomes[0].Target.Qualified() != "openai/gpt-4o" {
 		t.Fatalf("good strategy outcomes = %+v, want 2 for openai/gpt-4o", good.outcomes)
+	}
+}
+
+// A rebuild's Init must not hold the mutex ReportOutcome takes at the end of
+// every upstream request.
+func TestRouteResolver_ReportOutcomeNotBlockedByInit(t *testing.T) {
+	t.Parallel()
+	slow := &fakeRoute{name: "slow", initGate: make(chan struct{})}
+	resolver := NewRouteResolver(newRouteCatalog(t, slow), HostDeps{})
+
+	built := make(chan error, 1)
+	go func() {
+		_, inst, err := resolver.Strategy("slow")
+		inst.Release()
+		built <- err
+	}()
+	// Wait until the build has entered Init, which parks on the gate.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resolver.mu.Lock()
+		_, cached := resolver.strategies["slow"]
+		resolver.mu.Unlock()
+		if cached || time.Now().After(deadline) {
+			break
+		}
+		if !resolver.buildMu.TryLock() {
+			break
+		}
+		resolver.buildMu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+
+	reported := make(chan struct{})
+	go func() {
+		resolver.ReportOutcome(pluginapi.RouteOutcome{Source: "smart"})
+		close(reported)
+	}()
+	select {
+	case <-reported:
+	case <-time.After(time.Second):
+		t.Fatal("ReportOutcome blocked behind a plugin Init")
+	}
+	close(slow.initGate)
+	if err := <-built; err != nil {
+		t.Fatalf("Strategy: %v", err)
 	}
 }

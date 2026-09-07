@@ -102,11 +102,12 @@ func (s *Service) pluginTarget(ctx context.Context, entry *redirectEntry, sessio
 		s.warnPluginOnce(source, name, "routing-strategy plugins are not available (PLUGINS_ENABLED=false); falling back to round robin", nil)
 		return resolvedTarget{}, false
 	}
-	strategy, _, err := s.routeResolver.Strategy(name)
+	strategy, inst, err := s.routeResolver.Strategy(name)
 	if err != nil {
 		s.warnPluginOnce(source, name, "routing-strategy plugin unavailable; falling back to round robin", err)
 		return resolvedTarget{}, false
 	}
+	defer inst.Release() // a config change must not close the instance mid-Select
 	config, err := s.routeConfig(entry)
 	if err != nil {
 		s.warnPluginOnce(source, name, "routing-strategy config invalid; falling back to round robin", err)
