@@ -137,11 +137,29 @@ func (c *responsesCodec) remember(view *responsesEventView) {
 	switch view.Type {
 	case "response.output_text.delta", "response.reasoning_text.delta":
 		c.textIndex, c.textPart, c.textSummary = view.OutputIndex, view.ContentIndex, false
+		c.openPart()
 	case "response.reasoning_summary_text.delta":
 		c.textIndex, c.textPart, c.textSummary = view.OutputIndex, view.SummaryIndex, true
+		c.openPart()
 	case "response.function_call_arguments.delta":
 		c.argsIndex = view.OutputIndex
 	}
+}
+
+// openPart starts tracking the part of the text delta just decoded, before
+// any of its text is emitted. A part whose every delta is dropped or
+// replaced with nothing then still has an (empty) emitted text, so the
+// events that restate it are rewritten instead of relaying the original.
+func (c *responsesCodec) openPart() {
+	item := c.items[c.textIndex]
+	if item == nil {
+		return
+	}
+	if c.textSummary {
+		item.summary(c.textPart)
+		return
+	}
+	item.part(c.textPart)
 }
 
 // Track follows the output items the client has seen and the text emitted
