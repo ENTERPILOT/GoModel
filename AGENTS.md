@@ -66,10 +66,6 @@ Documentation in `docs/` directory is Mintlify based. It should be concise, prac
 
 Show defaults, explain when to change them, and include minimal examples when useful.
 
-## Agent Instruction Files
-
-How agent instructions reach every tool: `AGENTS.md` is canonical, curated by the maintainer, kept short on purpose. `CLAUDE.md` imports it for Claude Code.
-
 ## Commit and PR Format
 
 Use Conventional Commits for commit subjects and PR titles:
