@@ -66,6 +66,9 @@ class PluginsStore {
       if (outcome.status === "error") {
         this.plugins = [];
         this.loaded = false;
+        // An earlier 404/503 hid the panel; a failed retry is no proof the
+        // endpoint is still gone, so show the panel again with the error.
+        this.available = true;
         this.error = outcome.error || "";
         return;
       }
