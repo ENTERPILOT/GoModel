@@ -780,7 +780,7 @@
   "rate_limits_requests": "Anfragen",
   "rate_limits_tokens": "Tokens",
   "guardrails_title": "Plugins & Guardrails",
-  "guardrails_instances": "Plugin-Instanzen",
+  "guardrails_instances": "Guardrails",
   "guardrails_disabled": "GUARDRAILS_ENABLED ist deaktiviert. Du kannst Guardrails weiterhin verwalten, aber sie werden nicht ausgeführt.",
   "guardrails_unavailable": "Die Guardrails-Funktion ist nicht verfügbar.",
   "guardrails_create": "Guardrail erstellen",
