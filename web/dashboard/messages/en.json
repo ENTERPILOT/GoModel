@@ -60,8 +60,7 @@
   "navigation_rate_limits": "Rate Limits",
   "navigation_api_keys": "API Keys",
   "navigation_workflows": "Workflows",
-  "navigation_guardrails_beta": "Guardrails (beta)",
-  "navigation_plugins": "Plugins",
+  "navigation_plugins_guardrails": "Plugins & Guardrails",
   "navigation_mcp_servers": "MCP Servers",
   "navigation_settings": "Settings",
   "navigation_users": "Users",
@@ -780,7 +779,7 @@
   "rate_limits_in_flight": "In-flight",
   "rate_limits_requests": "Requests",
   "rate_limits_tokens": "Tokens",
-  "guardrails_title": "Guardrails",
+  "guardrails_title": "Plugins & Guardrails",
   "guardrails_kicker": "Reusable Policy Objects",
   "guardrails_library": "Guardrail Library",
   "guardrails_instances": "Instances",
@@ -1526,10 +1525,7 @@
   "schema_fields_model_placeholder": "provider/model or alias",
   "plugins_title": "Plugins",
   "plugins_help": "Plugins loaded by the gateway. They add Guardrail types and routing strategies; built-in plugins ship with GoModel, file plugins are loaded from the configured plugins directory.",
-  "plugins_help_label": "Plugins help",
-  "plugins_loading": "Loading plugins...",
   "plugins_empty": "No plugins loaded.",
-  "plugins_unavailable": "The plugin system is disabled. Set PLUGINS_ENABLED=true (or GUARDRAILS_ENABLED=true) to load plugins.",
   "plugins_count": [
     {
       "declarations": [

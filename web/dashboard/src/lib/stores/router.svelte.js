@@ -14,7 +14,6 @@ export const PAGES = [
   "workflows",
   "audit-logs",
   "guardrails",
-  "plugins",
   "mcp-servers",
   "providers-config",
   "auth-keys",

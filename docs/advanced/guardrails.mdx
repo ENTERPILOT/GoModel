@@ -60,14 +60,14 @@ redeploy, or for operators who don't manage this repo's config directly.
   className="rounded-lg"
 />
 
-Open **Guardrails** in the sidebar and click **Create Guardrail**: give it a
+Open **Plugins & Guardrails** in the sidebar and click **Create Guardrail**: give it a
 name, pick a type (every loaded plugin with a prompt, response, or stream
 hook is listed), optionally scope it to a `user_path`, and fill in the form
 the plugin declares. The **Advanced** section holds the failure mode and
 timeout. `config.yaml` entries are seeded into the same store at startup and
 stay in sync with it, so dashboard-created and config-declared guardrails
-appear side by side. The **Plugins** page in the sidebar shows every loaded
-plugin type, its hooks, source, and health. Not every plugin is a guardrail:
+appear side by side. The **Plugins** list at the bottom of the page shows
+every loaded plugin type, its hooks, source, and health. Not every plugin is a guardrail:
 a plugin declares `Guardrail: true` in its manifest when it polices traffic
 (it may block, answer, or warn), and the dashboard marks those, and the
 instances built from them, with a shield. A `header_edit` or `system_prompt`

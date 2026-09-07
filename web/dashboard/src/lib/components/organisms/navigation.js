@@ -13,7 +13,6 @@ import { access } from "$lib/stores/access.svelte.js";
 import { versionStore } from "$lib/stores/version.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
-  Blocks,
   Box,
   ChartColumn,
   FlaskConical,
@@ -67,15 +66,11 @@ export const NAV_ITEMS = [
     visible: globalOnly,
   },
   {
+    // Guardrail instances plus the loaded plugin list; shown whenever the
+    // plugin system is on, even with guardrail execution off.
     page: "guardrails",
-    label: m.navigation_guardrails_beta,
+    label: m.navigation_plugins_guardrails,
     icon: ShieldCheck,
-    visible: () => globalOnly() && runtimeConfig.guardrailsVisible(),
-  },
-  {
-    page: "plugins",
-    label: m.navigation_plugins,
-    icon: Blocks,
     visible: () => globalOnly() && runtimeConfig.pluginsVisible(),
   },
   {

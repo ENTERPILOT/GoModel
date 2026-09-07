@@ -1,7 +1,8 @@
 <script>
-  // Loaded plugins table (GET /admin/plugins): every plugin type with its
-  // version, hooks, source, and health; a plugin that failed to load shows
-  // its error. Guardrails carry a shield and are listed first.
+  // Loaded plugins section at the bottom of the Plugins & Guardrails page
+  // (GET /admin/plugins): every plugin type with its version, hooks, source,
+  // and health; a plugin that failed to load shows its error. Guardrails
+  // carry a shield and are listed first. Always expanded.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { ShieldCheck } from "lucide";
   import { pluginsStore } from "$lib/stores/plugins.svelte.js";
@@ -10,7 +11,17 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
-<div class="table-wrapper">
+<section class="settings-panel plugins-panel">
+  <div class="editor-header plugins-header">
+    <h3>{m.plugins_title()}</h3>
+    <span class="provider-badge">{m.plugins_count({ count: pluginsStore.plugins.length })}</span>
+  </div>
+  <p class="form-hint">{m.plugins_help()}</p>
+
+  {#if pluginsStore.loaded && pluginsStore.plugins.length === 0}
+    <p class="empty-state">{m.plugins_empty()}</p>
+  {:else}
+  <div class="table-wrapper">
   <table class="data-table plugins-table">
     <thead>
       <tr>
@@ -62,9 +73,26 @@
       {/each}
     </tbody>
   </table>
-</div>
+  </div>
+  {/if}
+</section>
 
 <style>
+  .plugins-panel {
+    min-width: 0;
+    margin-top: 20px;
+  }
+
+  .plugins-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .plugins-header :global(h3) {
+    margin: 0;
+  }
+
   .plugin-name {
     display: inline-flex;
     align-items: center;

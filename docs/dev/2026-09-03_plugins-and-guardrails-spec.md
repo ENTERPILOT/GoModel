@@ -12,8 +12,8 @@ text below, the code and the ADR win:
 - A guardrail is a plugin instance, but not every plugin instance is a
   guardrail: `Manifest.Guardrail` (added 2026-09-07) marks the plugins that
   police traffic, while header edits, prompt injection, and routing
-  strategies are plugin instances without it. The dashboard has a Plugins
-  page for loaded types and marks guardrails with a shield.
+  strategies are plugin instances without it. The dashboard lists loaded types at the bottom of the
+  Plugins & Guardrails page and marks guardrails with a shield.
 - Instances live only in `guardrails.rules[]` and the dashboard; the
   `plugins:` section only loads `.so` files (`search_paths`, `load[]` with
   `file` and `sha256`). Per-instance timeouts are `timeout_ms`; the

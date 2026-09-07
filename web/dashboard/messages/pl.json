@@ -60,8 +60,7 @@
   "navigation_rate_limits": "Limity zapytań",
   "navigation_api_keys": "Klucze API",
   "navigation_workflows": "Workflows",
-  "navigation_guardrails_beta": "Guardrails (beta)",
-  "navigation_plugins": "Wtyczki",
+  "navigation_plugins_guardrails": "Wtyczki i Guardrails",
   "navigation_mcp_servers": "Serwery MCP",
   "navigation_settings": "Ustawienia",
   "navigation_users": "Użytkownicy",
@@ -788,7 +787,7 @@
   "rate_limits_in_flight": "W toku",
   "rate_limits_requests": "Requesty",
   "rate_limits_tokens": "Tokeny",
-  "guardrails_title": "Guardrails",
+  "guardrails_title": "Wtyczki i Guardrails",
   "guardrails_kicker": "Obiekty polityk wielokrotnego użytku",
   "guardrails_library": "Biblioteka Guardrails",
   "guardrails_instances": "Instancje",
@@ -1554,10 +1553,7 @@
   "schema_fields_model_placeholder": "provider/model lub alias",
   "plugins_title": "Wtyczki",
   "plugins_help": "Wtyczki załadowane przez bramkę. Dodają typy Guardrails i strategie routingu; wbudowane są częścią GoModel, a wtyczki plikowe są ładowane ze skonfigurowanego katalogu wtyczek.",
-  "plugins_help_label": "Pomoc dotycząca wtyczek",
-  "plugins_loading": "Wczytywanie wtyczek...",
   "plugins_empty": "Brak załadowanych wtyczek.",
-  "plugins_unavailable": "System wtyczek jest wyłączony. Ustaw PLUGINS_ENABLED=true (lub GUARDRAILS_ENABLED=true), aby załadować wtyczki.",
   "plugins_count": [
     {
       "declarations": [
