@@ -13,7 +13,7 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	t.Cleanup(Uninstall)
+	t.Cleanup(func() { installed.Store(nil) })
 
 	// Without a hook the default dialer connects.
 	conn, err := DialContext(context.Background(), "tcp", listener.Addr().String())
@@ -29,10 +29,11 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 	// through the Dialer adapter.
 	refused := errors.New("outside the air gap")
 	var dialed []string
-	if err := Install(func(_ context.Context, _, address string) (net.Conn, error) {
+	hook, err := Install(func(_ context.Context, _, address string) (net.Conn, error) {
 		dialed = append(dialed, address)
 		return nil, refused
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !Installed() {
@@ -50,21 +51,32 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 
 	// A second hook is refused rather than silently replacing the first: the
 	// policy belongs to whoever composed the process.
-	if err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil }); err == nil {
+	if _, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil }); err == nil {
 		t.Fatal("installing over an existing hook must be an error")
 	}
 	if _, err := DialContext(context.Background(), "tcp", "db.example.com:5432"); !errors.Is(err, refused) {
 		t.Fatalf("the first hook must still be in force, got %v", err)
 	}
-	if err := Install(nil); err == nil {
-		t.Fatal("Install(nil) must be an error; Uninstall removes the hook")
+	if _, err := Install(nil); err == nil {
+		t.Fatal("a nil dial must be an error; the handle removes a hook")
 	}
 
-	// Uninstall restores the default dialer.
-	Uninstall()
+	// The handle its owner holds restores the default dialer, and says so
+	// only once: a stale handle must not remove a policy someone else
+	// installed afterwards.
+	hook.Uninstall()
 	if Installed() {
-		t.Fatal("Uninstall must remove the hook")
+		t.Fatal("the handle must remove the hook")
 	}
+	replacement, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, refused })
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook.Uninstall()
+	if !Installed() {
+		t.Fatal("a stale handle must not remove the current hook")
+	}
+	replacement.Uninstall()
 	conn, err = DialContext(context.Background(), "tcp", listener.Addr().String())
 	if err != nil {
 		t.Fatalf("default dialer after removal: %v", err)
@@ -77,7 +89,7 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 // a hook was installed would otherwise keep handing it addresses it had
 // already chosen, which no hostname policy can judge.
 func TestLookupFollowsTheHookAtCallTime(t *testing.T) {
-	t.Cleanup(Uninstall)
+	t.Cleanup(func() { installed.Store(nil) })
 	resolved := []string{"10.0.0.4"}
 	resolve := func(context.Context, string) ([]string, error) { return resolved, nil }
 
@@ -91,7 +103,7 @@ func TestLookupFollowsTheHookAtCallTime(t *testing.T) {
 	}
 
 	// The hook arrives afterwards; the same client must now hand it the name.
-	if err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil }); err != nil {
+	if _, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil }); err != nil {
 		t.Fatal(err)
 	}
 	got, err = Lookup(context.Background(), "db.internal", resolve)

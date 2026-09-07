@@ -16,13 +16,14 @@ import (
 // URL names rather than an address pgx resolved on its own.
 func TestPGVectorStoreDialsThroughTheEgressHook(t *testing.T) {
 	var address string
-	if err := egress.Install(func(_ context.Context, _, addr string) (net.Conn, error) {
+	hook, err := egress.Install(func(_ context.Context, _, addr string) (net.Conn, error) {
 		address = addr
 		return nil, errors.New("refused by the test hook")
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	defer egress.Uninstall()
+	defer hook.Uninstall()
 
 	if _, err := newPGVectorStore(config.PGVectorConfig{
 		URL:       "postgres://user:pw@vectors.example.com:5432/gomodel",

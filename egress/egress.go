@@ -31,29 +31,39 @@ var installed atomic.Pointer[DialFunc]
 // defaultDial is what core uses until a distribution installs a hook.
 var defaultDial DialFunc = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 
+// Hook is an installed policy, handed to whoever installed it. Removing the
+// policy needs this handle, so a package that merely imports egress cannot
+// take the guarantee away from the clients running under it.
+type Hook struct{ dial *DialFunc }
+
 // Install routes every direct connection core opens from now on through
-// dial. It belongs to whatever composes the process - a distribution's
-// startup path - and there is one: installing over an existing hook is an
-// error rather than a silent replacement, so a policy cannot be swapped out
-// from under the clients enforcing it. Uninstall removes it again.
+// dial, and returns the handle that removes it again. It belongs to
+// whatever composes the process - a distribution's startup path - and there
+// is one: installing over an existing hook is an error rather than a silent
+// replacement.
 //
 // Connections already open are unaffected: a hook installed at startup, as
 // GoModel Pro's air-gapped mode does before the application is built, sees
 // every connection the gateway makes.
-func Install(dial DialFunc) error {
+func Install(dial DialFunc) (*Hook, error) {
 	if dial == nil {
-		return errors.New("egress: dial hook is required; call Uninstall to remove one")
+		return nil, errors.New("egress: dial hook is required")
 	}
 	if !installed.CompareAndSwap(nil, &dial) {
-		return errors.New("egress: a dial hook is already installed")
+		return nil, errors.New("egress: a dial hook is already installed")
 	}
-	return nil
+	return &Hook{dial: &dial}, nil
 }
 
-// Uninstall removes the installed hook, so core's clients dial directly
-// again. Whoever installed the hook calls it: GoModel Pro's guard does on
-// close.
-func Uninstall() { installed.Store(nil) }
+// Uninstall removes this hook, so core's clients dial directly again. A hook
+// that is no longer the installed one leaves it alone, and calling twice is
+// harmless.
+func (h *Hook) Uninstall() {
+	if h == nil {
+		return
+	}
+	installed.CompareAndSwap(h.dial, nil)
+}
 
 // Installed reports whether a distribution has installed a hook.
 func Installed() bool { return installed.Load() != nil }

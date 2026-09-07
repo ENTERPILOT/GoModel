@@ -45,17 +45,18 @@ func TestMongoDBDialsThroughTheEgressHook(t *testing.T) {
 func recordDials(t *testing.T) (*string, func()) {
 	t.Helper()
 	var address string
-	if err := egress.Install(func(_ context.Context, _, addr string) (net.Conn, error) {
+	hook, err := egress.Install(func(_ context.Context, _, addr string) (net.Conn, error) {
 		address = addr
 		return nil, errors.New("refused by the test hook")
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	removed := false
 	remove := func() {
 		if !removed {
 			removed = true
-			egress.Uninstall()
+			hook.Uninstall()
 		}
 	}
 	t.Cleanup(remove)
