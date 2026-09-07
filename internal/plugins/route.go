@@ -141,9 +141,9 @@ func (r *RouteResolver) ValidateRouteConfig(name string, cfg map[string]any) (js
 // the failure is cached until that config changes, so a broken plugin costs
 // one lookup per request rather than one Init.
 //
-// The returned instance is held for the caller, who must Release it after
-// the call: a config change replaces the instance, and the replaced one is
-// closed only once no caller holds it.
+// The returned instance is held for the caller, who must hand it back to
+// Release after the call: a config change replaces the instance, and the
+// replaced one is closed only once no caller holds it.
 func (r *RouteResolver) Strategy(name string) (pluginapi.RouteStrategy, *Instance, error) {
 	entry, err := r.routeEntry(name)
 	if err != nil {
@@ -193,6 +193,17 @@ func (r *RouteResolver) rebuild(entry Entry) (pluginapi.RouteStrategy, *Instance
 	r.mu.Unlock()
 	r.closeRetired(context.Background())
 	return strategy, inst, err
+}
+
+// Release drops the hold Strategy took on inst and closes the retired
+// instances no call holds any more, so a replaced instance goes away when
+// its last Select returns rather than at the next rebuild or report.
+func (r *RouteResolver) Release(inst *Instance) {
+	if r == nil || inst == nil {
+		return
+	}
+	inst.Release()
+	r.closeRetired(context.Background())
 }
 
 // acquire hands out the strategy with its instance held for the caller.

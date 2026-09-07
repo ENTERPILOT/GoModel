@@ -376,3 +376,33 @@ func TestRouteResolver_ReportOutcomeHoldsInstanceAcrossOnAttemptEnd(t *testing.T
 		t.Fatalf("after OnAttemptEnd returned: previous closed %v, current closed %v", inst.Closed(), rebuilt.Closed())
 	}
 }
+
+// Handing an instance back closes it at once when a rebuild retired it
+// meanwhile: no later report or rebuild is needed.
+func TestRouteResolver_ReleaseClosesRetiredInstance(t *testing.T) {
+	t.Parallel()
+	route := &fakeRoute{name: "lat", schema: routeSchema}
+	resolver := NewRouteResolver(newRouteCatalog(t, route), HostDeps{})
+	configs := map[string]json.RawMessage{"lat": json.RawMessage(`{"endpoint":"http://a"}`)}
+	resolver.SetInstanceConfigs(func(name string) (json.RawMessage, bool) {
+		raw, ok := configs[name]
+		return raw, ok
+	})
+	_, inst, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
+	_, rebuilt, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Closed() {
+		t.Fatal("replaced instance closed while its Select was still held")
+	}
+	resolver.Release(inst)
+	if !inst.Closed() || rebuilt.Closed() {
+		t.Fatalf("after Release: previous closed %v, current closed %v; want the previous closed at once", inst.Closed(), rebuilt.Closed())
+	}
+	resolver.Release(rebuilt)
+}

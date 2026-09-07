@@ -83,6 +83,8 @@ func (r *fakeResolver) Strategy(name string) (pluginapi.RouteStrategy, *plugins.
 	return r.strategy, r.inst, nil
 }
 
+func (r *fakeResolver) Release(inst *plugins.Instance) { inst.Release() }
+
 func (r *fakeResolver) ValidateRouteConfig(name string, cfg map[string]any) (json.RawMessage, error) {
 	if name != "lat" {
 		return nil, errors.New("routing-strategy plugin \"" + name + "\" is not loaded")
