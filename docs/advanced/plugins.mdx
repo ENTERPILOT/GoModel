@@ -173,7 +173,9 @@ keep-alive lines are never affected.
 
 **Buffering**: the upstream is drained into a bounded buffer
 (`MaxBufferBytes`, default 4 MiB; exceeding it fails closed with code
-`response_too_large`). While draining, GoModel sends the SSE comment
+`response_too_large`). The buffer is shared by every plugin buffering the
+stream and by the response chain, so the largest cap asked for applies, and
+the default whenever the response chain runs or a plugin sets no cap. While draining, GoModel sends the SSE comment
 `: gomodel-buffering` every 15 s so proxies and clients do not time out; SDKs
 ignore comment lines. After the response chain runs, the original bytes are
 replayed unchanged (`allow`, `warn`), a stream is synthesized from the edited
