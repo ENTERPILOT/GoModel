@@ -198,12 +198,22 @@ func initPlugin(ctx context.Context, plugin pluginapi.Plugin, config json.RawMes
 }
 
 // closeFailedInit releases what a failed Init may hold. The plugin never
-// became an instance, so its Close error and panics are of no interest.
+// became an instance, so its Close error and panics are of no interest, and
+// a Close that ignores its deadline is left to finish on its own rather
+// than holding up NewInstance.
 func closeFailedInit(plugin pluginapi.Plugin) {
-	defer func() { _ = recover() }()
 	ctx, cancel := context.WithTimeout(context.Background(), initTimeout)
 	defer cancel()
-	_ = plugin.Close(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = recover() }()
+		_ = plugin.Close(ctx)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // FailsOpen reports whether err from a hook of phase is absorbed under the

@@ -187,3 +187,29 @@ func TestNewInstanceClosesAbandonedInitOnceItReturns(t *testing.T) {
 		t.Fatal("abandoned plugin was not closed after its Init returned")
 	}
 }
+
+// stuckClose fails Init and then ignores its Close deadline.
+type stuckClose struct{ release chan struct{} }
+
+func (s *stuckClose) Manifest() pluginapi.Manifest { return pluginapi.Manifest{Name: "stuck-close"} }
+func (s *stuckClose) Init(context.Context, json.RawMessage, pluginapi.Host) error {
+	return errors.New("init failed")
+}
+func (s *stuckClose) Close(context.Context) error { <-s.release; return nil }
+
+func TestNewInstanceDoesNotWaitForAStuckCloseAfterFailedInit(t *testing.T) {
+	previous := initTimeout
+	initTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { initTimeout = previous })
+
+	plugin := &stuckClose{release: make(chan struct{})}
+	defer close(plugin.release)
+	entry := Entry{Name: "stuck-close", Factory: func() pluginapi.Plugin { return plugin }}
+	start := time.Now()
+	if _, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{})); err == nil || !strings.Contains(err.Error(), "init failed") {
+		t.Fatalf("error = %v, want the init failure", err)
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Fatal("NewInstance waited on a Close that ignores its deadline")
+	}
+}
