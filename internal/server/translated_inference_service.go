@@ -198,17 +198,17 @@ func handleTranslatedJSON[Req any](
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
-			recordPromptPluginRevisions(c, nil, nil)
+			recordPromptPluginRevisions(c, s.logger, nil, nil)
 			return shortCircuit(s, c, workflow, req, short)
 		}
 		// A block or fail-closed outcome still belongs to the resolved
 		// workflow: the audit entry must carry it like every other outcome.
 		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
-		recordPromptPluginRevisions(c, nil, nil)
+		recordPromptPluginRevisions(c, s.logger, nil, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
-	recordPromptPluginRevisions(c, req, preparedReq)
+	recordPromptPluginRevisions(c, s.logger, req, preparedReq)
 	applyPluginRequestHeaders(c)
 
 	return handleWithCache(s, c, preparedReq, workflow, dispatch)

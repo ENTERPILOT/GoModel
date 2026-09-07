@@ -143,9 +143,10 @@ type LogData struct {
 	Attempts []AttemptSnapshot `json:"attempts,omitempty" bson:"attempts,omitempty"`
 
 	// RequestRevisions captures the ingress request-rewrite chain: one entry
-	// per registered rewriter that ran, in application order. Rewriters that
-	// changed the body carry the rewritten body; those that left it alone are
-	// recorded with NoChange so the audit trail still shows the step ran.
+	// per registered rewriter that ran, in application order, followed by the
+	// prompt-guardrail decisions. Rewriters and guardrails that changed the
+	// body carry the rewritten body; those that left it alone are recorded
+	// with NoChange so the audit trail still shows the step ran.
 	// RequestBody always remains the original client request; the last
 	// changed revision is what was forwarded downstream — when every rewriter
 	// was a no-op there is no such revision and the original body is what
@@ -405,8 +406,9 @@ type Config struct {
 	LogImageOutputs bool
 
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
-	// rewriters that changed the body store the full rewritten copy only when
-	// both are enabled. Revision metadata is always kept.
+	// rewriters and prompt guardrails that changed the body store the full
+	// rewritten copy only when both are enabled. Revision metadata is always
+	// kept.
 	LogRevisionBodies bool
 
 	// LogHeaders enables logging of request/response headers

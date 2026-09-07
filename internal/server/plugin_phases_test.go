@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
@@ -78,6 +79,11 @@ func (p *phasePlugin) decide(mode string, x *pluginapi.Exchange) (pluginapi.Deci
 }
 
 func (p *phasePlugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	if p.prompt == "edit" {
+		if last := x.Prompt.LastUser(); last != nil {
+			return pluginapi.Allow(), x.Prompt.SetText(last.ID, 0, p.text)
+		}
+	}
 	return p.decide(p.prompt, x)
 }
 
@@ -122,7 +128,12 @@ func phaseChains(t *testing.T, cfg map[string]string, steps ...guardrails.StepRe
 
 func phaseHandler(t *testing.T, inner core.RoutableProvider, chains *plugins.Chains) *Handler {
 	t.Helper()
-	handler := newHandler(inner, nil, nil, nil, nil, nil, nil, guardrails.NewWorkflowRequestPatcher(staticChainsResolver{chains: chains}))
+	return phaseHandlerWithLogger(t, inner, nil, chains)
+}
+
+func phaseHandlerWithLogger(t *testing.T, inner core.RoutableProvider, logger auditlog.LoggerInterface, chains *plugins.Chains) *Handler {
+	t.Helper()
+	handler := newHandler(inner, logger, nil, nil, nil, nil, nil, guardrails.NewWorkflowRequestPatcher(staticChainsResolver{chains: chains}))
 	handler.pluginChains = staticChainsResolver{chains: chains}
 	return handler
 }
@@ -449,4 +460,65 @@ func TestChatCompletion_BlockedRequestKeepsWorkflow(t *testing.T) {
 	if core.GetWorkflow(c.Request().Context()) == nil {
 		t.Fatal("blocked request lost its resolved workflow")
 	}
+}
+
+// A prompt edit is applied back to the request once, after the whole chain;
+// the audit revision of the editing instance carries that applied body under
+// the same gates as the ingress rewriters.
+func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
+	run := func(t *testing.T, logBodies, logRevisionBodies bool) *auditlog.LogEntry {
+		t.Helper()
+		chains := phaseChains(t, map[string]string{"prompt": "edit", "text": "rewritten by guardrail"},
+			guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1})
+		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: logBodies, LogRevisionBodies: logRevisionBodies}}
+		handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = &explodingReadCloser{}
+		frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(chatBody), false, "", nil)
+		req = withRequestSnapshotAndPrompt(req, frame)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+		c.Set(string(auditlog.LogEntryKey), entry)
+		if err := handler.ChatCompletion(c); err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+		}
+		revisions := entry.Data.RequestRevisions
+		if len(revisions) != 1 {
+			t.Fatalf("expected 1 revision, got %d: %+v", len(revisions), revisions)
+		}
+		revision := revisions[0]
+		if revision.Seq != 1 || revision.Rewriter != "phase" || revision.NoChange {
+			t.Errorf("revision must name the editing instance as a change: %+v", revision)
+		}
+		if revision.BytesBefore == 0 || revision.BytesAfter == 0 {
+			t.Errorf("revision sizes missing: %+v", revision)
+		}
+		return entry
+	}
+
+	t.Run("with body logging", func(t *testing.T) {
+		revision := run(t, true, true).Data.RequestRevisions[0]
+		body, _ := json.Marshal(revision.Body)
+		if !strings.Contains(string(body), "rewritten by guardrail") || strings.Contains(string(body), `"hi"`) {
+			t.Errorf("revision body must be the applied request: %s", body)
+		}
+	})
+
+	t.Run("without body logging", func(t *testing.T) {
+		if revision := run(t, false, true).Data.RequestRevisions[0]; revision.Body != nil {
+			t.Errorf("body must not be captured when body logging is off: %+v", revision)
+		}
+	})
+
+	t.Run("without revision body logging", func(t *testing.T) {
+		if revision := run(t, true, false).Data.RequestRevisions[0]; revision.Body != nil {
+			t.Errorf("body must not be captured when revision body logging is off: %+v", revision)
+		}
+	})
 }

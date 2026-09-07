@@ -42,8 +42,9 @@ type LogConfig struct {
 
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// when both are enabled, every request rewriter that changed the body
-	// (for example GoModel Pro token compression) stores the full rewritten
-	// body alongside the original in the audit entry. Requires LogBodies.
+	// (for example GoModel Pro token compression) and every prompt guardrail
+	// that edited it store the full rewritten body alongside the original in
+	// the audit entry. Requires LogBodies.
 	// Disabling it keeps the revision metadata (rewriter name, sizes, tokens
 	// saved, change detail) but drops the rewritten body copy — roughly
 	// halving audit storage per compressed request.

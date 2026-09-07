@@ -69,15 +69,20 @@ type pluginDecisionDetail struct {
 }
 
 // recordPromptPluginRevisions appends the prompt-phase decisions to the audit
-// request-revision chain. before and after are the encoded request around
-// the phase; they are only measured when an instance edited the request.
-func recordPromptPluginRevisions(c *echo.Context, before, after any) {
+// request-revision chain. before and after are the request around the whole
+// phase: the chain's edits are applied back to the request once, after every
+// step has run, so the byte sizes describe the phase as a whole and the
+// applied body is stored on the last editing instance's revision — the one
+// whose output was forwarded. The body is captured only when body logging
+// and revision-body logging are on and it fits the capture limit, matching
+// the ingress rewriters.
+func recordPromptPluginRevisions(c *echo.Context, auditLogger auditlog.LoggerInterface, before, after any) {
 	state := plugins.RequestStateFromContext(c.Request().Context())
 	if state == nil {
 		return
 	}
-	var bytesBefore, bytesAfter int
-	measured := false
+	var revisions []auditlog.RequestRevisionSnapshot
+	lastEdited := -1
 	for _, record := range state.Snapshot() {
 		if record.Phase != pluginapi.KindPrompt {
 			continue
@@ -85,16 +90,40 @@ func recordPromptPluginRevisions(c *echo.Context, before, after any) {
 		if record.Decision.Action == pluginapi.ActionAllow && !record.Edited && record.Err == nil {
 			continue
 		}
-		revision := auditlog.RequestRevisionSnapshot{Rewriter: record.Instance, NoChange: !record.Edited, Detail: decisionDetail(record)}
 		if record.Edited {
-			if !measured {
-				bytesBefore, bytesAfter = encodedSize(before), encodedSize(after)
-				measured = true
-			}
-			revision.BytesBefore, revision.BytesAfter = bytesBefore, bytesAfter
+			lastEdited = len(revisions)
 		}
+		revisions = append(revisions, auditlog.RequestRevisionSnapshot{
+			Rewriter: record.Instance,
+			NoChange: !record.Edited,
+			Detail:   decisionDetail(record),
+		})
+	}
+	if lastEdited >= 0 {
+		encodedBefore, encodedAfter := encodeRequest(before), encodeRequest(after)
+		for i := range revisions {
+			if !revisions[i].NoChange {
+				revisions[i].BytesBefore, revisions[i].BytesAfter = len(encodedBefore), len(encodedAfter)
+			}
+		}
+		if revisionBodyCaptureEnabled(auditLogger, len(encodedAfter)) {
+			revisions[lastEdited].Body = auditlog.CaptureLoggedBody(encodedAfter)
+		}
+	}
+	for _, revision := range revisions {
 		auditlog.EnrichEntryWithRequestRevision(c, revision)
 	}
+}
+
+// revisionBodyCaptureEnabled reports whether a revision body of the given
+// size is stored: body logging and revision-body logging must be on and the
+// body must be non-empty and within the audit capture limit.
+func revisionBodyCaptureEnabled(auditLogger auditlog.LoggerInterface, size int) bool {
+	if !auditCaptureEnabled(auditLogger) || size == 0 || int64(size) > auditlog.MaxBodyCapture {
+		return false
+	}
+	cfg := auditLogger.Config()
+	return cfg.LogBodies && cfg.LogRevisionBodies
 }
 
 func decisionDetail(record plugins.DecisionRecord) pluginDecisionDetail {
@@ -111,15 +140,17 @@ func decisionDetail(record plugins.DecisionRecord) pluginDecisionDetail {
 	return detail
 }
 
-func encodedSize(v any) int {
+// encodeRequest is the JSON form of a translated request, or nil when there
+// is none or it does not encode.
+func encodeRequest(v any) []byte {
 	if v == nil {
-		return 0
+		return nil
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return 0
+		return nil
 	}
-	return len(raw)
+	return raw
 }
 
 // pluginMeta builds the exchange meta for a response phase, attempts included.
