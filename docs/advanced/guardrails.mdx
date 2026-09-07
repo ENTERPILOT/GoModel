@@ -405,7 +405,7 @@ content.
 | `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
 | `block_status` | No | phase default | HTTP status for `block` (400 to 599). |
 | `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
-| `on_unclear` | No | `warn` | When the judge reply cannot be parsed: `allow`, `warn`, or `block` (applies `action`). |
+| `on_unclear` | No | `warn` | When the judge reply cannot be parsed or was cut off by `max_tokens`: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
 | `max_tokens` | No | `256` | Completion cap for the judge call. |
 | `temperature` | No | `0` | Sampling temperature for the judge call (0 to 2). |
 

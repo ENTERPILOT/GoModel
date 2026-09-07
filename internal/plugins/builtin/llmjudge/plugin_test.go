@@ -16,6 +16,7 @@ import (
 // fakeHost scripts judge replies and records the requests the plugin made.
 type fakeHost struct {
 	replies  []string
+	finish   string // finish reason of every reply; "" means "stop"
 	err      error
 	requests []pluginapi.InferenceRequest
 }
@@ -37,7 +38,11 @@ func (h *fakeHost) Complete(_ context.Context, req pluginapi.InferenceRequest) (
 	}
 	reply := h.replies[0]
 	h.replies = h.replies[1:]
-	return &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.TextMessage(pluginapi.RoleAssistant, reply), FinishReason: "stop"}}}, nil
+	finish := h.finish
+	if finish == "" {
+		finish = "stop"
+	}
+	return &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.TextMessage(pluginapi.RoleAssistant, reply), FinishReason: finish}}}, nil
 }
 
 type noopMetrics struct{}
@@ -174,11 +179,15 @@ func TestParseVerdict(t *testing.T) {
 		{"json in prose", "Sure, here is my assessment:\n{\"verdict\":\"block\",\"reason\":\"bad\"}\nThanks.", VerdictBlock, "bad"},
 		{"json in code fence", "```json\n{\"verdict\":\"allow\",\"reason\":\"ok\"}\n```", VerdictAllow, "ok"},
 		{"first object lacks verdict", `{"note":"x"} then {"verdict":"block","reason":"y"}`, VerdictBlock, "y"},
-		{"invalid json then words", `{"verdict": block} I would block this.`, VerdictBlock, "judge reply says block"},
+		{"invalid json with bare verdict", `{"verdict": block}`, VerdictBlock, "judge reply says block"},
 		{"bare word block", "BLOCK", VerdictBlock, "judge reply says block"},
 		{"bare word allow", "Verdict: allow.", VerdictAllow, "judge reply says allow"},
+		{"bare word in code fence", "```\nallow\n```", VerdictAllow, "judge reply says allow"},
 		{"partial word is not a match", "blocked", VerdictUnclear, "judge reply could not be parsed"},
 		{"both words", "I would allow it but block anyway", VerdictUnclear, "judge reply could not be parsed"},
+		{"verdict inside a sentence", "This is harmful content which I should not allow.", VerdictUnclear, "judge reply could not be parsed"},
+		{"invalid json then words", `{"verdict": block} I would block this.`, VerdictUnclear, "judge reply could not be parsed"},
+		{"json cut off inside the reason", `{"verdict":"allow","reason":"the user asks about`, VerdictUnclear, "judge reply could not be parsed"},
 		{"garbage", "I am not sure what you mean.", VerdictUnclear, "judge reply could not be parsed"},
 		{"empty", "", VerdictUnclear, "judge reply could not be parsed"},
 		{"unknown verdict value", `{"verdict":"maybe","reason":"x"}`, VerdictUnclear, "judge reply could not be parsed"},
@@ -299,6 +308,21 @@ func TestNoJudgeReplyChoices(t *testing.T) {
 	d, err := p.OnPrompt(context.Background(), exchange(prompt(), nil))
 	if err != nil || d.Action != pluginapi.ActionBlock || d.Code != CodeUnclear {
 		t.Errorf("decision = %+v, %v", d, err)
+	}
+}
+
+// A judge reply cut off by max_tokens is unclear even when its visible part
+// parses as a verdict.
+func TestTruncatedJudgeReplyIsUnclear(t *testing.T) {
+	host := &fakeHost{replies: []string{`{"verdict":"allow","reason":"fine"}`}, finish: "length"}
+	p := newPlugin(t, `{"model": "a/b", "on_unclear": "block"}`, host)
+	d, err := p.OnPrompt(context.Background(), exchange(prompt(), nil))
+	if err != nil || d.Action != pluginapi.ActionBlock || d.Code != CodeUnclear {
+		t.Fatalf("decision = %+v, %v", d, err)
+	}
+	detail, _ := d.Detail.(map[string]any)
+	if detail["verdict"] != VerdictUnclear || detail["reason"] != "judge reply was cut off (finish_reason length)" {
+		t.Errorf("detail = %v", d.Detail)
 	}
 }
 
