@@ -208,15 +208,20 @@ func (s *transformedSSEStream) pump() {
 		}
 	}
 	s.flushPending()
-	if s.ended {
+	if !s.ended {
+		s.callEnd()
+	}
+	if !s.ended {
+		s.ended = true
+		s.finalErr = err
 		return
 	}
-	s.callEnd()
-	if s.ended {
-		return
+	// The flush or OnEnd cut the stream. A real upstream failure still
+	// outranks that clean ending: the response was truncated and must be
+	// reported as such, not logged and billed as complete.
+	if err != io.EOF {
+		s.finalErr = err
 	}
-	s.ended = true
-	s.finalErr = err
 }
 
 // handle processes one raw event, first splitting a multi-choice chunk so

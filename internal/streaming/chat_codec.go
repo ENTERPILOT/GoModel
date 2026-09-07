@@ -84,6 +84,8 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 	}
 	for _, choice := range chunk.Choices {
 		ev.Choice = choice.Index
+		// A delta chunk may carry the choice's finish_reason as well.
+		ev.ClosesChoice = choice.FinishReason != nil
 		if delta := choice.Delta; delta != nil {
 			if delta.Content != nil && *delta.Content != "" {
 				ev.Kind, ev.Text = KindTextDelta, *delta.Content
@@ -101,6 +103,7 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 				return ev
 			}
 		}
+		ev.ClosesChoice = false
 		if choice.FinishReason != nil {
 			ev.Kind = KindFinish
 			return ev
@@ -134,9 +137,10 @@ func (c *chatCodec) remember(chunk *chatChunkView) {
 	}
 }
 
-// Track marks the choice of an emitted finish chunk as closed.
+// Track marks the choice of an emitted finish chunk as closed, including a
+// delta chunk that carries the finish_reason alongside its text.
 func (c *chatCodec) Track(ev Event) {
-	if ev.Kind == KindFinish {
+	if ev.Kind == KindFinish || ev.ClosesChoice {
 		c.finished[ev.Choice] = true
 	}
 }
@@ -214,6 +218,7 @@ func (c *chatCodec) StripTerminal(ev Event) (Event, bool) {
 	}
 	if pos := chatChoicePosition(choices, ev.Choice); pos >= 0 && jsonNonNull(choices[pos]["finish_reason"]) {
 		delete(choices[pos], "finish_reason")
+		ev.ClosesChoice = false
 		changed = true
 	}
 	if !changed {
@@ -349,7 +354,10 @@ func (c *chatCodec) Terminate(t Termination) [][]byte {
 			open = append(open, idx)
 		}
 	}
-	if len(open) == 0 {
+	// A stream that showed no choice at all, or a final text that needs a
+	// carrier, is closed on choice 0. Choices the provider already finished
+	// get no second finish_reason.
+	if len(open) == 0 && (len(c.choices) == 0 || t.Text != "") {
 		open = []int{0}
 	}
 	if t.Text != "" {
@@ -364,10 +372,12 @@ func (c *chatCodec) Terminate(t Termination) [][]byte {
 		choices = append(choices, chatFinishChoice{Index: idx, Delta: map[string]any{}, FinishReason: &reason})
 		c.finished[idx] = true
 	}
-	chunk := c.chunk(choices)
-	chunk.Usage = t.Usage
-	if encoded, err := encodeJSONEvent("", chunk); err == nil {
-		out = append(out, encoded)
+	if len(choices) > 0 || t.Usage != nil {
+		chunk := c.chunk(choices)
+		chunk.Usage = t.Usage
+		if encoded, err := encodeJSONEvent("", chunk); err == nil {
+			out = append(out, encoded)
+		}
 	}
 	return append(out, doneEventBytes)
 }

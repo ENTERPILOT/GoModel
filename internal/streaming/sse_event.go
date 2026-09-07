@@ -32,6 +32,11 @@ type Event struct {
 	// only for text deltas re-segmented under lookbehind, where consecutive
 	// windows overlap; Text[Overlap:] is the new text.
 	Overlap int
+	// ClosesChoice marks a delta event whose chunk also carries the
+	// finish_reason of its choice (a chat stream may end text and finish in
+	// one chunk), so once it is emitted the choice needs no finish chunk
+	// from Terminate. Cleared on a copy stripped of that member.
+	ClosesChoice bool
 	// Name is the SSE "event:" field. Empty for chat chunks.
 	Name string
 	// Data is the JSON payload, or the literal [DONE]. For events handed to a

@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -311,8 +312,10 @@ func TestTransformedSSEStream_OnEndTerminatesBeforeDone(t *testing.T) {
 	if strings.Count(out, "[DONE]") != 1 || !strings.HasSuffix(out, "data: [DONE]\n\n") {
 		t.Errorf("exactly one trailing [DONE] expected:\n%s", out)
 	}
-	if !strings.Contains(out, `"finish_reason":"length"`) {
-		t.Errorf("OnEnd termination missing:\n%s", out)
+	// The provider already finished the only choice, so the termination adds
+	// no second finish_reason.
+	if strings.Contains(out, `"finish_reason":"length"`) || strings.Count(out, `"finish_reason":"stop"`) != 1 {
+		t.Errorf("want the provider's finish once and no termination finish:\n%s", out)
 	}
 }
 
@@ -664,6 +667,44 @@ func TestTransformedSSEStream_LookbehindDeliversFinishAndUsageOnce(t *testing.T)
 			}
 			if resp.Choices[0].Message.Content != tc.content || resp.Choices[0].FinishReason != "stop" || resp.Usage.TotalTokens != 5 {
 				t.Errorf("assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
+			}
+		})
+	}
+}
+
+// A truncated upstream is still a failure when OnEnd cuts the stream: the
+// termination goes out, and the upstream error is reported after it.
+func TestTransformedSSEStream_UpstreamErrorOutranksOnEndTermination(t *testing.T) {
+	failing := io.MultiReader(strings.NewReader("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n"), &errReader{err: io.ErrUnexpectedEOF})
+	tr := &funcTransformer{onEnd: func() (*Termination, error) { return &Termination{FinishReason: "length"}, nil }}
+	stream := NewTransformedSSEStream(io.NopCloser(failing), ChatCodec(), tr, TransformOptions{})
+	got, err := io.ReadAll(stream)
+	if err != io.ErrUnexpectedEOF {
+		t.Errorf("err = %v, want ErrUnexpectedEOF", err)
+	}
+	if out := string(got); !strings.Contains(out, `"finish_reason":"length"`) || !strings.HasSuffix(out, "data: [DONE]\n\n") {
+		t.Errorf("termination missing:\n%s", out)
+	}
+}
+
+// A chunk carrying text and finish_reason together closes its choice, so a
+// termination afterwards adds no second finish chunk.
+func TestTransformedSSEStream_ContentWithFinishNeedsNoSecondFinish(t *testing.T) {
+	input := `data: {"choices":[{"index":0,"delta":{"content":"hello world"},"finish_reason":"stop"}]}` + "\n\n"
+	for _, lookbehind := range []int{0, 3} {
+		t.Run(fmt.Sprintf("lookbehind %d", lookbehind), func(t *testing.T) {
+			tr := &funcTransformer{onEnd: func() (*Termination, error) { return &Termination{FinishReason: "length"}, nil }}
+			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{LookbehindChars: lookbehind})
+			got, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(got)
+			if n := strings.Count(out, "finish_reason"); n != 1 || !strings.Contains(out, `"finish_reason":"stop"`) {
+				t.Errorf("finish_reason appears %d times, want the provider's once:\n%s", n, out)
+			}
+			if !strings.HasSuffix(out, "data: [DONE]\n\n") {
+				t.Errorf("stream not closed:\n%s", out)
 			}
 		})
 	}
