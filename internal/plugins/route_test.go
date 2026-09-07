@@ -309,9 +309,20 @@ func TestRouteResolver_CloseWaitsForRebuildAndRefusesAfter(t *testing.T) {
 		strategy <- built{inst, err}
 	}()
 	waitForBuild(t, resolver)
+	closeStarted := make(chan struct{})
 	closed := make(chan error, 1)
-	go func() { closed <- resolver.Close(context.Background()) }()
-	time.Sleep(10 * time.Millisecond) // Close is parked on the rebuild
+	go func() {
+		close(closeStarted)
+		closed <- resolver.Close(context.Background())
+	}()
+	<-closeStarted
+	// The rebuild still holds buildMu, so Close cannot have returned yet;
+	// it must wait for the instance the rebuild is about to publish.
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned (%v) before the rebuild finished", err)
+	default:
+	}
 	close(slow.initGate)
 	b := <-strategy
 	if err := <-closed; err != nil {
