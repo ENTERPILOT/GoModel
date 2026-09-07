@@ -14,6 +14,9 @@ export function normalizePlugins(items) {
     .filter((item) => item && typeof item === "object" && !Array.isArray(item))
     .map((item) => ({
       name: String(item.name || "").trim(),
+      // The title form of the name; an older gateway sends none, so the name
+      // stands in.
+      label: String(item.label || "").trim() || String(item.name || "").trim(),
       version: String(item.version || "").trim(),
       description: String(item.description || "").trim(),
       kinds: Array.isArray(item.kinds)

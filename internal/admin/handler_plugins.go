@@ -12,7 +12,9 @@ import (
 
 // pluginView is one catalog entry as GET /admin/plugins renders it.
 type pluginView struct {
-	Name        string                 `json:"name"`
+	Name string `json:"name"`
+	// Label is the name as a title ("header_edit" reads "Header Edit").
+	Label       string                 `json:"label"`
 	Version     string                 `json:"version,omitempty"`
 	Description string                 `json:"description,omitempty"`
 	Kinds       []string               `json:"kinds"`
@@ -43,6 +45,7 @@ func (h *Handler) ListPlugins(c *echo.Context) error {
 func pluginViewFromEntry(entry plugins.Entry) pluginView {
 	view := pluginView{
 		Name:        entry.Name,
+		Label:       guardrails.TypeLabel(entry.Name),
 		Version:     entry.Manifest.Version,
 		Description: entry.Manifest.Description,
 		Kinds:       []string{},

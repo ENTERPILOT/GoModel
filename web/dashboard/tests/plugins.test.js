@@ -99,3 +99,12 @@ test("phase helpers default to prompt-only and label known phases", () => {
   assert.equal(phaseLabel("stream"), "Stream");
   assert.equal(phaseLabel("custom"), "custom");
 });
+
+test("normalizePlugins keeps the label and falls back to the name", () => {
+  const [labelled, bare] = normalizePlugins([
+    { name: "header_edit", label: " Header Edit " },
+    { name: "keyword_block" },
+  ]);
+  assert.equal(labelled.label, "Header Edit");
+  assert.equal(bare.label, "keyword_block");
+});

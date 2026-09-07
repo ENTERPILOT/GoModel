@@ -49,13 +49,14 @@
       {#each pluginsStore.plugins as plugin (plugin.name)}
         <tr>
           <td>
-            <div class="plugin-name mono font-size-md">
+            <div class="plugin-name font-size-md">
               {#if plugin.guardrail}
                 <span class="plugin-guardrail" role="img" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
                   <Icon icon={ShieldCheck} class="form-action-icon" />
                 </span>
               {/if}
-              {plugin.name}
+              {plugin.label}
+              <span class="plugin-slug" title={m.plugins_slug()}>{plugin.name}</span>
             </div>
             {#if plugin.description}
               <div class="plugin-description">{plugin.description}</div>
@@ -115,6 +116,11 @@
     color: var(--accent);
   }
 
+  .plugin-slug {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
   .plugin-description {
     margin-top: 4px;
     color: var(--text-muted);
@@ -144,7 +150,7 @@
   }
 
   .plugin-source {
-    word-break: break-all;
+    white-space: nowrap;
   }
 
   .plugin-health {

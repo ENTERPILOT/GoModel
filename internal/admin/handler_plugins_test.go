@@ -18,3 +18,12 @@ func TestPluginViewFromEntry_ReportsGuardrail(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginViewFromEntry_LabelsTheName(t *testing.T) {
+	for name, want := range map[string]string{"header_edit": "Header Edit", "llm_judge": "LLM Judge", "cheapest_healthy": "Cheapest Healthy"} {
+		entry := plugins.Entry{Name: name, Source: plugins.SourceBuiltin, Manifest: pluginapi.Manifest{Name: name}}
+		if got := pluginViewFromEntry(entry).Label; got != want {
+			t.Errorf("%s: label = %q, want %q", name, got, want)
+		}
+	}
+}

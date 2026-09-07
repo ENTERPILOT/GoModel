@@ -297,8 +297,9 @@ instances run on traffic.
   and *Timeout (ms)*; they apply to the instance in every workflow that
   references it.
 - **Plugins list**: at the bottom of the Plugins & Guardrails page, every
-  loaded plugin type with its version, hooks, source (built-in, registered,
-  or the `.so` path), and health. Guardrail plugins (those whose instances
+  loaded plugin type with its title and name (`Header Edit` then
+  `header_edit`, the name being what configuration refers to), version,
+  hooks, source (built-in, registered, or the `.so` path), and health. Guardrail plugins (those whose instances
   apply a policy to prompts, responses, or streams) carry a shield and are
   listed first; routing strategies are plugins too, but not guardrails. A
   plugin that failed to load is listed with its error. The page is shown
@@ -536,6 +537,7 @@ Every plugin type known to the gateway, including ones that failed to load:
 [
   {
     "name": "string_replace",
+    "label": "String Replace",
     "version": "1.0.0",
     "description": "Replaces, flags, or blocks text matching literal or regex rules in prompts, responses, and streams.",
     "kinds": ["prompt", "response", "stream"],

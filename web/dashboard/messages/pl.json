@@ -1552,6 +1552,7 @@
   "plugins_loading": "Wczytywanie wtyczek...",
   "plugins_empty": "Brak załadowanych wtyczek.",
   "plugins_name": "Nazwa",
+  "plugins_slug": "Nazwa wtyczki używana w konfiguracji",
   "plugins_version": "Wersja",
   "plugins_kinds": "Hooki",
   "plugins_source": "Źródło",

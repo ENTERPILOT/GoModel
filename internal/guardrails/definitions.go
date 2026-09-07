@@ -109,7 +109,7 @@ func TypeFieldsFromSchema(schema []pluginapi.Field, scope pluginapi.FieldScope) 
 func typeDefinitionFromEntry(entry plugins.Entry) TypeDefinition {
 	return TypeDefinition{
 		Type:        entry.Name,
-		Label:       typeLabel(entry.Name),
+		Label:       TypeLabel(entry.Name),
 		Description: entry.Manifest.Description,
 		Defaults:    plugins.SchemaDefaults(entry.Manifest.ConfigSchema),
 		Fields:      TypeFieldsFromSchema(entry.Manifest.ConfigSchema, pluginapi.ScopeInstance),
@@ -129,9 +129,9 @@ func typeSource(source plugins.Source) string {
 	}
 }
 
-// typeLabel turns a manifest name into a title: "llm_based_altering" becomes
-// "LLM Based Altering".
-func typeLabel(name string) string {
+// TypeLabel turns a manifest name into a title: "llm_based_altering" becomes
+// "LLM Based Altering". The dashboard shows it next to the name.
+func TypeLabel(name string) string {
 	words := strings.FieldsFunc(name, func(r rune) bool { return r == '_' || r == '-' })
 	for i, word := range words {
 		switch strings.ToLower(word) {

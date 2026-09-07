@@ -1524,6 +1524,7 @@
   "plugins_loading": "Loading plugins...",
   "plugins_empty": "No plugins loaded.",
   "plugins_name": "Name",
+  "plugins_slug": "Plugin name used in configuration",
   "plugins_version": "Version",
   "plugins_kinds": "Hooks",
   "plugins_source": "Source",
