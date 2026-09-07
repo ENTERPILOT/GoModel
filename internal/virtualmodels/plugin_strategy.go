@@ -107,9 +107,9 @@ func (s *Service) pluginTarget(ctx context.Context, entry *redirectEntry, sessio
 		s.warnPluginOnce(source, name, "routing-strategy plugin unavailable; falling back to round robin", err)
 		return resolvedTarget{}, false
 	}
-	defer inst.Release() // a config change must not close the instance mid-Select
 	config, err := s.routeConfig(entry)
 	if err != nil {
+		inst.Release()
 		s.warnPluginOnce(source, name, "routing-strategy config invalid; falling back to round robin", err)
 		return resolvedTarget{}, false
 	}
@@ -126,7 +126,7 @@ func (s *Service) pluginTarget(ctx context.Context, entry *redirectEntry, sessio
 		Meta:          plugins.MetaFromContext(ctx, core.GetWorkflow(ctx)),
 		Config:        config,
 	}
-	choice, err := callRouteStrategy(ctx, strategy, req)
+	choice, err := callRouteStrategy(ctx, strategy, inst, req)
 	if err != nil {
 		slog.Warn("routing-strategy plugin failed; falling back to round robin",
 			"source", source, "plugin", name, "error", err)
@@ -173,12 +173,15 @@ type routeSelectResult struct {
 
 // callRouteStrategy runs Select on its own goroutine with panic recovery and
 // the select timeout. A plugin that ignores the context keeps running after
-// the timeout, but the request no longer waits for it.
-func callRouteStrategy(ctx context.Context, strategy pluginapi.RouteStrategy, req pluginapi.RouteRequest) (pluginapi.RouteChoice, error) {
+// the timeout, but the request no longer waits for it. The instance hold
+// taken by Strategy is released by that goroutine once Select returns, so a
+// config change cannot close the instance underneath a Select still running.
+func callRouteStrategy(ctx context.Context, strategy pluginapi.RouteStrategy, inst *plugins.Instance, req pluginapi.RouteRequest) (pluginapi.RouteChoice, error) {
 	selectCtx, cancel := context.WithTimeout(ctx, pluginSelectTimeout)
 	defer cancel()
 	results := make(chan routeSelectResult, 1)
 	go func() {
+		defer inst.Release()
 		defer func() {
 			if r := recover(); r != nil {
 				results <- routeSelectResult{err: fmt.Errorf("select panicked: %v", r)}

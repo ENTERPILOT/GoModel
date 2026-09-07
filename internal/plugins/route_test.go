@@ -23,8 +23,10 @@ type fakeRoute struct {
 	outcomes []pluginapi.RouteOutcome
 	panicEnd bool
 	closed   int
-	// initGate, when set, blocks Init until it is closed.
+	// initGate, when set, blocks Init until it is closed; endGate does the
+	// same for OnAttemptEnd.
 	initGate chan struct{}
+	endGate  chan struct{}
 }
 
 func (f *fakeRoute) Manifest() pluginapi.Manifest {
@@ -55,6 +57,9 @@ func (f *fakeRoute) Select(_ context.Context, req pluginapi.RouteRequest) (plugi
 func (f *fakeRoute) OnAttemptEnd(outcome pluginapi.RouteOutcome) {
 	if f.panicEnd {
 		panic("boom")
+	}
+	if f.endGate != nil {
+		<-f.endGate
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -242,21 +247,7 @@ func TestRouteResolver_ReportOutcomeNotBlockedByInit(t *testing.T) {
 		inst.Release()
 		built <- err
 	}()
-	// Wait until the build has entered Init, which parks on the gate.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		resolver.mu.Lock()
-		_, cached := resolver.strategies["slow"]
-		resolver.mu.Unlock()
-		if cached || time.Now().After(deadline) {
-			break
-		}
-		if !resolver.buildMu.TryLock() {
-			break
-		}
-		resolver.buildMu.Unlock()
-		time.Sleep(time.Millisecond)
-	}
+	waitForBuild(t, resolver)
 
 	reported := make(chan struct{})
 	go func() {
@@ -271,5 +262,106 @@ func TestRouteResolver_ReportOutcomeNotBlockedByInit(t *testing.T) {
 	close(slow.initGate)
 	if err := <-built; err != nil {
 		t.Fatalf("Strategy: %v", err)
+	}
+}
+
+// waitForBuild returns once a rebuild holds buildMu, i.e. is inside Init.
+func waitForBuild(t *testing.T, resolver *RouteResolver) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !resolver.buildMu.TryLock() {
+			return
+		}
+		resolver.buildMu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("no rebuild started")
+}
+
+// waitUntil polls cond for up to two seconds.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// Close during a rebuild waits for it and closes the instance it publishes;
+// later lookups are refused.
+func TestRouteResolver_CloseWaitsForRebuildAndRefusesAfter(t *testing.T) {
+	t.Parallel()
+	slow := &fakeRoute{name: "slow", initGate: make(chan struct{})}
+	resolver := NewRouteResolver(newRouteCatalog(t, slow), HostDeps{})
+
+	type built struct {
+		inst *Instance
+		err  error
+	}
+	strategy := make(chan built, 1)
+	go func() {
+		_, inst, err := resolver.Strategy("slow")
+		strategy <- built{inst, err}
+	}()
+	waitForBuild(t, resolver)
+	closed := make(chan error, 1)
+	go func() { closed <- resolver.Close(context.Background()) }()
+	time.Sleep(10 * time.Millisecond) // Close is parked on the rebuild
+	close(slow.initGate)
+	b := <-strategy
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if b.err != nil || b.inst == nil || !b.inst.Closed() {
+		t.Fatalf("rebuild published %+v (err %v), want it built and closed by Close", b.inst, b.err)
+	}
+	b.inst.Release()
+	if _, _, err := resolver.Strategy("slow"); !errors.Is(err, ErrRouteResolverClosed) {
+		t.Fatalf("Strategy after Close error = %v, want ErrRouteResolverClosed", err)
+	}
+}
+
+// An instance stays open while its OnAttemptEnd runs, even when a rebuild
+// replaces it meanwhile.
+func TestRouteResolver_ReportOutcomeHoldsInstanceAcrossOnAttemptEnd(t *testing.T) {
+	t.Parallel()
+	route := &fakeRoute{name: "lat", schema: routeSchema, endGate: make(chan struct{})}
+	resolver := NewRouteResolver(newRouteCatalog(t, route), HostDeps{})
+	configs := map[string]json.RawMessage{"lat": json.RawMessage(`{"endpoint":"http://a"}`)}
+	resolver.SetInstanceConfigs(func(name string) (json.RawMessage, bool) {
+		raw, ok := configs[name]
+		return raw, ok
+	})
+	_, inst, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst.Release()
+
+	reported := make(chan struct{})
+	go func() {
+		resolver.ReportOutcome(pluginapi.RouteOutcome{Source: "smart"})
+		close(reported)
+	}()
+	waitUntil(t, "OnAttemptEnd to hold the instance", inst.Held)
+
+	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
+	_, rebuilt, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuilt.Release()
+	if inst.Closed() {
+		t.Fatal("replaced instance closed while OnAttemptEnd was still running")
+	}
+	close(route.endGate)
+	<-reported
+	if !inst.Closed() || rebuilt.Closed() {
+		t.Fatalf("after OnAttemptEnd returned: previous closed %v, current closed %v", inst.Closed(), rebuilt.Closed())
 	}
 }

@@ -20,13 +20,16 @@ import (
 // scriptedStrategy answers Select with a fixed target (or fails in a scripted
 // way) and records the requests it saw.
 type scriptedStrategy struct {
-	mu       sync.Mutex
-	answer   string
-	reason   string
-	err      error
-	panics   bool
-	block    time.Duration
-	requests []pluginapi.RouteRequest
+	mu     sync.Mutex
+	answer string
+	reason string
+	err    error
+	panics bool
+	block  time.Duration
+	// ignoreCtx makes a blocking Select sleep out its block regardless of
+	// cancellation, like a plugin that does not honour its context.
+	ignoreCtx bool
+	requests  []pluginapi.RouteRequest
 }
 
 func (s *scriptedStrategy) Select(ctx context.Context, req pluginapi.RouteRequest) (pluginapi.RouteChoice, error) {
@@ -36,7 +39,9 @@ func (s *scriptedStrategy) Select(ctx context.Context, req pluginapi.RouteReques
 	if s.panics {
 		panic("scripted panic")
 	}
-	if s.block > 0 {
+	if s.block > 0 && s.ignoreCtx {
+		time.Sleep(s.block)
+	} else if s.block > 0 {
 		select {
 		case <-time.After(s.block):
 		case <-ctx.Done():
@@ -63,6 +68,8 @@ type fakeResolver struct {
 	strategy    pluginapi.RouteStrategy
 	strategyErr error
 	validated   []map[string]any
+	// inst, when set, is handed out held like the real resolver does.
+	inst *plugins.Instance
 }
 
 func (r *fakeResolver) Strategy(name string) (pluginapi.RouteStrategy, *plugins.Instance, error) {
@@ -72,7 +79,8 @@ func (r *fakeResolver) Strategy(name string) (pluginapi.RouteStrategy, *plugins.
 	if r.strategyErr != nil {
 		return nil, nil, r.strategyErr
 	}
-	return r.strategy, nil, nil
+	r.inst.Acquire()
+	return r.strategy, r.inst, nil
 }
 
 func (r *fakeResolver) ValidateRouteConfig(name string, cfg map[string]any) (json.RawMessage, error) {
@@ -409,5 +417,25 @@ func TestClone_StrategyConfigIsDeepCopied(t *testing.T) {
 	cloned.StrategyConfig["list"].([]any)[0] = "changed"
 	if vm.StrategyConfig["nested"].(map[string]any)["k"] != "v" || vm.StrategyConfig["list"].([]any)[0] != "a" {
 		t.Fatalf("clone shared nested config with the original: %v", vm.StrategyConfig)
+	}
+}
+
+// The hold on the instance outlives the select timeout: it is released by
+// the Select goroutine when Select returns, not when the request gives up.
+func TestBalancer_PluginTimeoutKeepsInstanceHeldUntilSelectReturns(t *testing.T) {
+	t.Parallel()
+	inst := &plugins.Instance{Name: "lat"}
+	strategy := &scriptedStrategy{answer: "groq/llama", block: 3 * pluginSelectTimeout, ignoreCtx: true}
+	svc := newPluginService(t, &fakeResolver{strategy: strategy, inst: inst}, nil)
+	resolvedModels(t, svc, "smart", 1)
+	if !inst.Held() {
+		t.Fatal("instance released while Select was still running")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for inst.Held() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if inst.Held() {
+		t.Fatal("instance never released after Select returned")
 	}
 }

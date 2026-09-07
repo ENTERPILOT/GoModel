@@ -3,6 +3,7 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -36,9 +37,15 @@ type RouteResolver struct {
 	strategies map[string]*routeStrategy
 	// retired holds replaced instances until no call holds them.
 	retired []*Instance
-	// buildMu serializes rebuilds so a config change costs one Init.
+	// closed is set by Close; nothing is built or handed out afterwards.
+	closed bool
+	// buildMu serializes rebuilds so a config change costs one Init, and
+	// makes Close wait for a rebuild in flight so its instance is closed too.
 	buildMu sync.Mutex
 }
+
+// ErrRouteResolverClosed is returned by Strategy after Close.
+var ErrRouteResolverClosed = errors.New("plugins: routing-strategy resolver is closed")
 
 // routeStrategy is one built (or failed) strategy instance together with the
 // raw instance config it was built from.
@@ -143,6 +150,10 @@ func (r *RouteResolver) Strategy(name string) (pluginapi.RouteStrategy, *Instanc
 		return nil, nil, err
 	}
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil, nil, ErrRouteResolverClosed
+	}
 	raw := r.instanceConfigLocked(entry.Name)
 	if current, ok := r.strategies[entry.Name]; ok && bytes.Equal(current.raw, raw) {
 		defer r.mu.Unlock()
@@ -160,6 +171,10 @@ func (r *RouteResolver) rebuild(entry Entry) (pluginapi.RouteStrategy, *Instance
 	r.buildMu.Lock()
 	defer r.buildMu.Unlock()
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil, nil, ErrRouteResolverClosed
+	}
 	raw := r.instanceConfigLocked(entry.Name)
 	if current, ok := r.strategies[entry.Name]; ok && bytes.Equal(current.raw, raw) {
 		defer r.mu.Unlock()
@@ -234,6 +249,8 @@ func (r *RouteResolver) build(entry Entry, raw json.RawMessage) *routeStrategy {
 
 // ReportOutcome hands one upstream attempt to every built strategy, each call
 // recovered from panics, so strategies learn from traffic they did not steer.
+// Each instance is held for the duration of its call, so a rebuild in the
+// meantime cannot close it underneath OnAttemptEnd.
 func (r *RouteResolver) ReportOutcome(outcome pluginapi.RouteOutcome) {
 	if r == nil {
 		return
@@ -242,12 +259,14 @@ func (r *RouteResolver) ReportOutcome(outcome pluginapi.RouteOutcome) {
 	strategies := make([]*routeStrategy, 0, len(r.strategies))
 	for _, s := range r.strategies {
 		if s.inst != nil {
+			s.inst.Acquire()
 			strategies = append(strategies, s)
 		}
 	}
 	r.mu.Unlock()
 	for _, s := range strategies {
 		r.report(s, outcome)
+		s.inst.Release()
 	}
 	r.closeRetired(context.Background())
 }
@@ -262,12 +281,16 @@ func (r *RouteResolver) report(s *routeStrategy, outcome pluginapi.RouteOutcome)
 }
 
 // Close releases every built and retired strategy instance, held or not:
-// it runs at shutdown.
+// it runs at shutdown. It waits for a rebuild in flight, so the instance
+// that rebuild publishes is closed as well, and refuses later lookups.
 func (r *RouteResolver) Close(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
+	r.buildMu.Lock()
+	defer r.buildMu.Unlock()
 	r.mu.Lock()
+	r.closed = true
 	var closing []*Instance
 	for name, s := range r.strategies {
 		if s.inst != nil {
