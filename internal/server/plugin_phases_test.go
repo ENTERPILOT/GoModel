@@ -140,6 +140,7 @@ func phaseProvider() *capturingProvider {
 		response: &core.ChatResponse{
 			ID: "chatcmpl_1", Object: "chat.completion", Model: "gpt-5-nano", Provider: "mock",
 			Choices: []core.Choice{{Index: 0, FinishReason: "stop", Message: core.ResponseMessage{Role: "assistant", Content: "the secret answer"}}},
+			Usage:   core.Usage{PromptTokens: 3, CompletionTokens: 5, TotalTokens: 8},
 		},
 		streamData: "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"the \"}}]}\n\n" +
 			"data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5-nano\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"secret answer\"}}]}\n\n" +
@@ -205,6 +206,10 @@ func TestChatCompletion_ResponsePhaseDecisions(t *testing.T) {
 			}
 			if got := rec.Header().Get(plugins.GuardrailHeader); got != tt.wantHeader {
 				t.Fatalf("header = %q, want %q", got, tt.wantHeader)
+			}
+			// The provider billed the original completion; every 200 keeps its usage.
+			if rec.Code == http.StatusOK && !strings.Contains(rec.Body.String(), `"total_tokens":8`) {
+				t.Fatalf("body = %s, want provider usage", rec.Body.String())
 			}
 		})
 	}

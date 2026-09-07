@@ -65,7 +65,7 @@ func ChatCodec() Codec {
 }
 
 func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
-	if raw.Comment || raw.Oversized || len(raw.Data) == 0 || raw.Data[0] != '{' {
+	if raw.Comment || raw.Oversized || !jsonObject(raw.Data) {
 		return decodeOther(raw, seq)
 	}
 	var chunk chatChunkView
@@ -196,7 +196,7 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 // top-level member is copied; usage, when present, stays on the last chunk
 // only so downstream accounting sees it once.
 func (c *chatCodec) Split(raw RawEvent) []RawEvent {
-	if raw.Comment || raw.Oversized || len(raw.Data) == 0 || raw.Data[0] != '{' {
+	if raw.Comment || raw.Oversized || !jsonObject(raw.Data) {
 		return nil
 	}
 	var top map[string]json.RawMessage

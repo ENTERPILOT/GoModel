@@ -21,6 +21,11 @@ type responsePhase[Req any, Resp any] struct {
 	apply        func(Resp, *pluginapi.Completion) (Resp, error)
 	synthesize   func(*pluginapi.Completion, string) Resp
 	model        func(Resp) string
+	// keepUsage copies the provider's usage onto a synthesized replacement:
+	// the provider already performed the inference, so the client and the
+	// usage observers downstream must see its tokens, not the zero usage of
+	// a canned completion.
+	keepUsage func(synthesized, original Resp)
 }
 
 var chatResponsePhase = responsePhase[*core.ChatRequest, *core.ChatResponse]{
@@ -29,6 +34,7 @@ var chatResponsePhase = responsePhase[*core.ChatRequest, *core.ChatResponse]{
 	apply:        exchange.ApplyToChatResponse,
 	synthesize:   exchange.CompletionToChatResponse,
 	model:        func(resp *core.ChatResponse) string { return resp.Model },
+	keepUsage:    func(synthesized, original *core.ChatResponse) { synthesized.Usage = original.Usage },
 }
 
 var responsesResponsePhase = responsePhase[*core.ResponsesRequest, *core.ResponsesResponse]{
@@ -37,6 +43,11 @@ var responsesResponsePhase = responsePhase[*core.ResponsesRequest, *core.Respons
 	apply:        exchange.ApplyToResponsesResponse,
 	synthesize:   exchange.CompletionToResponsesResponse,
 	model:        func(resp *core.ResponsesResponse) string { return resp.Model },
+	keepUsage: func(synthesized, original *core.ResponsesResponse) {
+		if original.Usage != nil {
+			synthesized.Usage = original.Usage
+		}
+	},
 }
 
 func (p responsePhase[Req, Resp]) run(s *translatedInferenceService, c *echo.Context, workflow *core.Workflow, req Req, resp Resp) (Resp, error) {
@@ -74,7 +85,9 @@ func (p responsePhase[Req, Resp]) run(s *translatedInferenceService, c *echo.Con
 		var zero Resp
 		return zero, plugins.BlockError(outcome.Decision, plugins.DefaultBlockStatus(pluginapi.KindResponse))
 	case pluginapi.ActionRespond:
-		return p.synthesize(outcome.Decision.Response, p.model(resp)), nil
+		synthesized := p.synthesize(outcome.Decision.Response, p.model(resp))
+		p.keepUsage(synthesized, resp)
+		return synthesized, nil
 	case pluginapi.ActionWarn:
 		state.AddResponseHeader(plugins.GuardrailHeader, plugins.WarnHeaderValue(outcome.Decision))
 	}

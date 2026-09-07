@@ -73,6 +73,16 @@ type Codec interface {
 // ErrNotTextEvent is returned by RewriteText for events without delta text.
 var ErrNotTextEvent = errors.New("streaming: event carries no rewritable text")
 
+// jsonObject reports whether data starts a JSON object once leading JSON
+// whitespace is skipped. SSE parsing strips a single space after "data:",
+// so a payload written as "data:  {...}" keeps one leading space; codecs
+// classify on the trimmed bytes and leave data itself untouched so relayed
+// events stay byte-identical.
+func jsonObject(data []byte) bool {
+	data = bytes.TrimLeft(data, " \t\r\n")
+	return len(data) > 0 && data[0] == '{'
+}
+
 // isDone reports whether raw carries the [DONE] sentinel.
 func isDone(raw RawEvent) bool {
 	return bytes.Equal(bytes.TrimSpace(raw.Data), donePayload)

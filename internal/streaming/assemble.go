@@ -65,7 +65,7 @@ func AssembleChatResponse(events []Event) (*core.ChatResponse, error) {
 	decoded := 0
 	for i := range events {
 		ev := &events[i]
-		if len(ev.Data) == 0 || ev.Data[0] != '{' {
+		if !jsonObject(ev.Data) {
 			continue
 		}
 		var chunk chatAssembleChunk
@@ -223,7 +223,7 @@ func AssembleResponsesResponse(events []Event) (*core.ResponsesResponse, error) 
 	}
 	for i := range events {
 		ev := &events[i]
-		if len(ev.Data) == 0 || ev.Data[0] != '{' {
+		if !jsonObject(ev.Data) {
 			continue
 		}
 		var event responsesAssembleEvent

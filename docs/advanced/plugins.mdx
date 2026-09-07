@@ -75,7 +75,7 @@ Every hook returns a `pluginapi.Decision`:
 | --- | --- | --- |
 | `allow` | continue with the edits already made to the exchange | zero value of `Decision` |
 | `block` | reject with `Status`, `Code`, and `Message` in the endpoint's native error format | `Status` 400 in the prompt phase, 502 in the response and stream phases; `Code` `guardrail_blocked` |
-| `respond` | answer the request with `Response` as an ordinary assistant turn, HTTP 200 (a synthesized one-turn stream for streaming requests) | `pluginapi.Respond(text)` builds a one-choice completion |
+| `respond` | answer the request with `Response` as an ordinary assistant turn, HTTP 200 (a synthesized one-turn stream for streaming requests); in the response and stream phases the provider's `usage` is kept on the reply, since the inference was already performed | `pluginapi.Respond(text)` builds a one-choice completion |
 | `warn` | continue; record `Code`, `Message`, and `Detail` in the audit trail and add `X-GoModel-Guardrail: warn; code=<code>` to the client response | `Code` `guardrail_warning` |
 
 `respond` is the "block with a safe message" most guardrail products offer:
@@ -160,6 +160,11 @@ the events that repeat a part's full text (`response.output_text.done`,
 `response.content_part.done`, `response.output_item.done`, and the terminal
 `response.completed`) are rewritten to the text that was actually emitted,
 so clients reading the completion instead of the deltas see the same result.
+
+**Event size** (`transform` and `observe`): one SSE event larger than 4 MiB
+cannot be inspected in flight, so the stream ends fail-closed with code
+`event_too_large` rather than relaying it past the plugins. Comments and
+keep-alive lines are never affected.
 
 **Buffering**: the upstream is drained into a bounded buffer
 (`MaxBufferBytes`, default 4 MiB; exceeding it fails closed with code

@@ -93,7 +93,7 @@ func ResponsesCodec() Codec {
 }
 
 func (c *responsesCodec) Decode(raw RawEvent, seq int) Event {
-	if raw.Comment || raw.Oversized || len(raw.Data) == 0 || raw.Data[0] != '{' {
+	if raw.Comment || raw.Oversized || !jsonObject(raw.Data) {
 		return decodeOther(raw, seq)
 	}
 	var view responsesEventView
@@ -237,7 +237,7 @@ func (c *responsesCodec) Split(RawEvent) []RawEvent { return nil }
 // what was emitted after transformation. An event whose text already
 // matches is returned unchanged.
 func (c *responsesCodec) Restate(ev Event) (Event, bool) {
-	if (ev.Kind != KindOther && ev.Kind != KindFinish) || len(ev.Data) == 0 || ev.Data[0] != '{' || !isResponsesRestatingEvent(ev) {
+	if (ev.Kind != KindOther && ev.Kind != KindFinish) || !jsonObject(ev.Data) || !isResponsesRestatingEvent(ev) {
 		return ev, false
 	}
 	var top map[string]json.RawMessage
@@ -311,7 +311,7 @@ func (c *responsesCodec) restateText(obj map[string]json.RawMessage, key string,
 // it back when fn reports a change.
 func (c *responsesCodec) restateNested(obj map[string]json.RawMessage, key string, fn func(map[string]json.RawMessage) bool) bool {
 	raw, ok := obj[key]
-	if !ok || len(raw) == 0 || raw[0] != '{' {
+	if !ok || !jsonObject(raw) {
 		return false
 	}
 	var nested map[string]json.RawMessage

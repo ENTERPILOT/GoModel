@@ -200,7 +200,9 @@ three modes in its `StreamPolicy`, and the host does the work:
   choices are split per choice first so each is transformed. For Responses,
   the codec tracks the emitted text per content part and rewrites the
   `*.done` and terminal `response.*` events that restate it, so completion
-  events agree with the transformed deltas.
+  events agree with the transformed deltas. An event larger than 4 MiB was
+  never parsed, so relaying it would bypass the plugins; the stream ends
+  fail-closed with `event_too_large` instead.
 - `buffer`: `streaming.BufferedSSEStream` drains upstream into a bounded
   buffer (default 4 MiB, exceeding it fails closed with
   `response_too_large`), sends the SSE comment `: gomodel-buffering` every

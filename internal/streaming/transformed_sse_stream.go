@@ -45,6 +45,11 @@ type TransformOptions struct {
 	// choice so a pattern that spans two chunks is visible to the transformer
 	// in one event. 0 disables re-segmentation. See NewTransformedSSEStream.
 	LookbehindChars int
+	// MaxEventBytes bounds one SSE event. A larger event cannot be inspected
+	// in flight, so the stream ends fail-closed with error code
+	// "event_too_large" instead of relaying it past the transformer. 0
+	// selects 4 MiB.
+	MaxEventBytes int
 	// OnError receives non-fatal problems (a replace on a non-text event, a
 	// failed rewrite) and the error behind a fail-closed termination.
 	OnError func(error)
@@ -53,17 +58,24 @@ type TransformOptions struct {
 // ErrStreamClosed is returned by Read after Close.
 var ErrStreamClosed = errors.New("streaming: stream closed")
 
-const transformReadBufferSize = 16 * 1024
+// ErrEventTooLarge reports that an upstream event exceeded MaxEventBytes.
+var ErrEventTooLarge = errors.New("streaming: event exceeded the inspectable size")
+
+const (
+	transformReadBufferSize = 16 * 1024
+	defaultMaxEventBytes    = 4 * 1024 * 1024
+)
 
 // NewTransformedSSEStream relays upstream through t. Reads are pull-based:
 // each Read consumes upstream bytes, splits them into SSE events, calls t
 // and returns the resulting bytes. Events t passes are relayed verbatim;
 // comments and unparseable blocks are relayed without consulting t.
 //
-// A decision to terminate, an error from t, or a Termination from OnEnd ends
-// the stream with the codec's terminal events (fail-closed with error code
-// "plugin_failure" for errors), closes upstream, and makes later Reads
-// return io.EOF.
+// A decision to terminate, an error from t, a Termination from OnEnd, or an
+// event larger than MaxEventBytes ends the stream with the codec's terminal
+// events (fail-closed with error code "plugin_failure" for errors and
+// "event_too_large" for oversized events), closes upstream, and makes later
+// Reads return io.EOF.
 //
 // Lookbehind re-segmentation (LookbehindChars = N > 0) applies to text
 // deltas only and works per choice with a withheld tail of at most N
@@ -86,11 +98,15 @@ const transformReadBufferSize = 16 * 1024
 // from the most recent raw chunk of that choice, so every other member of
 // that chunk is preserved (a Responses event keeps its sequence_number).
 func NewTransformedSSEStream(upstream io.ReadCloser, codec Codec, t Transformer, opts TransformOptions) io.ReadCloser {
+	if opts.MaxEventBytes <= 0 {
+		opts.MaxEventBytes = defaultMaxEventBytes
+	}
 	return &transformedSSEStream{
 		upstream: upstream,
 		codec:    codec,
 		t:        t,
 		opts:     opts,
+		scanner:  EventScanner{MaxEventBytes: opts.MaxEventBytes},
 		readBuf:  make([]byte, transformReadBufferSize),
 		pending:  make(map[int]*pendingText),
 	}
@@ -195,10 +211,16 @@ func (s *transformedSSEStream) pump() {
 }
 
 // handle processes one raw event, first splitting a multi-choice chunk so
-// the transformer sees every choice.
+// the transformer sees every choice. Comments are relayed untouched; an
+// oversized event was never parsed, so relaying it would bypass t.
 func (s *transformedSSEStream) handle(raw RawEvent) {
-	if raw.Comment || raw.Oversized {
+	if raw.Comment {
 		s.write(raw.Raw)
+		return
+	}
+	if raw.Oversized {
+		s.report(ErrEventTooLarge)
+		s.terminate(Termination{ErrorCode: "event_too_large", ErrorMessage: "a streamed event exceeded the size plugins can inspect"})
 		return
 	}
 	parts := s.codec.Split(raw)
