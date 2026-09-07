@@ -97,6 +97,11 @@ const (
 // N characters of delay. Re-segmented events are rendered with RewriteText
 // from the most recent raw chunk of that choice, so every other member of
 // that chunk is preserved (a Responses event keeps its sequence_number).
+// Members that must arrive once per choice (a chat chunk's finish_reason
+// and usage, see Codec.StripTerminal) are left off the emitted head and
+// travel with the chunk's withheld tail, so they follow the chunk's last
+// text; when that text is dropped or emptied they go out on a chunk with
+// empty text, so the stream still ends well-formed.
 func NewTransformedSSEStream(upstream io.ReadCloser, codec Codec, t Transformer, opts TransformOptions) io.ReadCloser {
 	if opts.MaxEventBytes <= 0 {
 		opts.MaxEventBytes = defaultMaxEventBytes
@@ -135,11 +140,15 @@ type transformedSSEStream struct {
 }
 
 // pendingText is the withheld tail of one choice under lookbehind together
-// with the chunk used as the template for re-segmented events.
+// with the chunk used as the template for re-segmented events. head is the
+// template without its once-per-choice members and terminal says the
+// template carried some, which the tail's chunk must then deliver.
 type pendingText struct {
 	tail     string
 	queued   bool
 	template Event
+	head     Event
+	terminal bool
 	dataBuf  []byte
 }
 
@@ -380,6 +389,7 @@ func (s *transformedSSEStream) hold(ev Event) {
 	p.dataBuf = append(p.dataBuf[:0], ev.Data...)
 	p.template = ev
 	p.template.Data = p.dataBuf
+	p.head, p.terminal = s.codec.StripTerminal(p.template)
 
 	window := p.tail + ev.Text
 	result, ok := s.inspect(ev.Choice, p, window, utf8.RuneCountInString(p.tail))
@@ -389,7 +399,7 @@ func (s *transformedSSEStream) hold(ev Event) {
 	}
 	head, tail := splitTail(result, s.opts.LookbehindChars)
 	p.tail = tail
-	s.emitText(ev.Choice, p, head)
+	s.emitText(ev.Choice, p.head, head)
 }
 
 // flushPending shows the transformer every choice's tail once more and
@@ -402,6 +412,7 @@ func (s *transformedSSEStream) flushPending() {
 		}
 		p.queued = false
 		if p.tail == "" {
+			s.emitEnvelope(choice, p)
 			continue
 		}
 		tail := p.tail
@@ -410,18 +421,34 @@ func (s *transformedSSEStream) flushPending() {
 		if s.ended {
 			return
 		}
-		if ok {
-			s.emitText(choice, p, result)
+		if ok && result != "" {
+			s.emitText(choice, p.template, result)
+			p.terminal = false
+		} else {
+			s.emitEnvelope(choice, p)
 		}
 	}
 	s.pendingOrder = s.pendingOrder[:0]
+}
+
+// emitEnvelope delivers the once-per-choice members of the template chunk
+// when its text was dropped or emptied: the chunk goes out with empty text.
+// Nothing is emitted when the template carried none.
+func (s *transformedSSEStream) emitEnvelope(choice int, p *pendingText) {
+	if !p.terminal {
+		return
+	}
+	p.terminal = false
+	ev := s.resegment(choice, p.template, "")
+	s.codec.Track(ev)
+	s.out = ev.appendEncoded(s.out)
 }
 
 // inspect hands text to the transformer as one text event built from the
 // choice's template chunk and returns the text to emit; ok is false when
 // nothing should be emitted (drop) or the stream ended.
 func (s *transformedSSEStream) inspect(choice int, p *pendingText, text string, overlap int) (string, bool) {
-	ev := s.resegment(choice, p, text)
+	ev := s.resegment(choice, p.template, text)
 	ev.Seq = s.seq
 	ev.Overlap = overlap
 	s.seq++
@@ -439,18 +466,19 @@ func (s *transformedSSEStream) inspect(choice int, p *pendingText, text string, 
 	}
 }
 
-// emitText renders text as a re-segmented event of the choice.
-func (s *transformedSSEStream) emitText(choice int, p *pendingText, text string) {
+// emitText renders text as a re-segmented event of the choice built from
+// template.
+func (s *transformedSSEStream) emitText(choice int, template Event, text string) {
 	if text == "" {
 		return
 	}
-	ev := s.resegment(choice, p, text)
+	ev := s.resegment(choice, template, text)
 	s.codec.Track(ev)
 	s.out = ev.appendEncoded(s.out)
 }
 
-func (s *transformedSSEStream) resegment(choice int, p *pendingText, text string) Event {
-	ev := p.template
+func (s *transformedSSEStream) resegment(choice int, template Event, text string) Event {
+	ev := template
 	ev.Choice = choice
 	if ev.Text == text {
 		return ev

@@ -151,7 +151,10 @@ comes back already carrying the plugin's earlier edits, and
 `StreamEvent.Overlap` says how many leading characters it spans: a plugin
 must only edit matches that extend past `Overlap`, since a match inside it
 was handled the previous time (the built-in `string_replace` does this, so
-a rule like `a => aa` is applied once, not on its own output).
+a rule like `a => aa` is applied once, not on its own output). A chat chunk
+that carries text together with `finish_reason` or `usage` is re-segmented
+too; those members go out once, with the chunk's last text, or on a chunk
+with empty text when the plugin removed that text.
 
 **Chat chunks with several choices** are split into one chunk per choice
 before plugins see them, so every choice is inspected; provider `usage`
@@ -499,7 +502,9 @@ virtual_models:
 - Instance-scoped fields of a route plugin (an endpoint, an API key) come
   from a guardrail definition whose **name and type both equal the plugin
   name**; without one the plugin is initialized with `{}`. Instance-scoped
-  `secret` values currently reach a route plugin redacted.
+  `secret` values currently reach a route plugin redacted. Saving that
+  definition rebuilds the instance; the previous one is closed once its
+  in-flight `Select` calls return.
 - GoModel falls back to weighted round robin, logging one warning per
   virtual model, when the plugin is missing, is not a route plugin, failed to
   initialize, `strategy_config` is invalid, or `Select` errors, panics, takes

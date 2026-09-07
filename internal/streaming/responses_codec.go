@@ -247,6 +247,11 @@ func (c *responsesCodec) RewriteText(ev Event, text string) (Event, error) {
 	return ev, nil
 }
 
+// StripTerminal is a no-op: a Responses text delta carries no per-choice
+// terminal members. A re-segmented delta repeats its sequence_number, which
+// clients do not act on.
+func (c *responsesCodec) StripTerminal(ev Event) (Event, bool) { return ev, false }
+
 // Split is a no-op: a Responses event carries one delta.
 func (c *responsesCodec) Split(RawEvent) []RawEvent { return nil }
 

@@ -1,6 +1,7 @@
 package streaming
 
 import (
+	"bytes"
 	"fmt"
 	"maps"
 	"strconv"
@@ -190,6 +191,51 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 	ev.Text = text
 	ev.Data = data
 	return ev, nil
+}
+
+// StripTerminal drops a non-null finish_reason of the event's choice and a
+// non-null top-level usage.
+func (c *chatCodec) StripTerminal(ev Event) (Event, bool) {
+	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+		return ev, false
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(ev.Data, &top); err != nil {
+		return ev, false
+	}
+	var choices []map[string]json.RawMessage
+	if err := json.Unmarshal(top["choices"], &choices); err != nil {
+		return ev, false
+	}
+	changed := false
+	if jsonNonNull(top["usage"]) {
+		delete(top, "usage")
+		changed = true
+	}
+	if pos := chatChoicePosition(choices, ev.Choice); pos >= 0 && jsonNonNull(choices[pos]["finish_reason"]) {
+		delete(choices[pos], "finish_reason")
+		changed = true
+	}
+	if !changed {
+		return ev, false
+	}
+	encoded, err := json.Marshal(choices)
+	if err != nil {
+		return ev, false
+	}
+	top["choices"] = encoded
+	data, err := json.Marshal(top)
+	if err != nil {
+		return ev, false
+	}
+	ev.Data = data
+	return ev, true
+}
+
+// jsonNonNull reports whether raw is a present, non-null JSON value.
+func jsonNonNull(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && string(trimmed) != "null"
 }
 
 // Split turns a chunk with several choices into one chunk per choice. Every

@@ -611,3 +611,60 @@ func TestTransformedSSEStream_OversizedEventFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// A chunk that carries text together with finish_reason and usage (Gemini
+// ends its streams this way) is re-segmented under lookbehind. Those members
+// must reach the client once, after the chunk's last text, even when that
+// text is replaced with nothing or dropped.
+func TestTransformedSSEStream_LookbehindDeliversFinishAndUsageOnce(t *testing.T) {
+	input := `data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello "},"finish_reason":null}],"usage":null}` + "\n\n" +
+		`data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	tests := []struct {
+		name    string
+		onEvent func(ev *Event) (Decision, error)
+		content string
+	}{
+		{name: "pass", content: "hello world"},
+		{name: "final text replaced with nothing", onEvent: func(ev *Event) (Decision, error) {
+			if strings.Contains(ev.Text, "world") {
+				return Decision{Action: ActionReplace, Text: ""}, nil
+			}
+			return Decision{Action: ActionPass}, nil
+		}, content: "hel"},
+		{name: "final text dropped", onEvent: func(ev *Event) (Decision, error) {
+			if strings.Contains(ev.Text, "world") {
+				return Decision{Action: ActionDrop}, nil
+			}
+			return Decision{Action: ActionPass}, nil
+		}, content: "hel"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &funcTransformer{onEvent: tc.onEvent}
+			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{LookbehindChars: 3})
+			got, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(got)
+			if n := strings.Count(out, `"finish_reason":"stop"`); n != 1 {
+				t.Errorf("finish_reason emitted %d times, want once:\n%s", n, out)
+			}
+			if n := strings.Count(out, `"total_tokens":5`); n != 1 {
+				t.Errorf("usage emitted %d times, want once:\n%s", n, out)
+			}
+			events := strings.Split(strings.TrimSpace(strings.TrimSuffix(out, "data: [DONE]\n\n")), "\n\n")
+			if last := events[len(events)-1]; !strings.Contains(last, `"finish_reason":"stop"`) {
+				t.Errorf("finish_reason is not on the last chunk:\n%s", out)
+			}
+			resp, err := AssembleChatResponse(decodeChatEvents(t, got))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.Choices[0].Message.Content != tc.content || resp.Choices[0].FinishReason != "stop" || resp.Usage.TotalTokens != 5 {
+				t.Errorf("assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
+			}
+		})
+	}
+}

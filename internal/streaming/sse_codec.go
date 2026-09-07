@@ -59,6 +59,13 @@ type Codec interface {
 	// Terminate renders the final bytes that end a cut stream, [DONE]
 	// included.
 	Terminate(t Termination) [][]byte
+	// StripTerminal returns a copy of a text event without the members that
+	// must reach the client once per choice (a chat chunk's finish_reason
+	// and usage); ok reports that ev carried any. Lookbehind
+	// re-segmentation emits the head of a chunk from the stripped copy and
+	// the withheld tail from the original, so those members arrive once,
+	// with the chunk's last text.
+	StripTerminal(ev Event) (Event, bool)
 	// Split divides a raw event that carries several choices into one raw
 	// event per choice, so each is decoded and transformed on its own. It
 	// returns nil when raw needs no splitting.
