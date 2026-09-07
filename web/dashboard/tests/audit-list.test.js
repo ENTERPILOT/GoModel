@@ -696,6 +696,159 @@ test("entries without revisions render no revision tabs", () => {
   assert.equal(auditRequestRevisions(entry).length, 0);
 });
 
+test("per-attempt response panes carry the tried model for the tab badge", () => {
+  const entry = {
+    data: {
+      request_body: { model: "virtual-model-a" },
+      response_body: { ok: true },
+      attempts: [
+        {
+          seq: 1,
+          kind: "primary",
+          provider_name: "provider-a",
+          model: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
+          status_code: 503,
+          success: false,
+        },
+        {
+          seq: 2,
+          kind: "failover",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
+          status_code: 400,
+          success: false,
+        },
+        {
+          seq: 3,
+          kind: "failover",
+          provider_name: "provider-b",
+          model: "provider-b/glm-5.3-flash",
+          status_code: 200,
+          success: true,
+        },
+      ],
+    },
+  };
+
+  const panes = auditPanes(entry);
+  assert.equal(
+    panes.map((p) => p.id).join(","),
+    "request,response-1,response-2,response-3",
+  );
+
+  // Each failover pane carries the requested → tried model strip: the model
+  // the request named and the concrete model that attempt targeted. Without
+  // an alias resolution the source chip reads "requested", not "virtual".
+  const first = panes.find((p) => p.id === "response-1").pane;
+  assert.deepEqual(first.modelStrip, {
+    label: "requested",
+    source: "virtual-model-a",
+    tried: "provider-a/Qwen/Qwen3.6-35B-A3B-FP8",
+  });
+  const second = panes.find((p) => p.id === "response-2").pane;
+  assert.deepEqual(second.modelStrip, {
+    label: "requested",
+    source: "virtual-model-a",
+    tried: "provider-b/glm-5.3-flash",
+  });
+
+  // Alias-resolved entries label the source "virtual" and prefer top-level
+  // requested_model over entry.model and the request body (the same
+  // precedence the metadata row uses).
+  const aliased = {
+    requested_model: "smart-vm",
+    model: "entry-model",
+    alias_used: true,
+    data: {
+      request_body: { model: "body-model" },
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(auditPanes(aliased).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "virtual",
+    source: "smart-vm",
+    tried: "provider-a/qwen-35b",
+  });
+
+  // Without requested_model, top-level entry.model steps in before the body.
+  const entryModel = {
+    model: "entry-model",
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  assert.deepEqual(auditPanes(entryModel).find((p) => p.id === "response-1").pane.modelStrip, {
+    label: "requested",
+    source: "entry-model",
+    tried: "provider-a/qwen-35b",
+  });
+
+  // Without any request-model value anywhere, no strip renders at all — a
+  // lone "tried" chip would read as if the request model were unknown by
+  // design, which it is not.
+  const noSource = {
+    data: {
+      attempts: [
+        { seq: 1, kind: "primary", model: "provider-a/qwen-35b", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "provider-b/glm-flash", status_code: 200, success: true },
+      ],
+    },
+  };
+  const noSourcePanes = auditPanes(noSource);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.ok(!noSourcePanes.find((p) => p.id === "response-2").pane.modelStrip);
+
+  // A single successful attempt collapses to the plain response tab, which
+  // carries no model strip (the row's model column already names it).
+  const single = {
+    data: {
+      request_body: { model: "m" },
+      response_body: { ok: true },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 200, success: true }],
+    },
+  };
+  const singlePanes = auditPanes(single);
+  assert.equal(singlePanes.map((p) => p.id).join(","), "request,response");
+  assert.ok(!singlePanes.find((p) => p.id === "response").pane.modelStrip);
+
+  // A single FAILED attempt keeps the per-attempt path but still hides the
+  // strip — the same `single` rule as the seq/kind/status chips.
+  const loneFailure = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [{ seq: 1, kind: "primary", model: "m", status_code: 503, success: false }],
+    },
+  };
+  const lonePanes = auditPanes(loneFailure);
+  assert.equal(lonePanes.map((p) => p.id).join(","), "request,response-1");
+  assert.ok(!lonePanes.find((p) => p.id === "response-1").pane.modelStrip);
+
+  // Entries that predate per-attempt model capture render no strip instead of
+  // the "-" placeholder.
+  const legacy = {
+    data: {
+      request_body: { model: "m" },
+      attempts: [
+        { seq: 1, kind: "primary", status_code: 503, success: false },
+        { seq: 2, kind: "failover", model: "m", status_code: 200, success: true },
+      ],
+    },
+  };
+  const legacyPanes = auditPanes(legacy);
+  assert.ok(!legacyPanes.find((p) => p.id === "response-1").pane.modelStrip);
+  assert.deepEqual(legacyPanes.find((p) => p.id === "response-2").pane.modelStrip, {
+    label: "requested",
+    source: "m",
+    tried: "m",
+  });
+});
+
 test("formatJSON pretty-prints JSON strings and objects, passing other text through", () => {
   assert.equal(formatJSON(null), "Not captured");
   assert.equal(formatJSON(""), "Not captured");

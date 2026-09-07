@@ -116,7 +116,11 @@ dashboard simply shows no update notice.
 
 ## Air-gapped and mirrored deployments
 
-Point the check at your own host and serve `core.txt` (or `pro.txt`) from it:
+`GOMODEL_OFFLINE=true` turns the check off together with the remote model
+catalog download; see the
+[production guide](/guides/production#air-gapped-and-offline-deployments).
+
+To keep update notices inside an air gap instead, point the check at your own host and serve `core.txt` (or `pro.txt`) from it:
 
 ```bash
 GOMODEL_VERSION_CHECK_URL=https://releases.internal.example.com/version

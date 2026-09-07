@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ModelCache represents the cached model data structure.
@@ -38,6 +40,12 @@ type CachedProvider struct {
 type CachedModel struct {
 	ID      string `json:"id"`
 	Created int64  `json:"created"`
+	// Metadata is what the provider itself reported about the model at
+	// discovery — never the catalog-enriched result. A restart restores it as
+	// the model's discovered metadata, so a provider that is slow or briefly
+	// unreachable does not fall back to catalog-only values (or to none) for
+	// its real context window, output limit, modes, and capabilities.
+	Metadata *core.ModelMetadata `json:"metadata,omitempty"`
 }
 
 // Cache defines the interface for model cache storage.

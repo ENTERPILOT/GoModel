@@ -21,6 +21,9 @@ type ResponsesOutputToolCallState struct {
 	Completed         bool
 	FinalStatus       string // status carried by the item's output_item.done event
 	PlaceholderObject bool
+	// ExtraContent is the tool call's extra_content member (Gemini thought
+	// signature), echoed on the function_call item.
+	ExtraContent json.RawMessage
 }
 
 // ResponsesOutputEventState manages assistant/tool output items for Responses streams.
@@ -303,7 +306,7 @@ func (s *ResponsesOutputEventState) RenderToolCallItem(state *ResponsesOutputToo
 	if includePlaceholder {
 		arguments = s.ToolCallArguments(state)
 	}
-	return map[string]any{
+	item := map[string]any{
 		"id":        state.ItemID,
 		"type":      "function_call",
 		"status":    status,
@@ -311,6 +314,10 @@ func (s *ResponsesOutputEventState) RenderToolCallItem(state *ResponsesOutputToo
 		"name":      state.Name,
 		"arguments": arguments,
 	}
+	if len(state.ExtraContent) > 0 {
+		item["extra_content"] = state.ExtraContent
+	}
+	return item
 }
 
 // StartToolCall emits the function_call output_item.added event once the item metadata is available.

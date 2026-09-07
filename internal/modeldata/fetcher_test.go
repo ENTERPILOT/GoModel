@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -411,5 +414,117 @@ func TestParse_PricingTimeWindows(t *testing.T) {
 	monday := time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC)
 	if got := pricing.AtTime(monday); *got.InputPerMtok != 0.44 {
 		t.Fatalf("AtTime(monday peak) = %v, want base 0.44", *got.InputPerMtok)
+	}
+}
+
+func TestFetchIfChanged_LocalFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "models.json")
+	content := []byte(`{"models":{"openai/gpt-4o":{"provider":"openai","name":"gpt-4o"}}}`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, location := range []string{path, "file://" + path} {
+		t.Run(location, func(t *testing.T) {
+			first, err := FetchIfChanged(context.Background(), location, "")
+			if err != nil {
+				t.Fatalf("first read: %v", err)
+			}
+			if first.List == nil || first.NotModified || first.ETag == "" {
+				t.Fatalf("first read should parse and return a validator: %+v", first)
+			}
+			if len(first.List.Models) != 1 {
+				t.Fatalf("models = %d, want 1", len(first.List.Models))
+			}
+
+			second, err := FetchIfChanged(context.Background(), location, first.ETag)
+			if err != nil {
+				t.Fatalf("second read: %v", err)
+			}
+			if !second.NotModified || second.ETag != first.ETag {
+				t.Fatalf("unchanged file should report NotModified with the same validator: %+v", second)
+			}
+
+			if err := os.WriteFile(path, []byte(`{"models":{}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			third, err := FetchIfChanged(context.Background(), location, first.ETag)
+			if err != nil {
+				t.Fatalf("third read: %v", err)
+			}
+			if third.NotModified || third.List == nil || third.ETag == first.ETag {
+				t.Fatalf("changed file should be re-read with a new validator: %+v", third)
+			}
+			// Restore for the next location.
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestFetchIfChanged_LocalFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := FetchIfChanged(context.Background(), filepath.Join(dir, "missing.json"), ""); err == nil {
+		t.Error("missing file should error")
+	}
+	bad := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(bad, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FetchIfChanged(context.Background(), bad, ""); err == nil {
+		t.Error("invalid JSON should error")
+	}
+	if _, err := FetchIfChanged(context.Background(), dir, ""); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("directory should be rejected as not a regular file, got %v", err)
+	}
+}
+
+func TestLocalPath(t *testing.T) {
+	tests := []struct {
+		in       string
+		wantPath string
+		wantOK   bool
+	}{
+		{"https://example.com/m.json", "", false},
+		{"http://example.com/m.json", "", false},
+		{"file:///etc/gomodel/models.json", "/etc/gomodel/models.json", true},
+		{"file://localhost/etc/models.json", "/etc/models.json", true},
+		{"/etc/gomodel/models.json", "/etc/gomodel/models.json", true},
+		{"./models.json", "./models.json", true},
+		{"  /tmp/m.json  ", "/tmp/m.json", true},
+	}
+	for _, tt := range tests {
+		gotPath, gotOK := localPath(tt.in)
+		if gotOK != tt.wantOK || gotPath != tt.wantPath {
+			t.Errorf("localPath(%q) = (%q, %v), want (%q, %v)", tt.in, gotPath, gotOK, tt.wantPath, tt.wantOK)
+		}
+	}
+}
+
+func TestFetchIfChanged_LocalFileOversizedIsRejectedBeforeAllocation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.json")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A sparse file well past the limit costs no disk and no memory to
+	// create; a full read would allocate the whole thing.
+	if err := f.Truncate(maxBodySize * 8); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err = FetchIfChanged(context.Background(), path, "")
+	runtime.ReadMemStats(&after)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected size rejection, got %v", err)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > maxBodySize {
+		t.Fatalf("oversized file allocated %d bytes before rejection; must stay under %d", allocated, maxBodySize)
 	}
 }

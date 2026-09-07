@@ -9,21 +9,24 @@ import (
 
 // Provider is gateway routing metadata on OpenAI-compatible request structs and
 // must be removed before dispatching to an upstream provider implementation.
+// Replay state another provider owns (extra_content) is dropped for every
+// dialect; Anthropic cache directives only reach providers that accept them.
 func forwardChatRequest(ctx context.Context, req *core.ChatRequest, route resolvedRoute) *core.ChatRequest {
 	forwardReq := *req
 	forwardReq.Model = route.selector.Model
 	forwardReq.Provider = ""
+	forward := adaptExtraContent(&forwardReq, route.providerType)
 	if core.RequestDialectFromContext(ctx) != core.RequestDialectAnthropicMessages {
-		return &forwardReq
+		return forward
 	}
-	return adaptAnthropicCacheControl(&forwardReq, route.providerType)
+	return adaptAnthropicCacheControl(forward, route.providerType)
 }
 
-func forwardResponsesRequest(req *core.ResponsesRequest, selector core.ModelSelector) *core.ResponsesRequest {
+func forwardResponsesRequest(req *core.ResponsesRequest, route resolvedRoute) *core.ResponsesRequest {
 	forwardReq := *req
-	forwardReq.Model = selector.Model
+	forwardReq.Model = route.selector.Model
 	forwardReq.Provider = ""
-	return &forwardReq
+	return adaptResponsesExtraContent(&forwardReq, route.providerType)
 }
 
 func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, route resolvedRoute) *core.ChatRequest {
@@ -35,7 +38,7 @@ func (r *Router) plannedChatRequest(ctx context.Context, req *core.ChatRequest, 
 }
 
 func (r *Router) plannedResponsesRequest(req *core.ResponsesRequest, route resolvedRoute) *core.ResponsesRequest {
-	forward := forwardResponsesRequest(req, route.selector)
+	forward := forwardResponsesRequest(req, route)
 	if r.cachePlanner == nil {
 		return forward
 	}

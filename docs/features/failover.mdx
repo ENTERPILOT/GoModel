@@ -75,6 +75,10 @@ are not swept in turn — which is what lets `gpt-4o` fall back to
 other redirect (an alias, a virtual model under a new name) that lists a
 protected model does sweep that model's fallbacks.
 
+Provider retries run before failover for non-streaming requests. To retry
+Cloudflare `522`/`524` responses and then switch models on the same provider,
+use [resilience settings with per-model breakers](/advanced/resilience#retry-cloudflare-timeouts-then-switch-models).
+
 ## When it runs
 
 Failover is attempted only after an attempt returns:

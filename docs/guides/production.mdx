@@ -174,41 +174,69 @@ call the gateway directly. Add the headers at your proxy if you need that.
 
 ## Air-gapped and offline deployments
 
-**GoModel runs fully air-gapped.** There is no telemetry, no phone-home, no
-update check, and no license check. The admin dashboard is embedded in the
-binary and its fonts are vendored, so the UI loads no CDN assets. Paired with
-local model servers such as [Ollama](/providers/multiple-ollama),
-[SGLang](/providers/sglang), or [vLLM](/providers/vllm), the gateway needs no
-route to the public internet.
+**GoModel runs fully air-gapped.** There is no telemetry, no analytics, and no
+license check. The admin dashboard is embedded in the binary and its fonts are
+vendored, so the UI loads no CDN assets. Paired with local model servers such
+as [Ollama](/providers/multiple-ollama), [SGLang](/providers/sglang), or
+[vLLM](/providers/vllm), the gateway needs no route to the public internet.
 
-There is exactly one outbound call that is not to a configured provider: the
-model metadata registry at `MODEL_LIST_URL`, which supplies pricing, context
-windows, and capabilities. It is fetched in a background goroutine at startup
-and again on each cache refresh.
+By default the gateway makes exactly two outbound calls that are not to a
+configured provider, and one switch turns both off:
 
-That fetch is best-effort. When it fails the gateway boots normally, `/health`
-and `/health/ready` return `200`, provider discovery still works because model
-lists come from each provider's own `/models` endpoint, and requests route
-normally. What you lose is metadata enrichment.
+```bash
+GOMODEL_OFFLINE=true
+```
+
+| Call | What it does | Default |
+| --- | --- | --- |
+| [Update check](/advanced/version-awareness) at `GOMODEL_VERSION_CHECK_URL` | Daily fetch of the latest release number, with an anonymous install id | on |
+| [Model catalog](/advanced/model-metadata) at `MODEL_LIST_URL` | Pricing, context windows, and capabilities, fetched at startup and on each cache refresh | on |
+
+`GOMODEL_OFFLINE=true` (or `offline: true` in `config.yaml`) disables the
+update check and drops any HTTP catalog URL. It is applied after every other
+setting, so nothing in `config.yaml` or the environment can re-enable an
+outbound call underneath it. Calls to configured providers and to anything you
+declared yourself, such as an OTLP collector, MCP upstreams, or a vector
+store, are untouched. The startup log confirms the mode.
+
+You can also control the two calls individually with
+`GOMODEL_VERSION_CHECK_ENABLED=false` and `MODEL_LIST_URL=off`.
+
+The catalog fetch is best-effort. When it is off or fails, the gateway boots
+normally, `/health` and `/health/ready` return `200`, provider discovery still
+works because model lists come from each provider's own `/models` endpoint,
+and requests route normally. What you lose is metadata enrichment.
 
 <Warning>
   Without metadata enrichment, models have **no pricing**. Cost tracking then
   reports no cost, and since [budgets](/features/budgets) read spend from usage
   cost records, budgets have nothing to charge against and will not enforce
   spend limits.
-
-  Fix it either by mirroring the model list internally and pointing
-  `MODEL_LIST_URL` at your mirror, or by declaring pricing per model under
-  `providers.<name>.models[].metadata.pricing` in `config.yaml`.
 </Warning>
 
+Keep pricing in an air gap in one of three ways:
+
+1. **Ship the catalog as a file.** Download `models.min.json` outside the air
+   gap, copy it in, and point the gateway at it. A local file is read, never
+   fetched, so it stays active under `GOMODEL_OFFLINE=true`:
+
+   ```bash
+   MODEL_LIST_URL=/etc/gomodel/models.json   # or file:///etc/gomodel/models.json
+   ```
+
+   The file is re-read on every cache refresh, so replacing it on disk updates
+   pricing without a restart.
+2. **Mirror it.** Serve the file from an internal HTTP host and set
+   `MODEL_LIST_URL` to that URL. Leave `GOMODEL_OFFLINE` unset and disable the
+   update check separately, or point `GOMODEL_VERSION_CHECK_URL` at an
+   internal mirror too.
+3. **Declare pricing per model** under `providers.<name>.models[].metadata.pricing`
+   in `config.yaml`.
+
 <Note>
-  To disable the fetch entirely — for fully air-gapped installs — set
-  `MODEL_LIST_URL=off` (or `cache.model.model_list.url: "off"` in
-  `config.yaml`). Setting the variable to an empty string does **not**
-  disable it: empty env values are skipped, so the default URL survives.
-  To redirect the fetch instead, point `MODEL_LIST_URL` at an internal
-  mirror.
+  Setting `MODEL_LIST_URL` to an empty string does **not** disable the
+  download: empty env values are skipped, so the default URL survives. Use
+  `off` or `GOMODEL_OFFLINE=true`.
 </Note>
 
 If a Bedrock provider is configured, the AWS SDK may also probe the link-local
@@ -384,6 +412,6 @@ if the file size matters.
   `terminationGracePeriodSeconds` above 30.
 - Enable metrics and alert on `gomodel_circuit_breaker_state` and on
   `usage log buffer full`.
-- For air-gapped installs, mirror `MODEL_LIST_URL` (or disable it with
-  `MODEL_LIST_URL=off`) and declare model pricing in config so cost tracking
-  and budgets keep working.
+- For air-gapped installs, set `GOMODEL_OFFLINE=true`, then ship the model
+  catalog as a file or declare model pricing in config so cost tracking and
+  budgets keep working.

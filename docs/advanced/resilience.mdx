@@ -12,7 +12,8 @@ GoModel wraps every upstream provider call with two resilience layers:
 2. **Circuit breaker** — short-circuits calls to a provider that has been
    failing repeatedly, then probes once the timeout elapses.
 
-Both layers apply per provider. They do not switch to a different model or
+Retries apply to the selected target. Circuit breakers apply per provider by
+default, or per model with `scope: model`. They do not switch to a different model or
 provider on failure. For cross-model failover, see
 [Failover](/features/failover).
 
@@ -23,6 +24,9 @@ you need.
 
 | Setting             | Default | Notes                                          |
 | ------------------- | ------- | ---------------------------------------------- |
+| `retry_on_statuses` | `[429, 502, 503, 504, 522, 524]` | HTTP statuses that trigger retries |
+| `failure_on_statuses` | `[429, 5xx]` | HTTP statuses that count as breaker failures |
+| `scope` | `provider` | Breaker isolation: `provider` or `model` |
 | `max_retries`       | `3`     | Maximum retry attempts per request             |
 | `initial_backoff`   | `1s`    | First retry wait                               |
 | `max_backoff`       | `30s`   | Upper cap on retry wait                        |
@@ -50,9 +54,12 @@ the full timeout.
 ## What counts as a failure
 
 **Retries** fire on transport errors (connection refused, resets, DNS
-failures) and on `429`, `502`, `503`, and `504` responses. Other statuses —
-including `500` — are returned to the caller without retrying. Two paths
+failures) and, by default, on `429`, `502`, `503`, `504`, `522`, and `524` responses. Other statuses —
+including `500` — are returned to the caller without retrying. The following paths
 retry less than the table suggests:
+
+- **Local HTTP client timeouts** return immediately without retrying. An
+  expired overall request context also prevents further attempts.
 
 - **Streaming** requests are never retried once dispatched, because partial
   data may already have been sent.
@@ -70,25 +77,45 @@ exactly like a genuine error status, and the response is never cached as a
 success. Passthrough endpoints are exempt: they forward the provider's
 response byte-for-byte.
 
-**The circuit breaker** counts transport errors and `5xx` responses
-(including non-retried `500`s) as failures. It deliberately ignores:
+**The circuit breaker** counts transport errors and, by default, `429` and
+all `5xx` responses as failures. One exhausted retry sequence counts as one
+failure; individual HTTP retries do not increment the breaker. A successful
+sequence records success. Client cancellation is ignored; local client
+timeouts count as failures.
 
-- `429` rate limits — a rate-limited provider is up, so the backpressure
-  signal is passed through instead of opening the circuit. The one
-  exception is a `429` on a half-open probe, which reopens the circuit.
-- `4xx` responses — the provider answered; the request was at fault.
-- Requests canceled by the client — a disconnect says nothing about
-  provider health. Client-side *timeouts* do count as failures.
+Set `retry.retry_on_statuses` and `circuit_breaker.failure_on_statuses`
+independently. Both accept exact codes and classes such as `5xx`. Omitted
+lists use defaults; explicit lists replace them; `[]` disables status-based
+triggers while retaining transport-error handling. For example,
+`failure_on_statuses: [5xx]` excludes rate limits from breaker failures,
+including during recovery probes. Invalid codes or scopes fail configuration
+loading.
+
+The default now includes `429` breaker failures. Deployments that previously
+relied on rate limits leaving the breaker closed can set
+`failure_on_statuses: [5xx]` to retain that behavior.
 
 While the circuit is open, requests fail fast with a `503` and the message
 `circuit breaker is open - provider temporarily unavailable`. After
 `timeout` elapses, a single probe request is let through while concurrent
 requests keep failing fast; `success_threshold` consecutive successful
-probes close the circuit, and any probe failure reopens it.
+probes close the circuit, and a failure matching the breaker policy reopens it. Probes make only one
+HTTP attempt, without retries.
 
 The circuit breaker is in-memory and per gateway process: each provider
-gets its own breaker, state resets on restart, and nothing is shared
-between replicas.
+gets its own breaker by default. With `scope: model`, each model within a
+provider instance gets an independent breaker; requests without a model,
+such as discovery, use a separate provider breaker. Multipart audio uploads
+use their explicit model names.
+
+Each provider retains at most 1,024 model breakers. Idle closed entries expire
+after 10 minutes when a new model is looked up; the oldest idle closed entry
+is evicted sooner when the limit is reached. Active and open breakers are
+preserved. If every slot is protected, a new model receives a failover-eligible
+`503` until a slot becomes available.
+
+State resets on restart
+and nothing is shared between replicas.
 
 ## Environment Variables
 
@@ -99,6 +126,7 @@ in YAML.
 
 | Variable                 | Type     | Default | Description                                |
 | ------------------------ | -------- | ------- | ------------------------------------------ |
+| `RETRY_ON_STATUSES` | comma-separated list | `429,502,503,504,522,524` | HTTP statuses that trigger retries |
 | `RETRY_MAX_RETRIES`      | int      | `3`     | Maximum retry attempts per request         |
 | `RETRY_INITIAL_BACKOFF`  | duration | `1s`    | First retry wait (e.g. `500ms`, `2s`)      |
 | `RETRY_MAX_BACKOFF`      | duration | `30s`   | Upper cap on retry wait                    |
@@ -109,6 +137,8 @@ in YAML.
 
 | Variable                            | Type     | Default | Description                                   |
 | ----------------------------------- | -------- | ------- | --------------------------------------------- |
+| `CIRCUIT_BREAKER_FAILURE_ON_STATUSES` | comma-separated list | `429,5xx` | HTTP statuses counted as failures |
+| `CIRCUIT_BREAKER_SCOPE` | string | `provider` | `provider` or `model` isolation |
 | `CIRCUIT_BREAKER_ENABLED`           | bool     | `true`  | Set `false` to turn the circuit breaker off    |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` | int      | `5`     | Consecutive failures before opening           |
 | `CIRCUIT_BREAKER_SUCCESS_THRESHOLD` | int      | `2`     | Consecutive successes to close again          |
@@ -195,7 +225,9 @@ combines two independent signals:
 The circuit breaker's state is shown on each provider card: expanding a
 card reveals a **Breaker State** chip, an open breaker turns the provider's
 status pill to `Circuit Open`, and a half-open breaker shows `Recovering`.
-A model whose recent requests keep failing (at least 3 errors making up
+With `scope: model`, the provider-level breaker display and metric reflect
+the breaker of the most recently completed request, rather than an aggregate
+of all model breakers. A model whose recent requests keep failing (at least 3 errors making up
 half or more of its windowed requests) marks the provider `Degraded` even
 while model discovery still succeeds — this catches upstreams that list
 models fine but fail real calls, e.g. with misreported `4xx` errors that
@@ -248,7 +280,49 @@ Unhealthy until its first successful fetch.
 
 ## Failover vs. Resilience
 
-The retry and circuit breaker layers stay on a single provider. If you also
+Retries stay on the selected target; the circuit breaker tracks the configured
+provider or model scope. If you also
 want GoModel to try a different model or provider when the primary keeps
 failing, give the model a virtual model with more than one target — the
 remaining targets are its failover chain. See [Failover](/features/failover).
+
+## Retry Cloudflare timeouts, then switch models
+
+For non-streaming translated requests, combine retries with a failover virtual
+model. Merge the following settings into your existing configuration, using
+your configured provider and model names:
+
+```yaml
+providers:
+  cloudflare:
+    # Keep your existing type, base_url, and credentials here.
+    resilience:
+      retry:
+        max_retries: 2
+        retry_on_statuses: [429, 502, 503, 504, 522, 524]
+      circuit_breaker:
+        scope: model
+        failure_on_statuses: [429, 5xx]
+        failure_threshold: 5
+
+virtual_models:
+  - source: resilient-chat
+    strategy: failover
+    targets:
+      - model: cloudflare/model1
+      - model: cloudflare/model2
+
+failover:
+  enabled: true
+  retry_on_statuses: [429, 5xx]
+```
+
+Send `model: resilient-chat`. While model1's breaker is closed, a `524`
+response triggers up to two retries against model1. If all three attempts
+fail, GoModel tries model2 with its own retry budget. Model1's open breaker
+skips its upstream calls without blocking model2. With the default
+`scope: provider`, both models share a breaker instead.
+
+The caller's deadline must allow time for the attempts and backoff. Streaming
+requests do not get this retry sequence; a partially delivered response
+cannot be restarted transparently.

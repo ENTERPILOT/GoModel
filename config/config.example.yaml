@@ -147,6 +147,11 @@ cache:
   model:
     refresh_interval: 3600 # how often to refresh the model registry (seconds, default: 3600)
     recheck_interval: 60 # env: PROVIDER_RECHECK_INTERVAL; how often providers whose last refresh failed are re-probed for recovery (seconds, default: 60; 0 disables)
+    # model_list:
+    #   # env: MODEL_LIST_URL. Pricing, context windows, and capabilities. An HTTP
+    #   # URL (default: the public catalog on GitHub), a local file path for
+    #   # air-gapped installs (re-read on each refresh), or "off".
+    #   url: /etc/gomodel/models.json
     local:
       cache_dir: ".cache" # local cache directory; kept as fallback if redis is configured but unreachable
     # Redis is preferred when set. Leave `local` in place to start in degraded mode if Redis is down:
@@ -312,12 +317,15 @@ workflows:
 # Individual providers can override any of these values.
 resilience:
   retry:
+    retry_on_statuses: [429, 502, 503, 504, 522, 524] # env: RETRY_ON_STATUSES; [] disables status-based retries
     max_retries: 3
     initial_backoff: 1s
     max_backoff: 30s
     backoff_factor: 2.0
     jitter_factor: 0.1
   circuit_breaker:
+    failure_on_statuses: [429, 5xx] # env: CIRCUIT_BREAKER_FAILURE_ON_STATUSES; [] disables status-based failures
+    scope: provider # env: CIRCUIT_BREAKER_SCOPE; model isolates each model within a provider
     # Set false to never fail fast on a struggling provider (default: true).
     enabled: true
     failure_threshold: 5
@@ -726,5 +734,10 @@ providers:
 # per-deployment install id, and the visiting browser's user agent and language.
 # Never sends API keys, model names, prompts, usage data, client addresses, or
 # the dashboard hostname. Set enabled: false to stop all outbound traffic.
+# Air-gapped installs: disables the update check and drops HTTP model catalog
+# URLs in one step. Configured providers, declared endpoints, and a catalog
+# given as a local file path are unaffected. Default: false
+# offline: false
+
 # version_check:
 #   enabled: true

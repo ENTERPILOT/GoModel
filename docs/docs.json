@@ -140,6 +140,7 @@
                             "advanced/responses-compatibility",
                             "advanced/conversations-api",
                             "advanced/anthropic-messages-api",
+                            "advanced/extra-content",
                             "advanced/audio-api",
                             "advanced/images-api",
                             "advanced/usage-api",

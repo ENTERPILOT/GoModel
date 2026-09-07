@@ -85,6 +85,37 @@ func convertResponsesContentParts(parts []any) (any, bool) {
 				InputAudio:  inputAudio,
 				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, "type", "input_audio")),
 			})
+		case "input_file", "file":
+			// Responses carries file fields flat on the part; chat nests them
+			// under "file". Accept both shapes.
+			fileMap := partMap
+			fileKeys := []string{"type", "file", "file_data", "file_url", "file_id", "filename"}
+			var fileExtras map[string]json.RawMessage
+			if nested, ok := partMap["file"].(map[string]any); ok {
+				// Unknown keys inside the nested object belong to the file, not
+				// the part.
+				fileMap = nested
+				fileExtras = rawJSONMapFromUnknownKeys(nested, "file_data", "file_url", "file_id", "filename")
+			}
+			fileData, _ := fileMap["file_data"].(string)
+			fileURL, _ := fileMap["file_url"].(string)
+			fileID, _ := fileMap["file_id"].(string)
+			filename, _ := fileMap["filename"].(string)
+			file := &core.FileContent{
+				FileData:    strings.TrimSpace(fileData),
+				FileURL:     strings.TrimSpace(fileURL),
+				FileID:      strings.TrimSpace(fileID),
+				Filename:    strings.TrimSpace(filename),
+				ExtraFields: core.UnknownJSONFieldsFromMap(fileExtras),
+			}
+			if !core.ValidFilePayload(file) {
+				return nil, false
+			}
+			typedParts = append(typedParts, core.ContentPart{
+				Type:        "file",
+				File:        file,
+				ExtraFields: core.UnknownJSONFieldsFromMap(rawJSONMapFromUnknownKeys(partMap, fileKeys...)),
+			})
 		default:
 			if nested, ok := partMap["content"]; ok {
 				text := ExtractContentFromInput(nested)
@@ -148,6 +179,21 @@ func normalizeTypedResponsesContentPart(part core.ContentPart) (core.ContentPart
 				Data:        data,
 				Format:      format,
 				ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
+			},
+			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
+		}, true
+	case "file", "input_file":
+		if !core.ValidFilePayload(part.File) {
+			return core.ContentPart{}, false
+		}
+		return core.ContentPart{
+			Type: "file",
+			File: &core.FileContent{
+				FileData:    strings.TrimSpace(part.File.FileData),
+				FileURL:     strings.TrimSpace(part.File.FileURL),
+				FileID:      strings.TrimSpace(part.File.FileID),
+				Filename:    strings.TrimSpace(part.File.Filename),
+				ExtraFields: core.CloneUnknownJSONFields(part.File.ExtraFields),
 			},
 			ExtraFields: core.CloneUnknownJSONFields(part.ExtraFields),
 		}, true

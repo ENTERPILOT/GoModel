@@ -197,7 +197,7 @@ func scanSQLDefinition(scanner definitionScanner) (Definition, error) {
 	definition.Config = configJSON
 	definition.FailMode = failMode
 	definition.TimeoutMS = int(timeoutMS)
-	definition.CreatedAt = time.Unix(createdAtUnix, 0).UTC()
-	definition.UpdatedAt = time.Unix(updatedAtUnix, 0).UTC()
+	definition.CreatedAt = sqlutil.TimeFromUnix(createdAtUnix)
+	definition.UpdatedAt = sqlutil.TimeFromUnix(updatedAtUnix)
 	return definition, nil
 }

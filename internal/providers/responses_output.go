@@ -104,6 +104,17 @@ func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.Respon
 					ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
 				},
 			})
+		case "file":
+			if !core.ValidFilePayload(part.File) {
+				continue
+			}
+			items = append(items, core.ResponsesContentItem{
+				Type:     "input_file",
+				FileData: strings.TrimSpace(part.File.FileData),
+				FileURL:  strings.TrimSpace(part.File.FileURL),
+				FileID:   strings.TrimSpace(part.File.FileID),
+				Filename: strings.TrimSpace(part.File.Filename),
+			})
 		}
 	}
 	return items
@@ -148,15 +159,28 @@ func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputI
 	for _, toolCall := range msg.ToolCalls {
 		callID := ResponsesFunctionCallCallID(toolCall.ID)
 		output = append(output, core.ResponsesOutputItem{
-			ID:        ResponsesFunctionCallItemID(callID),
-			Type:      "function_call",
-			Status:    "completed",
-			CallID:    callID,
-			Name:      toolCall.Function.Name,
-			Arguments: toolCall.Function.Arguments,
+			ID:          ResponsesFunctionCallItemID(callID),
+			Type:        "function_call",
+			Status:      "completed",
+			CallID:      callID,
+			Name:        toolCall.Function.Name,
+			Arguments:   toolCall.Function.Arguments,
+			ExtraFields: toolCallExtraContent(toolCall.ExtraFields),
 		})
 	}
 	return output
+}
+
+// toolCallExtraContent isolates the extra_content member of a chat tool call
+// so it survives on the Responses function_call item that clients replay. The
+// other unknown tool-call members are provider metadata, not replay state, so
+// only extra_content is forwarded.
+func toolCallExtraContent(fields core.UnknownJSONFields) core.UnknownJSONFields {
+	raw := fields.Lookup(core.ExtraContentField)
+	if len(raw) == 0 {
+		return core.UnknownJSONFields{}
+	}
+	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: raw})
 }
 
 func responseMessageReasoningContent(msg core.ResponseMessage) string {

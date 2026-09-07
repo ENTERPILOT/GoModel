@@ -237,11 +237,15 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		resolved.FairnessFromUserPath = enabledByDefault(raw.FairnessFromUserPath)
 	}
 
+	resolved.Resilience.CircuitBreaker.Scope = config.NormalizeBreakerScope(resolved.Resilience.CircuitBreaker.Scope)
 	if raw.Resilience == nil {
 		return resolved
 	}
 
-	if r := raw.Resilience.Retry; r != nil {
+	if r := raw.Resilience.Retry; r != nil { //nolint:dupl // Explicit field overrides preserve nil-as-inherit semantics for retry settings.
+		if r.RetryOnStatuses != nil {
+			resolved.Resilience.Retry.RetryOnStatuses = r.RetryOnStatuses
+		}
 		if r.MaxRetries != nil {
 			resolved.Resilience.Retry.MaxRetries = *r.MaxRetries
 		}
@@ -259,7 +263,13 @@ func buildProviderConfig(raw config.RawProviderConfig, global config.ResilienceC
 		}
 	}
 
-	if cb := raw.Resilience.CircuitBreaker; cb != nil {
+	if cb := raw.Resilience.CircuitBreaker; cb != nil { //nolint:dupl // Breaker settings have independent field overrides with the same inheritance semantics.
+		if cb.FailureOnStatuses != nil {
+			resolved.Resilience.CircuitBreaker.FailureOnStatuses = cb.FailureOnStatuses
+		}
+		if cb.Scope != nil {
+			resolved.Resilience.CircuitBreaker.Scope = config.NormalizeBreakerScope(*cb.Scope)
+		}
 		if cb.Enabled != nil {
 			resolved.Resilience.CircuitBreaker.Enabled = *cb.Enabled
 		}

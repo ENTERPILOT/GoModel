@@ -64,12 +64,27 @@ func UnixOrNil(value *time.Time) any {
 	return value.UTC().Unix()
 }
 
+// TimeFromUnix converts a stored Unix-seconds column into a UTC time,
+// mapping a value JSON cannot represent (time.Time marshals only years 0-9999)
+// to the zero time. A single corrupt timestamp — a row written while the host
+// clock was wrong, or hand-edited — would otherwise make every API response
+// carrying that row unserializable, failing the whole listing instead of the
+// one column. Same tolerance as StringsFromJSON, for the same reason.
+func TimeFromUnix(value int64) time.Time {
+	t := time.Unix(value, 0).UTC()
+	if year := t.Year(); year < 0 || year > 9999 {
+		slog.Warn("dropping out-of-range stored timestamp", "unix_seconds", value)
+		return time.Time{}
+	}
+	return t
+}
+
 // TimeFromUnixPtr converts an optional Unix timestamp to a *time.Time.
 func TimeFromUnixPtr(value *int64) *time.Time {
 	if value == nil {
 		return nil
 	}
-	t := time.Unix(*value, 0).UTC()
+	t := TimeFromUnix(*value)
 	return &t
 }
 

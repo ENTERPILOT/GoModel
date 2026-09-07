@@ -410,7 +410,7 @@ func scanSQLBudget(scanner sqlx.Row) (Budget, error) {
 		return Budget{}, fmt.Errorf("scan budget: %w", err)
 	}
 	budget.LastResetAt = sqlutil.TimeFromUnixPtr(lastResetAt)
-	budget.CreatedAt = time.Unix(createdAt, 0).UTC()
-	budget.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	budget.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	budget.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return budget, nil
 }

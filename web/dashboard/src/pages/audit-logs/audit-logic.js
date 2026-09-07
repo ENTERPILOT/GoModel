@@ -622,6 +622,11 @@ function auditAttemptStatusCode(attempt) {
   return Number.isFinite(code) && code > 0 ? code : null;
 }
 
+/**
+ * Builds one per-attempt response pane: captured body/headers, the normalized
+ * error message, and the model strip naming which model the request named
+ * versus which model this attempt actually tried.
+ */
 function auditAttemptResponsePane(entry, attempt) {
   const success = !!(attempt && attempt.success);
   const data = entry && entry.data ? entry.data : null;
@@ -633,12 +638,42 @@ function auditAttemptResponsePane(entry, attempt) {
   // With only one response tab the seq/type/status chips are just noise (it's
   // the whole response); show them only to tell apart multiple attempt tabs.
   const single = auditAttempts(entry).length <= 1;
+  // The tried model drives the in-pane model strip. Hidden on the single tab
+  // (the row's model column already shows it) and for entries that predate
+  // per-attempt model capture ("-" placeholder).
+  const triedModel = single ? "" : auditAttemptModel(attempt);
+  const tried = triedModel === "-" ? "" : triedModel;
+  const source = String(
+    (entry && entry.requested_model) ||
+      (entry && entry.model) ||
+      (data && data.request_body && data.request_body.model) ||
+      "",
+  ).trim();
 
   return {
     title: m.audit_response_title(),
     direction: "response",
     seq: single ? 0 : Number((attempt && attempt.seq) || 0),
     kind: single ? "" : kind === "attempt" ? "" : kind,
+    // In-pane strip under the tab header: the model the request named and
+    // the concrete model this attempt actually tried, so a failed step reads
+    // "requested → tried" without hovering anything. The source is only
+    // called "virtual" when an alias actually resolved — failover rules also
+    // apply to plain concrete models, so a bare requested name must not
+    // mislabel itself as a virtual model. Requires both values: a strip that
+    // named only the tried model would read as if the request model were
+    // unknown by design, which it is not.
+    modelStrip:
+      tried && !single && source
+        ? {
+            label:
+              entry && entry.alias_used
+                ? m.audit_model_strip_virtual()
+                : m.audit_model_strip_requested(),
+            source,
+            tried,
+          }
+        : null,
     statusCode: single ? null : auditAttemptStatusCode(attempt),
     layout: "split",
     entry,

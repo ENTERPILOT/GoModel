@@ -12418,6 +12418,10 @@
       "anthropicapi.ResponseContentBlock": {
         "type": "object",
         "properties": {
+          "extra_content": {
+            "description": "ExtraContent is provider replay state on a tool_use block; clients echo\nit back on the next turn (see core.ExtraContentField).",
+            "type": "object"
+          },
           "id": {
             "type": "string"
           },
@@ -13221,6 +13225,9 @@
       "core.ContentPart": {
         "type": "object",
         "properties": {
+          "file": {
+            "$ref": "#/components/schemas/core.FileContent"
+          },
           "image_url": {
             "$ref": "#/components/schemas/core.ImageURLContent"
           },
@@ -13416,7 +13423,8 @@
           "invalid_request_error",
           "authentication_error",
           "not_found_error",
-          "permission_error"
+          "permission_error",
+          "internal_error"
         ],
         "x-enum-varnames": [
           "ErrorTypeProvider",
@@ -13424,8 +13432,26 @@
           "ErrorTypeInvalidRequest",
           "ErrorTypeAuthentication",
           "ErrorTypeNotFound",
-          "ErrorTypePermission"
+          "ErrorTypePermission",
+          "ErrorTypeInternal"
         ]
+      },
+      "core.FileContent": {
+        "type": "object",
+        "properties": {
+          "file_data": {
+            "type": "string"
+          },
+          "file_id": {
+            "type": "string"
+          },
+          "file_url": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          }
+        }
       },
       "core.FileDeleteResponse": {
         "type": "object",
@@ -14350,6 +14376,19 @@
               "type": "object"
             }
           },
+          "file_data": {
+            "description": "input_file items carry their file fields flat, unlike chat file parts.",
+            "type": "string"
+          },
+          "file_id": {
+            "type": "string"
+          },
+          "file_url": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
           "image_url": {
             "$ref": "#/components/schemas/core.ImageURLContent"
           },
@@ -14417,6 +14456,10 @@
           "type": {
             "description": "\"message\", \"function_call\", etc.",
             "type": "string"
+          },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
       },
@@ -15824,6 +15867,10 @@
             "description": "Function call fields (type=\"function_call\")",
             "type": "string"
           },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
+          },
           "content": {
             "description": "Can be string or []ContentPart",
             "oneOf": [
@@ -15873,6 +15920,10 @@
                 }
               }
             ]
+          },
+          "extra_content": {
+            "type": "object",
+            "additionalProperties": true
           },
           "id": {
             "type": "string"

@@ -42,30 +42,42 @@ type Message struct {
 // is a union; only the fields relevant to Type are populated.
 type ContentBlock struct {
 	Type string `json:"type"`
-	// text / thinking
-	Text     string `json:"text,omitempty"`
-	Thinking string `json:"thinking,omitempty"`
-	// image
-	Source *Source `json:"source,omitempty"`
+	// text / thinking / redacted_thinking
+	Text      string `json:"text,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
+	// image / document (object) or search_result (string); decoded per type
+	Source json.RawMessage `json:"source,omitempty" swaggertype:"object"`
+	// document / search_result
+	Title string `json:"title,omitempty"`
 	// tool_use
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty" swaggertype:"object"`
-	// tool_result
+	// tool_result (Content also carries search_result text blocks and the
+	// custom-content variant of document sources)
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   json.RawMessage `json:"content,omitempty" swaggertype:"object"`
 	IsError   bool            `json:"is_error,omitempty"`
 	// CacheControl preserves Anthropic prompt-cache breakpoints through the
 	// canonical chat representation when the request is routed back to Claude.
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
+	// ExtraContent carries provider replay state on tool_use blocks (see
+	// core.ExtraContentField), so a tool-call history another provider produced
+	// through this API replays to it unchanged.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`
 }
 
-// Source describes an Anthropic image source (base64 inline data or a URL).
+// Source describes an Anthropic image or document source: base64 inline
+// data, plain text, a URL, a Files API file_id, or custom content blocks.
 type Source struct {
-	Type      string `json:"type"`
-	MediaType string `json:"media_type,omitempty"`
-	Data      string `json:"data,omitempty"`
-	URL       string `json:"url,omitempty"`
+	Type      string          `json:"type"`
+	MediaType string          `json:"media_type,omitempty"`
+	Data      string          `json:"data,omitempty"`
+	URL       string          `json:"url,omitempty"`
+	FileID    string          `json:"file_id,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty" swaggertype:"object"`
 }
 
 // Tool is an Anthropic tool definition. A custom tool has no Type (or Type
@@ -112,6 +124,9 @@ type ResponseContentBlock struct {
 	ID       string          `json:"id,omitempty"`
 	Name     string          `json:"name,omitempty"`
 	Input    json.RawMessage `json:"input,omitempty" swaggertype:"object"`
+	// ExtraContent is provider replay state on a tool_use block; clients echo
+	// it back on the next turn (see core.ExtraContentField).
+	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`
 }
 
 // Usage reports Anthropic-style token usage.

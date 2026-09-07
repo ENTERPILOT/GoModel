@@ -18,6 +18,16 @@
   const copyBodyState = createCopyState({
     logPrefix: "Failed to copy audit payload:",
   });
+  const copyModelState = createCopyState({
+    logPrefix: "Failed to copy model name:",
+  });
+
+  // The model-strip chips are buttons whose activation copies the full model
+  // name, so the complete value is reachable by keyboard and touch (the
+  // visual text may be ellipsized).
+  function copyModelValue(value) {
+    copyModelState.copy(value, (v) => v);
+  }
   const copyHeadersState = createCopyState({
     logPrefix: "Failed to copy audit payload:",
   });
@@ -59,6 +69,41 @@
     pane.layout === "split" &&
     !(pane.showHeaders && pane.showBody)}
 >
+  {#if pane.modelStrip}
+    <div class="audit-pane-model-strip">
+      {#if pane.modelStrip.source}
+        <!-- Chip is a button so the full value is keyboard-focusable and
+             touch-operable: activate copies the complete model name. -->
+        <button
+          type="button"
+          class="audit-pane-model-strip-chip"
+          title={pane.modelStrip.source}
+          aria-label={m.audit_model_strip_copy_label({
+            label: pane.modelStrip.label,
+            model: pane.modelStrip.source,
+          })}
+          onclick={() => copyModelValue(pane.modelStrip.source)}
+        >
+          <span class="audit-pane-model-strip-label">{pane.modelStrip.label}</span>
+          <span class="mono">{pane.modelStrip.source}</span>
+        </button>
+        <span class="audit-pane-model-strip-arrow" aria-hidden="true">→</span>
+      {/if}
+      <button
+        type="button"
+        class="audit-pane-model-strip-chip"
+        title={pane.modelStrip.tried}
+        aria-label={m.audit_model_strip_copy_label({
+          label: m.audit_model_strip_tried(),
+          model: pane.modelStrip.tried,
+        })}
+        onclick={() => copyModelValue(pane.modelStrip.tried)}
+      >
+        <span class="audit-pane-model-strip-label">{m.audit_model_strip_tried()}</span>
+        <span class="mono">{pane.modelStrip.tried}</span>
+      </button>
+    </div>
+  {/if}
   {#if pane.showErrorMessage}
     <div class="audit-pane-block audit-pane-block-error">
       <h5>{m.audit_error_message_title()}</h5>
@@ -155,6 +200,60 @@
     grid-template-columns: 1fr 2fr;
     gap: 10px 14px;
     align-items: start;
+  }
+
+  /* Virtual → tried model strip at the top of a failover attempt pane: which
+     virtual model leg this attempt belongs to and which concrete model was
+     actually called. Chips stay on one line, ellipsized when long. */
+  .audit-pane-model-strip {
+    grid-column: 1 / -1;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+
+  .audit-pane-model-strip-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 320px;
+    padding: 3px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-surface);
+    font-family: inherit;
+    font-size: 11px;
+    text-align: left;
+    appearance: none;
+    cursor: pointer;
+  }
+
+  .audit-pane-model-strip-chip:hover {
+    background: color-mix(in srgb, var(--text) 6%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--border) 60%, var(--text) 40%);
+  }
+
+  .audit-pane-model-strip-chip .mono {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+
+  .audit-pane-model-strip-label {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .audit-pane-model-strip-arrow {
+    color: var(--text-muted);
+    font-size: 12px;
   }
 
   .audit-pane-split-single {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -55,8 +55,8 @@ func (s *SQLStore) List(ctx context.Context) ([]User, error) {
 		if user.AllowedModels, err = decodeAllowedModels(allowedJSON); err != nil {
 			return nil, err
 		}
-		user.CreatedAt = time.Unix(createdAt, 0).UTC()
-		user.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+		user.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+		user.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 		result = append(result, user)
 	}
 	if err := rows.Err(); err != nil {

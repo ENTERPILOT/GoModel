@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -686,7 +687,7 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 			if item.Config.BaseURL != tt.want.BaseURL {
 				t.Errorf("config.base_url = %q, want %q", item.Config.BaseURL, tt.want.BaseURL)
 			}
-			if item.Config.Resilience != tt.want.Resilience {
+			if !reflect.DeepEqual(item.Config.Resilience, tt.want.Resilience) {
 				t.Errorf("config.resilience = %+v, want %+v", item.Config.Resilience, tt.want.Resilience)
 			}
 			if item.StatusLabel != tt.wantLabel {

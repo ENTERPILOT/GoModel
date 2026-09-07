@@ -264,6 +264,10 @@
   "audit_rewritten_title": "Po przetworzeniu",
   "audit_what_changed_title": "Co się zmieniło",
   "audit_attempt_failed": "Próba dostawcy nie powiodła się",
+  "audit_model_strip_requested": "żądany",
+  "audit_model_strip_tried": "próbowany",
+  "audit_model_strip_virtual": "wirtualny",
+  "audit_model_strip_copy_label": "Skopiuj model {label}: {model}",
   "audit_provider_attempts": [
     {
       "declarations": ["input count", "local count_plural = count: plural"],

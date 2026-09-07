@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -210,7 +210,7 @@ func scanSQLMCPServer(scanner sqlx.Row) (ManagedServer, error) {
 	if server.DisplayName == "" {
 		server.DisplayName = server.Name
 	}
-	server.CreatedAt = time.Unix(createdAt, 0).UTC()
-	server.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	server.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	server.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return server, nil
 }

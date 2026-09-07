@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/goccy/go-json"
 
+	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
@@ -124,7 +124,7 @@ func scanSQLOverride(rows sqlx.Rows) (Override, error) {
 	if err := json.Unmarshal(pricing, &override.Pricing); err != nil {
 		return Override{}, fmt.Errorf("decode pricing: %w", err)
 	}
-	override.CreatedAt = time.Unix(createdAt, 0).UTC()
-	override.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	override.CreatedAt = sqlutil.TimeFromUnix(createdAt)
+	override.UpdatedAt = sqlutil.TimeFromUnix(updatedAt)
 	return override, nil
 }

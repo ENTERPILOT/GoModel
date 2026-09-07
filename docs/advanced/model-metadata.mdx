@@ -69,6 +69,19 @@ flowchart LR
 If the catalog fetch fails or the deployment is air-gapped, the gateway runs
 normally — only the catalog-supplied defaults (including catalog pricing) are
 missing. Pricing overrides, `config.yaml` metadata, provider discovery signals,
-and the ID heuristic still apply. Mirror `MODEL_LIST_URL` internally, or set
-`MODEL_LIST_URL=off` to turn the download off entirely and declare metadata in
-`config.yaml`; see [Production guide](/guides/production) for details.
+and the ID heuristic still apply.
+
+`MODEL_LIST_URL` accepts a local file as well as an HTTP URL:
+
+```bash
+MODEL_LIST_URL=/etc/gomodel/models.json          # bare path
+MODEL_LIST_URL=file:///etc/gomodel/models.json   # file URL
+```
+
+A file is read on startup and on every cache refresh, and re-parsed only when
+its content changes, so you can update pricing by replacing the file. Because
+a file involves no network request, it keeps working under
+`GOMODEL_OFFLINE=true`, which drops HTTP catalog URLs. Set `MODEL_LIST_URL=off`
+to turn the catalog off entirely and declare metadata in `config.yaml`; see the
+[production guide](/guides/production#air-gapped-and-offline-deployments) for
+the full air-gap checklist.

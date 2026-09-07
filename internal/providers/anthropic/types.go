@@ -53,8 +53,14 @@ type anthropicMessage struct {
 }
 
 type anthropicContentBlock struct {
-	Type         string                  `json:"type"`
-	Text         string                  `json:"text,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+	// Thinking is a pointer so a thinking block whose text was omitted by the
+	// model (display: omitted) still round-trips as "thinking": "".
+	Thinking     *string                 `json:"thinking,omitempty"`
+	Signature    string                  `json:"signature,omitempty"`
+	Data         string                  `json:"data,omitempty"`
+	Title        string                  `json:"title,omitempty"`
 	ID           string                  `json:"id,omitempty"`
 	Name         string                  `json:"name,omitempty"`
 	Input        any                     `json:"input,omitempty"`
@@ -70,6 +76,7 @@ type anthropicContentSource struct {
 	MediaType string `json:"media_type,omitempty"`
 	Data      string `json:"data,omitempty"`
 	URL       string `json:"url,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
 }
 
 // anthropicResponse represents the Anthropic API response format

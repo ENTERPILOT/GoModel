@@ -9,8 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -266,5 +268,242 @@ func TestHandleError_RecordsUpstreamProviderOfError(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), `"provider"`) {
 		t.Fatalf("gateway auth error body should omit provider: %s", rec.Body.String())
+	}
+}
+
+func TestGatewayErrorHandler_RendersCanonicalEnvelope(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantStatus  int
+		wantType    string
+		wantMessage string
+	}{
+		{
+			name:       "recovered panic",
+			err:        errors.New("runtime error: invalid memory address"),
+			wantStatus: http.StatusInternalServerError,
+			wantType:   "internal_error",
+		},
+		{
+			name:       "unencodable response body",
+			err:        &json.UnsupportedValueError{Str: "+Inf"},
+			wantStatus: http.StatusInternalServerError,
+			wantType:   "internal_error",
+		},
+		{
+			name:       "echo client error keeps its status",
+			err:        echo.NewHTTPError(http.StatusMethodNotAllowed, "Method Not Allowed"),
+			wantStatus: http.StatusMethodNotAllowed,
+			wantType:   "invalid_request_error",
+		},
+		{
+			name:       "middleware sentinel keeps its status",
+			err:        echo.ErrStatusRequestEntityTooLarge,
+			wantStatus: http.StatusRequestEntityTooLarge,
+			wantType:   "invalid_request_error",
+		},
+		{
+			// echo's Decompress middleware answers 500 with err.Error(); a
+			// message describing gateway internals must not reach the client.
+			name:        "echo server error stays opaque",
+			err:         echo.NewHTTPError(http.StatusInternalServerError, "dial tcp 10.0.0.1:5432: connection refused"),
+			wantStatus:  http.StatusInternalServerError,
+			wantType:    "internal_error",
+			wantMessage: "an unexpected error occurred",
+		},
+		{
+			name:       "gateway error passes through",
+			err:        core.NewNotFoundError("no such model"),
+			wantStatus: http.StatusNotFound,
+			wantType:   "not_found_error",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, "/admin/virtual-models", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			gatewayErrorHandler(c, tc.err)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+			var body struct {
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal %q: %v", rec.Body.String(), err)
+			}
+			if body.Error.Type != tc.wantType {
+				t.Errorf("error type = %q, want %q (body %s)", body.Error.Type, tc.wantType, rec.Body.String())
+			}
+			if body.Error.Message == "" {
+				t.Errorf("error message is empty, body %s", rec.Body.String())
+			}
+			if tc.wantMessage != "" && body.Error.Message != tc.wantMessage {
+				t.Errorf("error message = %q, want %q", body.Error.Message, tc.wantMessage)
+			}
+		})
+	}
+}
+
+func TestGatewayErrorHandler_LogsPanicWithStackAndRoute(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	e := echo.NewWithConfig(echo.Config{HTTPErrorHandler: gatewayErrorHandler})
+	e.Use(middleware.Recover())
+	e.GET("/admin/virtual-models", func(*echo.Context) error {
+		panic("listing blew up")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/virtual-models", nil)
+	req = req.WithContext(core.WithRequestID(req.Context(), "panic-req-1"))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"type":"internal_error"`) {
+		t.Errorf("body = %s, want the canonical error envelope", rec.Body.String())
+	}
+
+	logOutput := buf.String()
+	for _, want := range []string{`"level":"ERROR"`, `"path":"/admin/virtual-models"`, `"request_id":"panic-req-1"`, `"panic":"listing blew up"`, `"stack":"goroutine `} {
+		if !strings.Contains(logOutput, want) {
+			t.Errorf("log missing %q, got %q", want, logOutput)
+		}
+	}
+	if strings.Contains(logOutput, "PANIC RECOVER") {
+		t.Errorf("panic value and stack should be separate attributes, not one error string: %q", logOutput)
+	}
+}
+
+func TestGatewayErrorHandler_LeavesCommittedResponseAlone(t *testing.T) {
+	var buf bytes.Buffer
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := c.String(http.StatusOK, "streamed"); err != nil {
+		t.Fatalf("String() error = %v", err)
+	}
+	gatewayErrorHandler(c, errors.New("failed after the first chunk"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (response already committed)", rec.Code)
+	}
+	if rec.Body.String() != "streamed" {
+		t.Fatalf("body = %q, want the already-written body", rec.Body.String())
+	}
+	// The response is untouchable, but the operator still needs to know.
+	if !strings.Contains(buf.String(), "failed after the first chunk") {
+		t.Fatalf("error after a committed response was not logged: %q", buf.String())
+	}
+}
+
+// The direct gatewayErrorHandler tests stub the error; this one drives the real
+// server so the goccy serializer, echo's dispatch and the handler are all in
+// the path — the shape that produced the opaque 500 in #881.
+func TestGatewayErrorHandler_UnencodableResponseThroughRealServer(t *testing.T) {
+	logs := &bytes.Buffer{}
+	original := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(original) })
+
+	// A year beyond 9999 is what time.Time refuses to marshal, which is how one
+	// stored row turned a whole admin listing into a 500.
+	type row struct {
+		CreatedAt time.Time `json:"created_at"`
+	}
+	srv := New(&mockProvider{}, nil)
+	srv.echo.GET("/admin/rows", func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, []row{{CreatedAt: time.Unix(1<<40, 0).UTC()}})
+	})
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/rows", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (body %q)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body %q is not a gateway error envelope: %v", rec.Body.String(), err)
+	}
+	if body.Error.Type != "internal_error" || body.Error.Message != "an unexpected error occurred" {
+		t.Fatalf("error = %+v, want the canonical internal_error envelope", body.Error)
+	}
+	if strings.Contains(rec.Body.String(), "year outside") {
+		t.Errorf("serializer detail leaked to the client: %s", rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), "year outside of range") {
+		t.Errorf("log should name the serialization failure, got %q", logs.String())
+	}
+}
+
+func TestGatewayErrorHandler_FinalizesHeadersAndAudit(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	gatewayErrorHandler(c, &gatewayErrorWithResponseHeaders{
+		GatewayError: core.NewRateLimitError("budget", "budget exceeded").WithCode("budget_exceeded"),
+		headers:      http.Header{"Retry-After": []string{"30"}},
+	})
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "30" {
+		t.Errorf("Retry-After = %q, want 30", got)
+	}
+	if entry.ErrorType != string(core.ErrorTypeRateLimit) || entry.Data.ErrorCode != "budget_exceeded" {
+		t.Errorf("audit entry = %q/%q, want rate_limit_error/budget_exceeded", entry.ErrorType, entry.Data.ErrorCode)
+	}
+}
+
+func TestGatewayErrorHandler_KeepsTheOriginalAuditedError(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+	c.Set(string(auditlog.LogEntryKey), entry)
+
+	// handleError records the real cause and returns its own write failure,
+	// which then escapes here; that follow-up must not overwrite the cause.
+	if err := handleError(c, core.NewNotFoundError("no such model")); err != nil {
+		t.Fatalf("handleError() error = %v", err)
+	}
+	gatewayErrorHandler(c, errors.New("writing the error response failed"))
+
+	if entry.ErrorType != string(core.ErrorTypeNotFound) {
+		t.Errorf("entry.ErrorType = %q, want not_found_error", entry.ErrorType)
+	}
+	if entry.Data.ErrorMessage != "no such model" {
+		t.Errorf("entry.Data.ErrorMessage = %q, want the original cause", entry.Data.ErrorMessage)
 	}
 }

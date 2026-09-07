@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/enterpilot/gomodel/internal/anthropicapi"
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -35,6 +36,85 @@ func writeGatewayError(c *echo.Context, gatewayErr *core.GatewayError) error {
 		return c.JSON(status, body)
 	}
 	return c.JSON(gatewayErr.HTTPStatusCode(), gatewayErr.ToJSON())
+}
+
+// gatewayErrorHandler renders every error that escapes a handler — a recovered
+// panic, a response body the JSON serializer could not encode, or an
+// echo.HTTPError raised by middleware — in the caller's wire dialect, and logs
+// it. Echo's default handler answers with a bare
+// {"message": "Internal Server Error"} and logs nothing at all, so such a
+// failure reaches the operator as a 500 naming neither the endpoint nor the
+// cause, and reaches the client in an envelope no OpenAI SDK can parse.
+func gatewayErrorHandler(c *echo.Context, err error) {
+	if err == nil {
+		return
+	}
+	gatewayErr := escapedGatewayError(err)
+	// Log before checking whether the response can still be changed: a panic
+	// after the first streamed chunk must still reach the operator.
+	logHandledError(c, gatewayErr)
+	// Finalize as handleError does, so an error that never passed through it —
+	// a panic, a rate-limit error returned rather than rendered — still lands
+	// on the audit row and keeps headers such as Retry-After. The audit half is
+	// skipped once an error is recorded: handleError returns its own response
+	// write failures here, and re-enriching would replace the real cause with
+	// this generic one.
+	if !auditlog.HasRecordedError(c) {
+		enrichAuditEntryWithProviderAttempts(c)
+		auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
+	}
+	applyErrorResponseHeaders(c, err)
+
+	// Once the status line and body are on the wire nothing can be changed;
+	// the response stands as the handler left it.
+	if response, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil && response.Committed {
+		return
+	}
+	if writeErr := writeGatewayError(c, gatewayErr); writeErr != nil {
+		slog.Error("failed to send error response", "error", writeErr)
+	}
+}
+
+// escapedGatewayError classifies an error that reached the central handler. A
+// gateway error is already shaped; an echo.HTTPError keeps its status; anything
+// else is a failure inside the gateway and stays opaque to the client.
+func escapedGatewayError(err error) *core.GatewayError {
+	if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok {
+		return gatewayErr
+	}
+
+	// Echo carries the intended status on the error itself — BodyLimit's 413,
+	// the router's 405, any middleware's echo.NewHTTPError. An error without
+	// one is a failure inside the gateway.
+	status := echo.StatusCode(err)
+	if status <= 0 {
+		status = http.StatusInternalServerError
+	}
+	if status < http.StatusInternalServerError {
+		return core.NewInvalidRequestErrorWithStatus(status, echoErrorMessage(err, status), err)
+	}
+	// A 5xx message describes what broke inside the gateway and can quote an
+	// internal error verbatim (echo's own Decompress middleware answers with
+	// err.Error()), so the client gets the same opaque text every other
+	// gateway 500 uses. The cause travels in Err, which only the logs read.
+	return &core.GatewayError{
+		Type:       core.ErrorTypeInternal,
+		Message:    "an unexpected error occurred",
+		StatusCode: status,
+		Err:        err,
+	}
+}
+
+// echoErrorMessage is the client-facing text of an echo error: its own message
+// when it carries one, else the status text.
+func echoErrorMessage(err error, status int) string {
+	if httpErr, ok := errors.AsType[*echo.HTTPError](err); ok && httpErr.Message != "" {
+		return httpErr.Message
+	}
+	if text := http.StatusText(status); text != "" {
+		return text
+	}
+	return "request failed"
 }
 
 // handleRouteNotFound renders unknown-route 404s in the caller's wire dialect
@@ -103,7 +183,12 @@ func logHandledError(c *echo.Context, gatewayErr *core.GatewayError) {
 	if gatewayErr.Code != nil {
 		attrs = append(attrs, "code", *gatewayErr.Code)
 	}
-	if gatewayErr.Err != nil {
+	// A recovered panic arrives as echo's PanicStackError, whose message is
+	// the panic value followed by the whole stack; split them so the message
+	// stays readable and the stack lands in its own attribute.
+	if panicErr, ok := errors.AsType[*middleware.PanicStackError](gatewayErr.Err); ok {
+		attrs = append(attrs, "panic", panicErr.Err, "stack", string(panicErr.Stack))
+	} else if gatewayErr.Err != nil {
 		attrs = append(attrs, "error", gatewayErr.Err)
 	}
 	if c != nil && c.Request() != nil {

@@ -2,6 +2,7 @@ package virtualmodels
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -147,4 +148,47 @@ func TestSQLStore_ListSurfacesUndecodableRow(t *testing.T) {
 			t.Fatalf("List() error = %v, want decode targets failure", err)
 		}
 	})
+}
+
+// A stored timestamp outside the range JSON can represent — a row written while
+// the host clock was wrong, or hand-edited — must still list. The admin API
+// serializes every row into one response, so a single unencodable column would
+// otherwise fail the whole listing with an opaque 500 (issue #881).
+func TestSQLStore_ListsRowWithOutOfRangeTimestamp(t *testing.T) {
+	ctx := context.Background()
+	db := sqlxtest.NewSQLite(t)
+	store, err := NewSQLStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewSQLStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	vm := VirtualModel{
+		Source:  "fast",
+		Targets: []Target{{Provider: "openai", Model: "gpt-4o"}},
+		Enabled: true,
+	}
+	if err := store.Upsert(ctx, vm); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	const beyondYear9999 = int64(99999999999999)
+	if _, err := db.Exec(ctx,
+		"UPDATE virtual_models SET created_at = ?, updated_at = ? WHERE source = ?",
+		beyondYear9999, beyondYear9999, vm.Source); err != nil {
+		t.Fatalf("corrupt timestamps: %v", err)
+	}
+
+	rows, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(List()) = %d, want 1", len(rows))
+	}
+	if !rows[0].CreatedAt.IsZero() || !rows[0].UpdatedAt.IsZero() {
+		t.Errorf("timestamps = %s / %s, want the zero time", rows[0].CreatedAt, rows[0].UpdatedAt)
+	}
+	if _, err := json.Marshal(rows); err != nil {
+		t.Fatalf("listing is not JSON-encodable: %v", err)
+	}
 }
