@@ -13,6 +13,9 @@ class PluginsStore {
   loaded = $state(false);
   loading = $state(false);
   available = $state(true);
+  // error holds the message of a failed request (not a 404/503); the list
+  // stays unloaded so the next fetch retries.
+  error = $state("");
   #inflight = null;
 
   byName(name) {
@@ -57,16 +60,19 @@ class PluginsStore {
         this.plugins = [];
         this.loaded = true;
         this.available = false;
+        this.error = "";
         return;
       }
       if (outcome.status === "error") {
         this.plugins = [];
         this.loaded = false;
+        this.error = outcome.error || "";
         return;
       }
       this.plugins = sortPlugins(outcome.items);
       this.loaded = true;
       this.available = true;
+      this.error = "";
     } finally {
       this.loading = false;
     }

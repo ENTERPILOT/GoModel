@@ -6,6 +6,7 @@
   // when the endpoint is unavailable (404/503), which the page-level
   // guardrails alert already explains.
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import { ShieldCheck } from "lucide";
   import { pluginsStore } from "$lib/stores/plugins.svelte.js";
   import { phaseLabel } from "$lib/utils/pluginPhases.js";
@@ -19,12 +20,18 @@
   <div class="editor-header">
     <h3 class="plugins-title">
       {m.plugins_title()}
-      <span class="provider-badge">{formatNumber(pluginsStore.plugins.length)}</span>
+      {#if pluginsStore.loaded}
+        <span class="provider-badge">{formatNumber(pluginsStore.plugins.length)}</span>
+      {/if}
     </h3>
   </div>
   <p class="form-hint">{m.plugins_help()}</p>
 
-  {#if pluginsStore.loaded && pluginsStore.plugins.length === 0}
+  {#if pluginsStore.error}
+    <p class="form-error" role="alert">{pluginsStore.error}</p>
+  {:else if !pluginsStore.loaded}
+    <LoadingState label={m.plugins_loading()} />
+  {:else if pluginsStore.plugins.length === 0}
     <p class="empty-state">{m.plugins_empty()}</p>
   {:else}
   <div class="table-wrapper">

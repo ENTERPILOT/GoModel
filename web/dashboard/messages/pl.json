@@ -1549,6 +1549,7 @@
   "schema_fields_model_placeholder": "provider/model lub alias",
   "plugins_title": "Wtyczki",
   "plugins_help": "Wtyczki załadowane przez bramkę. Dodają typy Guardrails i strategie routingu; wbudowane są częścią GoModel, a wtyczki plikowe są ładowane ze skonfigurowanego katalogu wtyczek.",
+  "plugins_loading": "Wczytywanie wtyczek...",
   "plugins_empty": "Brak załadowanych wtyczek.",
   "plugins_name": "Nazwa",
   "plugins_version": "Wersja",

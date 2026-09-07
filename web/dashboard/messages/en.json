@@ -1521,6 +1521,7 @@
   "schema_fields_model_placeholder": "provider/model or alias",
   "plugins_title": "Plugins",
   "plugins_help": "Plugins loaded by the gateway. They add Guardrail types and routing strategies; built-in plugins ship with GoModel, file plugins are loaded from the configured plugins directory.",
+  "plugins_loading": "Loading plugins...",
   "plugins_empty": "No plugins loaded.",
   "plugins_name": "Name",
   "plugins_version": "Version",
