@@ -22,12 +22,18 @@ type verdict struct {
 	Reason  string
 }
 
+// verdictSep matches what a model wraps a bare verdict in: whitespace,
+// punctuation and symbols (quotes, code fences, braces, a colon after a
+// label). Letters of any script are not separators, so a verdict glued to
+// prose in another language ("allowこれは") is not accepted.
+const verdictSep = `[\s\p{P}\p{S}]*`
+
 // bareVerdictRe accepts a reply that is nothing but the verdict word, with
-// an optional "verdict" label and any punctuation or quoting around it
-// (`allow`, "Verdict: block.", `{"verdict": block}`). A verdict embedded in
-// a sentence is not accepted: "I should not allow this" must not read as
-// allow, and a JSON reply cut off inside its reason must not either.
-var bareVerdictRe = regexp.MustCompile(`^\W*(?:verdict\W*)?(allow|block)\W*$`)
+// an optional "verdict" label and separators around it (`allow`,
+// "Verdict: block.", `{"verdict": block}`). A verdict embedded in a sentence
+// is not accepted: "I should not allow this" must not read as allow, and a
+// JSON reply cut off inside its reason must not either.
+var bareVerdictRe = regexp.MustCompile(`^` + verdictSep + `(?:verdict` + verdictSep + `)?(allow|block)` + verdictSep + `$`)
 
 // parseVerdict reads the judge reply. It takes the first JSON object with a
 // recognized "verdict" key, falling back to a reply that is a bare "allow"
