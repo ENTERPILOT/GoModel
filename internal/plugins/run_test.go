@@ -291,3 +291,19 @@ func TestRunAbandonedMutatorIsReportedAbandoned(t *testing.T) {
 		t.Fatalf("error = %v, want an abandoned failure even under fail_open", err)
 	}
 }
+
+// A plugin may hand back any status; only 4xx and 5xx can be written.
+func TestBlockErrorClampsStatus(t *testing.T) {
+	for _, status := range []int{42, 200, 399, 600, 1000, -1} {
+		got := BlockError(pluginapi.Block(status, "x", "y"), 502)
+		if got.HTTPStatusCode() != 502 {
+			t.Errorf("status %d rendered as %d, want the phase default 502", status, got.HTTPStatusCode())
+		}
+	}
+	if got := BlockError(pluginapi.Block(451, "x", "y"), 502); got.HTTPStatusCode() != 451 {
+		t.Errorf("status 451 rendered as %d", got.HTTPStatusCode())
+	}
+	if got := BlockError(pluginapi.Block(0, "x", "y"), 99); got.HTTPStatusCode() != 400 {
+		t.Errorf("unusable default rendered as %d, want 400", got.HTTPStatusCode())
+	}
+}

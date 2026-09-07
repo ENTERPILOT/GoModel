@@ -52,13 +52,14 @@ func MergeDecision(current, next pluginapi.Decision) pluginapi.Decision {
 
 // BlockError renders a block decision as the gateway error the client sees.
 // defaultStatus is used when the decision has no status (400 for request
-// phases, 502 for response phases).
+// phases, 502 for response phases) or one outside 400-599: a plugin may
+// hand back any integer, and net/http panics on a status it cannot write.
 func BlockError(d pluginapi.Decision, defaultStatus int) *core.GatewayError {
 	status := d.Status
-	if status <= 0 {
+	if !blockStatusOK(status) {
 		status = defaultStatus
 	}
-	if status <= 0 {
+	if !blockStatusOK(status) {
 		status = http.StatusBadRequest
 	}
 	message := strings.TrimSpace(d.Message)
@@ -76,6 +77,10 @@ func BlockError(d pluginapi.Decision, defaultStatus int) *core.GatewayError {
 		gatewayErr = core.NewInvalidRequestErrorWithStatus(status, message, nil)
 	}
 	return gatewayErr.WithCode(code)
+}
+
+func blockStatusOK(status int) bool {
+	return status >= http.StatusBadRequest && status <= 599
 }
 
 // FailureError renders a fail-closed plugin error: HTTP 500 with code
