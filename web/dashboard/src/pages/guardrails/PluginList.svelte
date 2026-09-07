@@ -13,9 +13,11 @@
 </script>
 
 <section class="settings-panel plugins-panel">
-  <div class="editor-header plugins-header">
-    <h3>{m.plugins_title()}</h3>
-    <span class="provider-badge">{formatNumber(pluginsStore.plugins.length)}</span>
+  <div class="editor-header">
+    <h3 class="plugins-title">
+      {m.plugins_title()}
+      <span class="provider-badge">{formatNumber(pluginsStore.plugins.length)}</span>
+    </h3>
   </div>
   <p class="form-hint">{m.plugins_help()}</p>
 
@@ -84,13 +86,10 @@
     margin-top: 20px;
   }
 
-  .plugins-header {
-    display: flex;
+  .plugins-title {
+    display: inline-flex;
     align-items: center;
     gap: 8px;
-  }
-
-  .plugins-header :global(h3) {
     margin: 0;
   }
 
