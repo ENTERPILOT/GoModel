@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin/llmaltering"
 	"github.com/enterpilot/gomodel/internal/workflows"
 )
 
@@ -79,7 +83,13 @@ func rawGuardrailConfig(t *testing.T, value any) json.RawMessage {
 func newGuardrailService(t *testing.T, definitions ...guardrails.Definition) *guardrails.Service {
 	t.Helper()
 
-	service, err := guardrails.NewService(newGuardrailTestStore(definitions...))
+	catalog := plugins.NewCatalog()
+	for _, factory := range builtin.All() {
+		if err := catalog.Register(factory, plugins.SourceBuiltin); err != nil {
+			t.Fatalf("catalog.Register() error = %v", err)
+		}
+	}
+	service, err := guardrails.NewService(newGuardrailTestStore(definitions...), catalog, plugins.HostDeps{})
 	if err != nil {
 		t.Fatalf("guardrails.NewService() error = %v", err)
 	}
@@ -170,9 +180,15 @@ func TestListGuardrailTypes(t *testing.T) {
 		if got := strings.TrimSpace(prompt); got == "" {
 			t.Fatalf("llm_based_altering defaults.prompt = %q, want built-in prompt", got)
 		}
+		if len(typeDef.Phases) != 2 || typeDef.Source != "builtin" || !typeDef.Mutates {
+			t.Fatalf("llm_based_altering type = %#v, want prompt+response phases from a mutating builtin", typeDef)
+		}
 		for _, field := range typeDef.Fields {
-			if field.Key == "provider" {
-				t.Fatalf("llm_based_altering fields = %#v, want provider field removed", typeDef.Fields)
+			if field.Key != "max_tokens" {
+				continue
+			}
+			if fmt.Sprint(field.Default) != fmt.Sprint(defaults["max_tokens"]) {
+				t.Fatalf("max_tokens default %v disagrees with defaults %v", field.Default, defaults["max_tokens"])
 			}
 		}
 	}
@@ -248,8 +264,8 @@ func TestUpsertGuardrailLLMBasedAltering(t *testing.T) {
 	if cfg["model"] != "gpt-4o-mini" {
 		t.Fatalf("config.model = %#v, want gpt-4o-mini", cfg["model"])
 	}
-	if cfg["max_tokens"] != float64(guardrails.DefaultLLMBasedAlteringMaxTokens) {
-		t.Fatalf("config.max_tokens = %#v, want %d", cfg["max_tokens"], guardrails.DefaultLLMBasedAlteringMaxTokens)
+	if cfg["max_tokens"] != float64(llmaltering.DefaultMaxTokens) {
+		t.Fatalf("config.max_tokens = %#v, want %d", cfg["max_tokens"], llmaltering.DefaultMaxTokens)
 	}
 }
 

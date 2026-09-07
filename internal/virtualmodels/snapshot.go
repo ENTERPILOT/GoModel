@@ -27,6 +27,9 @@ type redirectEntry struct {
 	vm       VirtualModel
 	targets  []resolvedTarget
 	strategy string
+	// route caches the validated strategy_config handed to a routing-strategy
+	// plugin; nil for entries built outside buildSnapshot.
+	route *routeConfigCache
 }
 
 // sessionAffinity reports whether this redirect keeps sessions pinned to the
@@ -114,6 +117,7 @@ func buildSnapshot(rows []VirtualModel, defaultEnable bool) (snapshot, error) {
 				vm:       normalized,
 				targets:  targets,
 				strategy: normalized.Strategy,
+				route:    &routeConfigCache{},
 			}
 			next.order = append(next.order, normalized.Source)
 			next.bySource[normalized.Source] = normalized

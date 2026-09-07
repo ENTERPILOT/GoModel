@@ -46,6 +46,7 @@ type bootstrap struct {
 	// Produced by the server phases.
 	provider                 core.RoutableProvider
 	translatedRequestPatcher server.TranslatedRequestPatcher
+	pluginChains             server.PluginChainsResolver
 	batchRequestPreparer     server.BatchRequestPreparer
 	swaggerEnabled           bool
 	serverUsageLogger        usage.LoggerInterface

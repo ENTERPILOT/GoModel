@@ -16,6 +16,8 @@ type mongoVirtualModelDocument struct {
 	ID              string    `bson:"_id"`
 	Targets         []Target  `bson:"targets,omitempty"`
 	Strategy        string    `bson:"strategy,omitempty"`
+	StrategyPlugin  string    `bson:"strategy_plugin,omitempty"`
+	StrategyConfig  bson.M    `bson:"strategy_config,omitempty"`
 	SessionAffinity *bool     `bson:"session_affinity,omitempty"`
 	Failover        *bool     `bson:"failover,omitempty"`
 	ProviderName    string    `bson:"provider_name,omitempty"`
@@ -98,6 +100,8 @@ func (s *MongoDBStore) Upsert(ctx context.Context, vm VirtualModel) error {
 		"$set": bson.M{
 			"targets":          vm.Targets,
 			"strategy":         vm.Strategy,
+			"strategy_plugin":  vm.StrategyPlugin,
+			"strategy_config":  vm.StrategyConfig,
 			"session_affinity": vm.SessionAffinity,
 			"failover":         vm.Failover,
 			"provider_name":    vm.ProviderName,
@@ -138,6 +142,8 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 	vm := VirtualModel{
 		Source:          doc.ID,
 		Strategy:        doc.Strategy,
+		StrategyPlugin:  doc.StrategyPlugin,
+		StrategyConfig:  strategyConfigFromBSON(doc.StrategyConfig),
 		SessionAffinity: doc.SessionAffinity,
 		Failover:        doc.Failover,
 		ProviderName:    doc.ProviderName,
@@ -155,4 +161,54 @@ func virtualModelFromMongo(doc mongoVirtualModelDocument) VirtualModel {
 		vm.UserPaths = append([]string(nil), doc.UserPaths...)
 	}
 	return vm
+}
+
+// strategyConfigFromBSON turns a decoded config into plain maps and slices:
+// the driver decodes nested documents as bson.D and arrays as bson.A, which
+// plugin config validation does not understand.
+func strategyConfigFromBSON(doc bson.M) map[string]any {
+	if len(doc) == 0 {
+		return nil
+	}
+	config, _ := plainBSONValue(doc).(map[string]any)
+	return config
+}
+
+func plainBSONValue(value any) any {
+	switch v := value.(type) {
+	case bson.M:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = plainBSONValue(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = plainBSONValue(item)
+		}
+		return out
+	case bson.D:
+		out := make(map[string]any, len(v))
+		for _, item := range v {
+			out[item.Key] = plainBSONValue(item.Value)
+		}
+		return out
+	case bson.A:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = plainBSONValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = plainBSONValue(item)
+		}
+		return out
+	case int32:
+		return int64(v)
+	default:
+		return v
+	}
 }

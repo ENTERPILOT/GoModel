@@ -32,6 +32,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/observability"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	provideradapter "github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -1643,12 +1644,7 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 }
 
 func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
-	pipeline := guardrails.NewPipeline()
-	systemPrompt, err := guardrails.NewSystemPromptGuardrail("test", guardrails.SystemPromptInject, "guardrail system")
-	if err != nil {
-		t.Fatalf("NewSystemPromptGuardrail() error = %v", err)
-	}
-	pipeline.Add(systemPrompt, 0)
+	chains := newSystemPromptChains(t, "guardrail system")
 
 	inner := &capturingProvider{
 		supportedModels: []string{"gpt-5-nano"},
@@ -1673,7 +1669,7 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 		},
 	}
 
-	patcher := guardrails.NewWorkflowRequestPatcher(staticPipelineResolver{pipeline: pipeline})
+	patcher := guardrails.NewWorkflowRequestPatcher(staticChainsResolver{chains: chains})
 
 	e := echo.New()
 	handler := newHandler(inner, nil, nil, nil, nil, nil, nil, patcher)
@@ -1702,7 +1698,7 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	err = handler.ChatCompletion(c)
+	err := handler.ChatCompletion(c)
 	if err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -1724,12 +1720,7 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 }
 
 func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
-	pipeline := guardrails.NewPipeline()
-	systemPrompt, err := guardrails.NewSystemPromptGuardrail("test", guardrails.SystemPromptInject, "guardrail system")
-	if err != nil {
-		t.Fatalf("NewSystemPromptGuardrail() error = %v", err)
-	}
-	pipeline.Add(systemPrompt, 0)
+	chains := newSystemPromptChains(t, "guardrail system")
 
 	mock := &mockProvider{
 		supportedModels: []string{"gpt-5-nano"},
@@ -1745,7 +1736,7 @@ func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
 			RequestCounts: core.BatchRequestCounts{Total: 1},
 		},
 	}
-	batchPreparer := guardrails.NewWorkflowBatchPreparer(mock, staticPipelineResolver{pipeline: pipeline})
+	batchPreparer := guardrails.NewWorkflowBatchPreparer(mock, staticChainsResolver{chains: chains})
 
 	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
@@ -1767,7 +1758,7 @@ func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	err = handler.Batches(c)
+	err := handler.Batches(c)
 	if err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
@@ -7192,13 +7183,13 @@ func TestIsNativeBatchResultsPending(t *testing.T) {
 	}
 }
 
-// staticPipelineResolver returns a fixed guardrails pipeline regardless of
-// context, letting tests drive the production WorkflowRequestPatcher /
-// WorkflowBatchPreparer with an explicit pipeline.
-type staticPipelineResolver struct{ pipeline *guardrails.Pipeline }
+// staticChainsResolver returns fixed plugin chains regardless of context,
+// letting tests drive the production WorkflowRequestPatcher /
+// WorkflowBatchPreparer and the response/stream phases with explicit chains.
+type staticChainsResolver struct{ chains *plugins.Chains }
 
-func (s staticPipelineResolver) PipelineForContext(context.Context) *guardrails.Pipeline {
-	return s.pipeline
+func (s staticChainsResolver) ChainsForContext(context.Context) *plugins.Chains {
+	return s.chains
 }
 
 // A caller that carries only the user-path header (no managed key) must get

@@ -189,3 +189,19 @@ crash). Readiness (`/health/ready`) is the right signal for a Kubernetes
 `gomodel --ready` as an exec probe. Keep `--ready-timeout` larger than the
 server's internal per-dependency probe timeout (`2s`) so a slow backend returns
 a clean `not_ready` instead of the client timing out first.
+
+## Plugin tooling
+
+`gomodel plugin` builds and inspects shared-object plugins (`.so`) with the
+toolchain of the running binary; see [Plugins](/advanced/plugins#shared-object-plugins).
+
+```sh
+gomodel plugin build [-o out.so] <dir>   # go build -buildmode=plugin with this binary's flags
+gomodel plugin inspect <file.so>         # open the file and print its manifest and build info
+```
+
+`plugin build` forces `CGO_ENABLED=1`, pins `GOTOOLCHAIN` to the host's Go
+version, stamps a `GoModelBuildInfo` variable into the plugin, and refuses an
+output built with a different Go version. Loading needs a cgo build of
+GoModel (`make build-plugins` or the `gomodel:<version>-plugins` image).
+`gomodel --version` prints the Go and `pluginapi` versions plugins must match.

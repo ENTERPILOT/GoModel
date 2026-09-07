@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	// encoding/json rather than goccy: rewriteMessagesModel needs the
 	// decoder's InputOffset to splice the model value in place.
 	"encoding/json"
@@ -28,11 +29,14 @@ const anthropicProviderType = "anthropic"
 // Features that operate on the canonical translated request take precedence:
 // requests using guardrails patching, response caching, or failover stay on
 // the translated pipeline.
-func (s *translatedInferenceService) canForwardMessagesNatively(workflow *core.Workflow) bool {
+func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
 		return false
 	}
 	if s.translatedRequestPatcher != nil {
+		return false
+	}
+	if s.hasPostResponsePlugins(ctx) {
 		return false
 	}
 	if s.responseCache != nil && workflow.CacheEnabled() {

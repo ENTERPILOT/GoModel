@@ -29,6 +29,7 @@ type Handler struct {
 	failoverPolicy                  *gateway.FailoverPolicy
 	workflowPolicyResolver          RequestWorkflowPolicyResolver
 	translatedRequestPatcher        TranslatedRequestPatcher
+	pluginChains                    PluginChainsResolver
 	batchRequestPreparer            BatchRequestPreparer
 	exposedModelLister              ExposedModelLister
 	keepOnlyAliasesAtModelsEndpoint bool
@@ -155,6 +156,7 @@ func (h *Handler) translatedInference() *translatedInferenceService {
 			failoverResolver:         h.failoverResolver,
 			failoverPolicy:           h.failoverPolicy,
 			translatedRequestPatcher: h.translatedRequestPatcher,
+			pluginChains:             h.pluginChains,
 			logger:                   h.logger,
 			usageLogger:              h.usageLogger,
 			budgetChecker:            h.budgetChecker,

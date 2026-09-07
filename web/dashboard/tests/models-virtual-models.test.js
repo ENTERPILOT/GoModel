@@ -1067,3 +1067,98 @@ test("rowAnchorID keeps distinct alias names on distinct DOM ids", () => {
   assert.match(id("team/cheap"), /^alias-row-[A-Za-z0-9%._~-]+$/);
   assert.equal(rowAnchorID({ is_alias: false, alias: { name: "x" } }), "");
 });
+
+// ─── Plugin routing strategies ───
+
+import {
+  parseStrategyDropdownValue,
+  strategyDropdownValue,
+  strategyLabel,
+} from "../src/pages/models/routing.js";
+
+test("strategyOptions lists plugin:<name> entries labelled by plugin name, keeping case", () => {
+  const options = strategyOptions(["round_robin", "plugin:latency-Aware"], "plugin:latency-Aware");
+  assert.deepEqual(
+    options.map((option) => option.value),
+    ["round_robin", "plugin:latency-Aware"],
+  );
+  assert.equal(options[1].label, "latency-Aware (routing plugin)");
+
+  // An existing plugin VM whose plugin is no longer loaded stays selectable.
+  const stale = strategyOptions(["round_robin"], "plugin:gone");
+  assert.deepEqual(stale[1], { value: "plugin:gone", label: "gone (routing plugin)" });
+});
+
+test("strategy dropdown values map to and from strategy/strategy_plugin", () => {
+  assert.equal(strategyDropdownValue("plugin", "latency-aware"), "plugin:latency-aware");
+  assert.equal(strategyDropdownValue("cost", ""), "cost");
+  assert.deepEqual(parseStrategyDropdownValue("plugin:latency-aware"), {
+    strategy: "plugin",
+    strategy_plugin: "latency-aware",
+  });
+  assert.deepEqual(parseStrategyDropdownValue("round_robin"), {
+    strategy: "round_robin",
+    strategy_plugin: "",
+  });
+  assert.equal(strategyLabel("plugin", "latency-aware"), "latency-aware");
+  assert.equal(strategyLabel("plugin"), "Plugin");
+});
+
+test("save payload carries strategy_plugin and strategy_config for a plugin strategy", () => {
+  const form = {
+    ...defaultVirtualModelForm(),
+    source: "smart",
+    target_model: "openai/gpt-4o",
+    targets: [{ model: "groq/llama", weight: 2 }],
+    strategy: "plugin",
+    strategy_plugin: "latency-aware",
+    strategy_config: { p95_window: "5m" },
+  };
+  const { payload } = buildVirtualModelSavePayload(form, "", "create");
+  assert.equal(payload.strategy, "plugin");
+  assert.equal(payload.strategy_plugin, "latency-aware");
+  assert.deepEqual(payload.strategy_config, { p95_window: "5m" });
+  // Plugins decide what weights mean, so they are kept.
+  assert.deepEqual(payload.targets, [
+    { model: "openai/gpt-4o", weight: 1 },
+    { model: "groq/llama", weight: 2 },
+  ]);
+
+  // An empty config is omitted; a non-plugin strategy sends no plugin fields.
+  const bare = buildVirtualModelSavePayload(
+    { ...form, strategy_config: {} },
+    "",
+    "create",
+  ).payload;
+  assert.equal("strategy_config" in bare, false);
+  const cost = buildVirtualModelSavePayload({ ...form, strategy: "cost" }, "", "create").payload;
+  assert.equal("strategy_plugin" in cost, false);
+});
+
+test("redirect views and toggle payloads round-trip plugin strategy fields", () => {
+  const alias = mapRedirectView({
+    source: "smart",
+    kind: "redirect",
+    targets: [
+      { provider: "openai", model: "gpt-4o" },
+      { provider: "groq", model: "llama" },
+    ],
+    strategy: "plugin",
+    strategy_plugin: "latency-aware",
+    strategy_config: { p95_window: "5m" },
+    enabled: true,
+    valid: true,
+  });
+  assert.equal(alias.strategy_plugin, "latency-aware");
+  assert.deepEqual(alias.strategy_config, { p95_window: "5m" });
+  assert.equal(aliasTargetLabel(alias), "openai/gpt-4o, groq/llama · latency-aware");
+
+  const payload = buildAliasTogglePayload(alias);
+  assert.equal(payload.strategy, "plugin");
+  assert.equal(payload.strategy_plugin, "latency-aware");
+  assert.deepEqual(payload.strategy_config, { p95_window: "5m" });
+
+  const plain = mapRedirectView({ source: "x", kind: "redirect", targets: [], strategy: "cost" });
+  assert.equal(plain.strategy_plugin, "");
+  assert.deepEqual(plain.strategy_config, {});
+});

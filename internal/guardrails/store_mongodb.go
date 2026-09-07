@@ -22,6 +22,8 @@ type mongoDefinitionDocument struct {
 	Description string    `bson:"description,omitempty"`
 	UserPath    string    `bson:"user_path,omitempty"`
 	Config      bson.M    `bson:"config"`
+	FailMode    string    `bson:"fail_mode,omitempty"`
+	TimeoutMS   int       `bson:"timeout_ms,omitempty"`
 	CreatedAt   time.Time `bson:"created_at"`
 	UpdatedAt   time.Time `bson:"updated_at"`
 }
@@ -99,7 +101,7 @@ func (s *MongoDBStore) Get(ctx context.Context, name string) (*Definition, error
 }
 
 func (s *MongoDBStore) Upsert(ctx context.Context, definition Definition) error {
-	definition, err := normalizeDefinition(definition)
+	definition, err := normalizeDefinitionIdentity(definition)
 	if err != nil {
 		return err
 	}
@@ -120,6 +122,8 @@ func (s *MongoDBStore) Upsert(ctx context.Context, definition Definition) error 
 			"description": definition.Description,
 			"user_path":   definition.UserPath,
 			"config":      configDoc,
+			"fail_mode":   definition.FailMode,
+			"timeout_ms":  definition.TimeoutMS,
 			"updated_at":  definition.UpdatedAt,
 		},
 		"$setOnInsert": bson.M{
@@ -141,7 +145,7 @@ func (s *MongoDBStore) UpsertMany(ctx context.Context, definitions []Definition)
 	now := time.Now().UTC()
 	models := make([]mongo.WriteModel, 0, len(definitions))
 	for _, definition := range definitions {
-		normalized, err := normalizeDefinition(definition)
+		normalized, err := normalizeDefinitionIdentity(definition)
 		if err != nil {
 			return err
 		}
@@ -161,6 +165,8 @@ func (s *MongoDBStore) UpsertMany(ctx context.Context, definitions []Definition)
 				"description": normalized.Description,
 				"user_path":   normalized.UserPath,
 				"config":      configDoc,
+				"fail_mode":   normalized.FailMode,
+				"timeout_ms":  normalized.TimeoutMS,
 				"updated_at":  normalized.UpdatedAt,
 			},
 			"$setOnInsert": bson.M{
@@ -236,6 +242,8 @@ func definitionFromMongo(doc mongoDefinitionDocument) (Definition, error) {
 		Description: doc.Description,
 		UserPath:    doc.UserPath,
 		Config:      raw,
+		FailMode:    doc.FailMode,
+		TimeoutMS:   doc.TimeoutMS,
 		CreatedAt:   doc.CreatedAt.UTC(),
 		UpdatedAt:   doc.UpdatedAt.UTC(),
 	}, nil

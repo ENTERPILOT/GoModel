@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -74,6 +75,24 @@ func (b *bootstrap) initProviders() error {
 	}
 	if b.routeSelector != nil {
 		b.cfg.Factory.AddHooks(routeSelectorHooks(b.routeSelector))
+	}
+	// Routing-strategy plugins learn target health from every upstream
+	// attempt, so the plugin catalog and the strategy resolver are built here,
+	// before the first provider captures the hook set. Guardrails, admin and
+	// virtual models reuse the same catalog. With the plugin system off
+	// nothing plugin-related exists: no catalog, no .so loading, no resolver.
+	if pluginsEnabled(b.appCfg) {
+		catalog, err := buildPluginCatalog(b.appCfg, b.cfg.Extensions)
+		if err != nil {
+			return err
+		}
+		app.pluginCatalog = catalog
+		app.routeStrategies = plugins.NewRouteResolver(catalog, plugins.HostDeps{Logger: slog.Default()})
+		app.routeStrategies.SetInstanceConfigs(guardrailInstanceConfig(app))
+		app.register(subsystemRouteStrategies, ownedByShutdown, app.closeRouteStrategies)
+		b.cfg.Factory.AddHooks(routeStrategyHooks(app.routeStrategies))
+	} else {
+		slog.Info("plugin system disabled", "hint", "set PLUGINS_ENABLED=true (or GUARDRAILS_ENABLED=true) to load plugins and guardrails")
 	}
 	// OpenTelemetry instruments provider calls through the same hooks, so it
 	// too must exist before the first provider is constructed.

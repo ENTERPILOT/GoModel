@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -42,8 +43,15 @@ func (b *bootstrap) initAdmin() error {
 		adminCfg.UIEnabled = false
 	}
 	if adminCfg.EndpointsEnabled {
+		// Nil when the plugin system is disabled; the admin handler then
+		// reports the guardrail endpoints unavailable.
+		var guardrailService *guardrails.Service
+		if app.guardrails != nil {
+			guardrailService = app.guardrails.Service
+		}
 		usageEnabledForDashboard := app.usage.Logger.Config().Enabled
 		adminRuntimeConfig := dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, b.cfg.DemoMode, b.routeSelector != nil)
+		adminRuntimeConfig.VirtualModelStrategies = dashboardVirtualModelStrategies(b.routeSelector != nil, plugins.RoutePluginNames(app.pluginCatalog))
 		adminRuntimeConfig.QuotaTemplatesEnabled = dashboardEnabledValue(b.quotaTemplatesEnabled)
 		adminHandler, dashHandler, auditReader, adminErr := newAdminHandlers(
 			b.usageReader,
@@ -55,7 +63,8 @@ func (b *bootstrap) initAdmin() error {
 			app.virtualModels.Service,
 			app.pricingOverrides.Service,
 			app.workflows.Service,
-			app.guardrails.Service,
+			guardrailService,
+			app.pluginCatalog,
 			app.budgets.Service,
 			app.rateLimits.Service,
 			app.tagging.Service,
@@ -120,6 +129,7 @@ func newAdminHandlers(
 	pricingOverrideService *pricingoverrides.Service,
 	workflowService *workflows.Service,
 	guardrailService *guardrails.Service,
+	pluginCatalog *plugins.Catalog,
 	budgetService *budget.Service,
 	rateLimitService *ratelimit.Service,
 	taggingService *tagging.Service,
@@ -182,6 +192,7 @@ func newAdminHandlers(
 		admin.WithPricingOverrides(pricingOverrideService),
 		admin.WithWorkflows(workflowService),
 		admin.WithGuardrailService(guardrailService),
+		admin.WithPluginCatalog(pluginCatalog),
 		admin.WithBudgets(budgetService),
 		admin.WithRateLimits(rateLimitService),
 		admin.WithQuotaTemplatesEnabled(quotaTemplatesEnabled),
@@ -226,7 +237,7 @@ func dashboardRuntimeConfig(cfg *config.Config, usageEnabled, demoMode, adaptive
 		SemanticCacheEnabled:   dashboardEnabledValue(semanticResponseCacheConfigured(cfg)),
 		LiveLogsEnabled:        dashboardEnabledValue(cfg != nil && cfg.Admin.LiveLogsEnabled),
 		MCPEnabled:             dashboardEnabledValue(cfg != nil && cfg.MCP.Enabled),
-		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting),
+		VirtualModelStrategies: dashboardVirtualModelStrategies(adaptiveRouting, nil),
 		UserPathHeader:         dashboardUserPathHeader(cfg),
 	}
 }
@@ -244,11 +255,17 @@ func dashboardUserPathHeader(cfg *config.Config) string {
 // dashboardVirtualModelStrategies lists the load-balancing strategies the
 // dashboard should offer. Core accepts "adaptive" regardless (it falls back
 // to round robin without a selector), but the UI only advertises it when a
-// route-selector extension is actually registered.
-func dashboardVirtualModelStrategies(adaptiveRouting bool) string {
+// route-selector extension is actually registered. Every loaded
+// routing-strategy plugin adds one "plugin:<name>" entry.
+func dashboardVirtualModelStrategies(adaptiveRouting bool, routePlugins []string) string {
 	strategies := []string{virtualmodels.StrategyRoundRobin, virtualmodels.StrategyCost, virtualmodels.StrategyFailover}
 	if adaptiveRouting {
 		strategies = append(strategies, virtualmodels.StrategyAdaptive)
+	}
+	for _, name := range routePlugins {
+		if name = strings.TrimSpace(name); name != "" {
+			strategies = append(strategies, virtualmodels.StrategyPlugin+":"+name)
+		}
 	}
 	return strings.Join(strategies, ",")
 }

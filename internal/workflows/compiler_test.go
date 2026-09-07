@@ -1,26 +1,21 @@
 package workflows
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 )
 
+func systemPromptGuardrail(name string) guardrails.Definition {
+	return guardrails.Definition{Name: name, Type: "system_prompt", Config: []byte(`{"mode":"inject","content":"be precise"}`)}
+}
+
 func TestCompilerCompile_Guardrails(t *testing.T) {
-	registry := guardrails.NewRegistry()
-	rule, err := guardrails.NewSystemPromptGuardrail("policy-system", guardrails.SystemPromptInject, "be precise")
-	if err != nil {
-		t.Fatalf("NewSystemPromptGuardrail() error = %v", err)
-	}
-	if err := registry.Register(rule, guardrails.RuleDescriptor{
-		Type:    "system_prompt",
-		Mode:    string(guardrails.SystemPromptInject),
-		Content: "be precise",
-	}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	registry := newGuardrailService(t, nil, systemPromptGuardrail("policy-system"))
 
 	compiled, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
 		ID:      "workflow-1",
@@ -38,20 +33,56 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile() error = %v", err)
 	}
-	if compiled == nil {
-		t.Fatal("Compile() returned nil")
+	if compiled == nil || compiled.Chains == nil {
+		t.Fatal("Compile() returned nil chains")
 	}
-	if compiled.Pipeline == nil {
-		t.Fatal("compiled pipeline is nil")
+	if compiled.Chains.Prompt.Len() != 1 || !compiled.Chains.Response.Empty() {
+		t.Fatalf("chains = %+v, want one prompt step from the v1 payload", compiled.Chains)
 	}
-	if compiled.Pipeline.Len() != 1 {
-		t.Fatalf("compiled pipeline len = %d, want 1", compiled.Pipeline.Len())
-	}
-	if compiled.Policy == nil {
-		t.Fatal("compiled policy is nil")
-	}
-	if compiled.Policy.GuardrailsHash == "" {
+	if compiled.Policy == nil || compiled.Policy.GuardrailsHash == "" {
 		t.Fatal("compiled guardrails hash is empty")
+	}
+	if compiled.Policy.ChainHashes["prompt"] != compiled.Policy.GuardrailsHash || len(compiled.Policy.ChainHashes) != 1 {
+		t.Fatalf("chain hashes = %v", compiled.Policy.ChainHashes)
+	}
+}
+
+func TestCompilerCompile_PhasesFromV2Steps(t *testing.T) {
+	registry := newGuardrailService(t, guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+		return &core.ChatResponse{}, nil
+	}), guardrails.Definition{Name: "privacy", Type: "llm_based_altering", Config: []byte(`{"model":"openai/gpt-4o-mini"}`)})
+
+	compiled, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-2", Name: "global",
+		Payload: Payload{
+			SchemaVersion: 2,
+			Features:      FeatureFlags{Guardrails: true},
+			Steps: []Step{
+				{Ref: "privacy", Phase: PhasePrompt, Step: 10},
+				{Ref: "privacy", Phase: PhaseResponse, Step: 10},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if compiled.Chains.Prompt.Len() != 1 || compiled.Chains.Response.Len() != 1 || !compiled.Chains.Stream.Empty() {
+		t.Fatalf("chains = %+v", compiled.Chains)
+	}
+	if len(compiled.Policy.ChainHashes) != 2 {
+		t.Fatalf("chain hashes = %v", compiled.Policy.ChainHashes)
+	}
+
+	_, err = NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-3", Name: "global",
+		Payload: Payload{
+			SchemaVersion: 2,
+			Features:      FeatureFlags{Guardrails: true},
+			Steps:         []Step{{Ref: "privacy", Phase: PhaseStream, Step: 10}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not support the stream phase") {
+		t.Fatalf("Compile(stream) error = %v, want unsupported phase", err)
 	}
 }
 
@@ -97,11 +128,11 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 	if compiled.Policy.Features.Failover {
 		t.Fatal("Policy.Features.Failover = true, want false")
 	}
-	if compiled.Pipeline != nil {
-		t.Fatal("compiled pipeline is not nil")
+	if compiled.Chains != nil {
+		t.Fatal("compiled chains are not nil")
 	}
-	if compiled.Policy.GuardrailsHash != "" {
-		t.Fatalf("compiled guardrails hash = %q, want empty", compiled.Policy.GuardrailsHash)
+	if compiled.Policy.GuardrailsHash != "" || compiled.Policy.ChainHashes != nil {
+		t.Fatalf("compiled guardrails hash = %q / %v, want empty", compiled.Policy.GuardrailsHash, compiled.Policy.ChainHashes)
 	}
 }
 
@@ -113,78 +144,55 @@ func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
 		Name:    "global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features: FeatureFlags{
-				Cache:      true,
-				Audit:      true,
-				Usage:      true,
-				Guardrails: false,
-			},
+			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
 	if err != nil {
 		t.Fatalf("Compile() error = %v", err)
 	}
-	if compiled == nil || compiled.Policy == nil {
-		t.Fatal("Compile() returned nil policy")
-	}
 	if !compiled.Policy.Features.Failover {
-		t.Fatal("Policy.Features.Failover = false, want true")
+		t.Fatal("Policy.Features.Failover = false, want true by default")
 	}
 }
 
-func TestCompilerCompile_ReturnsGatewayErrorWhenGuardrailsCatalogIsEmpty(t *testing.T) {
-	_, err := NewCompilerWithFeatureCaps(guardrails.NewRegistry(), core.DefaultWorkflowFeatures()).Compile(Version{
-		ID:      "workflow-1",
-		Scope:   Scope{},
-		Version: 1,
-		Name:    "global",
+func TestCompilerCompile_RejectsGuardrailsWithoutRegistry(t *testing.T) {
+	_, err := NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-1", Name: "global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
-			Guardrails: []GuardrailStep{
-				{Ref: "policy-system", Step: 10},
-			},
+			Features:      FeatureFlags{Guardrails: true},
+			Guardrails:    []GuardrailStep{{Ref: "policy-system", Step: 10}},
 		},
 	})
-	if err == nil {
-		t.Fatal("Compile() error = nil, want gateway error")
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != 502 {
+		t.Fatalf("Compile() error = %v, want 502 gateway error", err)
 	}
-	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
-		t.Fatalf("Compile() error = %T, want *core.GatewayError", err)
+	_, err = NewCompilerWithFeatureCaps(newGuardrailService(t, nil), core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-1", Name: "global",
+		Payload: Payload{
+			SchemaVersion: 1,
+			Features:      FeatureFlags{Guardrails: true},
+			Guardrails:    []GuardrailStep{{Ref: "policy-system", Step: 10}},
+		},
+	})
+	if !errors.As(err, &gatewayErr) || !strings.Contains(err.Error(), "no guardrails are loaded") {
+		t.Fatalf("Compile() with empty registry error = %v", err)
 	}
 }
 
-func TestCompilerCompile_WrapsBuildPipelineErrorsAsGatewayErrors(t *testing.T) {
-	registry := guardrails.NewRegistry()
-	rule, err := guardrails.NewSystemPromptGuardrail("present", guardrails.SystemPromptInject, "be precise")
-	if err != nil {
-		t.Fatalf("NewSystemPromptGuardrail() error = %v", err)
-	}
-	if err := registry.Register(rule, guardrails.RuleDescriptor{
-		Name:    "present",
-		Type:    "system_prompt",
-		Mode:    string(guardrails.SystemPromptInject),
-		Content: "be precise",
-	}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	_, err = NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
-		ID:      "workflow-1",
-		Scope:   Scope{},
-		Version: 1,
-		Name:    "global",
+func TestCompilerCompile_WrapsBuildChainsErrorsAsGatewayErrors(t *testing.T) {
+	registry := newGuardrailService(t, nil, systemPromptGuardrail("present"))
+	_, err := NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
+		ID: "workflow-1", Name: "global",
 		Payload: Payload{
 			SchemaVersion: 1,
-			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
-			Guardrails: []GuardrailStep{
-				{Ref: "missing", Step: 10},
-			},
+			Features:      FeatureFlags{Guardrails: true},
+			Guardrails:    []GuardrailStep{{Ref: "missing", Step: 10}},
 		},
 	})
-	if err == nil {
-		t.Fatal("Compile() error = nil, want gateway error")
-	}
-	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
-		t.Fatalf("Compile() error = %T, want *core.GatewayError", err)
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != 502 || !strings.Contains(err.Error(), "unknown guardrail ref") {
+		t.Fatalf("Compile() error = %v, want wrapped unknown ref error", err)
 	}
 }

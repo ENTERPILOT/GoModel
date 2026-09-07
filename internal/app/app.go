@@ -25,6 +25,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -63,6 +64,8 @@ type App struct {
 	authKeys            *authkeys.Result
 	users               *users.Result
 	guardrails          *guardrails.Result
+	pluginCatalog       *plugins.Catalog
+	routeStrategies     *plugins.RouteResolver
 	workflows           *workflows.Result
 	live                *live.Broker
 	server              *server.Server
@@ -456,4 +459,12 @@ func nilInterface(value any) bool {
 	default:
 		return false
 	}
+}
+
+// closeRouteStrategies closes the routing-strategy plugin instances.
+func (a *App) closeRouteStrategies() error {
+	if a.routeStrategies == nil {
+		return nil
+	}
+	return a.routeStrategies.Close(context.Background())
 }

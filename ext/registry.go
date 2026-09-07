@@ -32,6 +32,7 @@ type Registry struct {
 	settings        []RuntimeSetting
 	authenticators  []RequestAuthenticator
 	capabilities    map[Capability]struct{}
+	plugins         []PluginFactory
 }
 
 // EnableCapability unlocks an optional core behavior for this registry.

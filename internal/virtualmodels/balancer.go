@@ -1,6 +1,7 @@
 package virtualmodels
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -48,9 +49,10 @@ func (r *roundRobin) prune(active map[string]*redirectEntry) {
 // strategy picks and the choice is re-pinned. Under the adaptive strategy the
 // installed route selector owns that judgement — it receives the pin and
 // answers with the target to use — because it, and not core, knows whether
-// the pinned target is still healthy. It reports false when no target is
-// available.
-func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessionID string) (core.ModelSelector, bool) {
+// the pinned target is still healthy. The plugin strategy works the same way
+// with the virtual model's named routing-strategy plugin. It reports false
+// when no target is available.
+func (s *Service) balancedResolution(ctx context.Context, snap *snapshot, entry *redirectEntry, sessionID string) (core.ModelSelector, bool) {
 	supported := snap.viableTargets(entry, s.catalog)
 	if len(supported) == 0 {
 		return core.ModelSelector{}, false
@@ -64,7 +66,7 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		// This target is selected only to reach admission and produce the 429.
 		// Do not run affinity resolution: a transient capacity burst must not
 		// discard or replace the target that actually served the session.
-		return s.concreteTarget(snap, entry, supported[0], sessionID)
+		return s.concreteTarget(ctx, snap, entry, supported[0], sessionID)
 	}
 
 	// selectorChoice consults the route selector, reporting false when there
@@ -76,10 +78,17 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 	// and a one-target-available redirect behave identically with and without
 	// a selector installed.
 	selectorChoice := func(pinned string) (resolvedTarget, bool) {
-		if len(pool) == 1 || normalizeStrategy(entry.strategy) != StrategyAdaptive {
+		if len(pool) == 1 {
 			return resolvedTarget{}, false
 		}
-		return s.adaptiveTarget(entry, sessionID, pinned, pool)
+		switch normalizeStrategy(entry.strategy) {
+		case StrategyAdaptive:
+			return s.adaptiveTarget(entry, sessionID, pinned, pool)
+		case StrategyPlugin:
+			return s.pluginTarget(ctx, entry, sessionID, pinned, pool)
+		default:
+			return resolvedTarget{}, false
+		}
 	}
 
 	// pick applies the redirect's strategy to the viable pool. A single viable
@@ -97,7 +106,8 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		case StrategyCost:
 			return s.cheapestTarget(snap, entry, pool)
 		default:
-			// Round robin, and adaptive whose selector had no usable answer.
+			// Round robin, and adaptive or plugin whose selector had no
+			// usable answer.
 			return pool[weightedIndex(pool, s.balancer.next(entry.vm.Source))]
 		}
 	}
@@ -133,9 +143,9 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		if choice, ok := selectorChoice(pinned); ok {
 			qualified := s.sticky.repin(entry.vm.Source, sessionID, pinned, choice.qualified)
 			if target, found := poolTarget(pool, qualified); found {
-				return s.concreteTarget(snap, entry, target, sessionID)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID)
 			}
-			return s.concreteTarget(snap, entry, choice, sessionID)
+			return s.concreteTarget(ctx, snap, entry, choice, sessionID)
 		}
 
 		// No selector answer — a decline, a panic, an answer outside the pool,
@@ -146,7 +156,7 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 		// the next new session receives.
 		if hasPin {
 			if target, found := poolTarget(pool, pinned); found {
-				return s.concreteTarget(snap, entry, target, sessionID)
+				return s.concreteTarget(ctx, snap, entry, target, sessionID)
 			}
 		}
 
@@ -158,21 +168,21 @@ func (s *Service) balancedResolution(snap *snapshot, entry *redirectEntry, sessi
 			choice.qualified,
 		)
 		if target, ok := poolTarget(pool, qualified); ok {
-			return s.concreteTarget(snap, entry, target, sessionID)
+			return s.concreteTarget(ctx, snap, entry, target, sessionID)
 		}
-		return s.concreteTarget(snap, entry, choice, sessionID)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID)
 	}
 	if choice, ok := selectorChoice(""); ok {
-		return s.concreteTarget(snap, entry, choice, sessionID)
+		return s.concreteTarget(ctx, snap, entry, choice, sessionID)
 	}
-	return s.concreteTarget(snap, entry, pick(), sessionID)
+	return s.concreteTarget(ctx, snap, entry, pick(), sessionID)
 }
 
 // concreteTarget turns a chosen target of entry into the concrete model to
 // execute: the target itself, or — when it names another virtual model — that
 // redirect's own balanced resolution. Chains are acyclic and bounded by
 // construction (see validateChains), so the recursion terminates.
-func (s *Service) concreteTarget(snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string) (core.ModelSelector, bool) {
+func (s *Service) concreteTarget(ctx context.Context, snap *snapshot, entry *redirectEntry, target resolvedTarget, sessionID string) (core.ModelSelector, bool) {
 	inner, ok := snap.chained(entry.vm.Source, target)
 	if !ok {
 		return target.selector, true
@@ -180,7 +190,7 @@ func (s *Service) concreteTarget(snap *snapshot, entry *redirectEntry, target re
 	if !inner.vm.Enabled {
 		return core.ModelSelector{}, false
 	}
-	return s.balancedResolution(snap, inner, sessionID)
+	return s.balancedResolution(ctx, snap, inner, sessionID)
 }
 
 // poolTarget finds a qualified model among the viable targets.

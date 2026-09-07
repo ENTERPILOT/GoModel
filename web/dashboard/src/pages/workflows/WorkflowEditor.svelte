@@ -10,6 +10,7 @@
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowCard from "./WorkflowCard.svelte";
+  import { WORKFLOW_PHASES, phaseLabel } from "$lib/utils/pluginPhases.js";
   import { Plus, Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
@@ -158,6 +159,7 @@
         <div>
           <h4>{m.workflows_guardrail_steps()}</h4>
           <p class="form-hint">{m.workflows_steps_help()}</p>
+          <p class="form-hint">{m.workflows_phase_help()}</p>
         </div>
         <button type="button" class="table-action-btn" onclick={() => wf.addGuardrailStep()}>{m.workflows_add_step()}</button>
       </div>
@@ -172,18 +174,38 @@
       {#if wf.form.guardrails.length > 0}
         <div class="workflow-guardrail-list-editor">
           {#each wf.form.guardrails as step, index (index)}
+            {@const refOptions = wf.refOptions(step.phase, step.ref)}
             <div class="workflow-guardrail-row">
+              <div class="form-field workflow-guardrail-phase-field">
+                <label class="form-field-label" for={"workflow-guardrail-phase-" + index}>{m.workflows_phase()}</label>
+                <select
+                  class="form-select workflow-input"
+                  id={"workflow-guardrail-phase-" + index}
+                  value={step.phase}
+                  aria-label={`${m.workflows_phase()} ${index + 1}`}
+                  onchange={(event) => wf.setGuardrailStepPhase(index, event.currentTarget.value)}
+                >
+                  {#each WORKFLOW_PHASES as phase (phase)}
+                    <option value={phase}>{phaseLabel(phase)}</option>
+                  {/each}
+                </select>
+              </div>
               <div class="form-field workflow-guardrail-field">
                 <label class="form-field-label" for={"workflow-guardrail-ref-" + index}>{m.workflows_guardrail_reference()}</label>
-                <input
-                  type="text"
-                  class="workflow-input"
+                <select
+                  class="form-select workflow-input mono"
                   id={"workflow-guardrail-ref-" + index}
-                  list="workflow-guardrail-options"
-                  placeholder={m.workflows_guardrail_reference()}
                   bind:value={step.ref}
                   aria-label={`${m.workflows_guardrail_reference()} ${index + 1}`}
-                />
+                >
+                  <option value="">{m.workflows_select_guardrail()}</option>
+                  {#each refOptions as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+                {#if refOptions.length === 0 && wf.guardrailRefs.length > 0}
+                  <small class="form-hint">{m.workflows_no_phase_guardrails({ phase: phaseLabel(step.phase) })}</small>
+                {/if}
               </div>
               <div class="form-field workflow-guardrail-step-field">
                 <label class="form-field-label" for={"workflow-guardrail-step-" + index}>{m.workflows_step()}</label>
@@ -259,6 +281,10 @@
   min-width: 0;
 }
 
+.workflow-guardrail-phase-field {
+  flex: 0 0 150px;
+}
+
 .workflow-guardrail-step-field {
   flex: 0 0 120px;
 }
@@ -284,7 +310,7 @@
       width: 100%;
     }
 
-  .workflow-guardrail-field, .workflow-guardrail-step-field {
+  .workflow-guardrail-field, .workflow-guardrail-phase-field, .workflow-guardrail-step-field {
       flex-basis: auto;
       width: 100%;
     }

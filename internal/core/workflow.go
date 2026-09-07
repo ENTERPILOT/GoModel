@@ -133,13 +133,18 @@ type ResolvedWorkflowPolicy struct {
 	VersionID string
 	Version   int
 	// ScopeProvider is the configured provider instance name stored on the matched workflow.
-	ScopeProvider  string
-	ScopeModel     string
-	ScopeUserPath  string
-	Name           string
-	WorkflowHash   string
-	Features       WorkflowFeatures
+	ScopeProvider string
+	ScopeModel    string
+	ScopeUserPath string
+	Name          string
+	WorkflowHash  string
+	Features      WorkflowFeatures
+	// GuardrailsHash is the prompt-phase plugin chain hash; it feeds the
+	// response cache key.
 	GuardrailsHash string
+	// ChainHashes holds the per-phase plugin chain hashes ("prompt",
+	// "response", "stream"), for diagnostics and the admin views.
+	ChainHashes map[string]string
 }
 
 // Workflow is the request-scoped control-plane result consumed by later
@@ -154,6 +159,11 @@ type Workflow struct {
 	Passthrough  *PassthroughRouteInfo
 	Resolution   *RequestModelResolution
 	Policy       *ResolvedWorkflowPolicy
+	// PluginState is the per-request plugin state, created by the plugin
+	// runtime the first time a plugin runs for the request and nil otherwise.
+	// It lives here rather than in the context so a request that runs no
+	// plugin allocates nothing.
+	PluginState any
 }
 
 // RequestedQualifiedModel returns the requested model selector when present.

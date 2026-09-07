@@ -29,6 +29,7 @@ import (
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/app"
 	"github.com/enterpilot/gomodel/internal/version"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 var shutdownTimeout = 30 * time.Second
@@ -157,6 +158,10 @@ func Run(ctx context.Context, opts Options) error {
 			return nil
 		}
 		return &usageError{err: err}
+	}
+
+	if cliOpts.PluginArgs != nil {
+		return runPluginCommand(ctx, opts.ProductName, cliOpts.PluginArgs, opts.Stdout, opts.Stderr)
 	}
 
 	if cliOpts.Version {
@@ -341,8 +346,8 @@ func configHooks(ctx context.Context, opts Options) func(*config.LoadResult) err
 }
 
 func versionLine(productName string) string {
-	return fmt.Sprintf("%s %s (commit: %s, built: %s, %s)",
-		productName, version.Version, version.Commit, version.Date, runtime.Version())
+	return fmt.Sprintf("%s %s (commit: %s, built: %s, %s, pluginapi %s)",
+		productName, version.Version, version.Commit, version.Date, runtime.Version(), pluginapi.Version)
 }
 
 type lifecycleApp interface {

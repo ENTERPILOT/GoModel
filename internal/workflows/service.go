@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/plugins"
 )
 
 const (
@@ -23,9 +23,11 @@ const (
 
 // CompiledWorkflow is the immutable runtime projection cached in the hot-path snapshot.
 type CompiledWorkflow struct {
-	Version  Version
-	Policy   *core.ResolvedWorkflowPolicy
-	Pipeline *guardrails.Pipeline
+	Version Version
+	Policy  *core.ResolvedWorkflowPolicy
+	// Chains holds the compiled plugin chain of every phase; nil when the
+	// workflow runs no guardrails.
+	Chains *plugins.Chains
 }
 
 // Compiler turns one persisted workflow version into its runtime projection.
@@ -125,8 +127,40 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 		return fmt.Errorf("missing active global workflow")
 	}
 
-	s.current.Store(next)
+	s.install(next)
 	return nil
+}
+
+// install publishes next as the live snapshot. Compiled workflows hold their
+// plugin chains while live, so the guardrails service does not close an
+// instance a workflow still references; the diff against the previous
+// snapshot acquires the newcomers before the swap and releases the dropped
+// ones after it. Callers hold refreshMu.
+func (s *Service) install(next snapshot) {
+	previous := compiledSet(s.snapshot())
+	incoming := compiledSet(next)
+	for compiled := range incoming {
+		if !previous[compiled] {
+			compiled.Chains.Acquire()
+		}
+	}
+	s.current.Store(next)
+	for compiled := range previous {
+		if !incoming[compiled] {
+			compiled.Chains.Release()
+		}
+	}
+}
+
+func compiledSet(current snapshot) map[*CompiledWorkflow]bool {
+	set := make(map[*CompiledWorkflow]bool, len(current.byVersionID))
+	for _, compiled := range current.byScope {
+		set[compiled] = true
+	}
+	for _, compiled := range current.byVersionID {
+		set[compiled] = true
+	}
+	return set
 }
 
 // EnsureDefaultGlobal seeds or reconciles the managed active global workflow.
@@ -312,8 +346,8 @@ func (s *Service) Match(selector core.WorkflowSelector) (*core.ResolvedWorkflowP
 	return &policy, nil
 }
 
-// PipelineForContext resolves the active guardrails pipeline for the request context.
-func (s *Service) PipelineForContext(ctx context.Context) *guardrails.Pipeline {
+// ChainsForContext resolves the active plugin chains for the request context.
+func (s *Service) ChainsForContext(ctx context.Context) *plugins.Chains {
 	if s == nil || ctx == nil {
 		return nil
 	}
@@ -321,11 +355,11 @@ func (s *Service) PipelineForContext(ctx context.Context) *guardrails.Pipeline {
 	if workflow == nil {
 		return nil
 	}
-	return s.PipelineForWorkflow(workflow)
+	return s.ChainsForWorkflow(workflow)
 }
 
-// PipelineForWorkflow resolves the active guardrails pipeline for one request workflow.
-func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipeline {
+// ChainsForWorkflow resolves the active plugin chains for one request workflow.
+func (s *Service) ChainsForWorkflow(workflow *core.Workflow) *plugins.Chains {
 	if s == nil || workflow == nil || workflow.Policy == nil || !workflow.GuardrailsEnabled() {
 		return nil
 	}
@@ -338,7 +372,7 @@ func (s *Service) PipelineForWorkflow(workflow *core.Workflow) *guardrails.Pipel
 	if compiled == nil {
 		return nil
 	}
-	return compiled.Pipeline
+	return compiled.Chains
 }
 
 // StartBackgroundRefresh periodically reloads active workflows until stopped.
@@ -449,6 +483,7 @@ func (s *Service) viewForVersion(version Version) (View, error) {
 	view.ScopeDisplay = scopeDisplay(scope)
 	view.EffectiveFeatures = compiled.Policy.Features
 	view.GuardrailsHash = compiled.Policy.GuardrailsHash
+	view.ChainHashes = compiled.Policy.ChainHashes
 	return view, nil
 }
 
@@ -548,8 +583,8 @@ func compiledWorkflowForVersion(compiled *CompiledWorkflow, version Version) *Co
 		return nil
 	}
 	next := &CompiledWorkflow{
-		Version:  version,
-		Pipeline: compiled.Pipeline,
+		Version: version,
+		Chains:  compiled.Chains,
 	}
 	if compiled.Policy != nil {
 		policy := *compiled.Policy
@@ -576,7 +611,7 @@ func (s *Service) storeActivatedCompiledLocked(compiled *CompiledWorkflow) {
 	}
 	next.byScope[ref] = compiled
 	next.byVersionID[compiled.Version.ID] = compiled
-	s.current.Store(next)
+	s.install(next)
 }
 
 func (s *Service) storeDeactivatedVersionLocked(version Version) {
@@ -586,5 +621,5 @@ func (s *Service) storeDeactivatedVersionLocked(version Version) {
 	next := cloneSnapshot(s.snapshot())
 	delete(next.byScope, refForScope(version.Scope))
 	delete(next.byVersionID, version.ID)
-	s.current.Store(next)
+	s.install(next)
 }

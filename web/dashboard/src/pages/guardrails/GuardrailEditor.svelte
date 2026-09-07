@@ -1,11 +1,14 @@
 <script>
   // Guardrail editor modal (EditorDialog shell). The form fields below
   // Name/Type/Description/User Path are driven entirely by the type
-  // definition schema returned by GET /admin/guardrails/types (field.input:
-  // text/number/select/textarea/checkboxes).
+  // definition schema returned by GET /admin/guardrails/types (rendered by
+  // the shared SchemaFields component: text/number/select/textarea/
+  // checkboxes/secret/model). The Advanced area holds the per-instance
+  // failure mode and timeout.
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
+  import SchemaFields from "$lib/components/molecules/SchemaFields.svelte";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
 
@@ -87,94 +90,41 @@
       />
     </div>
 
-    {#each store.typeFields(store.form.type) as field (field.key)}
-      {#if field.input !== "checkboxes"}
-        <div class="form-field form-field-wide">
-          <InlineHelpSection
-            copyId={"guardrail-field-help-" + field.key}
-            label={field.label + " help"}
-            text={field.help || ""}
+    <SchemaFields
+      fields={store.typeFields(store.form.type)}
+      config={store.form.config}
+      idPrefix="guardrail-field"
+      onchange={(config) => store.setConfig(config)}
+    />
+
+    <details class="form-field form-field-wide guardrail-advanced">
+      <summary class="guardrail-advanced-summary">{m.guardrails_advanced()}</summary>
+      <p class="form-hint">{m.guardrails_advanced_help()}</p>
+      <div class="form-grid guardrail-advanced-grid">
+        <FormField id="guardrail-fail-mode" label={m.guardrails_fail_mode()}>
+          <select
+            id="guardrail-fail-mode"
+            class="form-select settings-select"
+            bind:value={store.form.fail_mode}
           >
-            {#snippet title()}
-              <label
-                class="form-field-label"
-                for={"guardrail-field-" + field.key}>{field.label}</label
-              >
-            {/snippet}
-          </InlineHelpSection>
-          {#if field.input === "select"}
-            <select
-              class="form-select settings-select"
-              id={"guardrail-field-" + field.key}
-              value={store.fieldValue(field)}
-              aria-describedby={field.help
-                ? "guardrail-field-help-" + field.key
-                : undefined}
-              onchange={(event) =>
-                store.setFieldValue(field, event.currentTarget.value)}
-            >
-              {#each field.options || [] as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          {:else if field.input === "textarea"}
-            <textarea
-              id={"guardrail-field-" + field.key}
-              placeholder={field.placeholder || ""}
-              value={store.fieldValue(field)}
-              aria-describedby={field.help
-                ? "guardrail-field-help-" + field.key
-                : undefined}
-              oninput={(event) =>
-                store.setFieldValue(field, event.currentTarget.value)}
-            ></textarea>
-          {:else}
-            <input
-              id={"guardrail-field-" + field.key}
-              type={field.input || "text"}
-              placeholder={field.placeholder || ""}
-              value={store.fieldValue(field)}
-              aria-describedby={field.help
-                ? "guardrail-field-help-" + field.key
-                : undefined}
-              oninput={(event) =>
-                store.setFieldValue(field, event.currentTarget.value)}
-            />
-          {/if}
-        </div>
-      {:else}
-        <fieldset
-          class="form-field form-field-wide form-field-fieldset"
-          aria-describedby={field.help
-            ? "guardrail-field-help-" + field.key
-            : undefined}
-        >
-          <legend class="form-field-legend">{field.label}</legend>
-          <div class="workflow-feature-toggles">
-            {#each field.options || [] as option (field.key + "-" + option.value)}
-              <label class="workflow-feature-toggle">
-                <input
-                  type="checkbox"
-                  checked={store.arrayFieldSelected(field, option.value)}
-                  onchange={(event) =>
-                    store.toggleArrayFieldValue(
-                      field,
-                      option.value,
-                      event.currentTarget.checked,
-                    )}
-                />
-                <span>{option.label}</span>
-              </label>
-            {/each}
-          </div>
-          {#if field.help}
-            <small class="form-hint" id={"guardrail-field-help-" + field.key}
-              >{field.help}</small
-            >
-          {/if}
-        </fieldset>
-      {/if}
-    {/each}
+            <option value="">{m.guardrails_fail_mode_default()}</option>
+            <option value="closed">{m.guardrails_fail_mode_closed()}</option>
+            <option value="open">{m.guardrails_fail_mode_open()}</option>
+          </select>
+        </FormField>
+        <FormField id="guardrail-timeout-ms" label={m.guardrails_timeout_ms()}>
+          <input
+            id="guardrail-timeout-ms"
+            type="number"
+            min="0"
+            step="1"
+            placeholder={m.guardrails_timeout_placeholder()}
+            bind:value={store.form.timeout_ms}
+          />
+          <small class="form-hint">{m.guardrails_timeout_help()}</small>
+        </FormField>
+      </div>
+    </details>
   </div>
 </EditorDialog>
 
@@ -187,23 +137,34 @@
   :global(.model-editor.guardrails-editor-wide) {
     width: min(1080px, 100%);
   }
-.form-field-fieldset {
-  border: 0;
-  margin: 0;
-  min-inline-size: 0;
-  padding: 0;
-}
 
-.form-field-legend {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  padding: 0;
-  text-transform: uppercase;
-}
+  :global(.model-editor.settings-guardrails-editor) {
+    min-width: 0;
+  }
 
-:global(.model-editor.settings-guardrails-editor) {
-  min-width: 0;
-}
+  .guardrail-advanced {
+    grid-column: 1 / -1;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+  }
+
+  .guardrail-advanced-summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    user-select: none;
+  }
+
+  .guardrail-advanced[open] .guardrail-advanced-summary {
+    margin-bottom: 8px;
+  }
+
+  .guardrail-advanced-grid {
+    margin-top: 10px;
+  }
 </style>

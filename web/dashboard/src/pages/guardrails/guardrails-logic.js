@@ -1,36 +1,28 @@
 // Pure guardrail logic. Everything here is side-effect free so it can be
 // unit-tested with node:test; the Svelte state module (guardrails.svelte.js)
-// owns fetches and reactive state.
+// owns fetches and reactive state. Field value helpers are shared with the
+// virtual-model editor through $lib/utils/schemaFields.js.
 
 import * as m from "../../lib/paraglide/messages.js";
+import {
+  cloneSchemaConfig,
+  instanceSchemaFields,
+  schemaArrayFieldSelected,
+  schemaFieldDefaults,
+  schemaFieldValue,
+  setSchemaFieldValue,
+  toggleSchemaArrayValue,
+} from "../../lib/utils/schemaFields.js";
+import { normalizePhases } from "../../lib/utils/pluginPhases.js";
 
-// cloneGuardrailJSON deep-clones a config payload, coercing anything that is
-// not a plain JSON object into {}.
-function cloneGuardrailJSON(value) {
-  try {
-    const cloned = JSON.parse(JSON.stringify(value || {}));
-    return cloned && typeof cloned === "object" && !Array.isArray(cloned)
-      ? cloned
-      : {};
-  } catch {
-    return {};
-  }
-}
+export {
+  schemaFieldValue as guardrailFieldValue,
+  setSchemaFieldValue as setGuardrailFieldValue,
+  schemaArrayFieldSelected as guardrailArrayFieldSelected,
+  toggleSchemaArrayValue as toggleGuardrailArrayValue,
+};
 
-// normalizeGuardrailArrayValue accepts an array or a comma-separated string
-// and returns a trimmed, non-empty string array.
-function normalizeGuardrailArrayValue(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item || "").trim()).filter((item) => item);
-  }
-  if (value === null || value === undefined) {
-    return [];
-  }
-  return String(value)
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item);
-}
+export const GUARDRAIL_FAIL_MODES = ["closed", "open"];
 
 // guardrailTypeDefinition finds the schema definition for a type name.
 function guardrailTypeDefinition(types, type) {
@@ -61,22 +53,72 @@ export function resolvedGuardrailType(types, type) {
   return defaultGuardrailType(types);
 }
 
-// defaultGuardrailConfig clones the schema defaults for a type.
+// guardrailTypeFields returns the schema-driven form fields for a type:
+// instance-scoped only (scope "" or missing); route-scoped fields belong to
+// the virtual-model editor.
+export function guardrailTypeFields(types, type) {
+  const definition = guardrailTypeDefinition(types, type);
+  return instanceSchemaFields(definition && definition.fields);
+}
+
+// defaultGuardrailConfig builds a new instance's config: each field's own
+// `default` wins, the type's `defaults` object fills the rest.
 export function defaultGuardrailConfig(types, type) {
   const definition = guardrailTypeDefinition(types, type);
-  if (!definition || !definition.defaults) {
+  if (!definition) {
     return {};
   }
-  return cloneGuardrailJSON(definition.defaults);
+  return {
+    ...cloneSchemaConfig(definition.defaults),
+    ...schemaFieldDefaults(guardrailTypeFields(types, type)),
+  };
 }
 
 // normalizeGuardrailConfig merges a stored config over the type defaults so
-// newly added schema fields get their built-in values.
+// newly added schema fields get their built-in values. A stored secret comes
+// back as the "********" marker and is kept as-is: sending it back unchanged
+// tells the server to keep the stored value.
 export function normalizeGuardrailConfig(types, config, type) {
   return {
     ...defaultGuardrailConfig(types, type),
-    ...cloneGuardrailJSON(config),
+    ...cloneSchemaConfig(config),
   };
+}
+
+// guardrailTypePhases lists the phases a type's plugin implements; a type
+// without `phases` (older gateway, legacy built-ins) is prompt-only.
+export function guardrailTypePhases(types, type) {
+  const definition = guardrailTypeDefinition(types, type);
+  return normalizePhases(definition && definition.phases);
+}
+
+// guardrailPhases lists an instance's phases: the view's own `phases` when
+// the server sends them, else its type's.
+export function guardrailPhases(types, guardrail) {
+  if (guardrail && Array.isArray(guardrail.phases) && guardrail.phases.length > 0) {
+    return normalizePhases(guardrail.phases);
+  }
+  return guardrailTypePhases(types, guardrail && guardrail.type);
+}
+
+// normalizeGuardrailFailMode returns "closed" | "open" | "" (plugin default).
+export function normalizeGuardrailFailMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return GUARDRAIL_FAIL_MODES.includes(mode) ? mode : "";
+}
+
+// parseGuardrailTimeoutMs returns a positive integer, 0 for empty/zero
+// (default), or NaN for invalid input so the form can reject it.
+export function parseGuardrailTimeoutMs(value) {
+  const trimmed = String(value ?? "").trim();
+  if (trimmed === "") {
+    return 0;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return Number.NaN;
+  }
+  return parsed;
 }
 
 // defaultGuardrailForm builds a blank editor form for a type.
@@ -88,6 +130,27 @@ export function defaultGuardrailForm(types, type) {
     description: "",
     user_path: "",
     config: defaultGuardrailConfig(types, resolvedType),
+    fail_mode: "",
+    timeout_ms: "",
+  };
+}
+
+// guardrailEditForm hydrates the editor from a stored definition view.
+export function guardrailEditForm(types, guardrail) {
+  const resolvedType = resolvedGuardrailType(types, guardrail && guardrail.type);
+  const timeout = Number(guardrail && guardrail.timeout_ms);
+  return {
+    name: String((guardrail && guardrail.name) || "").trim(),
+    type: resolvedType,
+    description: String((guardrail && guardrail.description) || "").trim(),
+    user_path: String((guardrail && guardrail.user_path) || "").trim(),
+    config: normalizeGuardrailConfig(
+      types,
+      guardrail && guardrail.config,
+      resolvedType,
+    ),
+    fail_mode: normalizeGuardrailFailMode(guardrail && guardrail.fail_mode),
+    timeout_ms: Number.isFinite(timeout) && timeout > 0 ? String(timeout) : "",
   };
 }
 
@@ -120,85 +183,18 @@ export function guardrailTypeLabel(types, type) {
   return definition && definition.label ? definition.label : type || m.guardrails_unknown();
 }
 
-// guardrailTypeFields returns the schema-driven form fields for a type.
-export function guardrailTypeFields(types, type) {
-  const definition = guardrailTypeDefinition(types, type);
-  return Array.isArray(definition && definition.fields)
-    ? definition.fields
-    : [];
-}
-
-// guardrailFieldValue reads a schema field's current value from a config.
-export function guardrailFieldValue(config, field) {
-  if (!field || !config) {
-    return field && field.input === "checkboxes" ? [] : "";
-  }
-  const value = config[field.key];
-  if (value === null || value === undefined) {
-    return field.input === "checkboxes" ? [] : "";
-  }
-  if (field.input === "checkboxes") {
-    return normalizeGuardrailArrayValue(value);
-  }
-  return value;
-}
-
-// setGuardrailFieldValue returns the next config with a schema field updated:
-// numbers are parsed (empty clears the key, non-numeric input is kept as the
-// trimmed string so the server can reject it), checkbox groups normalize to
-// string arrays, everything else stores the raw value.
-export function setGuardrailFieldValue(config, field, value) {
-  if (!field) {
-    return config;
-  }
-  const nextConfig = cloneGuardrailJSON(config);
-  if (field.input === "number") {
-    const trimmed = String(value || "").trim();
-    if (trimmed === "") {
-      delete nextConfig[field.key];
-    } else {
-      const parsed = Number(trimmed);
-      nextConfig[field.key] = Number.isFinite(parsed) ? parsed : trimmed;
-    }
-  } else if (field.input === "checkboxes") {
-    nextConfig[field.key] = normalizeGuardrailArrayValue(value);
-  } else {
-    nextConfig[field.key] = value;
-  }
-  return nextConfig;
-}
-
-// guardrailArrayFieldSelected reports whether a checkbox option is selected.
-export function guardrailArrayFieldSelected(config, field, optionValue) {
-  return guardrailFieldValue(config, field).includes(
-    String(optionValue || "").trim(),
-  );
-}
-
-// toggleGuardrailArrayValue returns the next config with a checkbox option
-// added or removed (deduplicated, order-preserving).
-export function toggleGuardrailArrayValue(config, field, optionValue, checked) {
-  const selected = normalizeGuardrailArrayValue(
-    guardrailFieldValue(config, field),
-  );
-  const normalizedValue = String(optionValue || "").trim();
-  if (!normalizedValue) {
-    return config;
-  }
-  const next = checked
-    ? Array.from(new Set([...selected, normalizedValue]))
-    : selected.filter((item) => item !== normalizedValue);
-  return setGuardrailFieldValue(config, field, next);
-}
-
 // buildGuardrailPayload builds the PUT /admin/guardrails body. Empty
-// description/user_path become undefined so JSON.stringify omits them.
+// description/user_path/fail_mode/timeout_ms become undefined so
+// JSON.stringify omits them (the server applies its defaults).
 export function buildGuardrailPayload(form) {
+  const timeout = parseGuardrailTimeoutMs(form && form.timeout_ms);
   return {
     name: String((form && form.name) || "").trim(),
     type: String((form && form.type) || "").trim(),
     description: String((form && form.description) || "").trim() || undefined,
     user_path: String((form && form.user_path) || "").trim() || undefined,
-    config: cloneGuardrailJSON(form && form.config),
+    config: cloneSchemaConfig(form && form.config),
+    fail_mode: normalizeGuardrailFailMode(form && form.fail_mode) || undefined,
+    timeout_ms: Number.isInteger(timeout) && timeout > 0 ? timeout : undefined,
   };
 }

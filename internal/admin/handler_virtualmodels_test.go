@@ -735,4 +735,3 @@ func qualifiedTargetNames(targets []virtualmodels.Target) []string {
 	}
 	return names
 }
-

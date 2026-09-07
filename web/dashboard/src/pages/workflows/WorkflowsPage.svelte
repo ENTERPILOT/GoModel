@@ -61,12 +61,6 @@
   <WorkflowEditor />
 
   <WorkflowList />
-
-  <datalist id="workflow-guardrail-options">
-    {#each wf.guardrailRefs as guardrailRef (guardrailRef)}
-      <option value={guardrailRef}></option>
-    {/each}
-  </datalist>
 </div>
 
 <style>

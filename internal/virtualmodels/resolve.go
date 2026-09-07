@@ -10,10 +10,13 @@ import (
 
 // Resolve resolves raw model/provider inputs through the redirect table.
 func (s *Service) Resolve(model, provider string) (Resolution, bool, error) {
-	return s.resolveRequested(core.NewRequestedModelSelector(model, provider), "", false, "")
+	return s.resolveRequested(context.Background(), core.NewRequestedModelSelector(model, provider), "", false, "")
 }
 
-func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPath string, enforceUserPaths bool, sessionID string) (Resolution, bool, error) {
+// resolveRequested resolves one requested selector through the redirect
+// table. ctx is the request context when there is one: routing-strategy
+// plugins read request metadata from it and are bounded by it.
+func (s *Service) resolveRequested(ctx context.Context, requested core.RequestedModelSelector, userPath string, enforceUserPaths bool, sessionID string) (Resolution, bool, error) {
 	selector, err := requested.Normalize()
 	if err != nil {
 		return Resolution{}, false, err
@@ -23,7 +26,7 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 	}
 	snap := s.snapshot()
 	if entry, ok := snap.findRedirect(requested.Model, userPath, enforceUserPaths); ok {
-		if resolved, ok := s.balancedResolution(snap, entry, sessionID); ok {
+		if resolved, ok := s.balancedResolution(ctx, snap, entry, sessionID); ok {
 			return Resolution{Requested: selector, Resolved: resolved, Source: entry.vm.Source}, true, nil
 		}
 	}
@@ -34,7 +37,7 @@ func (s *Service) resolveRequested(requested core.RequestedModelSelector, userPa
 // chosen for execution. It does not consult user_paths; scoped redirects are
 // applied by ResolveModelForUserPath on the request path.
 func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.resolveRequested(requested, "", false, "")
+	resolution, changed, err := s.resolveRequested(context.Background(), requested, "", false, "")
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}
@@ -45,7 +48,7 @@ func (s *Service) ResolveModel(requested core.RequestedModelSelector) (core.Mode
 // user_paths against the effective request user path. A redirect scoped to
 // user_paths the caller does not match falls through to the literal model name.
 func (s *Service) ResolveModelForUserPath(ctx context.Context, requested core.RequestedModelSelector) (core.ModelSelector, bool, error) {
-	resolution, changed, err := s.resolveRequested(requested, core.UserPathFromContext(ctx), true, core.SessionIDFromContext(ctx))
+	resolution, changed, err := s.resolveRequested(ctx, requested, core.UserPathFromContext(ctx), true, core.SessionIDFromContext(ctx))
 	if err != nil {
 		return core.ModelSelector{}, false, err
 	}

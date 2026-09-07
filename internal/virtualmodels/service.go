@@ -41,6 +41,15 @@ type Service struct {
 	routeSelector     ext.RouteSelector
 	routeSelectorName string
 
+	// routeResolver optionally serves the routing-strategy plugins consulted
+	// by redirects using the plugin strategy, and validates their
+	// strategy_config. Set once during startup, before serving.
+	routeResolver RouteResolver
+	// pluginWarned records, per redirect source, that the plugin strategy's
+	// failure has been logged, so an unavailable plugin warns once rather
+	// than on every request.
+	pluginWarned sync.Map
+
 	// accessPolicy optionally narrows model access per request from the
 	// subject side (auth key and user-path allowlists). It is consulted after
 	// the model-side policy rows. Set once during startup, before serving.
@@ -221,6 +230,9 @@ func (s *Service) ValidateManagedConfig(declaredProviders []string) error {
 		if err := s.validateTargetProviders(vm, declared); err != nil {
 			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
 		}
+		if err := s.validateRouteStrategy(vm); err != nil {
+			return fmt.Errorf("load virtual model %q: %w", vm.Source, err)
+		}
 	}
 	return nil
 }
@@ -285,6 +297,8 @@ func (s *Service) ListViews() []View {
 			Kind:            vm.Kind(),
 			Targets:         vm.Targets,
 			Strategy:        vm.Strategy,
+			StrategyPlugin:  vm.StrategyPlugin,
+			StrategyConfig:  vm.StrategyConfig,
 			SessionAffinity: vm.SessionAffinity,
 			Failover:        vm.Failover,
 			ProviderName:    vm.ProviderName,
@@ -584,6 +598,9 @@ func (s *Service) validateRedirectTarget(current *snapshot, vm VirtualModel) err
 		return err
 	}
 	if err := s.validateTargetProviders(vm, nil); err != nil {
+		return err
+	}
+	if err := s.validateRouteStrategy(vm); err != nil {
 		return err
 	}
 	if missing, ok := s.firstUnsupportedTarget(current, vm); ok {

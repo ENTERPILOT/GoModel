@@ -22,12 +22,23 @@ type cliOptions struct {
 	Ready         bool
 	ReadyTimeout  time.Duration
 	Reload        bool
+	// PluginArgs is non-nil when the first argument is the "plugin"
+	// subcommand; it holds the arguments after it.
+	PluginArgs []string
 }
 
 func parseCLI(productName string, args []string, output io.Writer) (cliOptions, error) {
 	var opts cliOptions
+	if len(args) > 0 && args[0] == pluginCommand {
+		opts.PluginArgs = append([]string{}, args[1:]...)
+		return opts, nil
+	}
 	flags := flag.NewFlagSet(productName, flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.Usage = func() {
+		fmt.Fprintf(output, "Usage:\n  %[1]s [flags]\n  %[1]s plugin build|inspect ... (see \"%[1]s plugin help\")\n\nFlags:\n", productName)
+		flags.PrintDefaults()
+	}
 	flags.BoolVar(&opts.Version, "version", false, "Print version information")
 	flags.BoolVar(&opts.Health, "health", false, "Check the local GoModel health (liveness) endpoint and exit")
 	flags.DurationVar(&opts.HealthTimeout, "health-timeout", defaultHealthTimeout, "Timeout for --health")

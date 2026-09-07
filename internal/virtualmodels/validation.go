@@ -32,6 +32,7 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	vm.Source = strings.TrimSpace(vm.Source)
 	vm.Description = strings.TrimSpace(vm.Description)
 	vm.Strategy = normalizeStrategy(vm.Strategy)
+	vm.StrategyPlugin = strings.TrimSpace(vm.StrategyPlugin)
 	if err := validateSlowdown(vm.Slowdown); err != nil {
 		return VirtualModel{}, nil, err
 	}
@@ -41,7 +42,20 @@ func normalizeRedirect(vm VirtualModel) (VirtualModel, []core.ModelSelector, err
 	}
 	if !validStrategy(vm.Strategy) {
 		return VirtualModel{}, nil, newValidationError(
-			fmt.Sprintf("unknown load-balancing strategy %q (use %q, %q, or %q)", vm.Strategy, StrategyRoundRobin, StrategyCost, StrategyAdaptive), nil)
+			fmt.Sprintf("unknown load-balancing strategy %q (use %q, %q, %q, %q, or %q)", vm.Strategy, StrategyRoundRobin, StrategyCost, StrategyFailover, StrategyAdaptive, StrategyPlugin), nil)
+	}
+	if vm.Strategy == StrategyPlugin {
+		if vm.StrategyPlugin == "" {
+			return VirtualModel{}, nil, newValidationError(fmt.Sprintf("strategy_plugin is required with strategy %q", StrategyPlugin), nil)
+		}
+		if vm.StrategyConfig == nil {
+			vm.StrategyConfig = map[string]any{}
+		}
+	} else {
+		// The plugin fields only mean something under the plugin strategy;
+		// dropping them keeps a row switched back to round robin tidy.
+		vm.StrategyPlugin = ""
+		vm.StrategyConfig = nil
 	}
 	if len(vm.Targets) == 0 {
 		return VirtualModel{}, nil, newValidationError("at least one target is required", nil)

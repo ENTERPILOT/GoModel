@@ -148,22 +148,13 @@ func workflowTestWorkflowHash(payload workflows.Payload) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func newWorkflowRegistry(t *testing.T) *guardrails.Registry {
+func newWorkflowRegistry(t *testing.T) *guardrails.Service {
 	t.Helper()
-
-	registry := guardrails.NewRegistry()
-	rule, err := guardrails.NewSystemPromptGuardrail("policy-system", guardrails.SystemPromptInject, "be precise")
-	if err != nil {
-		t.Fatalf("NewSystemPromptGuardrail() error = %v", err)
-	}
-	if err := registry.Register(rule, guardrails.RuleDescriptor{
-		Type:    "system_prompt",
-		Mode:    string(guardrails.SystemPromptInject),
-		Content: "be precise",
-	}); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	return registry
+	return newGuardrailService(t, guardrails.Definition{
+		Name:   "policy-system",
+		Type:   "system_prompt",
+		Config: rawGuardrailConfig(t, map[string]any{"mode": "inject", "content": "be precise"}),
+	})
 }
 
 func newWorkflowModelRegistry(t *testing.T) *providers.ModelRegistry {
@@ -194,11 +185,11 @@ func decodeWorkflowErrorEnvelope(t *testing.T, body []byte) workflowErrorEnvelop
 	return envelope
 }
 
-func newWorkflowHandler(t *testing.T, store workflows.Store, registry *guardrails.Registry) *Handler {
+func newWorkflowHandler(t *testing.T, store workflows.Store, registry *guardrails.Service) *Handler {
 	return newWorkflowHandlerWithModelRegistry(t, store, newWorkflowModelRegistry(t), registry)
 }
 
-func newWorkflowHandlerWithModelRegistry(t *testing.T, store workflows.Store, modelRegistry *providers.ModelRegistry, guardrailRegistry *guardrails.Registry) *Handler {
+func newWorkflowHandlerWithModelRegistry(t *testing.T, store workflows.Store, modelRegistry *providers.ModelRegistry, guardrailRegistry *guardrails.Service) *Handler {
 	t.Helper()
 
 	service, err := workflows.NewService(store, workflows.NewCompilerWithFeatureCaps(guardrailRegistry, core.DefaultWorkflowFeatures()))
@@ -528,12 +519,26 @@ func TestListWorkflowGuardrails(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 
-	var body []string
+	var body []workflowGuardrailItem
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if len(body) != 1 || body[0] != "policy-system" {
-		t.Fatalf("body = %#v, want [policy-system]", body)
+	if len(body) != 1 || body[0].Name != "policy-system" || len(body[0].Phases) != 1 || body[0].Phases[0] != "prompt" {
+		t.Fatalf("body = %#v, want [policy-system] with prompt phase", body)
+	}
+
+	// The full service reports type, phases and summary per instance.
+	h = NewHandler(nil, nil, WithGuardrailService(registry))
+	c, rec = newHandlerContext("/admin/workflows/guardrails")
+	if err := h.ListWorkflowGuardrails(c); err != nil {
+		t.Fatalf("ListWorkflowGuardrails() error = %v", err)
+	}
+	body = nil
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(body) != 1 || body[0].Type != "system_prompt" || body[0].Summary == "" || body[0].Phases[0] != "prompt" {
+		t.Fatalf("body = %#v, want typed item with summary", body)
 	}
 }
 

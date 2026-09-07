@@ -2,8 +2,11 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestApplyVirtualModelsEnv_ParsesAndMerges(t *testing.T) {
@@ -115,5 +118,42 @@ func TestApplyVirtualModelsEnv_Unset(t *testing.T) {
 	}
 	if len(cfg.VirtualModels) != 1 {
 		t.Fatalf("unset env mutated config: %#v", cfg.VirtualModels)
+	}
+}
+
+func TestVirtualModelConfig_PluginStrategyFromYAMLAndEnv(t *testing.T) {
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(`
+virtual_models:
+  - source: smart-router
+    strategy: plugin
+    strategy_plugin: cheapest_healthy
+    strategy_config:
+      prefer: fastest
+      max_error_rate: 0.1
+    targets:
+      - { model: openai/gpt-4o }
+      - { model: groq/llama }
+`), &cfg); err != nil {
+		t.Fatalf("yaml.Unmarshal() error = %v", err)
+	}
+	if len(cfg.VirtualModels) != 1 {
+		t.Fatalf("len(VirtualModels) = %d, want 1", len(cfg.VirtualModels))
+	}
+	vm := cfg.VirtualModels[0]
+	if vm.Strategy != "plugin" || vm.StrategyPlugin != "cheapest_healthy" {
+		t.Fatalf("yaml entry = %+v, want plugin strategy fields", vm)
+	}
+	if want := map[string]any{"prefer": "fastest", "max_error_rate": 0.1}; !reflect.DeepEqual(vm.StrategyConfig, want) {
+		t.Fatalf("yaml strategy_config = %#v, want %#v", vm.StrategyConfig, want)
+	}
+
+	t.Setenv(envVirtualModels, `[{"source":"smart-router","strategy":"plugin","strategy_plugin":"latency_aware","strategy_config":{"p95_window":"5m"},"targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama"}]}]`)
+	if err := applyVirtualModelsEnv(&cfg, true); err != nil {
+		t.Fatalf("applyVirtualModelsEnv() error = %v", err)
+	}
+	vm = cfg.VirtualModels[0]
+	if vm.StrategyPlugin != "latency_aware" || !reflect.DeepEqual(vm.StrategyConfig, map[string]any{"p95_window": "5m"}) {
+		t.Fatalf("env entry = %+v, want env to override plugin fields", vm)
 	}
 }

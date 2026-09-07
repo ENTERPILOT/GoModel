@@ -12,6 +12,9 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/enterpilot/gomodel/internal/plugins"
+	"github.com/enterpilot/gomodel/internal/plugins/builtin"
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 type staticStore struct {
@@ -670,35 +673,24 @@ func TestServiceEnsureDefaultGlobal_ValidatesBeforeStoreMutation(t *testing.T) {
 	}
 }
 
-func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *testing.T) {
-	guardrailStore := &guardrailTestStore{
-		definitions: map[string]guardrails.Definition{
-			"privacy": {
-				Name: "privacy",
-				Type: "llm_based_altering",
-				Config: mustMarshalJSON(t, struct {
-					Model string   `json:"model"`
-					Roles []string `json:"roles"`
-				}{
-					Model: "gpt-4o-mini",
-					Roles: []string{"user"},
-				}),
-			},
-		},
-	}
-	guardrailService, err := guardrails.NewService(guardrailStore, guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+func TestServiceRefresh_CompiledChainsFollowChatCompleterSwap(t *testing.T) {
+	guardrailService := newGuardrailService(t, guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
 		return &core.ChatResponse{
 			Choices: []core.Choice{
-				{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_1)"}},
+				{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_1)"}, FinishReason: "stop"},
 			},
 		}, nil
-	}))
-	if err != nil {
-		t.Fatalf("guardrails.NewService() error = %v", err)
-	}
-	if err := guardrailService.Refresh(context.Background()); err != nil {
-		t.Fatalf("guardrailService.Refresh() error = %v", err)
-	}
+	}), guardrails.Definition{
+		Name: "privacy",
+		Type: "llm_based_altering",
+		Config: mustMarshalJSON(t, struct {
+			Model string   `json:"model"`
+			Roles []string `json:"roles"`
+		}{
+			Model: "gpt-4o-mini",
+			Roles: []string{"user"},
+		}),
+	})
 
 	store := &staticStore{
 		versions: []Version{
@@ -710,15 +702,16 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 				Active:   true,
 				Name:     "global",
 				Payload: Payload{
-					SchemaVersion: 1,
+					SchemaVersion: 2,
 					Features: FeatureFlags{
 						Cache:      false,
 						Audit:      true,
 						Usage:      true,
 						Guardrails: true,
 					},
-					Guardrails: []GuardrailStep{
-						{Ref: "privacy", Step: 10},
+					Steps: []Step{
+						{Ref: "privacy", Phase: PhasePrompt, Step: 10},
+						{Ref: "privacy", Phase: PhaseResponse, Step: 10},
 					},
 				},
 			},
@@ -737,26 +730,34 @@ func TestServiceRefresh_RebuildsCompiledGuardrailPipelinesAfterExecutorSwap(t *t
 	if err != nil {
 		t.Fatalf("service.Match() error = %v", err)
 	}
+	// With a response chain the cache key covers every phase, so it differs
+	// from the prompt hash alone.
+	if policy.GuardrailsHash == "" || policy.ChainHashes["prompt"] == policy.GuardrailsHash || policy.ChainHashes["response"] == "" {
+		t.Fatalf("policy hashes = %q / %v", policy.GuardrailsHash, policy.ChainHashes)
+	}
 	workflow := &core.Workflow{Policy: policy}
+	chains := service.ChainsForWorkflow(workflow)
+	if chains == nil || chains.Prompt.Len() != 1 || chains.Response.Len() != 1 {
+		t.Fatalf("chains = %+v", chains)
+	}
+	if service.ChainsForContext(core.WithWorkflow(context.Background(), workflow)) != chains {
+		t.Fatal("ChainsForContext() differs from ChainsForWorkflow()")
+	}
+	if service.ChainsForWorkflow(&core.Workflow{Policy: &core.ResolvedWorkflowPolicy{VersionID: "missing"}}) != nil {
+		t.Fatal("unknown version should resolve no chains")
+	}
 
-	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_1)")
+	assertChainRewrite(t, chains.Prompt, "[|---|](PERSON_1)")
 
-	if err := guardrailService.SetExecutor(context.Background(), guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
+	guardrailService.SetChatCompleter(guardrailExecutorFunc(func(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
 		return &core.ChatResponse{
 			Choices: []core.Choice{
-				{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_2)"}},
+				{Message: core.ResponseMessage{Role: "assistant", Content: "[|---|](PERSON_2)"}, FinishReason: "stop"},
 			},
 		}, nil
-	})); err != nil {
-		t.Fatalf("guardrailService.SetExecutor() error = %v", err)
-	}
-
-	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_1)")
-
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("service.Refresh() after SetExecutor error = %v", err)
-	}
-	assertPipelineRewrite(t, service.PipelineForWorkflow(workflow), "[|---|](PERSON_2)")
+	}))
+	// Instances see the swapped executor without a workflow refresh.
+	assertChainRewrite(t, service.ChainsForWorkflow(workflow).Prompt, "[|---|](PERSON_2)")
 }
 
 type guardrailTestStore struct {
@@ -820,24 +821,48 @@ func mustMarshalJSON(t *testing.T, value any) []byte {
 	return raw
 }
 
-func assertPipelineRewrite(t *testing.T, pipeline *guardrails.Pipeline, want string) {
+// newGuardrailService builds a guardrails service over the built-in plugins.
+func newGuardrailService(t *testing.T, chat plugins.ChatCompleter, definitions ...guardrails.Definition) *guardrails.Service {
 	t.Helper()
-	if pipeline == nil {
-		t.Fatal("pipeline = nil, want non-nil")
+	catalog := plugins.NewCatalog()
+	for _, factory := range builtin.All() {
+		if err := catalog.Register(factory, plugins.SourceBuiltin); err != nil {
+			t.Fatalf("catalog.Register() error = %v", err)
+		}
 	}
-
-	msgs, err := pipeline.Process(context.Background(), []guardrails.Message{{Role: "user", Content: "John Smith"}})
+	store := &guardrailTestStore{definitions: map[string]guardrails.Definition{}}
+	for _, definition := range definitions {
+		store.definitions[definition.Name] = definition
+	}
+	service, err := guardrails.NewService(store, catalog, plugins.HostDeps{Chat: chat})
 	if err != nil {
-		t.Fatalf("pipeline.Process() error = %v", err)
+		t.Fatalf("guardrails.NewService() error = %v", err)
 	}
-	if len(msgs) != 1 {
-		t.Fatalf("len(msgs) = %d, want 1", len(msgs))
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("guardrailService.Refresh() error = %v", err)
 	}
-	if msgs[0].Role != "user" {
-		t.Fatalf("msgs[0].Role = %q, want user", msgs[0].Role)
+	return service
+}
+
+func assertChainRewrite(t *testing.T, chain *plugins.Chain, want string) {
+	t.Helper()
+	if chain.Empty() {
+		t.Fatal("chain = empty, want a prompt chain")
 	}
-	if msgs[0].Content != want {
-		t.Fatalf("msgs[0].Content = %q, want %q", msgs[0].Content, want)
+	msg := pluginapi.TextMessage(pluginapi.RoleUser, "John Smith")
+	msg.ID = "m0"
+	prompt := &pluginapi.Prompt{Messages: []pluginapi.Message{msg}}
+	prompt.Reset()
+	x := plugins.NewRequestState().NewExchange(context.Background(), pluginapi.Meta{})
+	x.Prompt = prompt
+	if _, err := chain.RunPrompt(context.Background(), x); err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if len(prompt.Messages) != 1 || prompt.Messages[0].Role != pluginapi.RoleUser {
+		t.Fatalf("messages = %+v, want one user message", prompt.Messages)
+	}
+	if got := prompt.Messages[0].Text(); got != want {
+		t.Fatalf("rewritten text = %q, want %q", got, want)
 	}
 }
 

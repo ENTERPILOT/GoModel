@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/live"
+	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/pricingoverrides"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/health"
@@ -50,6 +51,7 @@ type Handler struct {
 	runtimeSettings     *runtimesettings.Service
 	guardrails          guardrails.Catalog
 	guardrailDefs       *guardrails.Service
+	pluginCatalog       *plugins.Catalog
 	liveBroker          *live.Broker
 	runtimeConfig       DashboardConfigResponse
 	runtimeRefresher    RuntimeRefresher
@@ -324,9 +326,21 @@ func WithTagging(service *tagging.Service) Option {
 	}
 }
 
-// WithGuardrailService enables full guardrail definition administration endpoints.
+// WithPluginCatalog enables the plugin listing endpoint.
+func WithPluginCatalog(catalog *plugins.Catalog) Option {
+	return func(h *Handler) {
+		h.pluginCatalog = catalog
+	}
+}
+
+// WithGuardrailService enables full guardrail definition administration
+// endpoints. A nil service (plugin system disabled) leaves them unavailable
+// rather than storing a nil pointer behind the interfaces.
 func WithGuardrailService(service *guardrails.Service) Option {
 	return func(h *Handler) {
+		if service == nil {
+			return
+		}
 		h.guardrails = service
 		h.guardrailDefs = service
 	}
