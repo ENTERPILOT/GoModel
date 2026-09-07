@@ -426,3 +426,27 @@ func TestChatCompletion_BufferCapIsNotBorrowedByResponseChain(t *testing.T) {
 		}
 	})
 }
+
+// A blocked request belongs to its resolved workflow like any other outcome,
+// so the audit entry can carry it.
+func TestChatCompletion_BlockedRequestKeepsWorkflow(t *testing.T) {
+	chains := phaseChains(t, map[string]string{"prompt": "block"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1})
+	handler := phaseHandler(t, phaseProvider(), chains)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = &explodingReadCloser{}
+	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(chatBody), false, "", nil)
+	req = withRequestSnapshotAndPrompt(req, frame)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := handler.ChatCompletion(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d (%s), want the block", rec.Code, rec.Body.String())
+	}
+	if core.GetWorkflow(c.Request().Context()) == nil {
+		t.Fatal("blocked request lost its resolved workflow")
+	}
+}

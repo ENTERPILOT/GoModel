@@ -176,6 +176,9 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 			recordPromptPluginRevisions(c, nil, nil)
 			return s.writeChatShortCircuit(c, workflow, req, short, messagesJSON, messagesOuterWrap(req, resolvedModelFromWorkflow(workflow, req.Model)))
 		}
+		// A block or fail-closed outcome still belongs to the resolved
+		// workflow: the audit entry must carry it like every other outcome.
+		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
 		recordPromptPluginRevisions(c, nil, nil)
 		return handleError(c, err)
 	}
