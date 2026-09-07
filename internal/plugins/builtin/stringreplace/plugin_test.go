@@ -590,3 +590,39 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 		})
 	}
 }
+
+// Block, warn and respond count matches over the same units replace edits:
+// each text part and each tool-result text part on its own.
+func TestOnPromptCountsPerPartLikeReplace(t *testing.T) {
+	split := pluginapi.Message{ID: "m0", Role: pluginapi.RoleUser, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartText, Text: "my sec"},
+		{Kind: pluginapi.PartText, Text: "ret is here"},
+	}}
+	toolMsg := pluginapi.Message{ID: "m1", Role: pluginapi.RoleTool, ToolCallID: "c1", Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolResult, ToolResult: &pluginapi.ToolResult{CallID: "c1", Parts: []pluginapi.Part{{Kind: pluginapi.PartText, Text: "the secret result"}}}},
+	}}
+	newPrompt := func() *pluginapi.Prompt {
+		p := &pluginapi.Prompt{Messages: []pluginapi.Message{split, toolMsg}}
+		p.Reset()
+		return p
+	}
+
+	t.Run("split across parts matches in no mode", func(t *testing.T) {
+		block := newPlugin(t, `{"rules": "secret => x", "on_match": "block", "roles": ["user"]}`)
+		if d, err := block.OnPrompt(context.Background(), exchange(newPrompt(), nil)); err != nil || d.Action != pluginapi.ActionAllow {
+			t.Fatalf("block decision = %+v, %v; want allow like replace, which cannot edit across parts", d, err)
+		}
+		replace := newPlugin(t, `{"rules": "secret => x", "roles": ["user"]}`)
+		x := exchange(newPrompt(), nil)
+		if _, err := replace.OnPrompt(context.Background(), x); err != nil || x.Prompt.Changes().Dirty {
+			t.Fatalf("replace edited a split match: %v, dirty %v", err, x.Prompt.Changes().Dirty)
+		}
+	})
+	t.Run("tool results count like they are edited", func(t *testing.T) {
+		block := newPlugin(t, `{"rules": "secret => x", "on_match": "block", "roles": ["tool"]}`)
+		d, err := block.OnPrompt(context.Background(), exchange(newPrompt(), nil))
+		if err != nil || d.Action != pluginapi.ActionBlock || !reflect.DeepEqual(d.Detail, map[string]any{"matches": 1, "messages": 1}) {
+			t.Fatalf("block decision = %+v, %v", d, err)
+		}
+	})
+}

@@ -309,7 +309,9 @@ guardrail (see `fail_mode`).
 ### `string_replace`
 
 Replaces, flags, or blocks text that matches a list of literal or regular
-expression rules. Works on prompts, responses, and streams.
+expression rules. Works on prompts, responses, and streams. Rules match
+within one text part (a content part or a tool-result part) in every mode;
+text split across two parts is not matched.
 
 **Phases:** prompt, response, stream. **Edits content:** yes.
 
