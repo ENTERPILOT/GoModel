@@ -157,3 +157,33 @@ func TestNewInstanceRejectsBufferPolicyWithoutResponseHook(t *testing.T) {
 		t.Fatalf("transform policy rejected: %v", err)
 	}
 }
+
+// slowInit ignores the init deadline, returns later, and reports Close.
+type slowInit struct {
+	delay  time.Duration
+	closed chan struct{}
+}
+
+func (s *slowInit) Manifest() pluginapi.Manifest { return pluginapi.Manifest{Name: "slow"} }
+func (s *slowInit) Init(context.Context, json.RawMessage, pluginapi.Host) error {
+	time.Sleep(s.delay)
+	return nil
+}
+func (s *slowInit) Close(context.Context) error { close(s.closed); return nil }
+
+func TestNewInstanceClosesAbandonedInitOnceItReturns(t *testing.T) {
+	previous := initTimeout
+	initTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { initTimeout = previous })
+
+	plugin := &slowInit{delay: 60 * time.Millisecond, closed: make(chan struct{})}
+	entry := Entry{Name: "slow", Factory: func() pluginapi.Plugin { return plugin }}
+	if _, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{})); !errors.Is(err, ErrAbandoned) {
+		t.Fatalf("error = %v, want ErrAbandoned", err)
+	}
+	select {
+	case <-plugin.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("abandoned plugin was not closed after its Init returned")
+	}
+}

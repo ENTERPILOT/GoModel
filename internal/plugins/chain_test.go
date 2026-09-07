@@ -31,6 +31,9 @@ func TestNewInstance(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("NewInstance() error = %v, want %q", err, tt.wantErr)
 				}
+				if tt.plugin.initErr != nil && !tt.plugin.closed {
+					t.Fatal("a plugin whose Init failed must be closed")
+				}
 				return
 			}
 			if err != nil {
