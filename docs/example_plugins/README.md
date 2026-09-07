@@ -9,7 +9,7 @@ commented example implementing the `prompt` and `response` hooks.
 ```sh
 make example-plugins            # builds every example into ./plugins/<dir>.so
 # or one at a time:
-go run ./cmd/gomodel plugin build ./examples/plugins/keywordblock -o plugins/keyword_block.so
+go run ./cmd/gomodel plugin build ./docs/example_plugins/keywordblock -o plugins/keyword_block.so
 go run ./cmd/gomodel plugin inspect plugins/keyword_block.so
 ```
 

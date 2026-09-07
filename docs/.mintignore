@@ -6,5 +6,6 @@ DEVELOPMENT.md
 TESTING_STRATEGY.md
 dev/
 examples/
+example_plugins/
 install/
 server.json

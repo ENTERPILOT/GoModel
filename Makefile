@@ -85,11 +85,11 @@ image-plugins: frontend
 	docker build -f Dockerfile.plugins -t gomodel:$(VERSION)-plugins -t gomodel:plugins \
 		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg DATE=$(DATE) .
 
-# Build every example plugin under examples/plugins into ./plugins/<name>.so
+# Build every example plugin under docs/example_plugins into ./plugins/<name>.so
 # using the toolchain of this checkout (matches `make build-plugins`).
 example-plugins:
 	@mkdir -p plugins
-	@for dir in examples/plugins/*/; do \
+	@for dir in docs/example_plugins/*/; do \
 		name=$$(basename $$dir); \
 		echo "building $$dir -> plugins/$$name.so"; \
 		go run ./cmd/gomodel plugin build -o plugins/$$name.so $$dir || exit 1; \

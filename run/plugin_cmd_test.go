@@ -97,7 +97,7 @@ func TestParsePluginBuildArgs(t *testing.T) {
 		wantOut string
 		wantErr bool
 	}{
-		{name: "dir only", args: []string{"./examples/plugins/keywordblock"}, wantDir: "./examples/plugins/keywordblock", wantOut: "keywordblock.so"},
+		{name: "dir only", args: []string{"./docs/example_plugins/keywordblock"}, wantDir: "./docs/example_plugins/keywordblock", wantOut: "keywordblock.so"},
 		{name: "flag before dir", args: []string{"-o", "out/x.so", "./p"}, wantDir: "./p", wantOut: "out/x.so"},
 		{name: "flag after dir", args: []string{"./p", "-o", "x.so"}, wantDir: "./p", wantOut: "x.so"},
 		{name: "double dash flag", args: []string{"./p", "--o=x.so"}, wantDir: "./p", wantOut: "x.so"},

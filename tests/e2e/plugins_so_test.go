@@ -42,7 +42,7 @@ func TestPlugins_SharedObject_E2E(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	build := exec.CommandContext(ctx, "go", "run", "./cmd/gomodel", "plugin", "build", "-o", so, "./examples/plugins/keywordblock")
+	build := exec.CommandContext(ctx, "go", "run", "./cmd/gomodel", "plugin", "build", "-o", so, "./docs/example_plugins/keywordblock")
 	build.Dir = root
 	out, err := build.CombinedOutput()
 	require.NoError(t, err, "gomodel plugin build failed:\n%s", string(out))

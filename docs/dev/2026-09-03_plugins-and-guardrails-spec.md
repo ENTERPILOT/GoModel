@@ -928,7 +928,7 @@ Each phase is independently shippable and keeps existing behaviour.
    `gomodel plugin build` helper, cgo image variant,
    `gomodel-plugin-builder` image, `/admin/plugins`,
    dashboard plugin list, `secret` and `model` inputs, strategy dropdown entries and `strategy_config` fields in the virtual model editor, `docs/advanced/plugins.mdx`, ADR-0003 amendment for the `steps` payload
-   and an example plugin under `examples/plugins/`.
+   and an example plugin under `docs/example_plugins/`.
 6. Audio, realtime, and MCP tool-call hooks.
 
 ## 11. Open decisions for review

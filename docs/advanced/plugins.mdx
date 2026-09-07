@@ -321,7 +321,7 @@ Go's `plugin` package sets the rules, and they are strict:
 ### Build and inspect
 
 ```sh
-gomodel plugin build ./examples/plugins/keywordblock -o plugins/keyword_block.so
+gomodel plugin build ./docs/example_plugins/keywordblock -o plugins/keyword_block.so
 gomodel plugin inspect plugins/keyword_block.so
 shasum -a 256 plugins/keyword_block.so     # value for plugins.load[].sha256
 ```
@@ -351,7 +351,7 @@ docker run --rm -v "$PWD/my-plugin:/src" -v "$PWD/plugins:/out" \
 ```
 
 `gomodel --version` prints the Go and `pluginapi` versions of the binary.
-`examples/plugins/README.md` covers building a plugin in its own Go module.
+`docs/example_plugins/README.md` covers building a plugin in its own Go module.
 
 ## Writing a plugin
 
@@ -439,7 +439,7 @@ Notes for authors:
 - Add `Scope: pluginapi.ScopeRoute` to fields that belong to a virtual model
   rather than to the instance (routing strategies only).
 
-`examples/plugins/keywordblock/main.go` is a fuller, commented example with
+`docs/example_plugins/keywordblock/main.go` is a fuller, commented example with
 `prompt` and `response` hooks, and the built-ins under
 `internal/plugins/builtin/` are reference implementations of every hook kind.
 
