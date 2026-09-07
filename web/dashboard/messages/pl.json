@@ -788,10 +788,7 @@
   "rate_limits_requests": "Requesty",
   "rate_limits_tokens": "Tokeny",
   "guardrails_title": "Wtyczki i Guardrails",
-  "guardrails_kicker": "Obiekty polityk wielokrotnego użytku",
-  "guardrails_library": "Biblioteka Guardrails",
   "guardrails_instances": "Instancje",
-  "guardrails_types": "Typy",
   "guardrails_disabled": "GUARDRAILS_ENABLED jest wyłączone. Nadal możesz zarządzać Guardrails, ale nie będą uruchamiane.",
   "guardrails_unavailable": "Funkcja Guardrails jest niedostępna.",
   "guardrails_create": "Utwórz Guardrail",
@@ -805,7 +802,6 @@
   "guardrails_empty": "Nie zdefiniowano jeszcze Guardrails.",
   "guardrails_help_label": "Pomoc dotycząca Guardrails",
   "guardrails_help": "Obiekty polityk wielokrotnego użytku zapisane w bazie danych i utrzymywane w pamięci na potrzeby wykonywania Workflows.",
-  "guardrails_library_help": "Przechowuj Guardrails w bazie danych, utrzymuj je w pamięci i dołączaj do Workflows przez referencję.",
   "guardrails_instances_help": "Każda instancja ma nazwę wielokrotnego użytku, typ, opcjonalny User Path do ograniczania widoczności i konfigurację JSON.",
   "guardrails_loading": "Wczytywanie Guardrails...",
   "guardrails_no_summary": "Brak podsumowania.",
@@ -1554,23 +1550,6 @@
   "plugins_title": "Wtyczki",
   "plugins_help": "Wtyczki załadowane przez bramkę. Dodają typy Guardrails i strategie routingu; wbudowane są częścią GoModel, a wtyczki plikowe są ładowane ze skonfigurowanego katalogu wtyczek.",
   "plugins_empty": "Brak załadowanych wtyczek.",
-  "plugins_count": [
-    {
-      "declarations": [
-        "input count",
-        "local count_plural = count: plural"
-      ],
-      "selectors": [
-        "count_plural"
-      ],
-      "match": {
-        "count_plural=one": "{count} wtyczka",
-        "count_plural=few": "{count} wtyczki",
-        "count_plural=many": "{count} wtyczek",
-        "count_plural=*": "{count} wtyczki"
-      }
-    }
-  ],
   "plugins_name": "Nazwa",
   "plugins_version": "Wersja",
   "plugins_kinds": "Hooki",

@@ -780,10 +780,7 @@
   "rate_limits_requests": "Anfragen",
   "rate_limits_tokens": "Tokens",
   "guardrails_title": "Plugins & Guardrails",
-  "guardrails_kicker": "Wiederverwendbare Richtlinienobjekte",
-  "guardrails_library": "Guardrail-Bibliothek",
   "guardrails_instances": "Instanzen",
-  "guardrails_types": "Typen",
   "guardrails_disabled": "GUARDRAILS_ENABLED ist deaktiviert. Du kannst Guardrails weiterhin verwalten, aber sie werden nicht ausgeführt.",
   "guardrails_unavailable": "Die Guardrails-Funktion ist nicht verfügbar.",
   "guardrails_create": "Guardrail erstellen",
@@ -797,7 +794,6 @@
   "guardrails_empty": "Noch keine Guardrails definiert.",
   "guardrails_help_label": "Hilfe zu Guardrails",
   "guardrails_help": "Wiederverwendbare Richtlinienobjekte, die in der Datenbank gespeichert und für die Workflow-Ausführung im Speicher vorgehalten werden.",
-  "guardrails_library_help": "Guardrails in der Datenbank speichern, im Speicher vorhalten und per Referenz an Workflows anhängen.",
   "guardrails_instances_help": "Jede Instanz hat einen wiederverwendbaren Namen, einen Typ, einen optionalen Nutzerpfad zur Sichtbarkeitseinschränkung und eine JSON-basierte Config-Payload.",
   "guardrails_loading": "Guardrails werden geladen…",
   "guardrails_no_summary": "Noch keine Zusammenfassung.",
@@ -1526,16 +1522,6 @@
   "plugins_title": "Plugins",
   "plugins_help": "Vom Gateway geladene Plugins. Sie stellen Guardrail-Typen und Routing-Strategien bereit; eingebaute Plugins sind Teil von GoModel, Datei-Plugins werden aus dem konfigurierten Plugin-Verzeichnis geladen.",
   "plugins_empty": "Keine Plugins geladen.",
-  "plugins_count": [
-    {
-      "declarations": ["input count", "local count_plural = count: plural"],
-      "selectors": ["count_plural"],
-      "match": {
-        "count_plural=one": "{count} Plugin",
-        "count_plural=*": "{count} Plugins"
-      }
-    }
-  ],
   "plugins_name": "Name",
   "plugins_version": "Version",
   "plugins_kinds": "Hooks",

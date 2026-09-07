@@ -8,13 +8,14 @@
   import { pluginsStore } from "$lib/stores/plugins.svelte.js";
   import { phaseLabel } from "$lib/utils/pluginPhases.js";
   import { pluginHealthy, pluginSourceIsBuiltin } from "$lib/utils/plugins.js";
+  import { formatNumber } from "$lib/utils/format.js";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
 <section class="settings-panel plugins-panel">
   <div class="editor-header plugins-header">
     <h3>{m.plugins_title()}</h3>
-    <span class="provider-badge">{m.plugins_count({ count: pluginsStore.plugins.length })}</span>
+    <span class="provider-badge">{formatNumber(pluginsStore.plugins.length)}</span>
   </div>
   <p class="form-hint">{m.plugins_help()}</p>
 

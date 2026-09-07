@@ -8,6 +8,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
   import { phaseLabel } from "$lib/utils/pluginPhases.js";
+  import { formatNumber } from "$lib/utils/format.js";
   import { Pencil, Plus, ShieldCheck, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
@@ -15,7 +16,10 @@
 <section class="settings-panel settings-guardrails-list">
   <div class="editor-header">
     <div>
-      <h3>{m.guardrails_instances()}</h3>
+      <h3 class="settings-section-title">
+        {m.guardrails_instances()}
+        <span class="provider-badge">{formatNumber(store.guardrails.length)}</span>
+      </h3>
       <p class="form-hint">
         {m.guardrails_instances_help()}
       </p>
@@ -126,6 +130,12 @@
 <style>
   .settings-guardrails-list {
     min-width: 0;
+  }
+
+  .settings-section-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .settings-guardrail-shield {
