@@ -225,3 +225,22 @@ func TestSummarize(t *testing.T) {
 		t.Fatalf("manifest = %+v", m)
 	}
 }
+
+// "system" covers developer messages, the Responses spelling of system.
+func TestOnPromptSystemRoleIncludesDeveloper(t *testing.T) {
+	host := &fakeHost{reply: upper}
+	p := newPlugin(t, `{"model":"gpt","provider":"openai","roles":["system"]}`, host)
+	pr := prompt(
+		pluginapi.TextMessage(pluginapi.RoleDeveloper, "dev rules"),
+		pluginapi.TextMessage(pluginapi.RoleUser, "hello"),
+	)
+	if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); err != nil {
+		t.Fatalf("OnPrompt() error = %v", err)
+	}
+	if got := pr.Messages[0].Text(); got != "DEV RULES" {
+		t.Fatalf("developer message = %q, want rewritten", got)
+	}
+	if got := pr.Messages[1].Text(); got != "hello" {
+		t.Fatalf("user message = %q, want untouched", got)
+	}
+}
