@@ -283,7 +283,7 @@ instances run on traffic.
 
 ## Dashboard
 
-- **Guardrails page**: *Create Guardrail* lists every plugin that implements a
+- **Plugins & Guardrails page**: *Create Guardrail* lists every plugin that implements a
   `prompt`, `response`, or `stream` hook. The form is generated from the
   plugin's `ConfigSchema`: `text`, `textarea`, `number`, `select`,
   `checkboxes`, `secret` (masked; `GET` returns `********` and sending that
@@ -379,9 +379,10 @@ type wordBlock struct{ words []string }
 
 func (p *wordBlock) Manifest() pluginapi.Manifest {
 	return pluginapi.Manifest{
-		Name:    "word_block",
-		Version: "1.0.0",
-		Kinds:   []pluginapi.Kind{pluginapi.KindPrompt},
+		Name:      "word_block",
+		Version:   "1.0.0",
+		Kinds:     []pluginapi.Kind{pluginapi.KindPrompt},
+		Guardrail: true,
 		ConfigSchema: []pluginapi.Field{{
 			Key: "words", Label: "Blocked words", Input: pluginapi.InputTextarea,
 			Required: true, Help: "One word per line.",

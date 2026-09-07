@@ -2,7 +2,9 @@
   // Loaded plugins section at the bottom of the Plugins & Guardrails page
   // (GET /admin/plugins): every plugin type with its version, hooks, source,
   // and health; a plugin that failed to load shows its error. Guardrails
-  // carry a shield and are listed first. Always expanded.
+  // carry a shield and are listed first. Always expanded; hidden entirely
+  // when the endpoint is unavailable (404/503), which the page-level
+  // guardrails alert already explains.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { ShieldCheck } from "lucide";
   import { pluginsStore } from "$lib/stores/plugins.svelte.js";
@@ -12,6 +14,7 @@
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
+{#if pluginsStore.available}
 <section class="settings-panel plugins-panel">
   <div class="editor-header">
     <h3 class="plugins-title">
@@ -41,7 +44,7 @@
           <td>
             <div class="plugin-name mono font-size-md">
               {#if plugin.guardrail}
-                <span class="plugin-guardrail" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
+                <span class="plugin-guardrail" role="img" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
                   <Icon icon={ShieldCheck} class="form-action-icon" />
                 </span>
               {/if}
@@ -79,6 +82,7 @@
   </div>
   {/if}
 </section>
+{/if}
 
 <style>
   .plugins-panel {

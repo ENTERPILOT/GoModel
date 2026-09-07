@@ -12075,7 +12075,7 @@ const docTemplate = `{
                     "additionalProperties": {}
                 },
                 "strategy_plugin": {
-                    "description": "StrategyPlugin names the routing-strategy plugin consulted when Strategy\nis StrategyPlugin; StrategyConfig is that plugin's per-virtual-model\nconfiguration, validated against its route-scoped fields. Both are\ncleared for every other strategy.",
+                    "description": "StrategyPlugin names the routing-strategy plugin consulted when Strategy\nis \"plugin\"; StrategyConfig is that plugin's per-virtual-model\nconfiguration, validated against its route-scoped fields. Both are\ncleared for every other strategy.",
                     "type": "string"
                 },
                 "targets": {

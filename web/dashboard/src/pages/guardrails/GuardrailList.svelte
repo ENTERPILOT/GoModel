@@ -71,7 +71,7 @@
               <td>
                 <span class="settings-guardrail-type-pill">
                   {#if guardrail.guardrail}
-                    <span class="settings-guardrail-shield" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
+                    <span class="settings-guardrail-shield" role="img" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
                       <Icon icon={ShieldCheck} class="form-action-icon" />
                     </span>
                   {/if}
