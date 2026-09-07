@@ -1,6 +1,7 @@
 package streaming
 
 import (
+	"bytes"
 	"fmt"
 	"maps"
 	"strconv"
@@ -83,6 +84,8 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 	}
 	for _, choice := range chunk.Choices {
 		ev.Choice = choice.Index
+		// A delta chunk may carry the choice's finish_reason as well.
+		ev.ClosesChoice = choice.FinishReason != nil
 		if delta := choice.Delta; delta != nil {
 			if delta.Content != nil && *delta.Content != "" {
 				ev.Kind, ev.Text = KindTextDelta, *delta.Content
@@ -100,6 +103,7 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 				return ev
 			}
 		}
+		ev.ClosesChoice = false
 		if choice.FinishReason != nil {
 			ev.Kind = KindFinish
 			return ev
@@ -133,9 +137,10 @@ func (c *chatCodec) remember(chunk *chatChunkView) {
 	}
 }
 
-// Track marks the choice of an emitted finish chunk as closed.
+// Track marks the choice of an emitted finish chunk as closed, including a
+// delta chunk that carries the finish_reason alongside its text.
 func (c *chatCodec) Track(ev Event) {
-	if ev.Kind == KindFinish {
+	if ev.Kind == KindFinish || ev.ClosesChoice {
 		c.finished[ev.Choice] = true
 	}
 }
@@ -190,6 +195,52 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 	ev.Text = text
 	ev.Data = data
 	return ev, nil
+}
+
+// StripTerminal drops a non-null finish_reason of the event's choice and a
+// non-null top-level usage.
+func (c *chatCodec) StripTerminal(ev Event) (Event, bool) {
+	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+		return ev, false
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(ev.Data, &top); err != nil {
+		return ev, false
+	}
+	var choices []map[string]json.RawMessage
+	if err := json.Unmarshal(top["choices"], &choices); err != nil {
+		return ev, false
+	}
+	changed := false
+	if jsonNonNull(top["usage"]) {
+		delete(top, "usage")
+		changed = true
+	}
+	if pos := chatChoicePosition(choices, ev.Choice); pos >= 0 && jsonNonNull(choices[pos]["finish_reason"]) {
+		delete(choices[pos], "finish_reason")
+		ev.ClosesChoice = false
+		changed = true
+	}
+	if !changed {
+		return ev, false
+	}
+	encoded, err := json.Marshal(choices)
+	if err != nil {
+		return ev, false
+	}
+	top["choices"] = encoded
+	data, err := json.Marshal(top)
+	if err != nil {
+		return ev, false
+	}
+	ev.Data = data
+	return ev, true
+}
+
+// jsonNonNull reports whether raw is a present, non-null JSON value.
+func jsonNonNull(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && string(trimmed) != "null"
 }
 
 // Split turns a chunk with several choices into one chunk per choice. Every
@@ -303,7 +354,10 @@ func (c *chatCodec) Terminate(t Termination) [][]byte {
 			open = append(open, idx)
 		}
 	}
-	if len(open) == 0 {
+	// A stream that showed no choice at all, or a final text that needs a
+	// carrier, is closed on choice 0. Choices the provider already finished
+	// get no second finish_reason.
+	if len(open) == 0 && (len(c.choices) == 0 || t.Text != "") {
 		open = []int{0}
 	}
 	if t.Text != "" {
@@ -318,10 +372,12 @@ func (c *chatCodec) Terminate(t Termination) [][]byte {
 		choices = append(choices, chatFinishChoice{Index: idx, Delta: map[string]any{}, FinishReason: &reason})
 		c.finished[idx] = true
 	}
-	chunk := c.chunk(choices)
-	chunk.Usage = t.Usage
-	if encoded, err := encodeJSONEvent("", chunk); err == nil {
-		out = append(out, encoded)
+	if len(choices) > 0 || t.Usage != nil {
+		chunk := c.chunk(choices)
+		chunk.Usage = t.Usage
+		if encoded, err := encodeJSONEvent("", chunk); err == nil {
+			out = append(out, encoded)
+		}
 	}
 	return append(out, doneEventBytes)
 }

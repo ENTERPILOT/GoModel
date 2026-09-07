@@ -55,6 +55,9 @@
         {#each store.types as typeDef (typeDef.type)}
           <option value={typeDef.type}>{typeDef.label}</option>
         {/each}
+        {#if isEdit && !store.types.some((typeDef) => typeDef.type === store.form.type)}
+          <option value={store.form.type}>{store.form.type}</option>
+        {/if}
       </select>
     </FormField>
 

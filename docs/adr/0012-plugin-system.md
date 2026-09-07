@@ -268,6 +268,17 @@ steps. `guardrails.enabled` implies `plugins.enabled`, because every
 guardrail is a plugin instance; config loading applies the implication and
 logs it.
 
+Not every plugin instance is a guardrail. `Manifest.Guardrail` marks the
+plugins whose instances apply a policy to prompts, responses, or streams,
+whether they block, answer, warn, or rewrite (`llm_judge`, `string_replace`,
+`header_edit`, `system_prompt`, `llm_based_altering`); route strategies and
+any future plugin that never touches traffic leave it false. The flag is
+declared by the plugin author rather than derived from the hook kinds, so a
+traffic plugin that is deliberately not a guardrail can say so. The runtime
+does not read it; it is exposed on the plugin, type,
+and instance views so the dashboard can mark guardrails with a shield and
+list them first, while all instances stay in one store and one editor.
+
 A plugin type reaches the catalog in one of three ways:
 
 - built in: `internal/plugins/builtin` registers `system_prompt`,

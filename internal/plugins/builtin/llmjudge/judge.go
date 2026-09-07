@@ -96,18 +96,25 @@ func (p *Plugin) judge(ctx context.Context, x *pluginapi.Exchange, content strin
 			return p.decide(cached, true), nil
 		}
 	}
-	reply, err := p.ask(ctx, content)
+	reply, finish, err := p.ask(ctx, content)
 	if err != nil {
 		return pluginapi.Decision{}, err
 	}
 	v := parseVerdict(reply)
+	// A reply the model did not finish (max_tokens reached, a filter cut
+	// it) is not a verdict even when its visible part reads like one.
+	if finish != "" && finish != "stop" {
+		v = verdict{Verdict: VerdictUnclear, Reason: "judge reply was cut off (finish_reason " + finish + ")"}
+	}
 	if x.Values != nil {
 		x.Values.Set(key, v)
 	}
 	return p.decide(v, false), nil
 }
 
-func (p *Plugin) ask(ctx context.Context, content string) (string, error) {
+// ask runs the judge call and returns the reply text with its finish
+// reason; the finish reason is "" when the completion has no choice.
+func (p *Plugin) ask(ctx context.Context, content string) (string, string, error) {
 	temperature := p.temperature
 	completion, err := p.host.Inference().Complete(ctx, pluginapi.InferenceRequest{
 		Model:    p.model,
@@ -120,12 +127,12 @@ func (p *Plugin) ask(ctx context.Context, content string) (string, error) {
 		Temperature: &temperature,
 	})
 	if err != nil {
-		return "", fmt.Errorf("%s: judge call failed: %w", Name, err)
+		return "", "", fmt.Errorf("%s: judge call failed: %w", Name, err)
 	}
-	if completion == nil {
-		return "", nil
+	if completion == nil || len(completion.Choices) == 0 {
+		return "", "", nil
 	}
-	return completion.Text(0), nil
+	return completion.Text(0), strings.TrimSpace(completion.Choices[0].FinishReason), nil
 }
 
 // wrapContent puts the content between <CONTENT> tags, neutralizing a

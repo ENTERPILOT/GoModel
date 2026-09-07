@@ -47,7 +47,7 @@ type VirtualModel struct {
 	Targets  []Target `json:"targets,omitempty" bson:"targets,omitempty"`
 	Strategy string   `json:"strategy,omitempty" bson:"strategy,omitempty"`
 	// StrategyPlugin names the routing-strategy plugin consulted when Strategy
-	// is StrategyPlugin; StrategyConfig is that plugin's per-virtual-model
+	// is "plugin"; StrategyConfig is that plugin's per-virtual-model
 	// configuration, validated against its route-scoped fields. Both are
 	// cleared for every other strategy.
 	StrategyPlugin string         `json:"strategy_plugin,omitempty" bson:"strategy_plugin,omitempty"`

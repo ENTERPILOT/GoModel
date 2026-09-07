@@ -38,6 +38,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Description: "Uses an auxiliary model to rewrite selected message roles before the main request reaches the provider, and assistant text on the way back.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse},
 		Mutates:     true,
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key:         "model",
@@ -59,7 +60,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				Label:    "Roles",
 				Input:    pluginapi.InputCheckboxes,
 				Required: true,
-				Help:     "Choose which conversation roles should be rewritten.",
+				Help:     "Choose which conversation roles should be rewritten. System includes developer messages.",
 				Default:  []string{"user"},
 				Options: []pluginapi.Option{
 					{Value: "system", Label: "System"},
@@ -102,9 +103,12 @@ func (p *Plugin) Init(_ context.Context, raw json.RawMessage, host pluginapi.Hos
 		return err
 	}
 	p.cfg = cfg
-	p.roles = make(map[pluginapi.Role]struct{}, len(cfg.Roles))
+	p.roles = make(map[pluginapi.Role]struct{}, len(cfg.Roles)+1)
 	for _, role := range cfg.Roles {
 		p.roles[pluginapi.Role(role)] = struct{}{}
+		if role == "system" { // developer is the Responses spelling of system
+			p.roles[pluginapi.RoleDeveloper] = struct{}{}
+		}
 	}
 	p.host = host
 	return nil

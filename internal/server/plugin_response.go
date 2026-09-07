@@ -71,7 +71,9 @@ func (p responsePhase[Req, Resp]) run(s *translatedInferenceService, c *echo.Con
 	x.Response = completion
 
 	outcome, runErr := chains.Response.RunResponse(ctx, x)
-	state.Finish(x)
+	if !plugins.Abandoned(runErr) { // an abandoned mutator may still write x
+		state.Finish(x)
+	}
 	requestID := requestIDFromContextOrHeader(c.Request())
 	logResponseDecisions(requestID, pluginapi.KindResponse, outcome, state)
 	if runErr != nil {

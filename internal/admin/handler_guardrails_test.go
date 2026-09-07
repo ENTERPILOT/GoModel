@@ -180,8 +180,8 @@ func TestListGuardrailTypes(t *testing.T) {
 		if got := strings.TrimSpace(prompt); got == "" {
 			t.Fatalf("llm_based_altering defaults.prompt = %q, want built-in prompt", got)
 		}
-		if len(typeDef.Phases) != 2 || typeDef.Source != "builtin" || !typeDef.Mutates {
-			t.Fatalf("llm_based_altering type = %#v, want prompt+response phases from a mutating builtin", typeDef)
+		if len(typeDef.Phases) != 2 || typeDef.Source != "builtin" || !typeDef.Mutates || !typeDef.Guardrail {
+			t.Fatalf("llm_based_altering type = %#v, want prompt+response phases from a mutating guardrail builtin", typeDef)
 		}
 		for _, field := range typeDef.Fields {
 			if field.Key != "max_tokens" {
@@ -447,5 +447,71 @@ func TestDeleteGuardrailIgnoresDisabledWorkflowGuardrailRefs(t *testing.T) {
 	}
 	if _, ok := h.guardrailDefs.Get("policy-system"); ok {
 		t.Fatal("Get(policy-system) = present, want deleted guardrail")
+	}
+}
+
+// Retyping a guardrail must not strand an active workflow on a phase the
+// new type does not implement: the definition would be stored and the
+// recompile would fail.
+func TestUpsertGuardrailRejectsRetypeUsedInUnsupportedPhase(t *testing.T) {
+	guardrailService := newGuardrailService(t, guardrails.Definition{
+		Name:   "redact",
+		Type:   "string_replace",
+		Config: rawGuardrailConfig(t, map[string]any{"rules": "ACME => [co]"}),
+	})
+	planStore := &workflowTestStore{
+		versions: []workflows.Version{
+			{
+				ID:       "global-workflow",
+				Scope:    workflows.Scope{},
+				ScopeKey: "global",
+				Version:  1,
+				Active:   true,
+				Name:     "global",
+				Payload: workflows.Payload{
+					SchemaVersion: 2,
+					Features:      workflows.FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
+					Steps:         []workflows.Step{{Ref: "redact", Phase: "response", Step: 10}},
+				},
+				WorkflowHash: "hash-global",
+			},
+		},
+	}
+	planService, err := workflows.NewService(planStore, workflows.NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
+	if err != nil {
+		t.Fatalf("workflows.NewService() error = %v", err)
+	}
+	if err := planService.Refresh(context.Background()); err != nil {
+		t.Fatalf("planService.Refresh() error = %v", err)
+	}
+	h := NewHandler(nil, nil, WithGuardrailService(guardrailService), WithWorkflows(planService))
+	e := echo.New()
+
+	upsert := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		if err := h.UpsertGuardrail(e.NewContext(req, rec)); err != nil {
+			t.Fatalf("UpsertGuardrail() error = %v", err)
+		}
+		return rec
+	}
+
+	rec := upsert(`{"name":"redact","type":"system_prompt","config":{"mode":"inject","content":"be precise"}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	envelope := decodeWorkflowErrorEnvelope(t, rec.Body.Bytes())
+	if envelope.Error.Message != "guardrail type system_prompt does not support the phases used by active workflows: global (response)" {
+		t.Fatalf("error message = %q", envelope.Error.Message)
+	}
+	if got, _ := guardrailService.Get("redact"); got == nil || got.Type != "string_replace" {
+		t.Fatalf("definition after refused upsert = %+v, want unchanged string_replace", got)
+	}
+
+	// The same type with a new config keeps the phase and is accepted.
+	rec = upsert(`{"name":"redact","type":"string_replace","config":{"rules":"ACME => [x]"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 }

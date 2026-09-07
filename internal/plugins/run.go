@@ -114,7 +114,10 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, call hookCall) (
 
 // runReaders runs the readers concurrently on copies of x. A reader the
 // runtime stopped waiting for (see ErrAbandoned) may still be writing its
-// copy, so that copy is dropped instead of merged.
+// copy, so that copy is dropped instead of merged. The copies share Prompt
+// and Response with x, which readers do not edit; the mutator runs on x
+// itself, and when it is abandoned the run fails closed and the caller
+// must not read x again (see Abandoned).
 func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginapi.Exchange, call hookCall) ([]Record, error) {
 	if len(readers) == 0 {
 		return nil, nil
@@ -179,6 +182,14 @@ func callHook(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call h
 // running: it received a cancelled context and is expected to return soon,
 // but nothing it does from then on reaches the request.
 var ErrAbandoned = errors.New("plugin call abandoned")
+
+// Abandoned reports whether err, from a chain run or a single hook call,
+// stems from an abandoned call. The hook may still be writing the exchange
+// it ran on, so the caller must not read that exchange (its Prompt,
+// Response, Values or Headers) once the run has returned this error.
+func Abandoned(err error) bool {
+	return errors.Is(err, ErrAbandoned)
+}
 
 // Call runs fn under the instance's timeout with panic recovery. It returns
 // when fn returns or when ctx ends, whichever comes first, so a hook that
@@ -266,7 +277,8 @@ func ensureExchange(x *pluginapi.Exchange) {
 }
 
 // shallowCopy gives a concurrent reader its own Values and Headers so two
-// readers of one step never write the same map.
+// readers of one step never write the same map. Prompt, Response and Stream
+// are shared: readers only inspect them.
 func shallowCopy(x *pluginapi.Exchange) *pluginapi.Exchange {
 	cp := *x
 	cp.Values = make(pluginapi.Values, len(x.Values))

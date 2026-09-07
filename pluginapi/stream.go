@@ -3,6 +3,7 @@ package pluginapi
 import (
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 )
 
 // StreamMode says how GoModel drives a [StreamHook].
@@ -28,7 +29,9 @@ type StreamPolicy struct {
 	// transform mode so the hook can rewrite text that spans events.
 	LookbehindChars int
 	// MaxBufferBytes caps buffering in buffer mode; zero means the host
-	// default.
+	// default. The buffer is shared by every plugin buffering the same
+	// stream, so the largest cap asked for applies, and the host default
+	// when any of them asks for none.
 	MaxBufferBytes int
 }
 
@@ -108,8 +111,10 @@ func Terminate(d Decision) StreamDecision {
 	return StreamDecision{Action: StreamTerminate, Terminate: &d}
 }
 
-// StreamState accumulates what has streamed so far. The host appends events;
-// hooks read it.
+// StreamState accumulates what has streamed so far, as the client receives
+// it: text a transform hook replaced or dropped is recorded that way, so a
+// hook reading it in [StreamHook.OnStreamEnd] sees the delivered text. The
+// host appends events; hooks read it.
 type StreamState struct {
 	text   map[int]*strings.Builder
 	events int
@@ -144,13 +149,43 @@ func (s *StreamState) Append(ev *StreamEvent) {
 	if ev.Kind != EventTextDelta {
 		return
 	}
+	s.builder(ev.Choice).WriteString(ev.Text)
+}
+
+// ReplaceTail records ev as delivered with text in place of its window: the
+// last tail runes recorded for the choice (the withheld text shown again in
+// front of ev under lookbehind, plus any of ev's own text already recorded)
+// are removed and text is appended. An empty text records a dropped window.
+// Host-facing: only text deltas change Text; every event counts toward
+// Events.
+func (s *StreamState) ReplaceTail(ev *StreamEvent, tail int, text string) {
+	if ev == nil {
+		return
+	}
+	s.events++
+	if ev.Kind != EventTextDelta {
+		return
+	}
+	b := s.builder(ev.Choice)
+	current := b.String()
+	cut := len(current)
+	for i := 0; i < tail && cut > 0; i++ {
+		_, size := utf8.DecodeLastRuneInString(current[:cut])
+		cut -= size
+	}
+	b.Reset()
+	b.WriteString(current[:cut])
+	b.WriteString(text)
+}
+
+func (s *StreamState) builder(choice int) *strings.Builder {
 	if s.text == nil {
 		s.text = map[int]*strings.Builder{}
 	}
-	b := s.text[ev.Choice]
+	b := s.text[choice]
 	if b == nil {
 		b = &strings.Builder{}
-		s.text[ev.Choice] = b
+		s.text[choice] = b
 	}
-	b.WriteString(ev.Text)
+	return b
 }

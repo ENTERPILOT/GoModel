@@ -567,6 +567,10 @@ func TestDashboardRuntimeConfig_ExposesFeatureAvailabilityFlags(t *testing.T) {
 	if got := values.GuardrailsEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigGuardrailsEnabled, got)
 	}
+	// Guardrails imply the plugin system, so the Plugins page shows too.
+	if got := values.PluginsEnabled; got != "on" {
+		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigPluginsEnabled, got)
+	}
 	if got := values.CacheEnabled; got != "on" {
 		t.Fatalf("dashboardRuntimeConfig()[%q] = %q, want on", admin.DashboardConfigCacheEnabled, got)
 	}
@@ -844,4 +848,20 @@ func testPluginCatalog(t *testing.T) *plugins.Catalog {
 		}
 	}
 	return catalog
+}
+
+func TestDashboardRuntimeConfig_PluginsFlag(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  *config.Config
+		want string
+	}{
+		{"default off", &config.Config{}, "off"},
+		{"plugins on", &config.Config{Plugins: config.PluginsConfig{Enabled: true}}, "on"},
+		{"guardrails imply plugins", &config.Config{Guardrails: config.GuardrailsConfig{Enabled: true}}, "on"},
+	} {
+		if got := dashboardRuntimeConfig(tt.cfg, false, false, false).PluginsEnabled; got != tt.want {
+			t.Errorf("%s: PLUGINS_ENABLED = %q, want %q", tt.name, got, tt.want)
+		}
+	}
 }

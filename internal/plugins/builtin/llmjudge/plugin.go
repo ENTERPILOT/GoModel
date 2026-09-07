@@ -37,6 +37,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Description: "Asks a judge model whether prompts and responses violate a policy, then blocks, answers, or flags them.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream},
 		Mutates:     false,
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key: "model", Label: "Judge model", Input: pluginapi.InputModel, Required: true,
@@ -88,7 +89,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "on_unclear", Label: "On unclear verdict", Input: pluginapi.InputSelect, Default: UnclearWarn,
-				Help: "What to do when the judge reply contains neither a JSON verdict nor the word allow or block.",
+				Help: "What to do when the judge reply is neither a JSON verdict nor a bare allow or block, or was cut off before it finished.",
 				Options: []pluginapi.Option{
 					{Value: UnclearAllow, Label: "Allow"},
 					{Value: UnclearWarn, Label: "Warn"},

@@ -2428,6 +2428,7 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		RateLimitsEnabled:      "off",
 		QuotaTemplatesEnabled:  "on",
 		GuardrailsEnabled:      "on",
+		PluginsEnabled:         "on",
 		CacheEnabled:           "on",
 		RedisURL:               "on",
 		SemanticCacheEnabled:   "off",
@@ -2476,6 +2477,9 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 	}
 	if got := body.GuardrailsEnabled; got != "on" {
 		t.Fatalf("GUARDRAILS_ENABLED = %q, want on", got)
+	}
+	if got := body.PluginsEnabled; got != "on" {
+		t.Fatalf("PLUGINS_ENABLED = %q, want on", got)
 	}
 	if got := body.CacheEnabled; got != "on" {
 		t.Fatalf("CACHE_ENABLED = %q, want on", got)

@@ -66,10 +66,12 @@ export const NAV_ITEMS = [
     visible: globalOnly,
   },
   {
+    // Guardrail instances plus the loaded plugin list; shown whenever the
+    // plugin system is on, even with guardrail execution off.
     page: "guardrails",
-    label: m.navigation_guardrails_beta,
+    label: m.navigation_plugins_guardrails,
     icon: ShieldCheck,
-    visible: () => globalOnly() && runtimeConfig.guardrailsVisible(),
+    visible: () => globalOnly() && runtimeConfig.pluginsVisible(),
   },
   {
     page: "mcp-servers",

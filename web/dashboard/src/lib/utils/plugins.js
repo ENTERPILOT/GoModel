@@ -1,5 +1,5 @@
 // Pure helpers over GET /admin/plugins rows:
-//   { name, version, description, kinds: [phase...], mutates,
+//   { name, version, description, kinds: [phase...], mutates, guardrail,
 //     source: "builtin" | "/path/x.so", fields: [Field...],
 //     route_fields: [Field...], health: "ok" | "error", error }
 // Kept free of Svelte so node:test can import it; the plugins store owns the
@@ -14,12 +14,18 @@ export function normalizePlugins(items) {
     .filter((item) => item && typeof item === "object" && !Array.isArray(item))
     .map((item) => ({
       name: String(item.name || "").trim(),
+      // The title form of the name; an older gateway sends none, so the name
+      // stands in.
+      label: String(item.label || "").trim() || String(item.name || "").trim(),
       version: String(item.version || "").trim(),
       description: String(item.description || "").trim(),
       kinds: Array.isArray(item.kinds)
         ? item.kinds.map((kind) => String(kind || "").trim()).filter(Boolean)
         : [],
       mutates: Boolean(item.mutates),
+      // A guardrail polices traffic (may block, answer, or warn); other
+      // plugins edit or route it. Marked with a shield and listed first.
+      guardrail: Boolean(item.guardrail),
       source: String(item.source || "").trim(),
       fields: Array.isArray(item.fields) ? item.fields : [],
       // Older payloads carry route fields inside `fields` with scope "route".
@@ -30,6 +36,13 @@ export function normalizePlugins(items) {
       error: String(item.error || "").trim(),
     }))
     .filter((plugin) => plugin.name);
+}
+
+// sortPlugins lists guardrails first, then the rest, each group by name.
+export function sortPlugins(plugins) {
+  return [...(Array.isArray(plugins) ? plugins : [])].sort(
+    (a, b) => Number(Boolean(b.guardrail)) - Number(Boolean(a.guardrail)) || a.name.localeCompare(b.name),
+  );
 }
 
 export function pluginByName(plugins, name) {

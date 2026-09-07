@@ -22,11 +22,22 @@ type verdict struct {
 	Reason  string
 }
 
-var wordRe = regexp.MustCompile(`\b(allow|block)\b`)
+// verdictSep matches what a model wraps a bare verdict in: whitespace,
+// punctuation and symbols (quotes, code fences, braces, a colon after a
+// label). Letters of any script are not separators, so a verdict glued to
+// prose in another language ("allowこれは") is not accepted.
+const verdictSep = `[\s\p{P}\p{S}]*`
+
+// bareVerdictRe accepts a reply that is nothing but the verdict word, with
+// an optional "verdict" label and separators around it (`allow`,
+// "Verdict: block.", `{"verdict": block}`). A verdict embedded in a sentence
+// is not accepted: "I should not allow this" must not read as allow, and a
+// JSON reply cut off inside its reason must not either.
+var bareVerdictRe = regexp.MustCompile(`^` + verdictSep + `(?:verdict` + verdictSep + `)?(allow|block)` + verdictSep + `$`)
 
 // parseVerdict reads the judge reply. It takes the first JSON object with a
-// recognized "verdict" key, falling back to a whole-word scan for "allow"
-// or "block" when exactly one of them appears.
+// recognized "verdict" key, falling back to a reply that is a bare "allow"
+// or "block". Anything else is unclear.
 func parseVerdict(reply string) verdict {
 	for idx := strings.Index(reply, "{"); idx >= 0; {
 		var obj struct {
@@ -47,16 +58,8 @@ func parseVerdict(reply string) verdict {
 		}
 		idx += 1 + next
 	}
-	allow, block := false, false
-	for _, w := range wordRe.FindAllString(strings.ToLower(reply), -1) {
-		allow = allow || w == VerdictAllow
-		block = block || w == VerdictBlock
-	}
-	switch {
-	case block && !allow:
-		return verdict{Verdict: VerdictBlock, Reason: "judge reply says block"}
-	case allow && !block:
-		return verdict{Verdict: VerdictAllow, Reason: "judge reply says allow"}
+	if m := bareVerdictRe.FindStringSubmatch(strings.ToLower(reply)); m != nil {
+		return verdict{Verdict: m[1], Reason: "judge reply says " + m[1]}
 	}
 	return verdict{Verdict: VerdictUnclear, Reason: "judge reply could not be parsed"}
 }

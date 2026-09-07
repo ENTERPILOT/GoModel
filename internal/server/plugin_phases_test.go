@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,10 +20,11 @@ import (
 // phasePlugin is a configurable test plugin covering prompt, response and
 // stream hooks. Its behaviour is selected by config keys.
 type phasePlugin struct {
-	prompt   string
-	response string
-	stream   string
-	text     string
+	prompt    string
+	response  string
+	stream    string
+	text      string
+	maxBuffer int
 }
 
 func newPhasePlugin() pluginapi.Plugin { return &phasePlugin{} }
@@ -37,16 +39,23 @@ func (p *phasePlugin) Manifest() pluginapi.Manifest {
 			{Key: "response", Input: pluginapi.InputText},
 			{Key: "stream", Input: pluginapi.InputText},
 			{Key: "text", Input: pluginapi.InputText},
+			{Key: "max_buffer", Input: pluginapi.InputText},
 		},
 	}
 }
 
 func (p *phasePlugin) Init(_ context.Context, raw json.RawMessage, _ pluginapi.Host) error {
-	var cfg struct{ Prompt, Response, Stream, Text string }
+	var cfg struct {
+		Prompt, Response, Stream, Text string
+		MaxBuffer                      string `json:"max_buffer"`
+	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return err
 	}
 	p.prompt, p.response, p.stream, p.text = cfg.Prompt, cfg.Response, cfg.Stream, cfg.Text
+	if cfg.MaxBuffer != "" {
+		p.maxBuffer, _ = strconv.Atoi(cfg.MaxBuffer)
+	}
 	return nil
 }
 
@@ -78,7 +87,7 @@ func (p *phasePlugin) OnResponse(_ context.Context, x *pluginapi.Exchange) (plug
 
 func (p *phasePlugin) StreamPolicy() pluginapi.StreamPolicy {
 	if p.stream == "buffer" {
-		return pluginapi.StreamPolicy{Mode: pluginapi.StreamBuffer}
+		return pluginapi.StreamPolicy{Mode: pluginapi.StreamBuffer, MaxBufferBytes: p.maxBuffer}
 	}
 	return pluginapi.StreamPolicy{Mode: pluginapi.StreamTransform}
 }
@@ -353,5 +362,91 @@ func TestChatCompletion_PluginChainsReleasedAfterRequest(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// phaseChainsNamed builds chains from several instances of the phase plugin,
+// one definition per name.
+func phaseChainsNamed(t *testing.T, cfgs map[string]map[string]string, steps ...guardrails.StepReference) *plugins.Chains {
+	t.Helper()
+	definitions := make([]guardrails.Definition, 0, len(cfgs))
+	for name, cfg := range cfgs {
+		raw, _ := json.Marshal(cfg)
+		definitions = append(definitions, guardrails.Definition{Name: name, Type: "phase_test", Config: raw})
+	}
+	return newGuardrailChains(t, nil, steps, []func() pluginapi.Plugin{newPhasePlugin}, definitions...)
+}
+
+// An instance later in the stream chain must see, at the end of the stream,
+// the text an earlier instance replaced, not the original.
+func TestChatCompletion_StreamEndSeesTransformedText(t *testing.T) {
+	chains := phaseChainsNamed(t, map[string]map[string]string{
+		"scrub": {"stream": "replace", "text": "[x]"},
+		"watch": {"stream": "end_block"},
+	}, guardrails.StepReference{Ref: "scrub", Phase: pluginapi.KindStream, Step: 1}, guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindStream, Step: 2})
+	rec := doChat(t, phaseHandler(t, phaseProvider(), chains), chatStreamBody)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "[x] answer") || strings.Contains(body, "secret") {
+		t.Fatalf("body = %s, want the scrubbed text only", body)
+	}
+	if strings.Contains(body, `"policy"`) {
+		t.Fatalf("body = %s: the observing instance blocked over already-scrubbed text", body)
+	}
+}
+
+// A buffered instance's MaxBufferBytes must not cap the buffer the response
+// chain shares; without a response chain the cap applies.
+func TestChatCompletion_BufferCapIsNotBorrowedByResponseChain(t *testing.T) {
+	steps := func(withResponse bool) []guardrails.StepReference {
+		s := []guardrails.StepReference{{Ref: "small", Phase: pluginapi.KindStream, Step: 1}}
+		if withResponse {
+			s = append(s, guardrails.StepReference{Ref: "later", Phase: pluginapi.KindResponse, Step: 1})
+		}
+		return s
+	}
+	cfgs := map[string]map[string]string{
+		"small": {"stream": "buffer", "max_buffer": "16"},
+		"later": {"response": "warn"},
+	}
+	t.Run("response chain uses the default", func(t *testing.T) {
+		rec := doChat(t, phaseHandler(t, phaseProvider(), phaseChainsNamed(t, cfgs, steps(true)...)), chatStreamBody)
+		body := rec.Body.String()
+		if rec.Code != http.StatusOK || !strings.Contains(body, "secret answer") || !strings.Contains(body, "[DONE]") {
+			t.Fatalf("status = %d body = %s, want the full answer", rec.Code, body)
+		}
+	})
+	t.Run("alone the cap applies", func(t *testing.T) {
+		rec := doChat(t, phaseHandler(t, phaseProvider(), phaseChainsNamed(t, cfgs, steps(false)...)), chatStreamBody)
+		body := rec.Body.String()
+		if strings.Contains(body, "secret answer") {
+			t.Fatalf("body = %s, want the stream cut by the buffer cap", body)
+		}
+	})
+}
+
+// A blocked request belongs to its resolved workflow like any other outcome,
+// so the audit entry can carry it.
+func TestChatCompletion_BlockedRequestKeepsWorkflow(t *testing.T) {
+	chains := phaseChains(t, map[string]string{"prompt": "block"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1})
+	handler := phaseHandler(t, phaseProvider(), chains)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = &explodingReadCloser{}
+	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(chatBody), false, "", nil)
+	req = withRequestSnapshotAndPrompt(req, frame)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := handler.ChatCompletion(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d (%s), want the block", rec.Code, rec.Body.String())
+	}
+	if core.GetWorkflow(c.Request().Context()) == nil {
+		t.Fatal("blocked request lost its resolved workflow")
 	}
 }

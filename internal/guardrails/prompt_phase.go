@@ -28,8 +28,12 @@ func (r promptRun) run(ctx context.Context, prompt *pluginapi.Prompt) (edited bo
 	x := r.state.NewExchange(ctx, r.meta)
 	x.Prompt = prompt
 	outcome, runErr := r.chain.RunPrompt(ctx, x)
-	r.state.Finish(x)
-	edited = prompt.Changes().Dirty
+	// An abandoned mutator may still be editing x and prompt. Such a run
+	// fails closed below, so neither is read again.
+	if !plugins.Abandoned(runErr) {
+		r.state.Finish(x)
+		edited = prompt.Changes().Dirty
+	}
 	records := make([]plugins.DecisionRecord, 0, len(outcome.Records))
 	for _, record := range outcome.Records {
 		records = append(records, plugins.DecisionRecord{

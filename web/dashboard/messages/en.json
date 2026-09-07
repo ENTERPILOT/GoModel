@@ -60,7 +60,7 @@
   "navigation_rate_limits": "Rate Limits",
   "navigation_api_keys": "API Keys",
   "navigation_workflows": "Workflows",
-  "navigation_guardrails_beta": "Guardrails (beta)",
+  "navigation_plugins_guardrails": "Plugins & Guardrails",
   "navigation_mcp_servers": "MCP Servers",
   "navigation_settings": "Settings",
   "navigation_users": "Users",
@@ -779,11 +779,8 @@
   "rate_limits_in_flight": "In-flight",
   "rate_limits_requests": "Requests",
   "rate_limits_tokens": "Tokens",
-  "guardrails_title": "Guardrails",
-  "guardrails_kicker": "Reusable Policy Objects",
-  "guardrails_library": "Guardrail Library",
-  "guardrails_instances": "Instances",
-  "guardrails_types": "Types",
+  "guardrails_title": "Plugins & Guardrails",
+  "guardrails_instances": "Guardrails",
   "guardrails_disabled": "GUARDRAILS_ENABLED is disabled. You can still manage Guardrails, but they will not run.",
   "guardrails_unavailable": "Guardrails feature is unavailable.",
   "guardrails_create": "Create Guardrail",
@@ -797,7 +794,6 @@
   "guardrails_empty": "No Guardrails defined yet.",
   "guardrails_help_label": "Guardrails help",
   "guardrails_help": "Reusable policy objects stored in the database and kept hot in memory for Workflow execution.",
-  "guardrails_library_help": "Store Guardrails in the database, keep them hot in memory, and attach them to Workflows by reference.",
   "guardrails_instances_help": "Each instance has a reusable name, a type, an optional user path for visibility scoping, and a JSON-backed config payload.",
   "guardrails_loading": "Loading Guardrails...",
   "guardrails_no_summary": "No summary yet.",
@@ -1525,24 +1521,10 @@
   "schema_fields_model_placeholder": "provider/model or alias",
   "plugins_title": "Plugins",
   "plugins_help": "Plugins loaded by the gateway. They add Guardrail types and routing strategies; built-in plugins ship with GoModel, file plugins are loaded from the configured plugins directory.",
-  "plugins_count": [
-    {
-      "declarations": [
-        "input count",
-        "local count_plural = count: plural"
-      ],
-      "selectors": [
-        "count_plural"
-      ],
-      "match": {
-        "count_plural=one": "{count} plugin",
-        "count_plural=*": "{count} plugins"
-      }
-    }
-  ],
-  "plugins_show": "Show plugins",
-  "plugins_hide": "Hide plugins",
+  "plugins_loading": "Loading plugins...",
+  "plugins_empty": "No plugins loaded.",
   "plugins_name": "Name",
+  "plugins_slug": "Plugin name used in configuration",
   "plugins_version": "Version",
   "plugins_kinds": "Hooks",
   "plugins_source": "Source",
@@ -1550,6 +1532,7 @@
   "plugins_source_builtin": "Built-in",
   "plugins_health_ok": "OK",
   "plugins_health_error": "Error",
+  "plugins_guardrail": "Guardrail",
   "plugins_phase_request": "Request",
   "plugins_phase_prompt": "Prompt",
   "plugins_phase_response": "Response",

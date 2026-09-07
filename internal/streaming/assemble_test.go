@@ -242,3 +242,21 @@ func TestAssembleResponsesResponse_FromDeltasOnly(t *testing.T) {
 		t.Errorf("empty assemble err = %v", err)
 	}
 }
+
+// content_index is provider JSON: a negative value must not panic and a huge
+// one must not drive allocation; the text lands in the nearest part.
+func TestAppendOutputText_BoundsContentIndex(t *testing.T) {
+	item := &core.ResponsesOutputItem{Type: "message"}
+	appendOutputText(item, -1, "neg")
+	if len(item.Content) != 1 || item.Content[0].Text != "neg" {
+		t.Fatalf("after negative index: %+v", item.Content)
+	}
+	appendOutputText(item, 1<<30, "far")
+	if len(item.Content) != maxAssembledContentParts || item.Content[len(item.Content)-1].Text != "far" {
+		t.Fatalf("after huge index: %d parts, last %q", len(item.Content), item.Content[len(item.Content)-1].Text)
+	}
+	appendOutputText(item, 1, "one")
+	if item.Content[1].Text != "one" {
+		t.Fatalf("after index 1: %+v", item.Content[:2])
+	}
+}

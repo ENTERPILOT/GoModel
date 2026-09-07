@@ -106,6 +106,7 @@ func (k *keywordBlock) Manifest() pluginapi.Manifest {
 		Version:     "1.0.0",
 		Description: "Blocks, answers, or flags requests and responses containing configured keywords.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse},
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key:      "keywords",

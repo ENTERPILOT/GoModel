@@ -12,11 +12,14 @@ import (
 
 // pluginView is one catalog entry as GET /admin/plugins renders it.
 type pluginView struct {
-	Name        string                 `json:"name"`
+	Name string `json:"name"`
+	// Label is the name as a title ("header_edit" reads "Header Edit").
+	Label       string                 `json:"label"`
 	Version     string                 `json:"version,omitempty"`
 	Description string                 `json:"description,omitempty"`
 	Kinds       []string               `json:"kinds"`
 	Mutates     bool                   `json:"mutates"`
+	Guardrail   bool                   `json:"guardrail"`
 	Source      string                 `json:"source"`
 	Fields      []guardrails.TypeField `json:"fields"`
 	RouteFields []guardrails.TypeField `json:"route_fields"`
@@ -42,10 +45,12 @@ func (h *Handler) ListPlugins(c *echo.Context) error {
 func pluginViewFromEntry(entry plugins.Entry) pluginView {
 	view := pluginView{
 		Name:        entry.Name,
+		Label:       guardrails.TypeLabel(entry.Name),
 		Version:     entry.Manifest.Version,
 		Description: entry.Manifest.Description,
 		Kinds:       []string{},
 		Mutates:     entry.Manifest.Mutates,
+		Guardrail:   entry.Manifest.Guardrail,
 		Source:      string(entry.Source),
 		Fields:      guardrails.TypeFieldsFromSchema(entry.Manifest.ConfigSchema, pluginapi.ScopeInstance),
 		RouteFields: guardrails.TypeFieldsFromSchema(entry.Manifest.ConfigSchema, pluginapi.ScopeRoute),

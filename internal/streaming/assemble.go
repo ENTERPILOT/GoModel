@@ -286,9 +286,21 @@ func AssembleResponsesResponse(events []Event) (*core.ResponsesResponse, error) 
 	return resp, nil
 }
 
+// maxAssembledContentParts bounds how far a content_index may grow an
+// item's content: the index is provider JSON, so it must neither panic
+// (negative) nor drive allocation (huge). Out-of-range deltas land in the
+// nearest part so their text is still inspected.
+const maxAssembledContentParts = 256
+
 func appendOutputText(item *core.ResponsesOutputItem, contentIndex int, delta string) {
-	for len(item.Content) <= contentIndex {
+	if contentIndex < 0 {
+		contentIndex = 0
+	}
+	for len(item.Content) <= contentIndex && len(item.Content) < maxAssembledContentParts {
 		item.Content = append(item.Content, core.ResponsesContentItem{Type: "output_text"})
+	}
+	if contentIndex >= len(item.Content) {
+		contentIndex = len(item.Content) - 1
 	}
 	item.Content[contentIndex].Text += delta
 }

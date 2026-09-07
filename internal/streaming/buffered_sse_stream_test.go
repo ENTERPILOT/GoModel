@@ -259,3 +259,21 @@ func TestBufferedSSEStream_ResponsesReplay(t *testing.T) {
 		t.Errorf("assembled replay = %+v", got)
 	}
 }
+
+// Close may run on another goroutine while the first Read, which starts
+// the drain, is in progress; it must see the ticker and context hook it has
+// to stop. Meaningful under -race.
+func TestBufferedSSEStream_CloseRacesFirstRead(t *testing.T) {
+	upstream := newBlockingReader()
+	stream := NewBufferedSSEStream(context.Background(), upstream, ChatCodec(), nil, BufferOptions{KeepAliveInterval: time.Hour})
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		_, _ = stream.Read(make([]byte, 64))
+	}()
+	time.Sleep(10 * time.Millisecond) // let Read pass its closed check and start the drain
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-read
+}

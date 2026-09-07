@@ -499,10 +499,10 @@ This differs from the standard `/v1/models` endpoint: the admin version includes
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
-| `GET` | `/admin/plugins` | Every loaded plugin type: manifest, hook kinds, config schema, source, health |
-| `GET` | `/admin/guardrails/types` | Guardrail types with their editor schema, `phases`, `source`, and `mutates` |
-| `GET` | `/admin/guardrails` | Guardrail instances with `fail_mode`, `timeout_ms`, `phases`, and `summary` |
-| `PUT` | `/admin/guardrails` | Create or update one instance (accepts `fail_mode` and `timeout_ms`) |
+| `GET` | `/admin/plugins` | Every loaded plugin type: `name` and its title `label`, manifest, hook kinds, config schema, source, health, and whether it is a `guardrail` |
+| `GET` | `/admin/guardrails/types` | Guardrail types with their editor schema, `phases`, `source`, `mutates`, and `guardrail` |
+| `GET` | `/admin/guardrails` | Guardrail instances with `fail_mode`, `timeout_ms`, `phases`, `summary`, and `guardrail` |
+| `PUT` | `/admin/guardrails` | Create or update one instance (accepts `fail_mode` and `timeout_ms`; refused when the new type lacks a phase an active workflow uses the instance in) |
 | `DELETE` | `/admin/guardrails` | Delete one instance (refused while an active workflow references it) |
 | `GET` | `/admin/workflows/guardrails` | Instances available to workflow steps, with the `phases` each supports |
 | `GET` | `/admin/workflows` | Active workflows; views carry per-phase `chain_hashes` |

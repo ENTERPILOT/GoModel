@@ -157,3 +157,65 @@ func TestNewInstanceRejectsBufferPolicyWithoutResponseHook(t *testing.T) {
 		t.Fatalf("transform policy rejected: %v", err)
 	}
 }
+
+// slowInit ignores the init deadline, returns later, and reports Close.
+type slowInit struct {
+	delay  time.Duration
+	closed chan struct{}
+}
+
+func (s *slowInit) Manifest() pluginapi.Manifest { return pluginapi.Manifest{Name: "slow"} }
+func (s *slowInit) Init(context.Context, json.RawMessage, pluginapi.Host) error {
+	time.Sleep(s.delay)
+	return nil
+}
+func (s *slowInit) Close(context.Context) error { close(s.closed); return nil }
+
+func TestNewInstanceClosesAbandonedInitOnceItReturns(t *testing.T) {
+	previous := initTimeout
+	initTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { initTimeout = previous })
+
+	plugin := &slowInit{delay: 60 * time.Millisecond, closed: make(chan struct{})}
+	entry := Entry{Name: "slow", Factory: func() pluginapi.Plugin { return plugin }}
+	if _, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{})); !errors.Is(err, ErrAbandoned) {
+		t.Fatalf("error = %v, want ErrAbandoned", err)
+	}
+	select {
+	case <-plugin.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("abandoned plugin was not closed after its Init returned")
+	}
+}
+
+// stuckClose fails Init and then ignores its Close deadline; entered is
+// closed when Close is called.
+type stuckClose struct{ entered, release chan struct{} }
+
+func (s *stuckClose) Manifest() pluginapi.Manifest { return pluginapi.Manifest{Name: "stuck-close"} }
+func (s *stuckClose) Init(context.Context, json.RawMessage, pluginapi.Host) error {
+	return errors.New("init failed")
+}
+func (s *stuckClose) Close(context.Context) error { close(s.entered); <-s.release; return nil }
+
+func TestNewInstanceDoesNotWaitForAStuckCloseAfterFailedInit(t *testing.T) {
+	previous := initTimeout
+	initTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { initTimeout = previous })
+
+	plugin := &stuckClose{entered: make(chan struct{}), release: make(chan struct{})}
+	defer close(plugin.release)
+	entry := Entry{Name: "stuck-close", Factory: func() pluginapi.Plugin { return plugin }}
+	start := time.Now()
+	if _, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{})); err == nil || !strings.Contains(err.Error(), "init failed") {
+		t.Fatalf("error = %v, want the init failure", err)
+	}
+	if time.Since(start) > 500*time.Millisecond {
+		t.Fatal("NewInstance waited on a Close that ignores its deadline")
+	}
+	select {
+	case <-plugin.entered:
+	case <-time.After(time.Second):
+		t.Fatal("failed init did not call Close")
+	}
+}

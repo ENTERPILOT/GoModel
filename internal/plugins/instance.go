@@ -160,7 +160,10 @@ func NewInstance(ctx context.Context, entry Entry, spec InstanceSpec, host plugi
 
 // initPlugin runs Init under the fixed init deadline. Init is expected to
 // honour its context; one that does not is abandoned once the deadline
-// passes and the instance is reported as failed.
+// passes and the instance is reported as failed. A plugin whose Init failed
+// is closed, so whatever Init acquired before failing (clients, goroutines)
+// does not leak with every refresh that retries it; an abandoned Init is
+// closed once it finally returns.
 func initPlugin(ctx context.Context, plugin pluginapi.Plugin, config json.RawMessage, host pluginapi.Host) error {
 	initCtx, cancel := context.WithTimeout(ctx, initTimeout)
 	defer cancel()
@@ -176,14 +179,40 @@ func initPlugin(ctx context.Context, plugin pluginapi.Plugin, config json.RawMes
 	select {
 	case err := <-done:
 		if err == nil && initCtx.Err() != nil {
-			return fmt.Errorf("%w after the %s init deadline", ErrAbandoned, initTimeout)
+			err = fmt.Errorf("%w after the %s init deadline", ErrAbandoned, initTimeout)
+		}
+		if err != nil {
+			closeFailedInit(plugin)
 		}
 		return err
 	case <-initCtx.Done():
+		go func() {
+			<-done
+			closeFailedInit(plugin)
+		}()
 		if errors.Is(initCtx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("%w: exceeded the %s init deadline", ErrAbandoned, initTimeout)
 		}
 		return fmt.Errorf("%w: %v", ErrAbandoned, initCtx.Err())
+	}
+}
+
+// closeFailedInit releases what a failed Init may hold. The plugin never
+// became an instance, so its Close error and panics are of no interest, and
+// a Close that ignores its deadline is left to finish on its own rather
+// than holding up NewInstance.
+func closeFailedInit(plugin pluginapi.Plugin) {
+	ctx, cancel := context.WithTimeout(context.Background(), initTimeout)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = recover() }()
+		_ = plugin.Close(ctx)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
 	}
 }
 

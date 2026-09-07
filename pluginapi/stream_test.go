@@ -54,3 +54,22 @@ func TestMessageTextAndRoute(t *testing.T) {
 		t.Errorf("Qualified = %q", got)
 	}
 }
+
+func TestStreamStateReplaceTail(t *testing.T) {
+	s := &StreamState{}
+	s.Append(&StreamEvent{Seq: 1, Kind: EventTextDelta, Text: "my key sec"})
+	// Lookbehind showed "sec" again in front of "ret ok"; the plugin replaced
+	// the whole window.
+	s.ReplaceTail(&StreamEvent{Seq: 2, Kind: EventTextDelta, Text: "secret ok", Overlap: 3}, 3, "[x] ok")
+	if got := s.Text(0); got != "my key [x] ok" {
+		t.Errorf("Text(0) = %q", got)
+	}
+	s.ReplaceTail(&StreamEvent{Seq: 3, Kind: EventTextDelta, Text: "ok bye"}, 2, "")
+	if got := s.Text(0); got != "my key [x] " {
+		t.Errorf("after drop Text(0) = %q", got)
+	}
+	s.ReplaceTail(&StreamEvent{Seq: 4, Kind: EventReasoningDelta, Text: "hmm"}, 0, "")
+	if got, n := s.Text(0), s.Events(); got != "my key [x] " || n != 4 {
+		t.Errorf("reasoning delta changed text %q, events = %d", got, n)
+	}
+}

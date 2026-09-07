@@ -21,7 +21,7 @@ func (p *Plugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.D
 			if !p.roles[m.Role] {
 				continue
 			}
-			if n := count(p.rules, m.Text(), 0); n > 0 {
+			if n := p.countMessage(m); n > 0 {
 				matches += n
 				messages++
 			}
@@ -44,6 +44,36 @@ func (p *Plugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.D
 		}
 	}
 	return allowWith(replaceDetail(total, messages)), nil
+}
+
+// countMessage counts matches over the units editMessage rewrites: each
+// text part and each tool-result text part on its own. Block, respond and
+// warn therefore agree with replace on what is a match; text split across
+// two parts is not matched in any mode.
+func (p *Plugin) countMessage(m pluginapi.Message) int {
+	total := 0
+	for _, part := range m.Parts {
+		switch part.Kind {
+		case pluginapi.PartText:
+			total += count(p.rules, part.Text, 0)
+		case pluginapi.PartToolResult:
+			if part.ToolResult != nil {
+				total += countParts(p.rules, part.ToolResult.Parts)
+			}
+		}
+	}
+	return total
+}
+
+// countParts counts matches in each text part on its own.
+func countParts(rules []rule, parts []pluginapi.Part) int {
+	total := 0
+	for _, part := range parts {
+		if part.Kind == pluginapi.PartText {
+			total += count(rules, part.Text, 0)
+		}
+	}
+	return total
 }
 
 // editMessage rewrites the text parts and tool-result text of one message
@@ -101,7 +131,7 @@ func (p *Plugin) OnResponse(_ context.Context, x *pluginapi.Exchange) (pluginapi
 	if p.onMatch != OnMatchReplace {
 		matches, choices := 0, 0
 		for i := range x.Response.Choices {
-			if n := count(p.rules, x.Response.Text(i), 0); n > 0 {
+			if n := countParts(p.rules, x.Response.Choices[i].Message.Parts); n > 0 {
 				matches += n
 				choices++
 			}

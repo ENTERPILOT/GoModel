@@ -40,7 +40,7 @@ func newPlugin(t *testing.T, cfg string) *Plugin {
 
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
-	if m.Name != "header_edit" || m.Mutates {
+	if m.Name != "header_edit" || m.Mutates || !m.Guardrail {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if !reflect.DeepEqual(m.Kinds, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse}) {

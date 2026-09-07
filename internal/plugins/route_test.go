@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -22,6 +23,10 @@ type fakeRoute struct {
 	outcomes []pluginapi.RouteOutcome
 	panicEnd bool
 	closed   int
+	// initGate, when set, blocks Init until it is closed; endGate does the
+	// same for OnAttemptEnd.
+	initGate chan struct{}
+	endGate  chan struct{}
 }
 
 func (f *fakeRoute) Manifest() pluginapi.Manifest {
@@ -29,6 +34,9 @@ func (f *fakeRoute) Manifest() pluginapi.Manifest {
 }
 
 func (f *fakeRoute) Init(_ context.Context, config json.RawMessage, _ pluginapi.Host) error {
+	if f.initGate != nil {
+		<-f.initGate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.config = config
@@ -49,6 +57,9 @@ func (f *fakeRoute) Select(_ context.Context, req pluginapi.RouteRequest) (plugi
 func (f *fakeRoute) OnAttemptEnd(outcome pluginapi.RouteOutcome) {
 	if f.panicEnd {
 		panic("boom")
+	}
+	if f.endGate != nil {
+		<-f.endGate
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -136,19 +147,29 @@ func TestRouteResolver_StrategyBuildsLazilyFromInstanceConfig(t *testing.T) {
 	if string(route.config) != `{"endpoint":"http://a"}` {
 		t.Fatalf("instance config = %s", route.config)
 	}
-	again, _, err := resolver.Strategy("lat")
+	again, againInst, err := resolver.Strategy("lat")
 	if err != nil || again != strategy {
 		t.Fatalf("second Strategy = %v, %v; want the cached instance", again, err)
 	}
+	againInst.Release()
 
-	// A changed definition rebuilds the instance and closes the previous one.
+	// A changed definition rebuilds the instance. The previous one is still
+	// held by the first caller, so it stays open until that caller releases
+	// it and the resolver next looks.
 	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
-	if _, _, err := resolver.Strategy("lat"); err != nil {
+	_, rebuilt, err := resolver.Strategy("lat")
+	if err != nil {
 		t.Fatalf("Strategy after change: %v", err)
 	}
-	if string(route.config) != `{"endpoint":"http://b"}` || route.closed != 1 {
-		t.Fatalf("after change config = %s closed = %d, want rebuilt once", route.config, route.closed)
+	if string(route.config) != `{"endpoint":"http://b"}` || route.closed != 0 || inst.Closed() {
+		t.Fatalf("after change config = %s closed = %d, want the held instance kept open", route.config, route.closed)
 	}
+	inst.Release()
+	resolver.ReportOutcome(pluginapi.RouteOutcome{Source: "smart"})
+	if route.closed != 1 || !inst.Closed() || rebuilt.Closed() {
+		t.Fatalf("after release closed = %d (previous closed %v, current closed %v), want the previous instance closed", route.closed, inst.Closed(), rebuilt.Closed())
+	}
+	rebuilt.Release()
 
 	if names := resolver.Names(); len(names) != 1 || names[0] != "lat" {
 		t.Fatalf("Names() = %v, want [lat]", names)
@@ -211,4 +232,177 @@ func TestRouteResolver_ReportOutcomeFansOutAndRecovers(t *testing.T) {
 	if len(good.outcomes) != 2 || good.outcomes[0].Target.Qualified() != "openai/gpt-4o" {
 		t.Fatalf("good strategy outcomes = %+v, want 2 for openai/gpt-4o", good.outcomes)
 	}
+}
+
+// A rebuild's Init must not hold the mutex ReportOutcome takes at the end of
+// every upstream request.
+func TestRouteResolver_ReportOutcomeNotBlockedByInit(t *testing.T) {
+	t.Parallel()
+	slow := &fakeRoute{name: "slow", initGate: make(chan struct{})}
+	resolver := NewRouteResolver(newRouteCatalog(t, slow), HostDeps{})
+
+	built := make(chan error, 1)
+	go func() {
+		_, inst, err := resolver.Strategy("slow")
+		inst.Release()
+		built <- err
+	}()
+	waitForBuild(t, resolver)
+
+	reported := make(chan struct{})
+	go func() {
+		resolver.ReportOutcome(pluginapi.RouteOutcome{Source: "smart"})
+		close(reported)
+	}()
+	select {
+	case <-reported:
+	case <-time.After(time.Second):
+		t.Fatal("ReportOutcome blocked behind a plugin Init")
+	}
+	close(slow.initGate)
+	if err := <-built; err != nil {
+		t.Fatalf("Strategy: %v", err)
+	}
+}
+
+// waitForBuild returns once a rebuild holds buildMu, i.e. is inside Init.
+func waitForBuild(t *testing.T, resolver *RouteResolver) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !resolver.buildMu.TryLock() {
+			return
+		}
+		resolver.buildMu.Unlock()
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("no rebuild started")
+}
+
+// waitUntil polls cond for up to two seconds.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// Close during a rebuild waits for it and closes the instance it publishes;
+// later lookups are refused.
+func TestRouteResolver_CloseWaitsForRebuildAndRefusesAfter(t *testing.T) {
+	t.Parallel()
+	slow := &fakeRoute{name: "slow", initGate: make(chan struct{})}
+	resolver := NewRouteResolver(newRouteCatalog(t, slow), HostDeps{})
+
+	type built struct {
+		inst *Instance
+		err  error
+	}
+	strategy := make(chan built, 1)
+	go func() {
+		_, inst, err := resolver.Strategy("slow")
+		strategy <- built{inst, err}
+	}()
+	waitForBuild(t, resolver)
+	closeStarted := make(chan struct{})
+	closed := make(chan error, 1)
+	go func() {
+		close(closeStarted)
+		closed <- resolver.Close(context.Background())
+	}()
+	<-closeStarted
+	// The rebuild still holds buildMu, so Close cannot have returned yet;
+	// it must wait for the instance the rebuild is about to publish.
+	select {
+	case err := <-closed:
+		t.Fatalf("Close returned (%v) before the rebuild finished", err)
+	default:
+	}
+	close(slow.initGate)
+	b := <-strategy
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if b.err != nil || b.inst == nil || !b.inst.Closed() {
+		t.Fatalf("rebuild published %+v (err %v), want it built and closed by Close", b.inst, b.err)
+	}
+	b.inst.Release()
+	if _, _, err := resolver.Strategy("slow"); !errors.Is(err, ErrRouteResolverClosed) {
+		t.Fatalf("Strategy after Close error = %v, want ErrRouteResolverClosed", err)
+	}
+}
+
+// An instance stays open while its OnAttemptEnd runs, even when a rebuild
+// replaces it meanwhile.
+func TestRouteResolver_ReportOutcomeHoldsInstanceAcrossOnAttemptEnd(t *testing.T) {
+	t.Parallel()
+	route := &fakeRoute{name: "lat", schema: routeSchema, endGate: make(chan struct{})}
+	resolver := NewRouteResolver(newRouteCatalog(t, route), HostDeps{})
+	configs := map[string]json.RawMessage{"lat": json.RawMessage(`{"endpoint":"http://a"}`)}
+	resolver.SetInstanceConfigs(func(name string) (json.RawMessage, bool) {
+		raw, ok := configs[name]
+		return raw, ok
+	})
+	_, inst, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst.Release()
+
+	reported := make(chan struct{})
+	go func() {
+		resolver.ReportOutcome(pluginapi.RouteOutcome{Source: "smart"})
+		close(reported)
+	}()
+	waitUntil(t, "OnAttemptEnd to hold the instance", inst.Held)
+
+	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
+	_, rebuilt, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebuilt.Release()
+	if inst.Closed() {
+		t.Fatal("replaced instance closed while OnAttemptEnd was still running")
+	}
+	close(route.endGate)
+	<-reported
+	if !inst.Closed() || rebuilt.Closed() {
+		t.Fatalf("after OnAttemptEnd returned: previous closed %v, current closed %v", inst.Closed(), rebuilt.Closed())
+	}
+}
+
+// Handing an instance back closes it at once when a rebuild retired it
+// meanwhile: no later report or rebuild is needed.
+func TestRouteResolver_ReleaseClosesRetiredInstance(t *testing.T) {
+	t.Parallel()
+	route := &fakeRoute{name: "lat", schema: routeSchema}
+	resolver := NewRouteResolver(newRouteCatalog(t, route), HostDeps{})
+	configs := map[string]json.RawMessage{"lat": json.RawMessage(`{"endpoint":"http://a"}`)}
+	resolver.SetInstanceConfigs(func(name string) (json.RawMessage, bool) {
+		raw, ok := configs[name]
+		return raw, ok
+	})
+	_, inst, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
+	_, rebuilt, err := resolver.Strategy("lat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.Closed() {
+		t.Fatal("replaced instance closed while its Select was still held")
+	}
+	resolver.Release(inst)
+	if !inst.Closed() || rebuilt.Closed() {
+		t.Fatalf("after Release: previous closed %v, current closed %v; want the previous closed at once", inst.Closed(), rebuilt.Closed())
+	}
+	resolver.Release(rebuilt)
 }

@@ -28,8 +28,10 @@ class GuardrailsStore {
   loading = $state(false);
   typesLoading = $state(false);
   // Load and in-form errors only; mutation feedback goes through the
-  // flash store.
+  // flash store. The type catalog has its own so a later successful
+  // guardrails load cannot clear a type-load failure.
   error = $state("");
+  typesError = $state("");
   filter = $state("");
   formOpen = $state(false);
   formSubmitting = $state(false);
@@ -113,6 +115,7 @@ class GuardrailsStore {
       if (outcome.status === "unavailable") {
         this.available = false;
         this.types = [];
+        this.typesError = "";
         return;
       }
       // Only a real gateway response proves the feature is back — a thrown
@@ -120,12 +123,20 @@ class GuardrailsStore {
       if (outcome.result) {
         this.available = true;
       }
-      this.types = outcome.items;
       if (outcome.status === "error") {
-        this.error = outcome.error;
+        // Keep the types already loaded: with an empty list every stored
+        // definition would look unknown and the editor would retype it.
+        this.typesError = outcome.error;
         return;
       }
-      const resolvedType = resolvedGuardrailType(this.types, this.form.type);
+      this.typesError = "";
+      this.types = outcome.items;
+      // A definition being edited keeps its stored type whatever the
+      // catalog now says; the type select is disabled in that mode.
+      const resolvedType =
+        this.formMode === "edit"
+          ? this.form.type
+          : resolvedGuardrailType(this.types, this.form.type);
       this.form = {
         ...this.form,
         type: resolvedType,

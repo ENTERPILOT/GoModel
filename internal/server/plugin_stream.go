@@ -157,12 +157,20 @@ func (s *translatedInferenceService) wrapPluginStream(ctx context.Context, workf
 	x.Stream = &pluginapi.StreamState{}
 	ps := &pluginStream{ctx: ctx, chains: chains, state: state, x: x, requestID: x.Meta.RequestID}
 
+	// One buffer serves every buffered instance and the response chain. Its
+	// cap is the largest one asked for, and the host default as soon as any
+	// participant (the response chain always) asks for none, so one
+	// instance's small cap cannot fail every long answer for the others.
 	var buffered []*plugins.Instance
 	maxBuffer := 0
+	uncapped := !chains.Response.Empty()
 	for _, inst := range chains.Stream.Instances() {
 		policy := inst.StreamPolicy()
 		if policy.Mode == pluginapi.StreamBuffer {
 			buffered = append(buffered, inst)
+			if policy.MaxBufferBytes <= 0 {
+				uncapped = true
+			}
 			maxBuffer = max(maxBuffer, policy.MaxBufferBytes)
 			continue
 		}
@@ -170,6 +178,9 @@ func (s *translatedInferenceService) wrapPluginStream(ctx context.Context, workf
 		ps.lookbehind = max(ps.lookbehind, policy.LookbehindChars)
 	}
 
+	if uncapped {
+		maxBuffer = 0
+	}
 	if !chains.Response.Empty() || len(buffered) > 0 {
 		codec := dialect.codec()
 		finisher := func(events []streaming.Event, _ []byte) ([]byte, error) {
@@ -263,7 +274,9 @@ func (ps *pluginStream) runResponse(completion *pluginapi.Completion, buffered [
 		chain = merged
 	}
 	outcome, err := chain.RunResponse(ps.ctx, ps.x)
-	ps.state.Finish(ps.x)
+	if !plugins.Abandoned(err) { // an abandoned mutator may still write ps.x
+		ps.state.Finish(ps.x)
+	}
 	logResponseDecisions(ps.requestID, pluginapi.KindResponse, outcome, ps.state)
 	ps.recordWarn(outcome)
 	if err != nil {
@@ -279,10 +292,12 @@ func chainHas(chain *plugins.Chain, inst *plugins.Instance) bool {
 }
 
 // OnEvent runs the in-flight stream instances over one event in step order.
-// A replace feeds the next instance; drop and terminate end the walk.
+// A replace feeds the next instance; drop and terminate end the walk. The
+// exchange stream state records the event as the client receives it, after
+// the walk, so a later instance's OnStreamEnd sees replaced and dropped
+// text that way rather than the original.
 func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error) {
 	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Text: ev.Text, Overlap: ev.Overlap, Raw: ev.Data}
-	ps.appendState(pev, ev.Overlap)
 	result := streaming.Decision{Action: streaming.ActionPass}
 	for _, entry := range ps.inFlight {
 		inst, observe := entry.inst, entry.observe
@@ -313,6 +328,7 @@ func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error)
 			if observe {
 				continue
 			}
+			ps.x.Stream.ReplaceTail(pev, ev.Overlap, "")
 			return streaming.Decision{Action: streaming.ActionDrop}, nil
 		case pluginapi.StreamReplace:
 			if observe || pev.Kind != pluginapi.EventTextDelta && pev.Kind != pluginapi.EventReasoningDelta {
@@ -321,6 +337,13 @@ func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error)
 			pev.Text = decision.Text
 			result = streaming.Decision{Action: streaming.ActionReplace, Text: decision.Text}
 		}
+	}
+	if result.Action == streaming.ActionReplace {
+		// The replacement covers the whole window: the withheld tail
+		// already recorded plus this event's fresh text.
+		ps.x.Stream.ReplaceTail(pev, ev.Overlap, result.Text)
+	} else {
+		ps.appendState(pev, ev.Overlap)
 	}
 	return result, nil
 }
@@ -357,8 +380,9 @@ func (ps *pluginStream) recordWarn(outcome plugins.Outcome) {
 	}
 }
 
-// appendState records the new text of an event in the exchange stream state.
-// Under lookbehind the event repeats overlap runes already seen.
+// appendState records the new text of a passed event in the exchange stream
+// state. Under lookbehind the event repeats overlap runes already seen, so
+// only the rest is fresh.
 func (ps *pluginStream) appendState(ev *pluginapi.StreamEvent, overlap int) {
 	if overlap <= 0 || ev.Kind != pluginapi.EventTextDelta {
 		ps.x.Stream.Append(ev)

@@ -36,22 +36,39 @@ func patchChatMessage(original core.Message, m pluginapi.Message) (core.Message,
 	return out, nil
 }
 
+// patchToolCalls rewrites the tool calls of a message from the unified
+// calls. Each call takes over the envelope (type, extra fields) of the
+// original at the same position when the ids agree, otherwise of the
+// original with the same unique id; ids may be empty or repeated, so
+// neither alone is a key. A call without an original is new.
 func patchToolCalls(originals []core.ToolCall, calls []pluginapi.ToolCall) []core.ToolCall {
 	if len(calls) == 0 {
 		return nil
 	}
-	byID := make(map[string]core.ToolCall, len(originals))
-	for _, tc := range originals {
-		byID[tc.ID] = tc
+	byID := make(map[string]int, len(originals))
+	for i, tc := range originals {
+		if tc.ID == "" {
+			continue
+		}
+		if _, dup := byID[tc.ID]; dup {
+			byID[tc.ID] = -1 // repeated ids identify nothing
+			continue
+		}
+		byID[tc.ID] = i
 	}
 	out := make([]core.ToolCall, 0, len(calls))
-	for _, call := range calls {
-		tc, ok := byID[call.ID]
-		if !ok {
+	for i, call := range calls {
+		idx := -1
+		if i < len(originals) && originals[i].ID == call.ID {
+			idx = i
+		} else if j, ok := byID[call.ID]; ok && j >= 0 {
+			idx = j
+		}
+		if idx < 0 {
 			out = append(out, newToolCall(call))
 			continue
 		}
-		tc = cloneToolCall(tc)
+		tc := cloneToolCall(originals[idx])
 		tc.Function.Name = call.Name
 		tc.Function.Arguments = argumentsToString(call.Arguments)
 		out = append(out, tc)

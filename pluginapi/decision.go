@@ -22,8 +22,9 @@ type Decision struct {
 	// Action selects what happens next. The zero value is treated as
 	// [ActionAllow].
 	Action Action
-	// Status is the HTTP status for [ActionBlock]. Zero means the phase
-	// default: 400 in request phases, 502 in response phases.
+	// Status is the HTTP status for [ActionBlock], 400 to 599. Zero, or a
+	// value outside that range, means the phase default: 400 in request
+	// phases, 502 in response phases.
 	Status int
 	// Code is a machine-readable reason such as "content_policy".
 	Code string

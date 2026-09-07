@@ -16,6 +16,7 @@ const CONFIG_KEYS = [
   "RATE_LIMITS_ENABLED",
   "PER_CHILD_QUOTAS_ENABLED",
   "GUARDRAILS_ENABLED",
+  "PLUGINS_ENABLED",
   "CACHE_ENABLED",
   "REDIS_URL",
   "SEMANTIC_CACHE_ENABLED",
@@ -109,6 +110,10 @@ class RuntimeConfigStore {
 
   guardrailsVisible() {
     return this.booleanFlag("GUARDRAILS_ENABLED", true);
+  }
+
+  pluginsVisible() {
+    return this.booleanFlag("PLUGINS_ENABLED", true);
   }
 
   mcpVisible() {
