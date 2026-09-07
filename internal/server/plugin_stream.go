@@ -263,7 +263,9 @@ func (ps *pluginStream) runResponse(completion *pluginapi.Completion, buffered [
 		chain = merged
 	}
 	outcome, err := chain.RunResponse(ps.ctx, ps.x)
-	ps.state.Finish(ps.x)
+	if !plugins.Abandoned(err) { // an abandoned mutator may still write ps.x
+		ps.state.Finish(ps.x)
+	}
 	logResponseDecisions(ps.requestID, pluginapi.KindResponse, outcome, ps.state)
 	ps.recordWarn(outcome)
 	if err != nil {

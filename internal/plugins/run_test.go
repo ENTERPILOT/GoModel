@@ -265,3 +265,29 @@ func TestRunReadersEditRequestHeadersConcurrently(t *testing.T) {
 		t.Fatalf("X-Keep = %q, want same", got)
 	}
 }
+
+// A mutator that outlives its timeout keeps writing the request's exchange.
+// The run reports the failure as abandoned so callers know not to read it.
+func TestRunAbandonedMutatorIsReportedAbandoned(t *testing.T) {
+	stop := make(chan struct{})
+	defer close(stop)
+	mutator := &fakePlugin{name: "runaway", mutates: true, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+		for {
+			select {
+			case <-stop:
+				return pluginapi.Allow(), nil
+			default:
+				_ = x.Prompt.SetText("m0", 0, "still editing")
+			}
+		}
+	}}
+	inst := newTestInstance(mutator, InstanceSpec{Timeout: 20 * time.Millisecond, FailMode: FailOpen})
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{inst, 10}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = chain.RunPrompt(context.Background(), withPromptText(newExchange(), "x"))
+	if !Abandoned(err) {
+		t.Fatalf("error = %v, want an abandoned failure even under fail_open", err)
+	}
+}
