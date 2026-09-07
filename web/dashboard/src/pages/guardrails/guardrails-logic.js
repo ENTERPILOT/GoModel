@@ -135,9 +135,14 @@ export function defaultGuardrailForm(types, type) {
   };
 }
 
-// guardrailEditForm hydrates the editor from a stored definition view.
+// guardrailEditForm hydrates the editor from a stored definition view. The
+// stored type is kept even when the type catalog does not list it (the
+// plugin is unloaded, or the catalog failed to load): substituting another
+// type would retype the definition on save and drop its stored secrets.
 export function guardrailEditForm(types, guardrail) {
-  const resolvedType = resolvedGuardrailType(types, guardrail && guardrail.type);
+  const resolvedType =
+    String((guardrail && guardrail.type) || "").trim() ||
+    defaultGuardrailType(types);
   const timeout = Number(guardrail && guardrail.timeout_ms);
   return {
     name: String((guardrail && guardrail.name) || "").trim(),

@@ -332,8 +332,20 @@ test("parseGuardrailTimeoutMs accepts empty/whole numbers and rejects the rest",
   assert.ok(Number.isNaN(parseGuardrailTimeoutMs("abc")));
 });
 
-test("guardrailEditForm falls back to the default type for unknown types", () => {
-  const form = guardrailEditForm(PLUGIN_TYPES, { name: "old", type: "gone", timeout_ms: 0 });
-  assert.equal(form.type, "classifier");
+test("guardrailEditForm keeps an unknown stored type and its config", () => {
+  const form = guardrailEditForm(PLUGIN_TYPES, {
+    name: "old",
+    type: "gone",
+    config: { api_key: "********", endpoint: "http://x" },
+    timeout_ms: 0,
+  });
+  assert.equal(form.type, "gone");
+  assert.deepEqual(form.config, { api_key: "********", endpoint: "http://x" });
   assert.equal(form.timeout_ms, "");
+});
+
+test("guardrailEditForm keeps the stored type when no types are loaded", () => {
+  const form = guardrailEditForm([], { name: "old", type: "llm_judge", config: { model: "a/b" } });
+  assert.equal(form.type, "llm_judge");
+  assert.deepEqual(form.config, { model: "a/b" });
 });

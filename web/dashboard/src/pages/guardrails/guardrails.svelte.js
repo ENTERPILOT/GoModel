@@ -120,12 +120,19 @@ class GuardrailsStore {
       if (outcome.result) {
         this.available = true;
       }
-      this.types = outcome.items;
       if (outcome.status === "error") {
+        // Keep the types already loaded: with an empty list every stored
+        // definition would look unknown and the editor would retype it.
         this.error = outcome.error;
         return;
       }
-      const resolvedType = resolvedGuardrailType(this.types, this.form.type);
+      this.types = outcome.items;
+      // A definition being edited keeps its stored type whatever the
+      // catalog now says; the type select is disabled in that mode.
+      const resolvedType =
+        this.formMode === "edit"
+          ? this.form.type
+          : resolvedGuardrailType(this.types, this.form.type);
       this.form = {
         ...this.form,
         type: resolvedType,
