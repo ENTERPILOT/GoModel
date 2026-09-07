@@ -17,6 +17,7 @@ type pluginView struct {
 	Description string                 `json:"description,omitempty"`
 	Kinds       []string               `json:"kinds"`
 	Mutates     bool                   `json:"mutates"`
+	Guardrail   bool                   `json:"guardrail"`
 	Source      string                 `json:"source"`
 	Fields      []guardrails.TypeField `json:"fields"`
 	RouteFields []guardrails.TypeField `json:"route_fields"`
@@ -46,6 +47,7 @@ func pluginViewFromEntry(entry plugins.Entry) pluginView {
 		Description: entry.Manifest.Description,
 		Kinds:       []string{},
 		Mutates:     entry.Manifest.Mutates,
+		Guardrail:   entry.Manifest.Guardrail,
 		Source:      string(entry.Source),
 		Fields:      guardrails.TypeFieldsFromSchema(entry.Manifest.ConfigSchema, pluginapi.ScopeInstance),
 		RouteFields: guardrails.TypeFieldsFromSchema(entry.Manifest.ConfigSchema, pluginapi.ScopeRoute),

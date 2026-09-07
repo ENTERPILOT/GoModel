@@ -47,7 +47,7 @@ func text(role pluginapi.Role, id, s string) pluginapi.Message {
 
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
-	if m.Name != "string_replace" || !m.Mutates {
+	if m.Name != "string_replace" || !m.Mutates || !m.Guardrail {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if !reflect.DeepEqual(m.Kinds, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}) {

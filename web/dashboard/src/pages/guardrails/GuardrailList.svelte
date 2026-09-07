@@ -8,7 +8,7 @@
   import { auth } from "$lib/stores/auth.svelte.js";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
   import { phaseLabel } from "$lib/utils/pluginPhases.js";
-  import { Pencil, Plus, X } from "lucide";
+  import { Pencil, Plus, ShieldCheck, X } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -65,9 +65,14 @@
             <tr>
               <td class="mono font-size-md">{guardrail.name}</td>
               <td>
-                <span class="settings-guardrail-type-pill"
-                  >{store.typeLabel(guardrail.type)}</span
-                >
+                <span class="settings-guardrail-type-pill">
+                  {#if guardrail.guardrail}
+                    <span class="settings-guardrail-shield" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
+                      <Icon icon={ShieldCheck} class="form-action-icon" />
+                    </span>
+                  {/if}
+                  {store.typeLabel(guardrail.type)}
+                </span>
                 <div class="settings-guardrail-phases" aria-label={m.guardrails_phases()}>
                   {#each store.phases(guardrail) as phase (phase)}
                     <span class="settings-guardrail-phase">{phaseLabel(phase)}</span>
@@ -121,6 +126,12 @@
 <style>
   .settings-guardrails-list {
     min-width: 0;
+  }
+
+  .settings-guardrail-shield {
+    display: inline-flex;
+    margin-right: 4px;
+    color: var(--accent);
   }
 
   .settings-guardrail-type-pill {

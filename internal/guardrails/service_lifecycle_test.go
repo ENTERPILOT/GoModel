@@ -34,6 +34,7 @@ func (p *lifecyclePlugin) Manifest() pluginapi.Manifest {
 	return pluginapi.Manifest{
 		Name:         "lifecycle",
 		Kinds:        []pluginapi.Kind{pluginapi.KindPrompt},
+		Guardrail:    true,
 		ConfigSchema: []pluginapi.Field{{Key: "word", Input: pluginapi.InputText}},
 	}
 }
@@ -205,5 +206,18 @@ func TestServiceKeepsHeldRetiredInstanceOpen(t *testing.T) {
 	}
 	if _, closed := tracker.counts(); closed != 1 {
 		t.Fatalf("closed = %d, want the released instance closed", closed)
+	}
+}
+
+func TestServiceViewsCarryTheGuardrailFlag(t *testing.T) {
+	store := newTestStore(lifecycleDefinition("a", "one", ""))
+	service, _, _ := lifecycleService(t, store)
+	views := service.ListViews()
+	if len(views) != 1 || !views[0].Guardrail {
+		t.Fatalf("views = %+v, want one view flagged as a guardrail from its plugin manifest", views)
+	}
+	types := service.TypeDefinitions()
+	if len(types) != 1 || !types[0].Guardrail {
+		t.Fatalf("types = %+v, want the lifecycle type flagged as a guardrail", types)
 	}
 }

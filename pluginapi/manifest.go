@@ -46,6 +46,12 @@ type Manifest struct {
 	// Mutates declares that the plugin edits the Prompt, Completion, or
 	// stream. Non-mutating plugins may run concurrently with the provider call.
 	Mutates bool
+	// Guardrail declares that the plugin exists to police traffic: it may
+	// block, answer, or warn on a request or response (a judge, a pattern
+	// blocker). Plugins that only edit traffic (header or prompt rewriters)
+	// or route it leave it false. The dashboard marks guardrail plugins and
+	// their instances with a shield; nothing in the runtime depends on it.
+	Guardrail bool
 	// ConfigSchema drives the dashboard form and config validation. The
 	// validated config is passed to [Plugin.Init] as JSON.
 	ConfigSchema []Field

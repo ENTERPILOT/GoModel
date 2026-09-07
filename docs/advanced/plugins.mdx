@@ -292,9 +292,11 @@ instances run on traffic.
   and *Timeout (ms)*; they apply to the instance in every workflow that
   references it.
 - **Plugins page**: every loaded plugin type with its version, hooks, source
-  (built-in, registered, or the `.so` path), and health. A plugin that failed
-  to load is listed with its error. The page is hidden while the plugin
-  system is off.
+  (built-in, registered, or the `.so` path), and health. Guardrail plugins
+  (those that may block, answer, or warn) carry a shield and are listed
+  first; header or prompt modifiers and routing strategies are plugins too,
+  but not guardrails. A plugin that failed to load is listed with its error.
+  The page is hidden while the plugin system is off.
 - **Workflows page**: each step has a *Phase* selector; the instance dropdown
   only offers instances whose plugin implements that phase.
 
@@ -427,6 +429,12 @@ Notes for authors:
   works too but limits the file to a single instance.
 - Set `Mutates: true` when the plugin edits `Prompt`, `Response`, or the
   stream. Non-mutating plugins may share a step and run concurrently.
+- Set `Guardrail: true` when the plugin polices traffic, that is, it may
+  block, answer, or warn (`llm_judge`, `string_replace`). A plugin that only
+  edits traffic (`header_edit`, `system_prompt`, `llm_based_altering`) or
+  routes it leaves it false. The runtime ignores the flag; the dashboard
+  marks guardrail plugins and their instances with a shield and lists them
+  first.
 - The `Host` passed to `Init` offers `Logger()` (pre-tagged with plugin and
   instance), `Inference().Complete(...)` (a chat completion through the
   gateway with origin `plugin`, scoped to `<user path>/guardrails/<instance>`
@@ -522,6 +530,7 @@ Every plugin type known to the gateway, including ones that failed to load:
     "description": "Replaces, flags, or blocks text matching literal or regex rules in prompts, responses, and streams.",
     "kinds": ["prompt", "response", "stream"],
     "mutates": true,
+    "guardrail": true,
     "source": "builtin",
     "fields": [{ "key": "rules", "label": "Rules", "input": "textarea", "required": true }],
     "route_fields": [],
@@ -550,11 +559,13 @@ hook, in the shape the guardrail editor renders:
   "fields": [{ "key": "model", "label": "Judge model", "input": "model", "required": true }],
   "phases": ["prompt", "response", "stream"],
   "source": "builtin",
-  "mutates": false
+  "mutates": false,
+  "guardrail": true
 }
 ```
 
-`phases`, `source`, and `mutates` are new; `fields[].input` may now be
+`phases`, `source`, `mutates`, and `guardrail` are new (instance views from
+`GET /admin/guardrails` carry `guardrail` as well); `fields[].input` may now be
 `secret` or `model`, and `fields[].scope` is `""` (instance) or `"route"`.
 
 ### GET, PUT, DELETE /admin/guardrails

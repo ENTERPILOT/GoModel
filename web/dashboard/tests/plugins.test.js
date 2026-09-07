@@ -9,6 +9,7 @@ import {
   pluginHealthy,
   pluginRouteFields,
   pluginSourceIsBuiltin,
+  sortPlugins,
 } from "../src/lib/utils/plugins.js";
 import {
   isWorkflowPhase,
@@ -27,7 +28,7 @@ test("normalizePlugins fills every field and drops nameless rows", () => {
       source: "/etc/gomodel/plugins/latency.so",
       route_fields: [{ key: "p95_window", input: "text", scope: "route" }],
     },
-    { name: "string_replace", source: "builtin", health: "error", error: "init failed" },
+    { name: "string_replace", source: "builtin", health: "error", error: "init failed", guardrail: true },
     { version: "0.0.1" },
     null,
   ]);
@@ -43,6 +44,23 @@ test("normalizePlugins fills every field and drops nameless rows", () => {
   assert.deepEqual(plugins[1].kinds, []);
   assert.equal(pluginHealthy(plugins[1]), false);
   assert.equal(pluginSourceIsBuiltin(plugins[1]), true);
+  assert.equal(plugins[0].guardrail, false);
+  assert.equal(plugins[1].guardrail, true);
+});
+
+test("sortPlugins lists guardrails first, then by name", () => {
+  const sorted = sortPlugins(
+    normalizePlugins([
+      { name: "system_prompt" },
+      { name: "string_replace", guardrail: true },
+      { name: "cheapest_healthy" },
+      { name: "llm_judge", guardrail: true },
+    ]),
+  );
+  assert.deepEqual(
+    sorted.map((plugin) => plugin.name),
+    ["llm_judge", "string_replace", "cheapest_healthy", "system_prompt"],
+  );
 });
 
 test("normalizePlugins derives route_fields from scoped fields when absent", () => {

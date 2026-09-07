@@ -1548,6 +1548,7 @@
   "plugins_source_builtin": "Eingebaut",
   "plugins_health_ok": "OK",
   "plugins_health_error": "Fehler",
+  "plugins_guardrail": "Guardrail",
   "plugins_phase_request": "Anfrage",
   "plugins_phase_prompt": "Prompt",
   "plugins_phase_response": "Antwort",

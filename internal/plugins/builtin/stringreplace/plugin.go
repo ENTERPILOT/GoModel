@@ -37,6 +37,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Description: "Replaces, flags, or blocks text matching literal or regex rules in prompts, responses, and streams.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream},
 		Mutates:     true,
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key: "rules", Label: "Rules", Input: pluginapi.InputTextarea, Required: true,

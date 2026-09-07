@@ -1,7 +1,9 @@
 <script>
   // Loaded plugins table (GET /admin/plugins): every plugin type with its
   // version, hooks, source, and health; a plugin that failed to load shows
-  // its error.
+  // its error. Guardrails carry a shield and are listed first.
+  import Icon from "$lib/components/atoms/Icon.svelte";
+  import { ShieldCheck } from "lucide";
   import { pluginsStore } from "$lib/stores/plugins.svelte.js";
   import { phaseLabel } from "$lib/utils/pluginPhases.js";
   import { pluginHealthy, pluginSourceIsBuiltin } from "$lib/utils/plugins.js";
@@ -23,7 +25,14 @@
       {#each pluginsStore.plugins as plugin (plugin.name)}
         <tr>
           <td>
-            <div class="mono font-size-md">{plugin.name}</div>
+            <div class="plugin-name mono font-size-md">
+              {#if plugin.guardrail}
+                <span class="plugin-guardrail" title={m.plugins_guardrail()} aria-label={m.plugins_guardrail()}>
+                  <Icon icon={ShieldCheck} class="form-action-icon" />
+                </span>
+              {/if}
+              {plugin.name}
+            </div>
             {#if plugin.description}
               <div class="plugin-description">{plugin.description}</div>
             {/if}
@@ -56,6 +65,17 @@
 </div>
 
 <style>
+  .plugin-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .plugin-guardrail {
+    display: inline-flex;
+    color: var(--accent);
+  }
+
   .plugin-description {
     margin-top: 4px;
     color: var(--text-muted);

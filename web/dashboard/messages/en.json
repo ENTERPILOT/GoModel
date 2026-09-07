@@ -1553,6 +1553,7 @@
   "plugins_source_builtin": "Built-in",
   "plugins_health_ok": "OK",
   "plugins_health_error": "Error",
+  "plugins_guardrail": "Guardrail",
   "plugins_phase_request": "Request",
   "plugins_phase_prompt": "Prompt",
   "plugins_phase_response": "Response",

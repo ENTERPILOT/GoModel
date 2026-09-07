@@ -6,7 +6,7 @@
 // caller retries.
 
 import { loadAdminList } from "$lib/api/adminCrud.js";
-import { normalizePlugins, pluginByName, pluginRouteFields } from "$lib/utils/plugins.js";
+import { normalizePlugins, pluginByName, pluginRouteFields, sortPlugins } from "$lib/utils/plugins.js";
 
 class PluginsStore {
   plugins = $state([]);
@@ -64,7 +64,7 @@ class PluginsStore {
         this.loaded = false;
         return;
       }
-      this.plugins = outcome.items;
+      this.plugins = sortPlugins(outcome.items);
       this.loaded = true;
       this.available = true;
     } finally {

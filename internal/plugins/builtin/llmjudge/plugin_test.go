@@ -77,7 +77,7 @@ func exchange(prompt *pluginapi.Prompt, resp *pluginapi.Completion) *pluginapi.E
 
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
-	if m.Name != "llm_judge" || m.Mutates {
+	if m.Name != "llm_judge" || m.Mutates || !m.Guardrail {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if !reflect.DeepEqual(m.Kinds, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}) {

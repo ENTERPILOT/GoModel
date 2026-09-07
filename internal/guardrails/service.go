@@ -364,6 +364,7 @@ func (s *Service) viewLocked(name string) View {
 	view := View{Definition: s.redacted(s.snapshot.definitions[name]), Summary: s.snapshot.summaries[name]}
 	if inst := s.snapshot.instances[name]; inst != nil {
 		view.Phases = phaseNames(inst.Kinds)
+		view.Guardrail = inst.Manifest.Guardrail
 	}
 	return view
 }

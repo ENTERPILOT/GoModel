@@ -9,6 +9,11 @@ text below, the code and the ADR win:
 - `pluginapi` is a package in the main module, not a separate module. A
   `.so` therefore pins `github.com/enterpilot/gomodel` at the host version;
   splitting it into its own module remains a tag-time option for v1.
+- A guardrail is a plugin instance, but not every plugin instance is a
+  guardrail: `Manifest.Guardrail` (added 2026-09-07) marks the plugins that
+  police traffic, while header edits, prompt injection, and routing
+  strategies are plugin instances without it. The dashboard has a Plugins
+  page for loaded types and marks guardrails with a shield.
 - Instances live only in `guardrails.rules[]` and the dashboard; the
   `plugins:` section only loads `.so` files (`search_paths`, `load[]` with
   `file` and `sha256`). Per-instance timeouts are `timeout_ms`; the
@@ -164,6 +169,10 @@ type Manifest struct {
     // stream. Non-mutating plugins may share a step with a mutating one
     // and may run concurrently with the provider call (section 5).
     Mutates bool
+    // Guardrail marks a plugin that polices traffic (may block, answer,
+    // or warn). Modifiers and route strategies leave it false. Dashboard
+    // only; the runtime does not read it. Added 2026-09-07.
+    Guardrail bool
     // ConfigSchema drives the dashboard form and config validation.
     ConfigSchema []Field
 }

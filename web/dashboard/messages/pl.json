@@ -1583,6 +1583,7 @@
   "plugins_source_builtin": "Wbudowana",
   "plugins_health_ok": "OK",
   "plugins_health_error": "Błąd",
+  "plugins_guardrail": "Guardrail",
   "plugins_phase_request": "Request",
   "plugins_phase_prompt": "Prompt",
   "plugins_phase_response": "Odpowiedź",

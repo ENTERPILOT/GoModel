@@ -32,6 +32,10 @@ type View struct {
 	// Phases lists the hook phases the instance's plugin implements.
 	Phases  []string `json:"phases,omitempty"`
 	Summary string   `json:"summary,omitempty"`
+	// Guardrail reports whether the instance's plugin polices traffic (see
+	// pluginapi.Manifest.Guardrail); an instance of a modifier such as
+	// header_edit is a plugin instance but not a guardrail.
+	Guardrail bool `json:"guardrail"`
 }
 
 // ViewFromDefinition projects one guardrail definition into its admin-facing
@@ -69,6 +73,7 @@ type TypeDefinition struct {
 	Phases      []string        `json:"phases"`
 	Source      string          `json:"source"`
 	Mutates     bool            `json:"mutates"`
+	Guardrail   bool            `json:"guardrail"`
 }
 
 // TypeFieldsFromSchema converts the schema fields of one scope.
@@ -111,6 +116,7 @@ func typeDefinitionFromEntry(entry plugins.Entry) TypeDefinition {
 		Phases:      phaseNames(entry.Kinds),
 		Source:      typeSource(entry.Source),
 		Mutates:     entry.Manifest.Mutates,
+		Guardrail:   entry.Manifest.Guardrail,
 	}
 }
 

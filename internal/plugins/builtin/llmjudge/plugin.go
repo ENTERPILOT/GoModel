@@ -37,6 +37,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Description: "Asks a judge model whether prompts and responses violate a policy, then blocks, answers, or flags them.",
 		Kinds:       []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream},
 		Mutates:     false,
+		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key: "model", Label: "Judge model", Input: pluginapi.InputModel, Required: true,
