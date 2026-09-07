@@ -22,6 +22,10 @@ Please use Conventional Commits for commit subjects and PR titles:
 
 Allowed types are `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`, and `revert`.
 
+## Agent instruction files
+
+`AGENTS.md` holds the agent instructions every harness reads, and `CLAUDE.md` imports it for Claude Code. Make agent-instruction changes in `AGENTS.md`; harness-specific behavior belongs in that harness's file, such as `CLAUDE.md` for Claude Code.
+
 ## Dashboard frontend
 
 The admin dashboard is a Svelte 5 single-page app in `web/dashboard/`. Vite
