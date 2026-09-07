@@ -157,6 +157,21 @@ func TestEventScanner_ByteAtATime(t *testing.T) {
 	}
 }
 
+func TestEventScanner_OversizedCompletedEventIsRelayedUnparsed(t *testing.T) {
+	scanner := &EventScanner{MaxEventBytes: 16}
+	big := "data: " + strings.Repeat("x", 40) + "\n\n"
+	got := scanAll(t, scanner, big+"data: ok\n\n")
+	if len(got) != 2 {
+		t.Fatalf("events = %d, want 2: %+v", len(got), got)
+	}
+	if !got[0].Oversized || got[0].Data != nil || string(got[0].Raw) != big {
+		t.Errorf("completed oversized event should be an unparsed fragment: %+v", got[0])
+	}
+	if got[1].Oversized || string(got[1].Data) != "ok" {
+		t.Errorf("event after oversized block = %+v", got[1])
+	}
+}
+
 func TestEventScanner_OversizedEventIsRelayedUnparsed(t *testing.T) {
 	scanner := &EventScanner{MaxEventBytes: 16}
 	big := "data: " + strings.Repeat("x", 40)

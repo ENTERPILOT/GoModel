@@ -93,9 +93,10 @@ type RawEvent struct {
 // alias the scanner's buffer or the fed chunk and are valid only until the
 // next Feed or Flush call.
 type EventScanner struct {
-	// MaxEventBytes bounds the bytes held for an unterminated event. Once
-	// exceeded the event is relayed as Oversized fragments until its boundary.
-	// Zero selects 256 KiB.
+	// MaxEventBytes bounds one event's body. A larger event is relayed as
+	// Oversized fragments and never parsed, whether it arrived complete in
+	// one chunk or is still being buffered across chunks, so the limit does
+	// not depend on upstream read boundaries. Zero selects 256 KiB.
 	MaxEventBytes int
 
 	pending    []byte
@@ -144,7 +145,11 @@ func (s *EventScanner) Feed(chunk []byte) []RawEvent {
 			break
 		}
 		end := idx + sepLen
-		events = append(events, parseRawEvent(data[:end], data[:idx]))
+		if idx > s.limit() {
+			events = append(events, RawEvent{Oversized: true, Raw: data[:end]})
+		} else {
+			events = append(events, parseRawEvent(data[:end], data[:idx]))
+		}
 		data = data[end:]
 	}
 

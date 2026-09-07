@@ -571,31 +571,43 @@ func TestTransformedSSEStream_ReadAfterClose(t *testing.T) {
 func TestTransformedSSEStream_OversizedEventFailsClosed(t *testing.T) {
 	big := `data: {"id":"c1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"` + strings.Repeat("secret ", 40) + `"}}]}` + "\n\n"
 	input := ": keep-alive\n\n" + big + "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"}}]}\n\ndata: [DONE]\n\n"
-	var reported error
-	tr := &funcTransformer{}
-	upstream := &trackingCloser{Reader: &chunkedReader{data: []byte(input), n: 64}}
-	stream := NewTransformedSSEStream(upstream, ChatCodec(), tr, TransformOptions{MaxEventBytes: 128, OnError: func(err error) { reported = err }})
-	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(got)
-	if !strings.HasPrefix(out, ": keep-alive\n\n") {
-		t.Errorf("comment not relayed:\n%s", out)
-	}
-	if strings.Contains(out, "secret") || strings.Contains(out, "after") {
-		t.Errorf("uninspected content leaked:\n%s", out)
-	}
-	if !strings.Contains(out, `"code":"event_too_large"`) || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Errorf("fail-closed output = %s", out)
-	}
-	if !errors.Is(reported, ErrEventTooLarge) {
-		t.Errorf("reported = %v", reported)
-	}
-	if len(tr.seen) != 0 {
-		t.Errorf("transformer saw %d events, want none", len(tr.seen))
-	}
-	if !upstream.closed {
-		t.Error("upstream not closed")
+	// The limit must not depend on how upstream splits its reads: the event
+	// is rejected whether it arrives in small chunks or complete in one read.
+	for _, tt := range []struct {
+		name   string
+		reader io.Reader
+	}{
+		{"chunked", &chunkedReader{data: []byte(input), n: 64}},
+		{"one read", strings.NewReader(input)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var reported error
+			tr := &funcTransformer{}
+			upstream := &trackingCloser{Reader: tt.reader}
+			stream := NewTransformedSSEStream(upstream, ChatCodec(), tr, TransformOptions{MaxEventBytes: 128, OnError: func(err error) { reported = err }})
+			got, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(got)
+			if !strings.HasPrefix(out, ": keep-alive\n\n") {
+				t.Errorf("comment not relayed:\n%s", out)
+			}
+			if strings.Contains(out, "secret") || strings.Contains(out, "after") {
+				t.Errorf("uninspected content leaked:\n%s", out)
+			}
+			if !strings.Contains(out, `"code":"event_too_large"`) || !strings.HasSuffix(out, "data: [DONE]\n\n") {
+				t.Errorf("fail-closed output = %s", out)
+			}
+			if !errors.Is(reported, ErrEventTooLarge) {
+				t.Errorf("reported = %v", reported)
+			}
+			if len(tr.seen) != 0 {
+				t.Errorf("transformer saw %d events, want none", len(tr.seen))
+			}
+			if !upstream.closed {
+				t.Error("upstream not closed")
+			}
+		})
 	}
 }
