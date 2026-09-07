@@ -347,3 +347,31 @@ func TestChatRequestFromMessages(t *testing.T) {
 		t.Errorf("empty request = %+v", r)
 	}
 }
+
+func TestChatEditKeepsFilePart(t *testing.T) {
+	req := decodeChat(t, `{"model":"m","messages":[
+		{"role":"system","content":"be brief"},
+		{"role":"user","content":[
+			{"type":"text","text":"summarize"},
+			{"type":"file","file":{"file_id":"file_123","filename":"report.pdf","x_file":1}},
+			{"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0="}}
+		]}
+	]}`)
+	p, err := FromChatRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetText("m0", 0, "be very brief"); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyToChatRequest(req, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONEqual(t, req.Messages[1], applied.Messages[1])
+	got := messageJSON(t, applied.Messages[1])
+	want := `{"role":"user","content":[{"type":"text","text":"summarize"},{"type":"file","file":{"file_id":"file_123","filename":"report.pdf","x_file":1}},{"type":"file","file":{"file_data":"data:application/pdf;base64,JVBERi0="}}]}`
+	if got != want {
+		t.Errorf("file message\n got: %s\nwant: %s", got, want)
+	}
+}

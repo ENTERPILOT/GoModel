@@ -92,6 +92,15 @@ func cloneContentPart(part core.ContentPart) core.ContentPart {
 			ExtraFields: core.CloneUnknownJSONFields(part.InputAudio.ExtraFields),
 		}
 	}
+	if part.File != nil {
+		cloned.File = &core.FileContent{
+			FileData:    part.File.FileData,
+			FileURL:     part.File.FileURL,
+			FileID:      part.File.FileID,
+			Filename:    part.File.Filename,
+			ExtraFields: core.CloneUnknownJSONFields(part.File.ExtraFields),
+		}
+	}
 	return cloned
 }
 
