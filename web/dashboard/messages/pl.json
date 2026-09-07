@@ -61,6 +61,7 @@
   "navigation_api_keys": "Klucze API",
   "navigation_workflows": "Workflows",
   "navigation_guardrails_beta": "Guardrails (beta)",
+  "navigation_plugins": "Wtyczki",
   "navigation_mcp_servers": "Serwery MCP",
   "navigation_settings": "Ustawienia",
   "navigation_users": "Użytkownicy",
@@ -1553,6 +1554,10 @@
   "schema_fields_model_placeholder": "provider/model lub alias",
   "plugins_title": "Wtyczki",
   "plugins_help": "Wtyczki załadowane przez bramkę. Dodają typy Guardrails i strategie routingu; wbudowane są częścią GoModel, a wtyczki plikowe są ładowane ze skonfigurowanego katalogu wtyczek.",
+  "plugins_help_label": "Pomoc dotycząca wtyczek",
+  "plugins_loading": "Wczytywanie wtyczek...",
+  "plugins_empty": "Brak załadowanych wtyczek.",
+  "plugins_unavailable": "System wtyczek jest wyłączony. Ustaw PLUGINS_ENABLED=true (lub GUARDRAILS_ENABLED=true), aby załadować wtyczki.",
   "plugins_count": [
     {
       "declarations": [
@@ -1570,8 +1575,6 @@
       }
     }
   ],
-  "plugins_show": "Pokaż wtyczki",
-  "plugins_hide": "Ukryj wtyczki",
   "plugins_name": "Nazwa",
   "plugins_version": "Wersja",
   "plugins_kinds": "Hooki",

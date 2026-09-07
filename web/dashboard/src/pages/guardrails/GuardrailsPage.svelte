@@ -10,9 +10,7 @@
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import GuardrailList from "./GuardrailList.svelte";
   import GuardrailEditor from "./GuardrailEditor.svelte";
-  import PluginList from "./PluginList.svelte";
   import { guardrailsStore as store } from "./guardrails.svelte.js";
-  import { pluginsStore } from "$lib/stores/plugins.svelte.js";
 
   const PAGE = "guardrails";
 
@@ -22,7 +20,6 @@
     if (router.page === PAGE) {
       runtimeConfig.ensureLoaded();
       store.fetchPage();
-      pluginsStore.fetch();
     }
   });
 </script>
@@ -78,7 +75,6 @@
 
   <GuardrailEditor />
   <GuardrailList />
-  <PluginList />
 </div>
 
 <style>

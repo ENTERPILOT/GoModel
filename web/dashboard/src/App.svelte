@@ -25,6 +25,7 @@
   import WorkflowsPage from "$pages/workflows/WorkflowsPage.svelte";
   import AuditLogsPage from "$pages/audit-logs/AuditLogsPage.svelte";
   import GuardrailsPage from "$pages/guardrails/GuardrailsPage.svelte";
+  import PluginsPage from "$pages/plugins/PluginsPage.svelte";
   import McpServersPage from "$pages/mcp-servers/McpServersPage.svelte";
   import ProvidersConfigPage from "$pages/providers-config/ProvidersConfigPage.svelte";
   import AuthKeysPage from "$pages/auth-keys/AuthKeysPage.svelte";
@@ -43,6 +44,7 @@
     workflows: WorkflowsPage,
     "audit-logs": AuditLogsPage,
     guardrails: GuardrailsPage,
+    plugins: PluginsPage,
     "mcp-servers": McpServersPage,
     "providers-config": ProvidersConfigPage,
     "auth-keys": AuthKeysPage,

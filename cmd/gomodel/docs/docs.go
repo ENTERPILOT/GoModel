@@ -7374,6 +7374,9 @@ const docTemplate = `{
                 "PER_CHILD_QUOTAS_ENABLED": {
                     "type": "string"
                 },
+                "PLUGINS_ENABLED": {
+                    "type": "string"
+                },
                 "RATE_LIMITS_ENABLED": {
                     "type": "string"
                 },
@@ -8385,6 +8388,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "strategy": {
+                    "type": "string"
+                },
+                "strategy_config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "strategy_plugin": {
+                    "description": "StrategyPlugin names the routing-strategy plugin for strategy \"plugin\";\nStrategyConfig holds that plugin's route-scoped settings, validated\nagainst its schema (see GET /admin/plugins, route_fields).",
                     "type": "string"
                 },
                 "target_model": {
@@ -11992,6 +12003,13 @@ const docTemplate = `{
                 "strategy": {
                     "type": "string"
                 },
+                "strategy_config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "strategy_plugin": {
+                    "type": "string"
+                },
                 "targets": {
                     "type": "array",
                     "items": {
@@ -12050,6 +12068,14 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "strategy": {
+                    "type": "string"
+                },
+                "strategy_config": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "strategy_plugin": {
+                    "description": "StrategyPlugin names the routing-strategy plugin consulted when Strategy\nis StrategyPlugin; StrategyConfig is that plugin's per-virtual-model\nconfiguration, validated against its route-scoped fields. Both are\ncleared for every other strategy.",
                     "type": "string"
                 },
                 "targets": {

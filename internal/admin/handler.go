@@ -77,6 +77,7 @@ const (
 	DashboardConfigRateLimitsEnabled    = "RATE_LIMITS_ENABLED"
 	DashboardConfigQuotaTemplates       = "PER_CHILD_QUOTAS_ENABLED"
 	DashboardConfigGuardrailsEnabled    = "GUARDRAILS_ENABLED"
+	DashboardConfigPluginsEnabled       = "PLUGINS_ENABLED"
 	DashboardConfigCacheEnabled         = "CACHE_ENABLED"
 	DashboardConfigRedisURL             = "REDIS_URL"
 	DashboardConfigSemanticCacheEnabled = "SEMANTIC_CACHE_ENABLED"
@@ -101,6 +102,7 @@ type DashboardConfigResponse struct {
 	RateLimitsEnabled     string `json:"RATE_LIMITS_ENABLED,omitempty"`
 	QuotaTemplatesEnabled string `json:"PER_CHILD_QUOTAS_ENABLED,omitempty"`
 	GuardrailsEnabled     string `json:"GUARDRAILS_ENABLED,omitempty"`
+	PluginsEnabled        string `json:"PLUGINS_ENABLED,omitempty"`
 	CacheEnabled          string `json:"CACHE_ENABLED,omitempty"`
 	RedisURL              string `json:"REDIS_URL,omitempty"`
 	SemanticCacheEnabled  string `json:"SEMANTIC_CACHE_ENABLED,omitempty"`
@@ -427,6 +429,7 @@ func normalizeDashboardRuntimeConfig(values DashboardConfigResponse) DashboardCo
 		RateLimitsEnabled:      strings.TrimSpace(values.RateLimitsEnabled),
 		QuotaTemplatesEnabled:  strings.TrimSpace(values.QuotaTemplatesEnabled),
 		GuardrailsEnabled:      strings.TrimSpace(values.GuardrailsEnabled),
+		PluginsEnabled:         strings.TrimSpace(values.PluginsEnabled),
 		CacheEnabled:           strings.TrimSpace(values.CacheEnabled),
 		RedisURL:               strings.TrimSpace(values.RedisURL),
 		SemanticCacheEnabled:   strings.TrimSpace(values.SemanticCacheEnabled),

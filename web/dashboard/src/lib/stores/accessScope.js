@@ -14,6 +14,7 @@ export const GLOBAL_ONLY_PAGES = Object.freeze([
   "models",
   "workflows",
   "guardrails",
+  "plugins",
   "mcp-servers",
 ]);
 

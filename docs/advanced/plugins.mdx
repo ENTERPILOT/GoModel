@@ -234,8 +234,8 @@ The plugin system is off by default. With it off, nothing plugin-related
 exists: no built-in or loaded plugin types, no `.so` loading, no guardrails,
 and no routing-strategy plugins (a virtual model with `strategy: plugin` is
 rejected). `GET /admin/plugins` and the `/admin/guardrails` endpoints answer
-`503` with code `feature_unavailable`, and the dashboard hides the Guardrails
-page. Guardrails are plugin instances, so `GUARDRAILS_ENABLED=true` turns the
+`503` with code `feature_unavailable`, and the dashboard hides the Guardrails and
+Plugins pages. Guardrails are plugin instances, so `GUARDRAILS_ENABLED=true` turns the
 plugin system on implicitly; set `PLUGINS_ENABLED=true` on its own to use
 routing-strategy plugins or manage guardrail definitions without running them.
 
@@ -291,9 +291,10 @@ instances run on traffic.
   picker). The **Advanced** section holds *Fail mode* (Default, Closed, Open)
   and *Timeout (ms)*; they apply to the instance in every workflow that
   references it.
-- **Plugins list**: at the bottom of the Guardrails page, every loaded plugin
-  type with its version, hooks, source (built-in, registered, or the `.so`
-  path), and health. A plugin that failed to load is listed with its error.
+- **Plugins page**: every loaded plugin type with its version, hooks, source
+  (built-in, registered, or the `.so` path), and health. A plugin that failed
+  to load is listed with its error. The page is hidden while the plugin
+  system is off.
 - **Workflows page**: each step has a *Phase* selector; the instance dropdown
   only offers instances whose plugin implements that phase.
 

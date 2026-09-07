@@ -13,6 +13,7 @@ import { access } from "$lib/stores/access.svelte.js";
 import { versionStore } from "$lib/stores/version.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import {
+  Blocks,
   Box,
   ChartColumn,
   FlaskConical,
@@ -70,6 +71,12 @@ export const NAV_ITEMS = [
     label: m.navigation_guardrails_beta,
     icon: ShieldCheck,
     visible: () => globalOnly() && runtimeConfig.guardrailsVisible(),
+  },
+  {
+    page: "plugins",
+    label: m.navigation_plugins,
+    icon: Blocks,
+    visible: () => globalOnly() && runtimeConfig.pluginsVisible(),
   },
   {
     page: "mcp-servers",
