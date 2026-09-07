@@ -783,14 +783,44 @@ func TestToChatRequestToolResultIsError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToChatRequest: %v", err)
 	}
-	if got := string(chat.Messages[0].ExtraFields.Lookup(core.ToolResultIsErrorField)); got != "true" {
-		t.Errorf("is_error = %q, want true", got)
+	if got := string(chat.Messages[0].ExtraFields.ExtraContent(core.ExtraContentVendorAnthropic)); got != `{"is_error":true}` {
+		t.Errorf("extra_content.anthropic = %s, want is_error marker", got)
 	}
 	if got := string(chat.Messages[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
 		t.Errorf("cache_control = %s, want preserved alongside is_error", got)
 	}
-	if got := chat.Messages[1].ExtraFields.Lookup(core.ToolResultIsErrorField); len(got) != 0 {
-		t.Errorf("messages[1] is_error = %s, want absent", got)
+	if got := chat.Messages[1].ExtraFields.Lookup(core.ExtraContentField); len(got) != 0 {
+		t.Errorf("messages[1] extra_content = %s, want absent", got)
+	}
+}
+
+func TestToChatRequestCarriesToolUseExtraContent(t *testing.T) {
+	chat, err := ToChatRequest(mustDecode(t, `{
+		"model":"m","max_tokens":10,
+		"messages":[
+			{"role":"user","content":"hi"},
+			{"role":"assistant","content":[
+				{"type":"tool_use","id":"tu_1","name":"lookup","input":{},"cache_control":{"type":"ephemeral"},
+				 "extra_content":{"google":{"thought_signature":"sig"}}},
+				{"type":"tool_use","id":"tu_2","name":"lookup","input":{},"extra_content":null}
+			]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	calls := chat.Messages[1].ToolCalls
+	if len(calls) != 2 {
+		t.Fatalf("tool calls = %+v", calls)
+	}
+	if got := string(calls[0].ExtraFields.Lookup(core.ExtraContentField)); got != `{"google":{"thought_signature":"sig"}}` {
+		t.Errorf("tool call extra_content = %s", got)
+	}
+	if got := string(calls[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
+		t.Errorf("cache_control = %s, want preserved alongside extra_content", got)
+	}
+	if got := calls[1].ExtraFields.Lookup(core.ExtraContentField); len(got) != 0 {
+		t.Errorf("null extra_content = %s, want dropped", got)
 	}
 }
 
@@ -811,15 +841,15 @@ func TestToChatRequestPreservesAssistantThinkingBlocks(t *testing.T) {
 		t.Fatalf("ToChatRequest: %v", err)
 	}
 	assistant := chat.Messages[1]
-	want := `[{"type":"thinking","thinking":"","signature":"sig1"},{"type":"redacted_thinking","data":"opaque"}]`
-	if got := string(assistant.ExtraFields.Lookup(core.ThinkingBlocksField)); got != want {
-		t.Errorf("thinking_blocks = %s, want %s", got, want)
+	want := `{"thinking_blocks":[{"type":"thinking","thinking":"","signature":"sig1"},{"type":"redacted_thinking","data":"opaque"}]}`
+	if got := string(assistant.ExtraFields.ExtraContent(core.ExtraContentVendorAnthropic)); got != want {
+		t.Errorf("extra_content.anthropic = %s, want %s", got, want)
 	}
 	if len(assistant.ToolCalls) != 1 {
 		t.Errorf("tool calls = %+v", assistant.ToolCalls)
 	}
-	if got := chat.Messages[2].ExtraFields.Lookup(core.ThinkingBlocksField); len(got) != 0 {
-		t.Errorf("user thinking_blocks = %s, want dropped", got)
+	if got := chat.Messages[2].ExtraFields.Lookup(core.ExtraContentField); len(got) != 0 {
+		t.Errorf("user extra_content = %s, want dropped", got)
 	}
 	if chat.Messages[2].Content != "ok" {
 		t.Errorf("user content = %#v", chat.Messages[2].Content)

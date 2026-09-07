@@ -8695,6 +8695,10 @@ const docTemplate = `{
         "anthropicapi.ResponseContentBlock": {
             "type": "object",
             "properties": {
+                "extra_content": {
+                    "description": "ExtraContent is provider replay state on a tool_use block; clients echo\nit back on the next turn (see core.ExtraContentField).",
+                    "type": "object"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -9691,7 +9695,8 @@ const docTemplate = `{
                 "invalid_request_error",
                 "authentication_error",
                 "not_found_error",
-                "permission_error"
+                "permission_error",
+                "internal_error"
             ],
             "x-enum-varnames": [
                 "ErrorTypeProvider",
@@ -9699,7 +9704,8 @@ const docTemplate = `{
                 "ErrorTypeInvalidRequest",
                 "ErrorTypeAuthentication",
                 "ErrorTypeNotFound",
-                "ErrorTypePermission"
+                "ErrorTypePermission",
+                "ErrorTypeInternal"
             ]
         },
         "core.FileContent": {
@@ -10699,6 +10705,10 @@ const docTemplate = `{
                 "type": {
                     "description": "\"message\", \"function_call\", etc.",
                     "type": "string"
+                },
+                "extra_content": {
+                    "type": "object",
+                    "additionalProperties": true
                 }
             }
         },
@@ -12074,6 +12084,10 @@ const docTemplate = `{
                             }
                         }
                     ]
+                },
+                "extra_content": {
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "id": {
                     "type": "string"

@@ -36,10 +36,11 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 		}
 		for _, call := range choice.Message.ToolCalls {
 			out.Content = append(out.Content, ResponseContentBlock{
-				Type:  "tool_use",
-				ID:    call.ID,
-				Name:  call.Function.Name,
-				Input: argumentsToRaw(call.Function.Arguments),
+				Type:         "tool_use",
+				ID:           call.ID,
+				Name:         call.Function.Name,
+				Input:        argumentsToRaw(call.Function.Arguments),
+				ExtraContent: call.ExtraFields.Lookup(core.ExtraContentField),
 			})
 		}
 		out.StopReason = stopReasonFromFinish(choice.FinishReason, len(choice.Message.ToolCalls) > 0)

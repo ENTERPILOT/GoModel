@@ -9,7 +9,7 @@ import (
 
 // CreateBatch routes native batch creation to a provider type.
 func (r *Router) CreateBatch(ctx context.Context, providerType string, req *core.BatchRequest) (*core.BatchResponse, error) {
-	forwardReq, err := adaptAnthropicBatchCacheControl(ctx, req, providerType)
+	forwardReq, err := adaptBatchRequest(ctx, req, providerType)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,7 @@ func (r *Router) CreateBatchWithHints(ctx context.Context, providerType string, 
 		resp  *core.BatchResponse
 		hints map[string]string
 	}
-	forwardReq, err := adaptAnthropicBatchCacheControl(ctx, req, providerType)
+	forwardReq, err := adaptBatchRequest(ctx, req, providerType)
 	if err != nil {
 		return nil, nil, err
 	}

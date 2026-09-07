@@ -63,6 +63,10 @@ type ContentBlock struct {
 	// CacheControl preserves Anthropic prompt-cache breakpoints through the
 	// canonical chat representation when the request is routed back to Claude.
 	CacheControl json.RawMessage `json:"cache_control,omitempty" swaggertype:"object"`
+	// ExtraContent carries provider replay state on tool_use blocks (see
+	// core.ExtraContentField), so a tool-call history another provider produced
+	// through this API replays to it unchanged.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`
 }
 
 // Source describes an Anthropic image or document source: base64 inline
@@ -120,6 +124,9 @@ type ResponseContentBlock struct {
 	ID       string          `json:"id,omitempty"`
 	Name     string          `json:"name,omitempty"`
 	Input    json.RawMessage `json:"input,omitempty" swaggertype:"object"`
+	// ExtraContent is provider replay state on a tool_use block; clients echo
+	// it back on the next turn (see core.ExtraContentField).
+	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`
 }
 
 // Usage reports Anthropic-style token usage.
