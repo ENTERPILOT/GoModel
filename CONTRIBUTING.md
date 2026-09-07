@@ -24,7 +24,7 @@ Allowed types are `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `c
 
 ## Agent instruction files
 
-`AGENTS.md` holds the agent instructions every harness reads, and `CLAUDE.md` imports it for Claude Code. Make agent-instruction changes in `AGENTS.md`; harness-specific behavior belongs in that harness's file, such as `CLAUDE.md` for Claude Code.
+`AGENTS.md` holds the agent instructions that agent harnesses read; `CLAUDE.md` imports it for Claude Code. Make agent-instruction changes in `AGENTS.md`; harness-specific behavior belongs in that harness's file, such as `CLAUDE.md` for Claude Code.
 
 ## Dashboard frontend
 

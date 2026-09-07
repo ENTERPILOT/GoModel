@@ -110,7 +110,6 @@ findings appear only in the review summary under headings like "Comments
 Outside Diff" — Greptile updates its main comment in place after every push, so
 re-read it after each change.
 
-
 ## Configuration Reference
 
 Full reference: `.env.template` and `config/config.example.yaml`
