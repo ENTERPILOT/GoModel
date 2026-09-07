@@ -223,7 +223,9 @@ func (b *bootstrap) initResponseCache() error {
 		ResponseCache:   rcm,
 	})
 	// Instances pick the executor up on their next call; no rebuild needed.
-	app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
+	if app.guardrails != nil && app.guardrails.Service != nil {
+		app.guardrails.Service.SetChatCompleter(internalGuardrailExecutor)
+	}
 	return nil
 }
 

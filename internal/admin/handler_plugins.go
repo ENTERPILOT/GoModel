@@ -29,7 +29,7 @@ type pluginView struct {
 // manifest, hook kinds, config schema, source and health.
 func (h *Handler) ListPlugins(c *echo.Context) error {
 	if h.pluginCatalog == nil {
-		return handleError(c, featureUnavailableError("plugins feature is unavailable"))
+		return handleError(c, featureUnavailableError("plugin system is disabled; set PLUGINS_ENABLED=true"))
 	}
 	entries := h.pluginCatalog.Entries()
 	views := make([]pluginView, 0, len(entries))

@@ -387,10 +387,15 @@ guardrails:
     #     skip_content_prefix: "### safe"
     #     # prompt: "Custom rewrite instructions here."
 
-# Shared-object plugins (.so). Needs a cgo build of GoModel (make build-plugins
+# The plugin system: built-in and loaded plugin types, the guardrails built
+# from them, routing-strategy plugins for virtual models, and the
+# /admin/plugins and /admin/guardrails endpoints. Off by default;
+# guardrails.enabled: true turns it on implicitly.
+# Shared-object plugins (.so) need a cgo build of GoModel (make build-plugins
 # or the gomodel:<version>-plugins image). A .so is trusted code: keep
 # search_paths root-owned and pin sha256 in production.
 plugins:
+  enabled: false # PLUGINS_ENABLED. Default: false
   search_paths: [] # PLUGINS_SEARCH_PATHS (comma-separated). Default: empty (no .so loading)
   load: []
   # load:

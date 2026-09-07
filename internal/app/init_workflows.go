@@ -37,7 +37,7 @@ func (b *bootstrap) initWorkflows() error {
 	}
 
 	catalog := app.pluginCatalog
-	if catalog == nil {
+	if catalog == nil && pluginsEnabled(appCfg) {
 		built, err := buildPluginCatalog(appCfg, b.cfg.Extensions)
 		if err != nil {
 			return err
@@ -46,33 +46,28 @@ func (b *bootstrap) initWorkflows() error {
 		app.pluginCatalog = catalog
 	}
 
-	// Initialize reusable guardrail definitions using shared storage when already available.
-	guardrailResult, err := guardrails.New(b.ctx, app.storage, refreshInterval, catalog, plugins.HostDeps{
-		Logger: slog.Default(),
-		Chat:   guardrailExecutor,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to initialize guardrails: %w", err)
-	}
-	app.guardrails = guardrailResult
-	app.register(subsystemGuardrails, ownedByShutdown, app.guardrails.Close)
-
-	b.seedGuardrails, err = configGuardrailDefinitions(appCfg.Guardrails, catalog)
-	if err != nil {
-		return fmt.Errorf("failed to prepare guardrail definitions: %w", err)
-	}
-	if err := guardrailResult.Service.UpsertDefinitions(b.ctx, b.seedGuardrails); err != nil {
-		return fmt.Errorf("failed to upsert guardrails: %w", err)
+	// The guardrails service exists only with the plugin system on; without
+	// it workflows compile with no guardrail steps and the guardrail admin
+	// endpoints report the feature unavailable.
+	var guardrailRegistry guardrails.Catalog
+	var guardrailNames []string
+	if catalog != nil {
+		service, err := b.initGuardrails(refreshInterval, catalog, guardrailExecutor)
+		if err != nil {
+			return err
+		}
+		guardrailRegistry = service
+		guardrailNames = service.Names()
 	}
 
 	b.featureCaps = runtimeWorkflowFeatureCaps(appCfg)
-	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailResult.Service, b.featureCaps)
+	workflowCompiler := workflows.NewCompilerWithFeatureCaps(guardrailRegistry, b.featureCaps)
 	workflowResult, err := workflows.New(b.ctx, app.storage, workflowCompiler, refreshInterval)
 	if err != nil {
 		return fmt.Errorf("failed to initialize workflows: %w", err)
 	}
 	app.register(subsystemWorkflows, ownedByShutdown, workflowResult.Close)
-	defaultWorkflow := defaultWorkflowInput(appCfg, guardrailResult.Service.Names(), b.seedGuardrails)
+	defaultWorkflow := defaultWorkflowInput(appCfg, guardrailNames, b.seedGuardrails)
 	if err := workflowResult.Service.EnsureDefaultGlobal(b.ctx, defaultWorkflow); err != nil {
 		return fmt.Errorf("failed to seed workflows: %w", err)
 	}
@@ -92,6 +87,36 @@ func (b *bootstrap) initWorkflows() error {
 	// message reflects both bootstrap and managed auth modes.
 	app.logStartupInfo()
 	return nil
+}
+
+// initGuardrails builds the guardrails service over the plugin catalog and
+// seeds the instances declared in the configuration.
+func (b *bootstrap) initGuardrails(refreshInterval time.Duration, catalog *plugins.Catalog, executor plugins.ChatCompleter) (*guardrails.Service, error) {
+	app := b.app
+	result, err := guardrails.New(b.ctx, app.storage, refreshInterval, catalog, plugins.HostDeps{
+		Logger: slog.Default(),
+		Chat:   executor,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize guardrails: %w", err)
+	}
+	app.guardrails = result
+	app.register(subsystemGuardrails, ownedByShutdown, app.guardrails.Close)
+
+	b.seedGuardrails, err = configGuardrailDefinitions(b.appCfg.Guardrails, catalog)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare guardrail definitions: %w", err)
+	}
+	if err := result.Service.UpsertDefinitions(b.ctx, b.seedGuardrails); err != nil {
+		return nil, fmt.Errorf("failed to upsert guardrails: %w", err)
+	}
+	return result.Service, nil
+}
+
+// pluginsEnabled reports whether the plugin system is on. Guardrails imply
+// it (see config.applyPluginDependencies).
+func pluginsEnabled(cfg *config.Config) bool {
+	return cfg != nil && cfg.Plugins.Enabled
 }
 
 // buildPluginCatalog registers the built-in plugins, the plugins compiled in

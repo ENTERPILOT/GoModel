@@ -221,6 +221,22 @@ keeps the cache; editing inside the prefix invalidates it for the session.
 
 ## Configuration
 
+### Enabling the plugin system
+
+```yaml
+plugins:
+  enabled: true    # PLUGINS_ENABLED; default: false
+```
+
+The plugin system is off by default. With it off, nothing plugin-related
+exists: no built-in or loaded plugin types, no `.so` loading, no guardrails,
+and no routing-strategy plugins (a virtual model with `strategy: plugin` is
+rejected). `GET /admin/plugins` and the `/admin/guardrails` endpoints answer
+`503` with code `feature_unavailable`, and the dashboard hides the Guardrails
+page. Guardrails are plugin instances, so `GUARDRAILS_ENABLED=true` turns the
+plugin system on implicitly; set `PLUGINS_ENABLED=true` on its own to use
+routing-strategy plugins or manage guardrail definitions without running them.
+
 ### Instances
 
 Instances are declared in `guardrails.rules` or created on the dashboard;

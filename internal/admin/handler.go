@@ -333,9 +333,14 @@ func WithPluginCatalog(catalog *plugins.Catalog) Option {
 	}
 }
 
-// WithGuardrailService enables full guardrail definition administration endpoints.
+// WithGuardrailService enables full guardrail definition administration
+// endpoints. A nil service (plugin system disabled) leaves them unavailable
+// rather than storing a nil pointer behind the interfaces.
 func WithGuardrailService(service *guardrails.Service) Option {
 	return func(h *Handler) {
+		if service == nil {
+			return
+		}
 		h.guardrails = service
 		h.guardrailDefs = service
 	}

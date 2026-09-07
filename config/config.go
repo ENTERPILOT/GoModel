@@ -273,6 +273,7 @@ func Load() (*LoadResult, error) {
 		return nil, err
 	}
 	applyBudgetDependencies(cfg)
+	applyPluginDependencies(cfg)
 	if err := applyBudgetEnv(cfg, strict); err != nil {
 		return nil, err
 	}

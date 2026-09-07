@@ -65,10 +65,14 @@ func (b *bootstrap) initModelCatalog() error {
 	app.register(subsystemProviderCredentials, ownedByShutdown, app.providerCredentials.Close)
 
 	// The routing-strategy resolver was built with the provider hooks in
-	// initProviders; virtual models consult it for the plugin strategy.
-	routeStrategies := app.routeStrategies
-	virtualModelsResult, err := virtualmodels.New(b.ctx, b.appCfg, app.storage, providerResult.Registry, declaredProviders,
-		virtualmodels.WithRouteResolver(routeStrategies))
+	// initProviders; virtual models consult it for the plugin strategy. It
+	// is absent when the plugin system is disabled, and a nil pointer must
+	// not be wrapped in the interface.
+	var vmOptions []virtualmodels.Option
+	if app.routeStrategies != nil {
+		vmOptions = append(vmOptions, virtualmodels.WithRouteResolver(app.routeStrategies))
+	}
+	virtualModelsResult, err := virtualmodels.New(b.ctx, b.appCfg, app.storage, providerResult.Registry, declaredProviders, vmOptions...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize virtual models: %w", err)
 	}

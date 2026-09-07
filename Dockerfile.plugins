@@ -21,7 +21,7 @@
 #       gomodel-plugin-builder -o /out/my-plugin.so /src
 #
 # Run with plugins mounted:
-#   docker run -v "$PWD/plugins:/app/plugins:ro" -e PLUGINS_SEARCH_PATHS=/app/plugins ... gomodel:plugins
+#   docker run -v "$PWD/plugins:/app/plugins:ro" -e PLUGINS_ENABLED=true -e PLUGINS_SEARCH_PATHS=/app/plugins ... gomodel:plugins
 FROM golang:1.27.0-bookworm AS builder
 
 WORKDIR /app

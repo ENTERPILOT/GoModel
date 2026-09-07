@@ -162,6 +162,10 @@ You can toggle guardrails without editing the config file:
 export GUARDRAILS_ENABLED=true
 ```
 
+Guardrails are built from [plugins](/advanced/plugins), so enabling them also
+enables the plugin system (`PLUGINS_ENABLED`, off by default). With both off,
+the guardrail endpoints and the dashboard page are unavailable.
+
 ### Rule Fields
 
 | Field | Required | Description |

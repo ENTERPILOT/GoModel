@@ -509,7 +509,9 @@ This differs from the standard `/v1/models` endpoint: the admin version includes
 | `POST` | `/admin/workflows` | Create a workflow version (`schema_version: 2` with `steps[].phase`; version 1 still accepted) |
 
 Response shapes are documented in [Plugins](/advanced/plugins#admin-endpoints)
-and [Workflows](/advanced/workflows#guardrail-steps).
+and [Workflows](/advanced/workflows#guardrail-steps). The plugin and guardrail
+endpoints answer `503` with code `feature_unavailable` while the plugin system
+is off (`PLUGINS_ENABLED=false` and `GUARDRAILS_ENABLED=false`).
 
 ## Admin Dashboard
 

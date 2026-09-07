@@ -36,6 +36,7 @@ func newFullyWiredApp(t *testing.T) *App {
 	// The subsystems guarded by their own flags must be present, or a missing
 	// entry in shutdownOrder would go unnoticed here.
 	t.Setenv("MCP_ENABLED", "true")
+	t.Setenv("PLUGINS_ENABLED", "true")
 	t.Setenv("USAGE_ENABLED", "true")
 	t.Setenv("BUDGETS_ENABLED", "true")
 	t.Setenv("RATE_LIMITS_ENABLED", "true")

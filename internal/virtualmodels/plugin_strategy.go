@@ -49,7 +49,7 @@ func (s *Service) validateRouteStrategy(vm VirtualModel) error {
 		return nil
 	}
 	if s.routeResolver == nil {
-		return newValidationError("routing-strategy plugins are not available in this deployment", nil)
+		return newValidationError("routing-strategy plugins are not available; set PLUGINS_ENABLED=true", nil)
 	}
 	if _, err := s.routeResolver.ValidateRouteConfig(vm.StrategyPlugin, vm.StrategyConfig); err != nil {
 		return newValidationError(fmt.Sprintf("strategy plugin %q: %v", vm.StrategyPlugin, err), err)
@@ -99,7 +99,7 @@ func (s *Service) pluginTarget(ctx context.Context, entry *redirectEntry, sessio
 	source := entry.vm.Source
 	name := entry.vm.StrategyPlugin
 	if s.routeResolver == nil {
-		s.warnPluginOnce(source, name, "routing-strategy plugins are not available; falling back to round robin", nil)
+		s.warnPluginOnce(source, name, "routing-strategy plugins are not available (PLUGINS_ENABLED=false); falling back to round robin", nil)
 		return resolvedTarget{}, false
 	}
 	strategy, _, err := s.routeResolver.Strategy(name)

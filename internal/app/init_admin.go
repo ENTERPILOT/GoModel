@@ -43,6 +43,12 @@ func (b *bootstrap) initAdmin() error {
 		adminCfg.UIEnabled = false
 	}
 	if adminCfg.EndpointsEnabled {
+		// Nil when the plugin system is disabled; the admin handler then
+		// reports the guardrail endpoints unavailable.
+		var guardrailService *guardrails.Service
+		if app.guardrails != nil {
+			guardrailService = app.guardrails.Service
+		}
 		usageEnabledForDashboard := app.usage.Logger.Config().Enabled
 		adminRuntimeConfig := dashboardRuntimeConfig(appCfg, usageEnabledForDashboard, b.cfg.DemoMode, b.routeSelector != nil)
 		adminRuntimeConfig.VirtualModelStrategies = dashboardVirtualModelStrategies(b.routeSelector != nil, plugins.RoutePluginNames(app.pluginCatalog))
@@ -57,7 +63,7 @@ func (b *bootstrap) initAdmin() error {
 			app.virtualModels.Service,
 			app.pricingOverrides.Service,
 			app.workflows.Service,
-			app.guardrails.Service,
+			guardrailService,
 			app.pluginCatalog,
 			app.budgets.Service,
 			app.rateLimits.Service,

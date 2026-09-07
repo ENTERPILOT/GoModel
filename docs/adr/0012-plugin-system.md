@@ -255,6 +255,14 @@ other traffic.
 
 ### 8. Loaders
 
+The whole system sits behind `plugins.enabled` (`PLUGINS_ENABLED`, default
+false). Off, the app builds no catalog, opens no `.so`, creates no
+routing-strategy resolver and no guardrails service; the admin endpoints
+answer `503 feature_unavailable` and workflows compile without guardrail
+steps. `guardrails.enabled` implies `plugins.enabled`, because every
+guardrail is a plugin instance; config loading applies the implication and
+logs it.
+
 A plugin type reaches the catalog in one of three ways:
 
 - built in: `internal/plugins/builtin` registers `system_prompt`,

@@ -17,6 +17,7 @@ Point GoModel at the directory and list the files to load:
 
 ```yaml
 plugins:
+  enabled: true                        # PLUGINS_ENABLED=true (default: false; GUARDRAILS_ENABLED=true implies it)
   search_paths: ["./plugins"]          # PLUGINS_SEARCH_PATHS=./plugins
   load:
     - file: keyword_block.so

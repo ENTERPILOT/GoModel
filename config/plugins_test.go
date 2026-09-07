@@ -55,3 +55,39 @@ func TestLoad_PluginsDefaultsAndEnv(t *testing.T) {
 		}
 	})
 }
+
+func TestLoad_PluginsEnabledFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		yaml string
+		want bool
+	}{
+		{"disabled by default", nil, "", false},
+		{"env enables", map[string]string{"PLUGINS_ENABLED": "true"}, "", true},
+		{"yaml enables", nil, "plugins:\n  enabled: true\n", true},
+		{"guardrails imply plugins", map[string]string{"GUARDRAILS_ENABLED": "true"}, "", true},
+		{"guardrails imply plugins over yaml", map[string]string{"GUARDRAILS_ENABLED": "true"}, "plugins:\n  enabled: false\n", true},
+		{"load without enabled stays off", nil, "plugins:\n  load:\n    - file: a.so\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			for key, value := range tt.env {
+				t.Setenv(key, value)
+			}
+			withTempDir(t, func(dir string) {
+				if tt.yaml != "" {
+					writeConfigYAML(t, dir, tt.yaml)
+				}
+				result, err := Load()
+				if err != nil {
+					t.Fatalf("Load() error = %v", err)
+				}
+				if got := result.Config.Plugins.Enabled; got != tt.want {
+					t.Fatalf("Plugins.Enabled = %v, want %v", got, tt.want)
+				}
+			})
+		})
+	}
+}
