@@ -375,3 +375,31 @@ func TestChatEditKeepsFilePart(t *testing.T) {
 		t.Errorf("file message\n got: %s\nwant: %s", got, want)
 	}
 }
+
+// Tool-call ids may be empty or repeated, so envelopes are matched by
+// position first and by a unique id second.
+func TestPatchToolCallsMatchesByPositionThenUniqueID(t *testing.T) {
+	extra := func(k string) core.UnknownJSONFields {
+		return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{k: json.RawMessage(`1`)})
+	}
+	unnamed := []core.ToolCall{
+		{ID: "", Type: "function", ExtraFields: extra("first")},
+		{ID: "", Type: "custom", ExtraFields: extra("second")},
+	}
+	out := patchToolCalls(unnamed, []pluginapi.ToolCall{{ID: "", Name: "a"}, {ID: "", Name: "b"}})
+	if len(out) != 2 || out[1].Type != "custom" || out[1].ExtraFields.Lookup("second") == nil || out[0].ExtraFields.Lookup("first") == nil {
+		t.Errorf("empty ids: %+v", out)
+	}
+
+	repeated := []core.ToolCall{{ID: "x", Type: "function"}, {ID: "x", Type: "custom"}}
+	out = patchToolCalls(repeated, []pluginapi.ToolCall{{ID: "x", Name: "a"}, {ID: "x", Name: "b"}})
+	if len(out) != 2 || out[0].Type != "function" || out[1].Type != "custom" {
+		t.Errorf("repeated ids: %+v", out)
+	}
+
+	reordered := []core.ToolCall{{ID: "a", Type: "function"}, {ID: "b", Type: "function", ExtraFields: extra("b")}}
+	out = patchToolCalls(reordered, []pluginapi.ToolCall{{ID: "b", Name: "b"}, {ID: "a", Name: "a"}, {ID: "new", Name: "n"}})
+	if len(out) != 3 || out[0].ID != "b" || out[0].ExtraFields.Lookup("b") == nil || out[1].ID != "a" || out[2].ID != "new" || out[2].Type != "function" {
+		t.Errorf("reordered ids: %+v", out)
+	}
+}
