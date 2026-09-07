@@ -365,6 +365,17 @@ func TestOnResponse(t *testing.T) {
 			t.Errorf("detail = %v", d.Detail)
 		}
 	})
+	t.Run("match split across parts is not a match", func(t *testing.T) {
+		p := newPlugin(t, `{"rules": "secret => x", "on_match": "block"}`)
+		c := &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.Message{Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+			{Kind: pluginapi.PartText, Text: "my sec"},
+			{Kind: pluginapi.PartText, Text: "ret"},
+		}}}}}
+		c.Reset()
+		if d, err := p.OnResponse(context.Background(), exchange(nil, c)); err != nil || d.Action != pluginapi.ActionAllow {
+			t.Fatalf("OnResponse = %+v, %v; want allow like replace, which cannot edit across parts", d, err)
+		}
+	})
 	t.Run("nil exchange parts", func(t *testing.T) {
 		p := newPlugin(t, `{"rules": "ACME => x", "on_match": "block"}`)
 		if d, err := p.OnResponse(context.Background(), exchange(nil, nil)); err != nil || d.Action != pluginapi.ActionAllow {
