@@ -114,9 +114,10 @@ func (b *bootstrap) initGuardrails(refreshInterval time.Duration, catalog *plugi
 }
 
 // pluginsEnabled reports whether the plugin system is on. Guardrails imply
-// it (see config.applyPluginDependencies).
+// it: config.Load applies that at load time, and it is honoured here as
+// well for configurations built in code.
 func pluginsEnabled(cfg *config.Config) bool {
-	return cfg != nil && cfg.Plugins.Enabled
+	return cfg != nil && (cfg.Plugins.Enabled || cfg.Guardrails.Enabled)
 }
 
 // buildPluginCatalog registers the built-in plugins, the plugins compiled in

@@ -9,6 +9,25 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
+// A configuration built in code (tests, embedders) skips config.Load, so
+// the app applies the guardrails-imply-plugins rule itself.
+func TestPluginsEnabled_HonoursGuardrailsWithoutLoad(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		cfg  *config.Config
+		want bool
+	}{
+		{"nil", nil, false},
+		{"default", &config.Config{}, false},
+		{"plugins", &config.Config{Plugins: config.PluginsConfig{Enabled: true}}, true},
+		{"guardrails", &config.Config{Guardrails: config.GuardrailsConfig{Enabled: true}}, true},
+	} {
+		if got := pluginsEnabled(tt.cfg); got != tt.want {
+			t.Errorf("%s: pluginsEnabled = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 // The plugin system is off by default and takes guardrails and routing-
 // strategy plugins with it; GUARDRAILS_ENABLED=true turns it back on.
 func TestNew_PluginSystemFlag(t *testing.T) {
