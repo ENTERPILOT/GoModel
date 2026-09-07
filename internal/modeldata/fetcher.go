@@ -14,17 +14,22 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
-// httpClient is a shared HTTP client for model list fetching.
-// The 60-second timeout acts as a safety net; callers should use context
-// deadlines for finer-grained control.
-var httpClient = &http.Client{
-	Timeout: 60 * time.Second,
-}
+// fetchTimeout is a safety net for one catalog download; callers should use
+// context deadlines for finer-grained control.
+const fetchTimeout = 60 * time.Second
 
 // maxBodySize caps a catalog, whether downloaded or read from disk.
 const maxBodySize = 10 * 1024 * 1024 // 10 MB
+
+// httpClient is shared by every catalog download so refreshes reuse one
+// connection pool. Its transport follows the trust settings (private CA,
+// mTLS) installed at startup or by a reload, so creating it at package init
+// is safe.
+var httpClient = httpclient.NewClientWithTimeout(fetchTimeout)
 
 // FetchResult carries the outcome of one conditional model list fetch.
 type FetchResult struct {
@@ -61,8 +66,6 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 		return readLocal(path, etag)
 	}
 
-	client := httpClient
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("creating request: %w", err)
@@ -72,7 +75,7 @@ func FetchIfChanged(ctx context.Context, url, etag string) (FetchResult, error) 
 		req.Header.Set("If-None-Match", etag)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("fetching model list: %w", err)
 	}

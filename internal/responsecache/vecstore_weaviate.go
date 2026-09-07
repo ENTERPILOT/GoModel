@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 type weaviateStore struct {
@@ -41,7 +42,7 @@ func newWeaviateStore(cfg config.WeaviateConfig) (*weaviateStore, error) {
 		baseURL:    base,
 		class:      class,
 		apiKey:     strings.TrimSpace(cfg.APIKey),
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: httpclient.NewClientWithTimeout(60 * time.Second),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

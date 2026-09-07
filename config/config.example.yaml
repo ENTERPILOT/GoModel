@@ -299,6 +299,14 @@ opentelemetry:
 http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
+  # Client TLS trust for every outbound HTTPS connection (providers, model
+  # catalog, update check, MCP upstreams, vector stores). All optional; the
+  # default trusts the operating system certificate store.
+  tls:
+    # ca_file: /etc/gomodel/ca.pem            # private CA bundle (PEM), appended to the system store
+    # client_cert_file: /etc/gomodel/tls.crt  # mTLS client certificate; set both files together
+    # client_key_file: /etc/gomodel/tls.key
+    # insecure_skip_verify: false             # lab use only; logs a warning
 
 workflows:
   refresh_interval: 1m

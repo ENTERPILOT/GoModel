@@ -17,6 +17,8 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+
+	"github.com/enterpilot/gomodel/internal/httpclient"
 )
 
 const DefaultScope = "https://www.googleapis.com/auth/cloud-platform"
@@ -74,6 +76,11 @@ func HasServiceAccount(cfg Config) bool {
 func FindCredentials(ctx context.Context, cfg Config) (*Credentials, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// Token exchange goes through the shared client so it honors the
+	// operator's proxy and TLS trust settings like every other upstream call.
+	if ctx.Value(oauth2.HTTPClient) == nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, httpclient.NewDefaultHTTPClient())
 	}
 	scope := strings.TrimSpace(cfg.Scope)
 	if scope == "" {

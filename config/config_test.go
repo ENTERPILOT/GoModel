@@ -89,7 +89,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"GUARDRAILS_ENABLED", "ENABLE_GUARDRAILS_FOR_BATCH_PROCESSING",
 		"FAILOVER_MODE", "FAILOVER_MANUAL_RULES_PATH", "FAILOVER_ENABLED", "FAILOVER_RULES_JSON", "FAILOVER_DISABLED_MODELS", "FAILOVER_DISABLED_MODELS_JSON",
 		"MODELS_ENABLED_BY_DEFAULT", "KEEP_ONLY_ALIASES_AT_MODELS_ENDPOINT", "UNQUALIFIED_MODEL_IDS_AT_MODELS_ENDPOINT", "CONFIGURED_PROVIDER_MODELS_MODE",
-		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT",
+		"HTTP_TIMEOUT", "HTTP_RESPONSE_HEADER_TIMEOUT", "HTTP_TLS_CA_FILE", "HTTP_TLS_CLIENT_CERT_FILE", "HTTP_TLS_CLIENT_KEY_FILE", "HTTP_TLS_INSECURE_SKIP_VERIFY",
 		"WORKFLOW_REFRESH_INTERVAL",
 	} {
 		t.Setenv(key, "")
@@ -2289,5 +2289,35 @@ func TestIsLocalModelListSource(t *testing.T) {
 		if got := IsLocalModelListSource(tt.in); got != tt.want {
 			t.Errorf("IsLocalModelListSource(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestLoadHTTPTLSEnvOverrides(t *testing.T) {
+	clearAllConfigEnvVars(t)
+	t.Setenv("HTTP_TLS_CA_FILE", "/etc/gomodel/ca.pem")
+	t.Setenv("HTTP_TLS_CLIENT_CERT_FILE", "/etc/gomodel/client.crt")
+	t.Setenv("HTTP_TLS_CLIENT_KEY_FILE", "/etc/gomodel/client.key")
+	t.Setenv("HTTP_TLS_INSECURE_SKIP_VERIFY", "true")
+
+	result, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	got := result.Config.HTTP.TLS
+	if got.CAFile != "/etc/gomodel/ca.pem" {
+		t.Errorf("CAFile = %q", got.CAFile)
+	}
+	if got.ClientCertFile != "/etc/gomodel/client.crt" || got.ClientKeyFile != "/etc/gomodel/client.key" {
+		t.Errorf("client pair = %q / %q", got.ClientCertFile, got.ClientKeyFile)
+	}
+	if !got.InsecureSkipVerify {
+		t.Error("InsecureSkipVerify should be true")
+	}
+}
+
+func TestDefaultHTTPTLSIsSystemTrust(t *testing.T) {
+	cfg := buildDefaultConfig()
+	if cfg.HTTP.TLS != (HTTPTLSConfig{}) {
+		t.Errorf("expected zero TLS config by default, got %+v", cfg.HTTP.TLS)
 	}
 }
