@@ -64,7 +64,7 @@ func NewBufferedSSEStream(ctx context.Context, upstream io.ReadCloser, codec Cod
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &bufferedSSEStream{
+	s := &bufferedSSEStream{
 		ctx:       ctx,
 		upstream:  upstream,
 		codec:     codec,
@@ -73,6 +73,14 @@ func NewBufferedSSEStream(ctx context.Context, upstream io.ReadCloser, codec Cod
 		keepAlive: []byte(opts.KeepAliveComment + "\n\n"),
 		done:      make(chan struct{}),
 	}
+	// The ticker and the context hook are created here rather than on the
+	// first Read, so Close, which may run on another goroutine while that
+	// Read starts, always sees them and can stop them.
+	if opts.KeepAliveInterval > 0 {
+		s.ticker = time.NewTicker(opts.KeepAliveInterval)
+	}
+	s.stopAfter = context.AfterFunc(ctx, func() { _ = s.closeUpstream() })
+	return s
 }
 
 type bufferedSSEStream struct {
@@ -83,8 +91,10 @@ type bufferedSSEStream struct {
 	opts      BufferOptions
 	keepAlive []byte
 
-	start     sync.Once
-	done      chan struct{}
+	start sync.Once
+	done  chan struct{}
+	// ticker (nil when keep-alives are off) and stopAfter are set once at
+	// construction and only read afterwards.
 	ticker    *time.Ticker
 	stopAfter func() bool
 
@@ -151,9 +161,7 @@ func (s *bufferedSSEStream) Close() error {
 	if s.ticker != nil {
 		s.ticker.Stop()
 	}
-	if s.stopAfter != nil {
-		s.stopAfter()
-	}
+	s.stopAfter()
 	return s.closeUpstream()
 }
 
@@ -163,10 +171,6 @@ func (s *bufferedSSEStream) closeUpstream() error {
 }
 
 func (s *bufferedSSEStream) startDrain() {
-	if s.opts.KeepAliveInterval > 0 {
-		s.ticker = time.NewTicker(s.opts.KeepAliveInterval)
-	}
-	s.stopAfter = context.AfterFunc(s.ctx, func() { _ = s.closeUpstream() })
 	go s.drain()
 }
 
