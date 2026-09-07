@@ -37,15 +37,16 @@ func NewPostgreSQL(ctx context.Context, cfg PostgreSQLConfig) (PostgreSQLStorage
 	}
 
 	// Every connection the pool opens goes through the egress hook, so a
-	// distribution that polices outbound traffic sees the database too. With
-	// a hook installed the hostname is handed to it unresolved: the hook
-	// decides what the name may resolve to and dials the address that
-	// passed, rather than being given addresses pgx already picked.
+	// distribution that polices outbound traffic sees the database too. pgx
+	// resolves the host before it dials, so the lookup is deferred to the
+	// hook as well: with one installed the name reaches it unresolved and
+	// the hook dials the address that passed, and without one pgx's own
+	// resolver answers. Both are decided per connection, so a hook installed
+	// after this pool was built still sees hostnames.
 	poolCfg.ConnConfig.DialFunc = egress.DialContext
-	if egress.Installed() {
-		poolCfg.ConnConfig.LookupFunc = func(_ context.Context, host string) ([]string, error) {
-			return []string{host}, nil
-		}
+	resolve := poolCfg.ConnConfig.LookupFunc
+	poolCfg.ConnConfig.LookupFunc = func(ctx context.Context, host string) ([]string, error) {
+		return egress.Lookup(ctx, host, resolve)
 	}
 
 	// Create the connection pool

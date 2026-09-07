@@ -16,6 +16,7 @@ package egress
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync/atomic"
 	"time"
@@ -31,19 +32,28 @@ var installed atomic.Pointer[DialFunc]
 var defaultDial DialFunc = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 
 // Install routes every direct connection core opens from now on through
-// dial. A nil dial restores the default dialer. Installing replaces any
-// previous hook, so a distribution keeps one policy rather than a chain.
+// dial. It belongs to whatever composes the process - a distribution's
+// startup path - and there is one: installing over an existing hook is an
+// error rather than a silent replacement, so a policy cannot be swapped out
+// from under the clients enforcing it. Uninstall removes it again.
 //
 // Connections already open are unaffected: a hook installed at startup, as
 // GoModel Pro's air-gapped mode does before the application is built, sees
 // every connection the gateway makes.
-func Install(dial DialFunc) {
+func Install(dial DialFunc) error {
 	if dial == nil {
-		installed.Store(nil)
-		return
+		return errors.New("egress: dial hook is required; call Uninstall to remove one")
 	}
-	installed.Store(&dial)
+	if !installed.CompareAndSwap(nil, &dial) {
+		return errors.New("egress: a dial hook is already installed")
+	}
+	return nil
 }
+
+// Uninstall removes the installed hook, so core's clients dial directly
+// again. Whoever installed the hook calls it: GoModel Pro's guard does on
+// close.
+func Uninstall() { installed.Store(nil) }
 
 // Installed reports whether a distribution has installed a hook.
 func Installed() bool { return installed.Load() != nil }
@@ -56,6 +66,22 @@ func DialContext(ctx context.Context, network, address string) (net.Conn, error)
 		return (*dial)(ctx, network, address)
 	}
 	return defaultDial(ctx, network, address)
+}
+
+// Lookup resolves host for a client that resolves names itself before it
+// dials. With a hook installed the name is passed through untouched, so the
+// hook decides what it may resolve to and dials the address that passed;
+// without one the client's own resolver answers, keeping its behaviour -
+// multiple addresses and their fallbacks included - exactly as it was.
+//
+// It is consulted per connection, never snapshotted at client construction:
+// a client built before the hook was installed would otherwise keep handing
+// it addresses it had already chosen, which no hostname policy can judge.
+func Lookup(ctx context.Context, host string, resolve func(context.Context, string) ([]string, error)) ([]string, error) {
+	if Installed() {
+		return []string{host}, nil
+	}
+	return resolve(ctx, host)
 }
 
 // Dialer adapts DialContext to the interface the MongoDB driver takes.

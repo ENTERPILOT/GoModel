@@ -15,11 +15,13 @@ import (
 // URL names.
 func TestRedisStoreDialsThroughTheEgressHook(t *testing.T) {
 	var address string
-	egress.Install(func(_ context.Context, _, addr string) (net.Conn, error) {
+	if err := egress.Install(func(_ context.Context, _, addr string) (net.Conn, error) {
 		address = addr
 		return nil, errors.New("refused by the test hook")
-	})
-	defer egress.Install(nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer egress.Uninstall()
 
 	if _, err := NewRedisStore(RedisStoreConfig{URL: "redis://cache.example.com:6379/0"}); err == nil {
 		t.Fatal("expected the refused dial to fail the connection")

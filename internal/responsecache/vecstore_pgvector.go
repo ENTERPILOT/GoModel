@@ -39,13 +39,12 @@ func newPGVectorStore(cfg config.PGVectorConfig) (*pgVecStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vecstore pgvector: url: %w", err)
 	}
-	// See NewPostgreSQL: with an egress hook installed the name reaches it
-	// unresolved, so one place decides what it may resolve to.
+	// See NewPostgreSQL: the dial and the lookup before it both go through
+	// the egress hook, decided per connection.
 	poolCfg.ConnConfig.DialFunc = egress.DialContext
-	if egress.Installed() {
-		poolCfg.ConnConfig.LookupFunc = func(_ context.Context, host string) ([]string, error) {
-			return []string{host}, nil
-		}
+	resolve := poolCfg.ConnConfig.LookupFunc
+	poolCfg.ConnConfig.LookupFunc = func(ctx context.Context, host string) ([]string, error) {
+		return egress.Lookup(ctx, host, resolve)
 	}
 	pool, err := pgxpool.NewWithConfig(context.Background(), poolCfg)
 	if err != nil {
