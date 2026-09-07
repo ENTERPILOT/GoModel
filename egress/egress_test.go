@@ -13,7 +13,14 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	t.Cleanup(func() { installed.Store(nil) })
+	// Cleanup goes through the handles the test holds, the way any other
+	// owner removes a hook - never by reaching into the package's state.
+	var held []*Hook
+	t.Cleanup(func() {
+		for _, hook := range held {
+			hook.Uninstall()
+		}
+	})
 
 	// Without a hook the default dialer connects.
 	conn, err := DialContext(context.Background(), "tcp", listener.Addr().String())
@@ -36,6 +43,7 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	held = append(held, hook)
 	if !Installed() {
 		t.Fatal("Installed must report the hook")
 	}
@@ -72,6 +80,7 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	held = append(held, replacement)
 	hook.Uninstall()
 	if !Installed() {
 		t.Fatal("a stale handle must not remove the current hook")
@@ -89,7 +98,6 @@ func TestDialContextUsesTheInstalledHook(t *testing.T) {
 // a hook was installed would otherwise keep handing it addresses it had
 // already chosen, which no hostname policy can judge.
 func TestLookupFollowsTheHookAtCallTime(t *testing.T) {
-	t.Cleanup(func() { installed.Store(nil) })
 	resolved := []string{"10.0.0.4"}
 	resolve := func(context.Context, string) ([]string, error) { return resolved, nil }
 
@@ -103,9 +111,11 @@ func TestLookupFollowsTheHookAtCallTime(t *testing.T) {
 	}
 
 	// The hook arrives afterwards; the same client must now hand it the name.
-	if _, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil }); err != nil {
+	hook, err := Install(func(context.Context, string, string) (net.Conn, error) { return nil, nil })
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(hook.Uninstall)
 	got, err = Lookup(context.Background(), "db.internal", resolve)
 	if err != nil {
 		t.Fatal(err)
