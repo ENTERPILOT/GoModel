@@ -11,11 +11,45 @@ import {
   workflowScopeProviderValue,
 } from "./workflowsLogic.js";
 import * as m from "../../lib/paraglide/messages.js";
-import { normalizeWorkflowPhase, phaseLabel } from "../../lib/utils/pluginPhases.js";
+import {
+  WORKFLOW_PHASES,
+  normalizeWorkflowPhase,
+  phaseLabel,
+} from "../../lib/utils/pluginPhases.js";
+
+function workflowPhaseSteps(source, phase) {
+  const wanted = normalizeWorkflowPhase(phase);
+  return workflowSourceGuardrails(source).filter((step) => step.phase === wanted);
+}
 
 function workflowPhaseStepCount(source, phase) {
-  const wanted = normalizeWorkflowPhase(phase);
-  return workflowSourceGuardrails(source).filter((step) => step.phase === wanted).length;
+  return workflowPhaseSteps(source, phase).length;
+}
+
+// workflowGuardrailFlow is the execution order of one phase's guardrails:
+// steps ascending, each holding the refs that share that step number. The
+// gateway runs the refs of one step concurrently, so a step with several
+// refs is a parallel stage of the flow. Refs keep their configured order; a
+// step whose ref is not chosen yet (editor draft) stays in as "" so the flow
+// matches the node's step count.
+export function workflowGuardrailFlow(source, phase = "prompt") {
+  const byStep = new Map();
+  for (const item of workflowPhaseSteps(source, phase)) {
+    const ref = String(item.ref || "").trim();
+    if (!byStep.has(item.step)) byStep.set(item.step, []);
+    byStep.get(item.step).push(ref);
+  }
+  return Array.from(byStep.keys())
+    .sort((a, b) => a - b)
+    .map((step) => ({ step, refs: byStep.get(step) }));
+}
+
+function workflowGuardrailFlows(source, phases) {
+  const flows = {};
+  for (const phase of WORKFLOW_PHASES) {
+    flows[phase] = phases[phase] ? workflowGuardrailFlow(source, phase) : [];
+  }
+  return flows;
 }
 
 // workflowGuardrailLabel is the step-count sublabel of a guardrail node for
@@ -433,6 +467,12 @@ function workflowChartModel(source, runtime, options, caps) {
     showStreamGuardrails,
     streamGuardrailLabel: showStreamGuardrails ? workflowGuardrailLabel(source, "stream") : "",
     streamGuardrailBadge: showStreamGuardrails ? phaseLabel("stream") : null,
+    // Per-phase step flow behind each guardrail node's click-to-expand panel.
+    guardrailFlows: workflowGuardrailFlows(source, {
+      prompt: showGuardrails,
+      response: showResponseGuardrails,
+      stream: showStreamGuardrails,
+    }),
     showCache: !!config.forceCache || !!features.cache || workflowRuntimeHasCache(runtime),
     cacheNodeClass: workflowCacheNodeClass(runtime, liveStep === "cache"),
     cacheConnClass: workflowCacheConnClass(runtime),

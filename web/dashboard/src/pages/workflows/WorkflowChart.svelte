@@ -4,6 +4,9 @@
   // Renders a chart contract object built by workflowChartLogic.js.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import WorkflowIdBadge from "./WorkflowIdBadge.svelte";
+  import { fly } from "svelte/transition";
+  import { motionDuration } from "$lib/utils/motion.js";
+  import { phaseLabel } from "$lib/utils/pluginPhases.js";
   import {
     ChartColumnIncreasing,
     CircleCheckBig,
@@ -16,29 +19,78 @@
   } from "lucide";
 
   let { chart = {} } = $props();
+
+  // Phase whose guardrail steps are expanded under the pipeline; one panel
+  // at a time, toggled by clicking a Guardrails node.
+  let openPhase = $state(null);
+  const uid = $props.id();
+  const panelID = uid + "-guardrail-flow";
+
+  const openFlow = $derived(
+    openPhase && chart.guardrailFlows ? chart.guardrailFlows[openPhase] || [] : [],
+  );
+
+  function toggleGuardrails(phase) {
+    openPhase = openPhase === phase ? null : phase;
+  }
+
+  // Close the panel when its phase drops out of the chart (audit rows swap
+  // charts in place, editor previews re-render on each keystroke).
+  $effect(() => {
+    if (!openPhase) return;
+    const flows = chart.guardrailFlows || {};
+    if (!(flows[openPhase] && flows[openPhase].length > 0)) openPhase = null;
+  });
 </script>
 
 <!-- One pipeline node. `icon` is a lucide icon (omitted for the AI node);
      `variant` carries the structural class, `state` the computed status
      class from workflowChartLogic.js. -->
+{#snippet nodeBody({ icon, label, variant, sub, badge })}
+  {#if icon}
+    <div
+      class="workflow-node-icon"
+      class:workflow-node-icon-endpoint={variant === "workflow-node-endpoint"}
+    >
+      <Icon {icon} />
+    </div>
+  {/if}
+  <span class="workflow-node-label">{label}</span>
+  {#if badge}
+    <span class="workflow-node-badge">{badge}</span>
+  {/if}
+  {#if sub}
+    <span class="workflow-node-sub">{sub}</span>
+  {/if}
+{/snippet}
+
 {#snippet node({ icon, label, variant = "workflow-node-feature", state, sub, badge })}
   <div class={["workflow-node", variant, state]}>
-    {#if icon}
-      <div
-        class="workflow-node-icon"
-        class:workflow-node-icon-endpoint={variant === "workflow-node-endpoint"}
-      >
-        <Icon {icon} />
-      </div>
-    {/if}
-    <span class="workflow-node-label">{label}</span>
-    {#if badge}
-      <span class="workflow-node-badge">{badge}</span>
-    {/if}
-    {#if sub}
-      <span class="workflow-node-sub">{sub}</span>
-    {/if}
+    {@render nodeBody({ icon, label, variant, sub, badge })}
   </div>
+{/snippet}
+
+<!-- A Guardrails node: a button that expands the phase's step flow under
+     the pipeline. Disabled (plain node) when the phase has no steps to show. -->
+{#snippet guardrailNode({ phase, badge, sub })}
+  {@const flow = (chart.guardrailFlows && chart.guardrailFlows[phase]) || []}
+  {@const open = openPhase === phase}
+  {#if flow.length > 0}
+    <button
+      type="button"
+      class={["workflow-node", "workflow-node-feature", "workflow-node-button"]}
+      class:workflow-node-open={open}
+      aria-expanded={open}
+      aria-controls={open ? panelID : undefined}
+      aria-label={m.workflows_guardrail_flow_toggle({ phase: phaseLabel(phase) })}
+      title={m.workflows_guardrail_flow_toggle({ phase: phaseLabel(phase) })}
+      onclick={() => toggleGuardrails(phase)}
+    >
+      {@render nodeBody({ icon: Shield, label: m.workflows_guardrails(), badge, sub })}
+    </button>
+  {:else}
+    {@render node({ icon: Shield, label: m.workflows_guardrails(), badge, sub })}
+  {/if}
 {/snippet}
 
 <div class="workflow-pipeline">
@@ -78,9 +130,8 @@
 
     {#if chart.showGuardrails}
       <div class="workflow-conn"></div>
-      {@render node({
-        icon: Shield,
-        label: m.workflows_guardrails(),
+      {@render guardrailNode({
+        phase: "prompt",
         badge: chart.guardrailBadge,
         sub: chart.guardrailLabel,
       })}
@@ -107,9 +158,8 @@
 
     {#if chart.showResponseGuardrails}
       <div class={["workflow-conn", chart.responseConnClass]}></div>
-      {@render node({
-        icon: Shield,
-        label: m.workflows_guardrails(),
+      {@render guardrailNode({
+        phase: "response",
         badge: chart.responseGuardrailBadge,
         sub: chart.responseGuardrailLabel,
       })}
@@ -117,9 +167,8 @@
 
     {#if chart.showStreamGuardrails}
       <div class={["workflow-conn", chart.responseConnClass]}></div>
-      {@render node({
-        icon: Shield,
-        label: m.workflows_guardrails(),
+      {@render guardrailNode({
+        phase: "stream",
         badge: chart.streamGuardrailBadge,
         sub: chart.streamGuardrailLabel,
       })}
@@ -134,6 +183,47 @@
       sub: chart.responseNodeSublabel,
     })}
   </div>
+
+  {#if openPhase && openFlow.length > 0}
+    <!-- Step flow of the expanded phase. Steps run left to right (arrows);
+         refs sharing a step stack vertically inside a fork/join bracket,
+         which is how the gateway runs them: concurrently. -->
+    <section
+      id={panelID}
+      class="workflow-guardrail-flow"
+      aria-label={m.workflows_guardrail_flow_title({ phase: phaseLabel(openPhase) })}
+      transition:fly={{ y: -6, duration: motionDuration(150) }}
+    >
+      <div class="workflow-guardrail-flow-head">
+        <span class="workflow-guardrail-flow-title">
+          <Icon icon={Shield} />
+          {m.workflows_guardrail_flow_title({ phase: phaseLabel(openPhase) })}
+        </span>
+      </div>
+      <ol class="workflow-guardrail-flow-row">
+        {#each openFlow as stage, index (openPhase + "-" + stage.step)}
+          {#if index > 0}
+            <li class="workflow-conn workflow-flow-conn" aria-hidden="true"></li>
+          {/if}
+          <!-- The step number is the browser tooltip of the column; the
+               bracket already shows which refs run together. -->
+          <li
+            class="workflow-flow-step"
+            class:workflow-flow-step-parallel={stage.refs.length > 1}
+            title={m.workflows_step_number({ number: stage.step })}
+          >
+            <ul class="workflow-flow-refs">
+              {#each stage.refs as ref, refIndex (refIndex + ":" + ref)}
+                <li class="workflow-flow-ref" class:workflow-flow-ref-blank={!ref}>
+                  {ref || m.workflows_select_guardrail()}
+                </li>
+              {/each}
+            </ul>
+          </li>
+        {/each}
+      </ol>
+    </section>
+  {/if}
 
   {#if chart.showAsync}
     <div class="workflow-pipeline-row workflow-async-section">
@@ -428,6 +518,201 @@
     opacity: 0.55;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  /* ─── Clickable Guardrails node ─── */
+  .workflow-node-button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    appearance: none;
+    transition:
+      border-color 0.12s ease-out,
+      background 0.12s ease-out,
+      box-shadow 0.12s ease-out;
+  }
+
+  .workflow-node-button:hover {
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg-surface));
+  }
+
+  .workflow-node-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .workflow-node-open {
+    position: relative;
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg-surface));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  /* Filled triangle under the open node, pointing at the panel it expands.
+     It sits in the row's bottom padding, so the row's overflow clip keeps
+     it visible. */
+  .workflow-node-open::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    width: 16px;
+    height: 9px;
+    margin-top: 4px;
+    transform: translateX(-50%);
+    background: var(--accent);
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+  }
+
+  /* ─── Guardrail step flow panel ───
+   *
+   * Opens under the pipeline for the clicked phase. Steps are columns
+   * joined by the pipeline's own arrow connectors, so order reads left to
+   * right; refs that share a step stack inside a fork/join bracket:
+   *
+   *   [policy] ──→  ┤ [pii-scan]  ├  ──→  [redact]
+   *                 ┤ [toxicity]  ├
+   *
+   * The step number is each column's title tooltip.
+   */
+  .workflow-guardrail-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: -4px 0 16px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+    background: color-mix(in srgb, var(--accent) 4%, var(--bg-surface));
+  }
+
+  .workflow-guardrail-flow-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px 16px;
+  }
+
+  .workflow-guardrail-flow-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .workflow-guardrail-flow-title :global(svg) {
+    width: 12px;
+    height: 12px;
+    stroke: currentcolor;
+    fill: none;
+    stroke-width: 2;
+  }
+
+  .workflow-guardrail-flow-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 0;
+    padding: 4px 0 2px;
+    list-style: none;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .workflow-flow-conn {
+    flex: 0 0 34px;
+    margin: 0 4px;
+  }
+
+  .workflow-flow-step {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .workflow-flow-refs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .workflow-flow-ref {
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+    color: var(--text);
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Editor draft step with no ref chosen yet. */
+  .workflow-flow-ref-blank {
+    border-style: dashed;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  /* Fork/join bracket around a parallel stack: a vertical bar on each side
+     of the column, with a short tick from every ref to the bars. */
+  .workflow-flow-step-parallel .workflow-flow-refs {
+    position: relative;
+    padding: 0 12px;
+  }
+
+  .workflow-flow-step-parallel .workflow-flow-refs::before,
+  .workflow-flow-step-parallel .workflow-flow-refs::after {
+    content: "";
+    position: absolute;
+    top: 14px;
+    bottom: 14px;
+    width: 2px;
+    background: color-mix(in srgb, var(--accent) 44%, var(--border));
+  }
+
+  .workflow-flow-step-parallel .workflow-flow-refs::before {
+    left: 0;
+  }
+
+  .workflow-flow-step-parallel .workflow-flow-refs::after {
+    right: 0;
+  }
+
+  .workflow-flow-step-parallel .workflow-flow-ref {
+    position: relative;
+  }
+
+  .workflow-flow-step-parallel .workflow-flow-ref::before,
+  .workflow-flow-step-parallel .workflow-flow-ref::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 12px;
+    height: 2px;
+    transform: translateY(-50%);
+    background: color-mix(in srgb, var(--accent) 44%, var(--border));
+  }
+
+  .workflow-flow-step-parallel .workflow-flow-ref::before {
+    right: 100%;
+  }
+
+  .workflow-flow-step-parallel .workflow-flow-ref::after {
+    left: 100%;
   }
 
   /* Status variants of the node internals. The state classes

@@ -28,6 +28,7 @@ import {
   workflowChartWorkflowID,
   workflowRuntimeFromEntry,
   workflowGuardrailLabel,
+  workflowGuardrailFlow,
   workflowAsyncNodeClass,
   workflowCacheNodeClass,
   workflowCacheConnClass,
@@ -205,6 +206,14 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
       showStreamGuardrails: false,
       streamGuardrailLabel: "",
       streamGuardrailBadge: null,
+      guardrailFlows: {
+        prompt: [
+          { step: 10, refs: ["policy-system"] },
+          { step: 20, refs: ["pii"] },
+        ],
+        response: [],
+        stream: [],
+      },
       showCache: true,
       cacheNodeClass: "",
       cacheConnClass: "",
@@ -329,6 +338,11 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
       showStreamGuardrails: false,
       streamGuardrailLabel: "",
       streamGuardrailBadge: null,
+      guardrailFlows: {
+        prompt: [{ step: 10, refs: ["policy-system"] }],
+        response: [],
+        stream: [],
+      },
       showCache: true,
       cacheNodeClass: "workflow-node-success",
       cacheConnClass: "workflow-conn-hit",
@@ -1547,4 +1561,69 @@ test("workflowChart adds response and stream guardrail nodes after the model", (
   assert.equal(promptOnly.guardrailBadge, null);
   assert.equal(promptOnly.showResponseGuardrails, false);
   assert.equal(promptOnly.showStreamGuardrails, false);
+});
+
+test("workflowGuardrailFlow orders steps ascending and groups same-step refs as parallel", () => {
+  const source = {
+    workflow_payload: {
+      schema_version: 2,
+      features: { guardrails: true },
+      steps: [
+        { ref: "late", phase: "prompt", step: 30 },
+        { ref: "reader-a", phase: "prompt", step: "10" },
+        { ref: "mutator", phase: "prompt", step: 10 },
+        { ref: "  ", phase: "prompt", step: 10 },
+        { ref: "middle", phase: "prompt", step: 20 },
+        { ref: "scan", phase: "response", step: 10 },
+        { ref: "blank", phase: "prompt", step: " " },
+      ],
+    },
+  };
+  assert.deepEqual(workflowGuardrailFlow(source, "prompt"), [
+    { step: 10, refs: ["reader-a", "mutator", ""] },
+    { step: 20, refs: ["middle"] },
+    { step: 30, refs: ["late"] },
+  ]);
+  assert.deepEqual(workflowGuardrailFlow(source, "response"), [{ step: 10, refs: ["scan"] }]);
+  assert.deepEqual(workflowGuardrailFlow(source, "stream"), []);
+  assert.deepEqual(workflowGuardrailFlow(null), []);
+
+  // An editor draft step with no ref chosen yet still counts as a step on
+  // the node, so it stays in the flow as a blank placeholder.
+  const draft = { features: { guardrails: true }, guardrails: [{ ref: "", phase: "stream", step: 10 }] };
+  assert.equal(workflowGuardrailLabel(draft, "stream"), "1 step");
+  assert.deepEqual(workflowGuardrailFlow(draft, "stream"), [{ step: 10, refs: [""] }]);
+});
+
+test("workflowChart only carries step flows for phases that have a node", () => {
+  const chart = workflowChart(
+    {
+      workflow_payload: {
+        schema_version: 2,
+        features: { guardrails: true },
+        steps: [
+          { ref: "pii", phase: "prompt", step: 10 },
+          { ref: "scan", phase: "stream", step: 5 },
+          { ref: "scan2", phase: "stream", step: 5 },
+        ],
+      },
+    },
+    ALL_CAPS,
+  );
+  assert.deepEqual(chart.guardrailFlows, {
+    prompt: [{ step: 10, refs: ["pii"] }],
+    response: [],
+    stream: [{ step: 5, refs: ["scan", "scan2"] }],
+  });
+
+  const disabled = workflowChart(
+    {
+      workflow_payload: {
+        features: { guardrails: false },
+        guardrails: [{ ref: "pii", step: 10 }],
+      },
+    },
+    ALL_CAPS,
+  );
+  assert.deepEqual(disabled.guardrailFlows, { prompt: [], response: [], stream: [] });
 });
