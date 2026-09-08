@@ -673,8 +673,7 @@ func modelInteractionWriteDeadlineMiddleware(stallTimeout time.Duration) echo.Mi
 			if !core.IsModelInteractionPath(c.Request().URL.Path) {
 				return next(c)
 			}
-			res := c.Response()
-			ctl := http.NewResponseController(res)
+			ctl := http.NewResponseController(c.Response())
 			if err := ctl.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
 				slog.Warn("failed to clear write deadline for model interaction",
 					"path", c.Request().URL.Path,
@@ -685,8 +684,20 @@ func modelInteractionWriteDeadlineMiddleware(stallTimeout time.Duration) echo.Mi
 			if stallTimeout <= 0 {
 				return next(c)
 			}
-			c.SetResponse(newStallDeadlineWriter(res, stallTimeout))
-			err := next(c)
+			// Installed beneath echo's Response rather than around it, so the
+			// stall writer sees the connection's own flush errors and stays
+			// hidden from the wrappers later middleware adds on top.
+			res, err := echo.UnwrapResponse(c.Response())
+			if err != nil {
+				slog.Warn("stream stall timeout not applied: response writer cannot be unwrapped",
+					"path", c.Request().URL.Path,
+					"request_id", requestIDFromContextOrHeader(c.Request()),
+					"error", err,
+				)
+				return next(c)
+			}
+			res.ResponseWriter = newStallDeadlineWriter(res.ResponseWriter, stallTimeout)
+			err = next(c)
 			// The handler's last deadline would otherwise still apply to the
 			// trailing writes net/http makes after it returns (the chunked
 			// terminator), which may come much later than the last body write.
