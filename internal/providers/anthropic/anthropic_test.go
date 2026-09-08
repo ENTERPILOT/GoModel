@@ -6499,3 +6499,138 @@ data: {"type":"message_stop"}
 		t.Fatalf("extra_content = %s, want none for a stream with no thinking", got)
 	}
 }
+
+// responsesStreamEvents converts an Anthropic SSE stream to the Responses
+// dialect and returns the decoded events.
+func responsesStreamEvents(t *testing.T, anthropicSSE string) []map[string]any {
+	t.Helper()
+	conv := newResponsesStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5")
+	defer conv.Close() //nolint:errcheck
+
+	out, err := io.ReadAll(conv)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	events := []map[string]any{}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
+		if !ok || data == "[DONE]" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			t.Fatalf("unmarshal event %q: %v", data, err)
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+const thinkingResponsesSSE = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_rs","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+
+// A streamed Responses turn has to expose the same reasoning a non-streamed
+// one does, replay state included; otherwise a thinking conversation cannot be
+// continued on this dialect.
+func TestStreamResponses_ThinkingBecomesReasoningItem(t *testing.T) {
+	events := responsesStreamEvents(t, thinkingResponsesSSE)
+
+	var deltas []string
+	reasoningAdded, messageAdded := -1, -1
+	for i, event := range events {
+		switch event["type"] {
+		case "response.reasoning_text.delta":
+			deltas = append(deltas, event["delta"].(string))
+		case "response.output_item.added":
+			item := event["item"].(map[string]any)
+			if item["type"] == "reasoning" && reasoningAdded < 0 {
+				reasoningAdded = i
+			}
+			if item["type"] == "message" && messageAdded < 0 {
+				messageAdded = i
+			}
+		}
+	}
+	if strings.Join(deltas, "") != "Let me think." {
+		t.Errorf("reasoning deltas = %q, want the thinking text", strings.Join(deltas, ""))
+	}
+	if reasoningAdded < 0 {
+		t.Fatal("no reasoning output item was added")
+	}
+	if messageAdded >= 0 && reasoningAdded > messageAdded {
+		t.Errorf("reasoning item added at %d, message at %d; reasoning must claim the first slot", reasoningAdded, messageAdded)
+	}
+
+	final := events[len(events)-1]
+	output := final["response"].(map[string]any)["output"].([]any)
+	reasoning := output[0].(map[string]any)
+	if reasoning["type"] != "reasoning" {
+		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
+	}
+	extra, _ := json.Marshal(reasoning["extra_content"])
+	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"Let me think.","type":"thinking"}]}}`
+	if string(extra) != want {
+		t.Errorf("reasoning extra_content = %s, want %s", extra, want)
+	}
+}
+
+// A stream with no thinking must gain no reasoning item.
+func TestStreamResponses_NoThinkingNoReasoningItem(t *testing.T) {
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_plain","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":4,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	for _, event := range responsesStreamEvents(t, sse) {
+		if strings.HasPrefix(event["type"].(string), "response.reasoning") {
+			t.Errorf("unexpected reasoning event %v", event["type"])
+		}
+		if added, ok := event["item"].(map[string]any); ok && added["type"] == "reasoning" {
+			t.Error("a stream without thinking must not produce a reasoning item")
+		}
+	}
+}

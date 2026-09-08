@@ -296,12 +296,6 @@ automatic. Routing that history to another provider drops the member, as
 every foreign vendor object is dropped, and the conversation continues
 without it.
 
-<Note>
-  Streaming the Responses API against Anthropic does not emit reasoning items,
-  so a streamed `/v1/responses` turn has no thinking to replay. Use the
-  non-streaming call, or the Messages and Chat Completions dialects, when a
-  thinking conversation has to continue.
-</Note>
 
 ## Moving a history between providers
 
