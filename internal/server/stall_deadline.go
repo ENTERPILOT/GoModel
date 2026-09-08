@@ -32,6 +32,8 @@ func newStallDeadlineWriter(w http.ResponseWriter, stall time.Duration) *stallDe
 
 func (w *stallDeadlineWriter) Write(p []byte) (int, error) {
 	w.armDeadline()
+	// p is relayed unchanged: the handler chose these bytes and their
+	// content type, so this wrapper adds no reflection. lgtm[go/reflected-xss]
 	n, err := w.ResponseWriter.Write(p)
 	return n, w.classify(err)
 }
