@@ -1304,6 +1304,7 @@
   "workflows_step_number": "step {number}",
   "workflows_guardrail_flow_toggle": "Show or hide the {phase} guardrail steps",
   "workflows_guardrail_flow_title": "{phase} guardrails",
+  "workflows_guardrail_flow_mutator": "Runs after the checks of this step and may edit the request or response",
   "workflows_deactivate_action": "Deactivate Workflow {name}",
   "workflows_deactivate_active": "Deactivate active Workflow",
   "workflows_global_no_deactivate": "The global Workflow cannot be deactivated.",

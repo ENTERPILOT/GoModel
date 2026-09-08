@@ -30,7 +30,7 @@
   const guardrails = $derived(workflowGuardrails(workflow, caps));
   // Steps grouped in execution order: prompt, then response, then stream.
   const stepGroups = $derived(workflowStepGroups(guardrails));
-  const chart = $derived(workflowChart(workflow, caps));
+  const chart = $derived(workflowChart(workflow, caps, wf.guardrailRefs));
   const guardrailKeyPrefix = $derived(
     preview ? "draft-workflow-preview-guardrail-" : workflow.id + "-guardrail-",
   );

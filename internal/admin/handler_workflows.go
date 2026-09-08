@@ -69,6 +69,9 @@ type workflowGuardrailItem struct {
 	Type    string   `json:"type,omitempty"`
 	Phases  []string `json:"phases"`
 	Summary string   `json:"summary,omitempty"`
+	// Mutates marks an instance that may edit the request or response; the
+	// gateway runs it after the readers of its step.
+	Mutates bool `json:"mutates"`
 }
 
 // ListWorkflowGuardrails handles GET /admin/workflows/guardrails
@@ -81,7 +84,7 @@ func (h *Handler) ListWorkflowGuardrails(c *echo.Context) error {
 			if phases == nil {
 				phases = []string{}
 			}
-			items = append(items, workflowGuardrailItem{Name: view.Name, Type: view.Type, Phases: phases, Summary: view.Summary})
+			items = append(items, workflowGuardrailItem{Name: view.Name, Type: view.Type, Phases: phases, Summary: view.Summary, Mutates: view.Mutates})
 		}
 	case h.guardrails != nil:
 		for _, name := range h.guardrails.Names() {
