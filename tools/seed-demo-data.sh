@@ -136,19 +136,36 @@ guardrail_config_injection_judge='{"model":"openai/gpt-5-nano-2025-08-07","targe
 guardrail_config_quality_judge='{"model":"groq/llama-3.1-8b-instant","action":"warn","message":"The answer did not cite the retrieved context.","on_unclear":"allow","max_tokens":128,"temperature":0}'
 guardrail_config_normalizer='{"model":"groq/llama-3.1-8b-instant","roles":["user"],"max_tokens":2048,"prompt":"Rewrite the message as one self-contained question. Keep every fact, identifier, and instruction, and return only the rewritten text."}'
 
-# Workflow payloads. The stored hash is the SHA-256 of this exact JSON, which
-# is the encoding GoModel writes: schema version, canonical feature order, and
-# steps sorted by phase, step, then ref.
+# Workflow payloads. Guardrail references are written as @@name and expanded
+# to the prefixed instance names below, so a generated workflow can never bind
+# to an operator-owned guardrail that happens to share a plain name: that
+# guardrail could be of a type the referencing phase does not support, and the
+# workflow would then fail to compile and stop the gateway from starting.
+# The stored hash is the SHA-256 of the expanded JSON, which is the encoding
+# GoModel writes: schema version, canonical feature order, and steps sorted by
+# phase, step, then ref.
 workflow_payload_baseline_v1='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":false,"failover":true}}'
-workflow_payload_baseline='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"pii-redaction","phase":"prompt","step":0},{"ref":"gateway-headers","phase":"prompt","step":1},{"ref":"pii-redaction","phase":"response","step":0},{"ref":"gateway-headers","phase":"response","step":1}]}'
-workflow_payload_sales='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"pii-redaction","phase":"prompt","step":0},{"ref":"sales-assistant-tone","phase":"prompt","step":1},{"ref":"answer-quality-judge","phase":"response","step":0}]}'
-workflow_payload_agents='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"prompt-normalizer","phase":"prompt","step":0},{"ref":"blocked-terms","phase":"prompt","step":1}]}'
-workflow_payload_batch='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":false},"steps":[{"ref":"prompt-normalizer","phase":"prompt","step":0},{"ref":"pii-redaction","phase":"prompt","step":1}]}'
-workflow_payload_anthropic='{"schema_version":2,"features":{"cache":false,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"prompt-injection-judge","phase":"prompt","step":0},{"ref":"pii-redaction","phase":"prompt","step":1},{"ref":"pii-redaction","phase":"response","step":0}]}'
+workflow_payload_baseline='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@pii-redaction","phase":"prompt","step":0},{"ref":"@@gateway-headers","phase":"prompt","step":1},{"ref":"@@pii-redaction","phase":"response","step":0},{"ref":"@@gateway-headers","phase":"response","step":1}]}'
+workflow_payload_sales='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@pii-redaction","phase":"prompt","step":0},{"ref":"@@sales-assistant-tone","phase":"prompt","step":1},{"ref":"@@answer-quality-judge","phase":"response","step":0}]}'
+workflow_payload_agents='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@prompt-normalizer","phase":"prompt","step":0},{"ref":"@@blocked-terms","phase":"prompt","step":1}]}'
+workflow_payload_batch='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":false},"steps":[{"ref":"@@prompt-normalizer","phase":"prompt","step":0},{"ref":"@@pii-redaction","phase":"prompt","step":1}]}'
+workflow_payload_anthropic='{"schema_version":2,"features":{"cache":false,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@prompt-injection-judge","phase":"prompt","step":0},{"ref":"@@pii-redaction","phase":"prompt","step":1},{"ref":"@@pii-redaction","phase":"response","step":0}]}'
+
+# Expand @@name guardrail references to the prefixed instance names.
+expand_refs() {
+  printf '%s' "${1//@@/${prefix}-}"
+}
 
 payload_hash() {
   printf '%s' "$1" | openssl dgst -sha256 -r | awk '{print $1}'
 }
+
+workflow_payload_baseline_v1="$(expand_refs "$workflow_payload_baseline_v1")"
+workflow_payload_baseline="$(expand_refs "$workflow_payload_baseline")"
+workflow_payload_sales="$(expand_refs "$workflow_payload_sales")"
+workflow_payload_agents="$(expand_refs "$workflow_payload_agents")"
+workflow_payload_batch="$(expand_refs "$workflow_payload_batch")"
+workflow_payload_anthropic="$(expand_refs "$workflow_payload_anthropic")"
 
 workflow_hash_baseline_v1="$(payload_hash "$workflow_payload_baseline_v1")"
 workflow_hash_baseline="$(payload_hash "$workflow_payload_baseline")"
@@ -590,6 +607,7 @@ SELECT
   abs(random()) % 10000 AS normalize_bucket,
   abs(random()) % 10000 AS outcome_bucket,
   abs(random()) % 10000 AS alias_bucket,
+  abs(random()) % 10000 AS retarget_bucket,
   abs(random()) % CASE WHEN d.day = date(${seed_utc_epoch}, 'unixepoch')
     THEN ${current_utc_second} + 1
     ELSE 86400
@@ -600,11 +618,55 @@ JOIN demo_slots s ON s.slot_idx < d.request_count;
 
 DROP TABLE IF EXISTS temp.demo_generated;
 CREATE TEMP TABLE demo_generated AS
-WITH chosen AS (
+WITH pathed AS (
   SELECT
     b.*,
     p.user_path,
-    p.min_bucket AS path_min,
+    p.min_bucket AS path_min
+  FROM demo_random b
+  JOIN demo_paths p ON b.path_bucket >= p.min_bucket AND b.path_bucket < p.max_bucket
+),
+-- Paths that carry a model allowlist (see the users table below) draw only
+-- from the templates their policy permits, so the generated history never
+-- shows a request the gateway would have rejected. A node's allowlist bounds
+-- its whole subtree, which is why the two group rules apply to every path
+-- under them. Offsets land inside the template ranges declared above.
+routed AS (
+  SELECT
+    *,
+    CASE
+      -- gemini/ and openai/gpt-5-nano-2025-08-07: the two chat templates.
+      WHEN user_path = '/agents/team1/research' THEN
+        CASE retarget_bucket % 2
+          WHEN 0 THEN template_bucket % 1700           -- chat-openai
+          ELSE 3150 + (template_bucket % 1300)         -- chat-gemini
+        END
+      -- groq/llama-3.1-8b-instant and qwen-flash, which both bailian
+      -- templates serve.
+      WHEN user_path = '/engineering/ai/bot/batch' THEN
+        CASE retarget_bucket % 3
+          WHEN 0 THEN 1700 + (template_bucket % 1450)  -- chat-groq
+          WHEN 1 THEN 4450 + (template_bucket % 1200)  -- chat-bailian
+          ELSE 5650 + (template_bucket % 1200)         -- responses
+        END
+      -- /agents allows every provider except anthropic.
+      WHEN user_path GLOB '/agents*' AND template_bucket >= 6850 AND template_bucket < 7850 THEN
+        1700 + (template_bucket % 1450)                -- chat-groq
+      -- /sales allows openai/ and anthropic/claude-haiku-4-5-20251001.
+      WHEN user_path GLOB '/sales*' AND template_bucket >= 1700 AND template_bucket < 6850 THEN
+        CASE retarget_bucket % 4
+          WHEN 0 THEN template_bucket % 1700           -- chat-openai
+          WHEN 1 THEN 6850 + (template_bucket % 1000)  -- messages
+          WHEN 2 THEN 7850 + (template_bucket % 700)   -- embeddings
+          ELSE 8550 + (template_bucket % 1400)         -- stt and tts
+        END
+      ELSE template_bucket
+    END AS routed_template_bucket
+  FROM pathed
+),
+chosen AS (
+  SELECT
+    b.*,
     t.min_bucket AS template_min,
     t.label,
     t.endpoint,
@@ -623,17 +685,16 @@ WITH chosen AS (
     -- most-specific-scope match: the deepest user-path scope first, then a
     -- provider scope, then the global baseline.
     CASE
-      WHEN p.user_path GLOB '/sales*' THEN '${prefix}-wf-sales'
-      WHEN p.user_path GLOB '/agents/team1*' THEN '${prefix}-wf-agents'
-      WHEN p.user_path GLOB '/engineering/ai/bot/batch*' THEN '${prefix}-wf-batch'
-      WHEN p.user_path GLOB '/engineering/ai/mike*' THEN '${prefix}-wf-evals'
+      WHEN b.user_path GLOB '/sales*' THEN '${prefix}-wf-sales'
+      WHEN b.user_path GLOB '/agents/team1*' THEN '${prefix}-wf-agents'
+      WHEN b.user_path GLOB '/engineering/ai/bot/batch*' THEN '${prefix}-wf-batch'
+      WHEN b.user_path GLOB '/engineering/ai/mike*' THEN '${prefix}-wf-evals'
       WHEN t.provider = 'anthropic' THEN '${prefix}-wf-anthropic'
       ELSE '${prefix}-wf-global-v2'
     END AS workflow_version_id,
-    CASE WHEN p.user_path GLOB '/engineering/ai/mike*' THEN 0 ELSE 1 END AS workflow_guardrails
-  FROM demo_random b
-  JOIN demo_paths p ON b.path_bucket >= p.min_bucket AND b.path_bucket < p.max_bucket
-  JOIN demo_templates t ON b.template_bucket >= t.min_bucket AND b.template_bucket < t.max_bucket
+    CASE WHEN b.user_path GLOB '/engineering/ai/mike*' THEN 0 ELSE 1 END AS workflow_guardrails
+  FROM routed b
+  JOIN demo_templates t ON b.routed_template_bucket >= t.min_bucket AND b.routed_template_bucket < t.max_bucket
 ),
 tokens AS (
   SELECT
@@ -642,22 +703,33 @@ tokens AS (
     (output_min + ((token_noise / 97) % output_span)) * ${token_scale} AS output_tokens
   FROM chosen
 ),
+-- Local cache eligibility also depends on the matched workflow: the
+-- Anthropic policy turns the response cache off, so its traffic never reports
+-- a local hit. Provider prompt caching is upstream telemetry and unaffected.
 cache_decisions AS (
   SELECT
     *,
     CASE
-      WHEN local_cache_eligible = 1 AND cache_bucket < (${exact_cache_pct} * 100) THEN 'exact'
-      WHEN local_cache_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100) THEN 'semantic'
+      WHEN cache_workflow_eligible = 1 AND cache_bucket < (${exact_cache_pct} * 100) THEN 'exact'
+      WHEN cache_workflow_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100) THEN 'semantic'
       ELSE NULL
     END AS cache_type,
     CASE
       WHEN prompt_cache_eligible = 1
-        AND NOT (local_cache_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100))
+        AND NOT (cache_workflow_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100))
         AND prompt_bucket < (${prompt_cache_pct} * 100)
       THEN 1
       ELSE 0
     END AS prompt_cache_hit
-  FROM tokens
+  FROM (
+    SELECT
+      *,
+      CASE
+        WHEN local_cache_eligible = 1 AND workflow_version_id != '${prefix}-wf-anthropic' THEN 1
+        ELSE 0
+      END AS cache_workflow_eligible
+    FROM tokens
+  )
 ),
 rewrite_decisions AS (
   SELECT
@@ -989,7 +1061,7 @@ SELECT
   audit_id,
   2,
   json_object(
-    'rewriter', 'prompt-normalizer',
+    'rewriter', '${prefix}-prompt-normalizer',
     'bytes_before', bytes_rewritten,
     'bytes_after', bytes_normalized,
     'body', json_object(
@@ -1009,7 +1081,7 @@ SELECT
   audit_id,
   3,
   json_object(
-    'rewriter', 'prompt-injection-judge',
+    'rewriter', '${prefix}-prompt-injection-judge',
     'bytes_before', bytes_normalized,
     'bytes_after', bytes_normalized,
     'no_change', json('true'),
@@ -1028,7 +1100,7 @@ SELECT
   audit_id,
   4,
   json_object(
-    'rewriter', 'pii-redaction',
+    'rewriter', '${prefix}-pii-redaction',
     'bytes_before', bytes_normalized,
     'bytes_after', bytes_redacted,
     'detail', json_object('phase', 'prompt', 'action', 'allow')
@@ -1041,7 +1113,7 @@ SELECT
   audit_id,
   5,
   json_object(
-    'rewriter', 'sales-assistant-tone',
+    'rewriter', '${prefix}-sales-assistant-tone',
     'bytes_before', bytes_redacted,
     'bytes_after', bytes_toned,
     'detail', json_object('phase', 'prompt', 'action', 'allow')
@@ -1054,7 +1126,7 @@ SELECT
   audit_id,
   6,
   json_object(
-    'rewriter', CASE WHEN workflow_version_id = '${prefix}-wf-agents' THEN 'blocked-terms' ELSE 'prompt-injection-judge' END,
+    'rewriter', CASE WHEN workflow_version_id = '${prefix}-wf-agents' THEN '${prefix}-blocked-terms' ELSE '${prefix}-prompt-injection-judge' END,
     'bytes_before', bytes_normalized,
     'bytes_after', bytes_normalized,
     'no_change', json('true'),
@@ -1136,18 +1208,19 @@ SELECT
     ELSE 200
   END,
   request_id,
-  -- The generated demo keys own the traffic of their user paths; the rest is
-  -- attributed to the bootstrap master key.
+  -- The generated demo keys own the traffic of their user paths, except where
+  -- a key could not have made the request: the sales key allows only openai/,
+  -- so its path's other providers were reached with the master key.
   CASE
     WHEN user_path GLOB '/agents/team1*' THEN '${prefix}-key-team1'
     WHEN user_path GLOB '/engineering/ai*' THEN '${prefix}-key-engineering'
-    WHEN user_path GLOB '/sales/john*' THEN '${prefix}-key-sales'
+    WHEN user_path GLOB '/sales/john*' AND provider = 'openai' THEN '${prefix}-key-sales'
     ELSE NULL
   END,
   CASE
     WHEN user_path GLOB '/agents/team1*'
       OR user_path GLOB '/engineering/ai*'
-      OR user_path GLOB '/sales/john*' THEN 'api_key'
+      OR (user_path GLOB '/sales/john*' AND provider = 'openai') THEN 'api_key'
     ELSE 'master_key'
   END,
   '10.42.' || (abs(token_noise / 7) % 6) || '.' || ((abs(token_noise / 13) % 250) + 2),
@@ -1155,9 +1228,10 @@ SELECT
   endpoint,
   user_path,
   session_id,
+  -- Streaming is what the client asked for, so a request a guardrail or a
+  -- budget stopped keeps the flag its body carries.
   CASE
-    WHEN usage_recorded = 1
-      AND label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses', 'messages')
+    WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses', 'messages')
       AND slot_idx % 5 = 0
     THEN 1
     ELSE 0
@@ -1209,8 +1283,11 @@ SELECT
     END,
     -- The failover snapshot names the target the redirect moved to; it is
     -- present exactly when the seeded attempt trail shows a failover.
+    -- Only a workflow with failover on can redirect, so the batch workflow's
+    -- failures carry no target and get no failover attempt below.
     'failover', json(CASE
-      WHEN request_outcome = 'provider_error' THEN json_object('target_model', CASE provider
+      WHEN request_outcome = 'provider_error' AND workflow_version_id != '${prefix}-wf-batch'
+      THEN json_object('target_model', CASE provider
         WHEN 'openai' THEN 'groq/llama-3.1-8b-instant'
         WHEN 'groq' THEN 'gemini/gemini-2.5-flash-lite'
         WHEN 'gemini' THEN 'groq/llama-3.1-8b-instant'
@@ -1256,6 +1333,7 @@ SELECT
           json_object('role', 'user', 'content', 'Create a short incident-style report for ' || user_path || ' on session turn ' || session_turn || ' using token totals and cache telemetry.')
         ),
         'instructions', 'Return sections named summary, observations, and recommendation.',
+        'stream', CASE WHEN slot_idx % 5 = 0 THEN json('true') ELSE json('false') END,
         'previous_response_id', CASE
           WHEN previous_session_slot_idx IS NOT NULL THEN '${prefix}-response-' || day_idx || '-' || previous_session_slot_idx
           ELSE NULL
@@ -1273,6 +1351,7 @@ SELECT
           ))
         ),
         'max_tokens', output_tokens,
+        'stream', CASE WHEN slot_idx % 5 = 0 THEN json('true') ELSE json('false') END,
         'temperature', round(0.10 + ((token_noise % 55) / 100.0), 2)
       )
       WHEN label = 'embeddings' THEN json_object(
@@ -1474,6 +1553,7 @@ SELECT
   80000000 + (token_noise % 110000000)
 FROM demo_generated
 WHERE request_outcome = 'provider_error'
+  AND workflow_version_id != '${prefix}-wf-batch'
   AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
 
 INSERT INTO audit_log_attempts (
@@ -1512,43 +1592,43 @@ INSERT OR IGNORE INTO guardrail_definitions (
 )
 VALUES
   (
-    'pii-redaction', 'string_replace',
+    '${prefix}-pii-redaction', 'string_replace',
     '${prefix}: masks emails, phone numbers, keys, and SSNs in prompts and answers',
     NULL, '${guardrail_config_pii}', 'closed', 0,
     ${seed_utc_epoch} - 5184000, ${seed_utc_epoch} - 604800
   ),
   (
-    'blocked-terms', 'string_replace',
+    '${prefix}-blocked-terms', 'string_replace',
     '${prefix}: rejects prompts naming confidential programs',
     NULL, '${guardrail_config_blocked_terms}', 'closed', 0,
     ${seed_utc_epoch} - 4320000, ${seed_utc_epoch} - 1209600
   ),
   (
-    'sales-assistant-tone', 'system_prompt',
+    '${prefix}-sales-assistant-tone', 'system_prompt',
     '${prefix}: decorates the system prompt for sales conversations',
     '/sales', '${guardrail_config_sales_tone}', '', 0,
     ${seed_utc_epoch} - 3888000, ${seed_utc_epoch} - 259200
   ),
   (
-    'gateway-headers', 'header_edit',
+    '${prefix}-gateway-headers', 'header_edit',
     '${prefix}: tags responses and forwards the tenant header upstream',
     NULL, '${guardrail_config_headers}', 'open', 0,
     ${seed_utc_epoch} - 3456000, ${seed_utc_epoch} - 259200
   ),
   (
-    'prompt-injection-judge', 'llm_judge',
+    '${prefix}-prompt-injection-judge', 'llm_judge',
     '${prefix}: blocks prompt-injection attempts before the provider call',
     NULL, '${guardrail_config_injection_judge}', 'open', 4000,
     ${seed_utc_epoch} - 2592000, ${seed_utc_epoch} - 86400
   ),
   (
-    'answer-quality-judge', 'llm_judge',
+    '${prefix}-answer-quality-judge', 'llm_judge',
     '${prefix}: flags answers that ignore the retrieved context',
     '/sales', '${guardrail_config_quality_judge}', 'open', 6000,
     ${seed_utc_epoch} - 1728000, ${seed_utc_epoch} - 86400
   ),
   (
-    'prompt-normalizer', 'llm_based_altering',
+    '${prefix}-prompt-normalizer', 'llm_based_altering',
     '${prefix}: rewrites agent and batch prompts into self-contained questions',
     NULL, '${guardrail_config_normalizer}', 'open', 8000,
     ${seed_utc_epoch} - 2160000, ${seed_utc_epoch} - 172800
@@ -1861,7 +1941,8 @@ VALUES
 -- Selectors show every canonical form: provider-wide "provider/", exact
 -- "provider/model", and model-wide "model". An empty list keeps the node
 -- unrestricted while still carrying a description. INSERT OR IGNORE leaves
--- operator-created policies for the same path untouched.
+-- operator-created policies for the same path untouched. The generated
+-- traffic is routed to respect every list here (see the routed CTE above).
 INSERT OR IGNORE INTO users (user_path, allowed_models, description, created_at, updated_at)
 VALUES
   (
