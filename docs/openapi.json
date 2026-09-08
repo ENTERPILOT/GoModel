@@ -12472,6 +12472,10 @@
       "anthropicapi.ResponseContentBlock": {
         "type": "object",
         "properties": {
+          "data": {
+            "description": "Data is the opaque payload of a redacted_thinking block.",
+            "type": "string"
+          },
           "extra_content": {
             "description": "ExtraContent is provider replay state on a tool_use block; clients echo\nit back on the next turn (see core.ExtraContentField).",
             "type": "object"
@@ -12484,6 +12488,10 @@
             "additionalProperties": true
           },
           "name": {
+            "type": "string"
+          },
+          "signature": {
+            "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it.",
             "type": "string"
           },
           "text": {
@@ -16042,6 +16050,12 @@
             "type": "string"
           },
           "thinking": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "data": {
             "type": "string"
           },
           "tool_use_id": {

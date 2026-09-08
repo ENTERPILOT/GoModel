@@ -39,8 +39,15 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	messages := make([]core.Message, 0, len(items))
 	var pendingAssistant *core.Message
 	var pendingReasoning string
+	var pendingReasoningExtra json.RawMessage
 
 	flushPendingAssistant := func() error {
+		// A reasoning item describes the assistant turn that follows it. Once
+		// the history has moved past that turn the pending state is spent,
+		// whether or not there was an assistant turn to attach it to; holding
+		// it over would pin one turn's thinking blocks to another.
+		reasoning, reasoningExtra := pendingReasoning, pendingReasoningExtra
+		pendingReasoning, pendingReasoningExtra = "", nil
 		if pendingAssistant == nil {
 			return nil
 		}
@@ -49,8 +56,8 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 		// tool-result request, while reasoning from ordinary assistant turns is
 		// intentionally omitted because it is not part of their next-turn
 		// context.
-		if pendingReasoning != "" && len(pendingAssistant.ToolCalls) > 0 {
-			raw, err := json.Marshal(pendingReasoning)
+		if reasoning != "" && len(pendingAssistant.ToolCalls) > 0 {
+			raw, err := json.Marshal(reasoning)
 			if err != nil {
 				return err
 			}
@@ -61,7 +68,18 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 				return err
 			}
 			pendingAssistant.ExtraFields = extra
-			pendingReasoning = ""
+		}
+		// Replay state travels with every reasoning item, tool calls or not:
+		// an Anthropic thinking block has to be echoed back on a plain
+		// assistant turn just as much as on a tool-use one.
+		if len(reasoningExtra) > 0 {
+			extra, err := core.MergeUnknownJSONFields(pendingAssistant.ExtraFields, map[string]json.RawMessage{
+				core.ExtraContentField: reasoningExtra,
+			})
+			if err != nil {
+				return err
+			}
+			pendingAssistant.ExtraFields = extra
 		}
 		messages = append(messages, *pendingAssistant)
 		pendingAssistant = nil
@@ -69,14 +87,12 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	}
 
 	for i, item := range items {
-		if reasoning, ok := responsesInputReasoningText(item); ok {
+		if reasoning, extra, ok := responsesInputReasoning(item); ok {
 			if err := flushPendingAssistant(); err != nil {
 				return nil, err
 			}
-			pendingReasoning = ""
-			if reasoning != "" {
-				pendingReasoning = reasoning
-			}
+			pendingReasoning = reasoning
+			pendingReasoningExtra = extra
 			continue
 		}
 
@@ -90,7 +106,6 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 				if err := flushPendingAssistant(); err != nil {
 					return nil, err
 				}
-				pendingReasoning = ""
 			}
 			if pendingAssistant == nil {
 				assistant := cloneResponsesMessage(msg)
@@ -120,50 +135,56 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	return messages, nil
 }
 
-// responsesInputReasoningText recognizes a Responses reasoning item and
-// extracts raw reasoning content. Summary text is accepted as a compatibility
-// fallback for older gateways that mislabeled reasoning_content as a summary.
-// Encrypted-only reasoning stays opaque and is deliberately omitted.
-func responsesInputReasoningText(item any) (string, bool) {
+// responsesInputReasoning recognizes a Responses reasoning item and extracts
+// its raw reasoning content along with any provider replay state the client
+// echoed back. Summary text is accepted as a compatibility fallback for older
+// gateways that mislabeled reasoning_content as a summary. Encrypted-only
+// reasoning stays opaque and is deliberately omitted.
+func responsesInputReasoning(item any) (string, json.RawMessage, bool) {
 	var raw json.RawMessage
 	switch typed := item.(type) {
 	case core.ResponsesInputElement:
 		if typed.Type != "reasoning" {
-			return "", false
+			return "", nil, false
 		}
 		raw = typed.Raw
 		if len(raw) == 0 {
 			encoded, err := json.Marshal(typed)
 			if err != nil {
-				return "", true
+				return "", nil, true
 			}
 			raw = encoded
 		}
 	case map[string]any:
 		itemType, _ := typed["type"].(string)
 		if itemType != "reasoning" {
-			return "", false
+			return "", nil, false
 		}
 		encoded, err := json.Marshal(typed)
 		if err != nil {
-			return "", true
+			return "", nil, true
 		}
 		raw = encoded
 	default:
-		return "", false
+		return "", nil, false
 	}
 
 	var payload struct {
-		Content []responsesReasoningPart `json:"content"`
-		Summary []responsesReasoningPart `json:"summary"`
+		Content      []responsesReasoningPart `json:"content"`
+		Summary      []responsesReasoningPart `json:"summary"`
+		ExtraContent json.RawMessage          `json:"extra_content"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return "", true
+		return "", nil, true
+	}
+	extra := payload.ExtraContent
+	if core.IsJSONNull(extra) {
+		extra = nil
 	}
 	if text := reasoningTextParts(payload.Content, "reasoning_text"); text != "" {
-		return text, true
+		return text, extra, true
 	}
-	return reasoningTextParts(payload.Summary, "summary_text"), true
+	return reasoningTextParts(payload.Summary, "summary_text"), extra, true
 }
 
 type responsesReasoningPart struct {

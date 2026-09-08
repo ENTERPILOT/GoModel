@@ -28,7 +28,9 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
-		if thinking := reasoningContent(choice.Message.ExtraFields); thinking != "" {
+		if blocks, ok := thinkingBlocks(choice.Message.ExtraFields); ok {
+			out.Content = append(out.Content, blocks...)
+		} else if thinking := reasoningContent(choice.Message.ExtraFields); thinking != "" {
 			out.Content = append(out.Content, ResponseContentBlock{Type: "thinking", Thinking: thinking})
 		}
 		if text := core.ExtractTextContent(choice.Message.Content); text != "" {
@@ -80,6 +82,26 @@ func normalizeMessageID(id string) string {
 		return id
 	}
 	return "msg_" + id
+}
+
+// thinkingBlocks renders the thinking blocks a provider preserved as replay
+// state (extra_content.anthropic.thinking_blocks). Anthropic clients echo the
+// content array back verbatim, and Anthropic rejects a thinking block whose
+// signature is missing, so the signature belongs on the block itself rather
+// than in the gateway's own member. ok is false when there is no usable replay
+// state, which is when the caller falls back to reasoning_content text.
+func thinkingBlocks(fields core.UnknownJSONFields) ([]ResponseContentBlock, bool) {
+	raw := fields.ExtraContent(core.ExtraContentVendorAnthropic)
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var extra struct {
+		ThinkingBlocks []ResponseContentBlock `json:"thinking_blocks"`
+	}
+	if err := json.Unmarshal(raw, &extra); err != nil || len(extra.ThinkingBlocks) == 0 {
+		return nil, false
+	}
+	return extra.ThinkingBlocks, true
 }
 
 // reasoningContent extracts the reasoning_content surfaced by providers (e.g.

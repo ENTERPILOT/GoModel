@@ -118,12 +118,17 @@ type MessagesResponse struct {
 
 // ResponseContentBlock is one element of an Anthropic response content array.
 type ResponseContentBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	Thinking string          `json:"thinking,omitempty"`
-	ID       string          `json:"id,omitempty"`
-	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty" swaggertype:"object"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+	// Signature authenticates a thinking block. Anthropic requires it back
+	// verbatim when the conversation continues, so clients must echo it.
+	Signature string `json:"signature,omitempty"`
+	// Data is the opaque payload of a redacted_thinking block.
+	Data  string          `json:"data,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty" swaggertype:"object"`
 	// ExtraContent is provider replay state on a tool_use block; clients echo
 	// it back on the next turn (see core.ExtraContentField).
 	ExtraContent json.RawMessage `json:"extra_content,omitempty" swaggertype:"object"`

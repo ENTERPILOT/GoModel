@@ -8,6 +8,8 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/google/uuid"
+
+	"github.com/enterpilot/gomodel/internal/core"
 )
 
 // ResponsesOutputToolCallState tracks one function_call item in a Responses stream.
@@ -42,6 +44,9 @@ type ResponsesOutputEventState struct {
 	reasoningItemID      string
 	reasoningText        strings.Builder
 	reasoningFinalStatus string
+	// reasoningExtraContent is provider replay state for the reasoning item,
+	// such as Anthropic thinking-block signatures. Clients echo it back.
+	reasoningExtraContent json.RawMessage
 }
 
 // finalStatusOrCompleted defaults an unset item status to "completed" so items
@@ -189,7 +194,18 @@ func (s *ResponsesOutputEventState) ReasoningItem(status string, includeContent 
 			{"type": "reasoning_text", "text": s.reasoningText.String()},
 		}
 	}
+	if len(s.reasoningExtraContent) > 0 {
+		item[core.ExtraContentField] = s.reasoningExtraContent
+	}
 	return item
+}
+
+// SetReasoningExtraContent attaches provider replay state to the reasoning
+// item. It arrives after the item has been opened — an Anthropic signature
+// only lands when the thinking block closes — so the value is rendered on
+// every item written from here on, including the terminal output.
+func (s *ResponsesOutputEventState) SetReasoningExtraContent(raw json.RawMessage) {
+	s.reasoningExtraContent = raw
 }
 
 // StartReasoningOutput emits the reasoning output_item.added event once before

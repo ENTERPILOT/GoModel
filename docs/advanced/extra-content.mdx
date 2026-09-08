@@ -39,9 +39,9 @@ against it work unchanged.
 
 | API | Location |
 | --- | --- |
-| Chat Completions | `tool_calls[].extra_content`; for text-only turns, `message.extra_content`; also on streamed `tool_calls` deltas |
-| Responses | `function_call` output items |
-| Anthropic Messages | `tool_use` content blocks |
+| Chat Completions | `tool_calls[].extra_content`; on the assistant message for turn-wide state such as thinking blocks; also on streamed `tool_calls` and message deltas |
+| Responses | `function_call` output items; `reasoning` output items |
+| Anthropic Messages | `tool_use` content blocks. Thinking blocks use the dialect's own `signature` and `data` fields instead. |
 
 State sits on the unit that maps to one provider part. A tool call becomes one
 Gemini `part`, so a per-call signature lives on the tool call. Thinking blocks
@@ -244,10 +244,58 @@ the flow is:
   </Step>
 </Steps>
 
-GoModel returns `thinking` blocks in Anthropic Messages responses as text
-only. The signature Anthropic issues is not yet carried back on the response
-side, so a replay with signed blocks currently works for histories captured
-from Anthropic directly or through a client that kept them.
+### On the way back
+
+Anthropic signs every thinking block it returns, and rejects a later turn that
+replays one without its signature:
+
+```text
+400 messages.1.content.0.thinking.signature: Field required
+```
+
+So the blocks travel out to the client the same way they travel in. The
+Anthropic Messages API renders them as real content blocks, signature
+included, because that is what an Anthropic client echoes back:
+
+```json
+{
+  "content": [
+    {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."},
+    {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Kraków"}}
+  ],
+  "stop_reason": "tool_use"
+}
+```
+
+Streaming emits the signature as a `signature_delta` inside the thinking
+block, before it closes, exactly as Anthropic does.
+
+The other dialects have no thinking block, so they carry the same data under
+`extra_content.anthropic.thinking_blocks` — on the assistant message in Chat
+Completions, on the `reasoning` output item in the Responses API. Streaming
+chat deltas carry the value once the thinking block completes, before any
+text, and it is cumulative: the last one seen holds the whole turn.
+
+```json
+{
+  "role": "assistant",
+  "content": "Let me look that up.",
+  "reasoning_content": "I should call the weather tool.",
+  "extra_content": {"anthropic": {"thinking_blocks": [
+    {"type": "thinking", "thinking": "I should call the weather tool.", "signature": "EqQBCkYIBRgC..."}
+  ]}}
+}
+```
+
+`reasoning_content` stays what it has always been: the readable text, and
+nothing to replay. A `redacted_thinking` block has no readable text at all,
+so `extra_content` is the only thing that carries it.
+
+Append the assistant turn to the history as received and the replay is
+automatic. Routing that history to another provider drops the member, as
+every foreign vendor object is dropped, and the conversation continues
+without it.
+
 
 ## Moving a history between providers
 
@@ -270,4 +318,4 @@ GoModel sends upstream.
 | Vendor | Providers | Members |
 | --- | --- | --- |
 | `google` | `gemini`, `vertex` | `thought_signature`: the Gemini 3 signature of a function call or text turn. |
-| `anthropic` | `anthropic` | `thinking_blocks`: the `thinking` and `redacted_thinking` blocks of an assistant turn; `is_error`: marks a tool result as failed. Set by the Anthropic Messages API ingress. |
+| `anthropic` | `anthropic` | `thinking_blocks`: the `thinking` and `redacted_thinking` blocks of an assistant turn, signatures included, written on responses and read back on requests; `is_error`: marks a tool result as failed, set by the Anthropic Messages API ingress. |

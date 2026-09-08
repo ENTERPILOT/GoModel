@@ -48,6 +48,9 @@ func convertFromAnthropicResponse(resp *anthropicResponse) *core.ChatResponse {
 			})
 		}
 	}
+	// reasoning_content is the readable text only; the signatures Anthropic
+	// needs back travel as replay state.
+	msg.ExtraFields = withThinkingReplay(msg.ExtraFields, extractThinkingReplay(resp.Content))
 
 	return &core.ChatResponse{
 		ID:      resp.ID,

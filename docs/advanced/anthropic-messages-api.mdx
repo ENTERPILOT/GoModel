@@ -192,9 +192,11 @@ features that have no canonical equivalent are not preserved end to end:
   (Claude Code appends system reminders this way, and its prompt caching
   depends on them staying in place). On older Claude models, which reject the
   role, their text is hoisted into the top-level system prompt instead.
-- **`thinking` and `redacted_thinking` blocks** on assistant turns are replayed
-  verbatim (signatures included) when routed to Anthropic, so thinking-enabled
-  tool-use turns continue correctly. Other providers never see them.
+- **`thinking` and `redacted_thinking` blocks** travel both ways verbatim,
+  signatures included: responses carry the `signature` Anthropic issued (as a
+  `signature_delta` when streaming), and an assistant turn echoed back is
+  replayed unchanged, so thinking-enabled conversations and tool-use loops
+  continue correctly. Other providers never see them.
 - **`tool_result.is_error`** is preserved when routed to Anthropic. Other
   providers have no equivalent flag and receive the result content only.
 - **`tool_use.extra_content`** carries another provider's replay state, such as

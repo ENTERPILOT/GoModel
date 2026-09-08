@@ -4335,6 +4335,37 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/auth/verify": {
+            "get": {
+                "description": "Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. A gateway with no authentication configured has no credential to confirm and answers 200 with valid=false and method=none. Disabled unless AUTH_VERIFY_ENABLED is set.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Verify an API key",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.authVerifyResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/batches": {
             "get": {
                 "produces": [
@@ -8706,6 +8737,10 @@ const docTemplate = `{
         "anthropicapi.ResponseContentBlock": {
             "type": "object",
             "properties": {
+                "data": {
+                    "description": "Data is the opaque payload of a redacted_thinking block.",
+                    "type": "string"
+                },
                 "extra_content": {
                     "description": "ExtraContent is provider replay state on a tool_use block; clients echo\nit back on the next turn (see core.ExtraContentField).",
                     "type": "object"
@@ -8718,6 +8753,10 @@ const docTemplate = `{
                     "additionalProperties": true
                 },
                 "name": {
+                    "type": "string"
+                },
+                "signature": {
+                    "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it.",
                     "type": "string"
                 },
                 "text": {
@@ -8913,7 +8952,7 @@ const docTemplate = `{
                     }
                 },
                 "request_revisions": {
-                    "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that ran, in application order. Rewriters that\nchanged the body carry the rewritten body; those that left it alone are\nrecorded with NoChange so the audit trail still shows the step ran.\nRequestBody always remains the original client request; the last\nchanged revision is what was forwarded downstream — when every rewriter\nwas a no-op there is no such revision and the original body is what\nwent upstream.",
+                    "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that ran, in application order, followed by the\nprompt-guardrail steps. Rewriters that changed the body carry the\nrewritten body; those that left it alone are recorded with NoChange so\nthe audit trail still shows the step ran. Each prompt guardrail that\nedited the prompt is a changed revision, in step order, carrying the\nrequest as it stood right after that step (the next step's input) with\nits sizes; one that objected (warn, block, respond) or failed without\nediting is a NoChange entry carrying the decision, and a silent allow\nleaves no entry. RequestBody always remains the original client\nrequest; the last changed revision is what was forwarded downstream —\nwhen every step was a no-op there is no such revision and the original\nbody is what went upstream.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/auditlog.RequestRevisionSnapshot"
@@ -11153,6 +11192,26 @@ const docTemplate = `{
                 }
             }
         },
+        "server.authVerifyResponse": {
+            "type": "object",
+            "properties": {
+                "key_id": {
+                    "description": "KeyID identifies the managed auth key that authenticated the request.\nAbsent for every other method.",
+                    "type": "string"
+                },
+                "method": {
+                    "description": "Method is \"api_key\" for a managed key stored in the database,\n\"master_key\" for the bootstrap key, an extension-specific value for\nidentities supplied by an authentication extension, or \"none\" when the\nrequest carried no credential this gateway recognizes, which is also\nwhen Valid is false.",
+                    "type": "string"
+                },
+                "user_path": {
+                    "description": "UserPath is the subtree the credential is bound to. Absent when the\ncredential is global, which every master-key caller is.",
+                    "type": "string"
+                },
+                "valid": {
+                    "type": "boolean"
+                }
+            }
+        },
         "server.usageStatusBudget": {
             "type": "object",
             "properties": {
@@ -12143,6 +12202,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "thinking": {
+                    "type": "string"
+                },
+                "signature": {
+                    "type": "string"
+                },
+                "data": {
                     "type": "string"
                 },
                 "tool_use_id": {
