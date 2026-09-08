@@ -28,6 +28,10 @@ const searchSelect = readFileSync(
   join(SRC, "lib/components/molecules/SearchSelect.svelte"),
   "utf8",
 );
+const enabledToggle = readFileSync(
+  join(SRC, "lib/components/atoms/EnabledToggle.svelte"),
+  "utf8",
+);
 
 test("EditorDialog marks the form dirty on user edits and resets on open", () => {
   // The form element itself funnels every field's input/change events into
@@ -103,6 +107,19 @@ test("the confirmation dialog only asks for typed text when required", () => {
   assert.match(typedConfirm, /stacked=\{dialog\.stacked\}/);
   assert.match(confirmStore, /requiredText: "",/);
   assert.match(confirmStore, /stacked: false,/);
+  // Simple confirmations still get a focus target: the Cancel button is the
+  // fallback (the typed input sits earlier in the DOM and wins when shown).
+  assert.match(typedConfirm, /class="btn"\s*\n\s*data-modal-autofocus/);
+});
+
+test("EnabledToggle reports flips as change events", () => {
+  // The toggle flips form state in its click handler, so no DOM input or
+  // change event would otherwise reach the enclosing form's dirty guard.
+  assert.match(
+    enabledToggle,
+    /dispatchEvent\(new Event\("change", \{ bubbles: true \}\)\)/,
+  );
+  assert.match(enabledToggle, /onclick=\{onToggle\}/);
 });
 
 test("the discard prompt is translated in every locale", () => {

@@ -61,9 +61,13 @@
         <p class="auth-dialog-error" role="alert">{confirmDialog.error}</p>
       {/if}
       <div class="auth-dialog-actions">
+        <!-- Simple confirmations (no requiredText) have no input to
+             autofocus; the Cancel button is the fallback target. The typed
+             input sits earlier in the DOM, so it still wins when present. -->
         <button
           type="button"
           class="btn"
+          data-modal-autofocus
           onclick={() => confirmDialog.close()}>{m.common_action_cancel()}</button
         >
         <button

@@ -18,6 +18,14 @@
     onclick,
     text,
   } = $props();
+
+  function onToggle(event) {
+    onclick?.(event);
+    // The toggle flips form state programmatically; dispatch a bubbling
+    // change so enclosing forms (the editor dialog's unsaved-changes guard)
+    // treat flips like native field edits.
+    event.currentTarget.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 </script>
 
 <button
@@ -27,7 +35,7 @@
   class:restricted
   {disabled}
   aria-label={(enabled ? "Disable " : "Enable ") + label}
-  {onclick}
+  onclick={onToggle}
 >
   <span class="alias-toggle-track"><span class="alias-toggle-thumb"></span></span>
   <span>{text ?? (enabled ? "Enabled" : "Disabled")}</span>
