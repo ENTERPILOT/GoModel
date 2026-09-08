@@ -240,6 +240,12 @@ func TestPromptChangesEdits(t *testing.T) {
 			p.Insert(0, Message{Role: RoleSystem, Parts: []Part{{Kind: PartText, Text: "x"}}})
 			_ = p.Remove("m4")
 		}, 2},
+		{"rejected edits", func(p *Prompt) {
+			_ = p.SetText("nope", 0, "x")
+			_ = p.SetText("m1", 9, "x")
+			_ = p.SetText("m2", 0, "x") // a tool call, not text
+			_ = p.Remove("nope")
+		}, 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			p := toolPrompt()
