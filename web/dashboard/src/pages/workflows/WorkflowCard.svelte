@@ -29,9 +29,9 @@
 
 <article class="workflow-card" class:workflow-preview-card={preview}>
   <div class="workflow-card-head">
-    <div>
-      <p class="form-kicker">{workflowScopeTypeLabel(workflow)}</p>
+    <div class="workflow-card-title">
       <h3>{displayName}</h3>
+      <span class="workflow-card-scope-type">{workflowScopeTypeLabel(workflow)}</span>
     </div>
     {#if workflowScopeBadgeVisible(workflow)}
       <div class="workflow-card-badges">
@@ -108,9 +108,28 @@
     gap: 10px;
   }
 
+  /* Name first, scope type after it on the same baseline in a lighter,
+     smaller face; the pair wraps only when the name is long. */
+  .workflow-card-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    min-width: 0;
+  }
+
   .workflow-card-head :global(h3) {
     font-size: 18px;
     font-weight: 700;
+    margin: 0;
+  }
+
+  .workflow-card-scope-type {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .workflow-card-badges, .workflow-card-meta {
