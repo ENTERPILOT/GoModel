@@ -38,6 +38,7 @@ jobs:
 
       - name: Validate rendered manifests
         run: |
+          set -o pipefail
           for values in helm/ci/*-values.yaml; do
             echo "== $values"
             helm template gomodel helm -f "$values" --namespace gomodel \

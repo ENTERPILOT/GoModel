@@ -190,7 +190,11 @@ lint:
 helm-lint:
 	helm lint --strict helm
 	for values in helm/ci/*-values.yaml; do helm lint --strict helm -f "$$values"; done
-	for values in helm/ci/*-values.yaml; do helm template gomodel helm -f "$$values" --namespace gomodel | kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'; done
+	rendered=$$(mktemp); trap 'rm -f "$$rendered"' EXIT; \
+	for values in helm/ci/*-values.yaml; do \
+		helm template gomodel helm -f "$$values" --namespace gomodel > "$$rendered" || exit 1; \
+		kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' < "$$rendered" || exit 1; \
+	done
 
 # Run linter with auto-fix. Mirrors `lint`: same tags, same packages, so the
 # autofix pass cannot silently skip the tag-gated files under tests/.

@@ -28,7 +28,7 @@ Create a default fully qualified app name, truncated to the 63 character DNS lim
 {{- define "gomodel.labels" -}}
 helm.sh/chart: {{ include "gomodel.chart" . }}
 {{ include "gomodel.selectorLabels" . }}
-app.kubernetes.io/version: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+app.kubernetes.io/version: {{ .Values.image.tag | default .Chart.AppVersion | trunc 63 | trimAll "-_." | default .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
