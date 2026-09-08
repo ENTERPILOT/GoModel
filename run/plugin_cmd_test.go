@@ -202,10 +202,10 @@ func TestWriteManifest(t *testing.T) {
 				{Key: "action", Input: pluginapi.InputSelect, Default: "block", Scope: pluginapi.ScopeRoute},
 			},
 		},
-		BuildInfo:      pluginapi.BuildInfo{GoVersion: "go1.27.0", PluginAPIVersion: "0.1.0"},
+		BuildInfo:      pluginapi.BuildInfo{GoVersion: "go1.27.1", PluginAPIVersion: "0.1.0"},
 		SingleInstance: true,
 	})
-	for _, want := range []string{"name  ", "x\n", "prompt, response", "go1.27.0, pluginapi 0.1.0", "one (GoModelPlugin is a variable)", "keywords", "textarea", "true", "action", "route", "block"} {
+	for _, want := range []string{"name  ", "x\n", "prompt, response", "go1.27.1, pluginapi 0.1.0", "one (GoModelPlugin is a variable)", "keywords", "textarea", "true", "action", "route", "block"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
