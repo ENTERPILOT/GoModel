@@ -451,6 +451,13 @@ func TestSchemaToleratesConcurrentApplication(t *testing.T) {
 		// start. PostgreSQL's CREATE TABLE IF NOT EXISTS is not atomic
 		// across sessions: two of them racing on a missing table make the
 		// loser fail with a duplicate pg_type key instead of a no-op.
+		//
+		// SQLite is single-instance by design (one process applies its
+		// schema store by store), so the property is only pinned for
+		// PostgreSQL.
+		if db.Dialect() != sqlx.PostgreSQL {
+			t.Skip("concurrent schema application is a PostgreSQL property")
+		}
 		const workers = 8
 		errs := make(chan error, workers)
 		start := make(chan struct{})

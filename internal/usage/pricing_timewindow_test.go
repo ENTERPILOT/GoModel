@@ -276,3 +276,33 @@ func TestMongoDBStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t 
 		return doc.TotalCost
 	})
 }
+
+func TestNewPostgreSQLStoreToleratesConcurrentStartup(t *testing.T) {
+	pool := sqlxtest.NewPostgresPool(t)
+	if pool == nil {
+		return // skipped: no test server configured
+	}
+
+	// Several replicas construct the store against one fresh database at
+	// once; every DDL statement must serialize instead of failing the
+	// losing replica's startup.
+	const workers = 8
+	errs := make(chan error, workers)
+	start := make(chan struct{})
+	for range workers {
+		go func() {
+			<-start
+			store, err := NewPostgreSQLStore(pool, 0)
+			if err == nil {
+				err = store.Close()
+			}
+			errs <- err
+		}()
+	}
+	close(start)
+	for range workers {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent NewPostgreSQLStore() error = %v", err)
+		}
+	}
+}
