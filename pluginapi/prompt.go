@@ -332,8 +332,9 @@ func cloneMessages(messages []Message) []Message {
 	return out
 }
 
-// cloneParts copies the parts and the tool call/result each may point to;
-// media bytes and raw JSON are shared, as no edit rewrites them in place.
+// cloneParts copies the parts and the tool call/result each may point to,
+// tool-call arguments included; media bytes and raw JSON are shared, as no
+// edit rewrites them in place.
 func cloneParts(parts []Part) []Part {
 	if parts == nil {
 		return nil
@@ -342,6 +343,9 @@ func cloneParts(parts []Part) []Part {
 	for i, part := range parts {
 		if part.ToolCall != nil {
 			call := *part.ToolCall
+			if call.Arguments != nil {
+				call.Arguments = append(json.RawMessage(nil), call.Arguments...)
+			}
 			part.ToolCall = &call
 		}
 		if part.ToolResult != nil {

@@ -188,7 +188,9 @@ func promptChainRevisions(records []plugins.DecisionRecord, before, after []byte
 // promptStepRevisions builds the prompt phase's revisions: each record in
 // step order, an editing one as a change carrying the request after its
 // step, measured against the request the step started from; a step that
-// left the request alone reports that request's size on both sides.
+// left the request alone reports that request's size on both sides. When a
+// snapshot cannot be applied or encoded, the revision stays a change with
+// the error in its detail and the size chain carries on unchanged.
 func promptStepRevisions(records []plugins.DecisionRecord, edits []plugins.PromptEdit, before []byte, captureBodies bool) []auditlog.RequestRevisionSnapshot {
 	revisions := make([]auditlog.RequestRevisionSnapshot, 0, len(records))
 	previous := len(before)
@@ -210,8 +212,8 @@ func promptStepRevisions(records []plugins.DecisionRecord, edits []plugins.Promp
 					detail.Error += ": " + err.Error()
 				}
 			}
-			revision.BytesAfter = len(encoded)
 			if encoded != nil {
+				revision.BytesAfter = len(encoded)
 				previous = len(encoded)
 			}
 			if captureBodies && len(encoded) > 0 && int64(len(encoded)) <= auditlog.MaxBodyCapture {

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -664,6 +665,37 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 			t.Errorf("the edit snapshot must survive a later block: %+v", revisions)
 		}
 	})
+}
+
+// A snapshot that cannot be applied leaves its revision a change with the
+// error in its detail, and the size chain carries on from the previous step.
+func TestPromptStepRevisionsKeepSizesWhenASnapshotFails(t *testing.T) {
+	records := []plugins.DecisionRecord{
+		{Phase: pluginapi.KindPrompt, Instance: "first", Decision: pluginapi.Allow(), Edited: true},
+		{Phase: pluginapi.KindPrompt, Instance: "second", Decision: pluginapi.Allow(), Edited: true},
+		{Phase: pluginapi.KindPrompt, Instance: "watch", Decision: pluginapi.Warn("pii", "found", nil)},
+	}
+	edits := []plugins.PromptEdit{
+		{Instance: "first", Apply: func() (any, error) { return nil, errors.New("boom") }},
+		{Instance: "second", Apply: func() (any, error) {
+			return &core.ChatRequest{Model: "m", Messages: []core.Message{{Role: "user", Content: "rewritten"}}}, nil
+		}},
+	}
+	revisions := promptStepRevisions(records, edits, []byte(`{"model":"m"}`), true)
+	if len(revisions) != 3 {
+		t.Fatalf("revisions = %+v", revisions)
+	}
+	failed := revisions[0]
+	if failed.NoChange || failed.BytesBefore != 13 || failed.BytesAfter != 13 || failed.Body != nil || !strings.Contains(failed.Detail.(pluginDecisionDetail).Error, "boom") {
+		t.Errorf("failed snapshot revision = %+v", failed)
+	}
+	applied := revisions[1]
+	if applied.NoChange || applied.BytesBefore != 13 || applied.BytesAfter == 0 || applied.Body == nil {
+		t.Errorf("applied snapshot revision = %+v", applied)
+	}
+	if revisions[2].BytesBefore != applied.BytesAfter || revisions[2].BytesAfter != applied.BytesAfter || !revisions[2].NoChange {
+		t.Errorf("no-change revision after the chain = %+v", revisions[2])
+	}
 }
 
 // With step logging off the phase keeps no snapshots: the chain's edits are

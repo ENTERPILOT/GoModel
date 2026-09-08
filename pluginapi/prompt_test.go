@@ -301,6 +301,13 @@ func TestPromptClone(t *testing.T) {
 		t.Error("Clone of nil must be nil")
 	}
 
+	// Tool-call arguments are their own bytes on each side.
+	c = p.Clone()
+	c.Messages[2].Parts[0].ToolCall.Arguments[2] = 'X'
+	if got := string(p.Messages[2].Parts[0].ToolCall.Arguments); got != `{"city":"Rome"}` {
+		t.Errorf("clone shares tool call argument bytes with the original: %s", got)
+	}
+
 	// Object-valued parameters are copied too, not shared.
 	p.Params.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "weather"}}
 	c = p.Clone()
