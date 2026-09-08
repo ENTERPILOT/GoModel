@@ -74,8 +74,8 @@ Validate value combinations that would produce a broken deployment.
 {{- $urlEnv := include "gomodel.storageUrlEnv" . }}
 {{- $fromExtraEnv := false }}
 {{- range .Values.extraEnv }}{{ if eq .name $urlEnv }}{{ $fromExtraEnv = true }}{{ end }}{{ end }}
-{{- if not (or .Values.storage.url .Values.extraEnvFrom $fromExtraEnv (hasKey .Values.secretEnv $urlEnv)) }}
-{{- fail (printf "storage.url is required for storage.type %s (or supply %s through secretEnv, extraEnv, or extraEnvFrom)" $type $urlEnv) }}
+{{- if not (or .Values.storage.url .Values.extraEnvFrom $fromExtraEnv (hasKey .Values.secretEnv $urlEnv) (hasKey .Values.env $urlEnv)) }}
+{{- fail (printf "storage.url is required for storage.type %s (or supply %s through env, secretEnv, extraEnv, or extraEnvFrom)" $type $urlEnv) }}
 {{- end }}
 {{- end }}
 {{- if and .Values.config .Values.existingConfigMap }}
