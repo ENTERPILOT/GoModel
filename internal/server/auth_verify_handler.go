@@ -1,7 +1,7 @@
 package server
 
 import (
-	"context"
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -11,9 +11,11 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
-// authVerifyMethodNone is reported when the request reached the handler
-// without any credential being checked, which only happens on a gateway that
-// has no authentication configured at all.
+// authVerifyMethodNone is reported when the request carried no credential this
+// gateway recognizes. Requests with an unusable credential are rejected by the
+// authentication middleware long before the handler, so this is reached only
+// where that middleware admits unauthenticated callers: a gateway with no
+// authentication configured, or a route an extension excluded from it.
 const authVerifyMethodNone = "none"
 
 // authVerifyResponse is the answer of the credential check: whether the
@@ -24,7 +26,8 @@ type authVerifyResponse struct {
 	// Method is "api_key" for a managed key stored in the database,
 	// "master_key" for the bootstrap key, an extension-specific value for
 	// identities supplied by an authentication extension, or "none" when the
-	// gateway checked no credential.
+	// request carried no credential this gateway recognizes, which is also
+	// when Valid is false.
 	Method string `json:"method"`
 	// KeyID identifies the managed auth key that authenticated the request.
 	// Empty for every other method.
@@ -51,7 +54,7 @@ type authVerifyResponse struct {
 // key to confirm.
 //
 // @Summary      Verify an API key
-// @Description  Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. Disabled unless AUTH_VERIFY_ENABLED is set.
+// @Description  Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. A gateway with no authentication configured has no credential to confirm and answers 200 with valid=false and method=none. Disabled unless AUTH_VERIFY_ENABLED is set.
 // @Tags         auth
 // @Produce      json
 // @Security     BearerAuth
@@ -61,7 +64,7 @@ type authVerifyResponse struct {
 func (h *Handler) AuthVerify(c *echo.Context) error {
 	ctx := c.Request().Context()
 
-	method := h.authVerifyMethod(ctx)
+	method := h.authVerifyMethod(c)
 	response := authVerifyResponse{
 		Valid:    method != authVerifyMethodNone,
 		Method:   method,
@@ -75,11 +78,18 @@ func (h *Handler) AuthVerify(c *echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-// authVerifyMethod names the mechanism that let the request through. It is
-// read back from what the authentication middleware already attached to the
-// context rather than published as another context value, so the credential
-// check costs the model routes nothing.
-func (h *Handler) authVerifyMethod(ctx context.Context) string {
+// authVerifyMethod names the mechanism that authenticated the request. Every
+// answer rests on positive evidence rather than on the request having reached
+// the handler: an endpoint that attests authentication must not infer it from
+// a configuration where the middleware would normally have rejected the
+// caller. A route excluded from authentication (an extension's skip path)
+// therefore reports no credential instead of the configured master key.
+//
+// Managed keys and extension identities are read back from what the middleware
+// already attached to the context, so the model routes pay nothing for this
+// route; only the master key is re-compared here, on this request alone.
+func (h *Handler) authVerifyMethod(c *echo.Context) string {
+	ctx := c.Request().Context()
 	if core.GetAuthKeyID(ctx) != "" {
 		return auditlog.AuthMethodAPIKey
 	}
@@ -89,11 +99,11 @@ func (h *Handler) authVerifyMethod(ctx context.Context) string {
 		}
 		return auditlog.AuthMethodExtension
 	}
-	// Nothing else can have satisfied the middleware: without a master key,
-	// a request carrying no managed or extension identity never reaches a
-	// handler unless the gateway authenticates nobody at all.
-	if h.masterKeyConfigured {
-		return auditlog.AuthMethodMasterKey
+	if h.masterKey != "" {
+		if token, _ := requestAuthToken(c.Request()); token != "" &&
+			subtle.ConstantTimeCompare([]byte(token), []byte(h.masterKey)) == 1 {
+			return auditlog.AuthMethodMasterKey
+		}
 	}
 	return authVerifyMethodNone
 }

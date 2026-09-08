@@ -73,6 +73,69 @@ func TestAuthVerify_ExtensionIdentity(t *testing.T) {
 	assert.Equal(t, authVerifyResponse{Valid: true, Method: "oidc", UserPath: "/team"}, body)
 }
 
+// A route excluded from authentication reaches the handler with no credential
+// checked. The answer must rest on the request itself: a configured master key
+// is not evidence that this caller presented one.
+func TestAuthVerify_SkippedAuthenticationDoesNotClaimMasterKey(t *testing.T) {
+	cfg := &Config{
+		AuthVerifyEnabled:  true,
+		MasterKey:          "master",
+		ExtraAuthSkipPaths: []string{"/v1/auth/verify"},
+	}
+
+	rec, body := getAuthVerify(t, cfg, "")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, authVerifyResponse{Valid: false, Method: "none"}, body)
+
+	rec, body = getAuthVerify(t, cfg, "not-the-master-key")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, authVerifyResponse{Valid: false, Method: "none"}, body)
+
+	// The same skipped route still confirms a caller that does present it.
+	rec, body = getAuthVerify(t, cfg, "master")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, authVerifyResponse{Valid: true, Method: "master_key"}, body)
+}
+
+// The other cases decode into the response type, which cannot catch a changed
+// JSON tag or a dropped omitempty. This one asserts the wire shape itself.
+func TestAuthVerify_JSONShape(t *testing.T) {
+	cfg := &Config{
+		AuthVerifyEnabled: true,
+		MasterKey:         "master",
+		Authenticator: mockAuthenticator{
+			enabled:   true,
+			tokenToID: map[string]string{"sk_gom_token": "key-123"},
+			tokenPath: map[string]string{"sk_gom_token": "/team"},
+		},
+	}
+
+	srv := New(&mockProvider{}, cfg)
+	decode := func(token string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/auth/verify", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), "body: %s", rec.Body.String())
+		return body
+	}
+
+	assert.Equal(t, map[string]any{
+		"valid":     true,
+		"method":    "api_key",
+		"key_id":    "key-123",
+		"user_path": "/team",
+	}, decode("sk_gom_token"))
+
+	// key_id and user_path belong to managed keys only; they must be absent
+	// rather than empty strings for every other method.
+	assert.Equal(t, map[string]any{"valid": true, "method": "master_key"}, decode("master"))
+}
+
 func TestAuthVerify_InvalidKeyIsRejected(t *testing.T) {
 	cfg := &Config{
 		AuthVerifyEnabled: true,

@@ -6678,7 +6678,7 @@
     },
     "/v1/auth/verify": {
       "get": {
-        "description": "Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. Disabled unless AUTH_VERIFY_ENABLED is set.",
+        "description": "Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. A gateway with no authentication configured has no credential to confirm and answers 200 with valid=false and method=none. Disabled unless AUTH_VERIFY_ENABLED is set.",
         "tags": [
           "auth"
         ],
@@ -14968,7 +14968,7 @@
             "type": "string"
           },
           "method": {
-            "description": "Method is \"api_key\" for a managed key stored in the database,\n\"master_key\" for the bootstrap key, an extension-specific value for\nidentities supplied by an authentication extension, or \"none\" when the\ngateway checked no credential.",
+            "description": "Method is \"api_key\" for a managed key stored in the database,\n\"master_key\" for the bootstrap key, an extension-specific value for\nidentities supplied by an authentication extension, or \"none\" when the\nrequest carried no credential this gateway recognizes, which is also\nwhen Valid is false.",
             "type": "string"
           },
           "user_path": {

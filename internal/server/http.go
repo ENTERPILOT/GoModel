@@ -214,7 +214,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
 	if cfg != nil {
 		handler.versionChecker = cfg.VersionChecker
-		handler.masterKeyConfigured = cfg.MasterKey != ""
+		handler.masterKey = cfg.MasterKey
 	}
 	if cfg != nil {
 		handler.mcpEnabled = cfg.MCPEnabled

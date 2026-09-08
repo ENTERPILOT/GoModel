@@ -140,9 +140,12 @@ database, `master_key` the bootstrap key from `GOMODEL_MASTER_KEY`. `key_id`
 and `user_path` are present only for managed keys bound to them.
 
 <Note>
-  On a gateway with no authentication configured at all, every request is
-  accepted and there is no key to confirm: the endpoint answers `200` with
+  Where the gateway admits unauthenticated callers — no authentication
+  configured at all, or a route an extension excluded from it — there is no key
+  to confirm, and the endpoint answers `200` with
   `{"valid": false, "method": "none"}` rather than claiming the key is valid.
+  A status-code consumer such as Caddy's `forward_auth` treats that as allowed,
+  matching what the gateway itself does with those requests.
 </Note>
 
 ## Provider Passthrough
