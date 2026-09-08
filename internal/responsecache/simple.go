@@ -248,8 +248,8 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 		return false
 	}
 	// gjson returns the first matching top-level field. That differs from
-	// encoding/json on duplicate keys, but the cache hot path favors the cheaper
-	// first-match check because duplicate stream fields are not expected.
+	// encoding/json on duplicate keys, but ingress rejects bodies that repeat
+	// the stream field, so the cheaper first-match check is safe here.
 	result := gjson.GetBytes(body, "stream")
 	if !result.Exists() || (result.Type != gjson.True && result.Type != gjson.False) {
 		return false

@@ -65,6 +65,12 @@ GoModel strips client `Authorization` and `X-Api-Key` headers before forwarding
 the request, then applies the upstream provider credential configured on the
 server. For Anthropic, GoModel uses its configured `ANTHROPIC_API_KEY`.
 
+When the body is JSON, GoModel authorizes the top-level `model` it names and
+then forwards the body byte-for-byte. A body that repeats a top-level `model`,
+`provider`, or `stream` member is rejected with `400` instead, because the
+upstream parser could otherwise pick a different value than the one GoModel
+authorized.
+
 Because passthrough is provider-native, the response is also provider-native.
 For Anthropic messages, the response uses Anthropic's message schema, not an
 OpenAI chat completion schema.

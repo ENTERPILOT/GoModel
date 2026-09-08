@@ -1169,7 +1169,9 @@ func TestProviderPassthroughRoute_EnabledByDefault(t *testing.T) {
 	}
 }
 
-func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing.T) {
+func TestProviderPassthroughRoute_ResolvesOversizedBodySelectors(t *testing.T) {
+	// The whole JSON body is scanned before forwarding, so a model or stream
+	// field past the ingress peek window is still authoritative.
 	mock := &mockProvider{
 		passthroughResponse: &core.PassthroughResponse{
 			StatusCode: http.StatusOK,
@@ -1178,7 +1180,7 @@ func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing
 		},
 	}
 	srv := New(mock, &Config{})
-	body := `{"model":"gpt-5-mini","padding":"` + strings.Repeat("x", 65*1024) + `","stream":true}`
+	body := `{"padding":"` + strings.Repeat("x", 65*1024) + `","model":"gpt-5-mini","stream":true}`
 	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -1188,8 +1190,12 @@ func TestProviderPassthroughRoute_MarksOversizedStreamIntentUncertain(t *testing
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
-	if mock.lastPassthroughReq == nil || !mock.lastPassthroughReq.StreamUncertain {
-		t.Fatalf("passthrough stream metadata = %+v, want uncertain", mock.lastPassthroughReq)
+	got := mock.lastPassthroughReq
+	if got == nil || got.Model != "gpt-5-mini" || !got.Stream || got.StreamUncertain {
+		t.Fatalf("passthrough request = %+v, want model gpt-5-mini with certain stream=true", got)
+	}
+	if forwarded := readPassthroughRequestBody(t, got.Body); forwarded != body {
+		t.Fatal("forwarded body differs from the original")
 	}
 }
 

@@ -80,8 +80,22 @@ type WhiteBoxPrompt struct {
 	// JSONBodyParsed reports that the captured request body was parsed as JSON
 	// (for selector peeking and/or canonical request decode).
 	JSONBodyParsed bool
+	// DuplicateSelectorField names the top-level selector member ("model",
+	// "provider", or "stream") that the captured body repeats. Such a body
+	// yields no selector hints; DuplicateSelectorError rejects the request.
+	DuplicateSelectorField string
 
 	cache map[semanticCacheKey]any
+}
+
+// DuplicateSelectorError returns the invalid-request error for a captured body
+// that repeats a top-level selector field, or nil when the body was unique or
+// not inspected.
+func (env *WhiteBoxPrompt) DuplicateSelectorError() error {
+	if env == nil || env.DuplicateSelectorField == "" {
+		return nil
+	}
+	return NewDuplicateSelectorFieldError(env.DuplicateSelectorField)
 }
 
 // CachedChatRequest returns the cached canonical chat request, if present.
@@ -253,11 +267,15 @@ func DeriveWhiteBoxPrompt(snapshot *RequestSnapshot) *WhiteBoxPrompt {
 		return env
 	}
 
-	model, provider, stream, parsed := deriveSnapshotSelectorHintsGJSON(trimmed)
-	if !parsed {
+	hints := deriveSnapshotSelectorHintsGJSON(trimmed)
+	if hints.duplicate != "" {
+		env.DuplicateSelectorField = hints.duplicate
 		return env
 	}
-	ApplyBodySelectorHints(env, model, provider, stream)
+	if !hints.parsed {
+		return env
+	}
+	ApplyBodySelectorHints(env, hints.model, hints.provider, hints.stream)
 
 	return env
 }
@@ -389,48 +407,63 @@ func derivePassthroughRouteInfoFromTransport(snapshot *RequestSnapshot) *Passthr
 	return info
 }
 
-func deriveSnapshotSelectorHintsGJSON(body []byte) (model, provider string, stream, parsed bool) {
+// snapshotSelectorHints is the sparse selector state peeked from a captured
+// JSON body. duplicate names a repeated top-level selector field; when set the
+// remaining fields are meaningless because the body is rejected.
+type snapshotSelectorHints struct {
+	model     string
+	provider  string
+	stream    bool
+	parsed    bool
+	duplicate string
+}
+
+func deriveSnapshotSelectorHintsGJSON(body []byte) snapshotSelectorHints {
 	if !gjson.ValidBytes(body) {
-		return "", "", false, false
+		return snapshotSelectorHints{}
 	}
 
 	// GetBytes peeks without gjson.ParseBytes's full copy of the body; the
 	// leading byte is the object check the parse used to make.
 	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
-		return "", "", false, false
+		return snapshotSelectorHints{}
 	}
 
-	// gjson returns the first matching top-level field. That differs from
-	// encoding/json on duplicate keys, but the hot-path speedup is worth it here:
-	// duplicate selector keys are not expected from real clients, and we accept
-	// the first-match behavior to keep ingress peeking cheap.
+	// gjson returns the first matching top-level field while encoding/json
+	// keeps the last. Bodies that repeat a selector field are rejected, so for
+	// every body that reaches the lookups below both parsers agree.
+	if field := DuplicateSelectorField(body); field != "" {
+		return snapshotSelectorHints{duplicate: field}
+	}
+
 	modelResult := gjson.GetBytes(body, "model")
 	if !snapshotSelectorStringAllowed(modelResult) {
-		return "", "", false, false
+		return snapshotSelectorHints{}
 	}
 	providerResult := gjson.GetBytes(body, "provider")
 	if !snapshotSelectorStringAllowed(providerResult) {
-		return "", "", false, false
+		return snapshotSelectorHints{}
 	}
 	streamResult := gjson.GetBytes(body, "stream")
 	if !snapshotSelectorBoolAllowed(streamResult) {
-		return "", "", false, false
+		return snapshotSelectorHints{}
 	}
 
 	// GetBytes results own their strings (unlike Parse results, which alias
 	// the body), so these values can land in RouteHints — which lives on the
 	// request context for the whole, possibly streaming, request — without
 	// pinning a request-sized backing string.
+	hints := snapshotSelectorHints{parsed: true}
 	if modelResult.Type == gjson.String {
-		model = modelResult.String()
+		hints.model = modelResult.String()
 	}
 	if providerResult.Type == gjson.String {
-		provider = providerResult.String()
+		hints.provider = providerResult.String()
 	}
 	if streamResult.Type == gjson.True || streamResult.Type == gjson.False {
-		stream = streamResult.Bool()
+		hints.stream = streamResult.Bool()
 	}
-	return model, provider, stream, true
+	return hints
 }
 
 func snapshotSelectorStringAllowed(result gjson.Result) bool {
