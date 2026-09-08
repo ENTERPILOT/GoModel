@@ -9,7 +9,8 @@ import { flash } from "$lib/stores/flash.svelte.js";
 import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import { modelsStore } from "$lib/stores/models.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
-import { normalizeWorkflowPhase } from "$lib/utils/pluginPhases.js";
+import { normalizeWorkflowPhase, phasesSupport } from "$lib/utils/pluginPhases.js";
+import { guardrailsStore } from "../guardrails/guardrails.svelte.js";
 import {
   defaultWorkflowForm,
   emptyHydratedScope,
@@ -43,6 +44,8 @@ class WorkflowsStore {
   submitting = $state(false);
   deactivatingID = $state("");
   formError = $state("");
+  // Set once a submit failed validation, so rows outline their bad fields.
+  formValidated = $state(false);
   formHydrated = $state(false);
   hydratedScope = $state(emptyHydratedScope());
   guardrailRefs = $state([]);
@@ -114,6 +117,12 @@ class WorkflowsStore {
     this.formOpen = true;
     this.submitting = false;
     this.formError = "";
+    this.formValidated = false;
+    // The guardrail editor stacked on this form needs the type catalog and
+    // full definitions, which the ref list does not carry.
+    if (runtimeConfig.guardrailsVisible()) {
+      void guardrailsStore.fetchPage();
+    }
 
     if (!workflow) {
       this.formHydrated = false;
@@ -162,6 +171,7 @@ class WorkflowsStore {
     this.formOpen = false;
     this.submitting = false;
     this.formError = "";
+    this.formValidated = false;
     this.formHydrated = false;
     this.hydratedScope = emptyHydratedScope();
     this.form = defaultWorkflowForm();
@@ -186,6 +196,47 @@ class WorkflowsStore {
     this.form.guardrails.push(
       defaultWorkflowGuardrailStep(nextWorkflowGuardrailStep(steps, phase), phase),
     );
+  }
+
+  // ─── Guardrail instances (stacked guardrail editor) ───
+
+  // guardrailDefinition finds the full stored definition behind a ref, or
+  // null when the ref is unknown (unregistered, or not loaded yet).
+  guardrailDefinition(ref) {
+    const name = String(ref || "").trim();
+    if (!name) return null;
+    return guardrailsStore.guardrails.find((entry) => entry && entry.name === name) || null;
+  }
+
+  // openGuardrailCreate opens the guardrail editor over this form; the new
+  // instance fills the row it was started from when it supports the row's
+  // phase. Without a row it only refreshes the ref list.
+  openGuardrailCreate(index = null) {
+    guardrailsStore.onSaved = async (name) => {
+      await this.fetchGuardrailRefs();
+      const step =
+        Number.isInteger(index) && Array.isArray(this.form.guardrails)
+          ? this.form.guardrails[index]
+          : null;
+      if (!step || step.ref) return;
+      const entry = (this.guardrailRefs || []).find((item) =>
+        typeof item === "string" ? item.trim() === name : item && item.name === name,
+      );
+      const phases = typeof entry === "string" ? null : entry && entry.phases;
+      if (entry && phasesSupport(phases, step.phase)) {
+        step.ref = name;
+      }
+    };
+    guardrailsStore.openCreate();
+  }
+
+  openGuardrailEdit(ref) {
+    const definition = this.guardrailDefinition(ref);
+    if (!definition) return;
+    guardrailsStore.onSaved = () => {
+      void this.fetchGuardrailRefs();
+    };
+    guardrailsStore.openEdit(definition);
   }
 
   removeGuardrailStep(index) {
@@ -274,6 +325,7 @@ class WorkflowsStore {
     });
     if (validationError) {
       this.formError = validationError;
+      this.formValidated = true;
       return;
     }
 

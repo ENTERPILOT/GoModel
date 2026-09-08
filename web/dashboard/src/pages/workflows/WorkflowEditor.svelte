@@ -4,16 +4,19 @@
   // POSTs an immutable version that activates for the selected scope.
   import EnabledToggle from "$lib/components/atoms/EnabledToggle.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
+  import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import SearchSelect from "$lib/components/molecules/SearchSelect.svelte";
   import EditorDialog from "$lib/components/organisms/EditorDialog.svelte";
   import FormField from "$lib/components/molecules/FormField.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
-  import { router } from "$lib/stores/router.svelte.js";
   import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
+  import { guardrailsStore } from "../guardrails/guardrails.svelte.js";
+  import GuardrailEditor from "../guardrails/GuardrailEditor.svelte";
   import WorkflowCard from "./WorkflowCard.svelte";
   import { WORKFLOW_PHASES, phaseLabel } from "$lib/utils/pluginPhases.js";
-  import { Plus, Save } from "lucide";
+  import { workflowGuardrailStepIssues } from "./workflowsLogic.js";
+  import { Pencil, Plus, Save } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
 
@@ -26,6 +29,7 @@
   submittingLabel={wf.submittingLabel()}
   submitIcon={wf.submitMode() === "create" ? Plus : Save}
   dialogClass="workflow-editor"
+  canClose={() => !guardrailsStore.formOpen}
   onclose={() => wf.closeForm()}
   onsubmit={() => wf.submitForm()}
 >
@@ -209,7 +213,10 @@
       {#if wf.guardrailRefs.length === 0}
         <div class="alert alert-warning alert-inline-actions">
           <span>{m.workflows_no_registered_guardrails()}</span>
-          <button type="button" class="table-action-btn" onclick={() => router.navigate("guardrails")}>{m.workflows_open_guardrails()}</button>
+          <button type="button" class="table-action-btn workflow-add-btn" onclick={() => wf.openGuardrailCreate()}>
+            <Icon icon={Plus} class="table-icon-svg" aria-hidden="true" />
+            <span>{m.workflows_new_guardrail()}</span>
+          </button>
         </div>
       {/if}
 
@@ -235,21 +242,43 @@
               {#each wf.form.guardrails as step, index (index)}
                 {#if step.phase === phase}
                   {@const refOptions = wf.refOptions(phase, step.ref)}
+                  {@const issues = wf.formValidated ? workflowGuardrailStepIssues(step) : null}
+                  {@const editable = wf.guardrailDefinition(step.ref)}
                   <div class="workflow-guardrail-row">
                     <div class="form-field workflow-guardrail-field">
                       <label class="form-field-label" for={"workflow-guardrail-ref-" + index}>{m.workflows_guardrail_reference()}</label>
-                      <select
-                        class="form-select workflow-input mono"
-                        id={"workflow-guardrail-ref-" + index}
-                        bind:value={step.ref}
-                        aria-label={`${phaseName} ${m.workflows_guardrail_reference()} ${index + 1}`}
-                      >
-                        <option value="">{m.workflows_select_guardrail()}</option>
-                        {#each refOptions as option (option.value)}
-                          <option value={option.value}>{option.label}</option>
-                        {/each}
-                      </select>
-                      {#if refOptions.length === 0 && wf.guardrailRefs.length > 0}
+                      <div class="workflow-guardrail-ref-row">
+                        <select
+                          class="form-select workflow-input mono"
+                          id={"workflow-guardrail-ref-" + index}
+                          bind:value={step.ref}
+                          aria-label={`${phaseName} ${m.workflows_guardrail_reference()} ${index + 1}`}
+                          aria-invalid={issues && issues.ref ? "true" : undefined}
+                        >
+                          <option value="">{m.workflows_select_guardrail()}</option>
+                          {#each refOptions as option (option.value)}
+                            <option value={option.value}>{option.label}</option>
+                          {/each}
+                        </select>
+                        <TableActionButton
+                          label={m.workflows_new_guardrail()}
+                          class="table-icon-btn"
+                          onclick={() => wf.openGuardrailCreate(index)}
+                        >
+                          <Icon icon={Plus} class="table-icon-svg" />
+                        </TableActionButton>
+                        <TableActionButton
+                          label={m.workflows_edit_guardrail_action({ name: step.ref || "" })}
+                          class="table-icon-btn"
+                          disabled={!editable}
+                          onclick={() => wf.openGuardrailEdit(step.ref)}
+                        >
+                          <Icon icon={Pencil} class="table-icon-svg" />
+                        </TableActionButton>
+                      </div>
+                      {#if issues && issues.ref}
+                        <small class="form-field-error">{m.workflows_guardrail_ref_required()}</small>
+                      {:else if refOptions.length === 0 && wf.guardrailRefs.length > 0}
                         <small class="form-hint">{m.workflows_no_phase_guardrails({ phase: phaseName })}</small>
                       {/if}
                     </div>
@@ -264,6 +293,7 @@
                         placeholder={m.workflows_step()}
                         bind:value={step.step}
                         aria-label={`${phaseName} ${m.workflows_step()} ${index + 1}`}
+                        aria-invalid={issues && issues.step ? "true" : undefined}
                       />
                     </div>
                     <button type="button" class="table-action-btn table-action-btn-danger" onclick={() => wf.removeGuardrailStep(index)}>{m.workflows_remove()}</button>
@@ -279,6 +309,10 @@
     </div>
   {/if}
 </EditorDialog>
+
+<!-- Stacked over the workflow form for creating or editing an instance
+     without leaving the draft. -->
+<GuardrailEditor />
 
 <style>
   /* EditorDialog renders the plain editor shell (no wide variant), so widen
@@ -350,6 +384,18 @@
   }
 
   .workflow-guardrail-field {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .workflow-guardrail-ref-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .workflow-guardrail-ref-row select {
     flex: 1 1 auto;
     min-width: 0;
   }

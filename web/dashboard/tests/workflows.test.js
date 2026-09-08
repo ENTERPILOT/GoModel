@@ -17,6 +17,7 @@ import {
   workflowDisplayName,
   workflowScopeBadgeVisible,
   nextWorkflowGuardrailStep,
+  workflowGuardrailStepIssues,
   workflowScopeDisplay,
   normalizeWorkflowScopeUserPath,
   buildWorkflowRequest,
@@ -1349,6 +1350,29 @@ test("nextWorkflowGuardrailStep orders a new row after its own phase's rows", ()
   assert.equal(nextWorkflowGuardrailStep([], "prompt"), 10);
   // A legacy row without a phase is a prompt row.
   assert.equal(nextWorkflowGuardrailStep([{ ref: "x", step: 20 }], "prompt"), 30);
+});
+
+test("workflowGuardrailStepIssues flags the fields validateWorkflowRequest rejects", () => {
+  assert.deepEqual(workflowGuardrailStepIssues({ ref: "scan", phase: "prompt", step: 10 }), {
+    ref: false,
+    step: false,
+  });
+  assert.deepEqual(workflowGuardrailStepIssues({ ref: "  ", phase: "prompt", step: "10" }), {
+    ref: true,
+    step: false,
+  });
+  assert.deepEqual(workflowGuardrailStepIssues({ ref: "scan", phase: "prompt", step: "" }), {
+    ref: false,
+    step: true,
+  });
+  assert.deepEqual(workflowGuardrailStepIssues({ ref: "scan", phase: "prompt", step: -1 }), {
+    ref: false,
+    step: true,
+  });
+  assert.deepEqual(workflowGuardrailStepIssues({ ref: "scan", step: 1.5 }), {
+    ref: false,
+    step: true,
+  });
 });
 
 test("workflowDisplayName falls back to scope label or All models", () => {

@@ -120,6 +120,17 @@ export function workflowGuardrailRefOptions(refs, phase, current) {
   return options;
 }
 
+// workflowGuardrailStepIssues reports which fields of an editor row would
+// fail validateWorkflowRequest, so the editor can outline them once the
+// user has tried to submit.
+export function workflowGuardrailStepIssues(step) {
+  const parsed = parseWorkflowGuardrailStep(step && step.step);
+  return {
+    ref: !String((step && step.ref) || "").trim(),
+    step: !Number.isInteger(parsed) || parsed < 0,
+  };
+}
+
 export function parseWorkflowGuardrailStep(rawStep) {
   const trimmedStep =
     rawStep === null || rawStep === undefined ? "" : String(rawStep).trim();
