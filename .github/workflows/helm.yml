@@ -1,0 +1,104 @@
+name: Helm chart
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "helm/**"
+      - ".github/workflows/helm.yml"
+  pull_request:
+    paths:
+      - "helm/**"
+      - ".github/workflows/helm.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin kubeconform
+
+      - name: Lint
+        run: |
+          helm lint --strict helm
+          for values in helm/ci/*-values.yaml; do
+            helm lint --strict helm -f "$values"
+          done
+
+      - name: Validate rendered manifests
+        run: |
+          set -o pipefail
+          for values in helm/ci/*-values.yaml; do
+            echo "== $values"
+            helm template gomodel helm -f "$values" --namespace gomodel \
+              | kubeconform -strict -summary -kubernetes-version 1.31.0 \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+
+      - name: Reject invalid value combinations
+        run: |
+          ! helm template gomodel helm --set replicaCount=2 >/dev/null 2>&1
+          ! helm template gomodel helm --set storage.type=postgresql >/dev/null 2>&1
+          ! helm template gomodel helm --set httpRoute.enabled=true >/dev/null 2>&1
+          ! helm template gomodel helm --set auth.masterKey=legacy >/dev/null 2>&1
+          ! helm template gomodel helm --set env.PORT=9000 >/dev/null 2>&1
+          helm template gomodel helm --set storage.type=postgresql \
+            --set 'extraEnv[0].name=POSTGRES_URL' --set 'extraEnv[0].value=postgres://x' >/dev/null
+          test "$(helm template gomodel helm --set 'env.BASE_PATH=//g//api/../secure//' -s templates/deployment.yaml | grep -c 'path: /g/secure/health')" = 2
+          helm template gomodel helm --set replicaCount=2 --set storage.type=postgresql --set storage.url=postgres://x \
+            --set podDisruptionBudget.maxUnavailable=0 -s templates/pdb.yaml | grep -q 'maxUnavailable: 0'
+
+  install:
+    name: Install on kind
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Create kind cluster
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+
+      - name: Install with SQLite on a PVC
+        run: |
+          helm install gomodel helm -n gomodel --create-namespace \
+            -f helm/ci/default-values.yaml --wait --timeout 3m
+          helm test gomodel -n gomodel
+          kubectl -n gomodel logs deploy/gomodel | grep -q '"storage configured","type":"sqlite"'
+          ! kubectl -n gomodel logs deploy/gomodel | grep -q "not a volume"
+
+      - name: Upgrade with config.yaml
+        run: |
+          helm upgrade gomodel helm -n gomodel -f helm/ci/default-values.yaml \
+            --set-string 'config=server: {enable_passthrough_routes: false}' --wait --timeout 3m
+          kubectl -n gomodel logs deploy/gomodel | grep -q '"config file loaded"'
+
+      - name: Install two replicas on PostgreSQL
+        run: |
+          kubectl -n gomodel apply -f helm/ci/postgresql.yaml
+          kubectl -n gomodel rollout status deploy/postgresql --timeout=2m
+          helm install gm-pg helm -n gomodel -f helm/ci/postgresql-values.yaml \
+            --set autoscaling.enabled=false --wait --timeout 3m
+          helm test gm-pg -n gomodel
+          kubectl -n gomodel get pdb gm-pg-gomodel
+
+      - name: Show state on failure
+        if: failure()
+        run: |
+          kubectl -n gomodel get all,pvc
+          kubectl -n gomodel describe pod
+          kubectl -n gomodel logs deploy/gomodel --all-containers --tail=100 || true

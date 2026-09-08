@@ -14,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 const (
@@ -55,8 +56,14 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 
 	ctx := context.Background()
 
-	// Create table for usage tracking
-	_, err := pool.Exec(ctx, `
+	// Every DDL statement goes through sqlx.DB.Schema, which serializes
+	// concurrent replicas with an advisory lock, so a fresh database can be
+	// brought up by several pods at once.
+	schema, err := sqlx.NewPostgreSQL(pool)
+	if err != nil {
+		return nil, err
+	}
+	createTable := `
 		CREATE TABLE IF NOT EXISTS usage (
 			id UUID PRIMARY KEY,
 			request_id TEXT NOT NULL,
@@ -76,10 +83,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 			rewrite_cost_saved DOUBLE PRECISION,
 			raw_data JSONB
 		)
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create usage table: %w", err)
-	}
+	`
 
 	// Add cost columns (idempotent via IF NOT EXISTS)
 	costMigrations := []string{
@@ -96,10 +100,8 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS rewrite_tokens_saved INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE usage ADD COLUMN IF NOT EXISTS rewrite_cost_saved DOUBLE PRECISION",
 	}
-	for _, migration := range costMigrations {
-		if _, err := pool.Exec(ctx, migration); err != nil {
-			return nil, fmt.Errorf("failed to run migration: %w", err)
-		}
+	if err := schema.Schema(ctx, append([]string{createTable}, costMigrations...)...); err != nil {
+		return nil, fmt.Errorf("failed to create usage table: %w", err)
 	}
 
 	// Create indexes for common queries
@@ -117,7 +119,7 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 		"CREATE INDEX IF NOT EXISTS idx_usage_raw_data_gin ON usage USING GIN (raw_data)",
 	}
 	for _, idx := range indexes {
-		if _, err := pool.Exec(ctx, idx); err != nil {
+		if err := schema.Schema(ctx, idx); err != nil {
 			slog.Warn("failed to create index", "error", err)
 		}
 	}

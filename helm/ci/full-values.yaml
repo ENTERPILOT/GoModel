@@ -1,0 +1,69 @@
+# Every optional resource enabled, for template and schema validation.
+env:
+  BASE_PATH: /g
+  METRICS_ENDPOINT: /internal/metrics
+  LOG_FORMAT: json
+extraEnvFrom:
+  - secretRef:
+      name: gomodel-keys
+extraEnv:
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+config: |
+  server:
+    enable_passthrough_routes: false
+storage:
+  type: mongodb
+  url: mongodb://mongodb:27017/gomodel
+persistence:
+  enabled: false
+metrics:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: gomodel.example.com
+      paths:
+        - path: /g
+          pathType: Prefix
+  tls:
+    - secretName: gomodel-tls
+      hosts:
+        - gomodel.example.com
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: public-gateway
+      namespace: gateway-system
+  hostnames:
+    - gomodel.example.com
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/gomodel
+priorityClassName: system-cluster-critical
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: gomodel
+extraVolumes:
+  - name: models
+    configMap:
+      name: gomodel-models
+extraVolumeMounts:
+  - name: models
+    mountPath: /etc/gomodel
+    readOnly: true
+replicaCount: 3
+podDisruptionBudget:
+  maxUnavailable: 1
