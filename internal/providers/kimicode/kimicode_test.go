@@ -270,8 +270,10 @@ func TestStreamResponses_NativeEndpoint(t *testing.T) {
 	provider := NewWithHTTPClient("kimi-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
-		Model: "kimi-for-coding",
-		Input: "Say OK",
+		Model:              "kimi-for-coding",
+		Input:              "Say OK",
+		Store:              boolPtr(true),
+		PreviousResponseID: "resp_old",
 	})
 	if err != nil {
 		t.Fatalf("StreamResponses() error = %v", err)

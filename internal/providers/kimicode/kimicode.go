@@ -32,7 +32,8 @@ var Registration = providers.Registration{
 // OpenAI-compatible, so most transport goes through the shared chat-centric
 // adapter: chat completions, model listing, embeddings, and passthrough are
 // exposed via the embedded *openai.ChatCompatible. The Responses API is
-// forwarded natively to the upstream /responses endpoint (see responses.go).
+// forwarded natively to the upstream /responses endpoint (adaptResponsesRequest
+// below removes the state the upstream rejects).
 type Provider struct {
 	*openai.ChatCompatible
 	responses *openai.CompatibleProvider
