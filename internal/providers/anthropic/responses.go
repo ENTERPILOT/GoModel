@@ -39,7 +39,7 @@ func convertAnthropicResponseToResponses(resp *anthropicResponse, model string) 
 	}
 	// The reasoning item carries the signatures Anthropic needs back; without
 	// them a Responses client cannot continue a thinking conversation.
-	msg.ExtraFields = withThinkingReplay(msg.ExtraFields, extractThinkingReplay(resp.Content))
+	msg.ExtraFields = withThinkingReplay(msg.ExtraFields, resp.Content)
 	output := providers.BuildResponsesOutputItems(msg)
 
 	return &core.ResponsesResponse{
@@ -138,34 +138,28 @@ type responsesStreamConverter struct {
 	assistantOutputIndex int
 	reasoningOutputIndex int
 	toolCalls            map[int]*providers.ResponsesOutputToolCallState
-	thinkingBlocks       map[int]bool // tracks which content block indices are thinking blocks
-	// thinkingReplay accumulates the turn's thinking blocks, ordered by
-	// thinkingOrder, so the reasoning item can carry the signatures Anthropic
-	// requires back.
-	thinkingReplay map[int]*anthropicContent
-	thinkingOrder  []int
-	buffer         streaming.StreamBuffer
-	closed         bool
-	sentDone       bool
-	sawStop        bool  // upstream signalled the end of the message
-	pendingErr     error // upstream read error deferred until terminal events are drained
-	usage          anthropicUsage
-	hasUsage       bool
+	thinking             thinkingReplayState
+	buffer               streaming.StreamBuffer
+	closed               bool
+	sentDone             bool
+	sawStop              bool  // upstream signalled the end of the message
+	pendingErr           error // upstream read error deferred until terminal events are drained
+	usage                anthropicUsage
+	hasUsage             bool
 }
 
 func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
 	responseID := "resp_" + uuid.New().String()
 	return &responsesStreamConverter{
-		reader:         bufio.NewReader(body),
-		body:           body,
-		model:          model,
-		responseID:     responseID,
-		createdAt:      time.Now().Unix(),
-		output:         providers.NewResponsesOutputEventState(responseID),
-		toolCalls:      make(map[int]*providers.ResponsesOutputToolCallState),
-		thinkingBlocks: make(map[int]bool),
-		thinkingReplay: make(map[int]*anthropicContent),
-		buffer:         streaming.NewStreamBuffer(1024),
+		reader:     bufio.NewReader(body),
+		body:       body,
+		model:      model,
+		responseID: responseID,
+		createdAt:  time.Now().Unix(),
+		output:     providers.NewResponsesOutputEventState(responseID),
+		toolCalls:  make(map[int]*providers.ResponsesOutputToolCallState),
+		thinking:   newThinkingReplayState(),
+		buffer:     streaming.NewStreamBuffer(1024),
 	}
 }
 
@@ -254,38 +248,6 @@ func (sc *responsesStreamConverter) reserveReasoningOutput() {
 	sc.output.ReserveReasoning()
 	sc.reasoningOutputIndex = sc.nextOutputIndex
 	sc.nextOutputIndex++
-}
-
-// trackThinkingReplay records a thinking or redacted_thinking block and
-// publishes the accumulated replay state on the reasoning item.
-func (sc *responsesStreamConverter) trackThinkingReplay(index int, block anthropicContent) {
-	if _, seen := sc.thinkingReplay[index]; !seen {
-		tracked := block
-		sc.thinkingReplay[index] = &tracked
-		sc.thinkingOrder = append(sc.thinkingOrder, index)
-	}
-	sc.publishThinkingReplay()
-}
-
-func (sc *responsesStreamConverter) publishThinkingReplay() {
-	blocks := make([]json.RawMessage, 0, len(sc.thinkingOrder))
-	for _, i := range sc.thinkingOrder {
-		if raw, ok := thinkingReplayJSON(*sc.thinkingReplay[i]); ok {
-			blocks = append(blocks, raw)
-		}
-	}
-	if len(blocks) == 0 {
-		return
-	}
-	raw, err := json.Marshal(map[string][]json.RawMessage{core.ThinkingBlocksField: blocks})
-	if err != nil {
-		return
-	}
-	vendors, err := json.Marshal(map[string]json.RawMessage{core.ExtraContentVendorAnthropic: raw})
-	if err != nil {
-		return
-	}
-	sc.output.SetReasoningExtraContent(vendors)
 }
 
 func (sc *responsesStreamConverter) reserveAssistantMessageOutput() {
@@ -409,17 +371,10 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		})
 
 	case "content_block_start":
-		if event.ContentBlock != nil && event.ContentBlock.Type == "thinking" {
-			sc.thinkingBlocks[event.Index] = true
+		if sc.thinking.track(event.Index, event.ContentBlock) {
+			// A redacted block has no readable text; its reasoning item
+			// exists purely to carry the replay state.
 			sc.reserveReasoningOutput()
-			sc.trackThinkingReplay(event.Index, *event.ContentBlock)
-			return ""
-		}
-		if event.ContentBlock != nil && event.ContentBlock.Type == "redacted_thinking" {
-			// A redacted block arrives whole and has no readable text, so the
-			// reasoning item exists purely to carry its replay state.
-			sc.reserveReasoningOutput()
-			sc.trackThinkingReplay(event.Index, *event.ContentBlock)
 			return ""
 		}
 		if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
@@ -442,21 +397,23 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 
 		switch event.Delta.Type {
 		case "thinking_delta":
-			if !sc.thinkingBlocks[event.Index] || event.Delta.Thinking == "" {
+			if !sc.thinking.isThinking(event.Index) || event.Delta.Thinking == "" {
 				return ""
 			}
-			if block := sc.thinkingReplay[event.Index]; block != nil {
-				block.Thinking += event.Delta.Thinking
+			sc.thinking.appendThinking(event.Index, event.Delta.Thinking)
+			// A stream has one reasoning item, closed once text or a tool call
+			// follows, and output_item.done cannot be taken back. Thinking
+			// that arrives after that (interleaved thinking) adds no delta;
+			// its text and signature still reach the client inside the
+			// replay state of the terminal output.
+			if sc.output.ReasoningDone() {
+				return ""
 			}
-			sc.reserveReasoningOutput()
 			return sc.output.AppendReasoningDelta(sc.reasoningOutputIndex, event.Delta.Thinking)
 		case "signature_delta":
 			// A signature has no field of its own in the Responses dialect; it
 			// rides on the reasoning item as replay state instead.
-			if block := sc.thinkingReplay[event.Index]; block != nil {
-				block.Signature += event.Delta.Signature
-				sc.publishThinkingReplay()
-			}
+			sc.thinking.appendSignature(event.Index, event.Delta.Signature)
 			return ""
 		case "text_delta":
 			if event.Delta.Text != "" {
@@ -495,6 +452,12 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		return ""
 
 	case "content_block_stop":
+		if sc.thinking.tracked(event.Index) {
+			// The block is complete, signature included, before whatever
+			// closes the reasoning item can arrive.
+			sc.output.SetReasoningExtraContent(sc.thinking.extraContent())
+			return ""
+		}
 		state := sc.toolCalls[event.Index]
 		return sc.output.CompleteToolCall(state, true)
 

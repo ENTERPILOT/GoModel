@@ -6698,3 +6698,128 @@ data: {"type":"message_stop"}
 		t.Errorf("final output[1] = %v, want the assistant message", output[1])
 	}
 }
+
+// interleavedThinkingSSE is a single message with two thinking blocks: with
+// interleaved thinking the model can think again after it has written text.
+const interleavedThinkingSSE = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_two","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"First."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Checking."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"thinking_delta","thinking":"Second."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"signature_delta","signature":"sig-2"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+event: content_block_start
+data: {"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"toolu_1","name":"lookup_weather","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Warsaw\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":3}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":12}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+
+// Every thinking block of the turn must reach the client in order, each one
+// published as it closes and the last publication holding the whole turn.
+func TestStreamChatCompletion_TwoThinkingBlocks(t *testing.T) {
+	deltas := chatStreamDeltas(t, interleavedThinkingSSE)
+
+	var published []string
+	for _, delta := range deltas {
+		if raw, ok := delta[core.ExtraContentField]; ok {
+			encoded, _ := json.Marshal(raw)
+			published = append(published, string(encoded))
+		}
+	}
+	want := []string{
+		`{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"First.","type":"thinking"}]}}`,
+		`{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"First.","type":"thinking"},{"signature":"sig-2","thinking":"Second.","type":"thinking"}]}}`,
+	}
+	if len(published) != len(want) {
+		t.Fatalf("extra_content published %d times: %v, want %d", len(published), published, len(want))
+	}
+	for i := range want {
+		if published[i] != want[i] {
+			t.Errorf("publication %d = %s, want %s", i, published[i], want[i])
+		}
+	}
+}
+
+// A Responses stream has one reasoning item, and its output_item.done cannot
+// be taken back. Thinking that arrives after text therefore adds no delta to a
+// closed item, but its signature still has to reach the terminal output: the
+// SDK builds the next turn from response.output, and Anthropic rejects the
+// turn if any block of it lacks its signature.
+func TestStreamResponses_ThinkingAfterTextKeepsStreamValid(t *testing.T) {
+	events := responsesStreamEvents(t, interleavedThinkingSSE)
+
+	reasoningDone := false
+	var lateDeltas []string
+	for _, event := range events {
+		switch event["type"] {
+		case "response.output_item.done":
+			if event["item"].(map[string]any)["type"] == "reasoning" {
+				reasoningDone = true
+			}
+		case "response.reasoning_text.delta":
+			if reasoningDone {
+				lateDeltas = append(lateDeltas, event["delta"].(string))
+			}
+		}
+	}
+	if !reasoningDone {
+		t.Fatal("reasoning item was never closed")
+	}
+	if len(lateDeltas) > 0 {
+		t.Errorf("reasoning deltas %v were emitted after the item closed", lateDeltas)
+	}
+
+	final := events[len(events)-1]
+	output := final["response"].(map[string]any)["output"].([]any)
+	reasoning := output[0].(map[string]any)
+	if reasoning["type"] != "reasoning" {
+		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
+	}
+	extra, _ := json.Marshal(reasoning["extra_content"])
+	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"First.","type":"thinking"},{"signature":"sig-2","thinking":"Second.","type":"thinking"}]}}`
+	if string(extra) != want {
+		t.Errorf("terminal reasoning extra_content = %s, want both blocks", extra)
+	}
+	if got := output[len(output)-1].(map[string]any)["type"]; got != "function_call" {
+		t.Errorf("final output ends with %v, want the function_call", got)
+	}
+}
