@@ -24,7 +24,7 @@ const (
 // filled by the `gomodel plugin build` helper and used only to produce a
 // readable error when a shared object cannot be loaded.
 type BuildInfo struct {
-	// GoVersion is the Go toolchain version, for example "go1.27.0".
+	// GoVersion is the Go toolchain version, for example "go1.27.1".
 	GoVersion string
 	// PluginAPIVersion is the [Version] of this package at build time.
 	PluginAPIVersion string

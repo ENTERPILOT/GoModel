@@ -11,11 +11,67 @@ import {
   workflowScopeProviderValue,
 } from "./workflowsLogic.js";
 import * as m from "../../lib/paraglide/messages.js";
-import { normalizeWorkflowPhase, phaseLabel } from "../../lib/utils/pluginPhases.js";
+import {
+  WORKFLOW_PHASES,
+  normalizeWorkflowPhase,
+  phaseLabel,
+} from "../../lib/utils/pluginPhases.js";
 
-function workflowPhaseStepCount(source, phase) {
+function workflowPhaseSteps(source, phase) {
   const wanted = normalizeWorkflowPhase(phase);
-  return workflowSourceGuardrails(source).filter((step) => step.phase === wanted).length;
+  return workflowSourceGuardrails(source).filter((step) => step.phase === wanted);
+}
+
+// workflowPhaseStepCount counts the distinct step numbers of one phase: refs
+// sharing a step number are one step, as the node's "N steps" label and the
+// step flow both describe execution stages.
+function workflowPhaseStepCount(source, phase) {
+  return new Set(workflowPhaseSteps(source, phase).map((item) => item.step)).size;
+}
+
+// workflowMutatingRefs names the guardrail instances that may edit the
+// request or response, from GET /admin/workflows/guardrails rows.
+function workflowMutatingRefs(guardrailRefs) {
+  const names = new Set();
+  for (const entry of Array.isArray(guardrailRefs) ? guardrailRefs : []) {
+    if (!entry || typeof entry !== "object" || !entry.mutates) continue;
+    const name = String(entry.name || "").trim();
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+// workflowGuardrailFlow is the execution order of one phase's guardrails:
+// steps ascending, each holding the refs that share that step number. The
+// gateway runs a step's readers concurrently and then its mutating instance
+// (at most one per step), so a stage lists the readers in `refs` and the
+// mutator apart; without instance rows (audit view) every ref is a reader.
+// Refs keep their configured order; a step whose ref is not chosen yet
+// (editor draft) stays in as "" so the flow matches the node's step count.
+export function workflowGuardrailFlow(source, phase = "prompt", guardrailRefs = []) {
+  const mutating = workflowMutatingRefs(guardrailRefs);
+  const byStep = new Map();
+  for (const item of workflowPhaseSteps(source, phase)) {
+    const ref = String(item.ref || "").trim();
+    if (!byStep.has(item.step)) byStep.set(item.step, { step: item.step, refs: [], mutator: null });
+    const stage = byStep.get(item.step);
+    if (ref && mutating.has(ref) && !stage.mutator) {
+      stage.mutator = ref;
+    } else {
+      stage.refs.push(ref);
+    }
+  }
+  return Array.from(byStep.keys())
+    .sort((a, b) => a - b)
+    .map((step) => byStep.get(step));
+}
+
+function workflowGuardrailFlows(source, phases, guardrailRefs) {
+  const flows = {};
+  for (const phase of WORKFLOW_PHASES) {
+    flows[phase] = phases[phase] ? workflowGuardrailFlow(source, phase, guardrailRefs) : [];
+  }
+  return flows;
 }
 
 // workflowGuardrailLabel is the step-count sublabel of a guardrail node for
@@ -433,6 +489,16 @@ function workflowChartModel(source, runtime, options, caps) {
     showStreamGuardrails,
     streamGuardrailLabel: showStreamGuardrails ? workflowGuardrailLabel(source, "stream") : "",
     streamGuardrailBadge: showStreamGuardrails ? phaseLabel("stream") : null,
+    // Per-phase step flow behind each guardrail node's click-to-expand panel.
+    guardrailFlows: workflowGuardrailFlows(
+      source,
+      {
+        prompt: showGuardrails,
+        response: showResponseGuardrails,
+        stream: showStreamGuardrails,
+      },
+      config.guardrailRefs,
+    ),
     showCache: !!config.forceCache || !!features.cache || workflowRuntimeHasCache(runtime),
     cacheNodeClass: workflowCacheNodeClass(runtime, liveStep === "cache"),
     cacheConnClass: workflowCacheConnClass(runtime),
@@ -460,8 +526,11 @@ function workflowChartModel(source, runtime, options, caps) {
   };
 }
 
-export function workflowChart(source, caps) {
-  return workflowChartModel(source, null, { forceCache: false }, caps);
+// workflowChart builds the configuration chart. `guardrailRefs` are the
+// GET /admin/workflows/guardrails rows; they tell the step flow which
+// instance of a step is its mutator.
+export function workflowChart(source, caps, guardrailRefs = []) {
+  return workflowChartModel(source, null, { forceCache: false, guardrailRefs }, caps);
 }
 
 // workflowAuditChart renders a chart for an audit-log entry. The resolved

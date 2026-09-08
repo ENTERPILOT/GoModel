@@ -239,9 +239,65 @@ test("Paraglide compiles German interpolation and locale-aware plurals", () => {
   assert.equal(m.rate_limits_title({}, { locale: "de" }), "Rate-Limits");
 });
 
+test("Paraglide compiles Simplified Chinese interpolation and locale-aware plurals", () => {
+  assert.equal(
+    m.pagination_summary(
+      { start: 1, end: 25, total: 80 },
+      { locale: "zh-CN" },
+    ),
+    "显示 80 条中的第 1–25 条",
+  );
+  assert.equal(m.date_picker_last_days({ count: 1 }, { locale: "zh-CN" }), "最近 1 天");
+  assert.equal(
+    m.date_picker_last_days({ count: 14 }, { locale: "zh-CN" }),
+    "最近 14 天",
+  );
+  assert.equal(m.date_picker_days({ count: 1 }, { locale: "zh-CN" }), "1 天");
+  assert.equal(m.date_picker_days({ count: 5 }, { locale: "zh-CN" }), "5 天");
+  assert.equal(m.audit_provider_attempts({ count: 1 }, { locale: "zh-CN" }), "1 次供应商尝试");
+  assert.equal(m.audit_provider_attempts({ count: 5 }, { locale: "zh-CN" }), "5 次供应商尝试");
+  assert.equal(
+    m.settings_pricing_summary(
+      { matched: 1, recalculated: 1 },
+      { locale: "zh-CN" },
+    ),
+    "已重新计算 1 条用量记录中的 1 条的价格。",
+  );
+  assert.equal(
+    m.settings_pricing_missing({ count: 2 }, { locale: "zh-CN" }),
+    "2 条用量记录仍缺少定价元数据。",
+  );
+  assert.equal(
+    m.settings_pricing_missing({ count: 5 }, { locale: "zh-CN" }),
+    "5 条用量记录仍缺少定价元数据。",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_models({ count: 2 }, { locale: "zh-CN" }),
+    "2 个模型",
+  );
+  assert.equal(
+    m.settings_runtime_refresh_providers({ count: 5 }, { locale: "zh-CN" }),
+    "5 个供应商",
+  );
+  assert.equal(m.settings_pricing_confirmation({}, { locale: "zh-CN" }), "重新计算");
+  assert.equal(m.providers_keys_count({ count: 1 }, { locale: "zh-CN" }), "1 个密钥");
+  assert.equal(m.providers_keys_count({ count: 5 }, { locale: "zh-CN" }), "5 个密钥");
+  assert.equal(m.providers_models_count({ count: 5 }, { locale: "zh-CN" }), "5 个模型");
+  assert.equal(m.models_count({ count: 5 }, { locale: "zh-CN" }), "5 个模型");
+  assert.equal(m.models_alias_count({ count: 5 }, { locale: "zh-CN" }), "5 个别名");
+  assert.equal(m.overview_total_requests({}, { locale: "zh-CN" }), "请求总数");
+  assert.equal(
+    m.overview_live_token_throughput({}, { locale: "zh-CN" }),
+    "实时 Token 吞吐量",
+  );
+  assert.equal(m.overview_provider_status({}, { locale: "zh-CN" }), "供应商状态");
+  assert.equal(m.overview_input_tokens({}, { locale: "zh-CN" }), "输入 Token");
+  assert.equal(m.rate_limits_title({}, { locale: "zh-CN" }), "限流");
+});
+
 test("the browser locale strategy persists overrides without changing routes", () => {
   assert.equal(baseLocale, "en");
-  assert.deepEqual(locales, ["en", "pl", "de"]);
+  assert.deepEqual(locales, ["en", "pl", "de", "zh-CN"]);
   assert.deepEqual(strategy, [
     "custom-dashboard",
     "preferredLanguage",

@@ -354,7 +354,7 @@ Making the rebuild cheap:
 - `gomodel plugin build` runs `go build -buildmode=plugin` with the host's
   recorded flags and stamps `BuiltWith` (Go version, `pluginapi` version)
   so a refused load is reported as "built against pluginapi v0.3.0 with
-  go1.27.0, host has v0.4.0 with go1.27.1" instead of Go's generic
+  go1.27.1, host has v0.4.0 with go1.27.1" instead of Go's generic
   message.
 - A `gomodel-plugin-builder:<version>` image pins the matching toolchain,
   so an operator's CI rebuilds every `.so` with one line per GoModel
