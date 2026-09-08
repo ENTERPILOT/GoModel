@@ -42,6 +42,12 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 	var pendingReasoningExtra json.RawMessage
 
 	flushPendingAssistant := func() error {
+		// A reasoning item describes the assistant turn that follows it. Once
+		// the history has moved past that turn the pending state is spent,
+		// whether or not there was an assistant turn to attach it to; holding
+		// it over would pin one turn's thinking blocks to another.
+		reasoning, reasoningExtra := pendingReasoning, pendingReasoningExtra
+		pendingReasoning, pendingReasoningExtra = "", nil
 		if pendingAssistant == nil {
 			return nil
 		}
@@ -50,8 +56,8 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 		// tool-result request, while reasoning from ordinary assistant turns is
 		// intentionally omitted because it is not part of their next-turn
 		// context.
-		if pendingReasoning != "" && len(pendingAssistant.ToolCalls) > 0 {
-			raw, err := json.Marshal(pendingReasoning)
+		if reasoning != "" && len(pendingAssistant.ToolCalls) > 0 {
+			raw, err := json.Marshal(reasoning)
 			if err != nil {
 				return err
 			}
@@ -63,19 +69,17 @@ func convertResponsesInputItems(items []any) ([]core.Message, error) {
 			}
 			pendingAssistant.ExtraFields = extra
 		}
-		pendingReasoning = ""
 		// Replay state travels with every reasoning item, tool calls or not:
 		// an Anthropic thinking block has to be echoed back on a plain
 		// assistant turn just as much as on a tool-use one.
-		if len(pendingReasoningExtra) > 0 {
+		if len(reasoningExtra) > 0 {
 			extra, err := core.MergeUnknownJSONFields(pendingAssistant.ExtraFields, map[string]json.RawMessage{
-				core.ExtraContentField: pendingReasoningExtra,
+				core.ExtraContentField: reasoningExtra,
 			})
 			if err != nil {
 				return err
 			}
 			pendingAssistant.ExtraFields = extra
-			pendingReasoningExtra = nil
 		}
 		messages = append(messages, *pendingAssistant)
 		pendingAssistant = nil

@@ -65,3 +65,61 @@ func TestBuildResponsesOutputItems_ForwardsOnlyExtraContent(t *testing.T) {
 		t.Fatalf("extra_content = %s, want thought signature", got)
 	}
 }
+
+// A reasoning item belongs to the assistant turn that follows it. When no
+// assistant turn does — the history moves straight on to a user message — the
+// replay state must be dropped, not held over and pinned to whatever assistant
+// turn comes later: replaying another turn's thinking blocks is what Anthropic
+// rejects.
+func TestConvertResponsesInputToMessages_ReasoningDoesNotLeakForward(t *testing.T) {
+	input := []any{
+		map[string]any{"type": "message", "role": "user", "content": "first"},
+		map[string]any{
+			"type":          "reasoning",
+			"content":       []any{map[string]any{"type": "reasoning_text", "text": "thinking about the first"}},
+			"extra_content": map[string]any{"anthropic": map[string]any{"thinking_blocks": []any{map[string]any{"type": "thinking", "thinking": "first", "signature": "sig-first"}}}},
+		},
+		map[string]any{"type": "message", "role": "user", "content": "never mind, something else"},
+		map[string]any{"type": "message", "role": "assistant", "content": "unrelated answer"},
+	}
+
+	messages, err := ConvertResponsesInputToMessages(input)
+	if err != nil {
+		t.Fatalf("ConvertResponsesInputToMessages: %v", err)
+	}
+	for _, msg := range messages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		if raw := msg.ExtraFields.Lookup(core.ExtraContentField); len(raw) > 0 {
+			t.Errorf("assistant turn %q inherited stale replay state: %s", msg.Content, raw)
+		}
+	}
+}
+
+// The ordinary case still attaches: a reasoning item immediately followed by
+// its assistant turn hands the replay state over.
+func TestConvertResponsesInputToMessages_ReasoningAttachesToItsTurn(t *testing.T) {
+	const replay = `{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"hm","signature":"sig-1"}]}}`
+	input := []any{
+		map[string]any{"type": "message", "role": "user", "content": "question"},
+		map[string]any{
+			"type":          "reasoning",
+			"content":       []any{map[string]any{"type": "reasoning_text", "text": "hm"}},
+			"extra_content": json.RawMessage(replay),
+		},
+		map[string]any{"type": "message", "role": "assistant", "content": "answer"},
+	}
+
+	messages, err := ConvertResponsesInputToMessages(input)
+	if err != nil {
+		t.Fatalf("ConvertResponsesInputToMessages: %v", err)
+	}
+	assistant := messages[len(messages)-1]
+	if assistant.Role != "assistant" {
+		t.Fatalf("last message role = %q, want assistant", assistant.Role)
+	}
+	if raw := assistant.ExtraFields.Lookup(core.ExtraContentField); len(raw) == 0 {
+		t.Fatal("the assistant turn lost its replay state")
+	}
+}

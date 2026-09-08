@@ -135,6 +135,10 @@ function ensureAnthropicContentBlockSchema() {
       source: stringOrFreeFormObjectSchema(),
       text: { type: "string" },
       thinking: { type: "string" },
+      // thinking blocks are replayed with the signature Anthropic issued;
+      // redacted ones carry their opaque payload instead.
+      signature: { type: "string" },
+      data: { type: "string" },
       tool_use_id: { type: "string" },
       type: { type: "string" },
     },

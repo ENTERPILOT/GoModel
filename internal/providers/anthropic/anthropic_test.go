@@ -4372,23 +4372,37 @@ func TestConvertAnthropicResponseToResponses_WithThinkingBlocks(t *testing.T) {
 		name         string
 		content      []anthropicContent
 		expectedText string
+		wantReplay   string
 	}{
 		{
 			name: "thinking then text",
 			content: []anthropicContent{
-				{Type: "thinking", Text: "The user is asking about geography..."},
+				{Type: "thinking", Thinking: "The user is asking about geography...", Signature: "sig-1"},
 				{Type: "text", Text: "The capital of France is Paris."},
 			},
 			expectedText: "The capital of France is Paris.",
+			wantReplay:   `{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"The user is asking about geography...","signature":"sig-1"}]}}`,
 		},
 		{
 			name: "preamble text then thinking then answer",
 			content: []anthropicContent{
 				{Type: "text", Text: "\n\n"},
-				{Type: "thinking", Text: ""},
+				{Type: "thinking", Thinking: "", Signature: "sig-2"},
 				{Type: "text", Text: "The capital of France is Paris."},
 			},
 			expectedText: "The capital of France is Paris.",
+			// A thinking block whose text the model omitted still has to be
+			// replayed: the signature covers the block, not the text.
+			wantReplay: `{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"","signature":"sig-2"}]}}`,
+		},
+		{
+			name: "redacted thinking",
+			content: []anthropicContent{
+				{Type: "redacted_thinking", Data: "opaque"},
+				{Type: "text", Text: "The capital of France is Paris."},
+			},
+			expectedText: "The capital of France is Paris.",
+			wantReplay:   `{"anthropic":{"thinking_blocks":[{"type":"redacted_thinking","data":"opaque"}]}}`,
 		},
 	}
 
@@ -4416,8 +4430,8 @@ func TestConvertAnthropicResponseToResponses_WithThinkingBlocks(t *testing.T) {
 			if reasoning.Type != "reasoning" {
 				t.Fatalf("Output[0].Type = %q, want reasoning", reasoning.Type)
 			}
-			if raw := reasoning.ExtraFields.Lookup(core.ExtraContentField); len(raw) == 0 {
-				t.Error("the reasoning item must carry the thinking blocks as replay state")
+			if raw := reasoning.ExtraFields.Lookup(core.ExtraContentField); string(raw) != tt.wantReplay {
+				t.Errorf("reasoning replay state = %s, want %s", raw, tt.wantReplay)
 			}
 			if len(message.Content) == 0 {
 				t.Fatalf("len(Output[1].Content) = 0, want at least 1")

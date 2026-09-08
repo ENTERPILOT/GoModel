@@ -12204,6 +12204,12 @@ const docTemplate = `{
                 "thinking": {
                     "type": "string"
                 },
+                "signature": {
+                    "type": "string"
+                },
+                "data": {
+                    "type": "string"
+                },
                 "tool_use_id": {
                     "type": "string"
                 },
