@@ -222,6 +222,51 @@ func TestPromptRemoveToolPairs(t *testing.T) {
 	}
 }
 
+// Edits counts every edit call, repeats on one message included, so a host
+// can tell whether a step edited anything after an earlier step already
+// marked the prompt dirty.
+func TestPromptChangesEdits(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		edit func(p *Prompt)
+		want int
+	}{
+		{"untouched", func(*Prompt) {}, 0},
+		{"one edit", func(p *Prompt) { _ = p.SetText("m1", 0, "a") }, 1},
+		{"repeated edit of one message", func(p *Prompt) { _ = p.SetText("m1", 0, "a"); _ = p.SetText("m1", 0, "b") }, 2},
+		{"param", func(p *Prompt) { p.SetParam("max_tokens", 1) }, 1},
+		{"param set twice", func(p *Prompt) { p.SetParam("max_tokens", 1); p.SetParam("max_tokens", 2) }, 2},
+		{"insert and remove", func(p *Prompt) {
+			p.Insert(0, Message{Role: RoleSystem, Parts: []Part{{Kind: PartText, Text: "x"}}})
+			_ = p.Remove("m4")
+		}, 2},
+		{"rejected edits", func(p *Prompt) {
+			_ = p.SetText("nope", 0, "x")
+			_ = p.SetText("m1", 9, "x")
+			_ = p.SetText("m2", 0, "x") // a tool call, not text
+			_ = p.Remove("nope")
+		}, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := toolPrompt()
+			tt.edit(p)
+			ch := p.Changes()
+			if ch.Edits != tt.want || ch.Dirty != (tt.want > 0) {
+				t.Fatalf("Changes() = {Edits: %d, Dirty: %v}, want %d edits", ch.Edits, ch.Dirty, tt.want)
+			}
+			// Changes() is a copy: later edits do not move it, Reset clears it.
+			_ = p.SetText("m0", 0, "later")
+			if ch.Edits != tt.want || p.Changes().Edits != tt.want+1 {
+				t.Errorf("edits after a later edit: copy %d, live %d", ch.Edits, p.Changes().Edits)
+			}
+			p.Reset()
+			if got := p.Changes(); got.Edits != 0 || got.Dirty {
+				t.Errorf("Changes() after Reset = %+v", got)
+			}
+		})
+	}
+}
+
 func TestPromptSetParam(t *testing.T) {
 	p := toolPrompt()
 	p.SetParam("max_tokens", 42)

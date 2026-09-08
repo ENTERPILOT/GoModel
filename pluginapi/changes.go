@@ -28,6 +28,9 @@ type Changes struct {
 	Params map[string]any
 	// Dirty is true after any edit.
 	Dirty bool
+	// Edits counts the edit calls made so far, repeats on one message
+	// included, so a host can tell whether a step edited anything.
+	Edits int
 }
 
 func (c *Changes) mark(id string, kind ChangeKind) {
@@ -35,6 +38,7 @@ func (c *Changes) mark(id string, kind ChangeKind) {
 		c.Messages = map[string]ChangeKind{}
 	}
 	c.Dirty = true
+	c.Edits++
 	switch kind {
 	case ChangeEdited:
 		// An inserted or replaced message stays in its stronger state.
@@ -55,11 +59,12 @@ func (c *Changes) setParam(name string, value any) {
 	}
 	c.Params[name] = value
 	c.Dirty = true
+	c.Edits++
 }
 
 // clone returns a copy the caller may keep after further edits.
 func (c Changes) clone() Changes {
-	out := Changes{Dirty: c.Dirty}
+	out := Changes{Dirty: c.Dirty, Edits: c.Edits}
 	if c.Messages != nil {
 		out.Messages = make(map[string]ChangeKind, len(c.Messages))
 		maps.Copy(out.Messages, c.Messages)

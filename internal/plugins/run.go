@@ -22,6 +22,9 @@ type Record struct {
 	// Err is set when the instance failed; a fail-open failure still leaves
 	// the chain running.
 	Err error
+	// Edited reports that the instance changed the prompt or response. Only
+	// a mutator can; a mutator that ran and left them alone is not edited.
+	Edited bool
 }
 
 // Outcome is the merged result of a chain run.
@@ -99,7 +102,12 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, call hookCall) (
 			return outcome, err
 		}
 		if mutator != nil {
+			before := edits(x)
 			record, err := c.invoke(ctx, mutator, x, call, true)
+			// An abandoned mutator may still be editing x, so x is not read.
+			if !Abandoned(record.Err) {
+				record.Edited = edits(x) != before
+			}
 			outcome.absorb([]Record{record})
 			if err != nil {
 				return outcome, err
@@ -175,6 +183,18 @@ func callHook(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call h
 	return Call(ctx, inst, func(ctx context.Context) (pluginapi.Decision, error) {
 		return call(ctx, inst, x)
 	})
+}
+
+// edits counts the edits made to the exchange's prompt and response so far.
+func edits(x *pluginapi.Exchange) int {
+	n := 0
+	if x.Prompt != nil {
+		n += x.Prompt.Changes().Edits
+	}
+	if x.Response != nil {
+		n += x.Response.Changes().Edits
+	}
+	return n
 }
 
 // ErrAbandoned marks a hook call the runtime stopped waiting for because the

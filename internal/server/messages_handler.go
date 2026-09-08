@@ -173,17 +173,17 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
-			recordPromptPluginRevisions(c, nil, nil)
+			recordPromptPluginRevisions(c, s.logger, nil, nil)
 			return s.writeChatShortCircuit(c, workflow, req, short, messagesJSON, messagesOuterWrap(req, resolvedModelFromWorkflow(workflow, req.Model)))
 		}
 		// A block or fail-closed outcome still belongs to the resolved
 		// workflow: the audit entry must carry it like every other outcome.
 		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
-		recordPromptPluginRevisions(c, nil, nil)
+		recordPromptPluginRevisions(c, s.logger, nil, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
-	recordPromptPluginRevisions(c, req, prepared)
+	recordPromptPluginRevisions(c, s.logger, req, prepared)
 	applyPluginRequestHeaders(c)
 
 	if s.canForwardMessagesNatively(ctx, workflow) {
