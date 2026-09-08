@@ -89,7 +89,7 @@
                         ? m.rate_limits_deleting_action()
                         : m.rate_limits_delete_action()}
                       class="table-action-btn-danger budget-action-btn"
-                      onclick={() => rateLimits.deleteRateLimit(item)}
+                      onclick={() => rateLimits.requestDeleteRateLimit(item)}
                       disabled={rateLimits.rateLimitDeletingKey === rateLimits.rateLimitKey(item)}
                     >
                       <Icon icon={Trash2} class="budget-action-icon" />

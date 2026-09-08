@@ -1236,6 +1236,8 @@
   "rate_limits_move_cleanup_failed": "新规则已保存，但旧规则无法删除，请手动删除。",
   "rate_limits_delete_failed": "无法删除限流。",
   "rate_limits_deleted": "限流已删除。",
+  "rate_limits_delete_title": "删除限流",
+  "rate_limits_delete_message": "输入“{subject}”以永久删除此限流。此后被它限制的请求将不再受限。",
   "rate_limits_reset_failed": "无法重置限流。",
   "rate_limits_reset_success": "限流计数器已重置。",
   "rate_limits_user_path": "用户路径",

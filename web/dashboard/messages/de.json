@@ -1365,6 +1365,8 @@
   "rate_limits_move_cleanup_failed": "Die neue Regel wurde gespeichert, aber die vorherige konnte nicht entfernt werden. Lösche sie manuell.",
   "rate_limits_delete_failed": "Rate-Limit konnte nicht gelöscht werden.",
   "rate_limits_deleted": "Rate-Limit gelöscht.",
+  "rate_limits_delete_title": "Rate-Limit löschen",
+  "rate_limits_delete_message": "Tippe \"{subject}\", um dieses Rate-Limit endgültig zu löschen. Die dadurch begrenzten Anfragen laufen danach unbegrenzt.",
   "rate_limits_reset_failed": "Rate-Limit konnte nicht zurückgesetzt werden.",
   "rate_limits_reset_success": "Rate-Limit-Zähler zurückgesetzt.",
   "rate_limits_user_path": "Nutzerpfad",

@@ -6,7 +6,12 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { overwriteGetLocale } from "../src/lib/paraglide/runtime.js";
+
+const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
 import {
   defaultRateLimitForm,
@@ -682,5 +687,37 @@ test("inspector summary reports in-flight or per-cap usage", () => {
       requests_used: 10,
     }),
     "10/100 req",
+  );
+});
+
+// Guard for the delete-confirmation contract (#900): the list button must
+// open the shared typed-confirmation dialog instead of deleting outright,
+// failures stay inside the dialog, and only a successful delete closes it.
+// There is no DOM test harness in this suite, so this asserts the wiring
+// contract directly on the source (like editor-dialog.test.js).
+test("rate-limit deletes route through the typed confirmation dialog", () => {
+  const storeSource = readFileSync(
+    join(SRC, "pages/rate-limits/rateLimits.svelte.js"),
+    "utf8",
+  );
+  const listSource = readFileSync(
+    join(SRC, "pages/rate-limits/RateLimitList.svelte"),
+    "utf8",
+  );
+
+  // The dialog requires the rule's subject back and deletes on confirm.
+  assert.match(
+    storeSource,
+    /confirmDialog\.open\(\{[\s\S]*?requiredText: subject,[\s\S]*?onConfirm: \(\) => this\.deleteRateLimit\(item\)/,
+  );
+  // Failures stay inside the dialog; success closes it.
+  assert.match(storeSource, /confirmDialog\.error = outcome\.error;/);
+  assert.match(storeSource, /confirmDialog\.close\(\);/);
+  // The list button opens the confirmation; no path deletes outright.
+  assert.match(listSource, /onclick=\{\(\) => rateLimits\.requestDeleteRateLimit\(item\)\}/);
+  assert.equal(
+    listSource.match(/onclick=\{\(\) => rateLimits\.deleteRateLimit\(item\)\}/),
+    null,
+    "a list path deletes without confirmation",
   );
 });
