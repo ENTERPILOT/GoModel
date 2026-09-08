@@ -85,7 +85,24 @@ func processGuarded[Req any](
 	if err != nil {
 		return zero, core.NewInvalidRequestError("invalid "+kind+" request for guardrails", err)
 	}
-	edited, err := newPromptRun(ctx, chain).run(ctx, prompt)
+	run := newPromptRun(ctx, chain)
+	// When the request is audited, every editing step leaves a PromptEdit
+	// behind: a snapshot of the prompt as the step left it, applied to the
+	// request later, off the request path, by the audit revision chain.
+	var observe plugins.EditObserver
+	if plugins.PromptEditCaptureEnabled(ctx) {
+		observe = func(instance string, x *pluginapi.Exchange) {
+			snapshot := x.Prompt.Clone()
+			run.state.AddPromptEdit(plugins.PromptEdit{Instance: instance, Apply: func() (any, error) {
+				applied, err := apply(req, snapshot)
+				if err != nil {
+					return nil, err
+				}
+				return applied, nil
+			}})
+		}
+	}
+	edited, err := run.run(ctx, prompt, observe)
 	if err != nil {
 		return zero, err
 	}

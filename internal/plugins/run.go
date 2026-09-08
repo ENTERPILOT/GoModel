@@ -39,9 +39,20 @@ type Outcome struct {
 
 type hookCall func(ctx context.Context, inst *Instance, x *pluginapi.Exchange) (pluginapi.Decision, error)
 
+// EditObserver is told, during a chain run, that instance edited the prompt
+// or response, right after its step completed and before the next step
+// starts, so x is quiet while the observer reads it. An observer that needs
+// the state later must copy it (see [pluginapi.Prompt.Clone]).
+type EditObserver func(instance string, x *pluginapi.Exchange)
+
 // RunPrompt runs the chain's OnPrompt hooks over x.
 func (c *Chain) RunPrompt(ctx context.Context, x *pluginapi.Exchange) (Outcome, error) {
-	return c.run(ctx, x, func(ctx context.Context, inst *Instance, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	return c.RunPromptObserved(ctx, x, nil)
+}
+
+// RunPromptObserved is RunPrompt with an observer of each step's edit.
+func (c *Chain) RunPromptObserved(ctx context.Context, x *pluginapi.Exchange, observe EditObserver) (Outcome, error) {
+	return c.run(ctx, x, observe, func(ctx context.Context, inst *Instance, x *pluginapi.Exchange) (pluginapi.Decision, error) {
 		hook, ok := inst.Plugin.(pluginapi.PromptHook)
 		if !ok {
 			return pluginapi.Allow(), nil
@@ -52,7 +63,7 @@ func (c *Chain) RunPrompt(ctx context.Context, x *pluginapi.Exchange) (Outcome, 
 
 // RunResponse runs the chain's OnResponse hooks over x.
 func (c *Chain) RunResponse(ctx context.Context, x *pluginapi.Exchange) (Outcome, error) {
-	return c.run(ctx, x, func(ctx context.Context, inst *Instance, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	return c.run(ctx, x, nil, func(ctx context.Context, inst *Instance, x *pluginapi.Exchange) (pluginapi.Decision, error) {
 		hook, ok := inst.Plugin.(pluginapi.ResponseHook)
 		if !ok {
 			return pluginapi.Allow(), nil
@@ -63,7 +74,7 @@ func (c *Chain) RunResponse(ctx context.Context, x *pluginapi.Exchange) (Outcome
 
 // RunStreamEnd runs the chain's OnStreamEnd hooks over x.
 func (c *Chain) RunStreamEnd(ctx context.Context, x *pluginapi.Exchange) (Outcome, error) {
-	return c.run(ctx, x, func(ctx context.Context, inst *Instance, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+	return c.run(ctx, x, nil, func(ctx context.Context, inst *Instance, x *pluginapi.Exchange) (pluginapi.Decision, error) {
 		hook, ok := inst.Plugin.(pluginapi.StreamHook)
 		if !ok {
 			return pluginapi.Allow(), nil
@@ -76,8 +87,9 @@ func (c *Chain) RunStreamEnd(ctx context.Context, x *pluginapi.Exchange) (Outcom
 // run concurrently, each on a shallow copy of the exchange (their Values and
 // header edits are merged back afterwards), then the mutating one runs on
 // the exchange itself. The first blocking decision ends the chain after its
-// step completes.
-func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, call hookCall) (Outcome, error) {
+// step completes. observe, when set, is called for each step whose mutator
+// edited x.
+func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, observe EditObserver, call hookCall) (Outcome, error) {
 	outcome := Outcome{Decision: pluginapi.Allow()}
 	if c.Empty() || x == nil {
 		return outcome, nil
@@ -109,6 +121,13 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, call hookCall) (
 				record.Edited = edits(x) != before
 			}
 			outcome.absorb([]Record{record})
+			// A mutator that edited and then failed closed still hands its
+			// edit to the observer: the hook has returned (Edited is never
+			// set for an abandoned one), so x is quiet and the audit trail
+			// can show the request the failure was about.
+			if record.Edited && observe != nil {
+				observe(mutator.Name, x)
+			}
 			if err != nil {
 				return outcome, err
 			}

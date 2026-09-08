@@ -24,10 +24,10 @@ func newPromptRun(ctx context.Context, chain *plugins.Chain) promptRun {
 	return promptRun{chain: chain, state: plugins.RequestStateFor(ctx), meta: plugins.MetaFromContext(ctx, core.GetWorkflow(ctx))}
 }
 
-func (r promptRun) run(ctx context.Context, prompt *pluginapi.Prompt) (edited bool, err error) {
+func (r promptRun) run(ctx context.Context, prompt *pluginapi.Prompt, observe plugins.EditObserver) (edited bool, err error) {
 	x := r.state.NewExchange(ctx, r.meta)
 	x.Prompt = prompt
-	outcome, runErr := r.chain.RunPrompt(ctx, x)
+	outcome, runErr := r.chain.RunPromptObserved(ctx, x, observe)
 	// An abandoned mutator may still be editing x and prompt. Such a run
 	// fails closed below, so neither is read again.
 	if !plugins.Abandoned(runErr) {
