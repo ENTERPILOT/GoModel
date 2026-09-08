@@ -22,11 +22,10 @@ function workflowPhaseSteps(source, phase) {
   return workflowSourceGuardrails(source).filter((step) => step.phase === wanted);
 }
 
-// workflowPhaseStepCount counts the distinct step numbers of one phase: refs
-// sharing a step number are one step, as the node's "N steps" label and the
-// step flow both describe execution stages.
+// workflowPhaseStepCount counts the configured steps of one phase, the rows
+// of the editor's step list; refs sharing a step number each count.
 function workflowPhaseStepCount(source, phase) {
-  return new Set(workflowPhaseSteps(source, phase).map((item) => item.step)).size;
+  return workflowPhaseSteps(source, phase).length;
 }
 
 // workflowMutatingRefs names the guardrail instances that may edit the
@@ -42,12 +41,12 @@ function workflowMutatingRefs(guardrailRefs) {
 }
 
 // workflowGuardrailFlow is the execution order of one phase's guardrails:
-// steps ascending, each holding the refs that share that step number. The
-// gateway runs a step's readers concurrently and then its mutating instance
-// (at most one per step), so a stage lists the readers in `refs` and the
-// mutator apart; without instance rows (audit view) every ref is a reader.
-// Refs keep their configured order; a step whose ref is not chosen yet
-// (editor draft) stays in as "" so the flow matches the node's step count.
+// steps ascending, each holding the refs that share that step number, which
+// the gateway runs together. `mutator` names the step's mutating instance
+// (at most one per step; the gateway applies its edit after the step's
+// checks) when instance rows are given; the audit view has none. Refs keep
+// their configured order; a step whose ref is not chosen yet (editor draft)
+// stays in as "" so the flow matches the node's step count.
 export function workflowGuardrailFlow(source, phase = "prompt", guardrailRefs = []) {
   const mutating = workflowMutatingRefs(guardrailRefs);
   const byStep = new Map();
@@ -55,11 +54,8 @@ export function workflowGuardrailFlow(source, phase = "prompt", guardrailRefs = 
     const ref = String(item.ref || "").trim();
     if (!byStep.has(item.step)) byStep.set(item.step, { step: item.step, refs: [], mutator: null });
     const stage = byStep.get(item.step);
-    if (ref && mutating.has(ref) && !stage.mutator) {
-      stage.mutator = ref;
-    } else {
-      stage.refs.push(ref);
-    }
+    stage.refs.push(ref);
+    if (ref && mutating.has(ref) && !stage.mutator) stage.mutator = ref;
   }
   return Array.from(byStep.keys())
     .sort((a, b) => a - b)

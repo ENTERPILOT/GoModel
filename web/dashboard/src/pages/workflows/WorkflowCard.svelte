@@ -1,12 +1,12 @@
 <script>
   import * as m from "$lib/paraglide/messages.js";
-  // A single workflow card: head, description, pipeline chart, guardrails and
-  // (list mode only) the deactivate/edit footer. `preview` renders the
+  // A single workflow card: head, description, pipeline chart (whose
+  // Guardrails nodes expand the step flow) and (list mode only) the
+  // deactivate/edit footer. `preview` renders the
   // footer-less live preview card used inside the editor.
   import Icon from "$lib/components/atoms/Icon.svelte";
   import TableActionButton from "$lib/components/atoms/TableActionButton.svelte";
   import { timezone } from "$lib/stores/timezone.svelte.js";
-  import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
   import { workflowsStore as wf } from "./workflows.svelte.js";
   import WorkflowChart from "./WorkflowChart.svelte";
   import {
@@ -14,26 +14,17 @@
     workflowScopeLabel,
     workflowDisplayName,
     workflowFailoverLabel,
-    workflowGuardrails,
-    workflowStepGroups,
     canDeactivateWorkflow,
     shortHash,
   } from "./workflowsLogic.js";
   import { workflowChart } from "./workflowChartLogic.js";
-  import { phaseLabel } from "$lib/utils/pluginPhases.js";
   import { Pencil } from "lucide";
 
   let { workflow, preview = false } = $props();
 
   const caps = $derived(wf.featureCaps());
   const displayName = $derived(workflowDisplayName(workflow));
-  const guardrails = $derived(workflowGuardrails(workflow, caps));
-  // Steps grouped in execution order: prompt, then response, then stream.
-  const stepGroups = $derived(workflowStepGroups(guardrails));
   const chart = $derived(workflowChart(workflow, caps, wf.guardrailRefs));
-  const guardrailKeyPrefix = $derived(
-    preview ? "draft-workflow-preview-guardrail-" : workflow.id + "-guardrail-",
-  );
 </script>
 
 <article class="workflow-card" class:workflow-preview-card={preview}>
@@ -56,35 +47,6 @@
 
   <WorkflowChart {chart} />
 
-  {#if runtimeConfig.guardrailsVisible()}
-    <div class="workflow-guardrails">
-      <div class="workflow-section-head">
-        <h4>{m.workflows_guardrails()}</h4>
-        <span class="provider-badge">
-          {guardrails.length
-            ? m.workflows_steps_count({ count: guardrails.length })
-            : m.workflows_none()}
-        </span>
-      </div>
-      {#if guardrails.length > 0}
-        <div class="workflow-guardrail-list">
-          {#each stepGroups as group (guardrailKeyPrefix + group.phase)}
-            <div class="workflow-guardrail-group">
-              <span class="workflow-guardrail-phase">{phaseLabel(group.phase)}</span>
-              {#each group.steps as step, stepIndex (guardrailKeyPrefix + group.phase + "-" + stepIndex)}
-                <div class="workflow-guardrail-item">
-                  <span class="mono font-size-md">{step.ref}</span>
-                  <span class="provider-badge">{m.workflows_step_number({ number: step.step })}</span>
-                </div>
-              {/each}
-            </div>
-          {/each}
-        </div>
-      {:else}
-        <p class="form-hint">{m.workflows_no_guardrails()}</p>
-      {/if}
-    </div>
-  {/if}
 
   {#if !preview}
     <div class="workflow-card-footer">
@@ -172,45 +134,9 @@
     font-size: 14px;
   }
 
-  .workflow-guardrails {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .workflow-guardrail-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .workflow-guardrail-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .workflow-guardrail-phase {
-    color: var(--text-muted);
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .workflow-guardrail-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg);
-  }
 
   @media (max-width: 768px) {
-    .workflow-card-head, .workflow-card-footer, .workflow-card-badges, .workflow-card-meta, .workflow-guardrail-item {
+    .workflow-card-head, .workflow-card-footer, .workflow-card-badges, .workflow-card-meta {
         flex-direction: column;
         align-items: flex-start;
       }

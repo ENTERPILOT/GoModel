@@ -1406,7 +1406,6 @@ test("a provider's authentication error leaves the gateway auth node green", () 
 import {
   workflowGuardrailRefOptions,
   workflowPayloadSteps,
-  workflowStepGroups,
 } from "../src/pages/workflows/workflowsLogic.js";
 
 test("buildWorkflowRequest posts schema_version 2 steps with phases", () => {
@@ -1513,21 +1512,6 @@ test("workflowGuardrailRefOptions filters instances by phase and keeps the curre
   assert.deepEqual(names("prompt", ""), ["pii-redact", "legacy-object", "legacy-string"]);
 });
 
-test("workflowStepGroups orders phases prompt, response, stream and drops empty groups", () => {
-  const groups = workflowStepGroups([
-    { ref: "s", phase: "stream", step: 10 },
-    { ref: "p2", phase: "prompt", step: 20 },
-    { ref: "p1", step: 10 },
-  ]);
-  assert.deepEqual(
-    groups.map((group) => [group.phase, group.steps.map((step) => step.ref)]),
-    [
-      ["prompt", ["p2", "p1"]],
-      ["stream", ["s"]],
-    ],
-  );
-});
-
 test("workflowChart adds response and stream guardrail nodes after the model", () => {
   const chart = workflowChart(
     {
@@ -1614,15 +1598,15 @@ test("workflowGuardrailFlow sets a step's mutating instance apart from its reade
     { name: "inject", mutates: true },
     { name: "toxicity" },
   ];
-  // Readers keep their order and stack in parallel; the mutator runs after
-  // them. A step with only a mutator has no readers; an unknown ref (scan)
-  // is a reader.
+  // Refs keep their order and stack together; the step's mutating instance
+  // is named apart so the chart can mark it. An unknown ref (scan) is a
+  // check.
   assert.deepEqual(workflowGuardrailFlow(source, "prompt", refs), [
-    { step: 10, refs: ["pii", "toxicity"], mutator: "rewrite" },
-    { step: 20, refs: [], mutator: "inject" },
+    { step: 10, refs: ["pii", "rewrite", "toxicity"], mutator: "rewrite" },
+    { step: 20, refs: ["inject"], mutator: "inject" },
     { step: 30, refs: ["scan"], mutator: null },
   ]);
-  // Without instance rows every ref is treated as a reader.
+  // Without instance rows no mutator is known.
   assert.deepEqual(workflowGuardrailFlow(source, "prompt"), [
     { step: 10, refs: ["pii", "rewrite", "toxicity"], mutator: null },
     { step: 20, refs: ["inject"], mutator: null },
@@ -1650,8 +1634,8 @@ test("workflowChart only carries step flows for phases that have a node", () => 
     response: [],
     stream: [{ step: 5, refs: ["scan", "scan2"], mutator: null }],
   });
-  // Refs sharing a step number are one step on the node, as in the flow.
-  assert.equal(chart.streamGuardrailLabel, "1 step");
+  // Every configured step counts on the node, refs sharing a number too.
+  assert.equal(chart.streamGuardrailLabel, "2 steps");
 
   const typed = workflowChart(
     {
@@ -1667,7 +1651,9 @@ test("workflowChart only carries step flows for phases that have a node", () => 
     ALL_CAPS,
     [{ name: "rewrite", mutates: true }],
   );
-  assert.deepEqual(typed.guardrailFlows.prompt, [{ step: 10, refs: ["pii"], mutator: "rewrite" }]);
+  assert.deepEqual(typed.guardrailFlows.prompt, [
+    { step: 10, refs: ["pii", "rewrite"], mutator: "rewrite" },
+  ]);
 
   const disabled = workflowChart(
     {
