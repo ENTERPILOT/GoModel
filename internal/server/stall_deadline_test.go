@@ -145,7 +145,7 @@ func (*timeoutError) Temporary() bool { return false }
 // drop flush errors, so a stall during the final flush of a stream must be
 // picked up from the stall writer itself rather than logged as a success.
 func TestFlushStream_ReportsStallDuringFinalFlush(t *testing.T) {
-	inner := &flushStallingWriter{ResponseRecorder: httptest.NewRecorder()}
+	inner := &flushStallingWriter{ResponseRecorder: httptest.NewRecorder(), stallFrom: 2}
 	stallWriter := newStallDeadlineWriter(inner, time.Second)
 	res := echo.NewResponse(stallWriter, nil)
 	capture := &typeAssertingCapture{ResponseWriter: res}
@@ -160,6 +160,27 @@ func TestFlushStream_ReportsStallDuringFinalFlush(t *testing.T) {
 	if _, err := capture.Write([]byte("more")); !errors.Is(err, ErrClientStall) {
 		t.Fatalf("Write after stall error = %v, want ErrClientStall", err)
 	}
+}
+
+// A stall on the header flush must return before the upstream is read at
+// all: the request context is already cancelled by then, so the next read
+// would report a cancellation and misclassify the stall as a disconnect.
+func TestFlushStream_ReportsStallDuringInitialFlush(t *testing.T) {
+	inner := &flushStallingWriter{ResponseRecorder: httptest.NewRecorder(), stallFrom: 1}
+	stallWriter := newStallDeadlineWriter(inner, time.Second)
+	res := echo.NewResponse(stallWriter, nil)
+
+	err := flushStream(res, readerThatMustNotBeRead{t})
+	if !errors.Is(err, ErrClientStall) {
+		t.Fatalf("flushStream() error = %v, want ErrClientStall", err)
+	}
+}
+
+type readerThatMustNotBeRead struct{ t *testing.T }
+
+func (r readerThatMustNotBeRead) Read([]byte) (int, error) {
+	r.t.Fatal("upstream read after the client stalled on the header flush")
+	return 0, io.EOF
 }
 
 // The audit capture finds http.Hijacker with a direct type assertion on the
@@ -214,17 +235,18 @@ func TestModelInteractionWriteDeadlineMiddleware_PreservesHijack(t *testing.T) {
 	}
 }
 
-// flushStallingWriter lets the header flush through and then fails the flush
-// that follows the chunk, the way a net.Conn does once its write deadline
-// passed with the client no longer reading.
+// flushStallingWriter fails every flush from the stallFrom-th one on, the
+// way a net.Conn does once its write deadline passed with the client no
+// longer reading.
 type flushStallingWriter struct {
 	*httptest.ResponseRecorder
-	flushes int
+	stallFrom int
+	flushes   int
 }
 
 func (w *flushStallingWriter) FlushError() error {
 	w.flushes++
-	if w.flushes == 1 {
+	if w.flushes < w.stallFrom {
 		return nil
 	}
 	return &net.OpError{Op: "write", Err: &timeoutError{}}

@@ -26,6 +26,11 @@ func flushStream(w io.Writer, stream io.Reader) error {
 	stalls := findStallReporter(w)
 	if canFlush {
 		flusher.Flush()
+		if stalls != nil {
+			if stallErr := stalls.StallError(); stallErr != nil {
+				return stallErr
+			}
+		}
 	}
 
 	bufPtr := streamCopyBufferPool.Get().(*[]byte)
