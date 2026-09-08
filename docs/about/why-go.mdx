@@ -1,0 +1,73 @@
+---
+title: "Why Go"
+description: "Why GoModel is written in Go rather than Python or Rust: runtime behavior that fits a gateway, a language enterprises already trust, and a hiring pool that keeps the project maintainable."
+icon: "code"
+keywords: ["Go", "Golang", "Rust", "Python", "language choice", "performance"]
+---
+
+GoModel is written in Go. We also seriously considered Rust. This page explains
+why Go won, so you can judge whether our reasoning matches your own priorities.
+
+## A gateway is a runtime problem
+
+An AI gateway does one job thousands of times per second: accept a request,
+translate it, stream a provider's response back, and get out of the way. The
+language you write it in decides how much of your latency budget the gateway
+itself eats.
+
+Go fits that shape well:
+
+- **Goroutines make streaming cheap.** Every open connection to a provider is a
+  lightweight goroutine, so long-lived streaming responses do not tie up threads
+  or force an async framework onto the whole codebase.
+- **A single static binary.** GoModel ships as one file with no interpreter,
+  no virtual environment, and no dependency tree to install at deploy time. The
+  container image is small and starts in well under a second.
+- **Predictable memory.** Go's garbage collector is tuned for low pause times,
+  and the gateway holds very little state per request, so memory stays flat
+  under load instead of growing with the number of workers.
+
+The [benchmarks](/about/benchmarks) page shows what this looks like in practice
+against gateways written in Python and TypeScript.
+
+## Why not Rust
+
+Rust would give us the same deployment shape and, in some paths, lower overhead.
+We chose Go anyway, for reasons that have little to do with the language itself:
+
+1. **Go is far more widely used.** In every developer survey and language
+   ranking we looked at, Go sits well ahead of Rust in adoption. Part of that is
+   a gentler learning curve: an engineer productive in another language can
+   read and contribute to a Go codebase within days.
+2. **Contributors are easier to find.** A larger pool of engineers who already
+   know Go means more people can review, extend, and maintain GoModel, and it
+   keeps the cost of hiring for it reasonable for the companies that run it.
+3. **Enterprises are already moving to Go.** Many organizations that
+   standardized on Java for backend services now treat Go as their next paved
+   path for new infrastructure. Shipping a gateway in Go means it fits the
+   tooling, security review, and operational habits those teams already have.
+4. **Go keeps growing.** The share of new infrastructure projects written in Go
+   has increased year over year. Betting on the language that platform teams
+   are adopting keeps GoModel easy to run and easy to contribute to for the
+   long term.
+
+Rust remains an excellent language. For a project whose success depends on a
+broad base of contributors and operators, Go's reach mattered more than the
+last few percent of throughput.
+
+## Why not Python
+
+Python is the default for AI tooling, and most gateways started there. It is a
+good language for experimentation and a poor one for a network hop that sits in
+front of every model call. The trade-offs are covered in
+[Our Values](/about/values) and measured on the [benchmarks](/about/benchmarks)
+page.
+
+## What this means for you
+
+- **Operators** get a small, fast, statically linked service that behaves the
+  same in Docker, Kubernetes, and on bare metal.
+- **Contributors** get a codebase in a language they likely already know, with
+  a standard toolchain and no framework to learn first.
+- **Enterprises** get a gateway written in a language their platform and
+  security teams already approve and support.
