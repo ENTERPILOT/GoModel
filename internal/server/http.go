@@ -72,6 +72,7 @@ type Config struct {
 	MetricsEnabled                  bool                                   // Whether to expose Prometheus metrics endpoint
 	MetricsEndpoint                 string                                 // HTTP path for metrics endpoint (default: /metrics)
 	BodySizeLimit                   string                                 // Max request body size (e.g., "10M", "1024K")
+	StreamStallTimeout              time.Duration                          // Max time one response write on a model route waits for the client to read; 0 disables
 	PprofEnabled                    bool                                   // Whether to expose debug profiling routes at /debug/pprof/*
 	AuditLogger                     auditlog.LoggerInterface               // Optional: Audit logger for request/response logging
 	AuditReader                     auditlog.Reader                        // Optional: audit lookup used for dashboard interaction continuations
@@ -328,7 +329,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	e.Use(middleware.BodyLimit(parseBodySizeLimitBytes(bodySizeLimit)))
 
-	e.Use(modelInteractionWriteDeadlineMiddleware())
+	e.Use(modelInteractionWriteDeadlineMiddleware(streamStallTimeout(cfg)))
 
 	// Ingress capture (before auth/audit/model validation so they can consume
 	// shared raw request state). Also assigns the per-request ID: the snapshot
@@ -661,22 +662,48 @@ func configureGatewayHTTPServer(server *http.Server) error {
 	return nil
 }
 
-func modelInteractionWriteDeadlineMiddleware() echo.MiddlewareFunc {
+// modelInteractionWriteDeadlineMiddleware swaps the server-wide absolute
+// write deadline for a per-write stall deadline on model interaction routes:
+// a model response may run for minutes, but no single write to the client
+// should wait longer than stallTimeout for the client to read. A stallTimeout
+// of zero only clears the absolute deadline, leaving writes unbounded.
+func modelInteractionWriteDeadlineMiddleware(stallTimeout time.Duration) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if !core.IsModelInteractionPath(c.Request().URL.Path) {
 				return next(c)
 			}
-			if err := http.NewResponseController(c.Response()).SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			res := c.Response()
+			ctl := http.NewResponseController(res)
+			if err := ctl.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
 				slog.Warn("failed to clear write deadline for model interaction",
 					"path", c.Request().URL.Path,
 					"request_id", requestIDFromContextOrHeader(c.Request()),
 					"error", err,
 				)
 			}
-			return next(c)
+			if stallTimeout <= 0 {
+				return next(c)
+			}
+			c.SetResponse(newStallDeadlineWriter(res, stallTimeout))
+			err := next(c)
+			// The handler's last deadline would otherwise still apply to the
+			// trailing writes net/http makes after it returns (the chunked
+			// terminator), which may come much later than the last body write.
+			_ = ctl.SetWriteDeadline(time.Time{})
+			return err
 		}
 	}
+}
+
+// streamStallTimeout resolves the per-write client stall deadline for model
+// interaction routes. A nil config (tests constructing the server directly)
+// gets the documented default; an explicit zero disables it.
+func streamStallTimeout(cfg *Config) time.Duration {
+	if cfg == nil {
+		return time.Duration(config.DefaultStreamStallTimeoutSeconds) * time.Second
+	}
+	return cfg.StreamStallTimeout
 }
 
 func parseBodySizeLimitBytes(limit string) int64 {

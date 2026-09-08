@@ -81,7 +81,7 @@ func TestModelInteractionWriteDeadlineMiddleware_ClearsDeadlineForModelRoutes(t 
 			req := httptest.NewRequest(http.MethodPost, path, nil)
 			c := e.NewContext(req, writer)
 
-			handler := modelInteractionWriteDeadlineMiddleware()(func(c *echo.Context) error {
+			handler := modelInteractionWriteDeadlineMiddleware(0)(func(c *echo.Context) error {
 				return c.String(http.StatusOK, "ok")
 			})
 
@@ -98,13 +98,60 @@ func TestModelInteractionWriteDeadlineMiddleware_ClearsDeadlineForModelRoutes(t 
 	}
 }
 
+// With a stall timeout every write re-arms a deadline that far ahead, and the
+// handler's return clears it again so net/http's trailing writes are not held
+// to a deadline armed long before.
+func TestModelInteractionWriteDeadlineMiddleware_ArmsStallDeadlinePerWrite(t *testing.T) {
+	const stall = 45 * time.Second
+	e := echo.New()
+	writer := &deadlineTrackingWriter{ResponseRecorder: httptest.NewRecorder()}
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c := e.NewContext(req, writer)
+
+	handler := modelInteractionWriteDeadlineMiddleware(stall)(func(c *echo.Context) error {
+		c.Response().WriteHeader(http.StatusOK)
+		for _, chunk := range []string{"data: one\n\n", "data: two\n\n"} {
+			if _, err := c.Response().Write([]byte(chunk)); err != nil {
+				return err
+			}
+			c.Response().(http.Flusher).Flush()
+		}
+		return nil
+	})
+
+	before := time.Now()
+	if err := handler(c); err != nil {
+		t.Fatalf("handler() error = %v", err)
+	}
+	after := time.Now()
+
+	// clear, then (write + flush) x 2, then clear.
+	if got := len(writer.deadlines); got != 6 {
+		t.Fatalf("deadline calls = %d, want 6: %v", got, writer.deadlines)
+	}
+	if !writer.deadlines[0].IsZero() {
+		t.Fatalf("first deadline = %v, want zero time", writer.deadlines[0])
+	}
+	if !writer.deadlines[5].IsZero() {
+		t.Fatalf("last deadline = %v, want zero time", writer.deadlines[5])
+	}
+	for i, deadline := range writer.deadlines[1:5] {
+		if deadline.Before(before.Add(stall)) || deadline.After(after.Add(stall)) {
+			t.Fatalf("deadline[%d] = %v, want within %v of the write", i+1, deadline, stall)
+		}
+	}
+	if got := writer.Body.String(); got != "data: one\n\ndata: two\n\n" {
+		t.Fatalf("body = %q, want both chunks relayed", got)
+	}
+}
+
 func TestModelInteractionWriteDeadlineMiddleware_LeavesNonModelRoutesUntouched(t *testing.T) {
 	e := echo.New()
 	writer := &deadlineTrackingWriter{ResponseRecorder: httptest.NewRecorder()}
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	c := e.NewContext(req, writer)
 
-	handler := modelInteractionWriteDeadlineMiddleware()(func(c *echo.Context) error {
+	handler := modelInteractionWriteDeadlineMiddleware(time.Minute)(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 

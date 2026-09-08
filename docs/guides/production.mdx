@@ -391,6 +391,10 @@ if the file size matters.
 - **Keep `BODY_SIZE_LIMIT` sane.** It defaults to `10M` and is what stops an
   oversized body becoming a memory-exhaustion vector. An unparseable value falls
   back to the default with only a warning, so check the spelling.
+- **Keep `STREAM_STALL_TIMEOUT` on.** It defaults to `60` seconds and is what
+  frees the goroutine and upstream provider connection a client holds when it
+  opens a stream and stops reading. Disabling it (`0`) lets such a client pin
+  both until the provider-side `HTTP_TIMEOUT` expires.
 - **Leave `pprof` disabled.** It is off by default and unauthenticated when on.
 - **Scope managed API keys.** Give each consumer its own key with its own
   [user path](/features/user-path), which is also what makes per-consumer rate

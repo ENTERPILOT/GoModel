@@ -114,6 +114,7 @@ func buildDefaultConfig() *Config {
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
 			RealtimeEnabled:         true,
+			StreamStallTimeout:      DefaultStreamStallTimeoutSeconds,
 			EnabledPassthroughProviders: []string{
 				"openai",
 				"anthropic",
@@ -323,6 +324,9 @@ func Load() (*LoadResult, error) {
 		if err := ValidateBodySizeLimit(cfg.Server.BodySizeLimit); err != nil {
 			return nil, fmt.Errorf("invalid BODY_SIZE_LIMIT: %w", err)
 		}
+	}
+	if cfg.Server.StreamStallTimeout < 0 {
+		return nil, fmt.Errorf("server.stream_stall_timeout must be 0 or a positive number of seconds; got %d", cfg.Server.StreamStallTimeout)
 	}
 
 	if err := ValidateCacheConfig(&cfg.Cache); err != nil {
