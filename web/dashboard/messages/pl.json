@@ -1330,7 +1330,7 @@
   "workflows_step_number": "krok {number}",
   "workflows_guardrail_flow_toggle": "Pokaż lub ukryj kroki guardrails fazy {phase}",
   "workflows_guardrail_flow_title": "Guardrails: {phase}",
-  "workflows_guardrail_flow_mutator": "Uruchamia się po kontrolach tego kroku i może zmienić żądanie lub odpowiedź",
+  "workflows_guardrail_flow_mutator": "Może zmienić żądanie lub odpowiedź; zmiana jest stosowana po kontrolach tego kroku",
   "workflows_deactivate_action": "Dezaktywuj Workflow {name}",
   "workflows_deactivate_active": "Dezaktywuj aktywny Workflow",
   "workflows_global_no_deactivate": "Globalnego Workflow nie można dezaktywować.",

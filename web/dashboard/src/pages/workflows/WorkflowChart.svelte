@@ -187,9 +187,10 @@
 
   {#if openPhase && openFlow.length > 0}
     <!-- Step flow of the expanded phase. Steps run left to right (arrows);
-         the readers sharing a step stack vertically inside a fork/join
-         bracket, which is how the gateway runs them: concurrently. A step's
-         mutating instance follows its readers behind an arrow of its own. -->
+         refs sharing a step stack vertically inside a fork/join bracket,
+         which is how the gateway runs them: together. The step's mutating
+         instance, whose edit is applied after the step's checks, carries a
+         pencil. -->
     <section
       id={panelID}
       class="workflow-guardrail-flow"
@@ -216,27 +217,22 @@
             title={m.workflows_step_number({ number: stage.step })}
           >
             <span class="workflow-sr-only">{m.workflows_step_number({ number: stage.step })}</span>
-            {#if stage.refs.length > 0}
-              <ul class="workflow-flow-refs">
-                {#each stage.refs as ref, refIndex (refIndex + ":" + ref)}
-                  <li class="workflow-flow-ref" class:workflow-flow-ref-blank={!ref}>
-                    {ref || m.workflows_select_guardrail()}
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-            {#if stage.mutator}
-              {#if stage.refs.length > 0}
-                <span class="workflow-conn workflow-flow-conn workflow-flow-conn-mutator" aria-hidden="true"></span>
-              {/if}
-              <span
-                class="workflow-flow-ref workflow-flow-ref-mutator"
-                title={m.workflows_guardrail_flow_mutator()}
-              >
-                <Icon icon={Pencil} />
-                {stage.mutator}
-              </span>
-            {/if}
+            <ul class="workflow-flow-refs">
+              {#each stage.refs as ref, refIndex (refIndex + ":" + ref)}
+                {@const mutator = !!ref && ref === stage.mutator}
+                <li
+                  class="workflow-flow-ref"
+                  class:workflow-flow-ref-blank={!ref}
+                  class:workflow-flow-ref-mutator={mutator}
+                  title={mutator ? m.workflows_guardrail_flow_mutator() : undefined}
+                >
+                  {#if mutator}
+                    <Icon icon={Pencil} />
+                  {/if}
+                  {ref || m.workflows_select_guardrail()}
+                </li>
+              {/each}
+            </ul>
           </li>
         {/each}
       </ol>
@@ -655,14 +651,8 @@
     flex-shrink: 0;
   }
 
-  /* Arrow from a step's readers to its mutating instance. */
-  .workflow-flow-conn-mutator {
-    flex: 0 0 22px;
-    margin: 0 3px;
-  }
-
-  /* The instance that may edit the request or response: runs after the
-     readers of its step. */
+  /* The step's mutating instance: its edit is applied after the step's
+     checks. */
   .workflow-flow-ref-mutator {
     display: inline-flex;
     align-items: center;

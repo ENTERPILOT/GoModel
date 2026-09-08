@@ -1302,7 +1302,7 @@
   "workflows_step_number": "Schritt {number}",
   "workflows_guardrail_flow_toggle": "{phase}-Guardrail-Schritte ein- oder ausblenden",
   "workflows_guardrail_flow_title": "{phase}-Guardrails",
-  "workflows_guardrail_flow_mutator": "Läuft nach den Prüfungen dieses Schritts und kann Anfrage oder Antwort ändern",
+  "workflows_guardrail_flow_mutator": "Kann Anfrage oder Antwort ändern; die Änderung wird nach den Prüfungen dieses Schritts angewendet",
   "workflows_deactivate_action": "Workflow {name} deaktivieren",
   "workflows_deactivate_active": "Aktiven Workflow deaktivieren",
   "workflows_global_no_deactivate": "Der globale Workflow kann nicht deaktiviert werden.",
