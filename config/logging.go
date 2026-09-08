@@ -42,15 +42,25 @@ type LogConfig struct {
 
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// when both are enabled, every request rewriter that changed the body
-	// (for example GoModel Pro token compression) stores its rewritten body
-	// alongside the original in the audit entry, and the prompt guardrails
-	// that edited the prompt store, in their one shared revision, the body
-	// as forwarded after the whole guardrail chain. Requires LogBodies.
+	// (for example GoModel Pro token compression) and every prompt guardrail
+	// that edited the prompt store the request as they left it alongside the
+	// original in the audit entry. Requires LogBodies.
 	// Disabling it keeps the revision metadata (rewriter name, sizes, tokens
 	// saved, change detail) but drops the rewritten body copy — roughly
 	// halving audit storage per compressed request.
 	// Default: true
 	LogRevisionBodies bool `yaml:"log_revision_bodies" env:"LOGGING_LOG_REVISION_BODIES"`
+
+	// LogGuardrailSteps records every prompt guardrail that edited the
+	// request as its own revision in the audit entry, carrying the request
+	// as that step left it, so a chain of edits reads step by step. Each
+	// step leaves a copy of the prompt behind; building and encoding the
+	// requests from those copies runs off the request path. Disabling it
+	// records the
+	// chain's edits as one revision (the request as forwarded) and skips
+	// the per-step snapshots.
+	// Default: true
+	LogGuardrailSteps bool `yaml:"log_guardrail_steps" env:"LOGGING_LOG_GUARDRAIL_STEPS"`
 
 	// LogHeaders enables logging of request/response headers
 	// Sensitive headers (Authorization, Cookie, etc.) are auto-redacted

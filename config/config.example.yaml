@@ -206,6 +206,7 @@ logging:
   enabled: true
   log_bodies: true # WARNING: may contain sensitive data
   log_revision_bodies: true # store rewritten bodies from request rewriters and prompt guardrails (needs log_bodies)
+  # log_guardrail_steps: true # one audit revision per editing prompt guardrail; false records the chain's edits as one revision
   # log_audio_bodies: false # embed audio bytes for /v1/audio/* entries (needs log_bodies)
   # log_image_bodies: false # embed image bytes for /v1/images/* entries (needs log_bodies)
   # log_image_bodies_scope: all # all | input | output
