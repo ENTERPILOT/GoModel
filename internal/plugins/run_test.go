@@ -83,9 +83,21 @@ func TestRunMarksOnlyTheInstanceThatEdited(t *testing.T) {
 	if len(outcome.Records) != len(want) {
 		t.Fatalf("records = %+v", outcome.Records)
 	}
+	seen := make(map[string]bool, len(want))
 	for _, record := range outcome.Records {
-		if record.Edited != want[record.Instance] {
-			t.Errorf("%s: edited = %v, want %v", record.Instance, record.Edited, want[record.Instance])
+		expected, ok := want[record.Instance]
+		if !ok {
+			t.Errorf("unexpected record %q", record.Instance)
+			continue
+		}
+		seen[record.Instance] = true
+		if record.Edited != expected {
+			t.Errorf("%s: edited = %v, want %v", record.Instance, record.Edited, expected)
+		}
+	}
+	for instance := range want {
+		if !seen[instance] {
+			t.Errorf("missing record %q", instance)
 		}
 	}
 }
