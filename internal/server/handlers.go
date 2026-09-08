@@ -58,6 +58,10 @@ type Handler struct {
 	storageProbe                 ReadinessProbe
 	cacheProbe                   ReadinessProbe
 	versionChecker               *versioncheck.Checker
+	// masterKeyConfigured mirrors Config.MasterKey without keeping the secret
+	// itself; GET /v1/auth/verify uses it to name the mechanism that
+	// authenticated a request.
+	masterKeyConfigured bool
 
 	translatedSvc     *translatedInferenceService // snapshot of handler fields at first use; server.New sets cache/hash before traffic
 	translatedSvcOnce sync.Once

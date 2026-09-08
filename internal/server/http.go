@@ -99,6 +99,7 @@ type Config struct {
 	LogOnlyModelInteractions        bool                                   // Only log AI model endpoints (default: true)
 	DisablePassthroughRoutes        bool                                   // Disable /p/{provider}/{endpoint} route registration
 	RealtimeEnabled                 bool                                   // Enable the realtime websocket routes (/v1/realtime, /v1/realtime/translations) and passthrough upgrades
+	AuthVerifyEnabled               bool                                   // Enable the credential check route (GET /v1/auth/verify); off by default
 	MCPEnabled                      bool                                   // Enable the MCP gateway routes /mcp and /mcp/{server}
 	MCPGateway                      *mcpgateway.Service                    // MCP gateway service (nil if disabled or not wired)
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
@@ -213,6 +214,7 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	handler.realtimeEnabled = cfg == nil || cfg.RealtimeEnabled
 	if cfg != nil {
 		handler.versionChecker = cfg.VersionChecker
+		handler.masterKeyConfigured = cfg.MasterKey != ""
 	}
 	if cfg != nil {
 		handler.mcpEnabled = cfg.MCPEnabled
@@ -430,6 +432,11 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	e.GET("/v1/models", handler.ListModels)
 	e.GET("/v1/usage", handler.UsageStatus)
+	// Opt-in: the route answers questions about credentials, so it is only
+	// mounted where an operator asked for it.
+	if cfg != nil && cfg.AuthVerifyEnabled {
+		e.GET("/v1/auth/verify", handler.AuthVerify)
+	}
 	e.POST("/v1/chat/completions", handler.ChatCompletion)
 	e.POST("/v1/messages", handler.Messages)
 	e.POST("/v1/messages/count_tokens", handler.CountMessageTokens)

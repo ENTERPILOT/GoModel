@@ -114,6 +114,7 @@ func buildDefaultConfig() *Config {
 			EnablePassthroughRoutes: true,
 			AllowPassthroughV1Alias: true,
 			RealtimeEnabled:         true,
+			AuthVerifyEnabled:       false,
 			StreamStallTimeout:      DefaultStreamStallTimeoutSeconds,
 			EnabledPassthroughProviders: []string{
 				"openai",
