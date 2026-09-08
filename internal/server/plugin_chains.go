@@ -97,8 +97,9 @@ func promptEditCaptureContext(c *echo.Context, auditLogger auditlog.LoggerInterf
 // logging off (Config.LogGuardrailSteps) the phase kept no snapshots and
 // its edits are one changed revision, naming the editing instances and
 // carrying the request as forwarded (after). after is nil when nothing was
-// forwarded (block, fail-closed, answered): the phase is then recorded as
-// decisions only.
+// forwarded (block, fail-closed, answered): the step snapshots, when kept,
+// still show what each step handed on; without them the phase is recorded
+// as decisions, an edit among them marked as a change without a body.
 func recordPromptPluginRevisions(c *echo.Context, auditLogger auditlog.LoggerInterface, before, after any) {
 	state := plugins.RequestStateFromContext(c.Request().Context())
 	if state == nil {
@@ -117,20 +118,6 @@ func recordPromptPluginRevisions(c *echo.Context, auditLogger auditlog.LoggerInt
 	if len(records) == 0 {
 		return
 	}
-	edited := false
-	for _, record := range records {
-		edited = edited || record.Edited
-	}
-	if after == nil || !edited {
-		for _, record := range records {
-			auditlog.EnrichEntryWithRequestRevision(c, auditlog.RequestRevisionSnapshot{
-				Rewriter: record.Instance,
-				NoChange: true,
-				Detail:   decisionDetail(record),
-			})
-		}
-		return
-	}
 	captureBodies := revisionBodiesEnabled(auditLogger)
 	if edits := state.PromptEdits(); len(edits) > 0 {
 		auditlog.EnrichEntryWithPendingRequestRevisions(c, func() []auditlog.RequestRevisionSnapshot {
@@ -138,9 +125,26 @@ func recordPromptPluginRevisions(c *echo.Context, auditLogger auditlog.LoggerInt
 		})
 		return
 	}
-	auditlog.EnrichEntryWithPendingRequestRevisions(c, func() []auditlog.RequestRevisionSnapshot {
-		return promptChainRevisions(records, encodeRequest(before), encodeRequest(after), captureBodies)
-	})
+	edited := false
+	for _, record := range records {
+		edited = edited || record.Edited
+	}
+	if after != nil && edited {
+		auditlog.EnrichEntryWithPendingRequestRevisions(c, func() []auditlog.RequestRevisionSnapshot {
+			return promptChainRevisions(records, encodeRequest(before), encodeRequest(after), captureBodies)
+		})
+		return
+	}
+	size := len(encodeRequest(before))
+	for _, record := range records {
+		auditlog.EnrichEntryWithRequestRevision(c, auditlog.RequestRevisionSnapshot{
+			Rewriter:    record.Instance,
+			BytesBefore: size,
+			BytesAfter:  size,
+			NoChange:    !record.Edited,
+			Detail:      decisionDetail(record),
+		})
+	}
 }
 
 // pluginEditDetail is the audit-visible summary of a prompt chain's edits
@@ -152,18 +156,22 @@ type pluginEditDetail struct {
 
 // promptChainRevisions builds the prompt phase's revisions without step
 // snapshots: the objections as no-change entries, then one changed revision
-// for the whole chain carrying the request as forwarded.
+// for the whole chain carrying the request as forwarded. Without the
+// intermediate requests, an objection is sized as the original request
+// until the first edit and as the forwarded one after it.
 func promptChainRevisions(records []plugins.DecisionRecord, before, after []byte, captureBodies bool) []auditlog.RequestRevisionSnapshot {
 	var revisions []auditlog.RequestRevisionSnapshot
 	var editors []string
+	size := len(before)
 	for _, record := range records {
 		if record.Edited {
 			editors = append(editors, record.Instance)
+			size = len(after)
 		}
 		if record.Decision.Action == pluginapi.ActionAllow && record.Err == nil {
 			continue
 		}
-		revisions = append(revisions, auditlog.RequestRevisionSnapshot{Rewriter: record.Instance, NoChange: true, Detail: decisionDetail(record)})
+		revisions = append(revisions, auditlog.RequestRevisionSnapshot{Rewriter: record.Instance, BytesBefore: size, BytesAfter: size, NoChange: true, Detail: decisionDetail(record)})
 	}
 	revision := auditlog.RequestRevisionSnapshot{
 		Rewriter:    strings.Join(editors, ", "),
@@ -179,14 +187,15 @@ func promptChainRevisions(records []plugins.DecisionRecord, before, after []byte
 
 // promptStepRevisions builds the prompt phase's revisions: each record in
 // step order, an editing one as a change carrying the request after its
-// step, measured against the request the step started from.
+// step, measured against the request the step started from; a step that
+// left the request alone reports that request's size on both sides.
 func promptStepRevisions(records []plugins.DecisionRecord, edits []plugins.PromptEdit, before []byte, captureBodies bool) []auditlog.RequestRevisionSnapshot {
 	revisions := make([]auditlog.RequestRevisionSnapshot, 0, len(records))
 	previous := len(before)
 	next := 0
 	for _, record := range records {
 		detail := decisionDetail(record)
-		revision := auditlog.RequestRevisionSnapshot{Rewriter: record.Instance, NoChange: !record.Edited}
+		revision := auditlog.RequestRevisionSnapshot{Rewriter: record.Instance, NoChange: !record.Edited, BytesBefore: previous, BytesAfter: previous}
 		if record.Edited && next < len(edits) && edits[next].Instance == record.Instance {
 			edit := edits[next]
 			next++
@@ -201,7 +210,7 @@ func promptStepRevisions(records []plugins.DecisionRecord, edits []plugins.Promp
 					detail.Error += ": " + err.Error()
 				}
 			}
-			revision.BytesBefore, revision.BytesAfter = previous, len(encoded)
+			revision.BytesAfter = len(encoded)
 			if encoded != nil {
 				previous = len(encoded)
 			}

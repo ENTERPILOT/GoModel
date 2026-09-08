@@ -89,10 +89,11 @@ An instance that edited the prompt is a changed revision carrying the request
 as it stood right after that step, sizes included, so a chain of edits reads
 step by step and the last one is what was forwarded; the request bodies are
 stored under the same `LOGGING_LOG_BODIES` and `LOGGING_LOG_REVISION_BODIES`
-gates as request rewrites. Building those snapshots runs off the request
-path, alongside the provider call; `LOGGING_LOG_GUARDRAIL_STEPS=false` skips
-them and records a chain's edits as one revision carrying the request as
-forwarded. A warning, block, answer or failure without an edit is a no-change
+gates as request rewrites. Each editing step leaves only a copy of the prompt
+behind on the request path; applying those copies to the request and encoding
+the bodies runs afterwards, alongside the provider call.
+`LOGGING_LOG_GUARDRAIL_STEPS=false` skips them and records a chain's edits as
+one revision carrying the request as forwarded. A warning, block, answer or failure without an edit is a no-change
 entry carrying the decision. Response and stream
 decisions are logged with the request id.
 

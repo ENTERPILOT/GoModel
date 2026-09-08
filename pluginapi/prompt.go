@@ -308,6 +308,7 @@ func (p *Prompt) Clone() *Prompt {
 	params.MaxTokens = cloneInt(p.Params.MaxTokens)
 	params.Temperature = cloneFloat(p.Params.Temperature)
 	params.TopP = cloneFloat(p.Params.TopP)
+	params.ToolChoice = cloneJSONValue(p.Params.ToolChoice)
 	return &Prompt{
 		Messages: cloneMessages(p.Messages),
 		Tools:    p.Tools,
@@ -351,6 +352,27 @@ func cloneParts(parts []Part) []Part {
 		out[i] = part
 	}
 	return out
+}
+
+// cloneJSONValue deep-copies a decoded JSON value (objects and arrays);
+// scalars are returned as they are.
+func cloneJSONValue(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for k, item := range value {
+			out[k] = cloneJSONValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		for i, item := range value {
+			out[i] = cloneJSONValue(item)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func cloneInt(v *int) *int {

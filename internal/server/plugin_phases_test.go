@@ -529,6 +529,11 @@ func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
 // revision chain, complete.
 func runPromptRevisions(t *testing.T, body string, cfg auditlog.Config, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
 	t.Helper()
+	return runPromptRevisionsExpecting(t, http.StatusOK, body, cfg, cfgs, steps...)
+}
+
+func runPromptRevisionsExpecting(t *testing.T, wantStatus int, body string, cfg auditlog.Config, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
+	t.Helper()
 	chains := phaseChainsNamed(t, cfgs, steps...)
 	auditLogger := &capturingAuditLogger{config: cfg}
 	handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
@@ -545,8 +550,8 @@ func runPromptRevisions(t *testing.T, body string, cfg auditlog.Config, cfgs map
 	if err := handler.ChatCompletion(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
 	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	if rec.Code != wantStatus {
+		t.Fatalf("status = %d, want %d (%s)", rec.Code, wantStatus, rec.Body.String())
 	}
 	if len(auditLogger.entries) > 0 {
 		// A streamed request is written by the stream observer.
@@ -623,6 +628,40 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 		}
 		if revisions[1].Rewriter != "editor" || revisions[1].NoChange || !strings.Contains(bodyText(revisions[1]), "rewritten by editor") {
 			t.Errorf("the edit revision must follow with the applied body: %+v", revisions[1])
+		}
+		// The warning inspected the original request: sized as such on both sides.
+		if revisions[0].BytesBefore == 0 || revisions[0].BytesBefore != revisions[0].BytesAfter || revisions[1].BytesBefore != revisions[0].BytesAfter {
+			t.Errorf("no-change sizes must be the request the step saw: %+v", revisions)
+		}
+	})
+
+	t.Run("editor then warning", func(t *testing.T) {
+		revisions := run(t, chatBody, map[string]map[string]string{
+			"editor": {"prompt": "edit", "text": "rewritten by editor"},
+			"watch":  {"prompt": "warn"},
+		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
+			guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindPrompt, Step: 2})
+		if len(revisions) != 2 || revisions[1].Rewriter != "watch" || !revisions[1].NoChange {
+			t.Fatalf("expected the edit then the warning, got %+v", revisions)
+		}
+		// The warning inspected the edited request.
+		if revisions[1].BytesBefore != revisions[0].BytesAfter || revisions[1].BytesAfter != revisions[0].BytesAfter {
+			t.Errorf("no-change sizes must follow the edit: %+v", revisions)
+		}
+	})
+
+	t.Run("editor then block", func(t *testing.T) {
+		revisions := runPromptRevisionsExpecting(t, http.StatusBadRequest, chatBody, auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, map[string]map[string]string{
+			"editor": {"prompt": "edit", "text": "rewritten by editor"},
+			"gate":   {"prompt": "block"},
+		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
+			guardrails.StepReference{Ref: "gate", Phase: pluginapi.KindPrompt, Step: 2})
+		if len(revisions) != 2 || revisions[0].Rewriter != "editor" || revisions[0].NoChange || revisions[1].Rewriter != "gate" || !revisions[1].NoChange {
+			t.Fatalf("expected the edit then the block, got %+v", revisions)
+		}
+		// Nothing was forwarded, but the edit still shows what the block saw.
+		if !strings.Contains(bodyText(revisions[0]), "rewritten by editor") || revisions[1].BytesBefore != revisions[0].BytesAfter {
+			t.Errorf("the edit snapshot must survive a later block: %+v", revisions)
 		}
 	})
 }

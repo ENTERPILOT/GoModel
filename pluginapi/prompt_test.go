@@ -300,6 +300,14 @@ func TestPromptClone(t *testing.T) {
 	if (*Prompt)(nil).Clone() != nil {
 		t.Error("Clone of nil must be nil")
 	}
+
+	// Object-valued parameters are copied too, not shared.
+	p.Params.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "weather"}}
+	c = p.Clone()
+	p.Params.ToolChoice.(map[string]any)["function"].(map[string]any)["name"] = "changed"
+	if got := c.Params.ToolChoice.(map[string]any)["function"].(map[string]any)["name"]; got != "weather" {
+		t.Errorf("clone tool_choice shares the original's map: %v", got)
+	}
 }
 
 func TestPromptSetParam(t *testing.T) {

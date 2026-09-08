@@ -53,8 +53,10 @@ type LogConfig struct {
 
 	// LogGuardrailSteps records every prompt guardrail that edited the
 	// request as its own revision in the audit entry, carrying the request
-	// as that step left it, so a chain of edits reads step by step. The
-	// snapshots are built off the request path. Disabling it records the
+	// as that step left it, so a chain of edits reads step by step. Each
+	// step leaves a copy of the prompt behind; building and encoding the
+	// requests from those copies runs off the request path. Disabling it
+	// records the
 	// chain's edits as one revision (the request as forwarded) and skips
 	// the per-step snapshots.
 	// Default: true
