@@ -136,7 +136,7 @@ func (o *StreamLogObserver) OnStreamClose() {
 	}
 
 	if o.logger != nil && o.entry != nil {
-		o.entry.CompleteRequestRevisions()
+		o.entry.Complete()
 		o.logger.Write(o.entry)
 	}
 }

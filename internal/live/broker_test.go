@@ -774,6 +774,41 @@ func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
 	}
 }
 
+func TestBrokerAuditPreviewIncludesGuardrailOutcomesWithoutDetail(t *testing.T) {
+	b := NewBroker(Config{Enabled: true})
+	b.PublishAuditEvent(EventAuditUpdated, &auditlog.LogEntry{
+		ID:        "audit-1",
+		RequestID: "req-1",
+		Timestamp: time.Now(),
+		Data: &auditlog.LogData{
+			Guardrails: []auditlog.GuardrailOutcomeSnapshot{
+				{Seq: 1, Phase: "prompt", Instance: "check", Action: auditlog.GuardrailActionBlock, Code: "policy",
+					Detail: map[string]any{"verdict": "unsafe"}},
+			},
+		},
+	})
+
+	payload := eventPayload(t, b.events[0])
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview data = %T, want object", payload["data"])
+	}
+	outcomes, ok := data["guardrails"].([]any)
+	if !ok || len(outcomes) != 1 {
+		t.Fatalf("guardrails = %#v, want 1 outcome in the live preview", data["guardrails"])
+	}
+	outcome, ok := outcomes[0].(map[string]any)
+	if !ok {
+		t.Fatalf("guardrails[0] = %T, want object", outcomes[0])
+	}
+	if outcome["instance"] != "check" || outcome["action"] != auditlog.GuardrailActionBlock || outcome["code"] != "policy" {
+		t.Fatalf("guardrails[0] = %#v, want the block outcome", outcome)
+	}
+	if _, present := outcome["detail"]; present {
+		t.Fatalf("live preview outcome should omit detail, got %#v", outcome)
+	}
+}
+
 func TestAuditPreviewRemainsPendingUntilFlush(t *testing.T) {
 	entry := &auditlog.LogEntry{
 		ID:        "audit-1",

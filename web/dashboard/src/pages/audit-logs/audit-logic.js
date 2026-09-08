@@ -5,6 +5,11 @@
 
 import { formatJSON, formatNumber } from "../../lib/utils/format.js";
 import * as m from "../../lib/paraglide/messages.js";
+import { phaseLabel } from "../../lib/utils/pluginPhases.js";
+import {
+  workflowEntryGuardrails,
+  workflowGuardrailActionLabel,
+} from "../workflows/workflowChartLogic.js";
 import {
   findNestedErrorMessage,
   normalizeErrorText,
@@ -930,9 +935,126 @@ export function auditResponsePane(entry) {
   };
 }
 
+// --- Guardrail outcomes -----------------------------------------------------
+
+// auditGuardrailActionClass maps an outcome's verdict onto the status badge
+// tones: stopped the request (block, respond, fail-closed) reads as an
+// error, warn and fail-open as a warning, allow as success.
+export function auditGuardrailActionClass(outcome) {
+  switch (outcome && outcome.action) {
+    case "block":
+    case "respond":
+      return "status-error";
+    case "failure":
+      return outcome.failMode === "closed" ? "status-error" : "status-warning";
+    case "warn":
+      return "status-warning";
+    case "allow":
+      return "status-success";
+    default:
+      return "status-neutral";
+  }
+}
+
+function auditGuardrailFailModeLabel(outcome) {
+  switch (outcome.failMode) {
+    case "open":
+      return m.audit_guardrail_fail_open();
+    case "closed":
+      return m.audit_guardrail_fail_closed();
+    default:
+      return "";
+  }
+}
+
+function auditGuardrailEditedLabel(outcome) {
+  if (!outcome.edited) return "";
+  return outcome.target === "response"
+    ? m.audit_guardrail_edited_response()
+    : m.audit_guardrail_edited_request();
+}
+
+function auditGuardrailStreamLabel(outcome) {
+  if (outcome.replacedEvents === null && outcome.droppedEvents === null) return "";
+  return m.audit_guardrail_stream_events({
+    replaced: formatNumber(outcome.replacedEvents || 0),
+    dropped: formatNumber(outcome.droppedEvents || 0),
+  });
+}
+
+// auditGuardrailRows flattens the entry's guardrail outcomes into the rows
+// of the Guardrails table, one per instance that ran, in execution order.
+// `detail` and `error` are pre-formatted for the expandable block; the list
+// projection strips detail, so a row may gain it once the detail loads.
+export function auditGuardrailRows(entry) {
+  return workflowEntryGuardrails(entry).map((outcome) => ({
+    id: "guardrail-" + outcome.seq,
+    seq: outcome.seq,
+    phase: phaseLabel(outcome.phase),
+    step: outcome.step === null ? "" : String(outcome.step),
+    instance: outcome.instance,
+    type: outcome.type,
+    action: outcome.action,
+    actionLabel: workflowGuardrailActionLabel({ ...outcome, edited: false }),
+    actionClass: auditGuardrailActionClass(outcome),
+    edited: auditGuardrailEditedLabel(outcome),
+    code: outcome.code,
+    message: outcome.message,
+    failMode: auditGuardrailFailModeLabel(outcome),
+    streamEvents: auditGuardrailStreamLabel(outcome),
+    duration: outcome.durationNs === null ? "" : formatDurationNs(outcome.durationNs),
+    detail: outcome.detail === null || outcome.detail === undefined ? "" : formatJSON(outcome.detail),
+    error: outcome.error,
+  }));
+}
+
+// auditGuardrailVerdict is the one guardrail outcome worth a metadata badge:
+// the first that stopped the request (blocked, answered, failed closed),
+// else the first warning. Null when every guardrail let the request through.
+export function auditGuardrailVerdict(entry) {
+  const outcomes = workflowEntryGuardrails(entry);
+  const outcome =
+    outcomes.find((item) => auditGuardrailActionClass(item) === "status-error") ||
+    outcomes.find((item) => auditGuardrailActionClass(item) === "status-warning");
+  if (!outcome) return null;
+  const instance = outcome.instance;
+  const stop = auditGuardrailActionClass(outcome) === "status-error";
+  let text;
+  if (outcome.action === "failure") text = m.audit_guardrail_badge_failed({ instance });
+  else if (outcome.action === "respond") text = m.audit_guardrail_badge_answered({ instance });
+  else if (stop) text = m.audit_guardrail_badge_blocked({ instance });
+  else text = m.audit_guardrail_badge_warned({ instance });
+  return {
+    tone: stop ? "danger" : "warning",
+    text,
+    actionLabel: workflowGuardrailActionLabel({ ...outcome, edited: false }),
+  };
+}
+
+// auditGuardrailsPane backs the Guardrails tab: the outcome table plus the
+// tab's own badge, which carries the worst verdict, or the row count when
+// every guardrail let the request through.
+export function auditGuardrailsPane(entry) {
+  const rows = auditGuardrailRows(entry);
+  const verdict = auditGuardrailVerdict(entry);
+  return {
+    type: "guardrails",
+    title: m.audit_tab_guardrails(),
+    entry,
+    rows,
+    badge: verdict
+      ? {
+          text: verdict.actionLabel,
+          class: verdict.tone === "danger" ? "status-error" : "status-warning",
+        }
+      : { text: formatNumber(rows.length), class: "status-success" },
+  };
+}
+
 // auditPanes returns the ordered Request/Response panes that back the tab
 // strip: the original request, one pane per ingress rewrite revision, then
-// either the single response or one pane per provider attempt.
+// either the single response or one pane per provider attempt, and last the
+// guardrail outcomes when any guardrail ran.
 export function auditPanes(entry, extractSegments) {
   const panes = [{ id: "request", pane: auditRequestPane(entry, extractSegments) }];
   auditChangedRequestRevisions(entry).forEach((revision) => {
@@ -950,6 +1072,10 @@ export function auditPanes(entry, extractSegments) {
     });
   } else {
     panes.push({ id: "response", pane: auditResponsePane(entry) });
+  }
+  const guardrails = auditGuardrailsPane(entry);
+  if (guardrails.rows.length > 0) {
+    panes.push({ id: "guardrails", pane: guardrails });
   }
   return panes;
 }

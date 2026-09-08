@@ -71,6 +71,8 @@ func (p *phasePlugin) decide(mode string, x *pluginapi.Exchange) (pluginapi.Deci
 		return pluginapi.Block(0, "policy", "blocked by test"), nil
 	case "warn":
 		return pluginapi.Warn("pii", "found", nil), nil
+	case "fail":
+		return pluginapi.Allow(), errors.New("hook failed")
 	case "edit":
 		if x.Response != nil {
 			return pluginapi.Allow(), x.Response.ReplaceText(0, p.text)

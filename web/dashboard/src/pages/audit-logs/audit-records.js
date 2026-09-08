@@ -32,6 +32,8 @@ export function mergeAuditRecord(previous, incoming) {
       patch.data.request_revisions,
     );
     if (revisions) merged.data.request_revisions = revisions;
+    const guardrails = mergedGuardrails(current.data.guardrails, patch.data.guardrails);
+    if (guardrails) merged.data.guardrails = guardrails;
   }
 
   // Lifecycle fields belong to the live transport. Persisted/list projections
@@ -89,6 +91,25 @@ function mergedRequestRevisions(currentRevisions, patchRevisions) {
       richer.detail = previous.detail;
     }
     return richer;
+  });
+}
+
+// Guardrail outcomes carry their plugin detail only on the detail endpoint;
+// list rows and live events ship them without it. Merge per seq so a later
+// slim projection keeps the detail already loaded.
+function mergedGuardrails(currentOutcomes, patchOutcomes) {
+  if (!Array.isArray(currentOutcomes) || !Array.isArray(patchOutcomes)) {
+    return null;
+  }
+  return patchOutcomes.map((outcome) => {
+    const seq = Number(outcome && outcome.seq || 0);
+    const previous = currentOutcomes.find(
+      (candidate) => Number(candidate && candidate.seq || 0) === seq,
+    );
+    if (!previous || !plainObject(outcome) || outcome.detail != null || previous.detail == null) {
+      return outcome;
+    }
+    return { ...outcome, detail: previous.detail };
   });
 }
 

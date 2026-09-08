@@ -234,6 +234,17 @@ type pluginStream struct {
 	requestID  string
 	inFlight   []inFlightInstance
 	lookbehind int
+	// replaced and dropped count, per in-flight instance, the events it
+	// rewrote or withheld, for the audit outcome trail.
+	replaced map[string]int
+	dropped  map[string]int
+}
+
+func (ps *pluginStream) countEdit(counts *map[string]int, instance string) {
+	if *counts == nil {
+		*counts = map[string]int{}
+	}
+	(*counts)[instance]++
 }
 
 func (ps *pluginStream) reportError(stage string) func(error) {
@@ -277,7 +288,18 @@ func (ps *pluginStream) runResponse(completion *pluginapi.Completion, buffered [
 	if !plugins.Abandoned(err) { // an abandoned mutator may still write ps.x
 		ps.state.Finish(ps.x)
 	}
-	logResponseDecisions(ps.requestID, pluginapi.KindResponse, outcome, ps.state)
+	// A buffered stream instance ran its response hook here, but it is a
+	// stream-phase step of the workflow and is recorded as one.
+	records := plugins.DecisionRecordsOf(pluginapi.KindResponse, outcome, err)
+	for i := range records {
+		for _, inst := range buffered {
+			if inst.Name == records[i].Instance {
+				records[i].Phase = pluginapi.KindStream
+				records[i].Step = ps.streamStep(inst.Name)
+			}
+		}
+	}
+	logResponseDecisions(ps.requestID, ps.state, records)
 	ps.recordWarn(outcome)
 	if err != nil {
 		if pluginErr, ok := errors.AsType[*plugins.PluginError](err); ok {
@@ -313,7 +335,7 @@ func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error)
 				slog.Warn("stream plugin failed; continuing (fail_open)", "request_id", ps.requestID, "instance", inst.Name, "error", err)
 				continue
 			}
-			ps.state.Record(plugins.DecisionRecord{Phase: pluginapi.KindStream, Instance: inst.Name, Err: err})
+			ps.state.Record(ps.streamRecord(inst, plugins.DecisionRecord{Err: err, FailedClosed: true}))
 			return streaming.Decision{}, &plugins.PluginError{Instance: inst.Name, Phase: pluginapi.KindStream, Err: err}
 		}
 		switch decision.Action {
@@ -322,18 +344,20 @@ func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error)
 			if decision.Terminate != nil {
 				term = *decision.Terminate
 			}
-			ps.state.Record(plugins.DecisionRecord{Phase: pluginapi.KindStream, Instance: inst.Name, Decision: term})
+			ps.state.Record(ps.streamRecord(inst, plugins.DecisionRecord{Decision: term}))
 			return streaming.Decision{Action: streaming.ActionTerminate, Terminate: terminationFor(term)}, nil
 		case pluginapi.StreamDrop:
 			if observe {
 				continue
 			}
+			ps.countEdit(&ps.dropped, inst.Name)
 			ps.x.Stream.ReplaceTail(pev, ev.Overlap, "")
 			return streaming.Decision{Action: streaming.ActionDrop}, nil
 		case pluginapi.StreamReplace:
 			if observe || pev.Kind != pluginapi.EventTextDelta && pev.Kind != pluginapi.EventReasoningDelta {
 				continue
 			}
+			ps.countEdit(&ps.replaced, inst.Name)
 			pev.Text = decision.Text
 			result = streaming.Decision{Action: streaming.ActionReplace, Text: decision.Text}
 		}
@@ -363,12 +387,50 @@ func (ps *pluginStream) OnEnd() (*streaming.Termination, error) {
 		return nil, err
 	}
 	outcome, err := chain.RunStreamEnd(ps.ctx, ps.x)
-	logResponseDecisions(ps.requestID, pluginapi.KindStream, outcome, ps.state)
+	records := plugins.DecisionRecordsOf(pluginapi.KindStream, outcome, err)
+	for i := range records {
+		ps.applyStreamEdits(&records[i])
+	}
+	logResponseDecisions(ps.requestID, ps.state, records)
 	ps.recordWarn(outcome)
 	if err != nil {
 		return nil, err
 	}
 	return terminationFor(outcome.Decision), nil
+}
+
+// streamRecord is a stream-phase decision record of an in-flight instance
+// taken mid-stream (a terminate or a failure), with its edits so far.
+func (ps *pluginStream) streamRecord(inst *plugins.Instance, record plugins.DecisionRecord) plugins.DecisionRecord {
+	record.Phase = pluginapi.KindStream
+	record.Instance = inst.Name
+	record.Type = inst.Type
+	ps.applyStreamEdits(&record)
+	return record
+}
+
+// applyStreamEdits folds the instance's event edits into its record: a
+// replaced or dropped event is an edit of the response. The step is the
+// instance's configured one: the in-flight instances run on ad hoc chains
+// whose steps are positions, not the workflow's.
+func (ps *pluginStream) applyStreamEdits(record *plugins.DecisionRecord) {
+	record.Step = ps.streamStep(record.Instance)
+	record.Replaced = ps.replaced[record.Instance]
+	record.Dropped = ps.dropped[record.Instance]
+	record.Edited = record.Edited || record.Replaced > 0 || record.Dropped > 0
+}
+
+// streamStep is the configured step of a stream-phase instance, or zero when
+// it is not in the stream chain.
+func (ps *pluginStream) streamStep(instance string) int {
+	for _, step := range ps.chains.Stream.StepsOf() {
+		for _, inst := range step.Instances {
+			if inst.Name == instance {
+				return step.Order
+			}
+		}
+	}
+	return 0
 }
 
 // recordWarn adds the warn header for a warn outcome. It reaches the client

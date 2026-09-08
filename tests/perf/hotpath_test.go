@@ -498,7 +498,7 @@ func TestHotPathPerfGuard(t *testing.T) {
 			name:      "shared_stream_observers_default_config",
 			bench:     BenchmarkSharedStreamingObserversDefaultConfig,
 			maxAllocs: 62,   // baseline 60 (incl. request labels on both observers)
-			maxBytes:  3584, // baseline ~3.3 KB
+			maxBytes:  3712, // baseline ~3.5 KB (audit entry carries the guardrail outcome trail)
 		},
 	}
 

@@ -631,6 +631,10 @@ type auditPreviewData struct {
 	// entry. Per-attempt response bodies/headers are omitted to keep the live
 	// stream compact; they hydrate when the entry detail is fetched.
 	Attempts []auditlog.AttemptSnapshot `json:"attempts,omitempty"`
+	// Guardrails carries the guardrail outcome trail so the live workflow
+	// chart colors its steps as phases finish. The plugin-provided detail is
+	// omitted to keep the stream compact; it hydrates with the entry detail.
+	Guardrails []auditlog.GuardrailOutcomeSnapshot `json:"guardrails,omitempty"`
 }
 
 func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPreview {
@@ -671,6 +675,7 @@ func auditPreviewFromEntry(eventType string, entry *auditlog.LogEntry) auditPrev
 			WorkflowFeatures: entry.Data.WorkflowFeatures,
 			Failover:         entry.Data.Failover,
 			Attempts:         compactAttemptsForPreview(entry.Data.Attempts),
+			Guardrails:       compactGuardrailsForPreview(entry.Data.Guardrails),
 		}
 		if auditPreviewIncludesLiveRequestMetadata(eventType) {
 			data.UserAgent = entry.Data.UserAgent
@@ -745,7 +750,22 @@ func (d auditPreviewData) hasValues() bool {
 		d.ResponseBodyPartial ||
 		d.RequestBodyCaptured ||
 		d.ResponseBodyCaptured ||
-		len(d.Attempts) > 0
+		len(d.Attempts) > 0 ||
+		len(d.Guardrails) > 0
+}
+
+// compactGuardrailsForPreview copies the guardrail outcomes for a live
+// preview without the plugin-provided detail.
+func compactGuardrailsForPreview(outcomes []auditlog.GuardrailOutcomeSnapshot) []auditlog.GuardrailOutcomeSnapshot {
+	if len(outcomes) == 0 {
+		return nil
+	}
+	compact := make([]auditlog.GuardrailOutcomeSnapshot, len(outcomes))
+	for i, outcome := range outcomes {
+		outcome.Detail = nil
+		compact[i] = outcome
+	}
+	return compact
 }
 
 // compactAttemptsForPreview copies the attempt summaries for a live preview

@@ -32,6 +32,9 @@ import {
   workflowRuntimeFromEntry,
   workflowGuardrailLabel,
   workflowGuardrailFlow,
+  workflowEntryGuardrails,
+  workflowGuardrailActionLabel,
+  workflowGuardrailOutcomeLabel,
   workflowAsyncNodeClass,
   workflowCacheNodeClass,
   workflowCacheConnClass,
@@ -67,6 +70,21 @@ const NO_CAPS = {
 
 // FAILOVER_ENABLED off, everything else on.
 const HIDDEN_FAILOVER_CAPS = { ...ALL_CAPS, failover: false };
+
+// The flow's pseudo-outcome of a configured ref that never ran.
+const SKIPPED_OUTCOME = {
+  action: "skipped",
+  code: "",
+  message: "",
+  edited: false,
+  error: "",
+  failMode: "",
+  durationNs: null,
+  replacedEvents: null,
+  droppedEvents: null,
+  tone: "skipped",
+  title: "Skipped",
+};
 
 test("workflowProviderOptions returns unique sorted provider names", () => {
   const models = [
@@ -203,12 +221,18 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
       showGuardrails: true,
       guardrailLabel: "2 steps",
       guardrailBadge: null,
+      guardrailNodeClass: "",
+      guardrailStatusLabel: null,
       showResponseGuardrails: false,
       responseGuardrailLabel: "",
       responseGuardrailBadge: null,
+      responseGuardrailNodeClass: "",
+      responseGuardrailStatusLabel: null,
       showStreamGuardrails: false,
       streamGuardrailLabel: "",
       streamGuardrailBadge: null,
+      streamGuardrailNodeClass: "",
+      streamGuardrailStatusLabel: null,
       guardrailFlows: {
         prompt: [
           { step: 10, refs: ["policy-system"], mutator: null },
@@ -233,6 +257,7 @@ test("workflowChart returns the shared chart contract for workflow sources", () 
       responseConnClass: "",
       responseNodeClass: "",
       responseNodeSublabel: null,
+      responseNodeBadge: null,
       authNodeClass: "",
       authNodeSublabel: null,
       usageNodeClass: "",
@@ -335,14 +360,28 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
       showGuardrails: true,
       guardrailLabel: "1 step",
       guardrailBadge: null,
+      // A cache hit skipped the guardrails: the finished entry has no outcomes.
+      guardrailNodeClass: "workflow-node-skipped",
+      guardrailStatusLabel: "Skipped",
       showResponseGuardrails: false,
       responseGuardrailLabel: "",
       responseGuardrailBadge: null,
+      responseGuardrailNodeClass: "",
+      responseGuardrailStatusLabel: null,
       showStreamGuardrails: false,
       streamGuardrailLabel: "",
       streamGuardrailBadge: null,
+      streamGuardrailNodeClass: "",
+      streamGuardrailStatusLabel: null,
       guardrailFlows: {
-        prompt: [{ step: 10, refs: ["policy-system"], mutator: null }],
+        prompt: [
+          {
+            step: 10,
+            refs: ["policy-system"],
+            mutator: null,
+            outcomes: { "policy-system": SKIPPED_OUTCOME },
+          },
+        ],
         response: [],
         stream: [],
       },
@@ -362,6 +401,7 @@ test("workflowAuditChart returns the shared chart contract for audit runtime ent
       responseConnClass: "workflow-conn-dim",
       responseNodeClass: "workflow-node-success",
       responseNodeSublabel: "200",
+      responseNodeBadge: null,
       authNodeClass: "",
       authNodeSublabel: null,
       usageNodeClass: "workflow-node-success",
@@ -545,6 +585,9 @@ test("workflowRuntimeFromEntry preserves the primary route for cross-provider fa
       authError: false,
       authMethod: null,
       budgetExceeded: false,
+      guardrails: [],
+      guardrailBlocked: false,
+      guardrailAnswered: false,
     },
   );
 });
@@ -1719,4 +1762,431 @@ test("workflowChart only carries step flows for phases that have a node", () => 
     ALL_CAPS,
   );
   assert.deepEqual(disabled.guardrailFlows, { prompt: [], response: [], stream: [] });
+});
+
+// ─── Guardrail outcomes ───
+
+const GUARDED_SOURCE = {
+  id: "guarded-v3",
+  scope: { scope_provider: "openai", scope_model: "gpt-5" },
+  workflow_payload: {
+    schema_version: 2,
+    features: { audit: true, usage: true, guardrails: true, cache: false, budget: false, failover: false },
+    steps: [
+      { ref: "pii-filter", phase: "prompt", step: 10 },
+      { ref: "policy", phase: "prompt", step: 20 },
+      { ref: "scan", phase: "response", step: 10 },
+      { ref: "redact", phase: "stream", step: 10 },
+    ],
+  },
+};
+
+function guardedEntry(guardrails, extra = {}) {
+  return {
+    workflow_version_id: "guarded-v3",
+    provider: "openai",
+    model: "gpt-5",
+    status_code: 200,
+    usage: { entries: 1 },
+    data: { guardrails },
+    ...extra,
+  };
+}
+
+test("workflowEntryGuardrails normalizes recorded outcomes in execution order", () => {
+  const outcomes = workflowEntryGuardrails(
+    guardedEntry([
+      {
+        seq: 2,
+        phase: "Response",
+        step: 10,
+        instance: " scan ",
+        type: "string_replace",
+        action: "ALLOW",
+        edited: true,
+        replaced_events: "3",
+        duration_ns: 1500000,
+      },
+      { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "warn", code: "pii", message: "found an email" },
+      { seq: 3, phase: "stream", instance: "redact", action: "failure", fail_mode: "open", error: "timeout", detail: { retries: 2 } },
+      { seq: 4, phase: "prompt", instance: "", action: "block" },
+      { seq: 5, phase: "prompt", instance: "odd", action: "maybe" },
+      "junk",
+    ]),
+  );
+  assert.deepEqual(
+    outcomes.map((o) => [o.seq, o.phase, o.instance, o.action]),
+    [
+      [1, "prompt", "pii-filter", "warn"],
+      [2, "response", "scan", "allow"],
+      [3, "stream", "redact", "failure"],
+    ],
+  );
+  assert.deepEqual(outcomes[0], {
+    seq: 1,
+    phase: "prompt",
+    step: 10,
+    instance: "pii-filter",
+    type: "",
+    action: "warn",
+    code: "pii",
+    message: "found an email",
+    detail: null,
+    error: "",
+    failMode: "",
+    edited: false,
+    target: "",
+    replacedEvents: null,
+    droppedEvents: null,
+    durationNs: null,
+  });
+  // An edit without a target names the phase's own subject.
+  assert.equal(outcomes[1].type, "string_replace");
+  assert.equal(outcomes[1].edited, true);
+  assert.equal(outcomes[1].target, "response");
+  assert.equal(outcomes[1].replacedEvents, 3);
+  assert.equal(outcomes[1].durationNs, 1500000);
+  assert.equal(outcomes[2].failMode, "open");
+  assert.equal(outcomes[2].error, "timeout");
+  assert.deepEqual(outcomes[2].detail, { retries: 2 });
+  // fail_mode only means something on a failure.
+  assert.equal(
+    workflowEntryGuardrails(guardedEntry([{ instance: "x", action: "allow", fail_mode: "closed" }]))[0].failMode,
+    "",
+  );
+  assert.deepEqual(workflowEntryGuardrails(null), []);
+  assert.deepEqual(workflowEntryGuardrails({ data: { guardrails: "nope" } }), []);
+});
+
+test("workflowEntryGuardrails rebuilds outcomes from the legacy revision trail", () => {
+  const entry = {
+    status_code: 403,
+    data: {
+      request_revisions: [
+        { seq: 1, rewriter: "compress", bytes_before: 100, bytes_after: 80, body: {} },
+        {
+          seq: 2,
+          rewriter: "pii-filter",
+          bytes_before: 80,
+          bytes_after: 80,
+          no_change: true,
+          detail: { phase: "prompt", action: "allow", code: "", message: "" },
+        },
+        {
+          seq: 3,
+          rewriter: "inject, rewrite",
+          bytes_before: 80,
+          bytes_after: 90,
+          detail: { phase: "prompt", edited: ["inject", "rewrite"] },
+        },
+        {
+          seq: 4,
+          rewriter: "policy",
+          bytes_before: 90,
+          bytes_after: 90,
+          no_change: true,
+          detail: { phase: "prompt", action: "block", code: "content_policy", message: "not allowed" },
+        },
+        {
+          seq: 5,
+          rewriter: "flaky",
+          bytes_before: 90,
+          bytes_after: 90,
+          no_change: true,
+          detail: { phase: "prompt", action: "allow", error: "boom" },
+        },
+      ],
+    },
+  };
+  const outcomes = workflowEntryGuardrails(entry);
+  assert.deepEqual(
+    outcomes.map((o) => [o.seq, o.instance, o.action, o.edited, o.target]),
+    [
+      [1, "pii-filter", "allow", false, ""],
+      [2, "inject", "allow", true, "request"],
+      [3, "rewrite", "allow", true, "request"],
+      [4, "policy", "block", false, ""],
+      [5, "flaky", "failure", false, ""],
+    ],
+  );
+  assert.equal(outcomes[3].code, "content_policy");
+  assert.equal(outcomes[3].message, "not allowed");
+  assert.equal(outcomes[4].error, "boom");
+  assert.equal(outcomes[4].failMode, "");
+
+  // A step-level edit revision marks its instance as edited in place.
+  const stepEdit = workflowEntryGuardrails({
+    data: {
+      request_revisions: [
+        { seq: 1, rewriter: "rewrite", bytes_before: 10, bytes_after: 12, detail: { phase: "prompt", action: "allow" } },
+      ],
+    },
+  });
+  assert.deepEqual(stepEdit.map((o) => [o.instance, o.edited]), [["rewrite", true]]);
+
+  // data.guardrails wins over the legacy trail when present.
+  assert.deepEqual(
+    workflowEntryGuardrails({
+      data: {
+        guardrails: [{ instance: "new", action: "allow" }],
+        request_revisions: entry.data.request_revisions,
+      },
+    }).map((o) => o.instance),
+    ["new"],
+  );
+});
+
+test("guardrail labels carry the code only for a stop", () => {
+  assert.equal(workflowGuardrailActionLabel({ action: "block" }), "Blocked");
+  assert.equal(workflowGuardrailOutcomeLabel({ action: "block", code: "content_policy" }), "Blocked · content_policy");
+  assert.equal(workflowGuardrailOutcomeLabel({ action: "respond", code: "canned" }), "Answered · canned");
+  assert.equal(workflowGuardrailOutcomeLabel({ action: "warn", code: "pii" }), "Warned");
+  assert.equal(workflowGuardrailOutcomeLabel({ action: "failure", code: "x" }), "Failed");
+  assert.equal(workflowGuardrailOutcomeLabel({ action: "allow", edited: true }), "Edited");
+  assert.equal(workflowGuardrailOutcomeLabel({ action: "allow" }), "Passed");
+  assert.equal(workflowGuardrailOutcomeLabel({ action: "skipped" }), "Skipped");
+});
+
+test("a prompt block colors the node red, skips the model and keeps the response status", () => {
+  const chart = workflowAuditChart(
+    guardedEntry(
+      [
+        { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow", edited: true },
+        { seq: 2, phase: "prompt", step: 20, instance: "policy", action: "block", code: "content_policy", message: "no" },
+      ],
+      { status_code: 403 },
+    ),
+    GUARDED_SOURCE,
+    ALL_CAPS,
+  );
+  assert.equal(chart.guardrailNodeClass, "workflow-node-error");
+  assert.equal(chart.guardrailStatusLabel, "Blocked · content_policy");
+  assert.equal(chart.aiNodeClass, "workflow-node-skipped");
+  assert.equal(chart.aiConnClass, "workflow-conn-dim");
+  assert.equal(chart.responseConnClass, "workflow-conn-dim");
+  assert.equal(chart.responseNodeClass, "workflow-node-warning");
+  assert.equal(chart.responseNodeSublabel, "403");
+  assert.equal(chart.responseNodeBadge, null);
+  // The later phases never ran: skipped, with their refs skipped too.
+  assert.equal(chart.responseGuardrailNodeClass, "workflow-node-skipped");
+  assert.equal(chart.responseGuardrailStatusLabel, "Skipped");
+  assert.equal(chart.streamGuardrailNodeClass, "workflow-node-skipped");
+  assert.deepEqual(chart.guardrailFlows.response, [
+    { step: 10, refs: ["scan"], mutator: null, outcomes: { scan: SKIPPED_OUTCOME } },
+  ]);
+  // The prompt flow carries each ref's outcome and the edited marker.
+  const prompt = chart.guardrailFlows.prompt;
+  assert.deepEqual(prompt.map((stage) => stage.refs), [["pii-filter"], ["policy"]]);
+  assert.equal(prompt[0].outcomes["pii-filter"].tone, "success");
+  assert.equal(prompt[0].outcomes["pii-filter"].edited, true);
+  assert.equal(prompt[0].outcomes["pii-filter"].title, "Edited");
+  assert.deepEqual(prompt[1].outcomes.policy, {
+    action: "block",
+    code: "content_policy",
+    message: "no",
+    edited: false,
+    error: "",
+    failMode: "",
+    durationNs: null,
+    replacedEvents: null,
+    droppedEvents: null,
+    tone: "danger",
+    title: "Blocked · content_policy\nno",
+  });
+
+  const runtime = workflowRuntimeFromEntry(guardedEntry(
+    [{ seq: 1, phase: "prompt", instance: "policy", action: "block" }],
+    { status_code: 403 },
+  ), GUARDED_SOURCE);
+  assert.equal(runtime.guardrailBlocked, true);
+  assert.equal(runtime.guardrailAnswered, false);
+  assert.equal(runtime.aiSuccess, false);
+});
+
+test("a prompt respond marks the response as answered by the guardrail", () => {
+  const chart = workflowAuditChart(
+    guardedEntry([
+      { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow" },
+      { seq: 2, phase: "prompt", step: 20, instance: "policy", action: "respond", code: "canned" },
+    ]),
+    GUARDED_SOURCE,
+    ALL_CAPS,
+  );
+  assert.equal(chart.guardrailNodeClass, "workflow-node-error");
+  assert.equal(chart.guardrailStatusLabel, "Answered · canned");
+  assert.equal(chart.aiNodeClass, "workflow-node-skipped");
+  assert.equal(chart.responseNodeClass, "workflow-node-success");
+  assert.equal(chart.responseNodeBadge, "Answered by guardrail");
+  const runtime = workflowRuntimeFromEntry(
+    guardedEntry([{ seq: 1, phase: "prompt", instance: "policy", action: "respond" }]),
+    GUARDED_SOURCE,
+  );
+  assert.equal(runtime.guardrailBlocked, true);
+  assert.equal(runtime.guardrailAnswered, true);
+});
+
+test("guardrail phase rollups rank failures by fail mode and warnings over passes", () => {
+  const rollup = (outcomes) => {
+    const chart = workflowAuditChart(guardedEntry(outcomes), GUARDED_SOURCE, ALL_CAPS);
+    return [chart.guardrailNodeClass, chart.guardrailStatusLabel];
+  };
+  assert.deepEqual(
+    rollup([
+      { phase: "prompt", instance: "pii-filter", action: "allow" },
+      { phase: "prompt", instance: "policy", action: "allow" },
+    ]),
+    ["workflow-node-success", "Passed"],
+  );
+  assert.deepEqual(
+    rollup([
+      { phase: "prompt", instance: "pii-filter", action: "allow", edited: true },
+      { phase: "prompt", instance: "policy", action: "allow" },
+    ]),
+    ["workflow-node-success", "Edited"],
+  );
+  assert.deepEqual(
+    rollup([
+      { phase: "prompt", instance: "pii-filter", action: "warn", code: "pii" },
+      { phase: "prompt", instance: "policy", action: "allow", edited: true },
+    ]),
+    ["workflow-node-warning", "Warned"],
+  );
+  assert.deepEqual(
+    rollup([
+      { phase: "prompt", instance: "pii-filter", action: "failure", fail_mode: "open", error: "timeout" },
+      { phase: "prompt", instance: "policy", action: "allow" },
+    ]),
+    ["workflow-node-warning", "Failed"],
+  );
+  assert.deepEqual(
+    rollup([{ phase: "prompt", instance: "pii-filter", action: "failure", fail_mode: "closed", error: "boom" }]),
+    ["workflow-node-error", "Failed"],
+  );
+  // The worst outcome names the label, whatever its position.
+  assert.deepEqual(
+    rollup([
+      { phase: "prompt", instance: "pii-filter", action: "warn" },
+      { phase: "prompt", instance: "policy", action: "block", code: "x" },
+    ]),
+    ["workflow-node-error", "Blocked · x"],
+  );
+
+  // A fail-open failure keeps the model call: the AI node stays green.
+  const open = workflowAuditChart(
+    guardedEntry([{ phase: "prompt", instance: "pii-filter", action: "failure", fail_mode: "open" }]),
+    GUARDED_SOURCE,
+    ALL_CAPS,
+  );
+  assert.equal(open.aiNodeClass, "workflow-node-success");
+  assert.equal(workflowRuntimeFromEntry(guardedEntry(
+    [{ phase: "prompt", instance: "pii-filter", action: "failure", fail_mode: "open" }],
+  ), GUARDED_SOURCE).guardrailBlocked, false);
+  // A fail-closed one did not.
+  assert.equal(workflowRuntimeFromEntry(guardedEntry(
+    [{ phase: "prompt", instance: "pii-filter", action: "failure", fail_mode: "closed" }],
+    { status_code: 502 },
+  ), GUARDED_SOURCE).guardrailBlocked, true);
+});
+
+test("a response-phase block leaves the AI node green and colors the response node by status", () => {
+  const chart = workflowAuditChart(
+    guardedEntry(
+      [
+        { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "allow" },
+        { seq: 2, phase: "prompt", step: 20, instance: "policy", action: "allow" },
+        { seq: 3, phase: "response", step: 10, instance: "scan", action: "block", code: "leak" },
+      ],
+      { status_code: 403 },
+    ),
+    GUARDED_SOURCE,
+    ALL_CAPS,
+  );
+  assert.equal(chart.guardrailNodeClass, "workflow-node-success");
+  assert.equal(chart.guardrailStatusLabel, "Passed");
+  assert.equal(chart.aiNodeClass, "workflow-node-success");
+  assert.equal(chart.aiConnClass, "");
+  assert.equal(chart.responseGuardrailNodeClass, "workflow-node-error");
+  assert.equal(chart.responseGuardrailStatusLabel, "Blocked · leak");
+  assert.equal(chart.streamGuardrailNodeClass, "workflow-node-skipped");
+  assert.equal(chart.responseNodeClass, "workflow-node-warning");
+  assert.equal(chart.responseNodeBadge, null);
+});
+
+test("guardrail phases without outcomes are skipped only once the entry finished", () => {
+  // Live, still running: nothing is known yet.
+  const running = workflowAuditChart(
+    { ...guardedEntry([]), status_code: null, _live: true, _live_pending: true, _live_state: "audit.started" },
+    GUARDED_SOURCE,
+    ALL_CAPS,
+  );
+  assert.equal(running.guardrailNodeClass, "");
+  assert.equal(running.guardrailStatusLabel, null);
+  assert.equal(running.responseGuardrailNodeClass, "");
+  assert.deepEqual(running.guardrailFlows.prompt, [
+    { step: 10, refs: ["pii-filter"], mutator: null, outcomes: {} },
+    { step: 20, refs: ["policy"], mutator: null, outcomes: {} },
+  ]);
+  // A finished entry with a passed prompt phase but no later outcomes (the
+  // stream phase does not run for a non-streaming call, say).
+  const finished = workflowAuditChart(
+    guardedEntry([
+      { phase: "prompt", instance: "pii-filter", action: "allow" },
+      { phase: "prompt", instance: "policy", action: "allow" },
+      { phase: "response", instance: "scan", action: "allow" },
+    ]),
+    GUARDED_SOURCE,
+    ALL_CAPS,
+  );
+  assert.equal(finished.guardrailNodeClass, "workflow-node-success");
+  assert.equal(finished.responseGuardrailNodeClass, "workflow-node-success");
+  assert.equal(finished.streamGuardrailNodeClass, "workflow-node-skipped");
+  assert.equal(finished.streamGuardrailStatusLabel, "Skipped");
+  // A configured ref the phase never reached is skipped inside a phase that ran.
+  const partial = workflowAuditChart(
+    guardedEntry([{ phase: "prompt", step: 10, instance: "pii-filter", action: "block" }], { status_code: 403 }),
+    GUARDED_SOURCE,
+    ALL_CAPS,
+  );
+  assert.equal(partial.guardrailFlows.prompt[0].outcomes["pii-filter"].tone, "danger");
+  assert.deepEqual(partial.guardrailFlows.prompt[1].outcomes, { policy: SKIPPED_OUTCOME });
+  // Configuration charts carry no outcomes at all.
+  const config = workflowChart(GUARDED_SOURCE, ALL_CAPS);
+  assert.equal(config.guardrailNodeClass, "");
+  assert.equal(config.guardrailStatusLabel, null);
+  assert.equal(config.responseNodeBadge, null);
+  assert.deepEqual(config.guardrailFlows.prompt, [
+    { step: 10, refs: ["pii-filter"], mutator: null },
+    { step: 20, refs: ["policy"], mutator: null },
+  ]);
+});
+
+test("recorded outcomes show guardrail nodes even when the workflow version is unresolved", () => {
+  const chart = workflowAuditChart(
+    {
+      workflow_version_id: "gone",
+      provider: "openai",
+      model: "gpt-5",
+      status_code: 200,
+      data: {
+        workflow_features: { guardrails: false, audit: true, usage: true },
+        guardrails: [
+          { seq: 1, phase: "prompt", step: 10, instance: "pii-filter", action: "warn", code: "pii" },
+          { seq: 2, phase: "stream", step: 5, instance: "redact", action: "allow", edited: true, replaced_events: 2 },
+        ],
+      },
+    },
+    null,
+    ALL_CAPS,
+  );
+  assert.equal(chart.showGuardrails, true);
+  assert.equal(chart.guardrailNodeClass, "workflow-node-warning");
+  assert.equal(chart.guardrailStatusLabel, "Warned");
+  assert.equal(chart.showResponseGuardrails, false);
+  assert.equal(chart.showStreamGuardrails, true);
+  assert.equal(chart.streamGuardrailNodeClass, "workflow-node-success");
+  assert.equal(chart.streamGuardrailStatusLabel, "Edited");
+  // Unconfigured instances get a stage each so the flow still opens.
+  assert.deepEqual(chart.guardrailFlows.prompt.map((s) => [s.step, s.refs]), [[10, ["pii-filter"]]]);
+  assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.replacedEvents, 2);
+  assert.equal(chart.guardrailFlows.stream[0].outcomes.redact.tone, "success");
 });

@@ -2,10 +2,12 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -63,15 +65,52 @@ func PromptEditCaptureEnabled(ctx context.Context) bool {
 type DecisionRecord struct {
 	Phase    pluginapi.Kind
 	Instance string
+	// Type is the plugin type of the instance, when known.
+	Type string
+	// Step is the chain step the instance ran in, when known.
+	Step     int
 	Decision pluginapi.Decision
+	Duration time.Duration
 	Err      error
+	// FailedClosed reports that Err ended the request; a failure without it
+	// was a fail-open one and the chain carried on.
+	FailedClosed bool
 	// Edited reports that the instance's step changed the request or
 	// response.
 	Edited bool
+	// Replaced and Dropped count the stream events an in-flight stream
+	// instance rewrote or withheld.
+	Replaced int
+	Dropped  int
 	// BytesBefore and BytesAfter are the encoded request sizes around the
 	// edit, when known.
 	BytesBefore int
 	BytesAfter  int
+}
+
+// DecisionRecordsOf converts one chain run's records into decision records
+// of phase, marking the instance whose failure ended the run (runErr, when a
+// *PluginError) as failed closed.
+func DecisionRecordsOf(phase pluginapi.Kind, outcome Outcome, runErr error) []DecisionRecord {
+	var failedClosed string
+	if pluginErr, ok := errors.AsType[*PluginError](runErr); ok {
+		failedClosed = pluginErr.Instance
+	}
+	records := make([]DecisionRecord, 0, len(outcome.Records))
+	for _, record := range outcome.Records {
+		records = append(records, DecisionRecord{
+			Phase:        phase,
+			Instance:     record.Instance,
+			Type:         record.Type,
+			Step:         record.Step,
+			Decision:     record.Decision,
+			Duration:     record.Duration,
+			Err:          record.Err,
+			FailedClosed: record.Err != nil && record.Instance == failedClosed,
+			Edited:       record.Edited,
+		})
+	}
+	return records
 }
 
 type requestStateKey struct{}

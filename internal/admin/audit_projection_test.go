@@ -44,6 +44,9 @@ func fullAuditEntry(id string) auditlog.LogEntry {
 				},
 				{Seq: 2, Kind: "provider", ProviderName: "primary-openai", StatusCode: 200, Success: true},
 			},
+			Guardrails: []auditlog.GuardrailOutcomeSnapshot{
+				{Seq: 1, Phase: "prompt", Instance: "check", Action: "warn", Code: "pii", Detail: map[string]any{"hits": float64(2)}},
+			},
 			RequestRevisions: []auditlog.RequestRevisionSnapshot{
 				{
 					Seq:         1,
@@ -116,6 +119,12 @@ func TestAuditLogSlimsListEntries(t *testing.T) {
 	}
 	if rev.TokensSaved != 250 || rev.BytesBefore != 2000 || rev.Detail == nil {
 		t.Errorf("revision metadata must survive, got %+v", rev)
+	}
+	if len(d.Guardrails) != 1 || d.Guardrails[0].Action != "warn" || d.Guardrails[0].Code != "pii" {
+		t.Fatalf("guardrail outcomes must survive, got %+v", d.Guardrails)
+	}
+	if d.Guardrails[0].Detail != nil {
+		t.Error("guardrail outcome detail must be stripped")
 	}
 	if d.ErrorMessage != "boom" || d.RequestHeaders == nil || d.ResponseHeaders == nil {
 		t.Error("small fields must survive slimming")

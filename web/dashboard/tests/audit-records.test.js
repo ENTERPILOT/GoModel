@@ -93,3 +93,37 @@ test("slim revision metadata cannot erase loaded rewrite bodies", () => {
   assert.deepEqual(merged.data.request_revisions[0].detail, { blocks: 3 });
   assert.equal(merged.data.request_revisions[1].no_change, true);
 });
+
+test("slim guardrail outcomes cannot erase loaded plugin detail", () => {
+  const detailed = mergeAuditRecord(null, {
+    id: "audit-12",
+    data: {
+      guardrails: [
+        { seq: 1, phase: "prompt", instance: "pii", action: "allow", detail: { hits: 2 } },
+        { seq: 2, phase: "prompt", instance: "policy", action: "block", code: "x", detail: { rule: "r1" } },
+      ],
+    },
+  });
+
+  // A later list refresh ships outcomes without detail; a live event may
+  // even ship fewer of them.
+  const merged = mergeAuditRecord(detailed, {
+    id: "audit-12",
+    data: {
+      guardrails: [
+        { seq: 1, phase: "prompt", instance: "pii", action: "allow" },
+        { seq: 2, phase: "prompt", instance: "policy", action: "block", code: "x", message: "late" },
+        { seq: 3, phase: "response", instance: "scan", action: "allow" },
+      ],
+    },
+  });
+  assert.equal(merged.data.guardrails.length, 3);
+  assert.deepEqual(merged.data.guardrails[0].detail, { hits: 2 });
+  assert.deepEqual(merged.data.guardrails[1].detail, { rule: "r1" });
+  assert.equal(merged.data.guardrails[1].message, "late");
+  assert.equal(merged.data.guardrails[2].detail, undefined);
+
+  // A patch without outcomes keeps the ones already held.
+  const kept = mergeAuditRecord(detailed, { id: "audit-12", data: { response_body: {} } });
+  assert.equal(kept.data.guardrails.length, 2);
+});
