@@ -126,4 +126,18 @@ test("slim guardrail outcomes cannot erase loaded plugin detail", () => {
   // A patch without outcomes keeps the ones already held.
   const kept = mergeAuditRecord(detailed, { id: "audit-12", data: { response_body: {} } });
   assert.equal(kept.data.guardrails.length, 2);
+
+  // A live event carrying fewer outcomes than held updates the ones it has
+  // and keeps the rest.
+  const partial = mergeAuditRecord(merged, {
+    id: "audit-12",
+    data: { guardrails: [{ seq: 2, phase: "prompt", instance: "policy", action: "block", code: "y" }] },
+  });
+  assert.deepEqual(
+    partial.data.guardrails.map((outcome) => outcome.seq),
+    [1, 2, 3],
+  );
+  assert.equal(partial.data.guardrails[1].code, "y");
+  assert.deepEqual(partial.data.guardrails[1].detail, { rule: "r1" });
+  assert.deepEqual(partial.data.guardrails[0].detail, { hits: 2 });
 });

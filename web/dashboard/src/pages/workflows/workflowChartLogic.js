@@ -87,8 +87,11 @@ function workflowRuntimeGuardrailFlow(source, phase, guardrailRefs, outcomes, fi
   for (const outcome of outcomes) {
     if (seen.has(outcome.instance)) continue;
     seen.add(outcome.instance);
+    // Keyed by instance in the chart: its step may collide with a
+    // configured stage's.
     flow.push({
       step: outcome.step === null ? outcome.seq : outcome.step,
+      id: "outcome-" + outcome.instance,
       refs: [outcome.instance],
       mutator: null,
       outcomes: { [outcome.instance]: workflowFlowOutcome(outcome) },

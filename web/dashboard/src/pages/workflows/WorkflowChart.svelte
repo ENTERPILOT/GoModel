@@ -231,7 +231,7 @@
         </span>
       </div>
       <ol class="workflow-guardrail-flow-row">
-        {#each openFlow as stage, index (openPhase + "-" + stage.step)}
+        {#each openFlow as stage, index (openPhase + "-" + (stage.id || "step-" + stage.step))}
           {#if index > 0}
             <li class="workflow-conn workflow-flow-conn" aria-hidden="true"></li>
           {/if}

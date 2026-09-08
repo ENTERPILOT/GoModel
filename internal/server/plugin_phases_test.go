@@ -109,6 +109,10 @@ func (p *phasePlugin) StreamPolicy() pluginapi.StreamPolicy {
 
 func (p *phasePlugin) OnStreamEvent(_ context.Context, _ *pluginapi.Exchange, ev *pluginapi.StreamEvent) (pluginapi.StreamDecision, error) {
 	switch p.stream {
+	case "fail_event":
+		if ev.Kind == pluginapi.EventTextDelta {
+			return pluginapi.StreamDecision{}, errors.New("event hook failed")
+		}
 	case "replace":
 		if ev.Kind == pluginapi.EventTextDelta {
 			return pluginapi.Replace(strings.ReplaceAll(ev.Text, "secret", p.text)), nil

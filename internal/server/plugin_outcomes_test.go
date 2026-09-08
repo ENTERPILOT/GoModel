@@ -118,6 +118,24 @@ func TestChatCompletion_GuardrailOutcomes(t *testing.T) {
 			want: []want{{phase: "stream", instance: "phase", action: "allow", edited: true, target: "response"}}},
 		{name: "response block on a stream", body: chatStreamBody, wantStatus: 200,
 			want: []want{{phase: "response", instance: "phase", action: "block", code: "policy"}}},
+		{name: "stream event fail open", body: chatStreamBody, wantStatus: 200,
+			definitions: []outcomeDefinition{{name: "phase", cfg: map[string]string{"stream": "fail_event"}, failMode: "open"}},
+			steps:       []guardrails.StepReference{{Ref: "phase", Phase: pluginapi.KindStream, Step: 1}},
+			want:        []want{{phase: "stream", instance: "phase", action: "failure", failMode: "open"}}},
+		{name: "stream event fail closed", body: chatStreamBody, wantStatus: 200,
+			definitions: []outcomeDefinition{{name: "phase", cfg: map[string]string{"stream": "fail_event"}}},
+			steps:       []guardrails.StepReference{{Ref: "phase", Phase: pluginapi.KindStream, Step: 1}},
+			want:        []want{{phase: "stream", instance: "phase", action: "failure", failMode: "closed"}}},
+		{name: "instance in both response and buffered stream phases", body: chatStreamBody, wantStatus: 200,
+			definitions: []outcomeDefinition{{name: "phase", cfg: map[string]string{"stream": "buffer", "response": "edit", "text": "assembled"}}},
+			steps: []guardrails.StepReference{
+				{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1},
+				{Ref: "phase", Phase: pluginapi.KindStream, Step: 1},
+			},
+			want: []want{
+				{phase: "response", instance: "phase", action: "allow", edited: true, target: "response"},
+				{phase: "stream", instance: "phase", action: "allow", edited: true, target: "response"},
+			}},
 		{name: "prompt then response", body: chatBody, wantStatus: 200,
 			definitions: []outcomeDefinition{
 				{name: "check", cfg: map[string]string{"prompt": "warn"}},
@@ -188,6 +206,9 @@ func TestChatCompletion_GuardrailOutcomes(t *testing.T) {
 				}
 				if want.replaced != (got.ReplacedEvents > 0) {
 					t.Errorf("outcome %d = %+v, want replaced events %v", i, got, want.replaced)
+				}
+				if got.Phase == "stream" && got.DurationNs == 0 {
+					t.Errorf("outcome %d = %+v, want the stream hooks' time", i, got)
 				}
 			}
 		})

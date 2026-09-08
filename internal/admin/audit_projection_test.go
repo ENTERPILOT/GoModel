@@ -235,8 +235,8 @@ func TestAuditConversationSlimsEntries(t *testing.T) {
 	if d.ErrorMessage != "boom" {
 		t.Error("error_message feeds the drawer's error rendering; it must survive")
 	}
-	if d.Attempts != nil || d.ResponseHeaders != nil {
-		t.Errorf("attempts/response headers must be stripped from conversation entries, got %+v", d)
+	if d.Attempts != nil || d.ResponseHeaders != nil || d.Guardrails != nil {
+		t.Errorf("attempts/response headers/guardrail outcomes must be stripped from conversation entries, got %+v", d)
 	}
 	if len(d.RequestRevisions) != 1 {
 		t.Fatalf("revision metadata feeds the drawer's request-step picker; it must survive, got %+v", d.RequestRevisions)

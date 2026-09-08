@@ -95,22 +95,31 @@ function mergedRequestRevisions(currentRevisions, patchRevisions) {
 }
 
 // Guardrail outcomes carry their plugin detail only on the detail endpoint;
-// list rows and live events ship them without it. Merge per seq so a later
-// slim projection keeps the detail already loaded.
+// list rows and live events ship them without it, and a live event may ship
+// fewer of them than already held. Merge per seq: the patch updates what it
+// carries, keeps the detail already loaded, and never drops an outcome the
+// record already has.
 function mergedGuardrails(currentOutcomes, patchOutcomes) {
   if (!Array.isArray(currentOutcomes) || !Array.isArray(patchOutcomes)) {
     return null;
   }
-  return patchOutcomes.map((outcome) => {
-    const seq = Number(outcome && outcome.seq || 0);
-    const previous = currentOutcomes.find(
-      (candidate) => Number(candidate && candidate.seq || 0) === seq,
-    );
-    if (!previous || !plainObject(outcome) || outcome.detail != null || previous.detail == null) {
-      return outcome;
+  const seqOf = (outcome) => Number((outcome && outcome.seq) || 0);
+  const merged = new Map();
+  for (const outcome of currentOutcomes) {
+    merged.set(seqOf(outcome), outcome);
+  }
+  for (const outcome of patchOutcomes) {
+    const seq = seqOf(outcome);
+    const previous = merged.get(seq);
+    if (previous && plainObject(outcome) && outcome.detail == null && previous.detail != null) {
+      merged.set(seq, { ...outcome, detail: previous.detail });
+    } else {
+      merged.set(seq, outcome);
     }
-    return { ...outcome, detail: previous.detail };
-  });
+  }
+  return Array.from(merged.keys())
+    .sort((a, b) => a - b)
+    .map((seq) => merged.get(seq));
 }
 
 function plainObject(value) {
