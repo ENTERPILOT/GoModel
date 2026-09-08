@@ -723,12 +723,17 @@ test("rate-limit deletes route through the typed confirmation dialog", () => {
     /async deleteRateLimit\(item\) \{[\s\S]*?\n  \}/,
   );
   assert.ok(deleteRateLimit, "deleteRateLimit method missing");
-  assert.match(deleteRateLimit[0], /confirmDialog\.error = outcome\.error;/);
-  assert.match(deleteRateLimit[0], /confirmDialog\.close\(\);/);
+  // The failure branch must be guarded by the non-ok status, assign the
+  // dialog error, and return; the close belongs to the success path after
+  // that branch, not inside it.
+  const failureBranch = deleteRateLimit[0].match(
+    /if \(outcome\.status !== "ok"\) \{[\s\S]*?confirmDialog\.error = outcome\.error;[\s\S]*?return;[\s\S]*?\n    \}/,
+  );
+  assert.ok(failureBranch, "deleteRateLimit failure branch missing");
   assert.ok(
-    deleteRateLimit[0].indexOf("confirmDialog.error = outcome.error;") <
+    deleteRateLimit[0].indexOf(failureBranch[0]) <
       deleteRateLimit[0].indexOf("confirmDialog.close();"),
-    "the failure branch must come before the success close",
+    "confirmDialog.close() must run after the failure branch",
   );
   // The list button opens the confirmation; no path deletes outright.
   assert.match(listSource, /onclick=\{\(\) => rateLimits\.requestDeleteRateLimit\(item\)\}/);
