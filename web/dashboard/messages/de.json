@@ -1075,6 +1075,8 @@
   "users_filter_placeholder": "Nach Pfad, Beschreibung oder Modell filtern…",
   "users_filter_label": "Nutzer nach Pfad, Beschreibung oder Modell filtern",
   "users_no_match": "Keine Nutzer entsprechen dem aktuellen Filter.",
+  "users_show_inactive": "Inaktive anzeigen",
+  "users_hidden": "{count} inaktive Nutzer sind ausgeblendet.",
   "users_empty": "Noch keine Nutzer. Verknüpfe einen Nutzerpfad mit einem API-Schlüssel oder füge eine Gruppe hinzu.",
   "users_column_path": "Gruppe / Nutzer",
   "users_column_allowed_models": "Erlaubte Modelle",

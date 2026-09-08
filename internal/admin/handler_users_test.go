@@ -166,6 +166,40 @@ func TestUsersTreeDerivesFromPoliciesAndKeys(t *testing.T) {
 	}
 }
 
+func TestUsersTreeCountsActiveKeys(t *testing.T) {
+	now := time.Now().UTC()
+	expired := now.Add(-time.Hour)
+	deactivated := now.Add(-2 * time.Hour)
+	h := newUsersHandler(t,
+		authkeys.AuthKey{ID: "live", Name: "live", UserPath: "/acme/live", SecretHash: "h1", Enabled: true, CreatedAt: now, UpdatedAt: now},
+		authkeys.AuthKey{ID: "dead", Name: "dead", UserPath: "/acme/dead", SecretHash: "h2", Enabled: true, DeactivatedAt: &deactivated, CreatedAt: now, UpdatedAt: now},
+		authkeys.AuthKey{ID: "stale", Name: "stale", UserPath: "/acme/stale", SecretHash: "h3", Enabled: true, ExpiresAt: &expired, CreatedAt: now, UpdatedAt: now},
+	)
+
+	c, rec := jsonRequest(http.MethodGet, "/admin/users", "")
+	if err := h.ListUsers(c); err != nil {
+		t.Fatalf("ListUsers error = %v", err)
+	}
+	nodes := decodeUsers(t, rec)
+
+	for path, want := range map[string][2]int{
+		"/acme/live":  {1, 1},
+		"/acme/dead":  {1, 0},
+		"/acme/stale": {1, 0},
+	} {
+		node, ok := nodes[path]
+		if !ok {
+			t.Fatalf("node %s missing from %v", path, nodes)
+		}
+		if node.KeyCount != want[0] || node.ActiveKeyCount != want[1] {
+			t.Fatalf("%s key_count = %d, active_key_count = %d, want %v", path, node.KeyCount, node.ActiveKeyCount, want)
+		}
+	}
+	if nodes["/"].KeyCount != 0 || nodes["/"].ActiveKeyCount != 0 {
+		t.Fatalf("/ key counts = %d/%d, want 0/0", nodes["/"].KeyCount, nodes["/"].ActiveKeyCount)
+	}
+}
+
 func TestUsersTreeReportsEffectiveModels(t *testing.T) {
 	ctx := context.Background()
 	registry := newVMModelRegistry(t) // openai/gpt-4o only

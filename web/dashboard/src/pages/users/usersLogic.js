@@ -113,21 +113,42 @@ export function userSelectorOptions(models) {
   return modelSelectorOptions(models, (name) => m.model_selectors_provider_all({ name }));
 }
 
+// userNodeInactive reports whether every key bound to a node is inactive
+// (deactivated or expired). Nodes without keys are never inactive: they are
+// groups or configured policy rows and must stay visible.
+export function userNodeInactive(node) {
+  if (!node) {
+    return false;
+  }
+  return (node.key_count || 0) > 0 && (node.active_key_count || 0) === 0;
+}
+
 // filterUserNodes applies the toolbar query against the path, description,
-// and selectors.
-export function filterUserNodes(nodes, query) {
+// and selectors, and hides nodes whose keys are all inactive unless
+// `showInactive` is set.
+export function filterUserNodes(nodes, query, options = {}) {
+  const { showInactive = false } = options;
   const needle = String(query || "").trim().toLowerCase();
   const list = Array.isArray(nodes) ? nodes : [];
-  if (!needle) {
-    return list;
-  }
-  return list.filter((node) =>
-    [node.user_path, node.description, ...(node.allowed_models || [])]
+  return list.filter((node) => {
+    if (!showInactive && userNodeInactive(node)) {
+      return false;
+    }
+    if (!needle) {
+      return true;
+    }
+    return [node.user_path, node.description, ...(node.allowed_models || [])]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
-      .includes(needle),
-  );
+      .includes(needle);
+  });
+}
+
+// countInactiveUserNodes counts the nodes hidden by the default view.
+export function countInactiveUserNodes(nodes) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  return list.reduce((total, node) => total + (userNodeInactive(node) ? 1 : 0), 0);
 }
 
 // sortUserNodes orders the tree depth-first by path so a group is followed

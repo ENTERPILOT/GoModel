@@ -1075,6 +1075,8 @@
   "users_filter_placeholder": "Filter by path, description, or model...",
   "users_filter_label": "Filter users by path, description, or model",
   "users_no_match": "No users match the current filter.",
+  "users_show_inactive": "Show inactive",
+  "users_hidden": "{count} inactive users are hidden.",
   "users_empty": "No users yet. Bind a user path to an API key or add a group to get started.",
   "users_column_path": "Group / User",
   "users_column_allowed_models": "Allowed models",

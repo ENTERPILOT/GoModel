@@ -69,6 +69,15 @@
           bind:value={store.filter}
         />
       </div>
+      <div class="table-toolbar-actions">
+        <label class="users-inactive-toggle">
+          <input type="checkbox" bind:checked={store.showInactive} />
+          <span>
+            {m.users_show_inactive()}
+            {#if store.inactiveCount > 0}({store.inactiveCount}){/if}
+          </span>
+        </label>
+      </div>
     </div>
   {/if}
 
@@ -77,10 +86,35 @@
   {/if}
 
   {#if store.nodes.length > 0 && store.visibleNodes.length === 0 && store.available}
-    <p class="empty-state">{m.users_no_match()}</p>
+    <p class="empty-state">
+      {m.users_no_match()}{store.inactiveCount > 0 && !store.showInactive
+        ? " " + m.users_hidden({ count: store.inactiveCount })
+        : ""}
+    </p>
   {/if}
 
   {#if store.nodes.length === 0 && !store.loading && !auth.authError && !store.error && store.available}
     <p class="empty-state">{m.users_empty()}</p>
   {/if}
 </div>
+
+<style>
+/* --- Users page --- */
+.users-inactive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.users-inactive-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+</style>

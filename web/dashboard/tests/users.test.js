@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   buildUpsertUserPayload,
+  countInactiveUserNodes,
   defaultUserForm,
   filterUserNodes,
   parentEffectiveModels,
   previewEffectiveModels,
   selectorMatchesModel,
   sortUserNodes,
+  userNodeInactive,
   userNodeKind,
   userNodeRestricted,
   userPathDepth,
@@ -29,6 +31,7 @@ function node(overrides) {
     inherited_from: [],
     configured: false,
     key_count: 0,
+    active_key_count: 0,
     ...overrides,
   };
 }
@@ -96,6 +99,48 @@ test("filterUserNodes matches path, description, and selectors; sortUserNodes or
   assert.equal(filterUserNodes(nodes, "anthropic").length, 1);
   assert.equal(filterUserNodes(nodes, "acme").length, 2);
   assert.equal(filterUserNodes(nodes, "").length, 3);
+});
+
+test("userNodeInactive is true only when a node has keys and none are active", () => {
+  assert.equal(userNodeInactive(node({ key_count: 2, active_key_count: 1 })), false);
+  assert.equal(userNodeInactive(node({ key_count: 2, active_key_count: 0 })), true);
+  assert.equal(userNodeInactive(node({ key_count: 1 })), true);
+  // Zero-key nodes are groups or configured policies and never hide.
+  assert.equal(userNodeInactive(node({ key_count: 0 })), false);
+  assert.equal(userNodeInactive(null), false);
+});
+
+test("filterUserNodes hides all-inactive-key users unless showInactive; groups stay visible", () => {
+  const nodes = [
+    node({ user_path: "/friends", key_count: 0 }),
+    node({ user_path: "/friends/tom", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/friends/anna", key_count: 1, active_key_count: 1 }),
+    node({ user_path: "/policies", configured: true }),
+  ];
+  assert.deepEqual(
+    filterUserNodes(nodes, "").map((n) => n.user_path),
+    ["/friends", "/friends/anna", "/policies"],
+  );
+  assert.deepEqual(
+    filterUserNodes(nodes, "", { showInactive: true }).map((n) => n.user_path),
+    ["/friends", "/friends/tom", "/friends/anna", "/policies"],
+  );
+  assert.deepEqual(
+    filterUserNodes(nodes, "tom", { showInactive: true }).map((n) => n.user_path),
+    ["/friends/tom"],
+  );
+});
+
+test("countInactiveUserNodes counts the rows the default view hides", () => {
+  const nodes = [
+    node({ user_path: "/friends" }),
+    node({ user_path: "/friends/tom", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/friends/anna", key_count: 2, active_key_count: 0 }),
+    node({ user_path: "/friends/bob", key_count: 1, active_key_count: 1 }),
+  ];
+  assert.equal(countInactiveUserNodes(nodes), 2);
+  assert.equal(countInactiveUserNodes([]), 0);
+  assert.equal(countInactiveUserNodes(undefined), 0);
 });
 
 test("userPathValidationError mirrors the backend rules", () => {
