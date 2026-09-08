@@ -56,6 +56,40 @@ func TestRunPromptOrderingAndEdits(t *testing.T) {
 	}
 }
 
+// Edited is per instance: a mutator that edits is marked, a later mutator
+// that leaves the prompt alone is not, whatever an earlier step changed.
+func TestRunMarksOnlyTheInstanceThatEdited(t *testing.T) {
+	mk := func(name string, mutates bool, edit func(*pluginapi.Exchange)) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			if edit != nil {
+				edit(x)
+			}
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	editor := mk("editor", true, func(x *pluginapi.Exchange) { _ = x.Prompt.SetText("m0", 0, "edited") })
+	noop := mk("noop", true, nil)
+	again := mk("again", true, func(x *pluginapi.Exchange) { _ = x.Prompt.SetText("m0", 0, "edited twice") })
+	reader := mk("reader", false, nil)
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{editor, 10}, {noop, 20}, {reader, 20}, {again, 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := chain.RunPrompt(context.Background(), withPromptText(newExchange(), "hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"editor": true, "noop": false, "reader": false, "again": true}
+	if len(outcome.Records) != len(want) {
+		t.Fatalf("records = %+v", outcome.Records)
+	}
+	for _, record := range outcome.Records {
+		if record.Edited != want[record.Instance] {
+			t.Errorf("%s: edited = %v, want %v", record.Instance, record.Edited, want[record.Instance])
+		}
+	}
+}
+
 func TestRunReadersConcurrentAndMergeSeverity(t *testing.T) {
 	var inFlight, maxInFlight int32
 	reader := func(name string, d pluginapi.Decision) *Instance {

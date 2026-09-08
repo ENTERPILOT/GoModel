@@ -41,7 +41,7 @@ func (r promptRun) run(ctx context.Context, prompt *pluginapi.Prompt) (edited bo
 			Instance: record.Instance,
 			Decision: record.Decision,
 			Err:      record.Err,
-			Edited:   edited && mutatesInstance(r.chain, record.Instance),
+			Edited:   record.Edited,
 		})
 	}
 	r.state.Record(records...)
@@ -64,13 +64,4 @@ func (r promptRun) run(ctx context.Context, prompt *pluginapi.Prompt) (edited bo
 		r.state.AddResponseHeader(plugins.GuardrailHeader, plugins.WarnHeaderValue(outcome.Decision))
 	}
 	return edited, nil
-}
-
-func mutatesInstance(chain *plugins.Chain, name string) bool {
-	for _, inst := range chain.Instances() {
-		if inst.Name == name {
-			return inst.Mutates()
-		}
-	}
-	return false
 }

@@ -522,3 +522,67 @@ func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
 		}
 	})
 }
+
+// The applied body belongs to the last instance that actually edited the
+// prompt; a later mutating instance that changed nothing is a no-op and an
+// earlier editor keeps its sizes without a body.
+func TestChatCompletion_PromptRevisionBodyBelongsToLastEditor(t *testing.T) {
+	run := func(t *testing.T, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
+		t.Helper()
+		chains := phaseChainsNamed(t, cfgs, steps...)
+		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true}}
+		handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = &explodingReadCloser{}
+		frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(chatBody), false, "", nil)
+		req = withRequestSnapshotAndPrompt(req, frame)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+		c.Set(string(auditlog.LogEntryKey), entry)
+		if err := handler.ChatCompletion(c); err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+		}
+		return entry.Data.RequestRevisions
+	}
+	bodyText := func(revision auditlog.RequestRevisionSnapshot) string {
+		body, _ := json.Marshal(revision.Body)
+		return string(body)
+	}
+
+	t.Run("editor then no-op mutator", func(t *testing.T) {
+		revisions := run(t, map[string]map[string]string{
+			"editor": {"prompt": "edit", "text": "rewritten by editor"},
+			"noop":   {},
+		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
+			guardrails.StepReference{Ref: "noop", Phase: pluginapi.KindPrompt, Step: 2})
+		if len(revisions) != 1 || revisions[0].Rewriter != "editor" || revisions[0].NoChange {
+			t.Fatalf("expected one changed revision for the editor, got %+v", revisions)
+		}
+		if !strings.Contains(bodyText(revisions[0]), "rewritten by editor") {
+			t.Errorf("editor revision must carry the applied body: %+v", revisions[0])
+		}
+	})
+
+	t.Run("editor then editor", func(t *testing.T) {
+		revisions := run(t, map[string]map[string]string{
+			"first":  {"prompt": "edit", "text": "rewritten first"},
+			"second": {"prompt": "edit", "text": "rewritten second"},
+		}, guardrails.StepReference{Ref: "first", Phase: pluginapi.KindPrompt, Step: 1},
+			guardrails.StepReference{Ref: "second", Phase: pluginapi.KindPrompt, Step: 2})
+		if len(revisions) != 2 || revisions[0].Rewriter != "first" || revisions[1].Rewriter != "second" {
+			t.Fatalf("expected both editors in order, got %+v", revisions)
+		}
+		if revisions[0].NoChange || revisions[0].Body != nil || revisions[0].BytesAfter == 0 {
+			t.Errorf("first editor must be a change with sizes but no body: %+v", revisions[0])
+		}
+		if revisions[1].NoChange || !strings.Contains(bodyText(revisions[1]), "rewritten second") {
+			t.Errorf("last editor must carry the applied body: %+v", revisions[1])
+		}
+	})
+}

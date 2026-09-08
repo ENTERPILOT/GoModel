@@ -12636,7 +12636,7 @@
             }
           },
           "request_revisions": {
-            "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that ran, in application order, followed by the\nprompt-guardrail decisions. Rewriters and guardrails that changed the\nbody carry the rewritten body; those that left it alone are recorded\nwith NoChange so the audit trail still shows the step ran.\nRequestBody always remains the original client request; the last\nchanged revision is what was forwarded downstream — when every rewriter\nwas a no-op there is no such revision and the original body is what\nwent upstream.",
+            "description": "RequestRevisions captures the ingress request-rewrite chain: one entry\nper registered rewriter that ran, in application order, followed by the\nprompt-guardrail decisions. Rewriters that changed the body carry the\nrewritten body. Prompt guardrails that edited the prompt carry the\nsizes measured around the whole guardrail chain, and the last of them\nalso carries the body as forwarded after the chain; steps that left the\nbody alone are recorded with NoChange so the audit trail still shows\nthe step ran. RequestBody always remains the original client request;\nthe last changed revision is what was forwarded downstream — when every\nstep was a no-op there is no such revision and the original body is\nwhat went upstream.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/auditlog.RequestRevisionSnapshot"
