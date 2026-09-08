@@ -79,6 +79,10 @@ type LiveSubscriberReporter interface {
 // LogEntry represents a single audit log entry.
 // Core fields are indexed for efficient queries.
 type LogEntry struct {
+	// pendingRevisions is revision work still running off the request path;
+	// CompleteRequestRevisions folds it in before the entry is written.
+	pendingRevisions []*pendingRequestRevisions
+
 	// ID is a unique identifier for this log entry (UUID)
 	ID string `json:"id" bson:"_id"`
 
@@ -144,17 +148,17 @@ type LogData struct {
 
 	// RequestRevisions captures the ingress request-rewrite chain: one entry
 	// per registered rewriter that ran, in application order, followed by the
-	// prompt-guardrail phase. Rewriters that changed the body carry the
+	// prompt-guardrail steps. Rewriters that changed the body carry the
 	// rewritten body; those that left it alone are recorded with NoChange so
-	// the audit trail still shows the step ran. Prompt guardrails that
-	// objected (warn, block, respond) or failed are NoChange entries carrying
-	// the decision; a silent allow leaves no entry. When any prompt guardrail
-	// edited the prompt, one changed revision for the whole chain follows,
-	// naming the editing instances, with the sizes measured around the phase
-	// and the body as forwarded after the chain. RequestBody always remains
-	// the original client request; the last changed revision is what was
-	// forwarded downstream — when every step was a no-op there is no such
-	// revision and the original body is what went upstream.
+	// the audit trail still shows the step ran. Each prompt guardrail that
+	// edited the prompt is a changed revision, in step order, carrying the
+	// request as it stood right after that step (the next step's input) with
+	// its sizes; one that objected (warn, block, respond) or failed without
+	// editing is a NoChange entry carrying the decision, and a silent allow
+	// leaves no entry. RequestBody always remains the original client
+	// request; the last changed revision is what was forwarded downstream —
+	// when every step was a no-op there is no such revision and the original
+	// body is what went upstream.
 	RequestRevisions []RequestRevisionSnapshot `json:"request_revisions,omitempty" bson:"request_revisions,omitempty"`
 
 	// Request parameters
@@ -410,9 +414,9 @@ type Config struct {
 	LogImageOutputs bool
 
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
-	// only when both are enabled does each rewriter that changed the body
-	// store its rewritten copy, and the prompt-guardrail edit revision the
-	// body as forwarded. Revision metadata is always kept.
+	// only when both are enabled does each rewriter and each prompt
+	// guardrail that changed the body store its rewritten copy. Revision
+	// metadata is always kept.
 	LogRevisionBodies bool
 
 	// LogHeaders enables logging of request/response headers

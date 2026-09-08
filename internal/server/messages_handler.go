@@ -168,7 +168,7 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 		}
 	}
 
-	ctx := core.WithRequestDialect(c.Request().Context(), core.RequestDialectAnthropicMessages)
+	ctx := core.WithRequestDialect(promptEditCaptureContext(c, s.logger), core.RequestDialectAnthropicMessages)
 	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, ctx, req, translatedRequestMeta(c))
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {

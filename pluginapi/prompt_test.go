@@ -267,6 +267,41 @@ func TestPromptChangesEdits(t *testing.T) {
 	}
 }
 
+// Clone is independent of the original: edits on either side, including
+// the change tracking, stay on their side, and the copy keeps generating
+// fresh IDs.
+func TestPromptClone(t *testing.T) {
+	p := toolPrompt()
+	_ = p.SetText("m1", 0, "first")
+	c := p.Clone()
+	if c.Text() != p.Text() || c.Changes().Edits != 1 || c.Changes().Messages["m1"] != ChangeEdited {
+		t.Fatalf("clone differs from the original: %q, %+v", c.Text(), c.Changes())
+	}
+
+	_ = p.SetText("m1", 0, "second")
+	_ = p.SetToolArguments("m2", "call_1", json.RawMessage(`{"city":"Rome"}`))
+	_ = p.Remove("m4")
+	if c.Messages[1].Text() != "first" || len(c.Messages) != 5 || c.Changes().Edits != 1 {
+		t.Errorf("original edits reached the clone: %q, %d messages, %+v", c.Messages[1].Text(), len(c.Messages), c.Changes())
+	}
+	if got := string(c.Messages[2].Parts[0].ToolCall.Arguments); got != `{"city":"Oslo"}` {
+		t.Errorf("clone tool call arguments = %s", got)
+	}
+
+	if id := c.Insert(0, TextMessage(RoleSystem, "x")); id != "new-1" || len(p.Messages) != 4 || p.Message(id) != nil {
+		t.Errorf("clone insert %q leaked into the original (%d messages)", id, len(p.Messages))
+	}
+	if p.Clone().Insert(0, TextMessage(RoleSystem, "y")) != "new-1" {
+		t.Error("a fresh clone must continue the original's ID sequence")
+	}
+	if got := c.Changes(); got.Messages["m4"] != "" || len(c.removed) != 0 {
+		t.Errorf("removal on the original reached the clone: %+v", got)
+	}
+	if (*Prompt)(nil).Clone() != nil {
+		t.Error("Clone of nil must be nil")
+	}
+}
+
 func TestPromptSetParam(t *testing.T) {
 	p := toolPrompt()
 	p.SetParam("max_tokens", 42)

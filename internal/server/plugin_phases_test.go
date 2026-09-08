@@ -488,6 +488,7 @@ func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
 		}
+		entry.CompleteRequestRevisions()
 		revisions := entry.Data.RequestRevisions
 		if len(revisions) != 1 {
 			t.Fatalf("expected 1 revision, got %d: %+v", len(revisions), revisions)
@@ -523,11 +524,12 @@ func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
 	})
 }
 
-// A prompt chain's edits are one revision naming the instances that actually
-// edited the prompt, with the applied body; a mutating instance that changed
-// nothing is not an editor, and an objection is its own no-change entry.
-func TestChatCompletion_PromptEditsRecordOneRevision(t *testing.T) {
-	run := func(t *testing.T, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
+// Every editing step of a prompt chain is its own changed revision carrying
+// the request as that step left it, so the chain reads step by step and the
+// last body is what was forwarded; a mutating instance that changed nothing
+// is a no-op, and an objection is a no-change entry in its place.
+func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
+	run := func(t *testing.T, body string, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
 		t.Helper()
 		chains := phaseChainsNamed(t, cfgs, steps...)
 		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true}}
@@ -536,7 +538,7 @@ func TestChatCompletion_PromptEditsRecordOneRevision(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.Body = &explodingReadCloser{}
-		frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(chatBody), false, "", nil)
+		frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(body), false, "", nil)
 		req = withRequestSnapshotAndPrompt(req, frame)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
@@ -548,6 +550,11 @@ func TestChatCompletion_PromptEditsRecordOneRevision(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
 		}
+		if len(auditLogger.entries) > 0 {
+			// A streamed request is written by the stream observer.
+			return auditLogger.entries[0].Data.RequestRevisions
+		}
+		entry.CompleteRequestRevisions()
 		return entry.Data.RequestRevisions
 	}
 	bodyText := func(revision auditlog.RequestRevisionSnapshot) string {
@@ -556,7 +563,7 @@ func TestChatCompletion_PromptEditsRecordOneRevision(t *testing.T) {
 	}
 
 	t.Run("editor then no-op mutator", func(t *testing.T) {
-		revisions := run(t, map[string]map[string]string{
+		revisions := run(t, chatBody, map[string]map[string]string{
 			"editor": {"prompt": "edit", "text": "rewritten by editor"},
 			"noop":   {},
 		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
@@ -569,26 +576,34 @@ func TestChatCompletion_PromptEditsRecordOneRevision(t *testing.T) {
 		}
 	})
 
-	t.Run("editor then editor", func(t *testing.T) {
-		revisions := run(t, map[string]map[string]string{
-			"first":  {"prompt": "edit", "text": "rewritten first"},
-			"second": {"prompt": "edit", "text": "rewritten second"},
-		}, guardrails.StepReference{Ref: "first", Phase: pluginapi.KindPrompt, Step: 1},
-			guardrails.StepReference{Ref: "second", Phase: pluginapi.KindPrompt, Step: 2})
-		if len(revisions) != 1 || revisions[0].Rewriter != "first, second" || revisions[0].NoChange {
-			t.Fatalf("expected one changed revision naming both editors in order, got %+v", revisions)
-		}
-		if revisions[0].BytesBefore == 0 || revisions[0].BytesAfter == 0 || !strings.Contains(bodyText(revisions[0]), "rewritten second") {
-			t.Errorf("the revision must carry the phase sizes and the applied body: %+v", revisions[0])
-		}
-		detail, _ := json.Marshal(revisions[0].Detail)
-		if string(detail) != `{"phase":"prompt","edited":["first","second"]}` {
-			t.Errorf("detail = %s", detail)
-		}
-	})
+	for _, tt := range []struct{ name, body string }{{"editor then editor", chatBody}, {"editor then editor, streamed", chatStreamBody}} {
+		t.Run(tt.name, func(t *testing.T) {
+			revisions := run(t, tt.body, map[string]map[string]string{
+				"first":  {"prompt": "edit", "text": "rewritten first"},
+				"second": {"prompt": "edit", "text": "rewritten second"},
+			}, guardrails.StepReference{Ref: "first", Phase: pluginapi.KindPrompt, Step: 1},
+				guardrails.StepReference{Ref: "second", Phase: pluginapi.KindPrompt, Step: 2})
+			if len(revisions) != 2 || revisions[0].Rewriter != "first" || revisions[1].Rewriter != "second" || revisions[0].NoChange || revisions[1].NoChange {
+				t.Fatalf("expected one changed revision per editing step, got %+v", revisions)
+			}
+			if revisions[0].Seq != 1 || revisions[1].Seq != 2 {
+				t.Errorf("sequence = %d, %d", revisions[0].Seq, revisions[1].Seq)
+			}
+			first, second := bodyText(revisions[0]), bodyText(revisions[1])
+			if !strings.Contains(first, "rewritten first") || strings.Contains(first, "rewritten second") {
+				t.Errorf("step 1 must carry the request as it left step 1: %s", first)
+			}
+			if !strings.Contains(second, "rewritten second") {
+				t.Errorf("step 2 must carry the request as it left step 2: %s", second)
+			}
+			if revisions[0].BytesBefore == 0 || revisions[0].BytesAfter == 0 || revisions[1].BytesBefore != revisions[0].BytesAfter || revisions[1].BytesAfter == 0 {
+				t.Errorf("each step must be measured against the previous one: %+v", revisions)
+			}
+		})
+	}
 
 	t.Run("warning then editor", func(t *testing.T) {
-		revisions := run(t, map[string]map[string]string{
+		revisions := run(t, chatBody, map[string]map[string]string{
 			"watch":  {"prompt": "warn"},
 			"editor": {"prompt": "edit", "text": "rewritten by editor"},
 		}, guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindPrompt, Step: 1},

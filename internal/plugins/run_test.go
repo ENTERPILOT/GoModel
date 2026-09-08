@@ -102,6 +102,38 @@ func TestRunMarksOnlyTheInstanceThatEdited(t *testing.T) {
 	}
 }
 
+// The observer sees each edit right after its step, with the prompt as that
+// step left it, so a later step's edit builds on the earlier one.
+func TestRunPromptObservedReportsEachEditInOrder(t *testing.T) {
+	mk := func(name string, mutates bool, edit func(*pluginapi.Exchange)) *Instance {
+		return newTestInstance(&fakePlugin{name: name, mutates: mutates, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+			if edit != nil {
+				edit(x)
+			}
+			return pluginapi.Allow(), nil
+		}}, InstanceSpec{})
+	}
+	first := mk("first", true, func(x *pluginapi.Exchange) { _ = x.Prompt.SetText("m0", 0, x.Prompt.Messages[0].Text()+" one") })
+	second := mk("second", true, func(x *pluginapi.Exchange) { _ = x.Prompt.SetText("m0", 0, x.Prompt.Messages[0].Text()+" two") })
+	noop := mk("noop", true, nil)
+	reader := mk("reader", false, nil)
+	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{first, 10}, {reader, 10}, {noop, 20}, {second, 30}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	observe := func(instance string, x *pluginapi.Exchange) {
+		seen = append(seen, instance+": "+x.Prompt.Messages[0].Text())
+	}
+	if _, err := chain.RunPromptObserved(context.Background(), withPromptText(newExchange(), "hello"), observe); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"first: hello one", "second: hello one two"}
+	if len(seen) != len(want) || seen[0] != want[0] || seen[1] != want[1] {
+		t.Fatalf("observed = %q, want %q", seen, want)
+	}
+}
+
 func TestRunReadersConcurrentAndMergeSeverity(t *testing.T) {
 	var inFlight, maxInFlight int32
 	reader := func(name string, d pluginapi.Decision) *Instance {

@@ -246,6 +246,9 @@ func CreateStreamEntry(ctx context.Context, baseEntry *LogEntry) *LogEntry {
 		UserPath:    baseEntry.UserPath,
 		SessionID:   baseEntry.SessionID,
 		Stream:      true, // Mark as streaming
+		// Revision work still running finishes into this copy, the entry
+		// that is written.
+		pendingRevisions: baseEntry.pendingRevisions,
 	}
 
 	// This is a whitelist copy, so every request-side field of LogData must be

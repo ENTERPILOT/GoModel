@@ -177,10 +177,9 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   `LOGGING_LOG_REVISION_BODIES` refines `LOGGING_LOG_BODIES` for the ingress
   request-rewrite chain — it has no effect unless body logging is enabled. With
   both on, every rewriter that changed a request (for example GoModel Pro token
-  compression) stores its rewritten body alongside the original client body in
-  the audit entry, and the prompt guardrails that edited the prompt store one
-  more copy in their shared revision: the body as forwarded after the whole
-  guardrail chain.
+  compression) and every prompt guardrail that edited the prompt store the
+  request as they left it alongside the original client body in the audit
+  entry, so a chain of edits reads step by step.
   Disabling it keeps the revision metadata (rewriter name, byte sizes, tokens
   saved, change detail) but drops the extra body copies, roughly halving audit
   storage per rewritten request.

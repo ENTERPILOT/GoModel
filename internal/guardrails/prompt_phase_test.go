@@ -50,7 +50,7 @@ func TestPromptRunDoesNotReadAbandonedExchange(t *testing.T) {
 	prompt := &pluginapi.Prompt{Messages: []pluginapi.Message{msg}}
 	prompt.Reset()
 
-	edited, err := newPromptRun(context.Background(), chain).run(context.Background(), prompt)
+	edited, err := newPromptRun(context.Background(), chain).run(context.Background(), prompt, nil)
 	if err == nil || edited {
 		t.Fatalf("run = edited %v, err %v; want a failure and no edit", edited, err)
 	}

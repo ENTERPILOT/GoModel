@@ -295,6 +295,80 @@ func (p *Prompt) Changes() Changes {
 	return p.changes.clone()
 }
 
+// Clone returns an independent copy of the prompt and its change tracking:
+// later edits on either side do not reach the other, and the host can apply
+// the copy's edits on its own (see Changes). Raw, Tools and the read-only
+// Params.Extra are shared, as nothing edits them. Host-facing; plugins do
+// not need it.
+func (p *Prompt) Clone() *Prompt {
+	if p == nil {
+		return nil
+	}
+	params := p.Params
+	params.MaxTokens = cloneInt(p.Params.MaxTokens)
+	params.Temperature = cloneFloat(p.Params.Temperature)
+	params.TopP = cloneFloat(p.Params.TopP)
+	return &Prompt{
+		Messages: cloneMessages(p.Messages),
+		Tools:    p.Tools,
+		Params:   params,
+		Raw:      p.Raw,
+		changes:  p.changes.clone(),
+		removed:  cloneMessages(p.removed),
+		nextID:   p.nextID,
+	}
+}
+
+func cloneMessages(messages []Message) []Message {
+	if messages == nil {
+		return nil
+	}
+	out := make([]Message, len(messages))
+	for i, m := range messages {
+		m.Parts = cloneParts(m.Parts)
+		out[i] = m
+	}
+	return out
+}
+
+// cloneParts copies the parts and the tool call/result each may point to;
+// media bytes and raw JSON are shared, as no edit rewrites them in place.
+func cloneParts(parts []Part) []Part {
+	if parts == nil {
+		return nil
+	}
+	out := make([]Part, len(parts))
+	for i, part := range parts {
+		if part.ToolCall != nil {
+			call := *part.ToolCall
+			part.ToolCall = &call
+		}
+		if part.ToolResult != nil {
+			result := *part.ToolResult
+			result.Parts = cloneParts(result.Parts)
+			part.ToolResult = &result
+		}
+		out[i] = part
+	}
+	return out
+}
+
+func cloneInt(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
+}
+
+func cloneFloat(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
+}
+
 // Reset clears change tracking after the host has built the prompt or
 // applied the edits. Host-facing; plugin authors never call it.
 func (p *Prompt) Reset() {

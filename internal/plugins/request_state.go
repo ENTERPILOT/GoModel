@@ -25,6 +25,38 @@ type RequestState struct {
 	// ApplyRequestHeaders can replay only the differences.
 	requestHeaders  http.Header
 	originalHeaders http.Header
+	promptEdits     []PromptEdit
+}
+
+// PromptEdit is one instance's edit of the prompt, kept for the audit
+// revision chain. Apply builds the request as it stood right after that
+// step, from the phase's original request and a snapshot of the prompt taken
+// when the step completed; it is safe to call off the request path.
+type PromptEdit struct {
+	Instance string
+	Apply    func() (any, error)
+}
+
+type promptEditCaptureKey struct{}
+
+// WithPromptEditCapture marks ctx as wanting a PromptEdit kept for every
+// prompt edit (see RequestState.PromptEdits). Off by default, so batch items
+// and requests without audit capture pay nothing for it.
+func WithPromptEditCapture(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, promptEditCaptureKey{}, true)
+}
+
+// PromptEditCaptureEnabled reports whether ctx asks for prompt edits to be
+// kept.
+func PromptEditCaptureEnabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	enabled, _ := ctx.Value(promptEditCaptureKey{}).(bool)
+	return enabled
 }
 
 // DecisionRecord is one recorded plugin decision.
@@ -123,6 +155,26 @@ func (s *RequestState) Snapshot() []DecisionRecord {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]DecisionRecord(nil), s.Decisions...)
+}
+
+// AddPromptEdit keeps one prompt edit, in step order.
+func (s *RequestState) AddPromptEdit(edit PromptEdit) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptEdits = append(s.promptEdits, edit)
+}
+
+// PromptEdits returns a copy of the kept prompt edits, in step order.
+func (s *RequestState) PromptEdits() []PromptEdit {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]PromptEdit(nil), s.promptEdits...)
 }
 
 // AddResponseHeader appends a response header value.

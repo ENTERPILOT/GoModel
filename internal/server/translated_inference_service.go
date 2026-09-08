@@ -194,7 +194,7 @@ func handleTranslatedJSON[Req any](
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
 
-	ctx, preparedReq, workflow, err := prepare(s, c.Request().Context(), req, translatedRequestMeta(c))
+	ctx, preparedReq, workflow, err := prepare(s, promptEditCaptureContext(c, s.logger), req, translatedRequestMeta(c))
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
