@@ -54,7 +54,21 @@ type ServerConfig struct {
 	// needs a restart — it names the process that is already running — so a
 	// reload only warns about it.
 	PIDFile string `yaml:"pid_file" env:"PID_FILE"`
+	// StreamStallTimeout bounds, in seconds, how long a single response write
+	// on a model interaction route may wait for the client to accept bytes
+	// before the connection is dropped. It fires only when the client has
+	// stopped reading (its socket buffer is full), never while the gateway is
+	// waiting on the provider, so slow models are unaffected. Without it a
+	// client that stops reading a stream pins a goroutine and the upstream
+	// provider connection until the provider side times out.
+	// Default: 60 (DefaultStreamStallTimeoutSeconds). 0 disables the limit.
+	StreamStallTimeout int `yaml:"stream_stall_timeout" env:"STREAM_STALL_TIMEOUT"`
 }
+
+// DefaultStreamStallTimeoutSeconds is the default ServerConfig.StreamStallTimeout.
+// It matches the send timeout most reverse proxies apply between two
+// successive writes to a client.
+const DefaultStreamStallTimeoutSeconds = 60
 
 // LegacyPIDFilePath is the pid file location used next to a project-local
 // ./data directory, matching where the SQLite database lands in the same setup.

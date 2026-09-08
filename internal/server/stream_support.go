@@ -16,10 +16,21 @@ var streamCopyBufferPool = sync.Pool{
 	},
 }
 
+// flushStream relays stream to w chunk by chunk, flushing after each one. A
+// stall during a flush is not returned by the flush itself (the wrappers
+// above the stall writer drop flush errors), so the stall writer is asked
+// after every flush and at end of stream; otherwise a client that stalled on
+// the final chunk would be recorded as a completed response.
 func flushStream(w io.Writer, stream io.Reader) error {
 	flusher, canFlush := w.(http.Flusher)
+	stalls := findStallReporter(w)
 	if canFlush {
 		flusher.Flush()
+		if stalls != nil {
+			if stallErr := stalls.StallError(); stallErr != nil {
+				return stallErr
+			}
+		}
 	}
 
 	bufPtr := streamCopyBufferPool.Get().(*[]byte)
@@ -34,9 +45,17 @@ func flushStream(w io.Writer, stream io.Reader) error {
 			if canFlush {
 				flusher.Flush()
 			}
+			if stalls != nil {
+				if stallErr := stalls.StallError(); stallErr != nil {
+					return stallErr
+				}
+			}
 		}
 		if err != nil {
 			if err == io.EOF {
+				if stalls != nil {
+					return stalls.StallError()
+				}
 				return nil
 			}
 			return err

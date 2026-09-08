@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -123,6 +124,7 @@ func (b *bootstrap) initServerConfig() error {
 		MetricsEnabled:                  appCfg.Metrics.Enabled,
 		MetricsEndpoint:                 appCfg.Metrics.Endpoint,
 		BodySizeLimit:                   appCfg.Server.BodySizeLimit,
+		StreamStallTimeout:              time.Duration(appCfg.Server.StreamStallTimeout) * time.Second,
 		PprofEnabled:                    appCfg.Server.PprofEnabled,
 		AuditLogger:                     app.audit.Logger,
 		UsageLogger:                     b.serverUsageLogger,

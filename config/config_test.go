@@ -61,7 +61,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{
 		"CONFIG_STRICT",
-		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
+		"PORT", "BASE_PATH", "GOMODEL_MASTER_KEY", "BODY_SIZE_LIMIT", "STREAM_STALL_TIMEOUT", "SWAGGER_ENABLED", "PPROF_ENABLED", "ENABLE_PASSTHROUGH_ROUTES", "ALLOW_PASSTHROUGH_V1_ALIAS", "USER_PATH_HEADER", "ENABLED_PASSTHROUGH_PROVIDERS",
 		"GOMODEL_CACHE_DIR", "CACHE_REFRESH_INTERVAL", "MODEL_LIST_URL", "GOMODEL_OFFLINE", "GOMODEL_VERSION_CHECK_ENABLED",
 		"REDIS_URL", "REDIS_KEY_MODELS", "REDIS_KEY_RESPONSES", "REDIS_TTL_MODELS", "REDIS_TTL_RESPONSES",
 		"RESPONSE_CACHE_SIMPLE_ENABLED",
@@ -137,6 +137,9 @@ func TestBuildDefaultConfig(t *testing.T) {
 	}
 	if cfg.Server.SwaggerEnabled {
 		t.Error("expected Server.SwaggerEnabled=false")
+	}
+	if cfg.Server.StreamStallTimeout != DefaultStreamStallTimeoutSeconds {
+		t.Errorf("expected Server.StreamStallTimeout=%d, got %d", DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
 	}
 	if !cfg.Server.EnablePassthroughRoutes {
 		t.Error("expected Server.EnablePassthroughRoutes=true")
@@ -2290,4 +2293,67 @@ func TestIsLocalModelListSource(t *testing.T) {
 			t.Errorf("IsLocalModelListSource(%q) = %v, want %v", tt.in, got, tt.want)
 		}
 	}
+}
+
+func TestLoad_StreamStallTimeout(t *testing.T) {
+	clearAllConfigEnvVars(t)
+
+	withTempDir(t, func(_ string) {
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if got := result.Config.Server.StreamStallTimeout; got != DefaultStreamStallTimeoutSeconds {
+			t.Fatalf("Server.StreamStallTimeout = %d, want %d", got, DefaultStreamStallTimeoutSeconds)
+		}
+	})
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+server:
+  stream_stall_timeout: 0
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if got := result.Config.Server.StreamStallTimeout; got != 0 {
+			t.Fatalf("Server.StreamStallTimeout = %d, want 0 (disabled by YAML)", got)
+		}
+	})
+
+	withTempDir(t, func(dir string) {
+		yaml := `
+server:
+  stream_stall_timeout: 120
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
+			t.Fatalf("Failed to write config.yaml: %v", err)
+		}
+		t.Setenv("STREAM_STALL_TIMEOUT", "15")
+
+		result, err := Load()
+		if err != nil {
+			t.Fatalf("Load() failed: %v", err)
+		}
+		if got := result.Config.Server.StreamStallTimeout; got != 15 {
+			t.Fatalf("Server.StreamStallTimeout = %d, want 15 (env over YAML)", got)
+		}
+	})
+
+	withTempDir(t, func(_ string) {
+		t.Setenv("STREAM_STALL_TIMEOUT", "-1")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("expected Load() to reject a negative STREAM_STALL_TIMEOUT")
+		}
+		if !strings.Contains(err.Error(), "server.stream_stall_timeout") {
+			t.Fatalf("Load() error = %v, want server.stream_stall_timeout", err)
+		}
+	})
 }

@@ -726,7 +726,10 @@ func handleStreamingDispatchError(c *echo.Context, err error) error {
 
 func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
 	errorType := "stream_error"
-	if isClientDisconnect(ctx, err) {
+	switch {
+	case errors.Is(err, ErrClientStall):
+		errorType = "client_stalled"
+	case isClientDisconnect(ctx, err):
 		errorType = "client_disconnected"
 	}
 

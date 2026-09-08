@@ -2411,6 +2411,20 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 			err:      nil,
 			wantType: "client_disconnected",
 		},
+		{
+			name:     "stall deadline expiry",
+			ctx:      context.Background(),
+			err:      fmt.Errorf("%w for 1m0s: write tcp: i/o timeout", ErrClientStall),
+			wantType: "client_stalled",
+		},
+		{
+			// net/http cancels the request context once a write fails, so a
+			// stall usually arrives with a canceled ctx; the stall still wins.
+			name:     "stall deadline expiry with canceled ctx",
+			ctx:      canceledCtx,
+			err:      fmt.Errorf("%w for 1m0s: write tcp: i/o timeout", ErrClientStall),
+			wantType: "client_stalled",
+		},
 	}
 
 	for _, tt := range tests {
