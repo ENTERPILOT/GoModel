@@ -325,7 +325,7 @@ text split across two parts is not matched.
 | `roles` | No | `["user"]` | Prompt messages the rules apply to: `system` (includes developer), `user`, `assistant`, `tool`. In the response phase the assistant text is always the target. |
 | `on_match` | No | `replace` | `replace` substitutes; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the match. Only `replace` edits the text. |
 | `message` | No | `Request blocked by policy` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
-| `block_status` | No | phase default | HTTP status for `block` (400 to 599). Empty means 400 when a prompt is blocked, 502 when a response is blocked. |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. Used by `replace` and `warn`. |
 
 In the stream phase, `replace` and `warn` transform events in flight with the
@@ -405,7 +405,7 @@ content.
 | `target` | No | `auto` | What the judge sees in the prompt phase: `auto` or `last_user` (last user message), `all_user`, `conversation`. In the response phase it always sees the assistant text. |
 | `action` | No | `block` | On a block verdict: `block` rejects, `respond` answers with `respond_text`, `warn` continues and records the verdict. |
 | `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
-| `block_status` | No | phase default | HTTP status for `block` (400 to 599). |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
 | `on_unclear` | No | `warn` | When the judge reply cannot be parsed or was cut off by `max_tokens`: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
 | `max_tokens` | No | `256` | Completion cap for the judge call. |
