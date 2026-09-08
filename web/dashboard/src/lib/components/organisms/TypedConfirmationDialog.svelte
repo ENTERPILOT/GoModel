@@ -34,19 +34,24 @@
       {#if dialog.message}
         <p class="auth-dialog-hint">{dialog.message}</p>
       {/if}
-      <div class="form-field">
-        <label class="form-field-label" for={dialog.inputId}>
-          {confirmDialog.inputLabel()}
-        </label>
-        <input
-          id={dialog.inputId}
-          class="form-input"
-          type="text"
-          autocomplete="off"
-          data-modal-autofocus
-          bind:value={confirmDialog.state.value}
-        />
-      </div>
+      <!-- Typed flows require typing the exact text; simple confirmations
+           (e.g. the editor's discard-changes prompt) omit requiredText and
+           confirm with one click. -->
+      {#if dialog.requiredText}
+        <div class="form-field">
+          <label class="form-field-label" for={dialog.inputId}>
+            {confirmDialog.inputLabel()}
+          </label>
+          <input
+            id={dialog.inputId}
+            class="form-input"
+            type="text"
+            autocomplete="off"
+            data-modal-autofocus
+            bind:value={confirmDialog.state.value}
+          />
+        </div>
+      {/if}
       {#if confirmDialog.error}
         <p class="auth-dialog-error" role="alert">{confirmDialog.error}</p>
       {/if}
