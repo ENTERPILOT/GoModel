@@ -1169,29 +1169,27 @@ SELECT
   timestamp,
   -- Each provider gets its own latency profile so the dashboard's provider
   -- latency chart shows distinct, plausible lines instead of overlapping noise.
-  -- Requests stopped early are fast; a guardrail that calls a judge model, or
-  -- a prompt rewritten by the normalizer, adds that model call to the total.
+  -- Requests stopped early are fast, and a cache hit skips the provider.
   CASE
     WHEN request_outcome = 'budget_blocked' THEN 900000 + (token_noise % 2200000)
     WHEN request_outcome = 'guardrail_blocked' AND workflow_version_id = '${prefix}-wf-agents'
       THEN 1400000 + (token_noise % 3600000)
     WHEN request_outcome = 'guardrail_blocked' THEN 190000000 + (token_noise % 520000000)
-    ELSE
-      CASE
-        WHEN cache_type IS NOT NULL THEN 8000000 + (token_noise % 12000000)
-        ELSE CAST((90000000 + (token_noise % 260000000)) * CASE provider
-          WHEN 'groq' THEN 0.45
-          WHEN 'gemini' THEN 0.8
-          WHEN 'anthropic' THEN 1.6
-          WHEN 'bailian' THEN 2.2
-          ELSE 1.0
-        END AS INTEGER)
-      END
-      -- The prompt phase runs before the cache lookup, so a guardrail that
-      -- calls a model is part of the total even on a cache hit.
-      + CASE WHEN guardrail_normalized = 1 THEN 210000000 + (token_noise % 260000000) ELSE 0 END
-      + CASE WHEN guardrail_warned = 1 THEN 170000000 + (token_noise % 240000000) ELSE 0 END
-  END,
+    WHEN cache_type IS NOT NULL THEN 8000000 + (token_noise % 12000000)
+    ELSE CAST((90000000 + (token_noise % 260000000)) * CASE provider
+      WHEN 'groq' THEN 0.45
+      WHEN 'gemini' THEN 0.8
+      WHEN 'anthropic' THEN 1.6
+      WHEN 'bailian' THEN 2.2
+      ELSE 1.0
+    END AS INTEGER)
+  END
+  -- The prompt phase runs first, so a guardrail that calls a model is part of
+  -- the total whatever the request did next: a cache hit skipped the provider,
+  -- and a later step blocked the request only after this call had been paid
+  -- for.
+  + CASE WHEN guardrail_normalized = 1 THEN 210000000 + (token_noise % 260000000) ELSE 0 END
+  + CASE WHEN guardrail_warned = 1 THEN 170000000 + (token_noise % 240000000) ELSE 0 END,
   coalesce(alias_source, provider_name || '/' || model),
   provider_name || '/' || model,
   provider,
