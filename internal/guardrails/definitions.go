@@ -36,6 +36,10 @@ type View struct {
 	// pluginapi.Manifest.Guardrail); an instance of a modifier such as
 	// header_edit is a plugin instance but not a guardrail.
 	Guardrail bool `json:"guardrail"`
+	// Mutates reports whether the instance's plugin may edit the request or
+	// response (see pluginapi.Manifest.Mutates); within one workflow step the
+	// gateway runs such an instance after the step's readers.
+	Mutates bool `json:"mutates"`
 }
 
 // ViewFromDefinition projects one guardrail definition into its admin-facing

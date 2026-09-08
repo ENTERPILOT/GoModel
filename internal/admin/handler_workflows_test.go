@@ -523,11 +523,12 @@ func TestListWorkflowGuardrails(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if len(body) != 1 || body[0].Name != "policy-system" || len(body[0].Phases) != 1 || body[0].Phases[0] != "prompt" {
-		t.Fatalf("body = %#v, want [policy-system] with prompt phase", body)
+	if len(body) != 1 || body[0].Name != "policy-system" || len(body[0].Phases) != 1 || body[0].Phases[0] != "prompt" || body[0].Mutates {
+		t.Fatalf("body = %#v, want [policy-system] with prompt phase and no mutates flag", body)
 	}
 
-	// The full service reports type, phases and summary per instance.
+	// The full service reports type, phases, summary and the mutates flag
+	// per instance (system_prompt edits the prompt).
 	h = NewHandler(nil, nil, WithGuardrailService(registry))
 	c, rec = newHandlerContext("/admin/workflows/guardrails")
 	if err := h.ListWorkflowGuardrails(c); err != nil {
@@ -537,8 +538,8 @@ func TestListWorkflowGuardrails(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if len(body) != 1 || body[0].Type != "system_prompt" || body[0].Summary == "" || body[0].Phases[0] != "prompt" {
-		t.Fatalf("body = %#v, want typed item with summary", body)
+	if len(body) != 1 || body[0].Type != "system_prompt" || body[0].Summary == "" || body[0].Phases[0] != "prompt" || !body[0].Mutates {
+		t.Fatalf("body = %#v, want typed mutating item with summary", body)
 	}
 }
 
