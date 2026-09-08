@@ -82,6 +82,7 @@
       title: m.editor_discard_title(),
       message: m.editor_discard_message(),
       confirmLabel: m.editor_discard_confirm(),
+      stacked: true,
       onConfirm: () => {
         dirty = false;
         onclose?.();

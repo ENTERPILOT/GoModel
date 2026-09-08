@@ -8,7 +8,12 @@
   const dialog = $derived(confirmDialog.state);
 </script>
 
-<Modal open={dialog.open} variant="auth" onclose={() => confirmDialog.close()}>
+<Modal
+  open={dialog.open}
+  variant="auth"
+  stacked={dialog.stacked}
+  onclose={() => confirmDialog.close()}
+>
   <div
     class="auth-dialog {dialog.dialogClass}"
     role="dialog"

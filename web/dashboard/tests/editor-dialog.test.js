@@ -50,20 +50,23 @@ test("every EditorDialog close path goes through the discard confirmation", () =
     "a close path bypasses requestClose",
   );
   // A clean form closes as before; a dirty form opens the shared
-  // confirmation dialog instead of closing.
+  // confirmation dialog instead of closing, stacked above the editor.
   assert.match(editorDialog, /if \(!dirty\) \{\s*\n\s*onclose\?\.\(\);/);
   assert.match(
     editorDialog,
-    /confirmDialog\.open\(\{[\s\S]*?title: m\.editor_discard_title\(\)[\s\S]*?onConfirm: \(\) => \{[\s\S]*?onclose\?\.\(\);/,
+    /confirmDialog\.open\(\{[\s\S]*?title: m\.editor_discard_title\(\)[\s\S]*?stacked: true,[\s\S]*?onConfirm: \(\) => \{[\s\S]*?onclose\?\.\(\);/,
   );
 });
 
 test("the confirmation dialog only asks for typed text when required", () => {
   // The discard prompt needs no typed confirmation: the input renders only
   // when requiredText is set, and the store's default requiredText is empty
-  // (so ready() is immediately true for simple confirmations).
+  // (so ready() is immediately true for simple confirmations). A stacked
+  // dialog lightens its backdrop and lifts its shell above the editor.
   assert.match(typedConfirm, /\{#if dialog\.requiredText\}/);
+  assert.match(typedConfirm, /stacked=\{dialog\.stacked\}/);
   assert.match(confirmStore, /requiredText: "",/);
+  assert.match(confirmStore, /stacked: false,/);
 });
 
 test("the discard prompt is translated in every locale", () => {

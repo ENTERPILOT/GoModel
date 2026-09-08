@@ -14,15 +14,21 @@
     // Class pair: "editor" (editor-modal-*) or "auth" (auth-dialog-*).
     variant = "editor",
     closeOnBackdrop = true,
+    // Rendered on top of another open modal (e.g. the discard confirmation
+    // over an editor): the modal below already dims the page, so lighten
+    // the backdrop and lift the shell above the modal underneath.
+    stacked = false,
     children,
   } = $props();
 
-  const backdropClass = $derived(
+  const backdropClass = $derived([
     variant === "auth" ? "auth-dialog-backdrop" : "editor-modal-backdrop",
-  );
-  const shellClass = $derived(
+    ...(stacked ? ["modal-stacked-backdrop"] : []),
+  ]);
+  const shellClass = $derived([
     variant === "auth" ? "auth-dialog-shell" : "editor-modal-shell",
-  );
+    ...(stacked ? ["modal-stacked-shell"] : []),
+  ]);
 
   $effect(() => {
     if (!open) return;
@@ -92,6 +98,17 @@
     place-items: center;
     padding: 20px;
     overflow-y: auto;
+  }
+
+  /* Stacked modal over another open modal: the modal below already dims
+     the page, so only dim a little more and sit above its shell. */
+  .modal-stacked-backdrop {
+    background: rgba(0, 0, 0, 0.16);
+    z-index: 90;
+  }
+
+  .modal-stacked-shell {
+    z-index: 100;
   }
 
   .editor-modal-shell > :global(*) {
