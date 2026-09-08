@@ -6,8 +6,7 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
-Create a default fully qualified app name.
-We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
+Create a default fully qualified app name, truncated to the 63 character DNS limit.
 */}}
 {{- define "gomodel.fullname" -}}
 {{- if .Values.fullnameOverride }}
@@ -22,174 +21,110 @@ We truncate at 63 chars because some Kubernetes name fields are limited to this 
 {{- end }}
 {{- end }}
 
-{{/*
-Create chart name and version as used by the chart label.
-*/}}
 {{- define "gomodel.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{/*
-Common labels
-*/}}
 {{- define "gomodel.labels" -}}
 helm.sh/chart: {{ include "gomodel.chart" . }}
 {{ include "gomodel.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
+app.kubernetes.io/version: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{/*
-Selector labels
-*/}}
 {{- define "gomodel.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "gomodel.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{/*
-Create the name of the secret containing provider API keys
-*/}}
-{{- define "gomodel.providerSecretName" -}}
-{{- if .Values.providers.existingSecret }}
-{{- .Values.providers.existingSecret }}
+{{- define "gomodel.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "gomodel.fullname" .) .Values.serviceAccount.name }}
 {{- else }}
-{{- include "gomodel.fullname" . }}-providers
+{{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
 
-{{/*
-Create the name of the secret containing auth credentials
-*/}}
-{{- define "gomodel.authSecretName" -}}
-{{- if .Values.auth.existingSecret }}
-{{- .Values.auth.existingSecret }}
-{{- else }}
-{{- include "gomodel.fullname" . }}-auth
-{{- end }}
-{{- end }}
-
-{{/*
-Determine the Redis URL - either from values or auto-generated for subchart
-*/}}
-{{- define "gomodel.redisUrl" -}}
-{{- if .Values.cache.redis.url }}
-{{- .Values.cache.redis.url }}
-{{- else if .Values.redis.enabled }}
-{{- printf "redis://%s-redis-master:6379" .Release.Name }}
-{{- else }}
-{{- "" }}
-{{- end }}
-{{- end }}
-
-{{/*
-Create the image reference
-*/}}
 {{- define "gomodel.image" -}}
-{{- $tag := .Values.image.tag | default .Chart.AppVersion }}
-{{- printf "%s:%s" .Values.image.repository $tag }}
+{{- printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion) }}
 {{- end }}
 
 {{/*
-Normalize the public base path used by the application.
+Validate value combinations that would produce a broken deployment.
 */}}
-{{- define "gomodel.basePath" -}}
-{{- $basePath := trim (default "/" .Values.server.basePath) -}}
-{{- if or (eq $basePath "") (eq $basePath "/") -}}
-/
-{{- else -}}
-{{- if not (hasPrefix "/" $basePath) -}}
-{{- $basePath = printf "/%s" $basePath -}}
-{{- end -}}
-{{- $basePath = clean $basePath -}}
-{{- if or (eq $basePath ".") (eq $basePath "/") -}}
-/
-{{- else -}}
-{{- $basePath -}}
-{{- end -}}
-{{- end -}}
+{{- define "gomodel.validate" -}}
+{{- range $key := list "auth" "providers" "redis" "cache" "gateway" "server" "logging" }}
+{{- if hasKey $.Values $key }}
+{{- fail (printf "%s is a chart 0.1.x value that this chart no longer reads; migrate it to env / secretEnv / extraEnvFrom as described in the chart README before upgrading" $key) }}
+{{- end }}
+{{- end }}
+{{- range $key := list "PORT" "STORAGE_TYPE" "METRICS_ENABLED" }}
+{{- if or (hasKey $.Values.env $key) (hasKey $.Values.secretEnv $key) }}
+{{- fail (printf "%s is set by the chart; use storage.type, metrics.enabled, or the fixed container port instead of env.%s" $key $key) }}
+{{- end }}
+{{- end }}
+{{- $type := .Values.storage.type }}
+{{- if not (has $type (list "sqlite" "postgresql" "mongodb")) }}
+{{- fail (printf "storage.type must be sqlite, postgresql, or mongodb (got %q)" $type) }}
+{{- end }}
+{{- if and (eq $type "sqlite") (or (gt (int .Values.replicaCount) 1) .Values.autoscaling.enabled) }}
+{{- fail "SQLite storage is per pod: set storage.type to postgresql or mongodb before running more than one replica" }}
+{{- end }}
+{{- if ne $type "sqlite" }}
+{{- $urlEnv := include "gomodel.storageUrlEnv" . }}
+{{- $fromExtraEnv := false }}
+{{- range .Values.extraEnv }}{{ if eq .name $urlEnv }}{{ $fromExtraEnv = true }}{{ end }}{{ end }}
+{{- if not (or .Values.storage.url .Values.extraEnvFrom $fromExtraEnv (hasKey .Values.secretEnv $urlEnv)) }}
+{{- fail (printf "storage.url is required for storage.type %s (or supply %s through secretEnv, extraEnv, or extraEnvFrom)" $type $urlEnv) }}
+{{- end }}
+{{- end }}
+{{- if and .Values.config .Values.existingConfigMap }}
+{{- fail "set either config or existingConfigMap, not both" }}
+{{- end }}
+{{- if and .Values.httpRoute.enabled (not .Values.httpRoute.parentRefs) }}
+{{- fail "httpRoute.parentRefs is required when httpRoute.enabled is true" }}
+{{- end }}
 {{- end }}
 
 {{/*
-Prefix an application path with server.basePath unless it is already prefixed.
+Environment variable that carries the storage connection URL for the selected backend.
+*/}}
+{{- define "gomodel.storageUrlEnv" -}}
+{{- if eq .Values.storage.type "postgresql" }}POSTGRES_URL{{ else if eq .Values.storage.type "mongodb" }}MONGODB_URL{{ end }}
+{{- end }}
+
+{{/*
+True when SQLite data is kept on a PersistentVolumeClaim.
+*/}}
+{{- define "gomodel.usesPVC" -}}
+{{- if and (eq .Values.storage.type "sqlite") .Values.persistence.enabled }}true{{ end }}
+{{- end }}
+
+{{/*
+Name of the chart-managed Secret; empty when there is nothing to store.
+*/}}
+{{- define "gomodel.secretName" -}}
+{{- if or .Values.secretEnv .Values.storage.url }}{{ include "gomodel.fullname" . }}{{ end }}
+{{- end }}
+
+{{/*
+Name of the ConfigMap holding config.yaml; empty when no file is configured.
+*/}}
+{{- define "gomodel.configMapName" -}}
+{{- if .Values.existingConfigMap }}{{ .Values.existingConfigMap }}{{ else if .Values.config }}{{ include "gomodel.fullname" . }}-config{{ end }}
+{{- end }}
+
+{{/*
+Prefix an application path with env.BASE_PATH so probes and scrapes keep working
+when the gateway is mounted under a prefix. Mirrors the server's
+NormalizeBasePath: trimmed, a leading slash added, then path-cleaned, with root
+rendering as no prefix at all.
 */}}
 {{- define "gomodel.pathWithBasePath" -}}
-{{- $root := .root -}}
-{{- $path := trim (default "/" .path) -}}
-{{- if or (eq $path "") (eq $path "/") -}}
-{{- $path = "/" -}}
-{{- else if not (hasPrefix "/" $path) -}}
-{{- $path = printf "/%s" $path -}}
+{{- $base := "" -}}
+{{- with trim (toString (default "" .root.Values.env.BASE_PATH)) -}}
+{{- $base = clean (printf "/%s" (trimPrefix "/" .)) -}}
+{{- if eq $base "/" -}}{{- $base = "" -}}{{- end -}}
 {{- end -}}
-{{- $basePath := include "gomodel.basePath" $root -}}
-{{- if eq $path "/" -}}
-{{- if eq $basePath "/" -}}
-{{- $path -}}
-{{- else -}}
-{{- $basePath -}}
-{{- end -}}
-{{- else if eq $basePath "/" -}}
-{{- $path -}}
-{{- else if or (eq $path $basePath) (hasPrefix (printf "%s/" $basePath) $path) -}}
-{{- $path -}}
-{{- else -}}
-{{- printf "%s%s" $basePath $path -}}
-{{- end -}}
-{{- end }}
-
-{{/*
-Generate provider API key entries for the Secret stringData.
-*/}}
-{{- define "gomodel.providerSecretData" -}}
-{{- range $name, $config := .Values.providers }}
-  {{- if and (kindIs "map" $config) (hasKey $config "apiKey") $config.apiKey }}
-{{ upper $name }}_API_KEY: {{ $config.apiKey | quote }}
-  {{- end }}
-{{- end }}
-{{- end }}
-
-{{/*
-Generate provider environment variables for the Deployment.
-*/}}
-{{- define "gomodel.providerEnvVars" -}}
-{{- $secretName := include "gomodel.providerSecretName" . -}}
-{{- range $name, $config := .Values.providers }}
-{{- if kindIs "map" $config }}
-{{- $hasAPIKey := and (hasKey $config "apiKey") $config.apiKey }}
-{{- $enabledWithExistingSecret := and $.Values.providers.existingSecret (hasKey $config "enabled") $config.enabled }}
-{{- $enabledWithBaseURL := and (hasKey $config "enabled") $config.enabled $config.baseUrl }}
-{{- if or $hasAPIKey $enabledWithExistingSecret }}
-- name: {{ upper $name }}_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ $secretName }}
-      key: {{ upper $name }}_API_KEY
-{{- if eq $name "llmd" }}
-      optional: true
-{{- end }}
-{{- end }}
-{{- if or (or $hasAPIKey $enabledWithExistingSecret) $enabledWithBaseURL }}
-{{- if $config.baseUrl }}
-- name: {{ upper $name }}_BASE_URL
-  value: {{ $config.baseUrl | quote }}
-{{- end }}
-{{- end }}
-{{- if and (eq $name "gemini") (hasKey $config "useNativeApi") }}
-- name: USE_GOOGLE_GEMINI_NATIVE_API
-  value: {{ $config.useNativeApi | quote }}
-{{- end }}
-{{- if and (eq $name "llmd") (or (or $hasAPIKey $enabledWithExistingSecret) $enabledWithBaseURL) }}
-{{- if $config.inferenceObjective }}
-- name: LLMD_INFERENCE_OBJECTIVE
-  value: {{ $config.inferenceObjective | quote }}
-{{- end }}
-{{- if hasKey $config "fairnessFromUserPath" }}
-- name: LLMD_FAIRNESS_FROM_USER_PATH
-  value: {{ $config.fairnessFromUserPath | quote }}
-{{- end }}
-{{- end }}
-{{- end }}
-{{- end }}
+{{- printf "%s%s" $base .path -}}
 {{- end }}

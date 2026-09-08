@@ -1,4 +1,4 @@
-.PHONY: all build run demo clean tidy mod-check frontend frontend-check test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
+.PHONY: all build run demo clean tidy mod-check frontend frontend-check test test-race test-dashboard test-e2e test-integration test-contract test-all lint lint-fix fix fix-check record-api swagger docs-openapi helm-lint install-tools perf-check perf-bench infra image seed-demo-data build-plugins image-plugins example-plugins
 
 all: frontend build
 
@@ -184,6 +184,13 @@ docs-openapi:
 # Run linter
 lint:
 	$(GOLANGCI_LINT) run --build-tags=$(BUILD_TAGS) ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/...
+
+# Lint the Helm chart with every CI values profile and validate the rendered
+# manifests against the Kubernetes schemas (requires helm and kubeconform).
+helm-lint:
+	helm lint --strict helm
+	for values in helm/ci/*-values.yaml; do helm lint --strict helm -f "$$values"; done
+	for values in helm/ci/*-values.yaml; do helm template gomodel helm -f "$$values" --namespace gomodel | kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'; done
 
 # Run linter with auto-fix. Mirrors `lint`: same tags, same packages, so the
 # autofix pass cannot silently skip the tag-gated files under tests/.

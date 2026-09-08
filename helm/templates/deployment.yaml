@@ -1,3 +1,4 @@
+{{- $usesPVC := include "gomodel.usesPVC" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,6 +8,13 @@ metadata:
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  {{- if .Values.updateStrategy }}
+  strategy:
+    {{- toYaml .Values.updateStrategy | nindent 4 }}
+  {{- else if $usesPVC }}
+  strategy:
+    type: Recreate
   {{- end }}
   selector:
     matchLabels:
@@ -29,116 +37,88 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      serviceAccountName: {{ include "gomodel.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+        - name: gomodel
           image: {{ include "gomodel.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - name: http
-              containerPort: {{ .Values.server.port }}
+              containerPort: 8080
               protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "gomodel.fullname" . }}
+            {{- with (include "gomodel.secretName" .) }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnv }}
           env:
-            # Server configuration
-            - name: PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: PORT
-            - name: BASE_PATH
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: BASE_PATH
-            - name: USER_PATH_HEADER
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: USER_PATH_HEADER
-            - name: BODY_SIZE_LIMIT
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: BODY_SIZE_LIMIT
-            # Cache configuration
-            {{- if or .Values.redis.enabled .Values.cache.redis.url }}
-            - name: REDIS_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "gomodel.providerSecretName" . }}
-                  key: REDIS_URL
-                  optional: true
-            - name: REDIS_KEY_MODELS
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_KEY_MODELS
-            - name: REDIS_KEY_RESPONSES
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_KEY_RESPONSES
-            - name: REDIS_TTL_MODELS
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_TTL_MODELS
-            - name: REDIS_TTL_RESPONSES
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: REDIS_TTL_RESPONSES
-            {{- end }}
-            # Logging configuration
-            - name: LOG_FORMAT
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: LOG_FORMAT
-            # Metrics configuration
-            - name: METRICS_ENABLED
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: METRICS_ENABLED
-            - name: METRICS_ENDPOINT
-              valueFrom:
-                configMapKeyRef:
-                  name: {{ include "gomodel.fullname" . }}
-                  key: METRICS_ENDPOINT
-            # Authentication
-            {{- if or .Values.auth.masterKey .Values.auth.existingSecret }}
-            - name: GOMODEL_MASTER_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "gomodel.authSecretName" . }}
-                  key: {{ .Values.auth.existingSecretKey | default "master-key" }}
-            {{- end }}
-            # Provider API keys (conditional based on enabled providers)
-{{- include "gomodel.providerEnvVars" . | nindent 12 }}
-          volumeMounts:
-            - name: cache
-              mountPath: /cache
-          {{- $livenessProbe := deepCopy .Values.livenessProbe }}
-          {{- if and $livenessProbe.httpGet $livenessProbe.httpGet.path }}
-          {{- $_ := set $livenessProbe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" . "path" $livenessProbe.httpGet.path)) }}
+            {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- with .Values.livenessProbe }}
           livenessProbe:
-            {{- toYaml $livenessProbe | nindent 12 }}
-          {{- $readinessProbe := deepCopy .Values.readinessProbe }}
-          {{- if and $readinessProbe.httpGet $readinessProbe.httpGet.path }}
-          {{- $_ := set $readinessProbe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" . "path" $readinessProbe.httpGet.path)) }}
+            {{- $probe := deepCopy . }}
+            {{- if $probe.httpGet }}
+            {{- $_ := set $probe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" $ "path" $probe.httpGet.path)) }}
+            {{- end }}
+            {{- toYaml $probe | nindent 12 }}
           {{- end }}
+          {{- with .Values.readinessProbe }}
           readinessProbe:
-            {{- toYaml $readinessProbe | nindent 12 }}
+            {{- $probe := deepCopy . }}
+            {{- if $probe.httpGet }}
+            {{- $_ := set $probe.httpGet "path" (include "gomodel.pathWithBasePath" (dict "root" $ "path" $probe.httpGet.path)) }}
+            {{- end }}
+            {{- toYaml $probe | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: cache
+              mountPath: /app/.cache
+            {{- if include "gomodel.configMapName" . }}
+            - name: config
+              mountPath: /app/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
+        - name: data
+          {{- if $usesPVC }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "gomodel.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
         - name: cache
           emptyDir: {}
+        {{- with (include "gomodel.configMapName" .) }}
+        - name: config
+          configMap:
+            name: {{ . }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -149,5 +129,9 @@ spec:
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}

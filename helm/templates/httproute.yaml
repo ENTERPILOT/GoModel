@@ -1,4 +1,4 @@
-{{- if .Values.gateway.enabled -}}
+{{- if .Values.httpRoute.enabled }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -7,21 +7,16 @@ metadata:
     {{- include "gomodel.labels" . | nindent 4 }}
 spec:
   parentRefs:
-    - name: {{ .Values.gateway.parentRef.name }}
-      {{- if .Values.gateway.parentRef.namespace }}
-      namespace: {{ .Values.gateway.parentRef.namespace }}
-      {{- end }}
-  {{- if .Values.gateway.hostnames }}
+    {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+  {{- with .Values.httpRoute.hostnames }}
   hostnames:
-    {{- range .Values.gateway.hostnames }}
-    - {{ . | quote }}
-    {{- end }}
+    {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
     - matches:
         - path:
             type: PathPrefix
-            value: /
+            value: {{ include "gomodel.pathWithBasePath" (dict "root" . "path" "/") | quote }}
       backendRefs:
         - name: {{ include "gomodel.fullname" . }}
           port: {{ .Values.service.port }}

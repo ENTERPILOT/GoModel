@@ -302,9 +302,11 @@ itself, which works in a distroless image with no shell or `curl`.
 | Liveness | `GET /health` | `gomodel --health` | Nothing. Confirms the listener answers. |
 | Readiness | `GET /health/ready` | `gomodel --ready` | Storage (503 if down), Redis (degraded, still 200). |
 
-Point Kubernetes readiness at `/health/ready`, not `/health`. A Helm chart is
-included in the repository under `helm/`; check its probe paths and its
-`replicaCount` against the storage backend you chose before using it as-is.
+Point Kubernetes readiness at `/health/ready`, not `/health`. The Helm chart in
+the repository's `helm/` directory does this already, runs the gateway as the
+image's non-root user on a read-only filesystem, keeps SQLite on a persistent
+volume, and refuses more than one replica until you switch `storage.type` to
+`postgresql` or `mongodb`. See `helm/README.md` for the values.
 
 <Note>
   Readiness does not wait for the model catalog, which loads asynchronously. A

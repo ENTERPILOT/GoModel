@@ -1,0 +1,15 @@
+# Several replicas on a shared PostgreSQL database.
+replicaCount: 2
+storage:
+  type: postgresql
+  url: postgres://gomodel:gomodel@postgresql:5432/gomodel?sslmode=disable
+secretEnv:
+  GOMODEL_MASTER_KEY: ci-master-key
+  OPENAI_API_KEY: sk-ci-placeholder
+env:
+  LOG_LEVEL: debug
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetMemoryUtilizationPercentage: 80
