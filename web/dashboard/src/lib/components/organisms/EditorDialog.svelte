@@ -69,6 +69,19 @@
     if (open) dirty = false;
   });
 
+  // A dirty editor also guards the page itself: reload, tab close, or an
+  // external navigation triggers the browser's native unsaved-changes
+  // prompt. In-app sidebar navigation keeps the form data (it lives in the
+  // page stores), so only real page unloads need this.
+  $effect(() => {
+    if (!open || !dirty) return;
+    const onBeforeUnload = (event) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  });
+
   // Single close gate for every close path: Escape/backdrop arrive through
   // Modal's onclose; the header close button and Cancel call it directly.
   function requestClose() {

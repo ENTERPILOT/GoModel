@@ -34,6 +34,12 @@ test("EditorDialog marks the form dirty on user edits and resets on open", () =>
   // post-submit reopen, since every store closes the form after a
   // successful save.
   assert.match(editorDialog, /if \(open\) dirty = false;/);
+  // While a dirty editor is open, reload/tab close triggers the browser's
+  // native unsaved-changes prompt.
+  assert.match(
+    editorDialog,
+    /if \(!open \|\| !dirty\) return;\s*\n\s*const onBeforeUnload = \(event\) => \{\s*\n\s*event\.preventDefault\(\);/,
+  );
 });
 
 test("every EditorDialog close path goes through the discard confirmation", () => {
