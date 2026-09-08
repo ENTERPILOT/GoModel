@@ -14964,7 +14964,7 @@
         "type": "object",
         "properties": {
           "key_id": {
-            "description": "KeyID identifies the managed auth key that authenticated the request.\nEmpty for every other method.",
+            "description": "KeyID identifies the managed auth key that authenticated the request.\nAbsent for every other method.",
             "type": "string"
           },
           "method": {
@@ -14972,7 +14972,7 @@
             "type": "string"
           },
           "user_path": {
-            "description": "UserPath is the subtree the credential is bound to, empty when the\ncredential is global.",
+            "description": "UserPath is the subtree the credential is bound to. Absent when the\ncredential is global, which every master-key caller is.",
             "type": "string"
           },
           "valid": {

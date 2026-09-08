@@ -30,10 +30,10 @@ type authVerifyResponse struct {
 	// when Valid is false.
 	Method string `json:"method"`
 	// KeyID identifies the managed auth key that authenticated the request.
-	// Empty for every other method.
+	// Absent for every other method.
 	KeyID string `json:"key_id,omitempty"`
-	// UserPath is the subtree the credential is bound to, empty when the
-	// credential is global.
+	// UserPath is the subtree the credential is bound to. Absent when the
+	// credential is global, which every master-key caller is.
 	UserPath string `json:"user_path,omitempty"`
 }
 
