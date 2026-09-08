@@ -104,7 +104,7 @@
      the page, so only dim a little more and sit above its shell. */
   .modal-stacked-backdrop {
     background: rgba(0, 0, 0, 0.16);
-    z-index: 90;
+    z-index: 95;
   }
 
   .modal-stacked-shell {
