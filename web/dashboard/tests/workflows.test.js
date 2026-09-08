@@ -15,6 +15,8 @@ import {
   workflowSourceGuardrails,
   workflowActiveScopeMatch,
   workflowDisplayName,
+  workflowScopeBadgeVisible,
+  nextWorkflowGuardrailStep,
   workflowScopeDisplay,
   normalizeWorkflowScopeUserPath,
   buildWorkflowRequest,
@@ -1319,6 +1321,34 @@ test("workflowSourceFeatures masks raw features by global caps when effective fe
       failover: true,
     },
   );
+});
+
+test("workflowScopeBadgeVisible hides a badge that repeats the card head", () => {
+  // Global: the kicker already says Global.
+  assert.equal(workflowScopeBadgeVisible({ name: "global", scope_display: "global" }), false);
+  assert.equal(workflowScopeBadgeVisible({ name: "", scope_display: "global" }), false);
+  // Unnamed: the title already is the scope.
+  assert.equal(workflowScopeBadgeVisible({ name: "", scope_display: "openai/gpt-5" }), false);
+  // Named: the scope badge adds information.
+  assert.equal(
+    workflowScopeBadgeVisible({ name: "Primary", scope_display: "openai/gpt-5" }),
+    true,
+  );
+});
+
+test("nextWorkflowGuardrailStep orders a new row after its own phase's rows", () => {
+  const steps = [
+    { ref: "a", phase: "prompt", step: 10 },
+    { ref: "b", phase: "prompt", step: "40" },
+    { ref: "c", phase: "response", step: 50 },
+    { ref: "d", phase: "stream", step: "" },
+  ];
+  assert.equal(nextWorkflowGuardrailStep(steps, "prompt"), 50);
+  assert.equal(nextWorkflowGuardrailStep(steps, "response"), 60);
+  assert.equal(nextWorkflowGuardrailStep(steps, "stream"), 10);
+  assert.equal(nextWorkflowGuardrailStep([], "prompt"), 10);
+  // A legacy row without a phase is a prompt row.
+  assert.equal(nextWorkflowGuardrailStep([{ ref: "x", step: 20 }], "prompt"), 30);
 });
 
 test("workflowDisplayName falls back to scope label or All models", () => {

@@ -14,6 +14,7 @@ import {
   defaultWorkflowForm,
   emptyHydratedScope,
   defaultWorkflowGuardrailStep,
+  nextWorkflowGuardrailStep,
   workflowNormalizedFeatures,
   workflowSourceFeatures,
   workflowSourceGuardrails,
@@ -178,39 +179,18 @@ class WorkflowsStore {
     }
   }
 
-  addGuardrailStep() {
+  // addGuardrailStep appends a row to one phase's section, ordered after
+  // that phase's existing rows.
+  addGuardrailStep(phase) {
     const steps = Array.isArray(this.form.guardrails) ? this.form.guardrails : [];
-    const nextStep =
-      steps.reduce((maxStep, step) => {
-        const parsed = Number(step && step.step);
-        return Number.isFinite(parsed) ? Math.max(maxStep, parsed) : maxStep;
-      }, 0) + 10;
-    this.form.guardrails.push(defaultWorkflowGuardrailStep(nextStep));
+    this.form.guardrails.push(
+      defaultWorkflowGuardrailStep(nextWorkflowGuardrailStep(steps, phase), phase),
+    );
   }
 
   removeGuardrailStep(index) {
     if (!Array.isArray(this.form.guardrails)) return;
     this.form.guardrails.splice(index, 1);
-  }
-
-  // setGuardrailStepPhase switches a row's phase and clears a ref that is
-  // known not to support it, so the select shows a valid choice again. A ref
-  // the list does not know (unregistered, typed by hand) is kept.
-  setGuardrailStepPhase(index, phase) {
-    const step = Array.isArray(this.form.guardrails) ? this.form.guardrails[index] : null;
-    if (!step) return;
-    step.phase = normalizeWorkflowPhase(phase);
-    const ref = String(step.ref || "").trim();
-    if (!ref) return;
-    const known = workflowGuardrailRefOptions(this.guardrailRefs, step.phase, "").some(
-      (option) => option.value === ref,
-    );
-    const registered = (this.guardrailRefs || []).some((entry) =>
-      typeof entry === "string" ? entry.trim() === ref : entry && entry.name === ref,
-    );
-    if (registered && !known) {
-      step.ref = "";
-    }
   }
 
   buildRequest() {

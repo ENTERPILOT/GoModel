@@ -76,10 +76,6 @@
       grid-template-columns: 1fr;
     }
 
-  .workflow-feature-toggles {
-      grid-template-columns: 1fr;
-    }
-
   .workflow-section-head {
       flex-direction: column;
       align-items: flex-start;

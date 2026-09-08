@@ -12,8 +12,8 @@
   import {
     workflowScopeTypeLabel,
     workflowScopeLabel,
+    workflowScopeBadgeVisible,
     workflowDisplayName,
-    workflowFailoverLabel,
     canDeactivateWorkflow,
     shortHash,
   } from "./workflowsLogic.js";
@@ -33,16 +33,15 @@
       <p class="form-kicker">{workflowScopeTypeLabel(workflow)}</p>
       <h3>{displayName}</h3>
     </div>
-    <div class="workflow-card-badges">
-      <span class="provider-badge">{workflowScopeLabel(workflow)}</span>
-    </div>
+    {#if workflowScopeBadgeVisible(workflow)}
+      <div class="workflow-card-badges">
+        <span class="provider-badge">{workflowScopeLabel(workflow)}</span>
+      </div>
+    {/if}
   </div>
 
   {#if workflow.description}
     <p class="workflow-card-description">{workflow.description}</p>
-  {/if}
-  {#if wf.failoverVisible()}
-    <p class="form-hint">{m.workflows_failover()}: {workflowFailoverLabel(workflow, caps)}</p>
   {/if}
 
   <WorkflowChart {chart} />

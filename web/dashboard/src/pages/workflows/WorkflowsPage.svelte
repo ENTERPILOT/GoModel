@@ -65,6 +65,10 @@
 
 <style>
 /* Workflows */
+.workflow-create-btn {
+    white-space: nowrap;
+  }
+
 .workflow-page-note {
     margin-top: 6px;
     color: var(--text-muted);
