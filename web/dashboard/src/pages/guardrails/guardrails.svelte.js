@@ -38,6 +38,10 @@ class GuardrailsStore {
   deletingName = $state("");
   formMode = $state("create");
   formOriginalName = $state("");
+  // onSaved(name) runs after a successful save when another editor (the
+  // workflow editor) opened this form and wants the result. Plain field,
+  // not state: it never renders. Cleared when the form closes.
+  onSaved = null;
   form = $state({
     name: "",
     type: "",
@@ -90,6 +94,7 @@ class GuardrailsStore {
     this.formOpen = false;
     this.formMode = "create";
     this.formOriginalName = "";
+    this.onSaved = null;
     this.error = "";
     this.form = defaultGuardrailForm(this.types, defaultGuardrailType(this.types));
   }
@@ -218,8 +223,10 @@ class GuardrailsStore {
       }
 
       flash.success(m.guardrails_saved({ name }));
+      const onSaved = this.onSaved;
       this.closeForm();
       void this.fetchGuardrails();
+      onSaved?.(name);
     } finally {
       this.formSubmitting = false;
     }

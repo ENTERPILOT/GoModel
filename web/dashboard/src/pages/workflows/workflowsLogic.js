@@ -48,6 +48,18 @@ export function emptyHydratedScope() {
   };
 }
 
+// nextWorkflowGuardrailStep is the step number a new row in a phase gets:
+// 10 past the phase's highest step, so it runs after the existing rows.
+export function nextWorkflowGuardrailStep(steps, phase) {
+  const wanted = normalizeWorkflowPhase(phase);
+  const highest = (Array.isArray(steps) ? steps : []).reduce((maxStep, step) => {
+    if (normalizeWorkflowPhase(step && step.phase) !== wanted) return maxStep;
+    const parsed = Number(step && step.step);
+    return Number.isFinite(parsed) ? Math.max(maxStep, parsed) : maxStep;
+  }, 0);
+  return highest + 10;
+}
+
 export function defaultWorkflowGuardrailStep(step, phase) {
   return {
     ref: "",
@@ -106,6 +118,17 @@ export function workflowGuardrailRefOptions(refs, phase, current) {
     options.push({ value: active, label: active, summary: "" });
   }
   return options;
+}
+
+// workflowGuardrailStepIssues reports which fields of an editor row would
+// fail validateWorkflowRequest, so the editor can outline them once the
+// user has tried to submit.
+export function workflowGuardrailStepIssues(step) {
+  const parsed = parseWorkflowGuardrailStep(step && step.step);
+  return {
+    ref: !String((step && step.ref) || "").trim(),
+    step: !Number.isInteger(parsed) || parsed < 0,
+  };
 }
 
 export function parseWorkflowGuardrailStep(rawStep) {
@@ -199,10 +222,6 @@ export function workflowSourceFeatures(source, caps) {
   };
 }
 
-export function workflowFailoverLabel(source, caps) {
-  return workflowSourceFeatures(source, caps).failover ? m.workflows_on() : m.workflows_off();
-}
-
 // workflowSourceGuardrails reads a stored workflow's (or the editor form's)
 // steps as {ref, phase, step}, accepting the v2 `steps` list and the legacy
 // `guardrails` list, and drops steps without a usable step number.
@@ -287,6 +306,14 @@ export function workflowScopeTypeLabel(workflow) {
 
 export function workflowScopeLabel(workflow) {
   return String((workflow && workflow.scope_display) || "global").trim() || "global";
+}
+
+// workflowScopeBadgeVisible hides the scope badge when it would only repeat
+// the card head: the global scope already reads "Global" in the kicker, and
+// an unnamed workflow already shows its scope as the title.
+export function workflowScopeBadgeVisible(workflow) {
+  const scopeLabel = workflowScopeLabel(workflow);
+  return scopeLabel !== "global" && workflowDisplayName(workflow) !== scopeLabel;
 }
 
 export function workflowDisplayName(workflow) {

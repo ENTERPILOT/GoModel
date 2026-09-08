@@ -82,8 +82,8 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "block_status", Label: "Block status", Input: pluginapi.InputNumber,
-				Help:        "HTTP status for block (400 to 599). Leave empty for the phase default: 400 when a prompt is blocked, 502 when a response is blocked.",
-				Placeholder: "400 (prompt) / 502 (response)",
+				Help:        "One HTTP status code between 400 and 599 that a blocked request returns, for example 403. Leave empty to use the phase default: 400 when the prompt is blocked, 502 when the response is blocked.",
+				Placeholder: "phase default",
 			},
 			{
 				Key: "stream_lookbehind", Label: "Stream lookbehind", Input: pluginapi.InputNumber, Default: DefaultStreamLookbehind,
