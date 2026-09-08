@@ -123,3 +123,48 @@ func TestConvertResponsesInputToMessages_ReasoningAttachesToItsTurn(t *testing.T
 		t.Fatal("the assistant turn lost its replay state")
 	}
 }
+
+// Turn-wide replay state on the assistant message (a Gemini 3 text-turn
+// thought signature, an Anthropic thinking signature) has no home on the
+// message item, so it rides on a reasoning item even when there is no
+// reasoning text to show. The client echoes the item and the state comes back
+// on the assistant turn.
+func TestBuildResponsesOutputItems_MessageReplayStateBecomesReasoningItem(t *testing.T) {
+	fields, err := core.UnknownJSONFields{}.WithExtraContent(core.ExtraContentVendorGoogle, json.RawMessage(`{"thought_signature":"sig-1"}`))
+	if err != nil {
+		t.Fatalf("WithExtraContent: %v", err)
+	}
+	items := BuildResponsesOutputItems(core.ResponseMessage{Role: "assistant", Content: "hi", ExtraFields: fields})
+	if len(items) != 2 || items[0].Type != "reasoning" || items[1].Type != "message" {
+		t.Fatalf("items = %+v, want a reasoning item followed by the message", items)
+	}
+	encoded, err := json.Marshal(items[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var reasoning map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &reasoning); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := string(reasoning["extra_content"]); got != `{"google":{"thought_signature":"sig-1"}}` {
+		t.Errorf("reasoning extra_content = %s, want the message's replay state", got)
+	}
+	if _, ok := reasoning["content"]; ok {
+		t.Errorf("reasoning item carries content %s, want none for a turn without reasoning text", reasoning["content"])
+	}
+
+	// Echoed back, the item's state lands on the assistant turn it precedes.
+	messages, err := convertResponsesInputItems([]any{
+		map[string]any{"type": "reasoning", "summary": []any{}, "extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig-1"}}},
+		map[string]any{"type": "message", "role": "assistant", "content": "hi"},
+	})
+	if err != nil {
+		t.Fatalf("convertResponsesInputItems: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages = %+v, want one assistant turn", messages)
+	}
+	if got := string(messages[0].ExtraFields.ExtraContent(core.ExtraContentVendorGoogle)); got != `{"thought_signature":"sig-1"}` {
+		t.Errorf("assistant extra_content.google = %s, want the echoed signature", got)
+	}
+}
