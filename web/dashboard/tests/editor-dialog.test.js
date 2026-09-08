@@ -24,6 +24,10 @@ const confirmStore = readFileSync(
   join(SRC, "lib/stores/confirm.svelte.js"),
   "utf8",
 );
+const searchSelect = readFileSync(
+  join(SRC, "lib/components/molecules/SearchSelect.svelte"),
+  "utf8",
+);
 
 test("EditorDialog marks the form dirty on user edits and resets on open", () => {
   // The form element itself funnels every field's input/change events into
@@ -62,6 +66,32 @@ test("every EditorDialog close path goes through the discard confirmation", () =
     editorDialog,
     /confirmDialog\.open\(\{[\s\S]*?title: m\.editor_discard_title\(\)[\s\S]*?stacked: true,[\s\S]*?onConfirm: \(\) => \{[\s\S]*?onclose\?\.\(\);/,
   );
+  // Guards are re-checked at confirm time: they can flip between opening
+  // the prompt and confirming (e.g. a 401 opening the auth dialog on top).
+  assert.match(
+    editorDialog,
+    /onConfirm: \(\) => \{\s*\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*if \(auth\.dialogOpen\) return;\s*\n\s*if \(!canClose\(\)\) return;/,
+  );
+  // A programmatic close (successful save, store reset) closes the discard
+  // prompt too; it must not stay orphaned on screen.
+  assert.match(
+    editorDialog,
+    /if \(!open && discardOpen\) \{\s*\n\s*discardOpen = false;\s*\n\s*confirmDialog\.close\(\);/,
+  );
+  assert.match(editorDialog, /onClose: \(\) => \(discardOpen = false\),/);
+});
+
+test("SearchSelect reports selections as change events and keeps its query local", () => {
+  // Selections are programmatic; SearchSelect must dispatch a bubbling
+  // change event so the enclosing form's dirty guard notices them...
+  assert.match(
+    searchSelect,
+    /dispatchEvent\(new Event\("change", \{ bubbles: true \}\)\)/,
+  );
+  // ...while its search box (local UI state, never saved) must stop its own
+  // events from marking the form dirty.
+  assert.match(searchSelect, /oninput=\{\(event\) => event\.stopPropagation\(\)\}/);
+  assert.match(searchSelect, /onchange=\{\(event\) => event\.stopPropagation\(\)\}/);
 });
 
 test("the confirmation dialog only asks for typed text when required", () => {

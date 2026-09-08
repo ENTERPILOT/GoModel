@@ -82,6 +82,17 @@
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   });
 
+  // A programmatic close (successful save, store reset) must not leave the
+  // discard prompt orphaned on screen.
+  let discardOpen = $state(false);
+
+  $effect(() => {
+    if (!open && discardOpen) {
+      discardOpen = false;
+      confirmDialog.close();
+    }
+  });
+
   // Single close gate for every close path: Escape/backdrop arrive through
   // Modal's onclose; the header close button and Cancel call it directly.
   function requestClose() {
@@ -97,11 +108,17 @@
       confirmLabel: m.editor_discard_confirm(),
       stacked: true,
       onConfirm: () => {
+        // Guards can have flipped since the prompt opened (e.g. a 401
+        // opened the auth dialog on top).
+        if (auth.dialogOpen) return;
+        if (!canClose()) return;
         dirty = false;
         onclose?.();
         confirmDialog.close();
       },
+      onClose: () => (discardOpen = false),
     });
+    discardOpen = true;
   }
 </script>
 

@@ -152,6 +152,13 @@
     else openList();
   }
 
+  // Selection changes are programmatic, so no DOM change event fires on its
+  // own. Dispatch a bubbling one so enclosing forms (the editor dialog's
+  // unsaved-changes guard) treat picks like native field edits.
+  function notifyChanged() {
+    rootEl?.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
   async function choose(next) {
     if (next === undefined || next === null) return;
     if (multiple) {
@@ -162,6 +169,7 @@
       for (const piece of pieces) updated = toggleSearchValue(updated, piece);
       values = updated;
       onchange?.(values);
+      notifyChanged();
       query = "";
       await tick();
       placePopover();
@@ -170,6 +178,7 @@
     }
     value = String(next);
     onchange?.(value);
+    notifyChanged();
     close();
   }
 
@@ -177,6 +186,7 @@
     if (!multiple || !values.length) return;
     values = values.slice(0, -1);
     onchange?.(values);
+    notifyChanged();
   }
 
   function scrollActiveIntoView() {
@@ -269,6 +279,8 @@
     <div class="search-select-popover" style={popoverStyle}>
       <div class="search-select-search">
         <Icon icon={Search} class="search-select-search-icon" />
+        <!-- The query is local UI state, never saved; stopPropagation keeps
+             its events from marking an enclosing form dirty. -->
         <input
           type="text"
           class="search-select-search-input"
@@ -284,6 +296,8 @@
           bind:this={searchEl}
           bind:value={query}
           onkeydown={onSearchKeydown}
+          oninput={(event) => event.stopPropagation()}
+          onchange={(event) => event.stopPropagation()}
         />
       </div>
       <ul
