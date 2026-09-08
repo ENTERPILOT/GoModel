@@ -100,7 +100,7 @@ Before opening a PR:
 
 If this repository is not the official GoModel repository, ask the user whether they also want to create a PR against the official repository:
 
-[https://github.com/ENTERPILOT/GoModel/](https://github.com/ENTERPILOT/GoModel/)
+https://github.com/ENTERPILOT/GoModel/
 
 ## Code Review
 
