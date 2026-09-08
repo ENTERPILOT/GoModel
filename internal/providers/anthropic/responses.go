@@ -276,6 +276,12 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		status = "incomplete"
 		eventName = "response.incomplete"
 	}
+	// A stream cut after a thinking block's signature but before its stop
+	// still holds a block Anthropic accepts back, and this is the client's
+	// only chance to receive it.
+	if extra := sc.thinking.extraContent(); extra != nil {
+		sc.output.SetReasoningExtraContent(extra)
+	}
 	prefix := sc.output.FinishReasoningOutput(sc.reasoningOutputIndex, status) +
 		sc.output.FinishAssistantOutput(sc.assistantOutputIndex, status) +
 		sc.completePendingToolCalls(status)

@@ -6823,3 +6823,37 @@ func TestStreamResponses_ThinkingAfterTextKeepsStreamValid(t *testing.T) {
 		t.Errorf("final output ends with %v, want the function_call", got)
 	}
 }
+
+// A signature is the last delta of a thinking block, so a stream cut between
+// it and content_block_stop still holds a block Anthropic will accept back.
+// The incomplete terminal output must carry it: the client continues from
+// response.output, and losing the signature there loses the turn.
+func TestStreamResponses_InterruptedAfterSignatureKeepsReplayState(t *testing.T) {
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_cut","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}
+`
+	events := responsesStreamEvents(t, sse)
+	final := events[len(events)-1]
+	if final["type"] != "response.incomplete" {
+		t.Fatalf("final event = %v, want response.incomplete", final["type"])
+	}
+	output := final["response"].(map[string]any)["output"].([]any)
+	reasoning := output[0].(map[string]any)
+	if reasoning["type"] != "reasoning" {
+		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
+	}
+	extra, _ := json.Marshal(reasoning["extra_content"])
+	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"Let me think.","type":"thinking"}]}}`
+	if string(extra) != want {
+		t.Errorf("interrupted reasoning extra_content = %s, want the signed block", extra)
+	}
+}
