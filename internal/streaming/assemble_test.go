@@ -260,3 +260,48 @@ func TestAppendOutputText_BoundsContentIndex(t *testing.T) {
 		t.Fatalf("after index 1: %+v", item.Content[:2])
 	}
 }
+
+// A synthesized stream is indistinguishable from a real one to the client, so
+// it must carry the provider replay state the response holds; without it an
+// Anthropic thinking turn cannot be continued.
+func TestSynthesizeChatStream_CarriesReplayState(t *testing.T) {
+	const replay = `{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"hm","signature":"sig-1"}]}}`
+	resp := &core.ChatResponse{
+		ID:    "chatcmpl-3",
+		Model: "claude-sonnet-4-5",
+		Choices: []core.Choice{{
+			Index: 0,
+			Message: core.ResponseMessage{
+				Role:    "assistant",
+				Content: "done",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_content":    json.RawMessage(`"hm"`),
+					core.ExtraContentField: json.RawMessage(replay),
+				}),
+			},
+			FinishReason: "stop",
+		}},
+	}
+
+	var got string
+	for _, event := range decodeStreamEvents(t, SynthesizeChatStream(resp, false)) {
+		delta := event["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)
+		if extra, ok := delta[core.ExtraContentField]; ok {
+			encoded, _ := json.Marshal(extra)
+			got = string(encoded)
+		}
+	}
+	if got == "" {
+		t.Fatal("no chunk carried extra_content")
+	}
+	var want, have any
+	if err := json.Unmarshal([]byte(replay), &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(got), &have); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(want, have) {
+		t.Errorf("extra_content = %s, want %s", got, replay)
+	}
+}

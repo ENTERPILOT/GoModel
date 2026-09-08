@@ -1,0 +1,34 @@
+{
+  "model": "claude-sonnet-4-5",
+  "id": "msg_01ThinkingToolUseFixture",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "The user asked for the weather in Paris. I should call get_weather.",
+      "signature": "ErUBCkYIBRgCIkDPthinkingSignatureFixtureForContractTestsEgxSaW5nU2lnbmF0dXJlGgz//8AB"
+    },
+    {
+      "type": "redacted_thinking",
+      "data": "EroBCoYBEncKdG9wYXF1ZS1yZWRhY3RlZC10aGlua2luZy1maXh0dXJl"
+    },
+    {
+      "type": "text",
+      "text": "Let me look that up."
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01WeatherParis",
+      "name": "get_weather",
+      "input": { "city": "Paris" }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 61,
+    "output_tokens": 88,
+    "output_tokens_details": { "thinking_tokens": 42 }
+  }
+}

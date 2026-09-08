@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
@@ -47,11 +49,16 @@ type streamConverter struct {
 	nextToolCallIndex int
 	toolCalls         map[int]*streamToolCallState
 	thinkingBlocks    map[int]bool // tracks which content block indices are thinking blocks
-	usage             anthropicUsage
-	hasUsage          bool
-	buffer            streaming.StreamBuffer
-	closed            bool
-	emittedToolCalls  bool
+	// thinkingReplay accumulates the thinking blocks of this turn, keyed by
+	// upstream content-block index and ordered by thinkingOrder, so the
+	// signatures Anthropic requires back can be handed to the client.
+	thinkingReplay   map[int]*anthropicContent
+	thinkingOrder    []int
+	usage            anthropicUsage
+	hasUsage         bool
+	buffer           streaming.StreamBuffer
+	closed           bool
+	emittedToolCalls bool
 }
 
 // streamToolCallState tracks per-tool-call bookkeeping for the chat dialect.
@@ -73,6 +80,7 @@ func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
 		created:        time.Now().Unix(),
 		toolCalls:      make(map[int]*streamToolCallState),
 		thinkingBlocks: make(map[int]bool),
+		thinkingReplay: make(map[int]*anthropicContent),
 		buffer:         streaming.NewStreamBuffer(1024),
 	}
 }
@@ -187,6 +195,13 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 	case "content_block_start":
 		if event.ContentBlock != nil && event.ContentBlock.Type == "thinking" {
 			sc.thinkingBlocks[event.Index] = true
+			sc.trackThinking(event.Index, *event.ContentBlock)
+			return ""
+		}
+		if event.ContentBlock != nil && event.ContentBlock.Type == "redacted_thinking" {
+			// A redacted block arrives whole and has no readable text, so
+			// replay state is the only thing that can carry it.
+			sc.trackThinking(event.Index, *event.ContentBlock)
 			return ""
 		}
 		if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
@@ -231,13 +246,20 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		switch event.Delta.Type {
 		case "thinking_delta":
 			if sc.thinkingBlocks[event.Index] && event.Delta.Thinking != "" {
+				if block := sc.thinkingReplay[event.Index]; block != nil {
+					block.Thinking += event.Delta.Thinking
+				}
 				return sc.formatChatChunk(map[string]any{
 					"reasoning_content": event.Delta.Thinking,
 				}, nil, nil)
 			}
 		case "signature_delta":
-			// Signature deltas are internal to Anthropic's thinking protocol;
-			// no OpenAI-compatible equivalent to emit.
+			// A signature has no OpenAI-compatible field of its own; it is
+			// held until the block closes and then handed over as replay
+			// state, which is what the client must echo back.
+			if block := sc.thinkingReplay[event.Index]; block != nil {
+				block.Signature += event.Delta.Signature
+			}
 			return ""
 		case "text_delta":
 			if event.Delta.Text != "" {
@@ -285,6 +307,12 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		}
 
 	case "content_block_stop":
+		// The completed thinking block is published before any text follows,
+		// so a client that closes it on the first text delta still sees the
+		// signature.
+		if chunk := sc.thinkingReplayChunk(event.Index); chunk != "" {
+			return chunk
+		}
 		state := sc.toolCalls[event.Index]
 		if state != nil && !state.Started && state.PlaceholderObject {
 			state.Started = true
@@ -333,4 +361,40 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 	}
 
 	return ""
+}
+
+// trackThinking records a thinking or redacted_thinking block so its
+// signature, or its opaque payload, can be replayed on a later turn.
+func (sc *streamConverter) trackThinking(index int, block anthropicContent) {
+	if _, seen := sc.thinkingReplay[index]; seen {
+		return
+	}
+	tracked := block
+	sc.thinkingReplay[index] = &tracked
+	sc.thinkingOrder = append(sc.thinkingOrder, index)
+}
+
+// thinkingReplayChunk emits the thinking blocks accumulated so far when the
+// block at index closes. The value is cumulative rather than incremental so a
+// client that keeps only the most recent extra_content still ends up with the
+// whole turn.
+func (sc *streamConverter) thinkingReplayChunk(index int) string {
+	if _, ok := sc.thinkingReplay[index]; !ok {
+		return ""
+	}
+	blocks := make([]json.RawMessage, 0, len(sc.thinkingOrder))
+	for _, i := range sc.thinkingOrder {
+		if raw, ok := thinkingReplayJSON(*sc.thinkingReplay[i]); ok {
+			blocks = append(blocks, raw)
+		}
+	}
+	raw, err := json.Marshal(map[string][]json.RawMessage{core.ThinkingBlocksField: blocks})
+	if err != nil {
+		return ""
+	}
+	vendors, err := json.Marshal(map[string]json.RawMessage{core.ExtraContentVendorAnthropic: raw})
+	if err != nil {
+		return ""
+	}
+	return sc.formatChatChunk(map[string]any{core.ExtraContentField: json.RawMessage(vendors)}, nil, nil)
 }

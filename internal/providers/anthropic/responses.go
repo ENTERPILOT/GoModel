@@ -25,15 +25,22 @@ func convertAnthropicResponseToResponses(resp *anthropicResponse, model string) 
 	content := extractTextContent(resp.Content)
 	toolCalls := extractToolCalls(resp.Content)
 
-	msg := core.Message{
+	msg := core.ResponseMessage{
+		Role:      "assistant",
 		Content:   content,
 		ToolCalls: toolCalls,
 	}
-	output := providers.BuildResponsesOutputItems(core.ResponseMessage{
-		Role:      "assistant",
-		Content:   msg.Content,
-		ToolCalls: msg.ToolCalls,
-	})
+	if thinking := extractThinkingContent(resp.Content); thinking != "" {
+		if raw, err := json.Marshal(thinking); err == nil {
+			msg.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+				"reasoning_content": raw,
+			})
+		}
+	}
+	// The reasoning item carries the signatures Anthropic needs back; without
+	// them a Responses client cannot continue a thinking conversation.
+	msg.ExtraFields = withThinkingReplay(msg.ExtraFields, extractThinkingReplay(resp.Content))
+	output := providers.BuildResponsesOutputItems(msg)
 
 	return &core.ResponsesResponse{
 		ID:        resp.ID,

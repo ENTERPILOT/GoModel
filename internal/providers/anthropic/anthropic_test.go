@@ -4406,14 +4406,24 @@ func TestConvertAnthropicResponseToResponses_WithThinkingBlocks(t *testing.T) {
 
 			result := convertAnthropicResponseToResponses(resp, "claude-opus-4-6")
 
-			if len(result.Output) != 1 {
-				t.Fatalf("len(Output) = %d, want 1", len(result.Output))
+			// A thinking block always produces a leading reasoning item: it
+			// carries the signature the next turn has to replay, even when the
+			// model left the thinking text empty.
+			if len(result.Output) != 2 {
+				t.Fatalf("len(Output) = %d, want a reasoning item and a message", len(result.Output))
 			}
-			if len(result.Output[0].Content) == 0 {
-				t.Fatalf("len(Output[0].Content) = 0, want at least 1")
+			reasoning, message := result.Output[0], result.Output[1]
+			if reasoning.Type != "reasoning" {
+				t.Fatalf("Output[0].Type = %q, want reasoning", reasoning.Type)
 			}
-			if result.Output[0].Content[0].Text != tt.expectedText {
-				t.Errorf("expected %q, got %q", tt.expectedText, result.Output[0].Content[0].Text)
+			if raw := reasoning.ExtraFields.Lookup(core.ExtraContentField); len(raw) == 0 {
+				t.Error("the reasoning item must carry the thinking blocks as replay state")
+			}
+			if len(message.Content) == 0 {
+				t.Fatalf("len(Output[1].Content) = 0, want at least 1")
+			}
+			if message.Content[0].Text != tt.expectedText {
+				t.Errorf("expected %q, got %q", tt.expectedText, message.Content[0].Text)
 			}
 			if result.Usage.OutputTokens != 50 {
 				t.Errorf("OutputTokens = %d, want 50", result.Usage.OutputTokens)
@@ -6317,5 +6327,161 @@ func assertAdaptiveHighEffort(t *testing.T, out *anthropicRequest) {
 	}
 	if out.OutputConfig == nil || out.OutputConfig.Effort != "high" {
 		t.Fatalf("OutputConfig = %+v, want effort high", out.OutputConfig)
+	}
+}
+
+// chatStreamDeltas converts an Anthropic SSE stream and returns the delta
+// object of every emitted chat chunk.
+func chatStreamDeltas(t *testing.T, anthropicSSE string) []map[string]any {
+	t.Helper()
+	conv := newStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5")
+	defer conv.Close() //nolint:errcheck
+
+	out, err := io.ReadAll(conv)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	deltas := []map[string]any{}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
+		if !ok || data == "[DONE]" {
+			continue
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta map[string]any `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			t.Fatalf("unmarshal chunk %q: %v", data, err)
+		}
+		for _, choice := range chunk.Choices {
+			deltas = append(deltas, choice.Delta)
+		}
+	}
+	return deltas
+}
+
+// lastExtraContent returns the last extra_content value seen on a delta, which
+// is the authoritative cumulative value for a client that keeps only the most
+// recent one. Decoding through map[string]any sorts the members, so the
+// expected values below are in key order rather than wire order.
+func lastExtraContent(deltas []map[string]any) string {
+	for _, delta := range slices.Backward(deltas) {
+		if extra, ok := delta[core.ExtraContentField]; ok {
+			encoded, _ := json.Marshal(extra)
+			return string(encoded)
+		}
+	}
+	return ""
+}
+
+// A streamed thinking block carries its signature in a signature_delta that
+// arrives after the thinking text. Dropping it leaves the client with a
+// thinking block Anthropic will refuse on the next turn, so the converter must
+// surface it as replay state.
+func TestStreamChatCompletion_ThinkingSignatureSurfaced(t *testing.T) {
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_sig","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"think."}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	deltas := chatStreamDeltas(t, sse)
+	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"Let me think.","type":"thinking"}]}}`
+	if got := lastExtraContent(deltas); got != want {
+		t.Fatalf("extra_content = %s, want %s", got, want)
+	}
+
+	// The signature must not arrive after the text has been streamed: a client
+	// closing the thinking block on the first text delta would drop it.
+	extraAt, textAt := -1, -1
+	for i, delta := range deltas {
+		if _, ok := delta[core.ExtraContentField]; ok && extraAt < 0 {
+			extraAt = i
+		}
+		if _, ok := delta["content"]; ok && textAt < 0 {
+			textAt = i
+		}
+	}
+	if extraAt < 0 || textAt < 0 || extraAt > textAt {
+		t.Errorf("extra_content at %d, first content at %d; want the thinking block completed first", extraAt, textAt)
+	}
+}
+
+// A redacted thinking block arrives whole on content_block_start and has no
+// readable text, so nothing but extra_content can carry it.
+func TestStreamChatCompletion_RedactedThinkingSurfaced(t *testing.T) {
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_red","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	want := `{"anthropic":{"thinking_blocks":[{"data":"opaque","type":"redacted_thinking"}]}}`
+	if got := lastExtraContent(chatStreamDeltas(t, sse)); got != want {
+		t.Fatalf("extra_content = %s, want %s", got, want)
+	}
+}
+
+// A stream without thinking must stay byte-identical to what it was before:
+// no empty extra_content member on any delta.
+func TestStreamChatCompletion_NoThinkingNoExtraContent(t *testing.T) {
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_plain","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":4,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	if got := lastExtraContent(chatStreamDeltas(t, sse)); got != "" {
+		t.Fatalf("extra_content = %s, want none for a stream with no thinking", got)
 	}
 }
