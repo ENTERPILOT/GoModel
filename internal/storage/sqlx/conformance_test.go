@@ -443,3 +443,29 @@ func TestInTxIsAtomicUnderConcurrency(t *testing.T) {
 		}
 	})
 }
+
+func TestSchemaToleratesConcurrentApplication(t *testing.T) {
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		// Several gateway replicas boot against one empty database at the
+		// same time, and every store constructor applies its schema on
+		// start. PostgreSQL's CREATE TABLE IF NOT EXISTS is not atomic
+		// across sessions: two of them racing on a missing table make the
+		// loser fail with a duplicate pg_type key instead of a no-op.
+		const workers = 8
+		errs := make(chan error, workers)
+		start := make(chan struct{})
+		for range workers {
+			go func() {
+				<-start
+				errs <- db.Schema(context.Background(), conformanceSchema,
+					`CREATE INDEX IF NOT EXISTS conformance_updated_at ON conformance (updated_at)`)
+			}()
+		}
+		close(start)
+		for range workers {
+			if err := <-errs; err != nil {
+				t.Errorf("concurrent schema application failed: %v", err)
+			}
+		}
+	})
+}

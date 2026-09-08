@@ -14,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 )
 
 const (
@@ -55,8 +56,14 @@ func NewPostgreSQLStore(pool *pgxpool.Pool, retentionDays int) (*PostgreSQLStore
 
 	ctx := context.Background()
 
-	// Create table for usage tracking
-	_, err := pool.Exec(ctx, `
+	// Create table for usage tracking. sqlx.DB.Schema serializes concurrent
+	// replicas with an advisory lock, so a fresh database can be brought up
+	// by several pods at once.
+	schema, err := sqlx.NewPostgreSQL(pool)
+	if err != nil {
+		return nil, err
+	}
+	err = schema.Schema(ctx, `
 		CREATE TABLE IF NOT EXISTS usage (
 			id UUID PRIMARY KEY,
 			request_id TEXT NOT NULL,

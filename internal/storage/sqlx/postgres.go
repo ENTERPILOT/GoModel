@@ -38,8 +38,27 @@ func (p *postgresDB) QueryRow(ctx context.Context, query string, args ...any) Ro
 	return pgQueryRow(ctx, p.pool, query, args...)
 }
 
+// postgresSchemaLockKey is the advisory lock every Schema call takes. One key
+// for the whole gateway is deliberate: each store's DDL is short, and the
+// alternative (a key per store) buys nothing while making the lock easy to
+// forget in a new store.
+const postgresSchemaLockKey int64 = 0x676f6d6f64656c
+
+// Schema applies DDL inside one transaction that holds an advisory lock.
+//
+// PostgreSQL's CREATE TABLE IF NOT EXISTS checks and creates in two steps, so
+// two sessions racing on a missing table leave the loser with a duplicate
+// pg_type key error instead of a no-op. Several replicas booting against one
+// fresh database hit exactly that. The transaction-scoped lock serializes
+// them: the second replica waits, then finds every table present.
+// PostgreSQL DDL is transactional, so a failure leaves nothing half-applied.
 func (p *postgresDB) Schema(ctx context.Context, statements ...string) error {
-	return execSchema(ctx, p, PostgreSQL, statements)
+	return p.InTx(ctx, func(q Querier) error {
+		if _, err := q.Exec(ctx, "SELECT pg_advisory_xact_lock(?)", postgresSchemaLockKey); err != nil {
+			return fmt.Errorf("acquire schema lock: %w", err)
+		}
+		return execSchema(ctx, q, PostgreSQL, statements)
+	})
 }
 
 func (p *postgresDB) InTx(ctx context.Context, fn func(Querier) error) error {

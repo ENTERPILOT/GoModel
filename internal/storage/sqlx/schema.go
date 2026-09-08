@@ -8,10 +8,11 @@ import (
 
 // execSchema runs DDL statements in order with portable type tokens expanded.
 //
-// Statements run outside a transaction: SQLite cannot run every schema change
-// transactionally, and `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT
-// EXISTS` are individually idempotent, so a partial application is safe to
-// retry on the next start.
+// On SQLite the statements run outside a transaction: it cannot run every
+// schema change transactionally, and `CREATE TABLE IF NOT EXISTS` / `CREATE
+// INDEX IF NOT EXISTS` are individually idempotent, so a partial application
+// is safe to retry on the next start. PostgreSQL wraps them in a locked
+// transaction instead; see postgresDB.Schema.
 func execSchema(ctx context.Context, q Querier, dialect Dialect, statements []string) error {
 	for _, statement := range statements {
 		if _, err := q.Exec(ctx, dialect.ExpandTypes(statement)); err != nil {
