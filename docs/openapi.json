@@ -6676,6 +6676,49 @@
         }
       }
     },
+    "/v1/auth/verify": {
+      "get": {
+        "description": "Reports whether the presented credential authenticates against this gateway. Returns 401 when it does not. A gateway with no authentication configured has no credential to confirm and answers 200 with valid=false and method=none. Disabled unless AUTH_VERIFY_ENABLED is set.",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Verify an API key",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/server.authVerifyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-mint": {
+          "metadata": {
+            "sidebarTitle": "/v1/auth/verify",
+            "title": "Verify an API key",
+            "description": "GoModel API reference for GET /v1/auth/verify: Verify an API key."
+          }
+        }
+      }
+    },
     "/v1/batches": {
       "get": {
         "tags": [
@@ -14914,6 +14957,26 @@
           },
           "display_name": {
             "type": "string"
+          }
+        }
+      },
+      "server.authVerifyResponse": {
+        "type": "object",
+        "properties": {
+          "key_id": {
+            "description": "KeyID identifies the managed auth key that authenticated the request.\nAbsent for every other method.",
+            "type": "string"
+          },
+          "method": {
+            "description": "Method is \"api_key\" for a managed key stored in the database,\n\"master_key\" for the bootstrap key, an extension-specific value for\nidentities supplied by an authentication extension, or \"none\" when the\nrequest carried no credential this gateway recognizes, which is also\nwhen Valid is false.",
+            "type": "string"
+          },
+          "user_path": {
+            "description": "UserPath is the subtree the credential is bound to. Absent when the\ncredential is global, which every master-key caller is.",
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
           }
         }
       },

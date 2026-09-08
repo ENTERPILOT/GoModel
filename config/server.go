@@ -46,6 +46,12 @@ type ServerConfig struct {
 	// siblings, and the /p/{provider}/v1/realtime passthrough upgrade.
 	// Default: true. Only providers implementing realtime accept sessions.
 	RealtimeEnabled bool `yaml:"realtime_enabled" env:"REALTIME_ENABLED"`
+	// AuthVerifyEnabled exposes GET /v1/auth/verify, which reports whether the
+	// API key a request carries authenticates against this gateway. It sits
+	// outside /admin so it keeps working when the admin API is disabled.
+	// Default: false — turn it on only when a service in front of the gateway
+	// needs to validate keys without holding a copy of them.
+	AuthVerifyEnabled bool `yaml:"auth_verify_enabled" env:"AUTH_VERIFY_ENABLED"`
 	// PIDFile records the process id of the running gateway so `gomodel --reload`
 	// can find it. Default: DefaultPIDFilePath(). Set it per instance when
 	// several gateways share a host, or to "" in config.yaml to write no pid
