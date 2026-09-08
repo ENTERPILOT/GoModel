@@ -51,8 +51,8 @@ A refused load names both sides, for example:
 
 ```
 plugin file /app/plugins/x.so was built with a different toolchain, flags, or
-pluginapi sources: it was built with go1.27.0, gomodel v0.1.90, flags -trimpath;
-this binary was built with go1.27.0, gomodel v0.1.91, flags (none). Rebuild it
+pluginapi sources: it was built with go1.27.1, gomodel v0.1.90, flags -trimpath;
+this binary was built with go1.27.1, gomodel v0.1.91, flags (none). Rebuild it
 with `gomodel plugin build` from this GoModel version
 ```
 
