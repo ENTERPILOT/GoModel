@@ -705,14 +705,31 @@ test("rate-limit deletes route through the typed confirmation dialog", () => {
     "utf8",
   );
 
-  // The dialog requires the rule's subject back and deletes on confirm.
-  assert.match(
-    storeSource,
-    /confirmDialog\.open\(\{[\s\S]*?requiredText: subject,[\s\S]*?onConfirm: \(\) => this\.deleteRateLimit\(item\)/,
+  // The dialog requires the rule's subject back and deletes on confirm —
+  // asserted inside requestDeleteRateLimit's body, not anywhere in the store.
+  const requestDelete = storeSource.match(
+    /requestDeleteRateLimit\(item\) \{[\s\S]*?\n  \}/,
   );
-  // Failures stay inside the dialog; success closes it.
-  assert.match(storeSource, /confirmDialog\.error = outcome\.error;/);
-  assert.match(storeSource, /confirmDialog\.close\(\);/);
+  assert.ok(requestDelete, "requestDeleteRateLimit method missing");
+  assert.match(requestDelete[0], /requiredText: subject,/);
+  assert.match(
+    requestDelete[0],
+    /onConfirm: \(\) => this\.deleteRateLimit\(item\)/,
+  );
+
+  // Failures stay inside the dialog; only success closes it — asserted
+  // inside deleteRateLimit's body, failure branch before the success close.
+  const deleteRateLimit = storeSource.match(
+    /async deleteRateLimit\(item\) \{[\s\S]*?\n  \}/,
+  );
+  assert.ok(deleteRateLimit, "deleteRateLimit method missing");
+  assert.match(deleteRateLimit[0], /confirmDialog\.error = outcome\.error;/);
+  assert.match(deleteRateLimit[0], /confirmDialog\.close\(\);/);
+  assert.ok(
+    deleteRateLimit[0].indexOf("confirmDialog.error = outcome.error;") <
+      deleteRateLimit[0].indexOf("confirmDialog.close();"),
+    "the failure branch must come before the success close",
+  );
   // The list button opens the confirmation; no path deletes outright.
   assert.match(listSource, /onclick=\{\(\) => rateLimits\.requestDeleteRateLimit\(item\)\}/);
   assert.equal(

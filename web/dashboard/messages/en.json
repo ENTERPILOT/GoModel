@@ -1366,7 +1366,7 @@
   "rate_limits_delete_failed": "Unable to delete rate limit.",
   "rate_limits_deleted": "Rate limit deleted.",
   "rate_limits_delete_title": "Delete Rate Limit",
-  "rate_limits_delete_message": "Type \"{subject}\" to permanently delete this rate limit. Requests it capped run uncapped afterwards.",
+  "rate_limits_delete_message": "Type \"{subject}\" to permanently delete this rate limit. Requests previously capped by this rule will run uncapped afterwards.",
   "rate_limits_reset_failed": "Unable to reset rate limit.",
   "rate_limits_reset_success": "Rate limit counters reset.",
   "rate_limits_user_path": "User path",
