@@ -308,6 +308,15 @@ func TestPromptClone(t *testing.T) {
 		t.Errorf("clone shares tool call argument bytes with the original: %s", got)
 	}
 
+	// The extra parameters are copied, nested values included.
+	p.Params.Extra = map[string]any{"metadata": map[string]any{"team": "a"}}
+	c = p.Clone()
+	p.Params.Extra["metadata"].(map[string]any)["team"] = "b"
+	p.Params.Extra["new"] = true
+	if got := c.Params.Extra["metadata"].(map[string]any)["team"]; got != "a" || c.Params.Extra["new"] != nil {
+		t.Errorf("clone shares the original's extra parameters: %v", c.Params.Extra)
+	}
+
 	// Object-valued parameters are copied too, not shared.
 	p.Params.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": "weather"}}
 	c = p.Clone()

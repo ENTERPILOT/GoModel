@@ -121,11 +121,15 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, observe EditObse
 				record.Edited = edits(x) != before
 			}
 			outcome.absorb([]Record{record})
-			if err != nil {
-				return outcome, err
-			}
+			// A mutator that edited and then failed closed still hands its
+			// edit to the observer: the hook has returned (Edited is never
+			// set for an abandoned one), so x is quiet and the audit trail
+			// can show the request the failure was about.
 			if record.Edited && observe != nil {
 				observe(mutator.Name, x)
+			}
+			if err != nil {
+				return outcome, err
 			}
 		}
 		if outcome.Decision.Blocks() {

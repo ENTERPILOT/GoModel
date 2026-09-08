@@ -132,6 +132,24 @@ func TestRunPromptObservedReportsEachEditInOrder(t *testing.T) {
 	if len(seen) != len(want) || seen[0] != want[0] || seen[1] != want[1] {
 		t.Fatalf("observed = %q, want %q", seen, want)
 	}
+
+	// A mutator that edits and then fails closed is observed too, before
+	// the run returns its error.
+	failing := newTestInstance(&fakePlugin{name: "failing", mutates: true, onPrompt: func(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
+		_ = x.Prompt.SetText("m0", 0, "edited then failed")
+		return pluginapi.Allow(), errors.New("boom")
+	}}, InstanceSpec{FailMode: FailClosed})
+	chain, err = BuildChain(pluginapi.KindPrompt, []Ref{{failing, 10}, {second, 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen = nil
+	if _, err := chain.RunPromptObserved(context.Background(), withPromptText(newExchange(), "hello"), observe); err == nil {
+		t.Fatal("expected the fail-closed error")
+	}
+	if len(seen) != 1 || seen[0] != "failing: edited then failed" {
+		t.Fatalf("observed = %q, want the failing mutator's edit only", seen)
+	}
 }
 
 func TestRunReadersConcurrentAndMergeSeverity(t *testing.T) {

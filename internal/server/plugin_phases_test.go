@@ -80,9 +80,15 @@ func (p *phasePlugin) decide(mode string, x *pluginapi.Exchange) (pluginapi.Deci
 }
 
 func (p *phasePlugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
-	if p.prompt == "edit" {
+	if p.prompt == "edit" || p.prompt == "edit_fail" {
 		if last := x.Prompt.LastUser(); last != nil {
-			return pluginapi.Allow(), x.Prompt.SetText(last.ID, 0, p.text)
+			if err := x.Prompt.SetText(last.ID, 0, p.text); err != nil {
+				return pluginapi.Allow(), err
+			}
+			if p.prompt == "edit_fail" {
+				return pluginapi.Allow(), errors.New("failed after editing")
+			}
+			return pluginapi.Allow(), nil
 		}
 	}
 	return p.decide(p.prompt, x)
@@ -663,6 +669,22 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 		// Nothing was forwarded, but the edit still shows what the block saw.
 		if !strings.Contains(bodyText(revisions[0]), "rewritten by editor") || revisions[1].BytesBefore != revisions[0].BytesAfter {
 			t.Errorf("the edit snapshot must survive a later block: %+v", revisions)
+		}
+	})
+
+	t.Run("edit then fail closed", func(t *testing.T) {
+		revisions := runPromptRevisionsExpecting(t, http.StatusInternalServerError, chatBody, auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, map[string]map[string]string{
+			"editor": {"prompt": "edit_fail", "text": "rewritten then failed"},
+		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1})
+		if len(revisions) != 1 || revisions[0].Rewriter != "editor" || revisions[0].NoChange {
+			t.Fatalf("expected the edit as a changed revision, got %+v", revisions)
+		}
+		// The failure came after the edit, so the trail shows the edited request.
+		if !strings.Contains(bodyText(revisions[0]), "rewritten then failed") || revisions[0].BytesAfter == revisions[0].BytesBefore {
+			t.Errorf("the edit snapshot must survive the instance's own failure: %+v", revisions[0])
+		}
+		if detail := revisions[0].Detail.(pluginDecisionDetail); !strings.Contains(detail.Error, "failed after editing") {
+			t.Errorf("detail must carry the failure: %+v", detail)
 		}
 	})
 }

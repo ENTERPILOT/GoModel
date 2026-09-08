@@ -297,9 +297,8 @@ func (p *Prompt) Changes() Changes {
 
 // Clone returns an independent copy of the prompt and its change tracking:
 // later edits on either side do not reach the other, and the host can apply
-// the copy's edits on its own (see Changes). Raw, Tools and the read-only
-// Params.Extra are shared, as nothing edits them. Host-facing; plugins do
-// not need it.
+// the copy's edits on its own (see Changes). Raw and Tools are shared, as
+// nothing edits them. Host-facing; plugins do not need it.
 func (p *Prompt) Clone() *Prompt {
 	if p == nil {
 		return nil
@@ -309,6 +308,9 @@ func (p *Prompt) Clone() *Prompt {
 	params.Temperature = cloneFloat(p.Params.Temperature)
 	params.TopP = cloneFloat(p.Params.TopP)
 	params.ToolChoice = cloneJSONValue(p.Params.ToolChoice)
+	if extra, ok := cloneJSONValue(p.Params.Extra).(map[string]any); ok {
+		params.Extra = extra
+	}
 	return &Prompt{
 		Messages: cloneMessages(p.Messages),
 		Tools:    p.Tools,
