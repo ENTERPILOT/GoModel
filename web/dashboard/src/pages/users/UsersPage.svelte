@@ -87,9 +87,13 @@
 
   {#if store.nodes.length > 0 && store.visibleNodes.length === 0 && store.available}
     <p class="empty-state">
-      {m.users_no_match()}{store.inactiveCount > 0 && !store.showInactive
-        ? " " + m.users_hidden({ count: store.inactiveCount })
-        : ""}
+      {#if store.filter.trim()}
+        {m.users_no_match()}{store.inactiveCount > 0 && !store.showInactive
+          ? " " + m.users_hidden({ count: store.inactiveCount })
+          : ""}
+      {:else}
+        {m.users_hidden({ count: store.inactiveCount })}
+      {/if}
     </p>
   {/if}
 
