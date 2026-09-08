@@ -6634,3 +6634,67 @@ data: {"type":"message_stop"}
 		}
 	}
 }
+
+// A redacted thinking block has no readable text, so its reasoning item exists
+// only to carry the opaque payload the next turn must replay. It still has to
+// be a well-formed item: opened, closed, and present in the terminal output.
+func TestStreamResponses_RedactedThinkingBecomesReasoningItem(t *testing.T) {
+	sse := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_red","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done."}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}
+
+event: message_stop
+data: {"type":"message_stop"}
+`
+	events := responsesStreamEvents(t, sse)
+
+	added, done := false, false
+	for _, event := range events {
+		item, ok := event["item"].(map[string]any)
+		if !ok || item["type"] != "reasoning" {
+			continue
+		}
+		switch event["type"] {
+		case "response.output_item.added":
+			added = true
+		case "response.output_item.done":
+			done = true
+		}
+	}
+	if !added || !done {
+		t.Errorf("reasoning item added=%v done=%v, want both", added, done)
+	}
+
+	final := events[len(events)-1]
+	output := final["response"].(map[string]any)["output"].([]any)
+	reasoning := output[0].(map[string]any)
+	if reasoning["type"] != "reasoning" {
+		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
+	}
+	extra, _ := json.Marshal(reasoning["extra_content"])
+	want := `{"anthropic":{"thinking_blocks":[{"data":"opaque","type":"redacted_thinking"}]}}`
+	if string(extra) != want {
+		t.Errorf("reasoning extra_content = %s, want %s", extra, want)
+	}
+	// The message still follows it, and the redacted item contributes no text.
+	if output[1].(map[string]any)["type"] != "message" {
+		t.Errorf("final output[1] = %v, want the assistant message", output[1])
+	}
+}
