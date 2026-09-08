@@ -178,8 +178,9 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   request-rewrite chain — it has no effect unless body logging is enabled. With
   both on, every rewriter that changed a request (for example GoModel Pro token
   compression) stores its rewritten body alongside the original client body in
-  the audit entry, and the last prompt guardrail that edited the prompt stores
-  one more copy: the body as forwarded after the whole guardrail chain.
+  the audit entry, and the prompt guardrails that edited the prompt store one
+  more copy in their shared revision: the body as forwarded after the whole
+  guardrail chain.
   Disabling it keeps the revision metadata (rewriter name, byte sizes, tokens
   saved, change detail) but drops the extra body copies, roughly halving audit
   storage per rewritten request.

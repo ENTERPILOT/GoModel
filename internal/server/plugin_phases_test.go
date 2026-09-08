@@ -523,10 +523,10 @@ func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
 	})
 }
 
-// The applied body belongs to the last instance that actually edited the
-// prompt; a later mutating instance that changed nothing is a no-op and an
-// earlier editor keeps its sizes without a body.
-func TestChatCompletion_PromptRevisionBodyBelongsToLastEditor(t *testing.T) {
+// A prompt chain's edits are one revision naming the instances that actually
+// edited the prompt, with the applied body; a mutating instance that changed
+// nothing is not an editor, and an objection is its own no-change entry.
+func TestChatCompletion_PromptEditsRecordOneRevision(t *testing.T) {
 	run := func(t *testing.T, cfgs map[string]map[string]string, steps ...guardrails.StepReference) []auditlog.RequestRevisionSnapshot {
 		t.Helper()
 		chains := phaseChainsNamed(t, cfgs, steps...)
@@ -575,14 +575,29 @@ func TestChatCompletion_PromptRevisionBodyBelongsToLastEditor(t *testing.T) {
 			"second": {"prompt": "edit", "text": "rewritten second"},
 		}, guardrails.StepReference{Ref: "first", Phase: pluginapi.KindPrompt, Step: 1},
 			guardrails.StepReference{Ref: "second", Phase: pluginapi.KindPrompt, Step: 2})
-		if len(revisions) != 2 || revisions[0].Rewriter != "first" || revisions[1].Rewriter != "second" {
-			t.Fatalf("expected both editors in order, got %+v", revisions)
+		if len(revisions) != 1 || revisions[0].Rewriter != "first, second" || revisions[0].NoChange {
+			t.Fatalf("expected one changed revision naming both editors in order, got %+v", revisions)
 		}
-		if revisions[0].NoChange || revisions[0].Body != nil || revisions[0].BytesAfter == 0 {
-			t.Errorf("first editor must be a change with sizes but no body: %+v", revisions[0])
+		if revisions[0].BytesBefore == 0 || revisions[0].BytesAfter == 0 || !strings.Contains(bodyText(revisions[0]), "rewritten second") {
+			t.Errorf("the revision must carry the phase sizes and the applied body: %+v", revisions[0])
 		}
-		if revisions[1].NoChange || !strings.Contains(bodyText(revisions[1]), "rewritten second") {
-			t.Errorf("last editor must carry the applied body: %+v", revisions[1])
+		detail, _ := json.Marshal(revisions[0].Detail)
+		if string(detail) != `{"phase":"prompt","edited":["first","second"]}` {
+			t.Errorf("detail = %s", detail)
+		}
+	})
+
+	t.Run("warning then editor", func(t *testing.T) {
+		revisions := run(t, map[string]map[string]string{
+			"watch":  {"prompt": "warn"},
+			"editor": {"prompt": "edit", "text": "rewritten by editor"},
+		}, guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindPrompt, Step: 1},
+			guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 2})
+		if len(revisions) != 2 || revisions[0].Rewriter != "watch" || !revisions[0].NoChange || revisions[0].Body != nil {
+			t.Fatalf("expected the warning as a no-change entry first, got %+v", revisions)
+		}
+		if revisions[1].Rewriter != "editor" || revisions[1].NoChange || !strings.Contains(bodyText(revisions[1]), "rewritten by editor") {
+			t.Errorf("the edit revision must follow with the applied body: %+v", revisions[1])
 		}
 	})
 }

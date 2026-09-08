@@ -84,10 +84,11 @@ caller should see an error.
 
 `Detail` is stored in the audit record and must not contain secrets.
 Prompt-phase decisions are appended to the request's revision chain (the same
-place request rewrites are recorded). Every instance that edited the prompt is
-recorded as a change with the request sizes before and after the chain; only
-the last of them also stores the request body as it was forwarded after the
-whole chain (earlier edits get no body copy of their own), under the same
+place request rewrites are recorded): each warning, block, answer or failure
+is a no-change entry carrying the decision. When any instance edited the
+prompt, one changed revision for the whole chain follows, naming the editing
+instances, with the request sizes before and after the chain and the request
+body as it was forwarded after the whole chain, under the same
 `LOGGING_LOG_BODIES` and `LOGGING_LOG_REVISION_BODIES` gates as request
 rewrites. Response and stream decisions are logged with the request id.
 

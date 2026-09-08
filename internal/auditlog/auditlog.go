@@ -144,17 +144,17 @@ type LogData struct {
 
 	// RequestRevisions captures the ingress request-rewrite chain: one entry
 	// per registered rewriter that ran, in application order, followed by the
-	// prompt-guardrail decisions. Rewriters that changed the body carry the
+	// prompt-guardrail phase. Rewriters that changed the body carry the
 	// rewritten body; those that left it alone are recorded with NoChange so
-	// the audit trail still shows the step ran. Prompt guardrails are
-	// recorded when they edited the prompt, objected (warn, block, respond)
-	// or failed; an objection or failure without an edit is a NoChange
-	// entry, and a silent allow leaves no entry. Editing guardrails carry
-	// the sizes measured around the whole guardrail chain, and the last of
-	// them also carries the body as forwarded after the chain. RequestBody
-	// always remains the original client request; the last changed revision
-	// is what was forwarded downstream — when every step was a no-op there
-	// is no such revision and the original body is what went upstream.
+	// the audit trail still shows the step ran. Prompt guardrails that
+	// objected (warn, block, respond) or failed are NoChange entries carrying
+	// the decision; a silent allow leaves no entry. When any prompt guardrail
+	// edited the prompt, one changed revision for the whole chain follows,
+	// naming the editing instances, with the sizes measured around the phase
+	// and the body as forwarded after the chain. RequestBody always remains
+	// the original client request; the last changed revision is what was
+	// forwarded downstream — when every step was a no-op there is no such
+	// revision and the original body is what went upstream.
 	RequestRevisions []RequestRevisionSnapshot `json:"request_revisions,omitempty" bson:"request_revisions,omitempty"`
 
 	// Request parameters
@@ -411,8 +411,8 @@ type Config struct {
 
 	// LogRevisionBodies refines LogBodies for the request-revision chain:
 	// only when both are enabled does each rewriter that changed the body
-	// store its rewritten copy, and the last prompt guardrail that edited it
-	// store the body as forwarded. Revision metadata is always kept.
+	// store its rewritten copy, and the prompt-guardrail edit revision the
+	// body as forwarded. Revision metadata is always kept.
 	LogRevisionBodies bool
 
 	// LogHeaders enables logging of request/response headers
