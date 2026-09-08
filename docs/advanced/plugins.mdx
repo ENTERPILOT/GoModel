@@ -90,8 +90,10 @@ as it stood right after that step, sizes included, so a chain of edits reads
 step by step and the last one is what was forwarded; the request bodies are
 stored under the same `LOGGING_LOG_BODIES` and `LOGGING_LOG_REVISION_BODIES`
 gates as request rewrites. Building those snapshots runs off the request
-path, alongside the provider call. A warning, block, answer or failure without
-an edit is a no-change entry carrying the decision. Response and stream
+path, alongside the provider call; `LOGGING_LOG_GUARDRAIL_STEPS=false` skips
+them and records a chain's edits as one revision carrying the request as
+forwarded. A warning, block, answer or failure without an edit is a no-change
+entry carrying the decision. Response and stream
 decisions are logged with the request id.
 
 ## Fail modes and timeouts

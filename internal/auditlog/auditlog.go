@@ -419,6 +419,11 @@ type Config struct {
 	// metadata is always kept.
 	LogRevisionBodies bool
 
+	// LogGuardrailSteps records each editing prompt guardrail as its own
+	// revision (see LogData.RequestRevisions); off, the chain's edits are
+	// one revision carrying the request as forwarded.
+	LogGuardrailSteps bool
+
 	// LogHeaders enables logging of request/response headers
 	LogHeaders bool
 

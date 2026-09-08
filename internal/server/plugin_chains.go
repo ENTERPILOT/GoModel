@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -69,11 +70,12 @@ type pluginDecisionDetail struct {
 }
 
 // promptEditCaptureContext asks the prompt phase to keep a snapshot of every
-// edit when the request is audited, so each editing step can be recorded as
-// its own revision. Without an audit entry the phase keeps nothing.
+// edit when the request is audited and step logging is on, so each editing
+// step can be recorded as its own revision. Otherwise the phase keeps
+// nothing.
 func promptEditCaptureContext(c *echo.Context, auditLogger auditlog.LoggerInterface) context.Context {
 	ctx := c.Request().Context()
-	if !auditCaptureEnabled(auditLogger) {
+	if !auditCaptureEnabled(auditLogger) || !auditLogger.Config().LogGuardrailSteps {
 		return ctx
 	}
 	if entry, ok := c.Get(string(auditlog.LogEntryKey)).(*auditlog.LogEntry); !ok || entry == nil {
@@ -91,9 +93,12 @@ func promptEditCaptureContext(c *echo.Context, auditLogger auditlog.LoggerInterf
 // is what was forwarded. Building and encoding those requests runs off the
 // request path; the audit entry collects the result when it is written. A
 // body is stored only when body logging and revision-body logging are on
-// and it fits the capture limit, matching the ingress rewriters. after is
-// nil when nothing was forwarded (block, fail-closed, answered): the phase
-// is then recorded as decisions only.
+// and it fits the capture limit, matching the ingress rewriters. With step
+// logging off (Config.LogGuardrailSteps) the phase kept no snapshots and
+// its edits are one changed revision, naming the editing instances and
+// carrying the request as forwarded (after). after is nil when nothing was
+// forwarded (block, fail-closed, answered): the phase is then recorded as
+// decisions only.
 func recordPromptPluginRevisions(c *echo.Context, auditLogger auditlog.LoggerInterface, before, after any) {
 	state := plugins.RequestStateFromContext(c.Request().Context())
 	if state == nil {
@@ -112,8 +117,11 @@ func recordPromptPluginRevisions(c *echo.Context, auditLogger auditlog.LoggerInt
 	if len(records) == 0 {
 		return
 	}
-	edits := state.PromptEdits()
-	if after == nil || len(edits) == 0 {
+	edited := false
+	for _, record := range records {
+		edited = edited || record.Edited
+	}
+	if after == nil || !edited {
 		for _, record := range records {
 			auditlog.EnrichEntryWithRequestRevision(c, auditlog.RequestRevisionSnapshot{
 				Rewriter: record.Instance,
@@ -124,9 +132,49 @@ func recordPromptPluginRevisions(c *echo.Context, auditLogger auditlog.LoggerInt
 		return
 	}
 	captureBodies := revisionBodiesEnabled(auditLogger)
+	if edits := state.PromptEdits(); len(edits) > 0 {
+		auditlog.EnrichEntryWithPendingRequestRevisions(c, func() []auditlog.RequestRevisionSnapshot {
+			return promptStepRevisions(records, edits, encodeRequest(before), captureBodies)
+		})
+		return
+	}
 	auditlog.EnrichEntryWithPendingRequestRevisions(c, func() []auditlog.RequestRevisionSnapshot {
-		return promptStepRevisions(records, edits, encodeRequest(before), captureBodies)
+		return promptChainRevisions(records, encodeRequest(before), encodeRequest(after), captureBodies)
 	})
+}
+
+// pluginEditDetail is the audit-visible summary of a prompt chain's edits
+// recorded as one revision: the instances that edited, in step order.
+type pluginEditDetail struct {
+	Phase  string   `json:"phase"`
+	Edited []string `json:"edited"`
+}
+
+// promptChainRevisions builds the prompt phase's revisions without step
+// snapshots: the objections as no-change entries, then one changed revision
+// for the whole chain carrying the request as forwarded.
+func promptChainRevisions(records []plugins.DecisionRecord, before, after []byte, captureBodies bool) []auditlog.RequestRevisionSnapshot {
+	var revisions []auditlog.RequestRevisionSnapshot
+	var editors []string
+	for _, record := range records {
+		if record.Edited {
+			editors = append(editors, record.Instance)
+		}
+		if record.Decision.Action == pluginapi.ActionAllow && record.Err == nil {
+			continue
+		}
+		revisions = append(revisions, auditlog.RequestRevisionSnapshot{Rewriter: record.Instance, NoChange: true, Detail: decisionDetail(record)})
+	}
+	revision := auditlog.RequestRevisionSnapshot{
+		Rewriter:    strings.Join(editors, ", "),
+		BytesBefore: len(before),
+		BytesAfter:  len(after),
+		Detail:      pluginEditDetail{Phase: string(pluginapi.KindPrompt), Edited: editors},
+	}
+	if captureBodies && len(after) > 0 && int64(len(after)) <= auditlog.MaxBodyCapture {
+		revision.Body = auditlog.CaptureLoggedBody(after)
+	}
+	return append(revisions, revision)
 }
 
 // promptStepRevisions builds the prompt phase's revisions: each record in

@@ -51,6 +51,15 @@ type LogConfig struct {
 	// Default: true
 	LogRevisionBodies bool `yaml:"log_revision_bodies" env:"LOGGING_LOG_REVISION_BODIES"`
 
+	// LogGuardrailSteps records every prompt guardrail that edited the
+	// request as its own revision in the audit entry, carrying the request
+	// as that step left it, so a chain of edits reads step by step. The
+	// snapshots are built off the request path. Disabling it records the
+	// chain's edits as one revision (the request as forwarded) and skips
+	// the per-step snapshots.
+	// Default: true
+	LogGuardrailSteps bool `yaml:"log_guardrail_steps" env:"LOGGING_LOG_GUARDRAIL_STEPS"`
+
 	// LogHeaders enables logging of request/response headers
 	// Sensitive headers (Authorization, Cookie, etc.) are auto-redacted
 	// Default: true

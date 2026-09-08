@@ -143,6 +143,7 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `LOGGING_ENABLED`                 | Enable audit logging                       | `true`  |
 | `LOGGING_LOG_BODIES`              | Log request/response bodies                | `true`  |
 | `LOGGING_LOG_REVISION_BODIES`     | Log rewritten bodies from request rewriters and prompt guardrails | `true`  |
+| `LOGGING_LOG_GUARDRAIL_STEPS`     | One audit revision per editing prompt guardrail (off: one per chain) | `true`  |
 | `LOGGING_LOG_AUDIO_BODIES`        | Log audio endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES`        | Log image endpoint inputs/outputs          | `false` |
 | `LOGGING_LOG_IMAGE_BODIES_SCOPE`  | Which image bytes to store: `all`, `input`, `output` | `all` |
@@ -179,8 +180,10 @@ to `LOGGING_FLUSH_INTERVAL` seconds to appear through the stored-log API.
   both on, every rewriter that changed a request (for example GoModel Pro token
   compression) and every prompt guardrail that edited the prompt store the
   request as they left it alongside the original client body in the audit
-  entry, so a chain of edits reads step by step.
-  Disabling it keeps the revision metadata (rewriter name, byte sizes, tokens
+  entry, so a chain of edits reads step by step. `LOGGING_LOG_GUARDRAIL_STEPS`
+  controls that per-step record: turn it off to record a chain's edits as one
+  revision carrying the request as forwarded, with no per-step snapshots.
+  Disabling `LOGGING_LOG_REVISION_BODIES` keeps the revision metadata (rewriter name, byte sizes, tokens
   saved, change detail) but drops the extra body copies, roughly halving audit
   storage per rewritten request.
 </Note>

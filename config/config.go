@@ -159,6 +159,7 @@ func buildDefaultConfig() *Config {
 			LogBodies:             true,
 			LogImageBodiesScope:   ImageBodyScopeAll,
 			LogRevisionBodies:     true,
+			LogGuardrailSteps:     true,
 			LogHeaders:            true,
 			BufferSize:            1000,
 			FlushInterval:         5,
