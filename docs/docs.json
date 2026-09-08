@@ -172,6 +172,7 @@
                 "pages": [
                     "guides/production",
                     "guides/updating",
+                    "guides/caddy",
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/n8n",
