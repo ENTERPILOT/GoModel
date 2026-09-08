@@ -77,16 +77,6 @@ export function workflowPayloadSteps(payload) {
   }));
 }
 
-// workflowStepGroups groups steps by phase in execution order (prompt,
-// response, stream), dropping empty groups. Order within a group is kept.
-export function workflowStepGroups(steps) {
-  const list = Array.isArray(steps) ? steps : [];
-  return WORKFLOW_PHASES.map((phase) => ({
-    phase,
-    steps: list.filter((step) => normalizeWorkflowPhase(step && step.phase) === phase),
-  })).filter((group) => group.steps.length > 0);
-}
-
 // workflowGuardrailRefOptions lists the instances a step may reference for a
 // phase. GET /admin/workflows/guardrails returns either names (older
 // gateway) or {name, type, phases, summary} rows; an entry without `phases`
@@ -228,13 +218,6 @@ export function workflowSourceGuardrails(source) {
       step: parseWorkflowGuardrailStep(step.step),
     }))
     .filter((step) => Number.isInteger(step.step) && step.step >= 0);
-}
-
-export function workflowGuardrails(workflow, caps) {
-  if (!workflowSourceFeatures(workflow, caps).guardrails) {
-    return [];
-  }
-  return workflowPayloadSteps(workflow && workflow.workflow_payload);
 }
 
 export function workflowScopeProviderValue(scope) {

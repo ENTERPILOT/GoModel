@@ -1406,7 +1406,6 @@ test("a provider's authentication error leaves the gateway auth node green", () 
 import {
   workflowGuardrailRefOptions,
   workflowPayloadSteps,
-  workflowStepGroups,
 } from "../src/pages/workflows/workflowsLogic.js";
 
 test("buildWorkflowRequest posts schema_version 2 steps with phases", () => {
@@ -1511,21 +1510,6 @@ test("workflowGuardrailRefOptions filters instances by phase and keeps the curre
   // A cloned workflow's ref stays selectable even when it no longer qualifies.
   assert.deepEqual(names("stream", "pii-redact"), ["stream-scan", "pii-redact"]);
   assert.deepEqual(names("prompt", ""), ["pii-redact", "legacy-object", "legacy-string"]);
-});
-
-test("workflowStepGroups orders phases prompt, response, stream and drops empty groups", () => {
-  const groups = workflowStepGroups([
-    { ref: "s", phase: "stream", step: 10 },
-    { ref: "p2", phase: "prompt", step: 20 },
-    { ref: "p1", step: 10 },
-  ]);
-  assert.deepEqual(
-    groups.map((group) => [group.phase, group.steps.map((step) => step.ref)]),
-    [
-      ["prompt", ["p2", "p1"]],
-      ["stream", ["s"]],
-    ],
-  );
 });
 
 test("workflowChart adds response and stream guardrail nodes after the model", () => {
