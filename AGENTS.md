@@ -1,33 +1,108 @@
-This project is GoModel — a high-performance, lightweight AI gateway that routes requests to multiple AI model providers through an OpenAI-compatible API.
+This project is GoModel - a high-performance, lightweight AI gateway that routes requests to multiple AI model providers through an OpenAI-compatible API.
 
 ## Core Principles
 
-**Follow Postel’s Law.**
+### Follow Postel’s Law
 
-- GoModel accepts requests generously, such as allowing `max_tokens` for any model, and adapts them to each provider’s specific requirements before forwarding them. For example, it translates `max_tokens` to `max_completion_tokens` for OpenAI reasoning models.
-- GoModel accepts provider responses liberally and returns them to the user in a conservative OpenAI-compatible format.
+Accept user requests generously, adapt them to each provider’s requirements, and return conservative OpenAI-compatible responses.
 
-**Follow [The Twelve-Factor App](https://12factor.net/).**
+Examples:
 
-Keep files small and follow KISS principles.
+- Accept `max_tokens` from users even when a provider expects another field.
+- Translate `max_tokens` to `max_completion_tokens` for OpenAI reasoning models when required.
+- Normalize provider responses into an OpenAI-compatible shape.
 
-Keep the implementation explicit and maintainable rather than relying on clever abstractions.
+### Follow The Twelve-Factor App
 
-**Use good defaults.**
+Prefer production-friendly service design:
 
-Set defaults that match the needs of most users so well that they rarely need to change them.
+- Configuration through environment variables.
+- Stateless request handling.
+- Clear separation between configuration, routing, provider adapters, and runtime behavior.
+- Useful logs for containers and cloud environments.
 
-### Commit Format — Use Conventional Commits
+Reference: https://12factor.net/
 
-Use the Conventional Commits format for commit subjects and PR titles:
+### Keep It Simple
 
-`type(scope): short summary`
+Keep files small.
+
+Prefer explicit, maintainable code over clever abstractions.
+
+Do not add abstractions until a repeated pattern clearly justifies them.
+
+### Use Good Defaults
+
+Defaults should fit most users so well that they rarely need to change them.
+
+When adding configuration:
+
+- Choose a safe, practical default.
+- Avoid requiring configuration for common use cases.
+- Document when and why users should override the default.
+
+## Implementation Guidance
+
+When changing provider behavior:
+
+- Preserve the OpenAI-compatible public API.
+- Keep provider-specific logic isolated.
+- Avoid leaking provider-specific quirks into user-facing behavior.
+- Never expose API keys, authorization headers, or secrets in errors or logs.
+
+When editing code:
+
+- Make the smallest change that solves the problem.
+- Use idiomatic Go.
+- Prefer clear names, small interfaces, simple structs, and table-driven tests.
+- Avoid hidden global state, unnecessary reflection, and premature optimization.
+- Add or update tests for behavior changes.
+
+Tests should cover request translation, response normalization, error handling, default configuration, and provider-specific parameter mapping.
+
+## Documentation
+
+Documentation in `docs/` directory is Mintlify based. It should be concise, practical, and user-focused.
+
+Show defaults, explain when to change them, and include minimal examples when useful.
+
+## Commit and PR Format
+
+Use Conventional Commits for commit subjects and PR titles:
+
+```text
+type(scope): short summary
+```
 
 Allowed types: `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`, `revert`
 
+Examples:
+
+```text
+feat(openai): support reasoning model token mapping
+fix(router): preserve request headers during provider retry
+docs(config): document default provider timeout
+```
+
 Squash merges should preserve the PR title as the resulting commit subject.
 
-### Code Review
+Do not state that a PR or commit was co-authored by an AI assistant. Keep PR descriptions concise. Do not write a commit description unless it contains essential information for the reviewer. Do not add AI assistant links to PRs or commits.
+
+## Pull Request Guidance
+
+Before opening a PR:
+
+- Ensure tests pass.
+- Keep the change focused.
+- Explain the user-visible impact.
+- Mention provider-specific behavior when relevant.
+- Update documentation for new configuration or API behavior.
+
+If this repository is not the official GoModel repository, ask the user whether they also want to create a PR against the official repository:
+
+[https://github.com/ENTERPILOT/GoModel/](https://github.com/ENTERPILOT/GoModel/)
+
+## Code Review
 
 Greptile and CodeRabbit review new PRs automatically. Monitor CI and the review
 comments; verify each finding and address the valid ones before merging. Some
@@ -35,6 +110,6 @@ findings appear only in the review summary under headings like "Comments
 Outside Diff" — Greptile updates its main comment in place after every push, so
 re-read it after each change.
 
-### PR Suggestion for the Official Repository
+## Configuration Reference
 
-If this is not the official repository, ask the user whether they also want to create a PR against the official GoModel repository: https://github.com/ENTERPILOT/GoModel/
+Full reference: `.env.template` and `config/config.example.yaml`
