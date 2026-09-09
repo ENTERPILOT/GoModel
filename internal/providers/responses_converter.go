@@ -68,6 +68,7 @@ type openAIStreamChunk struct {
 			Content          string                `json:"content"`
 			ReasoningContent string                `json:"reasoning_content"`
 			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
+			ExtraContent     json.RawMessage       `json:"extra_content"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -277,6 +278,10 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 		sc.sawFinish = true
 	}
 
+	// Recorded before the text and tool calls of the same delta: a tool call
+	// closes the message item on the spot, and its output_item.done must
+	// already carry the state.
+	sc.setMessageExtraContent(choice.Delta.ExtraContent)
 	if choice.Delta.ReasoningContent != "" {
 		sc.appendReasoningDelta(choice.Delta.ReasoningContent)
 	}
@@ -288,6 +293,18 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	}
 	if choice.FinishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
+	}
+}
+
+// setMessageExtraContent records turn-wide replay state carried on the
+// message delta (a Gemini 3 text-turn thought signature). It arrives on the
+// last delta, after the reasoning slot is gone, so it rides on the assistant
+// message item, which the Responses input side already replays. Callers
+// record it before the rest of the delta so an item closed by that same delta
+// carries it. A null delta leaves the value alone.
+func (sc *OpenAIResponsesStreamConverter) setMessageExtraContent(raw json.RawMessage) {
+	if extra := bytes.TrimSpace(raw); len(extra) > 0 && !bytes.Equal(extra, []byte("null")) {
+		sc.output.SetAssistantExtraContent(extra)
 	}
 }
 
@@ -321,6 +338,11 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		return
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
+		if extra, ok := delta["extra_content"]; ok && extra != nil {
+			if raw, err := json.Marshal(extra); err == nil {
+				sc.setMessageExtraContent(raw)
+			}
+		}
 		if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
 			sc.appendReasoningDelta(reasoning)
 		}
