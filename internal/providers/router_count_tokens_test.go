@@ -47,3 +47,21 @@ func TestRouterCountMessagesTokens(t *testing.T) {
 		t.Errorf("err = %v, want ErrMessagesTokenCountUnsupported for a provider without the endpoint", err)
 	}
 }
+
+// A failure from the counting provider reaches the caller unchanged, so the
+// handler can tell an upstream error from a provider without the endpoint.
+func TestRouterCountMessagesTokens_PropagatesProviderError(t *testing.T) {
+	upstream := errors.New("count_tokens upstream failed")
+	counter := &mockTokenCountingProvider{mockProvider: &mockProvider{name: "anthropic", err: upstream}}
+	lookup := newMockLookup()
+	lookup.addModel("anthropic/claude-haiku-4-5", counter, "anthropic")
+	router, _ := NewRouter(lookup)
+
+	_, err := router.CountMessagesTokens(context.Background(), "anthropic/claude-haiku-4-5", []byte(`{"messages":[]}`))
+	if !errors.Is(err, upstream) {
+		t.Fatalf("err = %v, want the provider's error propagated", err)
+	}
+	if errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
+		t.Fatal("an upstream failure must not read as an unsupported provider")
+	}
+}

@@ -119,8 +119,8 @@ func contentBlockTokens(block ContentBlock) float64 {
 	}
 }
 
-// partsTokens counts canonical message content: text, and images given as
-// data URLs.
+// partsTokens counts canonical message content: text, images given as data
+// URLs, and files the way the wire estimate counts documents.
 func partsTokens(content core.MessageContent) float64 {
 	parts, ok := content.([]core.ContentPart)
 	if !ok {
@@ -131,8 +131,25 @@ func partsTokens(content core.MessageContent) float64 {
 		switch {
 		case part.Type == "image_url" && part.ImageURL != nil:
 			total += imageDataURLTokens(part.ImageURL.URL)
+		case part.Type == "file" && part.File != nil:
+			total += fileTokens(part.File)
 		default:
 			total += textTokens(part.Text)
+		}
+	}
+	return total
+}
+
+// fileTokens mirrors the document rule of the wire estimate: a text file is
+// counted as its text, anything else (a PDF) by its name only, since its page
+// cost is not knowable here.
+func fileTokens(file *core.FileContent) float64 {
+	total := textTokens(file.Filename)
+	if strings.HasPrefix(file.FileData, "data:text/") {
+		if _, data, ok := strings.Cut(file.FileData, ";base64,"); ok {
+			if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
+				total += textTokens(string(decoded))
+			}
 		}
 	}
 	return total

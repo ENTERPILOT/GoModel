@@ -103,3 +103,26 @@ func TestEstimateInputTokens_Images(t *testing.T) {
 		t.Errorf("URL image adds %d tokens, want the ~1600 upper bound when it cannot be measured", remote)
 	}
 }
+
+// The streaming message_start seed is computed from the translated chat
+// request, so a document must cost the same there as in the wire estimate:
+// its text when it is text, its title otherwise.
+func TestEstimateChatInputTokens_MatchesWireEstimateForDocuments(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"document","title":"notes.txt","source":{"type":"text","media_type":"text/plain","data":"` + strings.Repeat("plain document text ", 40) + `"}},{"type":"text","text":"summarize"}]}]}`,
+		`{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"document","title":"report.pdf","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}},{"type":"text","text":"summarize"}]}]}`,
+	} {
+		req := mustDecode(t, body)
+		chat, err := ToChatRequest(req)
+		if err != nil {
+			t.Fatalf("ToChatRequest: %v", err)
+		}
+		wire, seed := EstimateInputTokens(req), EstimateChatInputTokens(chat)
+		if seed < wire-2 || seed > wire+2 {
+			t.Errorf("stream seed = %d, wire estimate = %d; want the document priced the same way on both", seed, wire)
+		}
+		if wire < 10 {
+			t.Errorf("wire estimate = %d, want the document text or title counted", wire)
+		}
+	}
+}
