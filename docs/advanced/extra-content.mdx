@@ -40,7 +40,7 @@ against it work unchanged.
 | API | Location |
 | --- | --- |
 | Chat Completions | `tool_calls[].extra_content`; on the assistant message for turn-wide state such as thinking blocks; also on streamed `tool_calls` and message deltas |
-| Responses | `function_call` output items; `reasoning` output items |
+| Responses | `function_call` output items; `reasoning` output items; the assistant `message` item when a text-turn signature arrives while streaming |
 | Anthropic Messages | `tool_use` content blocks. Thinking blocks use the dialect's own `signature` and `data` fields instead. |
 
 State sits on the unit that maps to one provider part. A tool call becomes one

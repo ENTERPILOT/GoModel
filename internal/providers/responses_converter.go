@@ -68,6 +68,7 @@ type openAIStreamChunk struct {
 			Content          string                `json:"content"`
 			ReasoningContent string                `json:"reasoning_content"`
 			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
+			ExtraContent     json.RawMessage       `json:"extra_content"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -286,8 +287,20 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	if len(choice.Delta.ToolCalls) > 0 {
 		sc.buffer.AppendString(sc.handleToolCallDeltas(choice.Delta.ToolCalls))
 	}
+	sc.setMessageExtraContent(choice.Delta.ExtraContent)
 	if choice.FinishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
+	}
+}
+
+// setMessageExtraContent records turn-wide replay state carried on the
+// message delta (a Gemini 3 text-turn thought signature). It arrives on the
+// last delta, after the reasoning slot is gone, so it rides on the assistant
+// message item, which the Responses input side already replays. A null delta
+// leaves the value alone.
+func (sc *OpenAIResponsesStreamConverter) setMessageExtraContent(raw json.RawMessage) {
+	if extra := bytes.TrimSpace(raw); len(extra) > 0 && !bytes.Equal(extra, []byte("null")) {
+		sc.output.SetAssistantExtraContent(extra)
 	}
 }
 
@@ -329,6 +342,11 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 		}
 		if toolCalls, ok := delta["tool_calls"].([]any); ok && len(toolCalls) > 0 {
 			sc.buffer.AppendString(sc.handleToolCallDeltas(chunkToolCallsFromAny(toolCalls)))
+		}
+		if extra, ok := delta["extra_content"]; ok && extra != nil {
+			if raw, err := json.Marshal(extra); err == nil {
+				sc.setMessageExtraContent(raw)
+			}
 		}
 	}
 	finishReason, _ := choice["finish_reason"].(string)
