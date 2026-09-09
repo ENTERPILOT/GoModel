@@ -126,3 +126,15 @@ func TestEstimateChatInputTokens_MatchesWireEstimateForDocuments(t *testing.T) {
 		}
 	}
 }
+
+// A search_result block reaches the model as its title, source, and body, so
+// a rich result must cost far more than an empty one; counting it by the
+// text field alone priced both the same.
+func TestEstimateInputTokens_SearchResult(t *testing.T) {
+	body := strings.Repeat("The gateway routes each request to the provider that owns the model. ", 30)
+	rich := estimateFor(t, `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"search_result","title":"Routing","source":"https://example.com/docs/routing","content":[{"type":"text","text":"`+body+`"}]},{"type":"text","text":"summarize"}]}]}`)
+	empty := estimateFor(t, `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":[{"type":"search_result","title":"","source":"","content":[]},{"type":"text","text":"summarize"}]}]}`)
+	if rich-empty < 400 {
+		t.Errorf("rich search_result adds %d tokens over an empty one, want its title, source, and body counted (>= 400)", rich-empty)
+	}
+}

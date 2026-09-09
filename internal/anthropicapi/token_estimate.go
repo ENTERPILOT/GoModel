@@ -106,6 +106,10 @@ func contentBlockTokens(block ContentBlock) float64 {
 	case "tool_result":
 		result, _ := toolResultContent(block.Content, true)
 		return toolBlockOverhead + partsTokens(result)
+	case "search_result":
+		// Rendered for the model as its title, source, and body.
+		text, _ := searchResultText(block)
+		return textTokens(text)
 	case "document":
 		// Text documents are counted as text. A PDF costs by page and image
 		// content, which the header does not reveal, so only its title is
