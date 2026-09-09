@@ -6179,7 +6179,7 @@ const docTemplate = `{
         },
         "/v1/messages/count_tokens": {
             "post": {
-                "description": "Returns a provider-agnostic heuristic estimate of the input token count.",
+                "description": "Counts the input tokens of a Messages request. Exact when the provider that owns the model has a token counting endpoint (Anthropic); otherwise a calibrated estimate.",
                 "consumes": [
                     "application/json"
                 ],
