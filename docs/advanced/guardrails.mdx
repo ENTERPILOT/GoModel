@@ -18,6 +18,14 @@ them, in one of three phases:
 A guardrail can edit content, add headers, reject the request with an error,
 answer it with a safe message, or let it through with a warning.
 
+<Warning>
+  A response-phase guardrail needs the complete response, so a workflow that
+  runs one buffers every streaming request it matches: the client still asked
+  for `stream: true` and still receives SSE, but as one burst once the provider
+  has finished, and time to first token becomes the total response time. Use
+  the stream phase for guardrails that must keep streaming incremental.
+</Warning>
+
 Guardrails work across all text-based endpoints:
 
 - `/v1/chat/completions`
