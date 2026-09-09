@@ -170,8 +170,11 @@ that matter are shown.
 
 The same member appears on streamed `tool_calls` deltas, on Responses API
 `function_call` items, on Anthropic Messages `tool_use` blocks, and, for
-text-only turns, on the assistant message itself. Only the first call of a
-parallel batch carries a signature. A flat `thought_signature` or
+text-only turns, on the assistant message itself. On the Responses API a
+text-only turn's signature rides on a `reasoning` output item ahead of the
+message, with no reasoning text of its own; echo the item back and the
+signature lands on the assistant turn. Only the first call of a parallel
+batch carries a signature. A flat `thought_signature` or
 `thoughtSignature` on the tool call is accepted too, so clients built against
 other gateways keep working.
 

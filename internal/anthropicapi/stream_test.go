@@ -331,3 +331,47 @@ func TestStreamConverterThinkingSignatureNotRepeated(t *testing.T) {
 		t.Fatalf("signature deltas = %v, want each block signed exactly once", signatures)
 	}
 }
+
+// Interleaved thinking puts text between two thinking blocks. The second
+// block's signature must land in the second thinking block, not the first,
+// and the text block in between must be closed before it opens.
+func TestStreamConverterThinkingBlocksAroundText(t *testing.T) {
+	first := `{"type":"thinking","thinking":"a","signature":"sig-a"}`
+	second := `{"type":"thinking","thinking":"b","signature":"sig-b"}`
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"a"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[` + first + `]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"mid"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"b"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[` + first + `,` + second + `]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	var got []string
+	for _, event := range drainConverter(t, chatStream) {
+		switch event["type"] {
+		case "content_block_start":
+			got = append(got, "start:"+event["content_block"].(map[string]any)["type"].(string))
+		case "content_block_delta":
+			delta := event["delta"].(map[string]any)
+			entry := "delta:" + delta["type"].(string)
+			if sig, ok := delta["signature"].(string); ok {
+				entry += ":" + sig
+			}
+			got = append(got, entry)
+		case "content_block_stop":
+			got = append(got, "stop")
+		}
+	}
+	want := []string{
+		"start:thinking", "delta:thinking_delta", "delta:signature_delta:sig-a", "stop",
+		"start:text", "delta:text_delta", "stop",
+		"start:thinking", "delta:thinking_delta", "delta:signature_delta:sig-b", "stop",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("content events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
