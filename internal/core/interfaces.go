@@ -197,6 +197,20 @@ type RoutableProvider interface {
 	GetProviderType(model string) string
 }
 
+// MessagesTokenCounter is implemented by providers that count the input tokens
+// of an Anthropic Messages request exactly through an endpoint of their own.
+// It is optional: the router answers ErrMessagesTokenCountUnsupported for a
+// route whose provider lacks it, and the Messages API estimates instead. The
+// body is the client's original request; the provider forwards the fields its
+// endpoint accepts with model replaced by the resolved one.
+type MessagesTokenCounter interface {
+	CountMessagesTokens(ctx context.Context, model string, body []byte) (int, error)
+}
+
+// ErrMessagesTokenCountUnsupported reports that the provider owning a model
+// has no token counting endpoint.
+var ErrMessagesTokenCountUnsupported = errors.New("provider has no token counting endpoint")
+
 // ProviderNameResolver is an optional interface for components that can map a
 // routed model selector back to the concrete configured provider instance name.
 type ProviderNameResolver interface {
