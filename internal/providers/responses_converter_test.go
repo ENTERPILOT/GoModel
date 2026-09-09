@@ -1212,3 +1212,36 @@ data: [DONE]
 	}
 	t.Fatal("expected a response.completed event")
 }
+
+// One delta can carry text, a tool call, and the message-level signature at
+// once. The tool call closes the message item immediately, so the signature
+// must be recorded before that happens or the message's output_item.done
+// disagrees with the terminal output.
+func TestOpenAIResponsesStreamConverter_MessageExtraContentBeforeToolCallCloses(t *testing.T) {
+	mockStream := `data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"gemini-3.5-flash","choices":[{"index":0,"delta":{"role":"assistant","content":"Checking.","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup_weather","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig-1"}}}],"extra_content":{"google":{"thought_signature":"sig-text"}}},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1,"model":"gemini-3.5-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+`
+	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "gemini-3.5-flash", "gemini")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+	want := map[string]any{"google": map[string]any{"thought_signature": "sig-text"}}
+	for _, event := range parseTestSSEEvents(t, string(raw)) {
+		if event.Name != "response.output_item.done" {
+			continue
+		}
+		item, _ := event.Payload["item"].(map[string]any)
+		if item["type"] != "message" {
+			continue
+		}
+		if got := item["extra_content"]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("message output_item.done extra_content = %#v, want %#v", got, want)
+		}
+		return
+	}
+	t.Fatal("expected a message output_item.done event")
+}
