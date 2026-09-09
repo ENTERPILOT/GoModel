@@ -37,6 +37,10 @@ type ResponsesOutputEventState struct {
 	assistantMessageID   string
 	assistantText        strings.Builder
 	assistantFinalStatus string
+	// assistantExtraContent is turn-wide provider replay state that arrived
+	// on the message itself, such as a Gemini 3 text-turn thought signature.
+	// Clients echo the message item back with it.
+	assistantExtraContent json.RawMessage
 
 	reasoningReserved    bool
 	reasoningStarted     bool
@@ -123,7 +127,18 @@ func (s *ResponsesOutputEventState) AssistantMessageItem(status string, includeC
 			},
 		}
 	}
+	if len(s.assistantExtraContent) > 0 {
+		item[core.ExtraContentField] = s.assistantExtraContent
+	}
 	return item
+}
+
+// SetAssistantExtraContent attaches provider replay state to the assistant
+// message item. It is rendered on every item written from here on, including
+// the terminal output; a stream that carries it before the message starts
+// still sees it on the item once the message exists.
+func (s *ResponsesOutputEventState) SetAssistantExtraContent(raw json.RawMessage) {
+	s.assistantExtraContent = raw
 }
 
 // StartAssistantOutput emits the assistant message output_item.added event once.
