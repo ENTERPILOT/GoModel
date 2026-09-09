@@ -6699,6 +6699,28 @@ data: {"type":"message_stop"}
 	}
 }
 
+// A tool_use-only Anthropic turn has no text, so the Responses output must be
+// the function_call alone rather than an empty message item in front of it.
+func TestConvertAnthropicResponseToResponses_ToolUseOnlyHasNoEmptyMessage(t *testing.T) {
+	resp := &anthropicResponse{
+		ID:    "msg_tool",
+		Type:  "message",
+		Role:  "assistant",
+		Model: "claude-sonnet-4-5",
+		Content: []anthropicContent{{
+			Type:  "tool_use",
+			ID:    "toolu_1",
+			Name:  "lookup_weather",
+			Input: json.RawMessage(`{"city":"Warsaw"}`),
+		}},
+		StopReason: "tool_use",
+	}
+	result := convertAnthropicResponseToResponses(resp, "claude-sonnet-4-5")
+	if len(result.Output) != 1 || result.Output[0].Type != "function_call" {
+		t.Fatalf("Output = %+v, want the function_call alone", result.Output)
+	}
+}
+
 // interleavedThinkingSSE is a single message with two thinking blocks: with
 // interleaved thinking the model can think again after it has written text.
 const interleavedThinkingSSE = `event: message_start

@@ -30,6 +30,11 @@ func ResponsesFunctionCallItemID(callID string) string {
 func buildResponsesMessageContent(content any) []core.ResponsesContentItem {
 	switch c := content.(type) {
 	case string:
+		// An empty string is no content: OpenAI never emits an empty text
+		// part, and a tool-call turn must not gain a blank message item.
+		if c == "" {
+			return nil
+		}
 		return []core.ResponsesContentItem{
 			{
 				Type:        "output_text",

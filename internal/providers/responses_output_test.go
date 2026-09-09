@@ -124,6 +124,31 @@ func TestConvertResponsesInputToMessages_ReasoningAttachesToItsTurn(t *testing.T
 	}
 }
 
+// OpenAI never emits a message item whose only content is an empty text
+// part. A tool-call-only turn arrives from some providers with content "",
+// and that must not become an empty output_text block ahead of the calls.
+func TestBuildResponsesOutputItems_ToolCallOnlyHasNoEmptyMessage(t *testing.T) {
+	items := BuildResponsesOutputItems(core.ResponseMessage{
+		Role:    "assistant",
+		Content: "",
+		ToolCalls: []core.ToolCall{{
+			ID:       "call_1",
+			Type:     "function",
+			Function: core.FunctionCall{Name: "lookup_weather", Arguments: `{"city":"Warsaw"}`},
+		}},
+	})
+	if len(items) != 1 || items[0].Type != "function_call" {
+		t.Fatalf("items = %+v, want the function_call alone", items)
+	}
+
+	// A turn with neither text nor tool calls still yields one message so the
+	// output is never empty.
+	items = BuildResponsesOutputItems(core.ResponseMessage{Role: "assistant", Content: ""})
+	if len(items) != 1 || items[0].Type != "message" {
+		t.Fatalf("items = %+v, want a single message item", items)
+	}
+}
+
 // Turn-wide replay state on the assistant message (a Gemini 3 text-turn
 // thought signature, an Anthropic thinking signature) has no home on the
 // message item, so it rides on a reasoning item even when there is no
