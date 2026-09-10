@@ -3,7 +3,6 @@ package providers
 import (
 	"bytes"
 	"io"
-	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -418,19 +417,7 @@ func (sc *OpenAIResponsesStreamConverter) appendReasoningDelta(content string) {
 func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString(sc.output.CompleteReasoningOutput(reasoningOutputIndex))
 	sc.reserveAssistantOutput()
-	sc.buffer.AppendString(sc.output.StartAssistantOutput(sc.assistantOutputIndex))
-	sc.output.AppendAssistantText(content)
-	jsonData, err := json.Marshal(struct {
-		Type  string `json:"type"`
-		Delta string `json:"delta"`
-	}{Type: "response.output_text.delta", Delta: content})
-	if err != nil {
-		slog.Error("failed to marshal content delta event", "error", err, "response_id", sc.responseID)
-		return
-	}
-	sc.buffer.AppendString("event: response.output_text.delta\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\n")
+	sc.buffer.AppendString(sc.output.AppendAssistantDelta(sc.assistantOutputIndex, content))
 }
 
 // appendTerminalEvents flushes open output items and appends the terminal
@@ -473,20 +460,7 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 			responseData["usage"] = usage
 		}
 	}
-	doneEvent := map[string]any{
-		"type":     eventName,
-		"response": responseData,
-	}
-	jsonData, err := json.Marshal(doneEvent)
-	if err != nil {
-		slog.Error("failed to marshal terminal responses event", "error", err, "event", eventName, "response_id", sc.responseID)
-		return
-	}
-	sc.buffer.AppendString("event: ")
-	sc.buffer.AppendString(eventName)
-	sc.buffer.AppendString("\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
 }
 
 func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage) {
@@ -528,18 +502,7 @@ func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage
 			"message": upstream.Message,
 		},
 	}
-	failedEvent := map[string]any{
-		"type":     "response.failed",
-		"response": responseData,
-	}
-	jsonData, err := json.Marshal(failedEvent)
-	if err != nil {
-		slog.Error("failed to marshal response.failed event", "error", err, "response_id", sc.responseID)
-		return
-	}
-	sc.buffer.AppendString("event: response.failed\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+	sc.buffer.AppendString(sc.output.FinishResponse("response.failed", responseData))
 }
 
 // chatUsageToResponsesUsage renames a valid Chat Completions usage object into
@@ -594,28 +557,17 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 		return 0, pendingErr
 	}
 
-	// Send response.created event first
+	// Open the stream with response.created and response.in_progress first
 	if !sc.sentCreate {
 		sc.sentCreate = true
-		createdEvent := map[string]any{
-			"type": "response.created",
-			"response": map[string]any{
-				"id":         sc.responseID,
-				"object":     "response",
-				"status":     "in_progress",
-				"model":      sc.model,
-				"provider":   sc.provider,
-				"created_at": sc.createdAt,
-			},
-		}
-		jsonData, err := json.Marshal(createdEvent)
-		if err != nil {
-			slog.Error("failed to marshal response.created event", "error", err, "response_id", sc.responseID)
-			return 0, nil
-		}
-		sc.buffer.AppendString("event: response.created\ndata: ")
-		sc.buffer.AppendBytes(jsonData)
-		sc.buffer.AppendString("\n\n")
+		sc.buffer.AppendString(sc.output.StartResponse(map[string]any{
+			"id":         sc.responseID,
+			"object":     "response",
+			"status":     "in_progress",
+			"model":      sc.model,
+			"provider":   sc.provider,
+			"created_at": sc.createdAt,
+		}))
 		return sc.buffer.Read(p), nil
 	}
 

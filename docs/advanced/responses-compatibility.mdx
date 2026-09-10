@@ -31,7 +31,7 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
 | Feature | Native Responses provider | Chat-translated provider |
 | --- | --- | --- |
 | Text input and `instructions` | Forwarded | Converted to chat messages |
-| Streaming over HTTP/SSE | Forwarded | Converted from chat streaming events |
+| Streaming over HTTP/SSE | Forwarded | Converted from chat streaming events into the OpenAI event sequence: `response.created` and `response.in_progress`, output item and content part lifecycle events, and a `sequence_number` on every event |
 | Function tools | Forwarded | Converted to provider function/tool declarations |
 | Function call output items | Forwarded | Converted to chat tool-result messages |
 | `text.format` structured output | Forwarded | Converted to `response_format` when the provider supports it |

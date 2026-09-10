@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -141,6 +140,7 @@ type responsesStreamConverter struct {
 	thinking             thinkingReplayState
 	buffer               streaming.StreamBuffer
 	closed               bool
+	sentCreate           bool
 	sentDone             bool
 	sawStop              bool  // upstream signalled the end of the message
 	pendingErr           error // upstream read error deferred until terminal events are drained
@@ -270,6 +270,9 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		return
 	}
 	sc.sentDone = true
+	// A body cut before message_start still owes the client the opening
+	// events: stream helpers snapshot the created response before anything else.
+	sc.buffer.AppendString(sc.startResponse())
 	status := "completed"
 	eventName := "response.completed"
 	if !sc.sawStop {
@@ -301,21 +304,25 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 	if sc.hasUsage {
 		responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
 	}
-	doneEvent := map[string]any{
-		"type":     eventName,
-		"response": responseData,
-	}
-	jsonData, marshalErr := json.Marshal(doneEvent)
-	if marshalErr != nil {
-		slog.Error("failed to marshal terminal responses event", "error", marshalErr, "event", eventName, "response_id", sc.responseID)
-		return
-	}
 	sc.buffer.AppendString(prefix)
-	sc.buffer.AppendString("event: ")
-	sc.buffer.AppendString(eventName)
-	sc.buffer.AppendString("\ndata: ")
-	sc.buffer.AppendBytes(jsonData)
-	sc.buffer.AppendString("\n\ndata: [DONE]\n\n")
+	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
+}
+
+// startResponse opens the stream with response.created and
+// response.in_progress once.
+func (sc *responsesStreamConverter) startResponse() string {
+	if sc.sentCreate {
+		return ""
+	}
+	sc.sentCreate = true
+	return sc.output.StartResponse(map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     "in_progress",
+		"model":      sc.model,
+		"provider":   "anthropic",
+		"created_at": sc.createdAt,
+	})
 }
 
 // completePendingToolCalls emits the done events for tool calls the upstream
@@ -363,18 +370,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
 		}
-		// Send response.created event
-		return sc.output.WriteEvent("response.created", map[string]any{
-			"type": "response.created",
-			"response": map[string]any{
-				"id":         sc.responseID,
-				"object":     "response",
-				"status":     "in_progress",
-				"model":      sc.model,
-				"provider":   "anthropic",
-				"created_at": sc.createdAt,
-			},
-		})
+		return sc.startResponse()
 
 	case "content_block_start":
 		if sc.thinking.track(event.Index, event.ContentBlock) {
@@ -425,12 +421,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 			if event.Delta.Text != "" {
 				prefix := sc.output.CompleteReasoningOutput(sc.reasoningOutputIndex)
 				sc.reserveAssistantMessageOutput()
-				prefix += sc.output.StartAssistantOutput(sc.assistantOutputIndex)
-				sc.output.AppendAssistantText(event.Delta.Text)
-				return prefix + sc.output.WriteEvent("response.output_text.delta", map[string]any{
-					"type":  "response.output_text.delta",
-					"delta": event.Delta.Text,
-				})
+				return prefix + sc.output.AppendAssistantDelta(sc.assistantOutputIndex, event.Delta.Text)
 			}
 		case "input_json_delta":
 			if event.Delta.PartialJSON == "" {
