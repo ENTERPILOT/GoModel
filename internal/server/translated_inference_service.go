@@ -473,9 +473,10 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
-	pending := s.trackPendingSnapshot(resp.ID)
+	pendingKey := pendingSnapshotKey(ctx, resp.ID)
+	pending := s.trackPendingSnapshot(pendingKey)
 	scheduled := s.goSnapshotWrite(func() {
-		defer s.finishPendingSnapshot(resp.ID, pending)
+		defer s.finishPendingSnapshot(pendingKey, pending)
 		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
 		defer cancel()
 		if err := snapshot.Persist(writeCtx, store); err != nil {
@@ -483,7 +484,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 		}
 	})
 	if !scheduled {
-		s.finishPendingSnapshot(resp.ID, pending)
+		s.finishPendingSnapshot(pendingKey, pending)
 		s.recordResponseSnapshotStoreFailure(failure, errors.New("server shutting down, snapshot write skipped"))
 	}
 }

@@ -352,3 +352,52 @@ func TestApplyResponsesPreviousResponse_SkipsEmptyReplayText(t *testing.T) {
 		t.Fatalf("second item = %#v, want the function_call kept", items[1])
 	}
 }
+
+// TestResponsesWithPreviousResponseID_UntrackedIDWithTranslatedFailoverIsForwarded
+// keeps forwarding an id the gateway does not track when the primary provider
+// is native, even with a chat-translated failover configured: the native
+// provider may hold that response itself, and refusing up front would break a
+// valid request for the sake of a fallback that could not use it anyway.
+func TestResponsesWithPreviousResponseID_UntrackedIDWithTranslatedFailoverIsForwarded(t *testing.T) {
+	provider := previousResponseTestProvider(t, "openai")
+	provider.providerTypes["anthropic/claude"] = "anthropic"
+	provider.supportedModels = append(provider.supportedModels, "anthropic/claude")
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "anthropic", Model: "claude"}},
+	}, nil)
+	handler.SetResponseStore(responsestore.NewMemoryStore())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_at_provider"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := handler.Responses(echo.New().NewContext(req, rec)); err != nil {
+		t.Fatalf("handler.Responses() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if got := provider.capturedResponsesReq.PreviousResponseID; got != "resp_at_provider" {
+		t.Fatalf("native primary must still receive the untracked id, got %q", got)
+	}
+}
+
+// TestApplyResponsesPreviousResponse_PendingSnapshotIsScopedToTenant keeps
+// another tenant's in-flight write invisible: the caller does not wait on it.
+func TestApplyResponsesPreviousResponse_PendingSnapshotIsScopedToTenant(t *testing.T) {
+	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: responsestore.NewMemoryStore()}
+	ownerCtx := core.WithEffectiveUserPath(context.Background(), "/tenant-b")
+	done := s.trackPendingSnapshot(pendingSnapshotKey(ownerCtx, "resp_t"))
+	defer s.finishPendingSnapshot(pendingSnapshotKey(ownerCtx, "resp_t"), done)
+
+	foreignCtx := core.WithEffectiveUserPath(core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-a"}), "/tenant-a")
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		_, _ = s.applyResponsesPreviousResponse(foreignCtx, &core.ResponsesRequest{Model: "gpt-5-mini", Input: "x", PreviousResponseID: "resp_t"}, &core.Workflow{ProviderType: "anthropic"})
+	}()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a foreign tenant's request waited on another tenant's pending snapshot")
+	}
+}

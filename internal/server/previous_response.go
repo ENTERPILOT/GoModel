@@ -48,7 +48,7 @@ func (s *translatedInferenceService) applyResponsesPreviousResponse(ctx context.
 
 	// The predecessor's snapshot is written in the background; a client that
 	// chains as soon as it has the response must not race that write.
-	s.awaitPendingSnapshot(ctx, id)
+	s.awaitPendingSnapshot(ctx, pendingSnapshotKey(ctx, id))
 	stored, err := store.Get(ctx, id)
 	if err != nil {
 		if !errors.Is(err, responsestore.ErrNotFound) {
@@ -143,35 +143,42 @@ func previousResponseNotFound(id string) error {
 	return core.NewNotFoundError(fmt.Sprintf("Previous response with id '%s' not found.", id))
 }
 
-// trackPendingSnapshot registers an in-flight snapshot write for a response
-// id, so a request chained on that id can wait for it.
-func (s *translatedInferenceService) trackPendingSnapshot(id string) chan struct{} {
+// pendingSnapshotKey scopes an in-flight snapshot write to the user path it
+// was written under, so a caller can only wait for its own tenant's writes
+// and learns nothing about another tenant's in-flight response ids.
+func pendingSnapshotKey(ctx context.Context, id string) string {
+	return core.UserPathFromContext(ctx) + "\x00" + id
+}
+
+// trackPendingSnapshot registers an in-flight snapshot write under key, so a
+// request chained on that response can wait for it.
+func (s *translatedInferenceService) trackPendingSnapshot(key string) chan struct{} {
 	done := make(chan struct{})
 	s.pendingSnapshotMu.Lock()
 	if s.pendingSnapshots == nil {
 		s.pendingSnapshots = make(map[string]chan struct{})
 	}
-	s.pendingSnapshots[id] = done
+	s.pendingSnapshots[key] = done
 	s.pendingSnapshotMu.Unlock()
 	return done
 }
 
 // finishPendingSnapshot releases the waiters of one snapshot write.
-func (s *translatedInferenceService) finishPendingSnapshot(id string, done chan struct{}) {
+func (s *translatedInferenceService) finishPendingSnapshot(key string, done chan struct{}) {
 	s.pendingSnapshotMu.Lock()
-	if s.pendingSnapshots[id] == done {
-		delete(s.pendingSnapshots, id)
+	if s.pendingSnapshots[key] == done {
+		delete(s.pendingSnapshots, key)
 	}
 	s.pendingSnapshotMu.Unlock()
 	close(done)
 }
 
-// awaitPendingSnapshot blocks until the snapshot write for id, if one is in
-// flight, has finished; it gives up with the request or after the write's
+// awaitPendingSnapshot blocks until the snapshot write under key, if one is
+// in flight, has finished; it gives up with the request or after the write's
 // own timeout, in which case the store lookup decides.
-func (s *translatedInferenceService) awaitPendingSnapshot(ctx context.Context, id string) {
+func (s *translatedInferenceService) awaitPendingSnapshot(ctx context.Context, key string) {
 	s.pendingSnapshotMu.Lock()
-	done := s.pendingSnapshots[id]
+	done := s.pendingSnapshots[key]
 	s.pendingSnapshotMu.Unlock()
 	if done == nil {
 		return
