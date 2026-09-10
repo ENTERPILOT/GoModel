@@ -71,9 +71,10 @@ const (
 	defaultMaxEventBytes    = 4 * 1024 * 1024
 )
 
-// MaxMinChunkChars bounds TransformOptions.MinChunkChars, so a policy can
-// delay and buffer at most this many characters of a choice's text before
-// the transformer sees it and the client receives it.
+// MaxMinChunkChars caps TransformOptions.MinChunkChars: a policy cannot ask
+// for more than this many characters of a choice's text to be collected
+// before the transformer sees it. The run that reaches the threshold is
+// presented whole, so a single large delta can carry more.
 const MaxMinChunkChars = 16 * 1024
 
 // NewTransformedSSEStream relays upstream through t. Reads are pull-based:

@@ -462,3 +462,37 @@ func TestChatSetMediaReencodesImageAndAudio(t *testing.T) {
 		t.Error("original interface content was mutated")
 	}
 }
+
+// Replacing audio with the same bytes but another format still rewrites the
+// format, in typed and interface content alike.
+func TestChatSetMediaSameBytesNewFormat(t *testing.T) {
+	same, err := base64.StdEncoding.DecodeString("AAAA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &core.ChatRequest{Model: "m", Messages: []core.Message{
+		{Role: "user", Content: []core.ContentPart{{Type: "input_audio", InputAudio: &core.InputAudioContent{Data: "AAAA", Format: "wav"}}}},
+		{Role: "user", Content: []any{map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "AAAA", "format": "wav"}}}},
+	}}
+	p, err := FromChatRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"m0", "m1"} {
+		if err := p.SetMedia(id, 0, "audio/mp3", same); err != nil {
+			t.Fatal(err)
+		}
+	}
+	applied, err := ApplyToChatRequest(req, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range applied.Messages {
+		if got := messageJSON(t, applied.Messages[i]); got != `{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AAAA","format":"mp3"}}]}` {
+			t.Errorf("message %d = %s", i, got)
+		}
+	}
+	if req.Messages[1].Content.([]any)[0].(map[string]any)["input_audio"].(map[string]any)["format"] != "wav" {
+		t.Error("original interface content was mutated")
+	}
+}

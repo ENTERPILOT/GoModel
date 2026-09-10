@@ -198,10 +198,11 @@ func rewriteChatContent(original any, originalNull bool, parts []pluginapi.Part)
 			}
 		case pluginapi.PartAudio:
 			if isMap && len(parts[i].Data) > 0 {
-				if audio, ok := m["input_audio"].(map[string]any); ok && audio["data"] != string(parts[i].Data) {
+				format := strings.TrimPrefix(parts[i].MediaType, "audio/")
+				if audio, ok := m["input_audio"].(map[string]any); ok && (audio["data"] != string(parts[i].Data) || audio["format"] != format) {
 					audio = cloneAnyMap(audio)
 					audio["data"] = string(parts[i].Data)
-					audio["format"] = strings.TrimPrefix(parts[i].MediaType, "audio/")
+					audio["format"] = format
 					m["input_audio"] = audio
 				}
 			}
@@ -231,9 +232,10 @@ func rewriteContentParts(orig []core.ContentPart, parts []pluginapi.Part) (any, 
 				image.MediaType = ""
 			}
 		case pluginapi.PartAudio:
-			if audio := out[i].InputAudio; audio != nil && len(part.Data) > 0 && audio.Data != string(part.Data) {
+			format := strings.TrimPrefix(part.MediaType, "audio/")
+			if audio := out[i].InputAudio; audio != nil && len(part.Data) > 0 && (audio.Data != string(part.Data) || audio.Format != format) {
 				audio.Data = string(part.Data)
-				audio.Format = strings.TrimPrefix(part.MediaType, "audio/")
+				audio.Format = format
 			}
 		}
 	}
