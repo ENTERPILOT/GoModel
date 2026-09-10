@@ -359,7 +359,10 @@ Declared in the contract or the spec but not run by this release:
   `previous_response_id` or a conversation are not loaded.
 - The response phase does not run on response-cache hits, because the cache
   is served by middleware before the handler; a policy tightened after an
-  answer was cached applies once the prompt-chain hash changes the key.
+  answer was cached applies once the prompt-chain hash changes the key. A
+  plugin whose reply must not be replayed (one that restores request-specific
+  data on the way out) sets `Decision.NoStore`, which the cache honours after
+  the handler ran, on both the HTTP and the internal request path.
 - A `concurrent` prompt step (running a non-mutating check alongside the
   provider call) is not implemented.
 - A `warn` decided after the stream headers went out (a `transform` stream's

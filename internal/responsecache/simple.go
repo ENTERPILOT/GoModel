@@ -335,7 +335,7 @@ func captureResponseForCache(c *echo.Context, path, warnMessage string, next fun
 	if !shouldStoreCapturedResponse(capture.effectiveStatusCode()) || capture.body.Len() == 0 {
 		return nil, false, nil
 	}
-	if core.GetFailoverUsed(c.Request().Context()) {
+	if ctx := c.Request().Context(); core.GetFailoverUsed(ctx) || core.PluginNoStore(ctx) {
 		return nil, false, nil
 	}
 	data, ok := capture.cachedBody(c.Response().Header().Get("Content-Type"))

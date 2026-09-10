@@ -83,6 +83,16 @@ agent loops keep running instead of surfacing a 4xx. Use `block` when the
 caller should see an error.
 
 `Detail` is stored in the audit record and must not contain secrets.
+
+`NoStore` on any decision keeps the response out of the
+[response cache](/features/cache), exact and semantic, so the next request
+with the same or a similar body runs the plugins again instead of replaying
+a stored answer. Set it when the reply carries request-specific data a plugin
+restores on the way out, for example a de-anonymizer that puts the caller's
+PII back into the assistant text: a cached copy would hand that text to
+whoever sends a matching prompt next. It is honoured from any phase and any
+instance of the request, whatever the merged decision was.
+
 Prompt-phase decisions are appended to the request's revision chain (the same
 place request rewrites are recorded), one entry per instance in step order.
 An instance that edited the prompt is a changed revision carrying the request
