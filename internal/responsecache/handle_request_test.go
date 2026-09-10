@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1080,5 +1081,86 @@ func TestHandleRequest_InvalidStreamingBodySkipsExactCacheWrite(t *testing.T) {
 	}
 	if handlerCalls != 2 {
 		t.Fatalf("expected invalid stream to bypass cache on follow-up, got %d calls", handlerCalls)
+	}
+}
+
+// failingResponseWriter simulates a client that stopped draining the
+// connection: Write returns writeErr, and StallError reports flushErr the way
+// the server's stall deadline writer reports a stalled flush.
+type failingResponseWriter struct {
+	http.ResponseWriter
+	writeErr error
+	flushErr error
+}
+
+func (w *failingResponseWriter) Write(p []byte) (int, error) {
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *failingResponseWriter) StallError() error           { return w.flushErr }
+func (w *failingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// TestHandleRequest_StreamHitReportsClientWriteFailure returns the write or
+// flush error of a cached stream replay as a ReplayError, so the caller can
+// record a stalled or vanished client instead of a clean 200.
+func TestHandleRequest_StreamHitReportsClientWriteFailure(t *testing.T) {
+	stallErr := errors.New("client stopped reading the response for 3s: write tcp: i/o timeout")
+	tests := []struct {
+		name     string
+		writeErr error
+		flushErr error
+	}{
+		{name: "write fails", writeErr: syscall.EPIPE},
+		{name: "final flush stalls", flushErr: stallErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := cache.NewMapStore()
+			defer store.Close()
+			m := &ResponseCacheMiddleware{simple: newSimpleCacheMiddleware(store, time.Hour, nil)}
+			body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"replay-` + tt.name + `"}]}`)
+			rawStream := []byte("data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"streamed\"},\"finish_reason\":null}]}\n\n" +
+				"data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1,\"total_tokens\":10}}\n\n" +
+				"data: [DONE]\n\n")
+			e := echo.New()
+
+			newContext := func(w http.ResponseWriter) *echo.Context {
+				req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				return e.NewContext(req, w)
+			}
+			primeCtx := newContext(httptest.NewRecorder())
+			if err := m.HandleRequest(primeCtx, body, func() error {
+				primeCtx.Response().Header().Set("Content-Type", "text/event-stream")
+				primeCtx.Response().WriteHeader(http.StatusOK)
+				_, _ = primeCtx.Response().Write(rawStream)
+				return nil
+			}); err != nil {
+				t.Fatalf("prime: %v", err)
+			}
+			m.simple.wg.Wait()
+
+			c := newContext(&failingResponseWriter{ResponseWriter: httptest.NewRecorder(), writeErr: tt.writeErr, flushErr: tt.flushErr})
+			err := m.HandleRequest(c, body, func() error {
+				t.Fatal("cached stream must not reach the handler")
+				return nil
+			})
+			if _, ok := errors.AsType[*ReplayError](err); !ok {
+				t.Fatalf("HandleRequest() error = %v, want *ReplayError", err)
+			}
+			want := tt.writeErr
+			if want == nil {
+				want = tt.flushErr
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("ReplayError does not wrap the client error: %v", err)
+			}
+			if got := c.Response().Header().Get("X-Cache"); got != "HIT (exact)" {
+				t.Fatalf("X-Cache = %q, want the replay to have been attempted", got)
+			}
+		})
 	}
 }

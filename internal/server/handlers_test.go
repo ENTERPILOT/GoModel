@@ -27,6 +27,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
+	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/gateway"
@@ -34,6 +35,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/observability"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	provideradapter "github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/responsecache"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -7286,4 +7288,74 @@ func (a *userPathModelAuthorizer) FilterPublicModels(ctx context.Context, models
 		}
 	}
 	return out
+}
+
+// stalledCachedClientWriter fails every body write the way the stall
+// deadline writer does once the client stops reading.
+type stalledCachedClientWriter struct {
+	http.ResponseWriter
+}
+
+func (w *stalledCachedClientWriter) Write([]byte) (int, error) {
+	return 0, fmt.Errorf("%w for 3s: write tcp: i/o timeout", ErrClientStall)
+}
+
+func (w *stalledCachedClientWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// TestHandleWithCache_ClassifiesStalledClientOnCachedStream records a client
+// that stalled while a cached stream was replayed: the audit entry carries
+// error_type client_stalled instead of a clean cache hit, matching the live
+// stream path.
+func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	s := &translatedInferenceService{responseCache: mw}
+
+	req := &core.ChatRequest{Model: "gpt-4o-mini", Stream: true, Messages: []core.Message{{Role: "user", Content: "cached-stall"}}}
+	body, err := marshalRequestBody(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	e := echo.New()
+	newContext := func(w http.ResponseWriter) *echo.Context {
+		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		return e.NewContext(r, w)
+	}
+
+	primeCtx := newContext(httptest.NewRecorder())
+	if err := mw.HandleRequest(primeCtx, body, func() error {
+		primeCtx.Response().Header().Set("Content-Type", "text/event-stream")
+		primeCtx.Response().WriteHeader(http.StatusOK)
+		_, _ = primeCtx.Response().Write([]byte("data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"streamed\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1,\"total_tokens\":10}}\n\n" +
+			"data: [DONE]\n\n"))
+		return nil
+	}); err != nil {
+		t.Fatalf("prime cache: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("wait for cache write: %v", err)
+	}
+
+	c := newContext(&stalledCachedClientWriter{ResponseWriter: httptest.NewRecorder()})
+	entry := &auditlog.LogEntry{ID: "audit-entry"}
+	c.Set(string(auditlog.LogEntryKey), entry)
+	err = handleWithCache(s, c, req, nil, func(*echo.Context, *core.ChatRequest, *core.Workflow) error {
+		t.Fatal("cached stream must not dispatch to the provider")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("handleWithCache() error = %v, want nil after recording the stall", err)
+	}
+	if entry.ErrorType != "client_stalled" {
+		t.Fatalf("error_type = %q, want client_stalled", entry.ErrorType)
+	}
+	if entry.Data == nil || !strings.Contains(entry.Data.ErrorMessage, ErrClientStall.Error()) {
+		t.Fatalf("error_message = %#v, want the stall cause", entry.Data)
+	}
+	if entry.CacheType != auditlog.CacheTypeExact {
+		t.Fatalf("cache_type = %q, want %q", entry.CacheType, auditlog.CacheTypeExact)
+	}
 }

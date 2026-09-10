@@ -328,9 +328,14 @@ func handleWithCache[R any](
 		if marshalErr != nil {
 			slog.Debug("marshalRequestBody failed", "err", marshalErr)
 		} else {
-			return s.responseCache.HandleRequest(c, body, func() error {
+			err := s.responseCache.HandleRequest(c, body, func() error {
 				return dispatch(c, req, workflow)
 			})
+			if replayErr, ok := errors.AsType[*responsecache.ReplayError](err); ok {
+				recordCachedStreamError(c, replayErr.Err)
+				return nil
+			}
+			return err
 		}
 	}
 
@@ -724,14 +729,34 @@ func handleStreamingDispatchError(c *echo.Context, err error) error {
 	return handleError(c, err)
 }
 
-func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
-	errorType := "stream_error"
+// classifyStreamError names the audit error_type of a failure while writing
+// a stream to the client.
+func classifyStreamError(ctx context.Context, err error) string {
 	switch {
 	case errors.Is(err, ErrClientStall):
-		errorType = "client_stalled"
+		return "client_stalled"
 	case isClientDisconnect(ctx, err):
-		errorType = "client_disconnected"
+		return "client_disconnected"
 	}
+	return "stream_error"
+}
+
+// recordCachedStreamError records a cache-served stream the client stopped
+// reading or abandoned, so the audit entry does not show a clean 200 for a
+// stalled client just because the response happened to be cached.
+func recordCachedStreamError(c *echo.Context, err error) {
+	errorType := classifyStreamError(c.Request().Context(), err)
+	auditlog.EnrichEntryWithError(c, errorType, err.Error(), "")
+	slog.Warn("cached stream terminated abnormally",
+		"error", err,
+		"error_type", errorType,
+		"path", c.Request().URL.Path,
+		"request_id", requestIDFromContextOrHeader(c.Request()),
+	)
+}
+
+func recordStreamingError(streamEntry *auditlog.LogEntry, model, provider, path, requestID string, ctx context.Context, err error) {
+	errorType := classifyStreamError(ctx, err)
 
 	// The nil-err branch in isClientDisconnect is reachable for callers that
 	// only have a canceled context to report. Fall back to the context error

@@ -82,7 +82,8 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 		return false, nil
 	}
 	if len(cached) > 0 {
-		if err := ex.ReplayHit(body, cached, CacheTypeExact); err != nil {
+		err := ex.ReplayHit(body, cached, CacheTypeExact)
+		if err != nil && !replayCommitted(err) {
 			slog.Warn("response cache replay failed", "path", path, "cache_type", CacheTypeExact, "err", err)
 			return false, nil
 		}
@@ -94,7 +95,7 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 			"path", path,
 			"request_id", core.GetRequestID(ex.Context()),
 		)
-		return true, nil
+		return true, err
 	}
 	return false, nil
 }
@@ -130,14 +131,15 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 		_, err := m.captureAndStore(ex, key, next)
 		return err
 	}
-	if err := ex.ReplayHit(body, call.data, CacheTypeExact); err != nil {
+	err := ex.ReplayHit(body, call.data, CacheTypeExact)
+	if err != nil && !replayCommitted(err) {
 		return next()
 	}
 	ex.MarkHit(CacheTypeExact)
 	if m.hitRecorder != nil {
 		m.hitRecorder(ex, call.data, CacheTypeExact)
 	}
-	return nil
+	return err
 }
 
 // captureAndStore executes one cache miss without joining the coalescing
