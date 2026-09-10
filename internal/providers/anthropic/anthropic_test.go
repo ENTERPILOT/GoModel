@@ -6879,3 +6879,157 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta",
 		t.Errorf("interrupted reasoning extra_content = %s, want the signed block", extra)
 	}
 }
+
+// TestStreamResponses_NormalizedTextStream pins the streamed text lifecycle to
+// the shape OpenAI emits: sequence_number on every event, response.in_progress
+// after response.created, and the content part opened and closed around the
+// item-addressed text deltas.
+func TestStreamResponses_NormalizedTextStream(t *testing.T) {
+	stream := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+	events := parseTestSSEEvents(t, string(raw))
+
+	want := []string{
+		"response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.content_part.done",
+		"response.output_item.done",
+		"response.completed",
+		"[DONE]",
+	}
+	got := make([]string, 0, len(events))
+	next := 0
+	for _, event := range events {
+		if event.Done {
+			got = append(got, "[DONE]")
+			continue
+		}
+		got = append(got, event.Name)
+		seq, ok := event.Payload["sequence_number"].(float64)
+		if !ok || int(seq) != next {
+			t.Fatalf("event %s sequence_number = %#v, want %d", event.Name, event.Payload["sequence_number"], next)
+		}
+		next++
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("event order = %v, want %v", got, want)
+	}
+
+	item, _ := events[2].Payload["item"].(map[string]any)
+	itemID, _ := item["id"].(string)
+	if itemID == "" {
+		t.Fatalf("output_item.added item has no id: %v", item)
+	}
+	for _, event := range events[3:8] {
+		if event.Payload["item_id"] != itemID || event.Payload["output_index"] != float64(0) || event.Payload["content_index"] != float64(0) {
+			t.Fatalf("%s is not addressed to item %q part 0: %v", event.Name, itemID, event.Payload)
+		}
+	}
+	if events[6].Payload["text"] != "Hello world" {
+		t.Fatalf("output_text.done text = %#v, want %q", events[6].Payload["text"], "Hello world")
+	}
+	part, _ := events[7].Payload["part"].(map[string]any)
+	if part["type"] != "output_text" || part["text"] != "Hello world" {
+		t.Fatalf("content_part.done part = %#v, want full output_text", part)
+	}
+	inProgress, _ := events[1].Payload["response"].(map[string]any)
+	if inProgress["status"] != "in_progress" {
+		t.Fatalf("response.in_progress status = %#v", inProgress["status"])
+	}
+	if output, ok := inProgress["output"].([]any); !ok || len(output) != 0 {
+		t.Fatalf("response.in_progress output = %#v, want empty array", inProgress["output"])
+	}
+}
+
+// TestStreamResponses_NormalizedThinkingToolStream keeps the sequence numbers
+// contiguous across a thinking block and a tool call, a turn with no message
+// item and therefore no content part.
+func TestStreamResponses_NormalizedThinkingToolStream(t *testing.T) {
+	stream := `event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me check"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"lookup_weather","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"Warsaw\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":9}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+	events := parseTestSSEEvents(t, string(raw))
+	if len(events) < 3 || events[0].Name != "response.created" || events[1].Name != "response.in_progress" {
+		t.Fatalf("stream must open with response.created and response.in_progress, got %v", events)
+	}
+	next := 0
+	for _, event := range events {
+		if event.Done {
+			continue
+		}
+		if strings.HasPrefix(event.Name, "response.content_part.") || strings.HasPrefix(event.Name, "response.output_text.") {
+			t.Fatalf("unexpected %s on a turn without a message item", event.Name)
+		}
+		seq, ok := event.Payload["sequence_number"].(float64)
+		if !ok || int(seq) != next {
+			t.Fatalf("event %s sequence_number = %#v, want %d", event.Name, event.Payload["sequence_number"], next)
+		}
+		next++
+	}
+	if last := events[len(events)-2]; last.Name != "response.completed" {
+		t.Fatalf("terminal event = %s, want response.completed", last.Name)
+	}
+}

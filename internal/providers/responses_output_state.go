@@ -30,9 +30,13 @@ type ResponsesOutputToolCallState struct {
 
 // ResponsesOutputEventState manages assistant/tool output items for Responses streams.
 type ResponsesOutputEventState struct {
-	responseID           string
+	responseID string
+	// sequence is the sequence_number stamped on the next event. OpenAI
+	// numbers every stream event from zero, and typed SDK parsers require it.
+	sequence             int
 	assistantReserved    bool
 	assistantStarted     bool
+	assistantPartStarted bool
 	assistantDone        bool
 	assistantMessageID   string
 	assistantText        strings.Builder
@@ -67,21 +71,96 @@ func NewResponsesOutputEventState(responseID string) *ResponsesOutputEventState 
 	return &ResponsesOutputEventState{responseID: responseID}
 }
 
-// WriteEvent renders one SSE event in Responses API format.
+// WriteEvent renders one SSE event in Responses API format, stamping it with
+// the next sequence_number.
 func (s *ResponsesOutputEventState) WriteEvent(eventName string, payload map[string]any) string {
+	payload["sequence_number"] = s.sequence
+	return s.writeEncodedEvent(eventName, payload)
+}
+
+// writeEncodedEvent renders one SSE event whose payload already carries the
+// current sequence_number, then advances the sequence.
+func (s *ResponsesOutputEventState) writeEncodedEvent(eventName string, payload any) string {
+	return s.writeEncodedEventWithTrailer(eventName, payload, "")
+}
+
+// writeEncodedEventWithTrailer is writeEncodedEvent with raw SSE bytes
+// appended after the event, in the same allocation.
+func (s *ResponsesOutputEventState) writeEncodedEventWithTrailer(eventName string, payload any, trailer string) string {
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		slog.Error("failed to marshal responses stream event", "error", err, "event", eventName, "response_id", s.responseID)
 		return ""
 	}
+	s.sequence++
 	var b strings.Builder
-	b.Grow(len("event: \ndata: \n\n") + len(eventName) + len(jsonData))
+	b.Grow(len("event: \ndata: \n\n") + len(eventName) + len(jsonData) + len(trailer))
 	b.WriteString("event: ")
 	b.WriteString(eventName)
 	b.WriteString("\ndata: ")
 	b.Write(jsonData)
 	b.WriteString("\n\n")
+	b.WriteString(trailer)
 	return b.String()
+}
+
+// responsesLifecycleEvent is the typed payload of the events that carry the
+// whole response object: response.created, response.in_progress and the
+// terminal event.
+type responsesLifecycleEvent struct {
+	Type           string          `json:"type"`
+	Response       json.RawMessage `json:"response"`
+	SequenceNumber int             `json:"sequence_number"`
+}
+
+// writeLifecycleEvent emits one response-carrying event.
+func (s *ResponsesOutputEventState) writeLifecycleEvent(eventName string, response json.RawMessage) string {
+	return s.writeEncodedEvent(eventName, responsesLifecycleEvent{
+		Type:           eventName,
+		Response:       response,
+		SequenceNumber: s.sequence,
+	})
+}
+
+// encodeResponse renders a response object once for the lifecycle events
+// that repeat it.
+func (s *ResponsesOutputEventState) encodeResponse(eventName string, response map[string]any) (json.RawMessage, bool) {
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		slog.Error("failed to marshal responses stream response object", "error", err, "event", eventName, "response_id", s.responseID)
+		return nil, false
+	}
+	return encoded, true
+}
+
+// StartResponse emits the response.created and response.in_progress events
+// that open every OpenAI Responses stream, both carrying the given in-progress
+// response object. The object gets an empty output array: SDK stream helpers
+// snapshot it from response.created and append each output_item.added to it.
+func (s *ResponsesOutputEventState) StartResponse(response map[string]any) string {
+	response["output"] = []map[string]any{}
+	encoded, ok := s.encodeResponse("response.created", response)
+	if !ok {
+		return ""
+	}
+	return s.writeLifecycleEvent("response.created", encoded) +
+		s.writeLifecycleEvent("response.in_progress", encoded)
+}
+
+// FinishResponse emits the terminal event (response.completed, incomplete or
+// failed) carrying the final response object, followed by the [DONE] marker.
+// Open output items must be finished first so the terminal event sequences
+// after their closing events.
+func (s *ResponsesOutputEventState) FinishResponse(eventName string, response map[string]any) string {
+	encoded, ok := s.encodeResponse(eventName, response)
+	if !ok {
+		return ""
+	}
+	return s.writeEncodedEventWithTrailer(eventName, responsesLifecycleEvent{
+		Type:           eventName,
+		Response:       encoded,
+		SequenceNumber: s.sequence,
+	}, "data: [DONE]\n\n")
 }
 
 // ReserveAssistant marks that the assistant message output item occupies index 0.
@@ -104,9 +183,107 @@ func (s *ResponsesOutputEventState) AssistantDone() bool {
 	return s.assistantDone
 }
 
-// AppendAssistantText appends assistant text content to the output item buffer.
-func (s *ResponsesOutputEventState) AppendAssistantText(text string) {
-	_, _ = s.assistantText.WriteString(text)
+// AppendAssistantDelta starts the assistant message item and its text
+// content part if needed, records the text and emits its output_text.delta
+// event addressed to that part.
+func (s *ResponsesOutputEventState) AppendAssistantDelta(outputIndex int, delta string) string {
+	var b strings.Builder
+	b.WriteString(s.StartAssistantOutput(outputIndex))
+	b.WriteString(s.startAssistantPart(outputIndex))
+	_, _ = s.assistantText.WriteString(delta)
+	b.WriteString(s.writeEncodedEvent("response.output_text.delta", responsesTextDeltaEvent{
+		Type:           "response.output_text.delta",
+		ItemID:         s.assistantMessageID,
+		OutputIndex:    outputIndex,
+		ContentIndex:   0,
+		Delta:          delta,
+		SequenceNumber: s.sequence,
+	}))
+	return b.String()
+}
+
+// responsesTextDeltaEvent is the typed output_text.delta payload: the
+// per-token hot path of a text stream, kept off the generic map encoder.
+type responsesTextDeltaEvent struct {
+	Type           string `json:"type"`
+	ItemID         string `json:"item_id"`
+	OutputIndex    int    `json:"output_index"`
+	ContentIndex   int    `json:"content_index"`
+	Delta          string `json:"delta"`
+	SequenceNumber int    `json:"sequence_number"`
+}
+
+// responsesOutputTextPart is the message's single output_text content part.
+type responsesOutputTextPart struct {
+	Type        string            `json:"type"`
+	Text        string            `json:"text"`
+	Annotations []json.RawMessage `json:"annotations"`
+}
+
+// responsesContentPartEvent is the typed payload of content_part.added/done.
+type responsesContentPartEvent struct {
+	Type           string                  `json:"type"`
+	ItemID         string                  `json:"item_id"`
+	OutputIndex    int                     `json:"output_index"`
+	ContentIndex   int                     `json:"content_index"`
+	Part           responsesOutputTextPart `json:"part"`
+	SequenceNumber int                     `json:"sequence_number"`
+}
+
+// responsesTextDoneEvent is the typed payload of output_text.done.
+type responsesTextDoneEvent struct {
+	Type           string `json:"type"`
+	ItemID         string `json:"item_id"`
+	OutputIndex    int    `json:"output_index"`
+	ContentIndex   int    `json:"content_index"`
+	Text           string `json:"text"`
+	SequenceNumber int    `json:"sequence_number"`
+}
+
+// assistantPart renders the message's output_text content part.
+func assistantPart(text string) map[string]any {
+	return map[string]any{
+		"type":        "output_text",
+		"text":        text,
+		"annotations": []json.RawMessage{},
+	}
+}
+
+// writeAssistantPartEvent emits content_part.added or content_part.done
+// carrying the part with the given text.
+func (s *ResponsesOutputEventState) writeAssistantPartEvent(eventName string, outputIndex int, text string) string {
+	return s.writeEncodedEvent(eventName, responsesContentPartEvent{
+		Type:           eventName,
+		ItemID:         s.assistantMessageID,
+		OutputIndex:    outputIndex,
+		ContentIndex:   0,
+		Part:           responsesOutputTextPart{Type: "output_text", Text: text, Annotations: []json.RawMessage{}},
+		SequenceNumber: s.sequence,
+	})
+}
+
+// startAssistantPart emits response.content_part.added once, before the first
+// text delta of the message.
+func (s *ResponsesOutputEventState) startAssistantPart(outputIndex int) string {
+	if s.assistantPartStarted {
+		return ""
+	}
+	s.assistantPartStarted = true
+	return s.writeAssistantPartEvent("response.content_part.added", outputIndex, "")
+}
+
+// finishAssistantPart emits response.output_text.done and
+// response.content_part.done restating the message's full text.
+func (s *ResponsesOutputEventState) finishAssistantPart(outputIndex int) string {
+	text := s.assistantText.String()
+	return s.writeEncodedEvent("response.output_text.done", responsesTextDoneEvent{
+		Type:           "response.output_text.done",
+		ItemID:         s.assistantMessageID,
+		OutputIndex:    outputIndex,
+		ContentIndex:   0,
+		Text:           text,
+		SequenceNumber: s.sequence,
+	}) + s.writeAssistantPartEvent("response.content_part.done", outputIndex, text)
 }
 
 // AssistantMessageItem renders the assistant message output item payload.
@@ -119,13 +296,7 @@ func (s *ResponsesOutputEventState) AssistantMessageItem(status string, includeC
 		"content": []map[string]any{},
 	}
 	if includeContent {
-		item["content"] = []map[string]any{
-			{
-				"type":        "output_text",
-				"text":        s.assistantText.String(),
-				"annotations": []json.RawMessage{},
-			},
-		}
+		item["content"] = []map[string]any{assistantPart(s.assistantText.String())}
 	}
 	if len(s.assistantExtraContent) > 0 {
 		item[core.ExtraContentField] = s.assistantExtraContent
@@ -162,20 +333,26 @@ func (s *ResponsesOutputEventState) CompleteAssistantOutput(outputIndex int) str
 	return s.FinishAssistantOutput(outputIndex, "completed")
 }
 
-// FinishAssistantOutput emits the assistant message output_item.done event once,
-// carrying the given terminal status ("completed", or "incomplete" when the
-// upstream stream was interrupted before closing the message).
+// FinishAssistantOutput closes the message's content part and emits the
+// assistant message output_item.done event once, carrying the given terminal
+// status ("completed", or "incomplete" when the upstream stream was
+// interrupted before closing the message). The item always renders one
+// output_text part, so the part's lifecycle events are emitted even when no
+// text arrived.
 func (s *ResponsesOutputEventState) FinishAssistantOutput(outputIndex int, status string) string {
 	if !s.assistantReserved || s.assistantDone {
 		return ""
 	}
 	s.assistantDone = true
 	s.assistantFinalStatus = status
-	return s.StartAssistantOutput(outputIndex) + s.WriteEvent("response.output_item.done", map[string]any{
-		"type":         "response.output_item.done",
-		"item":         s.AssistantMessageItem(status, true),
-		"output_index": outputIndex,
-	})
+	return s.StartAssistantOutput(outputIndex) +
+		s.startAssistantPart(outputIndex) +
+		s.finishAssistantPart(outputIndex) +
+		s.WriteEvent("response.output_item.done", map[string]any{
+			"type":         "response.output_item.done",
+			"item":         s.AssistantMessageItem(status, true),
+			"output_index": outputIndex,
+		})
 }
 
 // ReserveReasoning marks that a reasoning output item occupies index 0,
