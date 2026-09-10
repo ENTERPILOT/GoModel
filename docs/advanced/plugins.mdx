@@ -219,8 +219,8 @@ of a request:
 | Field | Type | Contents |
 | --- | --- | --- |
 | `Meta` | `Meta` | read-only request facts: request id, dialect, endpoint, user path, key id, labels, session id, requested and resolved model, provider, workflow version and features, `Stream`, provider `Attempts` (response phases), prompt-cache planning |
-| `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam` |
-| `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason` |
+| `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` lists every text part, tool-result text included, and `SetTargetText` writes one back |
+| `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason`; `TextTargets` and `SetTargetText` work as on `Prompt` |
 | `Stream` | `*StreamState` | text accumulated so far per choice and the event count; `nil` for non-streaming requests |
 | `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (recorded, not forwarded in this release) |
 | `Values` | `Values` | per-request bag shared by every hook of the request; prefix keys with the plugin name |
@@ -242,6 +242,14 @@ keeps the cache; editing inside the prefix invalidates it for the session.
 
 ```yaml
 plugins:
+A plugin that scans or rewrites text does not need to walk parts itself:
+`Prompt.TextTargets(roles...)` returns one `TextTarget` per text part (plain
+text, and text inside tool results) with the message ID, role, part indexes,
+and current text, and `Prompt.SetTargetText(target, text)` writes the edit
+back. `Completion.TextTargets()` and `Completion.SetTargetText` do the same
+for the choices of a response. The built-in `string_replace` and
+`llm_based_altering` are written this way.
+
   enabled: true    # PLUGINS_ENABLED; default: false
 ```
 

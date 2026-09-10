@@ -84,7 +84,11 @@ every phase:
 
 Edits go through methods (`SetText`, `SetToolArguments`, `SetToolResult`,
 `Insert`, `Append`, `Remove`, `SetParam`, `ReplaceText`, `SetFinishReason`)
-that record a `Changes` map keyed by message ID (or `choice:<n>`). Apply-back
+that record a `Changes` map keyed by message ID (or `choice:<n>`).
+`TextTargets` and `SetTargetText` on both `Prompt` and `Completion` wrap the
+walk over text parts and tool-result text that every text-scanning plugin
+needs, so a plugin lists targets, edits their text, and writes each back
+without knowing the part layout. Apply-back
 copies untouched messages from the original typed request verbatim, so
 `ExtraFields`, `cache_control`, and multi-part structure survive; rewrites a
 touched text part in place; encodes inserted messages from the unified form;
