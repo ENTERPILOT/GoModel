@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -42,6 +43,48 @@ func TestDefaultEnabledPassthroughProvidersIncludesHetzner(t *testing.T) {
 	found := slices.Contains(defaultEnabledPassthroughProviders, "hetzner")
 	if !found {
 		t.Fatalf("defaultEnabledPassthroughProviders = %v, want hetzner included", defaultEnabledPassthroughProviders)
+	}
+}
+
+// TestDefaultEnabledPassthroughProvidersIncludesEdenAI asserts that the default
+// allowlist contains edenai — the provider matrix marks edenai passthrough ✅,
+// and the default handler must not reject those requests before contacting the
+// upstream.
+func TestDefaultEnabledPassthroughProvidersIncludesEdenAI(t *testing.T) {
+	found := slices.Contains(defaultEnabledPassthroughProviders, "edenai")
+	if !found {
+		t.Fatalf("defaultEnabledPassthroughProviders = %v, want edenai included", defaultEnabledPassthroughProviders)
+	}
+}
+
+// TestDefaultEnabledPassthroughProvidersMatchesConfigDefault keeps the two
+// passthrough allowlist defaults from drifting apart.
+//
+// This package's slice is only the fallback for a Handler built without
+// config; the list a running gateway actually enforces comes from
+// config.Config.Server.EnabledPassthroughProviders, which http.go applies over
+// the fallback. Adding a provider to one and not the other compiles, passes
+// every handler test (they construct Handlers directly and so read the
+// fallback), and still rejects the provider at runtime with "passthrough for
+// X is not enabled" — which is exactly how the edenai entry was first missed.
+func TestDefaultEnabledPassthroughProvidersMatchesConfigDefault(t *testing.T) {
+	// Load() with no config file present yields the built-in defaults; any
+	// ENABLED_PASSTHROUGH_PROVIDERS in the environment would mask them.
+	t.Setenv("ENABLED_PASSTHROUGH_PROVIDERS", "")
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+
+	fromConfig := append([]string(nil), loaded.Config.Server.EnabledPassthroughProviders...)
+	fromServer := append([]string(nil), defaultEnabledPassthroughProviders...)
+	slices.Sort(fromConfig)
+	slices.Sort(fromServer)
+
+	if !slices.Equal(fromConfig, fromServer) {
+		t.Fatalf("passthrough allowlist defaults disagree:\n  config/config.go: %v\n  internal/server:  %v\n"+
+			"both must list the same provider types, or the runtime default silently differs from the tested one",
+			fromConfig, fromServer)
 	}
 }
 

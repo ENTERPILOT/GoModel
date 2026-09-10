@@ -29,6 +29,7 @@ const PROVIDER_DOC_SLUGS = new Set([
   "chatgpt",
   "cohere",
   "deepseek",
+  "edenai",
   "elevenlabs",
   "gemini",
   "hetzner",

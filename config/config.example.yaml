@@ -532,6 +532,21 @@ providers:
     # base_url defaults to "https://llm.chutes.ai/v1".
     # Set base_url when using a different compatible endpoint.
 
+  edenai:
+    type: edenai
+    api_key: "${EDENAI_API_KEY}"
+    # base_url defaults to "https://api.edenai.run/v3".
+    # Multi-provider gateway: model IDs use provider/model notation and pass
+    # through unchanged. Models, context windows, capabilities, and per-token
+    # pricing are discovered from Eden's own /v3/models, and per-request cost
+    # comes from the exact USD "cost" Eden returns on each response, so no
+    # pricing metadata needs declaring here.
+    # GoModel's /v1/responses is served by translating to Eden's chat
+    # completions; Eden's own /v3/responses is a different API and is never used.
+    # models:
+    #   - id: "openai/gpt-4"
+    #   - id: "anthropic/claude-sonnet-latest"
+
   elevenlabs:
     type: elevenlabs
     api_key: "${ELEVENLABS_API_KEY}"

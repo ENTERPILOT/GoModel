@@ -53,6 +53,7 @@ support, not every individual model capability exposed by an upstream provider.
 | Meta (Muse Spark) | `META_API_KEY` (`META_BASE_URL` optional) | `muse-spark-1.1` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
 | OpenRouter | `OPENROUTER_API_KEY` | `google/gemini-2.5-flash` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Kilo AI | `KILO_API_KEY` (`KILO_BASE_URL` optional) | `anthropic/claude-sonnet-4.5` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | — |
+| Eden AI | `EDENAI_API_KEY` (`EDENAI_BASE_URL` optional) | `openai/gpt-4` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | [Eden AI](/providers/edenai) |
 | Z.ai | `ZAI_API_KEY` (`ZAI_BASE_URL` optional) | `glm-5.1` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | — |
 | xAI (Grok) | `XAI_API_KEY` | `grok-4.6` | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | [xAI (Grok)](/providers/xai) |
 | Alibaba Cloud Model Studio (Bailian) | `BAILIAN_API_KEY` (`BAILIAN_BASE_URL` optional) | `qwen3-max` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | [Alibaba Cloud Model Studio](/providers/bailian) |
@@ -118,6 +119,16 @@ support, not every individual model capability exposed by an upstream provider.
   another configured provider exposes the same raw model ID, select Kilo
   explicitly with `kilo/anthropic/claude-sonnet-4.5`; GoModel removes only the
   outer `kilo/` routing qualifier before forwarding.
+- **Eden AI** — model IDs use `provider/model` (for example, `openai/gpt-4`)
+  and are forwarded unchanged; select Eden explicitly with
+  `edenai/openai/gpt-4` when another configured provider exposes the same raw
+  ID. GoModel discovers Eden's catalog, context windows, capabilities, and
+  per-token pricing from Eden's own `/v3/models`, so there is no built-in
+  model list and new Eden models need no upgrade. Per-request cost comes from
+  the exact USD `cost` Eden returns on each response rather than from token
+  math. GoModel serves `/v1/responses` by translating it to Eden's
+  chat-completions endpoint — Eden's own `/v3/responses` is a different API
+  and is never used. See the [Eden AI guide](/providers/edenai).
 - **Xiaomi MiMo** — TTS (`mimo-v2.5-tts*`) and ASR (`mimo-v2.5-asr`) are served
   through `/v1/audio/speech` and `/v1/audio/transcriptions` (translated to
   MiMo's chat-completions audio dialect) as well as directly via chat

@@ -91,6 +91,9 @@ var testDiscoveryConfigs = map[string]DiscoveryConfig{
 	"hetzner": {
 		DefaultBaseURL: "https://inference.hetzner.com/api/v1",
 	},
+	"edenai": {
+		DefaultBaseURL: "https://api.edenai.run/v3",
+	},
 }
 
 // --- buildProviderConfig ---
@@ -1957,6 +1960,49 @@ func TestBuildProviderConfig_Hetzner_ResolvesBaseURL(t *testing.T) {
 	}
 	if p.BaseURL != testDiscoveryConfigs["hetzner"].DefaultBaseURL {
 		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["hetzner"].DefaultBaseURL)
+	}
+}
+
+// TestBuildProviderConfig_EdenAI_ResolvesBaseURL asserts that EDENAI_API_KEY
+// alone registers the provider and resolves Eden's default endpoint. The env
+// prefix is derived from the registered type "edenai" by the generic
+// discovery, so this also pins the spelling: renaming the type to "eden-ai"
+// would silently move the credential to EDEN_AI_API_KEY.
+func TestBuildProviderConfig_EdenAI_ResolvesBaseURL(t *testing.T) {
+	t.Setenv("EDENAI_API_KEY", "edenai-test-key")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["edenai"]
+	if !exists {
+		t.Fatal("edenai not discovered by config parser")
+	}
+	if p.Type != "edenai" {
+		t.Errorf("Type = %q, want edenai", p.Type)
+	}
+	if p.APIKey != "edenai-test-key" {
+		t.Errorf("APIKey = %q, want edenai-test-key", p.APIKey)
+	}
+	if p.BaseURL != "https://api.edenai.run/v3" {
+		t.Errorf("BaseURL = %q, want https://api.edenai.run/v3", p.BaseURL)
+	}
+}
+
+// TestBuildProviderConfig_EdenAI_BaseURLOverride asserts EDENAI_BASE_URL wins
+// over the registered default, so operators can point the provider at a
+// different Eden-compatible endpoint.
+func TestBuildProviderConfig_EdenAI_BaseURLOverride(t *testing.T) {
+	t.Setenv("EDENAI_API_KEY", "edenai-test-key")
+	t.Setenv("EDENAI_BASE_URL", "https://eden.internal.example/v3")
+
+	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+
+	p, exists := got["edenai"]
+	if !exists {
+		t.Fatal("edenai not discovered by config parser")
+	}
+	if p.BaseURL != "https://eden.internal.example/v3" {
+		t.Errorf("BaseURL = %q, want https://eden.internal.example/v3", p.BaseURL)
 	}
 }
 

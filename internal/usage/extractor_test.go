@@ -1019,3 +1019,67 @@ func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 		t.Fatalf("repricing retained %q, want the caveat kept for tiered token rates", retained)
 	}
 }
+
+// TestExtractFromChatResponse_EdenAIExactCostReachesTotalCost closes the seam
+// between the Eden provider and this package. The provider lifts Eden's
+// root-level cost into Usage.RawUsage; this asserts the extractor carries it
+// into rawData and that the entry ends up priced from it, so Eden spend
+// reaches usage records, budgets, and cost reporting.
+func TestExtractFromChatResponse_EdenAIExactCostReachesTotalCost(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID:    "chatcmpl-eden",
+		Model: "gpt-4o-mini-2024-07-18",
+		Usage: core.Usage{
+			PromptTokens:     1170,
+			CompletionTokens: 99,
+			TotalTokens:      1269,
+			RawUsage:         map[string]any{"cost": 0.0002349},
+		},
+	}
+	// Static pricing that would produce a very different number, to prove the
+	// exact charge wins rather than merely agreeing by coincidence.
+	pricing := &core.ModelPricing{InputPerMtok: new(100.0), OutputPerMtok: new(100.0)}
+
+	entry := ExtractFromChatResponse(resp, "req-eden", "edenai", "/v1/chat/completions", pricing)
+
+	if entry == nil {
+		t.Fatal("ExtractFromChatResponse() = nil")
+	}
+	if entry.RawData["cost"] != 0.0002349 {
+		t.Fatalf("RawData[cost] = %#v, want the lifted 0.0002349", entry.RawData["cost"])
+	}
+	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-0.0002349) > 1e-12 {
+		t.Fatalf("TotalCost = %v, want 0.0002349", entry.TotalCost)
+	}
+	if entry.CostSource != CostSourceEdenAICost {
+		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceEdenAICost)
+	}
+	if entry.InputTokens != 1170 || entry.OutputTokens != 99 {
+		t.Errorf("token counts = %d/%d, want 1170/99", entry.InputTokens, entry.OutputTokens)
+	}
+}
+
+// TestExtractFromChatResponse_EdenAIWithoutCostFallsBackToPricing asserts the
+// fallback path: no exact charge means the discovered per-model pricing is
+// used, rather than the entry going uncosted.
+func TestExtractFromChatResponse_EdenAIWithoutCostFallsBackToPricing(t *testing.T) {
+	resp := &core.ChatResponse{
+		ID:    "chatcmpl-eden",
+		Model: "gpt-4o-mini",
+		Usage: core.Usage{PromptTokens: 1_000_000, CompletionTokens: 500_000, TotalTokens: 1_500_000},
+	}
+	pricing := &core.ModelPricing{InputPerMtok: new(0.06), OutputPerMtok: new(0.18)}
+
+	entry := ExtractFromChatResponse(resp, "req-eden", "edenai", "/v1/chat/completions", pricing)
+
+	if entry == nil {
+		t.Fatal("ExtractFromChatResponse() = nil")
+	}
+	if entry.CostSource != CostSourceModelPricing {
+		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceModelPricing)
+	}
+	// 1M * 0.06/1M + 0.5M * 0.18/1M = 0.06 + 0.09
+	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-0.15) > 1e-9 {
+		t.Fatalf("TotalCost = %v, want 0.15 from discovered per-model pricing", entry.TotalCost)
+	}
+}
