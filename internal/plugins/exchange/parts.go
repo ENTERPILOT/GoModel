@@ -178,14 +178,28 @@ func rewriteChatContent(original any, originalNull bool, parts []pluginapi.Part)
 	}
 	out := cloneAnySlice(items)
 	for i, item := range out {
-		if parts[i].Kind != pluginapi.PartText {
-			continue
-		}
 		m, isMap := item.(map[string]any)
-		if !isMap || !isChatTextType(m["type"]) {
-			return nil, false, fmt.Errorf("exchange: content part %d is not a text part", i)
+		switch parts[i].Kind {
+		case pluginapi.PartText:
+			if !isMap || !isChatTextType(m["type"]) {
+				return nil, false, fmt.Errorf("exchange: content part %d is not a text part", i)
+			}
+			m["text"] = parts[i].Text
+		case pluginapi.PartImage:
+			if isMap && parts[i].URL != "" {
+				if image, ok := m["image_url"].(map[string]any); ok && image["url"] != parts[i].URL {
+					image["url"] = parts[i].URL
+					delete(image, "media_type")
+				}
+			}
+		case pluginapi.PartAudio:
+			if isMap && len(parts[i].Data) > 0 {
+				if audio, ok := m["input_audio"].(map[string]any); ok && audio["data"] != string(parts[i].Data) {
+					audio["data"] = string(parts[i].Data)
+					audio["format"] = strings.TrimPrefix(parts[i].MediaType, "audio/")
+				}
+			}
 		}
-		m["text"] = parts[i].Text
 	}
 	return out, false, nil
 }
@@ -197,13 +211,25 @@ func rewriteContentParts(orig []core.ContentPart, parts []pluginapi.Part) (any, 
 	}
 	out := cloneContentParts(orig)
 	for i, part := range parts {
-		if part.Kind != pluginapi.PartText {
-			continue
+		switch part.Kind {
+		case pluginapi.PartText:
+			if out[i].Type != "text" && out[i].Type != "input_text" {
+				return nil, false, fmt.Errorf("exchange: content part %d is not a text part", i)
+			}
+			out[i].Text = part.Text
+		case pluginapi.PartImage:
+			// A replaced payload (Prompt.SetMedia) arrives as a data URI;
+			// the wire part keeps its other members, such as detail.
+			if image := out[i].ImageURL; image != nil && part.URL != "" && image.URL != part.URL {
+				image.URL = part.URL
+				image.MediaType = ""
+			}
+		case pluginapi.PartAudio:
+			if audio := out[i].InputAudio; audio != nil && len(part.Data) > 0 && audio.Data != string(part.Data) {
+				audio.Data = string(part.Data)
+				audio.Format = strings.TrimPrefix(part.MediaType, "audio/")
+			}
 		}
-		if out[i].Type != "text" && out[i].Type != "input_text" {
-			return nil, false, fmt.Errorf("exchange: content part %d is not a text part", i)
-		}
-		out[i].Text = part.Text
 	}
 	return out, false, nil
 }

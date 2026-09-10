@@ -240,7 +240,7 @@ of a request:
 | Field | Type | Contents |
 | --- | --- | --- |
 | `Meta` | `Meta` | read-only request facts: request id, dialect, endpoint, user path, key id, labels, session id, requested and resolved model, provider, workflow version and features, `Stream`, provider `Attempts` (response phases), prompt-cache planning |
-| `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` lists every text part, tool-result text included, and `SetTargetText` writes one back |
+| `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` lists every text part, tool-result text included, and `SetTargetText` writes one back |
 | `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason`; `TextTargets` and `SetTargetText` work as on `Prompt` |
 | `Stream` | `*StreamState` | text accumulated so far per choice and the event count; `nil` for non-streaming requests |
 | `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (recorded, not forwarded in this release) |
@@ -260,6 +260,15 @@ and current text, and `Prompt.SetTargetText(target, text)` writes the edit
 back. `Completion.TextTargets()` and `Completion.SetTargetText` do the same
 for the choices of a response. The built-in `string_replace` and
 `llm_based_altering` are written this way.
+
+Media can be edited too. `Part.DecodeMedia()` returns the inline bytes and
+media type of an image sent as a data URI or of chat input audio, and
+`Prompt.SetMedia(msgID, partIdx, mediaType, data)` replaces the payload of an
+image or audio part: the part goes back out as a data URI (images) or base64
+input audio, and the other members of the wire part, such as an image's
+`detail`, are kept. An image referenced by URL has nothing inline to decode;
+a plugin that wants to redact it fetches it itself. Media inside a tool
+result is replaced with `SetToolResult`.
 
 `Meta.Cache.PlannedPrefixMessages` tells a prompt plugin how many leading
 messages the provider cache planner will mark as the cached prefix. Appending

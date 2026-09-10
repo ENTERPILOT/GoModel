@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -401,5 +402,63 @@ func TestPatchToolCallsMatchesByPositionThenUniqueID(t *testing.T) {
 	out = patchToolCalls(reordered, []pluginapi.ToolCall{{ID: "b", Name: "b"}, {ID: "a", Name: "a"}, {ID: "new", Name: "n"}})
 	if len(out) != 3 || out[0].ID != "b" || out[0].ExtraFields.Lookup("b") == nil || out[1].ID != "a" || out[2].ID != "new" || out[2].Type != "function" {
 		t.Errorf("reordered ids: %+v", out)
+	}
+}
+
+func TestChatSetMediaReencodesImageAndAudio(t *testing.T) {
+	req, p := chatPrompt(t)
+	redacted := []byte("redacted-png")
+	if err := p.SetMedia("m1", 1, "image/png", redacted); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyToChatRequest(req, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(redacted)
+	want := `{"role":"user","content":[{"type":"text","text":"what is this?"},{"type":"image_url","image_url":{"url":"` + wantURL + `","detail":"low"}},{"type":"text","text":"second text"}],"name":"alice"}`
+	if got := messageJSON(t, applied.Messages[1]); got != want {
+		t.Errorf("image message\n got: %s\nwant: %s", got, want)
+	}
+	if req.Messages[1].Content.([]core.ContentPart)[1].ImageURL.URL != "data:image/png;base64,AAAA" {
+		t.Error("original request was mutated")
+	}
+
+	// Audio in a typed part, and image and audio in interface content.
+	audioReq := &core.ChatRequest{Model: "m", Messages: []core.Message{
+		{Role: "user", Content: []core.ContentPart{{Type: "input_audio", InputAudio: &core.InputAudioContent{Data: "AAAA", Format: "wav"}}}},
+		{Role: "user", Content: []any{
+			map[string]any{"type": "image_url", "image_url": map[string]any{"url": "https://x/y.png", "detail": "high"}},
+			map[string]any{"type": "input_audio", "input_audio": map[string]any{"data": "AAAA", "format": "wav"}},
+			map[string]any{"type": "text", "text": "hi"},
+		}},
+	}}
+	p, err = FromChatRequest(audioReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetMedia("m0", 0, "audio/mp3", redacted); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetMedia("m1", 0, "image/jpeg", redacted); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetMedia("m1", 1, "audio/ogg", redacted); err != nil {
+		t.Fatal(err)
+	}
+	applied, err = ApplyToChatRequest(audioReq, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.StdEncoding.EncodeToString(redacted)
+	if got := messageJSON(t, applied.Messages[0]); got != `{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"`+b64+`","format":"mp3"}}]}` {
+		t.Errorf("typed audio message = %s", got)
+	}
+	want = `{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,` + b64 + `","detail":"high"}},{"type":"input_audio","input_audio":{"data":"` + b64 + `","format":"ogg"}},{"type":"text","text":"hi"}]}`
+	if got := messageJSON(t, applied.Messages[1]); got != want {
+		t.Errorf("interface message\n got: %s\nwant: %s", got, want)
+	}
+	if audioReq.Messages[1].Content.([]any)[0].(map[string]any)["image_url"].(map[string]any)["url"] != "https://x/y.png" {
+		t.Error("original interface content was mutated")
 	}
 }

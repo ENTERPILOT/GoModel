@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -365,4 +366,51 @@ func TestResponsesParams(t *testing.T) {
 	if _, err := ApplyToResponsesRequest(req, p); err == nil {
 		t.Error("model must be frozen")
 	}
+}
+
+func TestResponsesSetMediaReencodesImage(t *testing.T) {
+	req, p := responsesPrompt(t)
+	redacted := []byte("redacted-png")
+	if err := p.SetMedia("m0", 1, "image/png", redacted); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyToResponsesRequest(req, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	elements := applied.Input.([]core.ResponsesInputElement)
+	wantURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(redacted)
+	var want, got any
+	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_image","image_url":"`+wantURL+`","detail":"low"}]}`), &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(mustJSON(t, elements[0]), &got); err != nil {
+		t.Fatal(err)
+	}
+	assertJSONEqual(t, want, got)
+	orig := req.Input.([]core.ResponsesInputElement)
+	for i := 1; i < len(orig); i++ {
+		assertJSONEqual(t, orig[i], elements[i])
+	}
+
+	// An image block whose image_url is an object keeps the object.
+	objReq := decodeResponses(t, `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_image","image_url":{"url":"https://x/y.png","detail":"auto"}}]}]}`)
+	p, err = FromResponsesRequest(objReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.SetMedia("m0", 0, "image/png", redacted); err != nil {
+		t.Fatal(err)
+	}
+	applied, err = ApplyToResponsesRequest(objReq, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_image","image_url":{"url":"`+wantURL+`","detail":"auto"}}]}`), &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(mustJSON(t, applied.Input.([]core.ResponsesInputElement)[0]), &got); err != nil {
+		t.Fatal(err)
+	}
+	assertJSONEqual(t, want, got)
 }
