@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/responsestore"
@@ -210,5 +213,142 @@ func TestApplyResponsesPreviousResponse_ScopedTenantCannotChainAcrossScopes(t *t
 	}
 	if items, ok := patched.Input.([]any); !ok || len(items) != 3 {
 		t.Fatalf("patched input = %#v, want 3 items", patched.Input)
+	}
+}
+
+func TestResponsesWithPreviousResponseID_StreamedPredecessorReturns404(t *testing.T) {
+	provider := previousResponseTestProvider(t, "anthropic")
+	provider.streamData = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_s\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\ndata: [DONE]\n\n"
+	srv := New(provider, nil)
+
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"streamed","stream":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("streaming status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	provider.capturedResponsesReq = nil
+
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_s"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d (%s), want 404: streamed responses are not stored", rec.Code, rec.Body.String())
+	}
+	if provider.capturedResponsesReq != nil {
+		t.Fatal("a chained turn on an unstored id must not reach the provider")
+	}
+}
+
+// heldSnapshotStore holds every Create until released, standing in for a
+// slow snapshot write.
+type heldSnapshotStore struct {
+	responsestore.Store
+	release chan struct{}
+}
+
+func (s *heldSnapshotStore) Create(ctx context.Context, response *responsestore.StoredResponse) error {
+	<-s.release
+	return s.Store.Create(ctx, response)
+}
+
+// TestResponsesWithPreviousResponseID_WaitsForPendingSnapshot chains on a
+// response whose snapshot write has not landed yet: the chained turn waits
+// for it instead of reporting the response missing.
+func TestResponsesWithPreviousResponseID_WaitsForPendingSnapshot(t *testing.T) {
+	provider := previousResponseTestProvider(t, "anthropic")
+	srv := New(provider, nil)
+	store := &heldSnapshotStore{Store: responsestore.NewMemoryStore(), release: make(chan struct{})}
+	srv.handler.SetResponseStore(store)
+
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra"}`); rec.Code != http.StatusOK {
+		t.Fatalf("first responses status = %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	type outcome struct {
+		code int
+		body string
+	}
+	result := make(chan outcome, 1)
+	go func() {
+		rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_conv_1"}`)
+		result <- outcome{rec.Code, rec.Body.String()}
+	}()
+	select {
+	case got := <-result:
+		t.Fatalf("chained turn finished before the snapshot was written: %d %s", got.code, got.body)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(store.release)
+	got := <-result
+	if got.code != http.StatusOK {
+		t.Fatalf("chained status = %d (%s), want 200 after the snapshot landed", got.code, got.body)
+	}
+	if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
+		t.Fatalf("chained turn forwarded %d items, want 3", len(items))
+	}
+}
+
+// TestResponsesWithPreviousResponseID_TranslatedFailoverTargetResolvesUpFront
+// resolves the history before dispatch when a failover target is
+// chat-translated, so a failed native attempt does not hand the fallback an id
+// it cannot use.
+func TestResponsesWithPreviousResponseID_TranslatedFailoverTargetResolvesUpFront(t *testing.T) {
+	provider := previousResponseTestProvider(t, "openai")
+	provider.providerTypes["anthropic/claude"] = "anthropic"
+	provider.supportedModels = append(provider.supportedModels, "anthropic/claude")
+	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
+		selectors: []core.ModelSelector{{Provider: "anthropic", Model: "claude"}},
+	}, nil)
+	store := responsestore.NewMemoryStore()
+	handler.SetResponseStore(store)
+	if err := store.Create(context.Background(), &responsestore.StoredResponse{
+		Response: &core.ResponsesResponse{
+			ID: "resp_native", Object: "response", Status: "completed",
+			Output: []core.ResponsesOutputItem{{ID: "msg_1", Type: "message", Role: "assistant", Content: []core.ResponsesContentItem{{Type: "output_text", Text: "zebra"}}}},
+		},
+		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"remember"}]}`)},
+	}); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_native"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := handler.Responses(echo.New().NewContext(req, rec)); err != nil {
+		t.Fatalf("handler.Responses() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if provider.capturedResponsesReq.PreviousResponseID != "" {
+		t.Fatal("previous_response_id must be resolved up front when a failover target is chat-translated")
+	}
+	if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
+		t.Fatalf("forwarded %d items, want 3", len(items))
+	}
+}
+
+func TestApplyResponsesPreviousResponse_SkipsEmptyReplayText(t *testing.T) {
+	store := responsestore.NewMemoryStore()
+	defer func() { _ = store.Close() }()
+	if err := store.Create(context.Background(), &responsestore.StoredResponse{
+		Response: &core.ResponsesResponse{
+			ID: "resp_e", Object: "response", Status: "completed",
+			Output: []core.ResponsesOutputItem{
+				{ID: "msg_1", Type: "message", Role: "assistant", Content: []core.ResponsesContentItem{{Type: "output_text", Text: ""}}},
+				{ID: "fc_1", Type: "function_call", CallID: "call_1", Name: "lookup", Arguments: "{}"},
+			},
+		},
+		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"look it up"}]}`)},
+	}); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: store}
+	patched, err := s.applyResponsesPreviousResponse(context.Background(), &core.ResponsesRequest{Model: "gpt-5-mini", Input: "and?", PreviousResponseID: "resp_e"}, &core.Workflow{ProviderType: "anthropic"})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	items, _ := patched.Input.([]any)
+	if len(items) != 3 {
+		t.Fatalf("patched input has %d items, want input + function_call + new input (empty message dropped): %#v", len(items), patched.Input)
+	}
+	if call, _ := items[1].(map[string]any); call["type"] != "function_call" {
+		t.Fatalf("second item = %#v, want the function_call kept", items[1])
 	}
 }

@@ -59,6 +59,10 @@ type translatedInferenceService struct {
 	snapshotWrites   sync.WaitGroup
 	snapshotMu       sync.RWMutex
 	snapshotDraining bool
+	// pendingSnapshots holds the in-flight snapshot write per response id, so
+	// a request chained on a just-returned response can wait for its snapshot.
+	pendingSnapshots  map[string]chan struct{}
+	pendingSnapshotMu sync.Mutex
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -469,7 +473,9 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
+	pending := s.trackPendingSnapshot(resp.ID)
 	scheduled := s.goSnapshotWrite(func() {
+		defer s.finishPendingSnapshot(resp.ID, pending)
 		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
 		defer cancel()
 		if err := snapshot.Persist(writeCtx, store); err != nil {
@@ -477,6 +483,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 		}
 	})
 	if !scheduled {
+		s.finishPendingSnapshot(resp.ID, pending)
 		s.recordResponseSnapshotStoreFailure(failure, errors.New("server shutting down, snapshot write skipped"))
 	}
 }
