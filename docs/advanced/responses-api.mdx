@@ -47,8 +47,14 @@ This enables:
 - `GET /v1/responses/{id}/input_items` for the original normalized input.
 - `DELETE /v1/responses/{id}` even when the provider does not expose native
   response deletion.
+- `previous_response_id` on chat-translated providers such as Anthropic and
+  Gemini: GoModel prepends the stored response's input items and output to the
+  new input, so the provider receives the whole chain each turn. Native
+  Responses providers receive the id itself. An id that is not stored, or
+  belongs to another tenant, returns 404.
 
-Streaming responses are not stored as response snapshots.
+Streaming responses are not stored as response snapshots, so a chained turn
+must follow a non-streaming response.
 
 ## Native provider lookup
 

@@ -268,6 +268,11 @@ func prepareResponsesRequest(
 	// Resolve gateway-managed conversations before caching and dispatch so the
 	// cache key reflects the merged history and providers never see local IDs.
 	ctx, preparedReq, err = s.applyResponsesConversation(ctx, preparedReq)
+	if err != nil {
+		return ctx, preparedReq, workflow, err
+	}
+	// Likewise for a previous_response_id the route's provider cannot resolve.
+	preparedReq, err = s.applyResponsesPreviousResponse(ctx, preparedReq, workflow)
 	return ctx, preparedReq, workflow, err
 }
 
