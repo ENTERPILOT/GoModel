@@ -1,0 +1,8 @@
+nexus deploy source --repo https://github.com/ENTERPILOT/GoModel.git \
+--name OpenRouter \
+--provider docker \
+--json \
+--framework go \
+--no-health-check no \
+--env BASE_URL=openrouter.nexusai.run \
+--dockerfile "$(cat /Users/ihope/build/GoModel/Dockerfile.nexus)"

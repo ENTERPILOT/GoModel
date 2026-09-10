@@ -1,0 +1,13 @@
+FROM golang:1.27.1-alpine3.24
+RUN apk add --no-cache git ca-certificates nodejs npm
+ARG REPO_URL=https://github.com/ENTERPILOT/GoModel.git
+ARG REPO_REF=main
+ARG VERSION=nexus
+WORKDIR /src
+RUN git clone "${REPO_URL}" . && git checkout "${REPO_REF}"
+RUN cd web/dashboard && npm ci --no-audit --no-fund --ignore-scripts && npm run build
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/enterpilot/gomodel/internal/version.Version=${VERSION} -X github.com/enterpilot/gomodel/internal/version.Commit=$(git rev-parse --short HEAD)" -o /usr/local/bin/gomodel ./cmd/gomodel
+RUN mkdir -p /app/config /app/.cache /app/data && cp /src/config/*.yaml /app/config/
+WORKDIR /app
+EXPOSE 8080
+ENTRYPOINT ["gomodel"]
