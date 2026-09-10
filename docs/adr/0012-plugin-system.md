@@ -179,7 +179,11 @@ released when the snapshot drops it), and a request holds a chain for the
 duration of a phase, the whole stream for the stream phase. A delayed or
 failed workflow refresh therefore keeps the old instances open, and a
 closed instance refuses hook calls (`ErrInstanceClosed`, handled under the
-fail mode) as a safety net. The guardrails subsystem closes every active and retired instance on
+fail mode) as a safety net. An instance whose plugin implements
+`pluginapi.HealthChecker` is probed after every refresh, off the request
+path and under a 5 s deadline; the outcome is exposed on the instance view
+as `health` and never changes how traffic is handled, since `fail_mode`
+already decides that. The guardrails subsystem closes every active and retired instance on
 shutdown; the routing-strategy resolver is registered for shutdown as well.
 A build of a stream plugin whose `StreamPolicy` is `buffer` fails unless the
 plugin also implements `ResponseHook`, since buffering runs `OnResponse`.

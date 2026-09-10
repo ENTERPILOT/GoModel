@@ -764,6 +764,7 @@
   "guardrails_instances_help": "每个实例都有可复用的名称、类型、用于可见性范围的可选用户路径，以及基于 JSON 的配置负载。",
   "guardrails_loading": "正在加载护栏...",
   "guardrails_no_summary": "暂无摘要。",
+  "guardrails_health_degraded": "已降级",
   "workflows_editor": "工作流编辑器",
   "workflows_help_label": "工作流帮助",
   "workflows_help": "创建一个不可变版本。提交后将在所选作用域内生效。",

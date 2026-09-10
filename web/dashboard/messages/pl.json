@@ -808,6 +808,7 @@
   "guardrails_instances_help": "Każda instancja ma nazwę wielokrotnego użytku, typ, opcjonalny User Path do ograniczania widoczności i konfigurację JSON.",
   "guardrails_loading": "Wczytywanie Guardrails...",
   "guardrails_no_summary": "Brak podsumowania.",
+  "guardrails_health_degraded": "Niesprawny",
   "workflows_editor": "Edytor Workflow",
   "workflows_help_label": "Pomoc dotycząca Workflow",
   "workflows_help": "Utwórz niezmienną wersję. Zapisanie aktywuje ją dla wybranego zakresu.",

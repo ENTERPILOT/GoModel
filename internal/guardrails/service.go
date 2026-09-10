@@ -148,7 +148,35 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 		return guardrailServiceError("load guardrails", err)
 	}
 	s.swap(ctx, next)
+	s.probeHealth(ctx, next)
 	return nil
+}
+
+// probeHealth runs the health check of every instance of the snapshot that
+// has one, concurrently, and logs transitions. It runs after a swap, so a
+// probe never delays serving the new snapshot, and every refresh re-probes
+// the instances it kept.
+func (s *Service) probeHealth(ctx context.Context, snap serviceSnapshot) {
+	var wg sync.WaitGroup
+	for _, name := range snap.order {
+		inst := snap.instances[name]
+		if inst == nil || !inst.Checks() {
+			continue
+		}
+		wg.Add(1)
+		go func(inst *plugins.Instance) {
+			defer wg.Done()
+			before := inst.Health()
+			after := inst.CheckHealth(ctx)
+			switch {
+			case after.Degraded() && !before.Degraded():
+				slog.Warn("guardrail instance degraded", "instance", inst.Name, "type", inst.Type, "error", after.Error)
+			case !after.Degraded() && before.Degraded():
+				slog.Info("guardrail instance recovered", "instance", inst.Name, "type", inst.Type)
+			}
+		}(inst)
+	}
+	wg.Wait()
 }
 
 // swap installs next, retires the instances it replaced, and closes retired
@@ -307,6 +335,7 @@ func (s *Service) commit(ctx context.Context, mutate func(map[string]Definition)
 		return guardrailServiceError(action, err)
 	}
 	s.swap(ctx, next)
+	s.probeHealth(ctx, next)
 	return nil
 }
 
@@ -366,6 +395,13 @@ func (s *Service) viewLocked(name string) View {
 		view.Phases = phaseNames(inst.Kinds)
 		view.Guardrail = inst.Manifest.Guardrail
 		view.Mutates = inst.Manifest.Mutates
+		health := inst.Health()
+		view.Health = health.Status
+		view.HealthError = health.Error
+		if !health.CheckedAt.IsZero() {
+			at := health.CheckedAt
+			view.HealthCheckedAt = &at
+		}
 	}
 	return view
 }

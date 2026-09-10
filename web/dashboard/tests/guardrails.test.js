@@ -10,6 +10,7 @@ import {
   defaultGuardrailForm,
   filterGuardrails,
   guardrailArrayFieldSelected,
+  guardrailDegraded,
   guardrailFieldValue,
   normalizeGuardrailConfig,
   setGuardrailFieldValue,
@@ -348,4 +349,11 @@ test("guardrailEditForm keeps the stored type when no types are loaded", () => {
   const form = guardrailEditForm([], { name: "old", type: "llm_judge", config: { model: "a/b" } });
   assert.equal(form.type, "llm_judge");
   assert.deepEqual(form.config, { model: "a/b" });
+});
+
+test("guardrailDegraded reads the instance health of a view", () => {
+  assert.equal(guardrailDegraded({ name: "pii", health: "degraded", health_error: "analyzer unreachable" }), true);
+  assert.equal(guardrailDegraded({ name: "pii", health: "ok" }), false);
+  assert.equal(guardrailDegraded({ name: "legacy" }), false);
+  assert.equal(guardrailDegraded(undefined), false);
 });

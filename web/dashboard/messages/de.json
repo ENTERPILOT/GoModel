@@ -800,6 +800,7 @@
   "guardrails_instances_help": "Jede Instanz hat einen wiederverwendbaren Namen, einen Typ, einen optionalen Nutzerpfad zur Sichtbarkeitseinschränkung und eine JSON-basierte Config-Payload.",
   "guardrails_loading": "Guardrails werden geladen…",
   "guardrails_no_summary": "Noch keine Zusammenfassung.",
+  "guardrails_health_degraded": "Beeinträchtigt",
   "workflows_editor": "Workflow-Editor",
   "workflows_help_label": "Hilfe zu Workflows",
   "workflows_help": "Erstellt eine unveränderliche Version. Beim Absenden wird sie für den gewählten Geltungsbereich aktiviert.",

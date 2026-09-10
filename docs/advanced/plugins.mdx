@@ -502,6 +502,14 @@ Notes for authors:
 - Add `Summarize(config json.RawMessage) string` to render a one-line summary
   in the guardrails list, and `Normalize(config) (json.RawMessage, error)` to
   canonicalize a config before it is stored. Both are optional.
+- Implement `pluginapi.HealthChecker` (`Health(ctx) error`) when an instance
+  depends on something outside the process, such as a classifier sidecar.
+  GoModel probes it off the request path once the instance is built and on
+  every guardrail refresh (`workflows.refresh_interval`, one minute by
+  default), with a 5 s deadline. A failing probe marks the instance
+  `degraded` in `GET /admin/guardrails` and on the dashboard, with the error
+  as the reason, and is logged once per transition. Health is informational:
+  traffic still runs through the instance under its `fail_mode`.
 - Field inputs `secret` and `model` exist for API keys of external classifiers
   and for model pickers; a `secret` value is masked in every admin response.
   Use `bool` for a switch and `list` for an open-ended list of strings
@@ -638,7 +646,9 @@ or `"route"`.
 
 Definitions gain `fail_mode` (`closed` | `open`, empty for the phase default)
 and `timeout_ms` (`0` for none); views additionally carry `phases` (from the
-plugin manifest) and `summary`. `PUT` accepts both new fields. A stored
+plugin manifest), `summary`, and `health` (`ok` | `degraded`, with
+`health_error` and `health_checked_at` for plugins that implement a health
+probe). `PUT` accepts both new fields. A stored
 `secret` value is returned as `********`; send it back unchanged to keep it,
 or `""` to clear it.
 

@@ -800,6 +800,7 @@
   "guardrails_instances_help": "Each instance has a reusable name, a type, an optional user path for visibility scoping, and a JSON-backed config payload.",
   "guardrails_loading": "Loading Guardrails...",
   "guardrails_no_summary": "No summary yet.",
+  "guardrails_health_degraded": "Degraded",
   "workflows_editor": "Workflow editor",
   "workflows_help_label": "Workflow help",
   "workflows_help": "Create an immutable version. Submitting activates it for the selected scope.",
