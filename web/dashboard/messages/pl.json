@@ -1397,6 +1397,8 @@
   "rate_limits_move_cleanup_failed": "Nowa reguła została zapisana, ale poprzedniej nie udało się usunąć. Usuń ją ręcznie.",
   "rate_limits_delete_failed": "Nie udało się usunąć Rate Limitu.",
   "rate_limits_deleted": "Usunięto Rate Limit.",
+  "rate_limits_delete_title": "Usuń Rate Limit",
+  "rate_limits_delete_message": "Wpisz \"{subject}\", aby trwale usunąć ten Rate Limit. Ograniczane przez niego żądania będą potem bez limitu.",
   "rate_limits_reset_failed": "Nie udało się zresetować Rate Limitu.",
   "rate_limits_reset_success": "Zresetowano liczniki Rate Limitu.",
   "rate_limits_user_path": "User Path",
