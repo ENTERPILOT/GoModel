@@ -1402,6 +1402,8 @@
   "guardrails_timeout_invalid": "超时时间必须为不小于 0 的整数毫秒。",
   "schema_fields_secret_stored": "已存储一个值；保持不变即可保留，输入新值则替换。",
   "schema_fields_model_placeholder": "供应商/模型或别名",
+  "schema_fields_model_search_placeholder": "搜索模型或直接输入名称…",
+  "schema_fields_list_placeholder": "每行一个条目",
   "plugins_title": "插件",
   "plugins_help": "网关加载的插件。插件可添加护栏类型和路由策略；内置插件随 GoModel 附带，文件插件从配置的插件目录加载。",
   "plugins_loading": "正在加载插件…",

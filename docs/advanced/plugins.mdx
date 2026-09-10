@@ -242,6 +242,14 @@ carries a tool call whose result is still present (or the reverse) returns a
 `DanglingToolError` naming the partner message; the request is rejected if
 the pair stays broken.
 
+A plugin that scans or rewrites text does not need to walk parts itself:
+`Prompt.TextTargets(roles...)` returns one `TextTarget` per text part (plain
+text, and text inside tool results) with the message ID, role, part indexes,
+and current text, and `Prompt.SetTargetText(target, text)` writes the edit
+back. `Completion.TextTargets()` and `Completion.SetTargetText` do the same
+for the choices of a response. The built-in `string_replace` and
+`llm_based_altering` are written this way.
+
 `Meta.Cache.PlannedPrefixMessages` tells a prompt plugin how many leading
 messages the provider cache planner will mark as the cached prefix. Appending
 keeps the cache; editing inside the prefix invalidates it for the session.
@@ -252,14 +260,6 @@ keeps the cache; editing inside the prefix invalidates it for the session.
 
 ```yaml
 plugins:
-A plugin that scans or rewrites text does not need to walk parts itself:
-`Prompt.TextTargets(roles...)` returns one `TextTarget` per text part (plain
-text, and text inside tool results) with the message ID, role, part indexes,
-and current text, and `Prompt.SetTargetText(target, text)` writes the edit
-back. `Completion.TextTargets()` and `Completion.SetTargetText` do the same
-for the choices of a response. The built-in `string_replace` and
-`llm_based_altering` are written this way.
-
   enabled: true    # PLUGINS_ENABLED; default: false
 ```
 
@@ -319,9 +319,12 @@ instances run on traffic.
 - **Plugins & Guardrails page**: *Create Guardrail* lists every plugin that implements a
   `prompt`, `response`, or `stream` hook. The form is generated from the
   plugin's `ConfigSchema`: `text`, `textarea`, `number`, `select`,
-  `checkboxes`, `secret` (masked; `GET` returns `********` and sending that
-  literal back keeps the stored value), and `model` (a provider/model or alias
-  picker). The **Advanced** section holds *Fail mode* (Default, Closed, Open)
+  `checkboxes`, `bool` (a toggle), `list` (free-text entries, one per line,
+  stored as a string array), `secret` (masked; `GET` returns `********` and
+  sending that literal back keeps the stored value), and `model` (the same
+  searchable model picker as the playground and virtual-model editors, listing
+  the gateway's models; an alias or virtual model is typed in). The
+  **Advanced** section holds *Fail mode* (Default, Closed, Open)
   and *Timeout (ms)*; they apply to the instance in every workflow that
   references it.
 - **Plugins list**: at the bottom of the Plugins & Guardrails page, every
@@ -456,10 +459,13 @@ func main() {}
 Notes for authors:
 
 - `Init` receives the config after validation against `ConfigSchema`:
-  defaults applied, numbers and lists coerced, unknown keys rejected,
-  required keys checked. Line-oriented `textarea` fields accept a YAML list
-  of strings as well as a block scalar. It is called once per configured
-  instance and again when the instance is edited.
+  defaults applied, numbers, booleans, and lists coerced, unknown keys
+  rejected, required keys checked. Line-oriented `textarea` fields accept a
+  YAML list of strings as well as a block scalar; `list` fields accept a
+  list or one comma-separated line and arrive as a JSON array; `bool`
+  fields accept `true`/`false` as booleans or text and arrive as a JSON
+  boolean. It is called once per configured instance and again when the
+  instance is edited.
 - Export a **constructor** (`func GoModelPlugin() pluginapi.Plugin`) so one
   file can back several instances. A `var GoModelPlugin pluginapi.Plugin`
   works too but limits the file to a single instance.
@@ -487,6 +493,9 @@ Notes for authors:
   canonicalize a config before it is stored. Both are optional.
 - Field inputs `secret` and `model` exist for API keys of external classifiers
   and for model pickers; a `secret` value is masked in every admin response.
+  Use `bool` for a switch and `list` for an open-ended list of strings
+  (entity types, an allow list) instead of encoding them in a `select` or a
+  `textarea`.
 - Add `Scope: pluginapi.ScopeRoute` to fields that belong to a virtual model
   rather than to the instance (routing strategies only).
 
@@ -611,7 +620,8 @@ hook, in the shape the guardrail editor renders:
 
 `phases`, `source`, `mutates`, and `guardrail` are new (instance views from
 `GET /admin/guardrails` carry `guardrail` as well); `fields[].input` may now be
-`secret` or `model`, and `fields[].scope` is `""` (instance) or `"route"`.
+`secret`, `model`, `bool`, or `list`, and `fields[].scope` is `""` (instance)
+or `"route"`.
 
 ### GET, PUT, DELETE /admin/guardrails
 

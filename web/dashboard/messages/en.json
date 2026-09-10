@@ -1531,6 +1531,8 @@
   "guardrails_timeout_invalid": "Timeout must be a whole number of milliseconds (0 or more).",
   "schema_fields_secret_stored": "A value is stored. Leave it unchanged to keep it, or type a new one to replace it.",
   "schema_fields_model_placeholder": "provider/model or alias",
+  "schema_fields_model_search_placeholder": "Search models or type a name…",
+  "schema_fields_list_placeholder": "One entry per line",
   "plugins_title": "Plugins",
   "plugins_help": "Plugins loaded by the gateway. They add Guardrail types and routing strategies; built-in plugins ship with GoModel, file plugins are loaded from the configured plugins directory.",
   "plugins_loading": "Loading plugins...",
