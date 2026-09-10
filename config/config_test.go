@@ -74,7 +74,7 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"SEMANTIC_CACHE_WEAVIATE_URL", "SEMANTIC_CACHE_WEAVIATE_CLASS", "SEMANTIC_CACHE_WEAVIATE_API_KEY",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
 		"POSTGRESQL_URL", "POSTGRESQL_MAX_CONNS", "DATABASE_URL",
-		"MONGODB_URL", "MONGODB_DATABASE", "MONGO_URL", "MONGO_DATABASE",
+		"MONGODB_URL", "MONGODB_DATABASE", "MONGO_URL", "MONGO_URI", "MONGODB_URI", "MONGO_DATABASE",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
 		"LOGGING_ENABLED", "LOGGING_LOG_BODIES", "LOGGING_LOG_REVISION_BODIES", "LOGGING_LOG_GUARDRAIL_STEPS", "LOGGING_LOG_HEADERS",
 		"LOGGING_LOG_AUDIO_BODIES", "LOGGING_LOG_IMAGE_BODIES", "LOGGING_LOG_IMAGE_BODIES_SCOPE",
@@ -1503,9 +1503,9 @@ func TestLoad_StorageEnvAliases(t *testing.T) {
 		},
 		{
 			name:         "MongoAliases",
-			env:          map[string]string{"STORAGE_TYPE": "mongodb", "MONGO_URL": "mongodb://alias:27017", "MONGO_DATABASE": "gw"},
-			wantMongoURL: "mongodb://alias:27017",
-			wantMongoDB:  "gw",
+			env:          map[string]string{"STORAGE_TYPE": "mongodb", "MONGO_URI": "mongodb://root:pw@mongodb:27017/appdb?authSource=admin", "MONGO_DATABASE": "appdb"},
+			wantMongoURL: "mongodb://root:pw@mongodb:27017/appdb?authSource=admin",
+			wantMongoDB:  "appdb",
 		},
 	}
 	for _, tt := range tests {

@@ -38,9 +38,10 @@ type PostgreSQLStorageConfig struct {
 // MongoDBStorageConfig holds MongoDB-specific storage configuration
 type MongoDBStorageConfig struct {
 	// URL is the connection string; a database named in its path is honored
-	// (e.g., mongodb://localhost:27017/gomodel). MONGO_URL is accepted as an
-	// alias for platforms (e.g. NexusAI) that inject that name.
-	URL string `yaml:"url" env:"MONGODB_URL,MONGO_URL"`
+	// (e.g., mongodb://localhost:27017/gomodel). MONGO_URI / MONGO_URL /
+	// MONGODB_URI are accepted as aliases for platforms (e.g. NexusAI) that
+	// inject one of those names.
+	URL string `yaml:"url" env:"MONGODB_URL,MONGO_URI,MONGO_URL,MONGODB_URI"`
 	// Database overrides the database named in the URL (default: gomodel).
 	// MONGO_DATABASE is accepted as an alias.
 	Database string `yaml:"database" env:"MONGODB_DATABASE,MONGO_DATABASE"`

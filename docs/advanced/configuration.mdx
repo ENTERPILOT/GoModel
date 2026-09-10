@@ -131,13 +131,14 @@ Storage is shared by audit logging, usage tracking, and future features like IAM
 | `SQLITE_PATH`        | SQLite database file path                     | `data/gomodel.db` |
 | `POSTGRES_URL`       | PostgreSQL connection string (aliases: `POSTGRESQL_URL`, `DATABASE_URL`) | _(empty)_ |
 | `POSTGRES_MAX_CONNS` | PostgreSQL connection pool size               | `10`              |
-| `MONGODB_URL`        | MongoDB connection string; a database named in its path is used (alias: `MONGO_URL`) | _(empty)_ |
+| `MONGODB_URL`        | MongoDB connection string; a database named in its path is used (aliases: `MONGO_URI`, `MONGO_URL`, `MONGODB_URI`) | _(empty)_ |
 | `MONGODB_DATABASE`   | MongoDB database name; overrides the URL path (alias: `MONGO_DATABASE`) | `gomodel`         |
 
 <Note>
   The aliases exist for platforms that inject their own connection variable
-  names (for example NexusAI uses `DATABASE_URL` / `MONGO_URL`). When both a
-  canonical name and an alias are set, the canonical name wins.
+  names (for example NexusAI injects `DATABASE_URL`, `MONGO_URI`, and
+  `MONGO_DATABASE`). When both a canonical name and an alias are set, the
+  canonical name wins.
 </Note>
 
 <Warning>
