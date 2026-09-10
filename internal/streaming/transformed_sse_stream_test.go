@@ -709,3 +709,142 @@ func TestTransformedSSEStream_ContentWithFinishNeedsNoSecondFinish(t *testing.T)
 		})
 	}
 }
+
+func TestTransformedSSEStream_MinChunkRule(t *testing.T) {
+	chunk := func(choice int, text string) string {
+		return fmt.Sprintf(`data: {"choices":[{"index":%d,"delta":{"content":"%s"}}]}`+"\n\n", choice, text)
+	}
+	toolCall := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}` + "\n\n"
+	tests := []struct {
+		name         string
+		minChunk     int
+		lookbehind   int
+		input        string
+		replace      map[string]string
+		wantTexts    []string
+		wantOverlaps []int
+		wantEmit     []string
+	}{
+		{
+			name:         "deltas are collected into runs of at least the minimum",
+			minChunk:     4,
+			input:        chunk(0, "ab") + chunk(0, "cd") + chunk(0, "efg") + "data: [DONE]\n\n",
+			wantTexts:    []string{"abcd", "efg"},
+			wantOverlaps: []int{0, 0},
+			wantEmit:     []string{"abcd", "efg"},
+		},
+		{
+			name:         "the lookbehind tail leads each run and counts as overlap",
+			minChunk:     4,
+			lookbehind:   2,
+			input:        chunk(0, "ab") + chunk(0, "cd") + chunk(0, "efg") + chunk(0, "hi") + "data: [DONE]\n\n",
+			wantTexts:    []string{"abcd", "cdefghi", "hi"},
+			wantOverlaps: []int{0, 2, 2},
+			wantEmit:     []string{"ab", "cdefg", "hi"},
+		},
+		{
+			name:         "a non-text event flushes what is pending",
+			minChunk:     10,
+			input:        chunk(0, "he") + chunk(0, "llo") + toolCall,
+			wantTexts:    []string{"hello"},
+			wantOverlaps: []int{0, 0},
+			wantEmit:     []string{"hello"},
+		},
+		{
+			name:         "characters are counted as runes",
+			minChunk:     3,
+			input:        chunk(0, "hé") + chunk(0, "l") + chunk(0, "lo"),
+			wantTexts:    []string{"hél", "lo"},
+			wantOverlaps: []int{0, 0},
+			wantEmit:     []string{"hél", "lo"},
+		},
+		{
+			name:         "choices are collected separately",
+			minChunk:     4,
+			input:        chunk(0, "aa") + chunk(1, "bbbb") + chunk(0, "aaa"),
+			wantTexts:    []string{"bbbb", "aaaaa"},
+			wantOverlaps: []int{0, 0},
+			wantEmit:     []string{"bbbb", "aaaaa"},
+		},
+		{
+			name:         "a replace applies to the whole run",
+			minChunk:     8,
+			input:        chunk(0, "555-") + chunk(0, "1234") + chunk(0, " ok"),
+			replace:      map[string]string{"555-1234": "[phone]"},
+			wantTexts:    []string{"555-1234", " ok"},
+			wantOverlaps: []int{0, 0},
+			wantEmit:     []string{"[phone]", " ok"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := &funcTransformer{onEvent: func(ev *Event) (Decision, error) {
+				if out, ok := tt.replace[ev.Text]; ok {
+					return Decision{Action: ActionReplace, Text: out}, nil
+				}
+				return Decision{Action: ActionPass}, nil
+			}}
+			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(tt.input)), ChatCodec(), tr, TransformOptions{LookbehindChars: tt.lookbehind, MinChunkChars: tt.minChunk})
+			got, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !equalStrings(texts(tr.seen), tt.wantTexts) {
+				t.Errorf("transformer saw %q, want %q", texts(tr.seen), tt.wantTexts)
+			}
+			var overlaps []int
+			for _, ev := range tr.seen {
+				overlaps = append(overlaps, ev.Overlap)
+			}
+			if !reflect.DeepEqual(overlaps, tt.wantOverlaps) {
+				t.Errorf("overlaps = %v, want %v", overlaps, tt.wantOverlaps)
+			}
+			if emitted := texts(decodeChatEvents(t, got)); !equalStrings(emitted, tt.wantEmit) {
+				t.Errorf("emitted deltas = %q, want %q", emitted, tt.wantEmit)
+			}
+		})
+	}
+}
+
+func TestTransformedSSEStream_MinChunkDeliversFinishAndUsageOnce(t *testing.T) {
+	input := `data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello "},"finish_reason":null}],"usage":null}` + "\n\n" +
+		`data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	tests := []struct {
+		name    string
+		onEvent func(ev *Event) (Decision, error)
+		content string
+	}{
+		{name: "pass", content: "hello world"},
+		{name: "run dropped", onEvent: func(ev *Event) (Decision, error) {
+			return Decision{Action: ActionDrop}, nil
+		}, content: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &funcTransformer{onEvent: tc.onEvent}
+			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{MinChunkChars: 100})
+			got, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{"hello world"}; !equalStrings(texts(tr.seen), want) {
+				t.Errorf("transformer saw %q, want %q", texts(tr.seen), want)
+			}
+			out := string(got)
+			if n := strings.Count(out, `"finish_reason":"stop"`); n != 1 {
+				t.Errorf("finish_reason emitted %d times, want once:\n%s", n, out)
+			}
+			if n := strings.Count(out, `"total_tokens":5`); n != 1 {
+				t.Errorf("usage emitted %d times, want once:\n%s", n, out)
+			}
+			resp, err := AssembleChatResponse(decodeChatEvents(t, got))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.Choices[0].Message.Content != tc.content || resp.Choices[0].FinishReason != "stop" || resp.Usage.TotalTokens != 5 {
+				t.Errorf("assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
+			}
+		})
+	}
+}

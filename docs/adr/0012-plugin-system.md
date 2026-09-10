@@ -205,8 +205,12 @@ three modes in its `StreamPolicy`, and the host does the work:
   cost of N characters of delay. The tail is re-presented after the plugin's
   earlier edit, with `StreamEvent.Overlap` marking it; the contract requires
   plugins to edit only matches extending past the overlap, which keeps
-  non-idempotent replacements from compounding. Chat chunks with several
-  choices are split per choice first so each is transformed. For Responses,
+  non-idempotent replacements from compounding. `MinChunkChars` collects a
+  choice's deltas until that many new characters are pending before the
+  instances see them as one event, so a hook with a high per-call cost runs
+  on windows of useful size; the tail and overlap rules are unchanged and
+  the largest value among the transform instances applies. Chat chunks with
+  several choices are split per choice first so each is transformed. For Responses,
   the codec tracks the emitted text per content part and rewrites the
   `*.done` and terminal `response.*` events that restate it, so completion
   events agree with the transformed deltas. An event larger than 4 MiB was

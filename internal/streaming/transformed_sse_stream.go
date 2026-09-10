@@ -45,6 +45,11 @@ type TransformOptions struct {
 	// choice so a pattern that spans two chunks is visible to the transformer
 	// in one event. 0 disables re-segmentation. See NewTransformedSSEStream.
 	LookbehindChars int
+	// MinChunkChars collects the text deltas of a choice until at least this
+	// many new characters (runes) are pending and presents them to the
+	// transformer as one text event. 0 presents deltas as they arrive. See
+	// NewTransformedSSEStream.
+	MinChunkChars int
 	// MaxEventBytes bounds one SSE event. A larger event cannot be inspected
 	// in flight, so the stream ends fail-closed with error code
 	// "event_too_large" instead of relaying it past the transformer. 0
@@ -94,7 +99,14 @@ const (
 //
 // Consequently a pattern of up to N+1 characters is always visible to t in
 // one event before any of its characters reaches the client, at the cost of
-// N characters of delay. Re-segmented events are rendered with RewriteText
+// N characters of delay.
+//
+// Coalescing (MinChunkChars = M > 0) collects the text deltas of a choice
+// until at least M new characters are pending and only then runs step 1 on
+// the window tail+pending, so t sees runs of at least M characters (the
+// final run at a flush may be shorter). Both work together: the tail is
+// what t already saw, the pending text is new, and Event.Overlap still
+// counts the tail. Re-segmented events are rendered with RewriteText
 // from the most recent raw chunk of that choice, so every other member of
 // that chunk is preserved (a Responses event keeps its sequence_number).
 // Members that must arrive once per choice (a chat chunk's finish_reason
@@ -144,7 +156,10 @@ type transformedSSEStream struct {
 // template without its once-per-choice members and terminal says the
 // template carried some, which the tail's chunk must then deliver.
 type pendingText struct {
-	tail     string
+	tail string
+	// pending is text withheld under MinChunkChars that the transformer has
+	// not seen yet; it follows tail in the next window.
+	pending  string
 	queued   bool
 	template Event
 	head     Event
@@ -265,7 +280,7 @@ func (s *transformedSSEStream) handleOne(raw RawEvent) {
 		s.write(raw.Raw)
 		return
 	}
-	if s.opts.LookbehindChars > 0 && ev.Kind == KindTextDelta {
+	if (s.opts.LookbehindChars > 0 || s.opts.MinChunkChars > 0) && ev.Kind == KindTextDelta {
 		s.hold(ev)
 		return
 	}
@@ -378,7 +393,8 @@ func (s *transformedSSEStream) callEnd() {
 	}
 }
 
-// hold shows the transformer the window tail+delta of the event's choice,
+// hold adds the delta to the pending text of the event's choice and, once
+// MinChunkChars are pending, shows the transformer the window tail+pending,
 // emits all but the last N characters of the result and keeps the rest as
 // the new tail.
 func (s *transformedSSEStream) hold(ev Event) {
@@ -394,9 +410,18 @@ func (s *transformedSSEStream) hold(ev Event) {
 	p.dataBuf = append(p.dataBuf[:0], ev.Data...)
 	p.template = ev
 	p.template.Data = p.dataBuf
-	p.head, p.terminal = s.codec.StripTerminal(p.template)
+	// A chunk's once-per-choice members stay owed while its text is pending,
+	// whichever later chunk becomes the template.
+	var terminal bool
+	p.head, terminal = s.codec.StripTerminal(p.template)
+	p.terminal = p.terminal || terminal
 
-	window := p.tail + ev.Text
+	p.pending += ev.Text
+	if utf8.RuneCountInString(p.pending) < s.opts.MinChunkChars {
+		return
+	}
+	window := p.tail + p.pending
+	p.pending = ""
 	result, ok := s.inspect(ev.Choice, p, window, utf8.RuneCountInString(p.tail))
 	if !ok {
 		p.tail = ""
@@ -407,8 +432,9 @@ func (s *transformedSSEStream) hold(ev Event) {
 	s.emitText(ev.Choice, p.head, head)
 }
 
-// flushPending shows the transformer every choice's tail once more and
-// emits the results in full, in the order the tails were opened.
+// flushPending shows the transformer every choice's tail (once more) and
+// pending text and emits the results in full, in the order the windows were
+// opened.
 func (s *transformedSSEStream) flushPending() {
 	for _, choice := range s.pendingOrder {
 		p := s.pending[choice]
@@ -416,13 +442,14 @@ func (s *transformedSSEStream) flushPending() {
 			continue
 		}
 		p.queued = false
-		if p.tail == "" {
+		window := p.tail + p.pending
+		if window == "" {
 			s.emitEnvelope(choice, p)
 			continue
 		}
-		tail := p.tail
-		p.tail = ""
-		result, ok := s.inspect(choice, p, tail, utf8.RuneCountInString(tail))
+		overlap := utf8.RuneCountInString(p.tail)
+		p.tail, p.pending = "", ""
+		result, ok := s.inspect(choice, p, window, overlap)
 		if s.ended {
 			return
 		}

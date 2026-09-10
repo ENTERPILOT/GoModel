@@ -159,7 +159,7 @@ one of three modes in `StreamHook.StreamPolicy()`:
 | Mode | What the plugin can do | Latency cost |
 | --- | --- | --- |
 | `observe` | read every event; decisions are ignored except `terminate` | none |
-| `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice |
+| `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice, plus up to `MinChunkChars` while a run is collected |
 | `buffer` | nothing per event; GoModel collects the whole stream and runs the plugin's `OnResponse` on the assembled completion (a `buffer` plugin must implement `ResponseHook`; loading fails otherwise) | time-to-first-token becomes time-to-last-token |
 
 **Lookbehind** (`transform` only): GoModel withholds the last `LookbehindChars`
@@ -175,6 +175,17 @@ a rule like `a => aa` is applied once, not on its own output). A chat chunk
 that carries text together with `finish_reason` or `usage` is re-segmented
 too; those members go out once, with the chunk's last text, or on a chunk
 with empty text when the plugin removed that text.
+
+**Coalescing** (`transform` only): a hook whose per-call cost is high, such
+as a classifier or a named-entity detector calling a sidecar, cannot afford a
+call per token. `MinChunkChars` makes GoModel collect the text deltas of a
+choice until at least that many new characters are pending and present them
+as one text event; a non-text event and the end of the stream flush a shorter
+run. It composes with lookbehind: the withheld tail leads the window and
+`Overlap` still counts it, so the same edit contract applies. The client
+waits for up to `MinChunkChars` characters at a time, and the largest value
+among the transform instances of a stream applies to all of them. `0`, the
+default, presents deltas as they arrive.
 
 **Chat chunks with several choices** are split into one chunk per choice
 before plugins see them, so every choice is inspected; provider `usage`

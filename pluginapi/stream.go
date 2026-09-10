@@ -28,6 +28,17 @@ type StreamPolicy struct {
 	// LookbehindChars is how many trailing characters GoModel withholds in
 	// transform mode so the hook can rewrite text that spans events.
 	LookbehindChars int
+	// MinChunkChars, in transform mode, makes GoModel collect the text
+	// deltas of a choice until at least this many new characters (runes)
+	// are pending and present them to the hook as one text event, so a
+	// hook whose per-call cost is high (a classifier, a named-entity
+	// detector) runs on windows of useful size instead of on every token.
+	// A non-text event and the end of the stream flush what is pending
+	// early. Text reaches the client only after the hook saw it, so the
+	// client waits for up to MinChunkChars characters of text at a time.
+	// The largest value among the in-flight instances of a stream applies
+	// to all of them. Zero presents deltas as they arrive.
+	MinChunkChars int
 	// MaxBufferBytes caps buffering in buffer mode; zero means the host
 	// default. The buffer is shared by every plugin buffering the same
 	// stream, so the largest cap asked for applies, and the host default
