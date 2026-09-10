@@ -125,11 +125,11 @@ func applyEnvOverridesValue(v reflect.Value) error {
 			continue
 		}
 
-		envKey := field.Tag.Get("env")
-		if envKey == "" {
+		envTag := field.Tag.Get("env")
+		if envTag == "" {
 			continue
 		}
-		envVal := os.Getenv(envKey)
+		envKey, envVal := lookupEnv(envTag)
 		if envVal == "" {
 			continue
 		}
@@ -183,6 +183,24 @@ func applyEnvOverridesValue(v reflect.Value) error {
 		}
 	}
 	return nil
+}
+
+// lookupEnv resolves an `env` struct tag that may list several names separated
+// by commas. It returns the first name set to a non-empty value, along with
+// that name. The canonical GoModel variable is listed first and compatibility
+// aliases (e.g. platform-injected names) after it, so the canonical name always
+// wins when both are present.
+func lookupEnv(tag string) (name, value string) {
+	for _, key := range strings.Split(tag, ",") {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if v := os.Getenv(key); v != "" {
+			return key, v
+		}
+	}
+	return "", ""
 }
 
 // expandString expands environment variable references like ${VAR} or ${VAR:-default} in a string.

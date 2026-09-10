@@ -73,7 +73,8 @@ func clearAllConfigEnvVars(t *testing.T) {
 		"SEMANTIC_CACHE_PINECONE_HOST", "SEMANTIC_CACHE_PINECONE_API_KEY", "SEMANTIC_CACHE_PINECONE_NAMESPACE", "SEMANTIC_CACHE_PINECONE_DIMENSION",
 		"SEMANTIC_CACHE_WEAVIATE_URL", "SEMANTIC_CACHE_WEAVIATE_CLASS", "SEMANTIC_CACHE_WEAVIATE_API_KEY",
 		"STORAGE_TYPE", "SQLITE_PATH", "POSTGRES_URL", "POSTGRES_MAX_CONNS",
-		"MONGODB_URL", "MONGODB_DATABASE",
+		"POSTGRESQL_URL", "POSTGRESQL_MAX_CONNS", "DATABASE_URL",
+		"MONGODB_URL", "MONGODB_DATABASE", "MONGO_URL", "MONGO_DATABASE",
 		"METRICS_ENABLED", "METRICS_ENDPOINT",
 		"LOGGING_ENABLED", "LOGGING_LOG_BODIES", "LOGGING_LOG_REVISION_BODIES", "LOGGING_LOG_GUARDRAIL_STEPS", "LOGGING_LOG_HEADERS",
 		"LOGGING_LOG_AUDIO_BODIES", "LOGGING_LOG_IMAGE_BODIES", "LOGGING_LOG_IMAGE_BODIES_SCOPE",
@@ -1473,6 +1474,64 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 			t.Errorf("expected max conns 20, got %d", cfg.Storage.PostgreSQL.MaxConns)
 		}
 	})
+}
+
+// TestLoad_StorageEnvAliases covers the platform-injected connection variable
+// names (NexusAI and similar) accepted alongside the canonical GoModel names.
+func TestLoad_StorageEnvAliases(t *testing.T) {
+	tests := []struct {
+		name         string
+		env          map[string]string
+		wantPostgres string
+		wantMongoURL string
+		wantMongoDB  string
+	}{
+		{
+			name:         "PostgresqlURLAlias",
+			env:          map[string]string{"STORAGE_TYPE": "postgresql", "POSTGRESQL_URL": "postgres://alias/db"},
+			wantPostgres: "postgres://alias/db",
+		},
+		{
+			name:         "DatabaseURLAlias",
+			env:          map[string]string{"STORAGE_TYPE": "postgresql", "DATABASE_URL": "postgres://generic/db"},
+			wantPostgres: "postgres://generic/db",
+		},
+		{
+			name:         "CanonicalWinsOverAlias",
+			env:          map[string]string{"STORAGE_TYPE": "postgresql", "POSTGRES_URL": "postgres://canonical/db", "DATABASE_URL": "postgres://generic/db"},
+			wantPostgres: "postgres://canonical/db",
+		},
+		{
+			name:         "MongoAliases",
+			env:          map[string]string{"STORAGE_TYPE": "mongodb", "MONGO_URL": "mongodb://alias:27017", "MONGO_DATABASE": "gw"},
+			wantMongoURL: "mongodb://alias:27017",
+			wantMongoDB:  "gw",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearAllConfigEnvVars(t)
+			withTempDir(t, func(_ string) {
+				for k, v := range tt.env {
+					t.Setenv(k, v)
+				}
+				result, err := Load()
+				if err != nil {
+					t.Fatalf("Load() failed: %v", err)
+				}
+				cfg := result.Config
+				if cfg.Storage.PostgreSQL.URL != tt.wantPostgres {
+					t.Errorf("PostgreSQL.URL = %q, want %q", cfg.Storage.PostgreSQL.URL, tt.wantPostgres)
+				}
+				if cfg.Storage.MongoDB.URL != tt.wantMongoURL {
+					t.Errorf("MongoDB.URL = %q, want %q", cfg.Storage.MongoDB.URL, tt.wantMongoURL)
+				}
+				if cfg.Storage.MongoDB.Database != tt.wantMongoDB {
+					t.Errorf("MongoDB.Database = %q, want %q", cfg.Storage.MongoDB.Database, tt.wantMongoDB)
+				}
+			})
+		})
+	}
 }
 
 func TestLoad_ModelListURLEnv(t *testing.T) {

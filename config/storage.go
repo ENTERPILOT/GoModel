@@ -27,19 +27,23 @@ type SQLiteStorageConfig struct {
 
 // PostgreSQLStorageConfig holds PostgreSQL-specific storage configuration
 type PostgreSQLStorageConfig struct {
-	// URL is the connection string (e.g., postgres://user:pass@localhost/dbname)
-	URL string `yaml:"url" env:"POSTGRES_URL"`
+	// URL is the connection string (e.g., postgres://user:pass@localhost/dbname).
+	// POSTGRESQL_URL and DATABASE_URL are accepted as aliases for platforms
+	// (e.g. NexusAI) that inject one of those names.
+	URL string `yaml:"url" env:"POSTGRES_URL,POSTGRESQL_URL,DATABASE_URL"`
 	// MaxConns is the maximum connection pool size (default: 10)
-	MaxConns int `yaml:"max_conns" env:"POSTGRES_MAX_CONNS"`
+	MaxConns int `yaml:"max_conns" env:"POSTGRES_MAX_CONNS,POSTGRESQL_MAX_CONNS"`
 }
 
 // MongoDBStorageConfig holds MongoDB-specific storage configuration
 type MongoDBStorageConfig struct {
 	// URL is the connection string; a database named in its path is honored
-	// (e.g., mongodb://localhost:27017/gomodel)
-	URL string `yaml:"url" env:"MONGODB_URL"`
-	// Database overrides the database named in the URL (default: gomodel)
-	Database string `yaml:"database" env:"MONGODB_DATABASE"`
+	// (e.g., mongodb://localhost:27017/gomodel). MONGO_URL is accepted as an
+	// alias for platforms (e.g. NexusAI) that inject that name.
+	URL string `yaml:"url" env:"MONGODB_URL,MONGO_URL"`
+	// Database overrides the database named in the URL (default: gomodel).
+	// MONGO_DATABASE is accepted as an alias.
+	Database string `yaml:"database" env:"MONGODB_DATABASE,MONGO_DATABASE"`
 }
 
 // BackendConfig converts the application storage config into the internal storage config.
