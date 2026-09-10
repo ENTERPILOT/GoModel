@@ -140,6 +140,7 @@ type responsesStreamConverter struct {
 	thinking             thinkingReplayState
 	buffer               streaming.StreamBuffer
 	closed               bool
+	sentCreate           bool
 	sentDone             bool
 	sawStop              bool  // upstream signalled the end of the message
 	pendingErr           error // upstream read error deferred until terminal events are drained
@@ -269,6 +270,9 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		return
 	}
 	sc.sentDone = true
+	// A body cut before message_start still owes the client the opening
+	// events: stream helpers snapshot the created response before anything else.
+	sc.buffer.AppendString(sc.startResponse())
 	status := "completed"
 	eventName := "response.completed"
 	if !sc.sawStop {
@@ -302,6 +306,23 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 	}
 	sc.buffer.AppendString(prefix)
 	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
+}
+
+// startResponse opens the stream with response.created and
+// response.in_progress once.
+func (sc *responsesStreamConverter) startResponse() string {
+	if sc.sentCreate {
+		return ""
+	}
+	sc.sentCreate = true
+	return sc.output.StartResponse(map[string]any{
+		"id":         sc.responseID,
+		"object":     "response",
+		"status":     "in_progress",
+		"model":      sc.model,
+		"provider":   "anthropic",
+		"created_at": sc.createdAt,
+	})
 }
 
 // completePendingToolCalls emits the done events for tool calls the upstream
@@ -349,15 +370,7 @@ func (sc *responsesStreamConverter) convertEvent(event *anthropicStreamEvent) st
 		if mergeAnthropicUsage(&sc.usage, event.Usage) {
 			sc.hasUsage = true
 		}
-		// Open the stream with response.created and response.in_progress
-		return sc.output.StartResponse(map[string]any{
-			"id":         sc.responseID,
-			"object":     "response",
-			"status":     "in_progress",
-			"model":      sc.model,
-			"provider":   "anthropic",
-			"created_at": sc.createdAt,
-		})
+		return sc.startResponse()
 
 	case "content_block_start":
 		if sc.thinking.track(event.Index, event.ContentBlock) {

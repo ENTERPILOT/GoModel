@@ -7033,3 +7033,31 @@ data: {"type":"message_stop"}
 		t.Fatalf("terminal event = %s, want response.completed", last.Name)
 	}
 }
+
+// TestStreamResponses_CutBeforeMessageStartStillOpens covers an upstream body
+// that ends before message_start: the stream must still open with
+// response.created and response.in_progress before response.incomplete, so
+// stream helpers that snapshot the created response can finish cleanly.
+func TestStreamResponses_CutBeforeMessageStartStillOpens(t *testing.T) {
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
+	raw, err := io.ReadAll(converter)
+	if err != nil {
+		t.Fatalf("failed to read from converter: %v", err)
+	}
+	events := parseTestSSEEvents(t, string(raw))
+	want := []string{"response.created", "response.in_progress", "response.incomplete", "[DONE]"}
+	got := make([]string, 0, len(events))
+	for i, event := range events {
+		if event.Done {
+			got = append(got, "[DONE]")
+			continue
+		}
+		got = append(got, event.Name)
+		if seq, ok := event.Payload["sequence_number"].(float64); !ok || int(seq) != i {
+			t.Fatalf("event %s sequence_number = %#v, want %d", event.Name, event.Payload["sequence_number"], i)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("event order = %v, want %v", got, want)
+	}
+}
