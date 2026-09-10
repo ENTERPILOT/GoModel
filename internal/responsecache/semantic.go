@@ -159,7 +159,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 
 	if len(results) > 0 && float64(results[0].Score) >= threshold {
 		replayErr := ex.ReplayHit(body, results[0].Response, CacheTypeSemantic)
-		if replayErr == nil {
+		if replayErr == nil || replayCommitted(replayErr) {
 			ex.MarkHit(CacheTypeSemantic)
 			if m.hitRecorder != nil {
 				m.hitRecorder(ex, results[0].Response, CacheTypeSemantic)
@@ -169,7 +169,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 				"score", results[0].Score,
 				"request_id", core.GetRequestID(ex.Context()),
 			)
-			return nil
+			return replayErr
 		}
 		slog.Warn("semantic cache replay failed", "path", path, "err", replayErr)
 	}
