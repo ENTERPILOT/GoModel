@@ -465,8 +465,13 @@ Notes for authors:
 - The `Host` passed to `Init` offers `Logger()` (pre-tagged with plugin and
   instance), `Inference().Complete(...)` (a chat completion through the
   gateway with origin `plugin`, scoped to `<user path>/guardrails/<instance>`
-  for budgets and audit), and `Metrics()` (names prefixed `plugin_<name>_`).
-  `History()` returns an error in this release.
+  for budgets and audit), `Metrics()` (names prefixed `plugin_<name>_`), and
+  `HTTPClient()` for calls to external services such as a classifier or a
+  PII detector. The client is shared by every instance, uses the gateway's
+  proxy environment and connection pool, and has a 60 s timeout as a
+  backstop; build requests with `http.NewRequestWithContext` so the
+  instance `timeout_ms` bounds each call. `History()` returns an error in
+  this release.
 - Add `Summarize(config json.RawMessage) string` to render a one-line summary
   in the guardrails list, and `Normalize(config) (json.RawMessage, error)` to
   canonicalize a config before it is stored. Both are optional.

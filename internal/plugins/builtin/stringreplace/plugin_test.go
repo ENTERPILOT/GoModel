@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ func (fakeHost) History(context.Context, pluginapi.Meta) ([]pluginapi.Message, e
 	return nil, nil
 }
 func (fakeHost) Metrics() pluginapi.Metrics { return noopMetrics{} }
+func (fakeHost) HTTPClient() *http.Client   { return http.DefaultClient }
 
 type noopMetrics struct{}
 

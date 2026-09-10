@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ func (h *fakeHost) History(context.Context, pluginapi.Meta) ([]pluginapi.Message
 	return nil, nil
 }
 func (h *fakeHost) Metrics() pluginapi.Metrics { return noopMetrics{} }
+func (h *fakeHost) HTTPClient() *http.Client   { return http.DefaultClient }
 func (h *fakeHost) Complete(_ context.Context, req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
 	h.mu.Lock()
 	h.requests = append(h.requests, req)

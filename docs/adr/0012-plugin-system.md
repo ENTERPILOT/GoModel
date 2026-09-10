@@ -352,6 +352,9 @@ Declared in the contract or the spec but not run by this release:
   plugins, request logging) but are not forwarded to the provider.
 - `RouteRequest.Prompt` is nil; `RouteChoice.Reason` reaches debug logs
   only. Instance-scoped `secret` fields reach a route plugin redacted.
+- `Host.HTTPClient` hands plugins one shared client built from the gateway's
+  transport settings with a 60 s backstop timeout; per-instance proxy or TLS
+  settings are not modelled.
 - `Host.History` returns an error; earlier Responses turns referenced by
   `previous_response_id` or a conversation are not loaded.
 - The response phase does not run on response-cache hits, because the cache
