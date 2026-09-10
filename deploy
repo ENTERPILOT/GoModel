@@ -5,4 +5,4 @@ nexus deploy source --repo https://github.com/ENTERPILOT/GoModel.git \
 --framework go \
 --no-health-check no \
 --env BASE_URL=openrouter.nexusai.run \
---dockerfile "$(cat /Users/ihope/build/GoModel/Dockerfile.nexus)"
+--dockerfile "$(cat "$(dirname "$0")/Dockerfile.nexus")"
