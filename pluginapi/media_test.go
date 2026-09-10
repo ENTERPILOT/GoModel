@@ -79,11 +79,14 @@ func TestPromptSetMediaErrors(t *testing.T) {
 		{"text part", "m1", 0, "image/png", []byte("x"), "not image or audio"},
 		{"tool call part", "m2", 0, "image/png", []byte("x"), "not image or audio"},
 		{"bad media type", "m1", 1, "png", []byte("x"), "not a MIME type"},
+		{"audio type on an image part", "m1", 1, "audio/wav", []byte("x"), "does not fit the image part"},
+		{"image type on an audio part", "m5", 0, "image/png", []byte("x"), "does not fit the audio part"},
 		{"empty data", "m1", 1, "image/png", nil, "is empty"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := toolPrompt()
+			p.Messages = append(p.Messages, Message{ID: "m5", Role: RoleUser, Parts: []Part{{Kind: PartAudio, Data: []byte("AAAA"), MediaType: "audio/wav"}}})
 			err := p.SetMedia(tt.msgID, tt.partIdx, tt.mediaType, tt.data)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)

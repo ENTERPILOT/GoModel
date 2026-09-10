@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -120,5 +121,14 @@ func TestInstanceCheckHealthUsesProbeDeadline(t *testing.T) {
 	inst.Plugin.(*healthPlugin).setHealth(func(context.Context) error { return nil })
 	if got := inst.CheckHealth(context.Background()); got.Degraded() {
 		t.Fatalf("CheckHealth() after recovery = %+v", got)
+	}
+}
+
+func TestInstanceCheckHealthBoundsErrorText(t *testing.T) {
+	long := strings.Repeat("é", 300)
+	inst := newHealthInstance(t, func(context.Context) error { return errors.New(long) }, InstanceSpec{})
+	got := inst.CheckHealth(context.Background())
+	if !got.Degraded() || len(got.Error) > maxHealthErrorLen+len("…") || !strings.HasSuffix(got.Error, "…") || !utf8.ValidString(got.Error) {
+		t.Fatalf("Error = %q (%d bytes), want a valid string bounded to %d bytes plus an ellipsis", got.Error, len(got.Error), maxHealthErrorLen)
 	}
 }

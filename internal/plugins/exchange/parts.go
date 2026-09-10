@@ -186,17 +186,23 @@ func rewriteChatContent(original any, originalNull bool, parts []pluginapi.Part)
 			}
 			m["text"] = parts[i].Text
 		case pluginapi.PartImage:
+			// Nested maps are shared with the caller's request, so the
+			// edited one is copied before its payload member changes.
 			if isMap && parts[i].URL != "" {
 				if image, ok := m["image_url"].(map[string]any); ok && image["url"] != parts[i].URL {
+					image = cloneAnyMap(image)
 					image["url"] = parts[i].URL
 					delete(image, "media_type")
+					m["image_url"] = image
 				}
 			}
 		case pluginapi.PartAudio:
 			if isMap && len(parts[i].Data) > 0 {
 				if audio, ok := m["input_audio"].(map[string]any); ok && audio["data"] != string(parts[i].Data) {
+					audio = cloneAnyMap(audio)
 					audio["data"] = string(parts[i].Data)
 					audio["format"] = strings.TrimPrefix(parts[i].MediaType, "audio/")
+					m["input_audio"] = audio
 				}
 			}
 		}

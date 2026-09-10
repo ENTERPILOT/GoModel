@@ -52,6 +52,9 @@ func (p *Prompt) SetMedia(msgID string, partIdx int, mediaType string, data []by
 	if !strings.Contains(mediaType, "/") {
 		return fmt.Errorf("pluginapi: media type %q is not a MIME type", mediaType)
 	}
+	if prefix := string(part.Kind) + "/"; !strings.HasPrefix(mediaType, prefix) {
+		return fmt.Errorf("pluginapi: media type %q does not fit the %s part %d of message %q", mediaType, part.Kind, partIdx, msgID)
+	}
 	if len(data) == 0 {
 		return fmt.Errorf("pluginapi: media data for part %d of message %q is empty", partIdx, msgID)
 	}

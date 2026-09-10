@@ -109,7 +109,9 @@ func TestOnPromptRewritesSelectedRoles(t *testing.T) {
 	}
 }
 
-func TestOnPromptKeepsTextOnRewriteFailures(t *testing.T) {
+// A rewrite that fails is reported to the runtime, so the instance's
+// fail_mode decides; the prompt is left untouched either way.
+func TestOnPromptReturnsRewriteFailures(t *testing.T) {
 	tests := []struct {
 		name  string
 		reply func(pluginapi.InferenceRequest) (*pluginapi.Completion, error)
@@ -132,8 +134,8 @@ func TestOnPromptKeepsTextOnRewriteFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, `{"model":"m"}`, &fakeHost{reply: tt.reply})
 			pr := prompt(pluginapi.TextMessage(pluginapi.RoleUser, "hello"))
-			if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); err != nil {
-				t.Fatalf("OnPrompt() error = %v", err)
+			if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); err == nil {
+				t.Fatal("OnPrompt() error = nil, want the rewrite failure")
 			}
 			if pr.Messages[0].Text() != "hello" || pr.Changes().Dirty {
 				t.Fatalf("prompt changed: %+v", pr.Messages[0])

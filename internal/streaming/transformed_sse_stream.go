@@ -47,8 +47,8 @@ type TransformOptions struct {
 	LookbehindChars int
 	// MinChunkChars collects the text deltas of a choice until at least this
 	// many new characters (runes) are pending and presents them to the
-	// transformer as one text event. 0 presents deltas as they arrive. See
-	// NewTransformedSSEStream.
+	// transformer as one text event. 0 presents deltas as they arrive; values
+	// above MaxMinChunkChars are clamped to it. See NewTransformedSSEStream.
 	MinChunkChars int
 	// MaxEventBytes bounds one SSE event. A larger event cannot be inspected
 	// in flight, so the stream ends fail-closed with error code
@@ -70,6 +70,11 @@ const (
 	transformReadBufferSize = 16 * 1024
 	defaultMaxEventBytes    = 4 * 1024 * 1024
 )
+
+// MaxMinChunkChars bounds TransformOptions.MinChunkChars, so a policy can
+// delay and buffer at most this many characters of a choice's text before
+// the transformer sees it and the client receives it.
+const MaxMinChunkChars = 16 * 1024
 
 // NewTransformedSSEStream relays upstream through t. Reads are pull-based:
 // each Read consumes upstream bytes, splits them into SSE events, calls t
@@ -118,6 +123,9 @@ func NewTransformedSSEStream(upstream io.ReadCloser, codec Codec, t Transformer,
 	if opts.MaxEventBytes <= 0 {
 		opts.MaxEventBytes = defaultMaxEventBytes
 	}
+	if opts.MinChunkChars > MaxMinChunkChars {
+		opts.MinChunkChars = MaxMinChunkChars
+	}
 	return &transformedSSEStream{
 		upstream: upstream,
 		codec:    codec,
@@ -151,20 +159,49 @@ type transformedSSEStream struct {
 	finalErr       error
 }
 
-// pendingText is the withheld tail of one choice under lookbehind together
-// with the chunk used as the template for re-segmented events. head is the
-// template without its once-per-choice members and terminal says the
-// template carried some, which the tail's chunk must then deliver.
+// pendingText is the withheld text of one choice: the lookbehind tail the
+// transformer already saw and the pending run it has not, together with the
+// chunks re-segmented events are rendered from.
 type pendingText struct {
 	tail string
 	// pending is text withheld under MinChunkChars that the transformer has
 	// not seen yet; it follows tail in the next window.
-	pending  string
-	queued   bool
-	template Event
-	head     Event
-	terminal bool
-	dataBuf  []byte
+	pending string
+	queued  bool
+	// template renders the choice's re-segmented events: the first chunk of
+	// the pending run, so members it alone carries (a chat delta's role)
+	// survive coalescing, and the latest chunk once a window was emitted,
+	// so once-per-choice members ride with the withheld tail. head is the
+	// template without those members; templateTerminal says it carries
+	// some.
+	template         Event
+	head             Event
+	templateTerminal bool
+	dataBuf          []byte
+	// closer is the latest chunk of the run that carried once-per-choice
+	// members (a chat chunk's finish_reason and usage), owed to the client
+	// while terminal is set.
+	closer    Event
+	closerBuf []byte
+	terminal  bool
+}
+
+// setTemplate makes ev the chunk the choice's re-segmented events are
+// rendered from.
+func (s *transformedSSEStream) setTemplate(p *pendingText, ev Event) {
+	p.dataBuf = append(p.dataBuf[:0], ev.Data...)
+	p.template = ev
+	p.template.Data = p.dataBuf
+	p.head, p.templateTerminal = s.codec.StripTerminal(p.template)
+}
+
+// setCloser records ev as the chunk whose once-per-choice members the
+// choice still owes the client.
+func (s *transformedSSEStream) setCloser(p *pendingText, ev Event) {
+	p.closerBuf = append(p.closerBuf[:0], ev.Data...)
+	p.closer = ev
+	p.closer.Data = p.closerBuf
+	p.terminal = true
 }
 
 func (s *transformedSSEStream) Read(p []byte) (int, error) {
@@ -407,14 +444,12 @@ func (s *transformedSSEStream) hold(ev Event) {
 		p.queued = true
 		s.pendingOrder = append(s.pendingOrder, ev.Choice)
 	}
-	p.dataBuf = append(p.dataBuf[:0], ev.Data...)
-	p.template = ev
-	p.template.Data = p.dataBuf
-	// A chunk's once-per-choice members stay owed while its text is pending,
-	// whichever later chunk becomes the template.
-	var terminal bool
-	p.head, terminal = s.codec.StripTerminal(p.template)
-	p.terminal = p.terminal || terminal
+	if p.pending == "" {
+		s.setTemplate(p, ev)
+	}
+	if _, terminal := s.codec.StripTerminal(ev); terminal {
+		s.setCloser(p, ev)
+	}
 
 	p.pending += ev.Text
 	if utf8.RuneCountInString(p.pending) < s.opts.MinChunkChars {
@@ -430,6 +465,9 @@ func (s *transformedSSEStream) hold(ev Event) {
 	head, tail := splitTail(result, s.opts.LookbehindChars)
 	p.tail = tail
 	s.emitText(ev.Choice, p.head, head)
+	// The withheld tail continues under the latest chunk, so once-per-choice
+	// members it carries go out with the choice's last text.
+	s.setTemplate(p, ev)
 }
 
 // flushPending shows the transformer every choice's tail (once more) and
@@ -453,25 +491,32 @@ func (s *transformedSSEStream) flushPending() {
 		if s.ended {
 			return
 		}
-		if ok && result != "" {
+		switch {
+		case !ok || result == "":
+			s.emitEnvelope(choice, p)
+		case p.terminal && !p.templateTerminal:
+			// The run's template is not the chunk that carries the
+			// once-per-choice members: the text goes out from it and the
+			// owed chunk follows with empty text.
+			s.emitText(choice, p.head, result)
+			s.emitEnvelope(choice, p)
+		default:
 			s.emitText(choice, p.template, result)
 			p.terminal = false
-		} else {
-			s.emitEnvelope(choice, p)
 		}
 	}
 	s.pendingOrder = s.pendingOrder[:0]
 }
 
-// emitEnvelope delivers the once-per-choice members of the template chunk
-// when its text was dropped or emptied: the chunk goes out with empty text.
-// Nothing is emitted when the template carried none.
+// emitEnvelope delivers the owed once-per-choice members when their chunk's
+// text was dropped, emptied, or emitted from another template: the chunk
+// goes out with empty text. Nothing is emitted when none are owed.
 func (s *transformedSSEStream) emitEnvelope(choice int, p *pendingText) {
 	if !p.terminal {
 		return
 	}
 	p.terminal = false
-	ev := s.resegment(choice, p.template, "")
+	ev := s.resegment(choice, p.closer, "")
 	s.codec.Track(ev)
 	s.out = ev.appendEncoded(s.out)
 }

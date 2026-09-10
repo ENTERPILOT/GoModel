@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -20,6 +21,10 @@ const (
 
 // healthTimeout bounds one health probe; a variable so tests can shorten it.
 var healthTimeout = 5 * time.Second
+
+// maxHealthErrorLen bounds the error text kept from a probe, which reaches
+// the admin views and the logs.
+const maxHealthErrorLen = 256
 
 // Health is the outcome of an instance's last health probe.
 type Health struct {
@@ -66,7 +71,7 @@ func (i *Instance) CheckHealth(ctx context.Context) Health {
 	h := Health{Status: HealthOK, CheckedAt: time.Now()}
 	if err != nil {
 		h.Status = HealthDegraded
-		h.Error = strings.TrimSpace(err.Error())
+		h.Error = truncateHealthError(err.Error())
 	}
 	i.health.Store(&h)
 	return h
@@ -82,4 +87,17 @@ func (i *Instance) Health() Health {
 		return *h
 	}
 	return Health{Status: HealthOK}
+}
+
+// truncateHealthError trims and bounds a probe's error text.
+func truncateHealthError(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= maxHealthErrorLen {
+		return text
+	}
+	cut := maxHealthErrorLen
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "…"
 }

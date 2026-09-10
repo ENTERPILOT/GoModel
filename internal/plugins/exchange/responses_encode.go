@@ -105,7 +105,10 @@ func rewriteBlocks(blocks []any, role pluginapi.Role, parts []pluginapi.Part) ([
 				continue
 			}
 			if image, isMap := m["image_url"].(map[string]any); isMap {
+				// The nested map is shared with the caller's request.
+				image = cloneAnyMap(image)
 				image["url"] = part.URL
+				m["image_url"] = image
 			} else {
 				m["image_url"] = part.URL
 			}

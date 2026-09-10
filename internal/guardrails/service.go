@@ -157,6 +157,10 @@ func (s *Service) refreshLocked(ctx context.Context) error {
 // probe never delays serving the new snapshot, and every refresh re-probes
 // the instances it kept.
 func (s *Service) probeHealth(ctx context.Context, snap serviceSnapshot) {
+	// The probe outlives the caller's cancellation (an admin request that
+	// went away, a shutdown in progress) so that cancellation is never
+	// recorded as the instance's health; the probe deadline still applies.
+	ctx = context.WithoutCancel(ctx)
 	var wg sync.WaitGroup
 	for _, name := range snap.order {
 		inst := snap.instances[name]

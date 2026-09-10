@@ -37,7 +37,8 @@ type StreamPolicy struct {
 	// early. Text reaches the client only after the hook saw it, so the
 	// client waits for up to MinChunkChars characters of text at a time.
 	// The largest value among the in-flight instances of a stream applies
-	// to all of them. Zero presents deltas as they arrive.
+	// to all of them, capped by the host at 16384 characters. Zero presents
+	// deltas as they arrive.
 	MinChunkChars int
 	// MaxBufferBytes caps buffering in buffer mode; zero means the host
 	// default. The buffer is shared by every plugin buffering the same

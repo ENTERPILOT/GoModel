@@ -848,3 +848,83 @@ func TestTransformedSSEStream_MinChunkDeliversFinishAndUsageOnce(t *testing.T) {
 		})
 	}
 }
+
+// Coalescing renders a run from its first chunk, so members only that chunk
+// carries (a chat delta's role) survive, while the finish that a later chunk
+// carries still goes out exactly once after the text.
+func TestTransformedSSEStream_MinChunkKeepsRunTemplateMembers(t *testing.T) {
+	input := `data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"},"finish_reason":null}]}` + "\n\n" +
+		`data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"lo"},"finish_reason":null}]}` + "\n\n" +
+		`data: {"id":"c","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	tests := []struct {
+		name      string
+		minChunk  int
+		wantSeen  []string
+		wantEmit  []string
+		wantRoles int
+	}{
+		{name: "whole run flushed at the end", minChunk: 100, wantSeen: []string{"Hello world"}, wantEmit: []string{"Hello world"}, wantRoles: 1},
+		{name: "run emitted mid-stream", minChunk: 4, wantSeen: []string{"Hello", " world"}, wantEmit: []string{"Hello", " world"}, wantRoles: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &funcTransformer{}
+			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{MinChunkChars: tc.minChunk})
+			got, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !equalStrings(texts(tr.seen), tc.wantSeen) {
+				t.Errorf("transformer saw %q, want %q", texts(tr.seen), tc.wantSeen)
+			}
+			out := string(got)
+			if n := strings.Count(out, `"role":"assistant"`); n != tc.wantRoles {
+				t.Errorf("role emitted %d times, want %d:\n%s", n, tc.wantRoles, out)
+			}
+			if n := strings.Count(out, `"finish_reason":"stop"`); n != 1 {
+				t.Errorf("finish_reason emitted %d times, want once:\n%s", n, out)
+			}
+			if n := strings.Count(out, `"total_tokens":5`); n != 1 {
+				t.Errorf("usage emitted %d times, want once:\n%s", n, out)
+			}
+			events := decodeChatEvents(t, got)
+			if emitted := texts(events); !equalStrings(emitted, tc.wantEmit) {
+				t.Errorf("emitted deltas = %q, want %q", emitted, tc.wantEmit)
+			}
+			if first := events[0]; !strings.Contains(string(first.Data), `"role":"assistant"`) {
+				t.Errorf("first emitted chunk lacks the role: %s", first.Data)
+			}
+			resp, err := AssembleChatResponse(events)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.Choices[0].Message.Content != "Hello world" || resp.Choices[0].FinishReason != "stop" || resp.Usage.TotalTokens != 5 {
+				t.Errorf("assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
+			}
+		})
+	}
+}
+
+func TestTransformedSSEStream_MinChunkIsCapped(t *testing.T) {
+	chunk := strings.Repeat("x", 8000)
+	input := ""
+	for range 3 {
+		input += `data: {"choices":[{"index":0,"delta":{"content":"` + chunk + `"}}]}` + "\n\n"
+	}
+	tr := &funcTransformer{}
+	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{MinChunkChars: 1 << 30})
+	if s := stream.(*transformedSSEStream); s.opts.MinChunkChars != MaxMinChunkChars {
+		t.Fatalf("MinChunkChars = %d, want clamped to %d", s.opts.MinChunkChars, MaxMinChunkChars)
+	}
+	if _, err := io.ReadAll(stream); err != nil {
+		t.Fatal(err)
+	}
+	var lengths []int
+	for _, ev := range tr.seen {
+		lengths = append(lengths, len(ev.Text))
+	}
+	if want := []int{24000}; !reflect.DeepEqual(lengths, want) {
+		t.Errorf("window lengths = %v, want %v (a window once the cap is reached, nothing left to flush)", lengths, want)
+	}
+}

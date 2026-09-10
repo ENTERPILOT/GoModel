@@ -184,7 +184,8 @@ as one text event; a non-text event and the end of the stream flush a shorter
 run. It composes with lookbehind: the withheld tail leads the window and
 `Overlap` still counts it, so the same edit contract applies. The client
 waits for up to `MinChunkChars` characters at a time, and the largest value
-among the transform instances of a stream applies to all of them. `0`, the
+among the transform instances of a stream applies to all of them, capped at
+16384 characters. `0`, the
 default, presents deltas as they arrive.
 
 **Chat chunks with several choices** are split into one chunk per choice
@@ -517,7 +518,8 @@ Notes for authors:
   every guardrail refresh (`workflows.refresh_interval`, one minute by
   default), with a 5 s deadline. A failing probe marks the instance
   `degraded` in `GET /admin/guardrails` and on the dashboard, with the error
-  as the reason, and is logged once per transition. Health is informational:
+  as the reason, and is logged once per transition; the error text must not
+  contain secrets and is truncated to 256 characters. Health is informational:
   traffic still runs through the instance under its `fail_mode`.
 - Field inputs `secret` and `model` exist for API keys of external classifiers
   and for model pickers; a `secret` value is masked in every admin response.

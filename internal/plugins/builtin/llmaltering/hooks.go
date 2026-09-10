@@ -54,7 +54,9 @@ func (p *Plugin) shouldRewrite(text string) bool {
 
 // rewriteTargets rewrites every target concurrently (at most 8 in flight)
 // and writes back the results that changed with set. A rewrite that fails
-// keeps the original text; a cancelled context aborts the whole run.
+// fails the hook, so the instance's fail_mode decides whether the request
+// is rejected or continues with the original text; nothing is written back
+// in that case.
 func (p *Plugin) rewriteTargets(ctx context.Context, targets []pluginapi.TextTarget, set func(pluginapi.TextTarget, string) error) error {
 	if len(targets) == 0 {
 		return nil
@@ -79,12 +81,7 @@ func (p *Plugin) rewriteTargets(ctx context.Context, targets []pluginapi.TextTar
 			defer func() { <-sem }()
 			rewritten, err := p.rewriteText(ctx, text)
 			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					errs[i] = err
-					return
-				}
-				p.host.Logger().Warn("rewrite failed; keeping original text", "error", err)
-				results[i] = text
+				errs[i] = err
 				return
 			}
 			results[i] = rewritten

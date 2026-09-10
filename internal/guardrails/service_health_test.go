@@ -107,3 +107,30 @@ func TestServiceProbesInstanceHealthOnRefresh(t *testing.T) {
 		t.Fatalf("view after upsert = %+v, want ok", view)
 	}
 }
+
+func TestServiceProbeHealthIgnoresCallerCancellation(t *testing.T) {
+	state := &sidecarState{}
+	catalog := plugins.NewCatalog()
+	if err := catalog.Register(func() pluginapi.Plugin { return &sidecarPlugin{state: state} }, plugins.SourceRegistered); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	service, err := NewService(newTestStore(Definition{Name: "pii", Type: "sidecar", Config: json.RawMessage(`{"url":"http://presidio"}`)}), catalog, plugins.HostDeps{})
+	if err != nil {
+		t.Fatalf("NewService() error = %v", err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	service.mu.RLock()
+	snap := service.snapshot
+	service.mu.RUnlock()
+	service.probeHealth(ctx, snap)
+	if view, _ := service.GetView("pii"); view.Health != plugins.HealthOK || view.HealthError != "" {
+		t.Fatalf("view after a probe under a cancelled caller context = %+v, want ok", view)
+	}
+	if state.count() != 2 {
+		t.Fatalf("probes = %d, want the probe to have run despite the cancelled caller", state.count())
+	}
+}

@@ -413,4 +413,11 @@ func TestResponsesSetMediaReencodesImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertJSONEqual(t, want, got)
+	var original any
+	if err := json.Unmarshal(mustJSON(t, objReq.Input.([]core.ResponsesInputElement)[0]), &original); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mustJSON(t, original)), wantURL) {
+		t.Fatalf("original request was mutated: %s", mustJSON(t, original))
+	}
 }
