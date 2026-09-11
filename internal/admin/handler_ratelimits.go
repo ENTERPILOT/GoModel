@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
 	"strconv"
@@ -67,9 +68,13 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	item, err := ratelimit.NormalizeRule(ratelimit.Rule{
-		Scope:         scope,
-		Subject:       subject,
-		PerChild:      req.PerChild,
+		Scope:   scope,
+		Subject: subject,
+		// The spelling the operator wrote: provider and model subjects are
+		// stored case-folded, and the folded form must not be what the rule
+		// is reported as.
+		SubjectDisplay: cmp.Or(strings.TrimSpace(req.Subject), strings.TrimSpace(req.UserPath)),
+		PerChild:       req.PerChild,
 		PeriodSeconds: periodSeconds,
 		MaxRequests:   req.MaxRequests,
 		MaxTokens:     req.MaxTokens,
@@ -255,7 +260,7 @@ func rateLimitStatusResponses(statuses []ratelimit.Status) []rateLimitStatusResp
 		rule := status.Rule
 		item := rateLimitStatusResponse{
 			Scope:             string(rule.Scope),
-			Subject:           rule.Subject,
+			Subject:           rule.DisplaySubject(),
 			PerChild:          rule.PerChild,
 			EffectiveSubject:  rule.EffectiveSubject,
 			PeriodSeconds:     rule.PeriodSeconds,

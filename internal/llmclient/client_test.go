@@ -1759,7 +1759,7 @@ func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
 	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
 	}
-	if !strings.Contains(gatewayErr.Message, "failed to send request") {
+	if gatewayErr.Message != "provider request timed out" {
 		t.Fatalf("Message = %q, want send-request timeout context", gatewayErr.Message)
 	}
 }
@@ -1909,7 +1909,7 @@ func TestClient_Do_BodyReadTimeoutReturnsGatewayTimeout(t *testing.T) {
 	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
 		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
 	}
-	if !strings.Contains(gatewayErr.Message, "failed to read response") {
+	if gatewayErr.Message != "timed out reading provider response" {
 		t.Fatalf("Message = %q, want read-response timeout context", gatewayErr.Message)
 	}
 }

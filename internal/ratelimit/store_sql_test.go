@@ -70,6 +70,34 @@ func TestSQLStoreRoundTripsNullableLimits(t *testing.T) {
 	})
 }
 
+// The folded subject stays the key; the written spelling survives the round
+// trip so breaches and listings can name a provider that exists.
+func TestSQLStoreRoundTripsSubjectDisplay(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+
+		if err := store.UpsertRules(ctx, []Rule{
+			{Scope: ScopeProvider, Subject: "mockA", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)), Source: SourceManual},
+		}); err != nil {
+			t.Fatalf("UpsertRules() failed: %v", err)
+		}
+
+		rules, err := store.ListRules(ctx)
+		if err != nil {
+			t.Fatalf("ListRules() failed: %v", err)
+		}
+		if len(rules) != 1 {
+			t.Fatalf("rules = %d, want 1", len(rules))
+		}
+		if rules[0].Subject != "mocka" {
+			t.Fatalf("Subject = %q, want the folded match key", rules[0].Subject)
+		}
+		if got := rules[0].DisplaySubject(); got != "mockA" {
+			t.Fatalf("DisplaySubject() = %q, want %q", got, "mockA")
+		}
+	})
+}
+
 func TestSQLStoreDeleteRule(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()

@@ -137,7 +137,7 @@ func executeTranslatedWithFailover[Req any, Resp any](
 	req Req,
 	model, provider string,
 	cloneForSelector func(Req, core.ModelSelector) Req,
-	call func(context.Context, Req) (Resp, string, error),
+	call func(context.Context, Req, string) (Resp, string, error),
 ) (Resp, ExecutionMeta, error) {
 	return executeWithFailoverResponse(ctx, o, workflow, model, provider,
 		func() (Resp, string, string, error) {
@@ -150,7 +150,7 @@ func executeTranslatedWithFailover[Req any, Resp any](
 				recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, ProviderTypeFromWorkflow(workflow), ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, saturated))
 				return zero, "", "", saturated
 			}
-			resp, responseProvider, err := call(ctx, req)
+			resp, responseProvider, err := call(ctx, req, ProviderNameFromWorkflow(workflow))
 			attemptProviderType := ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider)
 			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, attemptProviderType, ProviderNameFromWorkflow(workflow), currentSelectorForWorkflow(workflow, model, provider), started, err))
 			if err != nil {
@@ -159,7 +159,7 @@ func executeTranslatedWithFailover[Req any, Resp any](
 			return resp, ResponseProviderType(ProviderTypeFromWorkflow(workflow), responseProvider), ProviderNameFromWorkflow(workflow), nil
 		},
 		func(selector core.ModelSelector, providerType, providerName string) (Resp, string, error) {
-			resp, responseProvider, err := call(ctx, cloneForSelector(req, selector))
+			resp, responseProvider, err := call(ctx, cloneForSelector(req, selector), providerName)
 			if err != nil {
 				var zero Resp
 				return zero, "", err

@@ -48,9 +48,14 @@ const (
 // Rule stores the limits for one scope, subject, and period.
 // A period of PeriodConcurrent caps in-flight requests via MaxRequests.
 type Rule struct {
-	Scope    RuleScope `json:"scope" bson:"scope"`
-	Subject  string    `json:"subject" bson:"subject"`
-	PerChild bool      `json:"per_child" bson:"per_child"`
+	Scope   RuleScope `json:"scope" bson:"scope"`
+	Subject string    `json:"subject" bson:"subject"`
+	// SubjectDisplay keeps the spelling the rule was written with for
+	// provider and model scopes, whose Subject is case-folded to stay the
+	// match key. It is empty when the two agree, and rules stored before it
+	// existed simply fall back to Subject.
+	SubjectDisplay string `json:"subject_display,omitempty" bson:"subject_display,omitempty"`
+	PerChild       bool   `json:"per_child" bson:"per_child"`
 	// EffectiveSubject identifies the runtime child partition for a per-child
 	// rule. It is never persisted or exposed as part of the rule definition.
 	EffectiveSubject string    `json:"-" bson:"-"`
@@ -121,13 +126,24 @@ func modelSubjectMatches(subject, provider, model string) bool {
 		strings.EqualFold(subject, model[len(prefix):])
 }
 
+// DisplaySubject spells the subject the way the rule was written. Provider
+// and model subjects are matched case-insensitively and stored folded, so the
+// folded key must never be the one shown to clients: it can name a provider
+// that appears in no configuration.
+func (r Rule) DisplaySubject() string {
+	if display := strings.TrimSpace(r.SubjectDisplay); display != "" {
+		return display
+	}
+	return r.Subject
+}
+
 // SubjectLabel names the rule subject for error messages and logs.
 func (r Rule) SubjectLabel() string {
 	switch r.Scope {
 	case ScopeProvider:
-		return "provider " + r.Subject
+		return "provider " + r.DisplaySubject()
 	case ScopeModel:
-		return "model " + r.Subject
+		return "model " + r.DisplaySubject()
 	default:
 		if r.EffectiveSubject != "" {
 			return r.EffectiveSubject
@@ -250,17 +266,35 @@ func NormalizeSubject(scope RuleScope, subject string) (string, error) {
 	}
 }
 
+// subjectDisplayForm keeps the written spelling only when it differs from the
+// stored key by case alone; anything else (a normalized user path, a subject
+// the caller did not supply) leaves no display form to store.
+func subjectDisplayForm(subject, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == subject || !strings.EqualFold(raw, subject) {
+		return ""
+	}
+	return raw
+}
+
 func NormalizeRule(r Rule) (Rule, error) {
 	scope, err := NormalizeScope(string(r.Scope))
 	if err != nil {
 		return Rule{}, err
 	}
 	r.Scope = scope
+	rawSubject := r.Subject
+	if display := strings.TrimSpace(r.SubjectDisplay); display != "" {
+		// Callers that normalized the subject themselves (the admin API, the
+		// config seeder) pass the original spelling here.
+		rawSubject = display
+	}
 	subject, err := NormalizeSubject(scope, r.Subject)
 	if err != nil {
 		return Rule{}, err
 	}
 	r.Subject = subject
+	r.SubjectDisplay = subjectDisplayForm(subject, rawSubject)
 	r.EffectiveSubject = ""
 	if r.PerChild && scope != ScopeUserPath {
 		return Rule{}, fmt.Errorf("per_child is only valid for user_path rules")

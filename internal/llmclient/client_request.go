@@ -3,12 +3,15 @@ package llmclient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 
 	"github.com/goccy/go-json"
 
@@ -76,9 +79,71 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to send request: "+err.Error(), err)
+		logTransportError("provider request failed", c.config.ProviderName, req.Endpoint, err)
+		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), transportErrorMessage(err), err)
 	}
 	return resp, nil
+}
+
+// logTransportError records the full transport error — including the upstream
+// URL the client never sees — for operators.
+func logTransportError(message, providerName, endpoint string, err error) {
+	slog.Warn(message,
+		"provider", providerName,
+		"endpoint", endpoint,
+		"error", err,
+	)
+}
+
+// transportErrorMessage summarizes a transport failure for the client. The
+// raw error embeds the upstream URL (a private hostname, an Azure deployment
+// path, or a token an operator put in a custom base_url), so it is logged
+// server-side and never returned. The summary still distinguishes the failure
+// modes operators triage by, and providerErrorStatusCode keeps the status
+// mapping (timeout 504, everything else 502).
+func transportErrorMessage(err error) string {
+	switch {
+	case isTimeoutError(err):
+		return "provider request timed out"
+	case errors.Is(err, context.Canceled):
+		return "provider request canceled"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "provider refused the connection"
+	case isTLSError(err):
+		return "TLS handshake with provider failed"
+	case isDNSError(err):
+		return "provider host could not be resolved"
+	default:
+		return "failed to send request to provider"
+	}
+}
+
+// readErrorMessage summarizes a failure while reading the upstream response
+// body. Like transportErrorMessage it withholds the connection details the
+// raw error carries (local and upstream addresses).
+func readErrorMessage(err error) string {
+	if isTimeoutError(err) {
+		return "timed out reading provider response"
+	}
+	return "failed to read provider response"
+}
+
+func isTLSError(err error) bool {
+	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
+		return true
+	}
+	if _, ok := errors.AsType[tls.RecordHeaderError](err); ok {
+		return true
+	}
+	// Handshake failures the standard library reports as plain messages
+	// ("tls: first record does not look like a TLS handshake", "x509: ...").
+	message := err.Error()
+	return strings.Contains(message, "tls:") || strings.Contains(message, "x509:")
+}
+
+func isDNSError(err error) bool {
+	_, ok := errors.AsType[*net.DNSError](err)
+	return ok
 }
 
 // closeRawBodyReader releases a caller-supplied streaming body when the
@@ -113,7 +178,8 @@ func (c *Client) doRequest(ctx context.Context, req Request) (*Response, error) 
 	}
 	body, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), "failed to read response: "+err.Error(), err)
+		logTransportError("reading provider response failed", c.config.ProviderName, req.Endpoint, err)
+		return nil, core.NewProviderError(c.config.ProviderName, providerErrorStatusCode(err), readErrorMessage(err), err)
 	}
 
 	return &Response{
