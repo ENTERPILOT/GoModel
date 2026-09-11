@@ -77,6 +77,8 @@ type Instance struct {
 	refs atomic.Int64
 	// closed is set by Close; a closed instance refuses hook calls.
 	closed atomic.Bool
+	// health is the last outcome of CheckHealth.
+	health atomic.Pointer[Health]
 }
 
 // ErrInstanceClosed is returned by Call for an instance that was closed.

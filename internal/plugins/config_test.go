@@ -18,6 +18,8 @@ var testSchema = []pluginapi.Field{
 	{Key: "max_tokens", Input: pluginapi.InputNumber, Default: 4096},
 	{Key: "roles", Input: pluginapi.InputCheckboxes, Default: []string{"user"}, Options: []pluginapi.Option{{Value: "user"}, {Value: "system"}}},
 	{Key: "api_key", Input: pluginapi.InputSecret},
+	{Key: "entities", Input: pluginapi.InputList},
+	{Key: "reversible", Input: pluginapi.InputBool},
 	{Key: "window", Input: pluginapi.InputText, Scope: pluginapi.ScopeRoute},
 }
 
@@ -47,6 +49,51 @@ func TestValidateConfig(t *testing.T) {
 			name: "empty select falls back to default",
 			raw:  `{"content":"x","mode":""}`,
 			want: `{"content":"x","max_tokens":4096,"mode":"inject","roles":["user"]}`,
+		},
+		{
+			name: "list accepts an array, trims, and dedupes",
+			raw:  `{"content":"x","entities":[" PERSON ","EMAIL","PERSON",""]}`,
+			want: `{"content":"x","entities":["PERSON","EMAIL"],"max_tokens":4096,"mode":"inject","roles":["user"]}`,
+		},
+		{
+			name: "list accepts comma and newline separated text",
+			raw:  `{"content":"x","entities":"PERSON, EMAIL\nPHONE"}`,
+			want: `{"content":"x","entities":["PERSON","EMAIL","PHONE"],"max_tokens":4096,"mode":"inject","roles":["user"]}`,
+		},
+		{
+			name: "empty list text is an empty list",
+			raw:  `{"content":"x","entities":""}`,
+			want: `{"content":"x","entities":[],"max_tokens":4096,"mode":"inject","roles":["user"]}`,
+		},
+		{
+			name:    "list rejects a number",
+			raw:     `{"content":"x","entities":5}`,
+			wantErr: "expected a list of strings",
+		},
+		{
+			name: "bool accepts a boolean",
+			raw:  `{"content":"x","reversible":true}`,
+			want: `{"content":"x","max_tokens":4096,"mode":"inject","reversible":true,"roles":["user"]}`,
+		},
+		{
+			name: "bool accepts words and numbers",
+			raw:  `{"content":"x","reversible":"Yes"}`,
+			want: `{"content":"x","max_tokens":4096,"mode":"inject","reversible":true,"roles":["user"]}`,
+		},
+		{
+			name: "bool accepts 0",
+			raw:  `{"content":"x","reversible":0}`,
+			want: `{"content":"x","max_tokens":4096,"mode":"inject","reversible":false,"roles":["user"]}`,
+		},
+		{
+			name: "empty bool text is unset",
+			raw:  `{"content":"x","reversible":""}`,
+			want: `{"content":"x","max_tokens":4096,"mode":"inject","roles":["user"]}`,
+		},
+		{
+			name:    "bool rejects other words",
+			raw:     `{"content":"x","reversible":"maybe"}`,
+			wantErr: "expected true or false",
 		},
 		{
 			name:    "missing required",
@@ -138,7 +185,7 @@ func TestSecrets(t *testing.T) {
 
 func TestSchemaDefaultsAndConfigHash(t *testing.T) {
 	defaults := SchemaDefaults(testSchema)
-	if string(defaults) != `{"api_key":"","content":"","max_tokens":4096,"mode":"inject","roles":["user"]}` {
+	if string(defaults) != `{"api_key":"","content":"","entities":[],"max_tokens":4096,"mode":"inject","reversible":false,"roles":["user"]}` {
 		t.Fatalf("SchemaDefaults() = %s", defaults)
 	}
 	a := ConfigHash(json.RawMessage(`{"b":1,"a":2}`))

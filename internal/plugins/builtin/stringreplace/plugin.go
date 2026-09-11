@@ -53,12 +53,8 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				},
 			},
 			{
-				Key: "case_insensitive", Label: "Case insensitive", Input: pluginapi.InputSelect, Default: "false",
+				Key: "case_insensitive", Label: "Case insensitive", Input: pluginapi.InputBool, Default: false,
 				Help: "Match regardless of letter case.",
-				Options: []pluginapi.Option{
-					{Value: "false", Label: "No"},
-					{Value: "true", Label: "Yes"},
-				},
 			},
 			{
 				Key: "roles", Label: "Prompt roles", Input: pluginapi.InputCheckboxes, Default: []string{"user"},

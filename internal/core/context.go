@@ -327,6 +327,24 @@ func GetGuardrailsHash(ctx context.Context) string {
 	return ""
 }
 
+// ResponseCacheVeto is implemented by the per-request plugin state
+// (Workflow.PluginState) so the response cache can ask whether a plugin
+// decision asked for the response not to be stored.
+type ResponseCacheVeto interface {
+	NoStore() bool
+}
+
+// PluginNoStore reports whether a plugin that ran for the request asked for
+// its response not to be stored in the response cache.
+func PluginNoStore(ctx context.Context) bool {
+	workflow := GetWorkflow(ctx)
+	if workflow == nil {
+		return false
+	}
+	veto, ok := workflow.PluginState.(ResponseCacheVeto)
+	return ok && veto.NoStore()
+}
+
 // WithFailoverUsed returns a new context marked as having used a failover model.
 func WithFailoverUsed(ctx context.Context) context.Context {
 	return context.WithValue(ctx, failoverUsedKey, true)

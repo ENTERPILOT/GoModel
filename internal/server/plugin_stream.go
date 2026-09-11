@@ -175,7 +175,10 @@ func (s *translatedInferenceService) wrapPluginStream(ctx context.Context, workf
 			continue
 		}
 		ps.inFlight = append(ps.inFlight, inFlightInstance{inst: inst, observe: policy.Mode != pluginapi.StreamTransform})
-		ps.lookbehind = max(ps.lookbehind, policy.LookbehindChars)
+		if policy.Mode == pluginapi.StreamTransform {
+			ps.lookbehind = max(ps.lookbehind, policy.LookbehindChars)
+			ps.minChunk = max(ps.minChunk, policy.MinChunkChars)
+		}
 	}
 
 	if uncapped {
@@ -202,6 +205,7 @@ func (s *translatedInferenceService) wrapPluginStream(ctx context.Context, workf
 	if len(ps.inFlight) > 0 {
 		stream = streaming.NewTransformedSSEStream(stream, dialect.codec(), ps, streaming.TransformOptions{
 			LookbehindChars: ps.lookbehind,
+			MinChunkChars:   ps.minChunk,
 			OnError:         ps.reportError("transform"),
 		})
 	}
@@ -234,6 +238,7 @@ type pluginStream struct {
 	requestID  string
 	inFlight   []inFlightInstance
 	lookbehind int
+	minChunk   int
 }
 
 func (ps *pluginStream) reportError(stage string) func(error) {

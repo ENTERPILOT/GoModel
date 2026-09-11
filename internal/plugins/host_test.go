@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -162,4 +163,32 @@ func TestMetaFromContextAndRequestState(t *testing.T) {
 	}
 	x.Headers.Upstream = http.Header{"X-Up": {"1"}}
 	state.Finish(x)
+}
+
+func TestHostHTTPClient(t *testing.T) {
+	h := NewHost(HostDeps{}, HostInfo{PluginName: "presidio", InstanceName: "pii"})
+	client := h.HTTPClient()
+	if client == nil {
+		t.Fatal("HTTPClient() = nil, want the default client")
+	}
+	if client.Timeout != PluginHTTPTimeout {
+		t.Fatalf("default client timeout = %v, want %v", client.Timeout, PluginHTTPTimeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok || transport.Proxy == nil {
+		t.Fatalf("default client transport = %T, want an *http.Transport with a proxy function", client.Transport)
+	}
+	if transport.ResponseHeaderTimeout != PluginHTTPTimeout {
+		t.Fatalf("default response header timeout = %v, want %v", transport.ResponseHeaderTimeout, PluginHTTPTimeout)
+	}
+	other := NewHost(HostDeps{}, HostInfo{PluginName: "other", InstanceName: "b"})
+	if other.HTTPClient() != client {
+		t.Fatal("instances must share the default client")
+	}
+
+	custom := &http.Client{Timeout: time.Second}
+	h = NewHost(HostDeps{HTTP: custom}, HostInfo{PluginName: "presidio", InstanceName: "pii"})
+	if h.HTTPClient() != custom {
+		t.Fatal("HTTPClient() must return the client from HostDeps")
+	}
 }

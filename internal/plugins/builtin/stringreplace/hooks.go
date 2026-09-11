@@ -10,117 +10,27 @@ import (
 // block, respond, or warn.
 const Code = "string_replace_match"
 
-// OnPrompt edits or inspects the prompt messages of the configured roles.
+// OnPrompt edits or inspects the text of the prompt messages of the
+// configured roles, tool-result text included.
 func (p *Plugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
 	if x.Prompt == nil {
 		return pluginapi.Allow(), nil
 	}
-	if p.onMatch != OnMatchReplace {
-		matches, messages := 0, 0
-		for _, m := range x.Prompt.Messages {
-			if !p.roles[m.Role] {
-				continue
-			}
-			if n := p.countMessage(m); n > 0 {
-				matches += n
-				messages++
-			}
+	var targets []pluginapi.TextTarget
+	for _, t := range x.Prompt.TextTargets() {
+		if p.roles[t.Role] {
+			targets = append(targets, t)
 		}
+	}
+	if p.onMatch != OnMatchReplace {
+		matches, messages, _ := p.scan(targets, nil)
 		return p.decide(matches, messages), nil
 	}
-	total, messages := 0, 0
-	for i := range x.Prompt.Messages {
-		m := &x.Prompt.Messages[i]
-		if !p.roles[m.Role] {
-			continue
-		}
-		n, err := p.editMessage(x.Prompt, m)
-		if err != nil {
-			return pluginapi.Decision{}, err
-		}
-		if n > 0 {
-			total += n
-			messages++
-		}
+	total, messages, err := p.scan(targets, x.Prompt.SetTargetText)
+	if err != nil {
+		return pluginapi.Decision{}, err
 	}
 	return allowWith(replaceDetail(total, messages)), nil
-}
-
-// countMessage counts matches over the units editMessage rewrites: each
-// text part and each tool-result text part on its own. Block, respond and
-// warn therefore agree with replace on what is a match; text split across
-// two parts is not matched in any mode.
-func (p *Plugin) countMessage(m pluginapi.Message) int {
-	total := 0
-	for _, part := range m.Parts {
-		switch part.Kind {
-		case pluginapi.PartText:
-			total += count(p.rules, part.Text, 0)
-		case pluginapi.PartToolResult:
-			if part.ToolResult != nil {
-				total += countParts(p.rules, part.ToolResult.Parts)
-			}
-		}
-	}
-	return total
-}
-
-// countParts counts matches in each text part on its own.
-func countParts(rules []rule, parts []pluginapi.Part) int {
-	total := 0
-	for _, part := range parts {
-		if part.Kind == pluginapi.PartText {
-			total += count(rules, part.Text, 0)
-		}
-	}
-	return total
-}
-
-// editMessage rewrites the text parts and tool-result text of one message
-// and returns the number of replacements.
-func (p *Plugin) editMessage(prompt *pluginapi.Prompt, m *pluginapi.Message) (int, error) {
-	total := 0
-	for j, part := range m.Parts {
-		switch part.Kind {
-		case pluginapi.PartText:
-			out, n := apply(p.rules, part.Text, 0)
-			if n == 0 {
-				continue
-			}
-			if err := prompt.SetText(m.ID, j, out); err != nil {
-				return total, err
-			}
-			total += n
-		case pluginapi.PartToolResult:
-			if part.ToolResult == nil {
-				continue
-			}
-			parts, n := p.editParts(part.ToolResult.Parts)
-			if n == 0 {
-				continue
-			}
-			if err := prompt.SetToolResult(m.ID, part.ToolResult.CallID, parts); err != nil {
-				return total, err
-			}
-			total += n
-		}
-	}
-	return total, nil
-}
-
-func (p *Plugin) editParts(parts []pluginapi.Part) ([]pluginapi.Part, int) {
-	out := make([]pluginapi.Part, len(parts))
-	copy(out, parts)
-	total := 0
-	for i := range out {
-		if out[i].Kind != pluginapi.PartText {
-			continue
-		}
-		text, n := apply(p.rules, out[i].Text, 0)
-		out[i].Text = text
-		total += n
-	}
-	return out, total
 }
 
 // OnResponse edits or inspects the text of every completion choice.
@@ -128,38 +38,53 @@ func (p *Plugin) OnResponse(_ context.Context, x *pluginapi.Exchange) (pluginapi
 	if x.Response == nil {
 		return pluginapi.Allow(), nil
 	}
+	targets := x.Response.TextTargets()
 	if p.onMatch != OnMatchReplace {
-		matches, choices := 0, 0
-		for i := range x.Response.Choices {
-			if n := countParts(p.rules, x.Response.Choices[i].Message.Parts); n > 0 {
-				matches += n
-				choices++
-			}
-		}
+		matches, choices, _ := p.scan(targets, nil)
 		return p.decide(matches, choices), nil
 	}
-	total, choices := 0, 0
-	for i := range x.Response.Choices {
-		changed := 0
-		for j, part := range x.Response.Choices[i].Message.Parts {
-			if part.Kind != pluginapi.PartText {
-				continue
-			}
-			out, n := apply(p.rules, part.Text, 0)
-			if n == 0 {
-				continue
-			}
-			if err := x.Response.SetText(i, j, out); err != nil {
-				return pluginapi.Decision{}, err
-			}
-			changed += n
-		}
-		if changed > 0 {
-			total += changed
-			choices++
-		}
+	total, choices, err := p.scan(targets, x.Response.SetTargetText)
+	if err != nil {
+		return pluginapi.Decision{}, err
 	}
 	return allowWith(replaceDetail(total, choices)), nil
+}
+
+// unit identifies the message or choice a target belongs to.
+type unit struct {
+	message string
+	choice  int
+}
+
+// scan applies the rules to each target on its own and returns the number of
+// matches and the number of messages (or choices) with at least one match.
+// With a nil set the text is only counted; otherwise every rewritten target
+// is written back through set. Block, respond and warn therefore agree with
+// replace on what is a match: text split across two parts is matched in no
+// mode.
+func (p *Plugin) scan(targets []pluginapi.TextTarget, set func(pluginapi.TextTarget, string) error) (int, int, error) {
+	total := 0
+	units := map[unit]bool{}
+	for _, t := range targets {
+		if set == nil {
+			n := count(p.rules, t.Text, 0)
+			if n > 0 {
+				total += n
+				units[unit{t.MessageID, t.Choice}] = true
+			}
+			continue
+		}
+		out, n := apply(p.rules, t.Text, 0)
+		if n == 0 {
+			continue
+		}
+		if err := set(t, out); err != nil {
+			return total, len(units), err
+		}
+		total += n
+		units[unit{t.MessageID, t.Choice}] = true
+	}
+	return total, len(units), nil
 }
 
 // StreamPolicy transforms text deltas in flight for replace and warn, and

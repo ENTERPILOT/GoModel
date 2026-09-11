@@ -53,3 +53,18 @@ export function modelSelectorOptions(models, describeProvider = () => "") {
     ...selectors.map((selector) => ({ value: selector, label: selector, description: "" })),
   ];
 }
+
+// modelPickerOptions builds SearchSelect options for a single-model field
+// (a plugin's `model` input): every enabled selector from the shared
+// inventory, sorted, described by its provider. Aliases and virtual models
+// are typed in through the picker's custom entry.
+export function modelPickerOptions(models) {
+  const seen = new Map();
+  for (const entry of Array.isArray(models) ? models : []) {
+    const value = String(entry?.selector || entry?.model?.id || "").trim();
+    if (!value || seen.has(value)) continue;
+    if (entry?.access && entry.access.effective_enabled === false) continue;
+    seen.set(value, { value, label: value, description: String(entry?.provider_name || "") });
+  }
+  return [...seen.values()].sort((a, b) => a.value.localeCompare(b.value));
+}

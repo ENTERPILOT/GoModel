@@ -299,8 +299,9 @@ The internal request uses:
 - request origin: `plugin`
 
 Guardrails are skipped for that internal request to avoid recursion. A rewrite
-that fails keeps the original text; a cancelled or timed-out call fails the
-guardrail (see `fail_mode`).
+that fails (an error, an empty or truncated reply, a tool call instead of
+text) fails the guardrail, so `fail_mode` decides: `closed` rejects the
+request, `open` continues with the original text.
 
 #### Example
 

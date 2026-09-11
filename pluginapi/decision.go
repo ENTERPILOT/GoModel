@@ -35,6 +35,13 @@ type Decision struct {
 	// Detail is a JSON-serializable summary stored in the audit trail. It
 	// must not contain secrets.
 	Detail any
+	// NoStore asks GoModel not to store the response of this request in the
+	// response cache (exact or semantic), so a later request with the same
+	// or a similar body runs the plugins again instead of replaying it. Set
+	// it when the reply carries request-specific data a plugin puts back on
+	// the way out, such as de-anonymized PII. It is honoured with any
+	// Action, from any phase, and from any instance of the request.
+	NoStore bool
 }
 
 // Allow returns a Decision that lets the exchange continue.
