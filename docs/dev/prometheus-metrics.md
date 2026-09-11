@@ -43,16 +43,20 @@ Defined in `internal/llmclient/client.go`:
 
 ```go
 type RequestInfo struct {
-    Provider string
-    Model    string
-    Endpoint string
-    Method   string
-    Stream   bool
+    Provider     string
+    ProviderType string
+    Model        string
+    Operation    string // semantic GenAI operation; "" for non-inference calls
+    Endpoint     string
+    Method       string
+    Stream       bool
 }
 
 type ResponseInfo struct {
     Provider     string
+    ProviderType string
     Model        string
+    Operation    string
     Endpoint     string
     StatusCode   int           // 0 if network error
     Duration     time.Duration
@@ -61,11 +65,25 @@ type ResponseInfo struct {
     CircuitState string        // "closed", "half-open", "open"; "" when the breaker is disabled
 }
 
+type EmptyResponseInfo struct {
+    Provider     string
+    ProviderType string
+    Model        string
+    Operation    string
+    Reason       string // "no_choices", "no_output", "no_usage"
+}
+
 type Hooks struct {
-    OnRequestStart func(ctx context.Context, info RequestInfo) context.Context
-    OnRequestEnd   func(ctx context.Context, info ResponseInfo)
+    OnRequestStart     func(ctx context.Context, info RequestInfo) context.Context
+    OnRequestEnd       func(ctx context.Context, info ResponseInfo)
+    OnStreamFirstChunk func(ctx context.Context, info ResponseInfo) // first bytes of a successful stream
+    OnStreamEmpty      func(ctx context.Context, info ResponseInfo) // stream ended before its first byte
+    OnEmptyResponse    func(ctx context.Context, info EmptyResponseInfo) // fired by the provider router
 }
 ```
+
+`ResponseInfo` and `RequestInfo` omit the stream-intent fields
+(`StreamUncertain`) here for brevity; see the source for the full structs.
 
 `OnRequestStart` returns a `context.Context` so hooks can attach trace spans
 or request IDs that flow through the rest of the request.

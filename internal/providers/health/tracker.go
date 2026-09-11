@@ -169,6 +169,12 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 // as a failure. OnRequestEnd already recorded the call as a success, so the
 // model's most recent success is turned into a failure instead of adding a
 // second request.
+//
+// Under concurrency that success may belong to another request for the same
+// model. Events carry only a timestamp and outcome, so every success for a
+// model is interchangeable: each empty response follows its own success and
+// flips exactly one, which keeps request, error, and flag counts exact
+// without correlating hook calls.
 func (t *Tracker) RecordEmptyResponse(info llmclient.EmptyResponseInfo) {
 	if info.Provider == "" || info.Model == "" || info.Model == llmclient.UnknownModel {
 		return

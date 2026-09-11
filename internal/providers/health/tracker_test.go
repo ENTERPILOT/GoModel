@@ -254,6 +254,27 @@ func TestTrackerEmptyResponsesFlagModel(t *testing.T) {
 	}
 }
 
+func TestTrackerEmptyResponseInterleavedWithOtherRequests(t *testing.T) {
+	tracker, now := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
+	success := llmclient.ResponseInfo{Provider: "openai", Model: "gpt-4o", StatusCode: 200}
+	empty := llmclient.EmptyResponseInfo{Provider: "openai", Model: "gpt-4o", Reason: llmclient.EmptyReasonNoChoices}
+
+	// A and B both end before A is classified empty; C fails outright
+	// before B is classified empty.
+	tracker.Record(success) // A
+	*now = now.Add(time.Millisecond)
+	tracker.Record(success) // B
+	tracker.RecordEmptyResponse(empty)
+	tracker.Record(llmclient.ResponseInfo{Provider: "openai", Model: "gpt-4o", StatusCode: 500}) // C
+	tracker.RecordEmptyResponse(empty)
+	tracker.Record(success) // D
+
+	row := tracker.Snapshot()["openai"].Models[0]
+	if row.Requests != 4 || row.Errors != 3 || !row.Flagged {
+		t.Fatalf("row = %+v, want requests=4 errors=3 flagged", row)
+	}
+}
+
 func TestTrackerEvictsStalestModel(t *testing.T) {
 	tracker, now := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
 	for i := range maxTrackedModels {
