@@ -143,27 +143,22 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON emits the OpenAI Responses usage shape and nothing else. Unlike
+// Chat Completions, which passes provider usage extras through at the top
+// level, the Responses API returns a closed object, so provider-specific
+// members (thoughts_token_count, completion_reasoning_tokens,
+// cache_creation_input_tokens, …) stay in RawUsage for usage records and cost
+// calculation instead of leaking into the client response. Everything with an
+// OpenAI-shaped home is kept: reasoning tokens under output_tokens_details,
+// cached tokens under input_tokens_details.
 func (u ResponsesUsage) MarshalJSON() ([]byte, error) {
-	return marshalTokenUsageJSON(
-		u.RawUsage,
-		responsesUsageJSONPayload{
-			InputTokens:             u.InputTokens,
-			OutputTokens:            u.OutputTokens,
-			TotalTokens:             u.TotalTokens,
-			PromptTokensDetails:     u.PromptTokensDetails,
-			CompletionTokensDetails: u.CompletionTokensDetails,
-		},
-		func(payload map[string]any) {
-			payload["input_tokens"] = u.InputTokens
-			payload["output_tokens"] = u.OutputTokens
-			payload["total_tokens"] = u.TotalTokens
-		},
-		u.PromptTokensDetails,
-		"input_tokens_details",
-		u.CompletionTokensDetails,
-		"output_tokens_details",
-		responsesUsageKnownFields,
-	)
+	return json.Marshal(responsesUsageJSONPayload{
+		InputTokens:             u.InputTokens,
+		OutputTokens:            u.OutputTokens,
+		TotalTokens:             u.TotalTokens,
+		PromptTokensDetails:     u.PromptTokensDetails,
+		CompletionTokensDetails: u.CompletionTokensDetails,
+	})
 }
 
 type usageJSONPayload struct {

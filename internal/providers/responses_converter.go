@@ -35,6 +35,7 @@ type OpenAIResponsesStreamConverter struct {
 	sentCreate           bool
 	sentDone             bool
 	sawFinish            bool            // upstream signalled completion (finish_reason or [DONE])
+	finishReason         string          // first finish_reason seen, used for incomplete_details
 	pendingErr           error           // upstream read error deferred until terminal events are drained
 	cachedUsage          json.RawMessage // Stores usage from final chunk for inclusion in response.completed
 }
@@ -274,7 +275,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// Any finish_reason means the model finished generating; some providers
 	// close the stream without a trailing [DONE] marker (Postel's law).
 	if choice.FinishReason != "" {
-		sc.sawFinish = true
+		sc.recordFinishReason(choice.FinishReason)
 	}
 
 	// Recorded before the text and tool calls of the same delta: a tool call
@@ -354,7 +355,7 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 	}
 	finishReason, _ := choice["finish_reason"].(string)
 	if finishReason != "" {
-		sc.sawFinish = true
+		sc.recordFinishReason(finishReason)
 	}
 	if finishReason == "tool_calls" {
 		sc.buffer.AppendString(sc.completePendingToolCalls())
@@ -420,11 +421,22 @@ func (sc *OpenAIResponsesStreamConverter) appendTextDelta(content string) {
 	sc.buffer.AppendString(sc.output.AppendAssistantDelta(sc.assistantOutputIndex, content))
 }
 
+// recordFinishReason marks the upstream turn finished and keeps the first
+// finish reason, which decides whether the response completed or stopped
+// early.
+func (sc *OpenAIResponsesStreamConverter) recordFinishReason(reason string) {
+	sc.sawFinish = true
+	if sc.finishReason == "" {
+		sc.finishReason = reason
+	}
+}
+
 // appendTerminalEvents flushes open output items and appends the terminal
 // event plus the trailing [DONE] marker exactly once. Streams the upstream
-// finished (a finish_reason or [DONE] was seen) end with response.completed;
-// interrupted streams end with response.incomplete and close their open items
-// with status "incomplete" instead of fabricating completion.
+// finished (a finish_reason or [DONE] was seen) end with response.completed,
+// unless the finish reason says the turn stopped early (max_output_tokens,
+// content_filter); interrupted streams end with response.incomplete and close
+// their open items with status "incomplete" instead of fabricating completion.
 func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 	if sc.sentDone {
 		return
@@ -432,7 +444,11 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 	sc.sentDone = true
 	status := "completed"
 	eventName := "response.completed"
-	if !sc.sawFinish {
+	incompleteReason := "interrupted"
+	if sc.sawFinish {
+		incompleteReason = ResponsesIncompleteReason(sc.finishReason)
+	}
+	if incompleteReason != "" {
 		status = "incomplete"
 		eventName = "response.incomplete"
 	}
@@ -448,8 +464,8 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 		"created_at": sc.createdAt,
 		"output":     sc.output.FinalOutputItems(reasoningOutputIndex, sc.assistantOutputIndex, sc.toolCalls, false),
 	}
-	if status == "incomplete" {
-		responseData["incomplete_details"] = map[string]any{"reason": "interrupted"}
+	if incompleteReason != "" {
+		responseData["incomplete_details"] = map[string]any{"reason": incompleteReason}
 	}
 	// Include usage data if captured from OpenAI stream, renamed from Chat
 	// Completions field names (prompt_tokens/completion_tokens) to the

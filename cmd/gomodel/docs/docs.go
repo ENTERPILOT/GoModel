@@ -8891,6 +8891,60 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.GuardrailOutcomeSnapshot": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "description": "Action is the decision (allow, warn, block, respond) or \"failure\" when\nthe instance errored; FailMode then says whether the chain carried on\n(\"open\") or the request failed (\"closed\").",
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "detail": {},
+                "dropped_events": {
+                    "type": "integer"
+                },
+                "duration_ns": {
+                    "type": "integer"
+                },
+                "edited": {
+                    "description": "Edited reports that the instance changed the request (prompt phase)\nor the response (response and stream phases); Target names which.",
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "fail_mode": {
+                    "type": "string"
+                },
+                "instance": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "replaced_events": {
+                    "description": "ReplacedEvents and DroppedEvents count the stream events an in-flight\nstream instance rewrote or withheld.",
+                    "type": "integer"
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "step": {
+                    "type": "integer"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "auditlog.LogData": {
             "type": "object",
             "properties": {
@@ -8926,6 +8980,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/auditlog.FailoverSnapshot"
                         }
                     ]
+                },
+                "guardrails": {
+                    "description": "Guardrails records the outcome of every guardrail (plugin instance)\nthat ran for the request, in execution order across the prompt,\nresponse and stream phases: what each decided, whether it edited the\nrequest or response, and how it failed. It is the decision trail;\nRequestRevisions is the body trail. A configured step without an\noutcome did not run (an earlier block, a cache hit).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.GuardrailOutcomeSnapshot"
+                    }
                 },
                 "labels": {
                     "description": "Labels are request labels extracted from configured tagging headers.",
@@ -10725,6 +10786,14 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ResponsesIncompleteDetails": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "core.ResponsesOutputItem": {
             "type": "object",
             "properties": {
@@ -10873,6 +10942,14 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "incomplete_details": {
+                    "description": "IncompleteDetails explains a status of \"incomplete\": the model hit\nmax_output_tokens, was stopped by a content filter, or the upstream\nstream was interrupted.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ResponsesIncompleteDetails"
+                        }
+                    ]
+                },
                 "model": {
                     "type": "string"
                 },
@@ -10894,7 +10971,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "description": "\"completed\", \"failed\", \"in_progress\"",
+                    "description": "\"completed\", \"incomplete\", \"failed\", \"in_progress\"",
                     "type": "string"
                 },
                 "usage": {
