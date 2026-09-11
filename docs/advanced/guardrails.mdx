@@ -133,7 +133,7 @@ flowchart LR
 
 Each sequential group receives the output of the previous group. Guardrails
 that **edit content** (`system_prompt`, `llm_based_altering`,
-`string_replace`) cannot share an order with another editing guardrail; only
+`string_replace`, `presidio`) cannot share an order with another editing guardrail; only
 one editor per order, and any number of non-editing checks (`llm_judge`,
 `header_edit`) next to it. When several guardrails at one order decide
 differently, the most severe decision wins: `block` > `respond` > `warn` >
@@ -194,7 +194,7 @@ the guardrail endpoints and the dashboard page are unavailable.
 
 ## Guardrail Types
 
-Five types ship with GoModel. Each is a built-in plugin; the tables list its
+Six types ship with GoModel. Each is a built-in plugin; the tables list its
 config keys as they appear under `config:` and on the dashboard form.
 
 ### `system_prompt`
@@ -437,6 +437,106 @@ complete response.
     model: "openai/gpt-4o-mini"
     action: "respond"
     respond_text: "I can't help with that request."
+```
+
+### `presidio`
+
+Detects personal data with a [Presidio](https://presidio.dataprivacystack.org/)
+analyzer and anonymizes, flags, or blocks it. Only the analyzer service is
+needed; GoModel rewrites the text itself, so it can put the original values
+back into the response.
+
+```bash
+docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
+```
+
+**Phases:** prompt, response, stream. **Edits content:** yes.
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `analyzer_url` | No | `http://localhost:5002` | Base URL of the analyzer service. |
+| `api_key` | No | | Bearer token sent as `Authorization`, for an analyzer behind an authenticating proxy. Needs an `https://` URL unless the analyzer is on localhost. |
+| `language` | No | `en` | Language code the analyzer runs with. The default image ships only `en`; the instance shows as degraded when the analyzer has no model for the language. |
+| `entities` | No | all | Entity types to look for (`PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`, `CREDIT_CARD`, `US_SSN`, ...; see `GET /supportedentities` on the analyzer). |
+| `block_entities` | No | | Entity types that reject the request (or answer with `message` when the action is `respond`) whatever the action. |
+| `score_threshold` | No | analyzer default | Minimum confidence, 0 to 1. Raise it when common words are taken for names or dates. |
+| `allow_list` | No | | Exact words never treated as personal data: product names, your company. |
+| `ad_hoc_recognizers` | No | | JSON array of Presidio pattern recognizers (`supported_entity` plus `patterns` or `deny_list`) for identifiers of your own. |
+| `roles` | No | `["user", "assistant", "tool"]` | Prompt messages analyzed, tool-result text and tool-call arguments included. In the response phase the assistant text and tool-call arguments are always analyzed. |
+| `action` | No | `anonymize` | `anonymize` rewrites the values; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the entity types. |
+| `operator` | No | `replace` | How `anonymize` rewrites a value: `replace` with a numbered placeholder (`<PERSON_1>`, the same one for every occurrence of that value in the request), `mask` with `*` per character, `redact` (removed), `hash` (SHA-256). |
+| `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
+| `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
+| `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
+| `stream_chunk` | No | `256` | Characters of streamed text collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a value or placeholder split across two chunks is still handled. |
+
+Every text part is analyzed on its own (one analyzer call each, up to eight
+in flight), so the analyzer never sees the whole conversation as one text and
+the analyzer's own limits apply per part. The audit detail records entity
+types and counts, never the values, and errors from the analyzer never carry
+the text it was given. The analyzer receives the text in clear, so run it as
+a sidecar on the same host or reach it over `https://` or a private network.
+
+<Tip>
+  Start with an explicit `entities` list. With every type enabled, the
+  analyzer's language model also reports `DATE_TIME`, `LOCATION`, `NRP`, and
+  `URL`, which turns phrases like "a nice day" or "Paris" into placeholders
+  in both the prompt and the reply. `PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`,
+  `CREDIT_CARD`, `IBAN_CODE`, and the national identifiers you need cover most
+  deployments. Some models, Claude among them, treat unexplained
+  `<PERSON_1>`-style tokens with suspicion and may refuse to repeat them; a
+  system prompt line such as `Values like <PERSON_1> are privacy placeholders;
+  use them as ordinary values` fixes that.
+</Tip>
+
+In the stream phase, `anonymize` and `warn` transform events in flight in
+chunks of `stream_chunk` characters with `stream_lookbehind` of overlap; a
+`block_entities` type found mid-stream cuts the stream before that chunk
+reaches the client. `block` and `respond` buffer the whole stream so nothing
+leaks before the decision.
+
+#### Restoring values
+
+With `restore: true` the prompt phase replaces values with numbered
+placeholders and remembers them for the request; the response or stream
+phase puts the values back where the model repeats a placeholder, in text
+and in tool-call arguments, so the client sees its own data while the
+provider never does. Set `restore` on the instances in both phases: the
+prompt-phase instance records the values, the response-phase instance
+restores them. Only values from user messages, earlier assistant turns, and
+tool results are put back; a value from a system or developer message stays
+a placeholder, so a user cannot make the model reveal it. A value the model
+produced on its own is still anonymized on the way out. Such responses are
+kept out of the [response cache](/features/cache).
+
+Streamed tool-call arguments are not rewritten in the stream phase; use the
+response phase (which buffers the stream) when agents must receive restored
+arguments.
+
+#### Example
+
+```yaml
+- name: "pii-in"
+  type: "presidio"
+  order: 1
+  timeout_ms: 5000
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    block_entities: ["CREDIT_CARD", "US_SSN"]
+    restore: true
+
+- name: "pii-out"
+  type: "presidio"
+  phase: "response"
+  order: 1
+  timeout_ms: 5000
+  fail_mode: "open"
+  config:
+    entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    restore: true
 ```
 
 ## Examples

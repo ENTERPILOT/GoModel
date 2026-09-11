@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -153,13 +154,33 @@ func ApplyToResponsesResponse(original *core.ResponsesResponse, c *pluginapi.Com
 			return nil, fmt.Errorf("exchange: choice parts changed structurally (%d parts, %d output entries); use ReplaceText", len(parts), len(locs))
 		}
 		for i, part := range parts {
-			if part.Kind != pluginapi.PartText || locs[i].content < 0 {
-				continue
+			if part.Kind == pluginapi.PartText && locs[i].content >= 0 {
+				result.Output[locs[i].item].Content[locs[i].content].Text = part.Text
 			}
-			result.Output[locs[i].item].Content[locs[i].content].Text = part.Text
 		}
 	}
+	applyFunctionCallArguments(result.Output, parts)
 	return &result, nil
+}
+
+// applyFunctionCallArguments writes the arguments of the unified tool calls
+// back to the function_call items with the same call ID. Calls the plugin
+// did not touch keep their arguments byte for byte.
+func applyFunctionCallArguments(items []core.ResponsesOutputItem, parts []pluginapi.Part) {
+	for _, part := range parts {
+		if part.Kind != pluginapi.PartToolCall || part.ToolCall == nil {
+			continue
+		}
+		for i := range items {
+			if items[i].Type != "function_call" || items[i].CallID != part.ToolCall.ID {
+				continue
+			}
+			if !bytes.Equal(argumentsFromString(items[i].Arguments), part.ToolCall.Arguments) {
+				items[i].Arguments = argumentsToString(part.ToolCall.Arguments)
+			}
+			break
+		}
+	}
 }
 
 func replaceResponsesText(resp *core.ResponsesResponse, text string) {

@@ -137,3 +137,52 @@ func TestCompletionToResponsesResponse(t *testing.T) {
 		t.Errorf("nil completion output = %+v", empty.Output)
 	}
 }
+
+func TestApplyToResponsesResponseToolArguments(t *testing.T) {
+	resp, c := responsesCompletion(t)
+	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{"a":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyToResponsesResponse(resp, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applied.Output[2].Arguments; got != `{"a":2}` {
+		t.Errorf("arguments = %q", got)
+	}
+	if resp.Output[2].Arguments != `{"a":1}` {
+		t.Error("original mutated")
+	}
+	// A replaced text keeps the argument edit, whichever came first.
+	for _, first := range []string{"replace", "arguments"} {
+		resp, c := responsesCompletion(t)
+		edits := []func() error{
+			func() error { return c.ReplaceText(0, "[x]") },
+			func() error { return c.SetToolArguments(0, "c1", json.RawMessage(`{"a":2}`)) },
+		}
+		if first == "arguments" {
+			edits[0], edits[1] = edits[1], edits[0]
+		}
+		for _, edit := range edits {
+			if err := edit(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		applied, err := ApplyToResponsesResponse(resp, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var call, msg *core.ResponsesOutputItem
+		for i := range applied.Output {
+			switch applied.Output[i].Type {
+			case "function_call":
+				call = &applied.Output[i]
+			case "message":
+				msg = &applied.Output[i]
+			}
+		}
+		if call == nil || call.Arguments != `{"a":2}` || msg == nil || len(msg.Content) != 1 || msg.Content[0].Text != "[x]" {
+			t.Errorf("%s first: %+v", first, applied.Output)
+		}
+	}
+}
