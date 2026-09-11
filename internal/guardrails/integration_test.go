@@ -218,6 +218,46 @@ func (failingPlugin) OnPrompt(context.Context, *pluginapi.Exchange) (pluginapi.D
 	return pluginapi.Decision{}, errors.New("classifier unreachable")
 }
 
+// A chained Responses request only needs its stored history expanded into the
+// input when a prompt plugin rewrites content; a classifier leaves the native
+// passthrough (and the provider's own history) alone.
+func TestWorkflowRequestPatcherEditsPromptContent(t *testing.T) {
+	catalog := testCatalog(t)
+	if err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{} }, plugins.SourceRegistered); err != nil {
+		t.Fatal(err)
+	}
+	store := newTestStore(Definition{Name: "classify", Type: "decide"}, systemPromptDefinition("inject", "be safe"))
+	service, err := NewService(store, catalog, plugins.HostDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		steps []StepReference
+		want  bool
+	}{
+		{name: "no chain", want: false},
+		{name: "classifier only", steps: []StepReference{{Ref: "classify", Step: 1}}, want: false},
+		{name: "rewriting plugin", steps: []StepReference{{Ref: "classify", Step: 1}, {Ref: "inject", Step: 2}}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var chains *plugins.Chains
+			if len(tt.steps) > 0 {
+				chains = chainsFor(t, service, tt.steps...)
+			}
+			patcher := NewWorkflowRequestPatcher(staticChains{chains})
+			if got := patcher.EditsPromptContent(context.Background()); got != tt.want {
+				t.Fatalf("EditsPromptContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWorkflowRequestPatcherFailModes(t *testing.T) {
 	for _, tt := range []struct {
 		failMode string

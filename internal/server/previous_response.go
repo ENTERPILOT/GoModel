@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 )
 
@@ -40,11 +41,13 @@ func (s *translatedInferenceService) PatchResponsesAttempt(ctx context.Context, 
 // values included, so replaying it past the guardrails would hand those
 // values to the provider. The client's own turn is kept in the context for
 // the response snapshot. previous_response_id is expanded when the primary
-// target (providerTypes[0]) is chat-translated, or when a failover target is
-// and guardrails run on the request; otherwise a native primary keeps the
-// id, which it resolves itself, and PatchResponsesAttempt expands it for a
-// translated failover attempt. A native primary also keeps an id the
-// gateway has not stored.
+// target (providerTypes[0]) is chat-translated; when guardrails run and
+// either a failover target is chat-translated or the prompt phase edits
+// content; and when the id names a response the gateway minted for a
+// chat-translated provider, which a native provider cannot resolve.
+// Otherwise a native primary keeps the id, which it resolves itself, and
+// PatchResponsesAttempt expands it for a translated failover attempt. A
+// native primary also keeps an id the gateway has not stored.
 func (s *translatedInferenceService) ResolveResponsesHistory(ctx context.Context, req *core.ResponsesRequest, providerTypes []string) (context.Context, *core.ResponsesRequest, error) {
 	if req == nil {
 		return ctx, req, nil
@@ -56,8 +59,11 @@ func (s *translatedInferenceService) ResolveResponsesHistory(ctx context.Context
 	}
 	translated := func(providerType string) bool { return !s.providerTypeResolvesPreviousResponse(providerType) }
 	primaryTranslated := len(providerTypes) > 0 && translated(providerTypes[0])
-	guarded := s.translatedRequestPatcher != nil && core.GetWorkflow(ctx).GuardrailsEnabled() && slices.ContainsFunc(providerTypes, translated)
-	if !primaryTranslated && !guarded {
+	guarded := s.promptPhaseRuns(ctx) &&
+		(slices.ContainsFunc(providerTypes, translated) || s.promptPhaseEditsContent(ctx))
+	// The store lookup runs last: it is only needed while the id would
+	// otherwise be forwarded to a native provider.
+	if !primaryTranslated && !guarded && !s.gatewayOwnedPreviousResponse(ctx, req.PreviousResponseID) {
 		return ctx, req, nil
 	}
 	patched, err := s.withPreviousResponseHistory(ctx, req)
@@ -67,6 +73,45 @@ func (s *translatedInferenceService) ResolveResponsesHistory(ctx context.Context
 		}
 	}
 	return ctx, patched, err
+}
+
+// promptPhaseRuns reports whether a prompt-phase patch runs for the request.
+func (s *translatedInferenceService) promptPhaseRuns(ctx context.Context) bool {
+	return s.translatedRequestPatcher != nil && core.GetWorkflow(ctx).GuardrailsEnabled()
+}
+
+// promptPhaseEditsContent reports whether the prompt phase may rewrite the
+// request's content. Only a rewriting prompt phase needs the replayed history
+// in the input: an anonymizing guardrail that never sees the earlier turns
+// reuses their placeholders for new values, so the restore step hands the
+// client another turn's data. A patcher without the capability is assumed to
+// rewrite.
+func (s *translatedInferenceService) promptPhaseEditsContent(ctx context.Context) bool {
+	editor, ok := s.translatedRequestPatcher.(gateway.PromptContentEditor)
+	return !ok || editor.EditsPromptContent(ctx)
+}
+
+// gatewayOwnedPreviousResponse reports whether the referenced response is one
+// the gateway minted while serving a chat-translated provider. Such an id
+// exists only in the gateway's store, so a native Responses provider rejects
+// it; the history behind it has to be replayed instead. An id the gateway
+// does not hold (a response created directly against the provider, or one
+// that was not stored) is still forwarded untouched.
+func (s *translatedInferenceService) gatewayOwnedPreviousResponse(ctx context.Context, id string) bool {
+	id = strings.TrimSpace(id)
+	store := s.currentResponseStore()
+	if id == "" || store == nil {
+		return false
+	}
+	// A client that chains as soon as it has the response must not race the
+	// background snapshot write.
+	s.awaitPendingSnapshot(ctx, id)
+	stored, err := store.Get(ctx, id)
+	// Another tenant's response is indistinguishable from a missing one.
+	if err != nil || stored == nil || stored.Response == nil || !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return false
+	}
+	return !s.providerTypeResolvesPreviousResponse(stored.Provider)
 }
 
 // clientTurn is a Responses request's own turn as the client sent it, before

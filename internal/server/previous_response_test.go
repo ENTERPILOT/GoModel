@@ -179,6 +179,89 @@ func TestResponsesWithPreviousResponseID_NativeProviderKeepsForwarding(t *testin
 	}
 }
 
+// storeChainedResponse records a response the gateway served for providerType,
+// the way a finished turn is snapshotted.
+func storeChainedResponse(t *testing.T, store responsestore.Store, id, providerType, userPath string) {
+	t.Helper()
+	if err := store.Create(context.Background(), &responsestore.StoredResponse{
+		Response: &core.ResponsesResponse{
+			ID: id, Object: "response", Status: "completed",
+			Output: []core.ResponsesOutputItem{{ID: "msg_1", Type: "message", Role: "assistant", Content: []core.ResponsesContentItem{{Type: "output_text", Text: "the word is zebra"}}}},
+		},
+		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"remember: zebra"}]}`)},
+		Provider:   providerType,
+		UserPath:   userPath,
+	}); err != nil {
+		t.Fatalf("store %s: %v", id, err)
+	}
+}
+
+// A response the gateway minted for a chat-translated provider exists only in
+// the gateway's store, so a native provider rejects the id ("Expected an ID
+// that begins with 'resp'"). The gateway holds the whole turn and replays it
+// instead. An id it does not know is still forwarded, so native chains that
+// started outside the gateway keep working.
+func TestResponsesWithPreviousResponseID_NativeProviderReplaysGatewayMintedChain(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerType string
+		wantItems    int
+		wantID       string
+	}{
+		{name: "translated predecessor is replayed", providerType: "anthropic", wantItems: 3},
+		{name: "native predecessor keeps the id", providerType: "openai", wantID: "resp_stored"},
+		{name: "unknown provider keeps the id", providerType: "", wantID: "resp_stored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := previousResponseTestProvider(t, "openai")
+			srv := New(provider, nil)
+			storeChainedResponse(t, srv.handler.currentResponseStore(), "resp_stored", tt.providerType, "")
+
+			rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_stored"}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			forwarded := provider.capturedResponsesReq
+			if forwarded.PreviousResponseID != tt.wantID {
+				t.Fatalf("forwarded previous_response_id = %q, want %q", forwarded.PreviousResponseID, tt.wantID)
+			}
+			if tt.wantItems == 0 {
+				if _, ok := forwarded.Input.(string); !ok {
+					t.Fatalf("native input must be untouched, got %#v", forwarded.Input)
+				}
+				return
+			}
+			items := forwardedInputItems(t, provider.capturingProvider)
+			if len(items) != tt.wantItems {
+				t.Fatalf("forwarded %d items, want %d: %#v", len(items), tt.wantItems, items)
+			}
+			if text, _ := json.Marshal(items[1]["content"]); !strings.Contains(string(text), "the word is zebra") {
+				t.Fatalf("stored output not replayed: %#v", items[1])
+			}
+			if !strings.Contains(rec.Body.String(), `"previous_response_id":"resp_stored"`) {
+				t.Fatalf("chained response must echo previous_response_id: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+// Another tenant's stored response stays invisible: it is neither replayed
+// nor reported, and the id reaches the provider as any unknown id does.
+func TestResponsesWithPreviousResponseID_ForeignTenantChainIsNotReplayed(t *testing.T) {
+	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "openai"), responseStore: responsestore.NewMemoryStore()}
+	storeChainedResponse(t, s.responseStore, "resp_other", "anthropic", "/tenant-b")
+
+	foreign := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-a"})
+	if s.gatewayOwnedPreviousResponse(foreign, "resp_other") {
+		t.Fatal("a foreign tenant must not reach another tenant's stored chain")
+	}
+	owner := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-b"})
+	if !s.gatewayOwnedPreviousResponse(owner, "resp_other") {
+		t.Fatal("the owning tenant must replay its own gateway-minted chain")
+	}
+}
+
 func TestResponsesWithPreviousResponseID_UnknownIDReturns404(t *testing.T) {
 	provider := previousResponseTestProvider(t, "anthropic")
 	srv := New(provider, nil)
