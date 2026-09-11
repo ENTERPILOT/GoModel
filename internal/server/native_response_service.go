@@ -413,6 +413,13 @@ func (s *nativeResponseService) refreshStoredResponse(
 	if responseStatusPending(resp.Status) {
 		return resp
 	}
+	// A concurrent cancel may have persisted a terminal snapshot while the
+	// provider lookup was in flight. Its outcome wins: the provider's later
+	// body must not turn a cancelled response back into a completed one.
+	if current, currentErr := s.responseStore.Get(ctx, id); currentErr == nil &&
+		current != nil && current.Response != nil && !responseStatusPending(current.Response.Status) {
+		return current.Response
+	}
 	stored.Response = resp
 	stored.Provider = providerType
 	if updateErr := s.responseStore.Update(ctx, stored); updateErr != nil && !errors.Is(updateErr, responsestore.ErrNotFound) {

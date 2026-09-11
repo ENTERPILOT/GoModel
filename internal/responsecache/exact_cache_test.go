@@ -765,31 +765,69 @@ func TestLimitsConcurrentCacheWrites(t *testing.T) {
 	}
 }
 
-func TestHandleRequest_BackgroundResponsesAreNotCached(t *testing.T) {
-	store := cache.NewMapStore()
-	defer store.Close()
-	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
-	workflow := resolvedWorkflow("openai", "gpt-4")
-	body := []byte(`{"model":"gpt-4","input":"hi","background":true}`)
-	callCount := 0
-	next := func(c *echo.Context) error {
-		callCount++
-		return c.JSON(http.StatusOK, map[string]string{"id": "resp_1", "status": "queued"})
+func TestHandleRequest_BackgroundOnlyBypassesResponsesCreate(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		body      string
+		wantCache string
+		wantCalls int
+	}{
+		{
+			name:      "responses create bypasses the cache",
+			path:      "/v1/responses",
+			body:      `{"model":"gpt-4","input":"hi","background":true}`,
+			wantCache: "",
+			wantCalls: 2,
+		},
+		{
+			name:      "chat completions still caches",
+			path:      "/v1/chat/completions",
+			body:      `{"model":"gpt-4","messages":[{"role":"user","content":"hi"}],"background":true}`,
+			wantCache: "HIT (exact)",
+			wantCalls: 1,
+		},
 	}
 
-	if rec := driveHandleRequest(t, mw, workflow, body, nil, next); rec.Code != http.StatusOK {
-		t.Fatalf("first request: got status %d", rec.Code)
-	}
-	mw.simple.wg.Wait()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := cache.NewMapStore()
+			defer store.Close()
+			mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+			workflow := resolvedWorkflow("openai", "gpt-4")
+			body := []byte(tt.body)
+			callCount := 0
+			drive := func() *httptest.ResponseRecorder {
+				e := echo.New()
+				req := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				req = req.WithContext(core.WithWorkflow(req.Context(), workflow))
+				rec := httptest.NewRecorder()
+				c := e.NewContext(req, rec)
+				if err := mw.HandleRequest(c, body, func() error {
+					callCount++
+					return c.JSON(http.StatusOK, map[string]string{"id": "resp_1"})
+				}); err != nil {
+					t.Fatalf("HandleRequest: %v", err)
+				}
+				return rec
+			}
 
-	rec2 := driveHandleRequest(t, mw, workflow, body, nil, next)
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("second request: got status %d", rec2.Code)
-	}
-	if got := rec2.Header().Get("X-Cache"); got != "" {
-		t.Fatalf("background create should never be cached, X-Cache=%s", got)
-	}
-	if callCount != 2 {
-		t.Fatalf("callCount = %d, want 2 (no cache replay)", callCount)
+			if rec := drive(); rec.Code != http.StatusOK {
+				t.Fatalf("first request: got status %d", rec.Code)
+			}
+			mw.simple.wg.Wait()
+
+			rec2 := drive()
+			if rec2.Code != http.StatusOK {
+				t.Fatalf("second request: got status %d", rec2.Code)
+			}
+			if got := rec2.Header().Get("X-Cache"); got != tt.wantCache {
+				t.Fatalf("X-Cache = %q, want %q", got, tt.wantCache)
+			}
+			if callCount != tt.wantCalls {
+				t.Fatalf("callCount = %d, want %d", callCount, tt.wantCalls)
+			}
+		})
 	}
 }

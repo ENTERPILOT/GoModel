@@ -143,7 +143,7 @@ func (m *ResponseCacheMiddleware) handle(ex exchange, body []byte, next func() e
 	if shouldSkipAllCacheHeaders(ex.RequestHeader) {
 		return next()
 	}
-	if requestIsBackground(body) {
+	if requestIsBackgroundResponsesCreate(ex, body) {
 		// A background create only returns a "queued" snapshot whose id is
 		// unique to that request. Replaying it would hand a later caller an
 		// id that belongs to someone else's response.
@@ -174,10 +174,15 @@ func (m *ResponseCacheMiddleware) handle(ex exchange, body []byte, next func() e
 	return innerNext()
 }
 
-// requestIsBackground reports whether a request body asks for background
-// execution (`"background": true` on /v1/responses).
-func requestIsBackground(body []byte) bool {
+// requestIsBackgroundResponsesCreate reports whether a request creates a
+// background response (`"background": true` on a /v1/responses create). Other
+// endpoints tolerate the field without acting on it, so they keep caching.
+func requestIsBackgroundResponsesCreate(ex exchange, body []byte) bool {
 	if len(body) == 0 {
+		return false
+	}
+	desc := core.DescribeEndpoint(ex.Method(), ex.Path())
+	if desc.Operation != core.OperationResponses || desc.BodyMode != core.BodyModeJSON {
 		return false
 	}
 	return gjson.GetBytes(body, "background").Bool()

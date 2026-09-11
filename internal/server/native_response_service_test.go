@@ -185,6 +185,56 @@ func TestGetStoredResponseKeepsTerminalSnapshot(t *testing.T) {
 	}
 }
 
+func TestGetStoredResponseKeepsConcurrentCancellation(t *testing.T) {
+	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+	err := store.Create(context.Background(), &responsestore.StoredResponse{
+		Response:           &core.ResponsesResponse{ID: "resp_gateway", Object: "response", Provider: "mock", Status: "queued"},
+		Provider:           "mock",
+		ProviderResponseID: "provider_resp",
+	})
+	if err != nil {
+		t.Fatalf("store.Create() error = %v", err)
+	}
+	provider := &mockProvider{
+		responseGetResponse: &core.ResponsesResponse{ID: "provider_resp", Object: "response", Status: "completed"},
+	}
+	// A cancel lands while the provider lookup is in flight.
+	provider.responseGetHook = func() {
+		updateErr := store.Update(context.Background(), &responsestore.StoredResponse{
+			Response:           &core.ResponsesResponse{ID: "resp_gateway", Object: "response", Provider: "mock", Status: "cancelled"},
+			Provider:           "mock",
+			ProviderResponseID: "provider_resp",
+		})
+		if updateErr != nil {
+			t.Errorf("store.Update() error = %v", updateErr)
+		}
+	}
+	srv := New(provider, &Config{ResponseStore: store})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_gateway", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var resp core.ResponsesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "cancelled" {
+		t.Fatalf("status = %q, want the cancellation to win", resp.Status)
+	}
+
+	stored, err := store.Get(context.Background(), "resp_gateway")
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if stored.Response.Status != "cancelled" {
+		t.Fatalf("stored status = %q, want cancelled", stored.Response.Status)
+	}
+}
+
 func TestGetStoredResponseServesSnapshotWhenRefreshFails(t *testing.T) {
 	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
 	err := store.Create(context.Background(), &responsestore.StoredResponse{
