@@ -117,7 +117,7 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 		clientProviderName = "vertex"
 	}
 	clientCfg := llmclient.Config{
-		ProviderName:   clientProviderName,
+		ProviderName:   opts.ClientName(clientProviderName),
 		BaseURL:        baseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

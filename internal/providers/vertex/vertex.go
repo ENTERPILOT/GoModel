@@ -77,7 +77,7 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	p.gemini = gemini.NewVertexWithHTTPClient(providerCfg, opts, authClient)
 	nativeBaseURL := vertexNativeBaseURL(providerCfg)
 	nativeCfg := llmclient.Config{
-		ProviderName:   "vertex",
+		ProviderName:   opts.ClientName("vertex"),
 		BaseURL:        nativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

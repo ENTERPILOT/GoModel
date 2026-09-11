@@ -510,7 +510,9 @@ restores them. Only values from user messages, earlier assistant turns, and
 tool results are put back; a value from a system or developer message stays
 a placeholder, so a user cannot make the model reveal it. A value the model
 produced on its own is still anonymized on the way out. Such responses are
-kept out of the [response cache](/features/cache).
+kept out of the [response cache](/features/cache). Placeholder-shaped text
+already in the conversation, such as a `<PERSON_2>` an earlier reply carried
+back, is left as it is and its number is never reused for a new value.
 
 Streamed tool-call arguments are not rewritten in the stream phase; use the
 response phase (which buffers the stream) when agents must receive restored

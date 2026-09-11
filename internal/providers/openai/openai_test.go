@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -2152,5 +2153,80 @@ func TestPassthrough(t *testing.T) {
 	}
 	if string(body) != `{"error":"rate limited"}` {
 		t.Fatalf("response body = %q", string(body))
+	}
+}
+
+func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		reasoning  *core.Reasoning
+		wantEffort string // "" means the field must be absent
+	}{
+		{name: "gpt-5 family", model: "gpt-5-mini", reasoning: &core.Reasoning{Effort: "low"}, wantEffort: "low"},
+		{name: "o-series", model: "o3-mini", reasoning: &core.Reasoning{Effort: "high"}, wantEffort: "high"},
+		{name: "custom endpoint model", model: "qwen3-32b", reasoning: &core.Reasoning{Effort: "medium"}, wantEffort: "medium"},
+		{name: "non-reasoning gpt-4 drops it", model: "gpt-4.1-mini", reasoning: &core.Reasoning{Effort: "low"}},
+		{name: "non-reasoning chatgpt drops it", model: "chatgpt-4o-latest", reasoning: &core.Reasoning{Effort: "low"}},
+		{name: "empty effort drops it", model: "gpt-5-mini", reasoning: &core.Reasoning{}},
+		{name: "no reasoning", model: "gpt-5-mini"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var raw map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+			}))
+			defer server.Close()
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
+
+			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:     tt.model,
+				Messages:  []core.Message{{Role: "user", Content: "hi"}},
+				Reasoning: tt.reasoning,
+			})
+			if err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if _, ok := raw["reasoning"]; ok {
+				t.Errorf("request body includes nested reasoning: %v", raw["reasoning"])
+			}
+			got, ok := raw["reasoning_effort"]
+			if tt.wantEffort == "" {
+				if ok {
+					t.Errorf("reasoning_effort = %v, want absent", got)
+				}
+			} else if got != tt.wantEffort {
+				t.Errorf("reasoning_effort = %v, want %q", got, tt.wantEffort)
+			}
+		})
+	}
+}
+
+func TestNew_AttributesErrorsToInstanceName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad request","type":"invalid_request_error"}}`))
+	}))
+	defer server.Close()
+
+	provider := New(providers.ProviderConfig{Name: "openai-eu", Type: "openai", APIKey: "k", BaseURL: server.URL},
+		providers.ProviderOptions{Name: "openai-eu"})
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "gpt-4.1-mini",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+	var gwErr *core.GatewayError
+	if !errors.As(err, &gwErr) {
+		t.Fatalf("error = %v, want a gateway error", err)
+	}
+	if gwErr.Provider != "openai-eu" {
+		t.Fatalf("error provider = %q, want the instance name openai-eu", gwErr.Provider)
 	}
 }

@@ -105,10 +105,15 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 	if x == nil || x.Prompt == nil {
 		return pluginapi.Allow(), nil
 	}
+	m := p.mapping(x)
 	var jobs []job
 	for _, t := range x.Prompt.TextTargets() {
 		if p.roles[t.Role] {
 			jobs = append(jobs, textJob(t, p.restorable(t.Role), x.Prompt.SetTargetText))
+		} else {
+			// Not analyzed, but the model reads it: its placeholder-shaped
+			// text must not collide with a new placeholder either.
+			m.reserve(t.Text)
 		}
 	}
 	if p.roles[pluginapi.RoleAssistant] {
@@ -122,7 +127,6 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 		}
 	}
 	rep := newReport()
-	m := p.mapping(x)
 	if err := p.run(ctx, jobs, m, rep, pass{prompt: true, requestID: x.Meta.RequestID}); err != nil {
 		return pluginapi.Decision{}, err
 	}
@@ -200,15 +204,21 @@ func argsJob(u unit, args json.RawMessage, restorable bool, set func(json.RawMes
 
 // run analyzes every input (at most 8 analyzer calls in flight), then
 // rewrites them in document order and writes the results back when the
-// action edits or values are restored. Nothing is recorded or written, the
-// placeholder table included, until every analyzer call has succeeded: a
-// failed call fails the phase, so fail_mode decides.
+// action edits or values are restored. Placeholder-shaped text already in
+// any input is reserved before the first placeholder is allocated. Nothing is
+// recorded or written, and no placeholder allocated, until every analyzer
+// call has succeeded: a failed call fails the phase, so fail_mode decides.
 func (p *Plugin) run(ctx context.Context, jobs []job, m *mapping, rep *report, ps pass) error {
 	if len(jobs) == 0 {
 		return nil
 	}
 	if err := p.analyzeAll(ctx, jobs, ps.requestID); err != nil {
 		return err
+	}
+	for i := range jobs {
+		for _, text := range jobs[i].inputs {
+			m.reserve(text)
+		}
 	}
 	for i := range jobs {
 		j := &jobs[i]

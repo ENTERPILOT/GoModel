@@ -739,3 +739,48 @@ func TestAPIKeyIsNotFollowedToPlainHTTP(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestPlaceholdersSkipLiteralTokens(t *testing.T) {
+	a := newAnalyzer(t, "Jakub Nowak", "Jan Kowalczyk", "Zoe Ray")
+	in := newPlugin(t, a, `{"restore": true}`)
+	out := newPlugin(t, a, `{"restore": true}`)
+	// The history carries a placeholder an earlier response left unrestored
+	// (a person the model invented), and the unanalyzed system message a
+	// literal one; neither number may be handed to a new value.
+	x := plugintest.Exchange(plugintest.Prompt(
+		plugintest.Text(pluginapi.RoleSystem, "m0", "Template slot: <PERSON_3>."),
+		plugintest.Text(pluginapi.RoleUser, "m1", "I am Jakub Nowak."),
+		plugintest.Text(pluginapi.RoleAssistant, "m2", "Meet <PERSON_2>, a historian."),
+		plugintest.Text(pluginapi.RoleUser, "m3", "My colleague Jan Kowalczyk wants to meet <PERSON_2>."),
+	), nil)
+	if _, err := in.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Prompt.Message("m3").Text(); got != "My colleague <PERSON_4> wants to meet <PERSON_2>." {
+		t.Fatalf("prompt = %q", got)
+	}
+	x.Response = plugintest.Completion("<PERSON_4> meets <PERSON_2>; <PERSON_1> watches.")
+	if _, err := out.OnResponse(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Response.Text(0); got != "Jan Kowalczyk meets <PERSON_2>; Jakub Nowak watches." {
+		t.Errorf("response = %q", got)
+	}
+	// A value the model produces next to a literal placeholder gets a fresh
+	// number, in the response phase and in a stream.
+	y := plugintest.Exchange(nil, plugintest.Completion("<PERSON_1> meets Zoe Ray"))
+	if _, err := out.OnResponse(context.Background(), y); err != nil {
+		t.Fatal(err)
+	}
+	if got := y.Response.Text(0); got != "<PERSON_1> meets <PERSON_2>" {
+		t.Errorf("response = %q", got)
+	}
+	z := plugintest.Exchange(nil, nil)
+	got, err := out.OnStreamEvent(context.Background(), z, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "<PERSON_1> meets Zoe Ray"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != "<PERSON_1> meets <PERSON_2>" {
+		t.Errorf("stream = %+v", got)
+	}
+}

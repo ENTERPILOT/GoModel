@@ -60,9 +60,10 @@ func newProvider(compat *openai.CompatibleProvider) *Provider {
 
 func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
-		ProviderName: "groq",
-		BaseURL:      baseURL,
-		SetHeaders:   setHeaders,
+		ProviderName:     "groq",
+		BaseURL:          baseURL,
+		SetHeaders:       setHeaders,
+		AdaptChatRequest: adaptChatRequest,
 	}
 }
 

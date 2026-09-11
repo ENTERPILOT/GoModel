@@ -28,3 +28,11 @@ func AdaptReasoningEffortRequest(req *core.ChatRequest, effort string) (*core.Ch
 	adapted.ExtraFields = extra
 	return &adapted, nil
 }
+
+// DropReasoning returns a shallow copy of req without the nested reasoning
+// object, for upstreams that reject any reasoning parameter on the model.
+func DropReasoning(req *core.ChatRequest) *core.ChatRequest {
+	adapted := *req
+	adapted.Reasoning = nil
+	return &adapted
+}

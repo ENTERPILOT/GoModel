@@ -229,6 +229,11 @@ features that have no canonical equivalent are not preserved end to end:
   providers conflate stop-parameter hits with natural stops in `finish_reason`,
   so completions there report `stop_reason: "end_turn"` (output is still truncated
   correctly).
+- **`thinking`** on a non-Anthropic model becomes a reasoning effort (budget
+  under 10000 tokens: `low`, under 20000: `medium`, otherwise `high`; adaptive:
+  `medium`), sent as each provider's own field: `reasoning_effort` on OpenAI,
+  Groq, and Fireworks. Models that cannot reason (OpenAI `gpt-4*`, Groq models
+  other than gpt-oss and qwen3) get the request without it instead of an error.
 - **`count_tokens`** is exact when the model's provider can count tokens itself:
   Anthropic models are counted by Anthropic's own `count_tokens` endpoint. The
   forwarded request carries the resolved model (an alias is resolved first)

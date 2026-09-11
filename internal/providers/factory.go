@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/enterpilot/gomodel/config"
@@ -15,6 +16,10 @@ import (
 
 // ProviderOptions bundles runtime settings passed from the factory to provider constructors.
 type ProviderOptions struct {
+	// Name is the configured provider instance name (for example "openai-eu").
+	// HTTP clients report it in errors, so two instances of one type stay
+	// distinguishable. It is empty for constructors invoked outside the factory.
+	Name       string
 	Hooks      llmclient.Hooks
 	Models     []string
 	Resilience config.ResilienceConfig
@@ -35,6 +40,16 @@ func (o ProviderOptions) Keyring(apiKey string) *Keyring {
 		return o.Keys
 	}
 	return NewKeyring(apiKey)
+}
+
+// ClientName returns the provider name an HTTP client reports in errors: the
+// configured instance name when the factory supplied one, providerType
+// otherwise.
+func (o ProviderOptions) ClientName(providerType string) string {
+	if name := strings.TrimSpace(o.Name); name != "" {
+		return name
+	}
+	return providerType
 }
 
 // ProviderConstructor is the constructor signature for providers.
@@ -138,6 +153,7 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 	// One Keyring per provider instance: every client this provider builds
 	// shares session affinity and the sessionless round-robin sequence.
 	opts := ProviderOptions{
+		Name:       cfg.Name,
 		Hooks:      hooksWithProviderIdentity(hooks, cfg.Name, cfg.Type),
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,

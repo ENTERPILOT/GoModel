@@ -61,7 +61,7 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 			SetHeaders:   setHeaders,
 		}),
 		rootClient: llmclient.New(llmclient.Config{
-			ProviderName:   "llamacpp",
+			ProviderName:   opts.ClientName("llamacpp"),
 			BaseURL:        passthroughBaseURL(baseURL),
 			Retry:          opts.Resilience.Retry,
 			Hooks:          opts.Hooks,
