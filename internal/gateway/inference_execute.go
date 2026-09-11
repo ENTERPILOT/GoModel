@@ -416,6 +416,9 @@ func (o *InferenceOrchestrator) chatCompletionProviderCall(ctx context.Context, 
 	if resp == nil {
 		return nil, emptyProviderResponseError("")
 	}
+	if len(resp.Choices) == 0 {
+		return nil, core.NewNoChoicesProviderError(resp.Provider)
+	}
 	return resp, nil
 }
 

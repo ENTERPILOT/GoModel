@@ -176,6 +176,12 @@ func NewEmptyProviderResponseError(provider string) *GatewayError {
 	return NewProviderError(provider, http.StatusBadGateway, "provider returned empty response", nil)
 }
 
+// NewNoChoicesProviderError reports a chat completion that succeeded upstream
+// but carried no choices (502), so failover treats it as a failed attempt.
+func NewNoChoicesProviderError(provider string) *GatewayError {
+	return NewProviderError(provider, http.StatusBadGateway, "provider returned no choices", nil)
+}
+
 // NewRateLimitError creates a new rate limit error (429)
 func NewRateLimitError(provider string, message string) *GatewayError {
 	return &GatewayError{

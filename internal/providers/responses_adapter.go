@@ -369,6 +369,12 @@ func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRe
 	if err != nil {
 		return nil, err
 	}
+	if chatResp == nil {
+		return nil, core.NewEmptyProviderResponseError("")
+	}
+	if len(chatResp.Choices) == 0 {
+		return nil, core.NewNoChoicesProviderError(chatResp.Provider)
+	}
 
 	return ConvertChatResponseToResponses(chatResp), nil
 }

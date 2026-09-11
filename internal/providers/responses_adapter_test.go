@@ -3,8 +3,10 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,12 +16,13 @@ import (
 
 type capturingChatProvider struct {
 	capturedReq *core.ChatRequest
+	chatResp    *core.ChatResponse
 	streamData  string
 	streamErr   error
 }
 
 func (p *capturingChatProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
-	return nil, nil
+	return p.chatResp, nil
 }
 
 func (p *capturingChatProvider) StreamChatCompletion(_ context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
@@ -1508,5 +1511,19 @@ func TestStreamResponsesViaChat_DoesNotInjectUsageWhenPolicyDisabled(t *testing.
 	}
 	if provider.capturedReq.StreamOptions != nil {
 		t.Fatalf("captured StreamOptions = %+v, want nil", provider.capturedReq.StreamOptions)
+	}
+}
+
+func TestResponsesViaChatRejectsEmptyChoices(t *testing.T) {
+	provider := &capturingChatProvider{chatResp: &core.ChatResponse{ID: "chatcmpl-1", Provider: "gemini"}}
+
+	resp, err := ResponsesViaChat(context.Background(), provider, &core.ResponsesRequest{Model: "m", Input: "hi"})
+
+	var gatewayErr *core.GatewayError
+	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
+		t.Fatalf("ResponsesViaChat() = %+v, %v; want 502 provider error", resp, err)
+	}
+	if gatewayErr.Provider != "gemini" {
+		t.Fatalf("error provider = %q, want gemini", gatewayErr.Provider)
 	}
 }

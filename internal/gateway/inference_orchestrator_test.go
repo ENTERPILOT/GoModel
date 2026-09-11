@@ -68,6 +68,7 @@ func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t
 			ID:       "chatcmpl-test",
 			Model:    "gpt-4o-mini-2024-07-18",
 			Provider: "openai",
+			Choices:  []core.Choice{{FinishReason: "stop"}},
 			Usage: core.Usage{
 				PromptTokens:     12,
 				CompletionTokens: 1,
