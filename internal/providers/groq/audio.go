@@ -3,6 +3,7 @@ package groq
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -82,6 +83,14 @@ func withoutJSONMember(data []byte, member string) []byte {
 		buf.Write(encodedKey)
 		buf.WriteByte(':')
 		buf.Write(value)
+	}
+	// dec.More() also stops at a truncated body, so require the closing
+	// delimiter and nothing but whitespace after it before rewriting.
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return data
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return data
 	}
 	buf.WriteByte('}')
 	return buf.Bytes()

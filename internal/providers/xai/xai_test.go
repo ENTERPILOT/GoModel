@@ -1083,32 +1083,36 @@ func TestChatCompletion_DropsReasoningEffortForModelsThatRejectIt(t *testing.T) 
 }
 
 func TestChatCompletion_DropsEmptyReasoningObject(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"c1","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
-	}))
-	defer server.Close()
+	for _, effort := range []string{"", " \t "} {
+		t.Run("effort="+effort, func(t *testing.T) {
+			var gotBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					http.Error(w, "decode error", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"c1","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+			}))
+			defer server.Close()
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
 
-	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model:     "grok-4.5",
-		Messages:  []core.Message{{Role: "user", Content: "hi"}},
-		Reasoning: &core.Reasoning{},
-	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if _, ok := gotBody["reasoning"]; ok {
-		t.Errorf("reasoning should be absent, got %#v", gotBody["reasoning"])
-	}
-	if _, ok := gotBody["reasoning_effort"]; ok {
-		t.Errorf("reasoning_effort should be absent, got %#v", gotBody["reasoning_effort"])
+			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:     "grok-4.5",
+				Messages:  []core.Message{{Role: "user", Content: "hi"}},
+				Reasoning: &core.Reasoning{Effort: effort},
+			})
+			if err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			if _, ok := gotBody["reasoning"]; ok {
+				t.Errorf("reasoning should be absent, got %#v", gotBody["reasoning"])
+			}
+			if _, ok := gotBody["reasoning_effort"]; ok {
+				t.Errorf("reasoning_effort should be absent, got %#v", gotBody["reasoning_effort"])
+			}
+		})
 	}
 }

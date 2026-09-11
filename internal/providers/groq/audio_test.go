@@ -31,6 +31,11 @@ func TestCreateTranscription_StripsVendorMember(t *testing.T) {
 			want:     `{"task":"transcribe","duration":2.9,"segments":[{"id":0,"text":"hello"}]}`,
 		},
 		{
+			name:     "default response_format is json",
+			upstream: `{"text":"hello","x_groq":{"id":"req_1"}}`,
+			want:     `{"text":"hello"}`,
+		},
+		{
 			name:     "json without the member is untouched",
 			format:   "json",
 			upstream: `{"text":"hello"}`,
@@ -82,6 +87,32 @@ func TestCreateTranscription_StripsVendorMember(t *testing.T) {
 	}
 }
 
+func TestCreateTranscription_PropagatesUpstreamError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad audio","type":"invalid_request_error"}}`))
+	}))
+	defer server.Close()
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+		Model:    "whisper-large-v3-turbo",
+		File:     []byte("audio"),
+		Filename: "a.mp3",
+	})
+	if err == nil {
+		t.Fatalf("CreateTranscription() error = nil, want the upstream error (resp = %+v)", resp)
+	}
+	if resp != nil {
+		t.Errorf("response = %+v, want nil", resp)
+	}
+	if !strings.Contains(err.Error(), "bad audio") {
+		t.Errorf("error = %v, want it to carry the upstream message", err)
+	}
+}
+
 func TestWithoutJSONMember_LeavesMalformedBodiesAlone(t *testing.T) {
 	tests := []struct {
 		name string
@@ -89,6 +120,8 @@ func TestWithoutJSONMember_LeavesMalformedBodiesAlone(t *testing.T) {
 	}{
 		{name: "not an object", body: `["x_groq"]`},
 		{name: "truncated object", body: `{"text":"hi","x_groq":`},
+		{name: "missing closing delimiter", body: `{"text":"hi","x_groq":{"id":"req_1"}`},
+		{name: "trailing data", body: `{"text":"hi","x_groq":{"id":"req_1"}} oops`},
 		{name: "empty", body: ``},
 	}
 	for _, tt := range tests {
