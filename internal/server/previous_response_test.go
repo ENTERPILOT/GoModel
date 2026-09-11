@@ -231,19 +231,118 @@ func TestPatchResponsesAttempt_ScopedTenantCannotChainAcrossScopes(t *testing.T)
 	}
 }
 
-func TestResponsesWithPreviousResponseID_StreamedPredecessorReturns404(t *testing.T) {
+func streamedResponseData(id, text string) string {
+	return streamedTerminalData("response.completed", "completed", id, text)
+}
+
+func streamedTerminalData(event, status, id, text string) string {
+	return "event: " + event + "\ndata: {\"type\":\"" + event + "\",\"response\":{\"id\":\"" + id +
+		"\",\"object\":\"response\",\"status\":\"" + status + "\",\"output\":[{\"id\":\"msg_" + id +
+		"\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"" + text +
+		"\"}]}]}}\n\ndata: [DONE]\n\n"
+}
+
+// TestResponsesWithPreviousResponseID_StreamedPredecessorChains covers the
+// common agent loop: every turn streams, and each one chains on the last. A
+// streamed response is snapshotted from its terminal event, so a later turn
+// can chain on it and replays the whole streamed chain.
+func TestResponsesWithPreviousResponseID_StreamedPredecessorChains(t *testing.T) {
 	provider := previousResponseTestProvider(t, "anthropic")
-	provider.streamData = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_s\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\ndata: [DONE]\n\n"
+	provider.streamData = streamedResponseData("resp_s1", "the word is zebra")
+	srv := New(provider, nil)
+	store := srv.handler.currentResponseStore()
+
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra","stream":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("turn one status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	waitForStoredResponse(t, store, "resp_s1")
+	stored, err := store.Get(context.Background(), "resp_s1")
+	if err != nil {
+		t.Fatalf("get resp_s1: %v", err)
+	}
+	if len(stored.InputItems) != 1 || len(stored.Response.Output) != 1 {
+		t.Fatalf("streamed snapshot holds %d input items and %d output items, want 1 and 1", len(stored.InputItems), len(stored.Response.Output))
+	}
+
+	provider.streamData = streamedResponseData("resp_s2", "still zebra")
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"sure?","previous_response_id":"resp_s1","stream":true}`); rec.Code != http.StatusOK {
+		t.Fatalf("turn two status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	waitForStoredResponse(t, store, "resp_s2")
+	stored, err = store.Get(context.Background(), "resp_s2")
+	if err != nil {
+		t.Fatalf("get resp_s2: %v", err)
+	}
+	if stored.Response.PreviousResponseID != "resp_s1" {
+		t.Fatalf("streamed chained snapshot links to %q, want resp_s1", stored.Response.PreviousResponseID)
+	}
+
+	provider.capturedResponsesReq = nil
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_s2"}`); rec.Code != http.StatusOK {
+		t.Fatalf("turn three status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	items := forwardedInputItems(t, provider.capturingProvider)
+	if len(items) != 5 {
+		t.Fatalf("forwarded %d items, want two streamed turns plus the new input: %#v", len(items), items)
+	}
+	if items[1]["role"] != "assistant" || items[3]["role"] != "assistant" {
+		t.Fatalf("forwarded roles = %v/%v, want assistant at 1 and 3", items[1]["role"], items[3]["role"])
+	}
+	if text, _ := json.Marshal(items[1]["content"]); !strings.Contains(string(text), "the word is zebra") {
+		t.Fatalf("streamed output not replayed: %#v", items[1])
+	}
+}
+
+// TestResponsesWithPreviousResponseID_StreamedTerminalEventsAreStored covers
+// the other terminal events: a truncated or failed streamed turn is stored
+// like its buffered counterpart, so a client can retrieve it and chain on it.
+func TestResponsesWithPreviousResponseID_StreamedTerminalEventsAreStored(t *testing.T) {
+	for _, tc := range []struct{ event, status string }{
+		{"response.incomplete", "incomplete"},
+		{"response.failed", "failed"},
+	} {
+		t.Run(tc.event, func(t *testing.T) {
+			provider := previousResponseTestProvider(t, "anthropic")
+			provider.streamData = streamedTerminalData(tc.event, tc.status, "resp_t", "partial")
+			srv := New(provider, nil)
+			store := srv.handler.currentResponseStore()
+
+			if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"go","stream":true}`); rec.Code != http.StatusOK {
+				t.Fatalf("streaming status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			waitForStoredResponse(t, store, "resp_t")
+			stored, err := store.Get(context.Background(), "resp_t")
+			if err != nil {
+				t.Fatalf("get resp_t: %v", err)
+			}
+			if stored.Response.Status != tc.status {
+				t.Fatalf("stored status = %q, want %q", stored.Response.Status, tc.status)
+			}
+
+			provider.capturedResponsesReq = nil
+			if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"continue","previous_response_id":"resp_t"}`); rec.Code != http.StatusOK {
+				t.Fatalf("chained status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
+				t.Fatalf("forwarded %d items, want 3", len(items))
+			}
+		})
+	}
+}
+
+func TestResponsesWithPreviousResponseID_StreamedWithStoreFalseIsNotStored(t *testing.T) {
+	provider := previousResponseTestProvider(t, "anthropic")
+	provider.streamData = streamedResponseData("resp_s", "not kept")
 	srv := New(provider, nil)
 
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"streamed","stream":true}`); rec.Code != http.StatusOK {
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"streamed","stream":true,"store":false}`); rec.Code != http.StatusOK {
 		t.Fatalf("streaming status = %d (%s)", rec.Code, rec.Body.String())
 	}
 	provider.capturedResponsesReq = nil
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_s"}`)
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d (%s), want 404: streamed responses are not stored", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d (%s), want 404: store:false responses are not stored", rec.Code, rec.Body.String())
 	}
 	if provider.capturedResponsesReq != nil {
 		t.Fatal("a chained turn on an unstored id must not reach the provider")
