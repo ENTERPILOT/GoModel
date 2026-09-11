@@ -121,6 +121,7 @@ type span struct {
 // whole is the span of a text that is not streamed.
 var whole = span{final: true}
 
+// due reports whether match m (submatch indexes into s) is rewritten now.
 func (w span) due(s string, m []int) bool {
 	fits := utf8.RuneCountInString(s[m[0]:m[1]]) <= w.hold
 	switch {

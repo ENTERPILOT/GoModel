@@ -70,6 +70,7 @@ func TestResponsesWithPreviousResponseID_HistoryPassesPromptGuardrails(t *testin
 		}
 		waitForStoredResponse(t, store, "resp_conv_1")
 
+		provider.responsesResponse.ID = "resp_conv_2" // the streamed fixture carries resp_conv_2 too
 		body := `{"model":"gpt-5-mini","input":"what is it?","previous_response_id":"resp_conv_1","stream":` + map[bool]string{false: "false", true: "true"}[stream] + `}`
 		rec := postResponses(t, srv, body)
 		if rec.Code != http.StatusOK {
@@ -87,13 +88,22 @@ func TestResponsesWithPreviousResponseID_HistoryPassesPromptGuardrails(t *testin
 		}
 
 		// Snapshots keep the client's own turn as sent, so the next replay
-		// is anonymized consistently with the output.
+		// is anonymized consistently with the output, and link to their
+		// predecessor instead of holding the replayed history.
 		first, err := store.Get(context.Background(), "resp_conv_1")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(first.InputItems) != 1 || !strings.Contains(string(first.InputItems[0]), "my pet is a zebra") {
-			t.Fatalf("turn one snapshot input = %s, want the client's own input", first.InputItems)
+			t.Fatalf("stream=%v turn one snapshot input = %s, want the client's own input", stream, first.InputItems)
+		}
+		waitForStoredResponse(t, store, "resp_conv_2")
+		second, err := store.Get(context.Background(), "resp_conv_2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if second.Response.PreviousResponseID != "resp_conv_1" || len(second.InputItems) != 1 || !strings.Contains(string(second.InputItems[0]), "what is it?") {
+			t.Fatalf("stream=%v chained snapshot previous=%q input=%s, want resp_conv_1 and only the client's own turn", stream, second.Response.PreviousResponseID, second.InputItems)
 		}
 	}
 }
