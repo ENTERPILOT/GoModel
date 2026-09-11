@@ -183,6 +183,7 @@ func (d *driver) other(ctx context.Context, ev *pluginapi.StreamEvent) error {
 	d.seq++
 	out := *ev
 	out.Seq = d.seq
+	out.Overlap = 0 // only re-segmented text deltas carry an overlap
 	decision, err := d.hook.OnStreamEvent(ctx, d.x, &out)
 	if err != nil {
 		return err

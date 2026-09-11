@@ -165,6 +165,9 @@ type lower struct{ redactor }
 func (l *lower) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *pluginapi.StreamEvent) (pluginapi.StreamDecision, error) {
 	switch ev.Kind {
 	case pluginapi.EventReasoningDelta:
+		if ev.Overlap != 0 {
+			return pluginapi.Replace("overlap leaked"), nil
+		}
 		return pluginapi.Replace(strings.ToLower(ev.Text)), nil
 	case pluginapi.EventUsage:
 		return pluginapi.Drop(), nil
@@ -177,7 +180,7 @@ func TestRunStreamMultiChoiceAndOtherEvents(t *testing.T) {
 	res, err := RunStream(context.Background(), l, nil, []*pluginapi.StreamEvent{
 		{Kind: pluginapi.EventTextDelta, Choice: 1, Text: "one"},
 		{Kind: pluginapi.EventTextDelta, Choice: 0, Text: "zero"},
-		{Kind: pluginapi.EventReasoningDelta, Text: "THINK"},
+		{Kind: pluginapi.EventReasoningDelta, Text: "THINK", Overlap: 3},
 		{Kind: pluginapi.EventUsage},
 		{Kind: pluginapi.EventTextDelta, Choice: 0, Text: " more"},
 	})

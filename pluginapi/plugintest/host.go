@@ -93,12 +93,11 @@ func (h *Host) HTTPClient() *http.Client {
 func (h *Host) Complete(_ context.Context, req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
 	h.mu.Lock()
 	h.requests = append(h.requests, req)
-	reply := h.Reply
-	h.mu.Unlock()
-	if reply != nil {
+	if reply := h.Reply; reply != nil {
+		// The callback may read the host, so it runs outside the lock.
+		h.mu.Unlock()
 		return reply(req)
 	}
-	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.Err != nil {
 		return nil, h.Err
