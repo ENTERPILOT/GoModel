@@ -161,10 +161,13 @@ key is hashed from the pre-failover resolution, so storing the backup's answer
 would serve it under the primary's key once the primary recovers.
 
 The practical consequence: a virtual model whose first target is chronically
-down gets no cache benefit for as long as it stays down — every request misses,
-fails over, and is served fresh. If a target is going to be unavailable for a
-while, reorder the chain (or point the virtual model at a healthy target) so
-the responses that answer it are cacheable again.
+down stops accumulating cache entries for as long as it stays down — every
+request that misses fails over and is served fresh, and nothing it produces is
+stored. Entries written before the outage keep serving until their TTL expires:
+a lookup runs ahead of dispatch, so a hit is returned without touching either
+target. If a target is going to be unavailable for a while, reorder the chain
+(or point the virtual model at a healthy target) so the responses that answer
+it are cacheable again.
 
 Retries within one target are unaffected: only a response produced after the
 sweep moved to another target is withheld from both cache layers.
@@ -182,7 +185,9 @@ Cache hits are also recorded as usage entries, with the caller's `user_path`
 and a `cache_type` of `exact` or `semantic`. The usage endpoints
 (`/admin/usage/*` and `/v1/usage`) leave them out by default so that totals and
 cost track provider spend; pass `cache_mode=all` to include them, or
-`cache_mode=cached` to see only the hits:
+`cache_mode=cached` to see only the hits. `/admin/usage/sessions` is the
+exception: session request and token totals always include cache hits, while
+its cost fields stay provider-only.
 
 ```bash
 # provider-bound requests only (default)

@@ -106,7 +106,8 @@ failover to the model rather than replacing it.
   [response cache](/features/cache#responses-served-through-failover-are-not-cached):
   the cache key is hashed from the pre-failover resolution, so the backup's
   answer would otherwise be replayed under the primary's key. While a first
-  target is down, every request to that chain therefore misses the cache.
+  target is down, the chain therefore stops adding cache entries; entries
+  written before the outage still serve until their TTL expires.
 </Note>
 
 Set `FAILOVER_ENABLED=false` (or `failover.enabled: false`) to switch the
