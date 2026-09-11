@@ -453,8 +453,10 @@ func TestToChatRequestToolResultWithImage(t *testing.T) {
 	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "data:image/png;base64,aGVsbG8=" {
 		t.Errorf("parts[1] = %+v, want image_url data URL", parts[1])
 	}
-	if got := EstimateInputTokens(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"captured"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGVsbG8="}}]}]}]}`)); got != 2 {
-		t.Errorf("EstimateInputTokens = %d, want 2 (text only)", got)
+	// The image inside the tool result is priced too. Its payload here is not
+	// a real image, so it is charged the upper bound rather than ignored.
+	if got := EstimateInputTokens(mustDecode(t, `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"captured"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGVsbG8="}}]}]}]}`)); got <= imageMaxTokens {
+		t.Errorf("EstimateInputTokens = %d, want the text plus an unmeasurable image (> %d)", got, imageMaxTokens)
 	}
 }
 
@@ -602,55 +604,29 @@ func TestToChatRequestRoundTripsAsJSON(t *testing.T) {
 }
 
 func TestEstimateChatInputTokens(t *testing.T) {
-	tests := []struct {
-		name string
-		req  *core.ChatRequest
-		want int
-	}{
-		{
-			name: "nil request",
-			req:  nil,
-			want: 0,
-		},
-		{
-			name: "messages only",
-			req: &core.ChatRequest{
-				Messages: []core.Message{
-					{Role: "system", Content: "You are terse."},
-					{Role: "user", Content: "What is 2+2?"},
-				},
-			},
-			// "You are terse." (14) + "What is 2+2?" (12) = 26 chars → ceil(26/4) = 7
-			want: 7,
-		},
-		{
-			name: "tool calls and tool definitions",
-			req: &core.ChatRequest{
-				Messages: []core.Message{
-					{
-						Role: "assistant",
-						ToolCalls: []core.ToolCall{
-							{Function: core.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}},
-						},
-					},
-				},
-				Tools: []map[string]any{
-					{"type": "function", "function": map[string]any{"name": "weather"}},
-				},
-			},
-			// "weather" (7) + `{"city":"Paris"}` (16) = 23 chars, plus the
-			// marshaled tool definition
-			// `{"function":{"name":"weather"},"type":"function"}` (49 chars).
-			// Total 72 chars → ceil(72/4) = 18.
-			want: 18,
-		},
+	if got := EstimateChatInputTokens(nil); got != 0 {
+		t.Fatalf("EstimateChatInputTokens(nil) = %d, want 0", got)
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := EstimateChatInputTokens(tc.req); got != tc.want {
-				t.Errorf("estimate = %d, want %d", got, tc.want)
-			}
-		})
+	plain := EstimateChatInputTokens(&core.ChatRequest{
+		Messages: []core.Message{
+			{Role: "system", Content: "You are terse."},
+			{Role: "user", Content: "What is 2+2?"},
+		},
+	})
+	// Two short messages: their text plus the per-message framing.
+	if plain < 2*messageOverhead+7 || plain > 2*messageOverhead+20 {
+		t.Errorf("messages only = %d, want the text plus framing for two messages", plain)
+	}
+	withTools := EstimateChatInputTokens(&core.ChatRequest{
+		Messages: []core.Message{{
+			Role:      "assistant",
+			ToolCalls: []core.ToolCall{{Function: core.FunctionCall{Name: "weather", Arguments: `{"city":"Paris"}`}}},
+		}},
+		Tools: []map[string]any{{"type": "function", "function": map[string]any{"name": "weather"}}},
+	})
+	// A tool definition brings Anthropic's tool-use system prompt with it.
+	if withTools < toolUseSystemPrompt+toolDefinitionOverhead+toolBlockOverhead {
+		t.Errorf("tools = %d, want at least the tool-use system prompt and framing", withTools)
 	}
 }
 

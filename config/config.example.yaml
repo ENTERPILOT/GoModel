@@ -15,6 +15,7 @@ server:
   allow_passthrough_v1_alias: true # allow /p/{provider}/v1/... while keeping /p/{provider}/... canonical
   user_path_header: "X-GoModel-User-Path" # env: USER_PATH_HEADER; inbound header used for user_path scoping
   enabled_passthrough_providers: ["openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"] # providers enabled on /p/{provider}/...
+  auth_verify_enabled: false # env: AUTH_VERIFY_ENABLED; expose GET /v1/auth/verify, which reports whether the API key a request carries authenticates against this gateway (401 when it does not; 200 with {"valid":false,"method":"none"} when the gateway has no authentication configured). Outside /admin, so it works with the admin API disabled
   realtime_enabled: true # env: REALTIME_ENABLED; expose the /v1/realtime and /v1/realtime/translations websockets, their calls/client_secrets siblings, and /p/{provider}/v1/realtime upgrades
   pid_file: "data/gomodel.pid" # env: PID_FILE; where the running gateway records its process id so `gomodel --reload` can find it. Set per instance when several gateways share a host; empty writes no pid file and disables --reload; changing it needs a restart, not a reload
 
@@ -340,7 +341,8 @@ guardrails:
   rules:
     # Each entry is a guardrail instance built from a plugin (`type`). Built-in
     # plugins: system_prompt, llm_based_altering, string_replace, header_edit,
-    # llm_judge; loaded .so plugins are referenced by their manifest name.
+    # llm_judge, presidio; loaded .so plugins are referenced by their manifest
+    # name.
     # Instances are seeded into the guardrails store and referenced by the
     # default workflow at `order` in `phase` (prompt | response | stream,
     # default prompt). Guardrails with the same "order" run in parallel;
@@ -365,6 +367,17 @@ guardrails:
     #     mode: "regex"                 # literal (default) | regex
     #     rules: |                      # one "find => replace" per line (a YAML list also works)
     #       sk-[A-Za-z0-9]{20,} => [redacted]
+
+    # Example: anonymize personal data with a Presidio analyzer sidecar
+    # (docker run -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer).
+    # - name: "pii"
+    #   type: "presidio"
+    #   order: 1
+    #   timeout_ms: 5000
+    #   config:
+    #     analyzer_url: "http://localhost:5002"
+    #     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    #     block_entities: ["CREDIT_CARD"]
 
     # Example: a second system_prompt instance running at the same order (parallel)
     # - name: "compliance-prompt"

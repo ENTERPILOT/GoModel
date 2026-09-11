@@ -1091,6 +1091,9 @@ func TestCircuitBreaker_OpensAfterFailures(t *testing.T) {
 	if !strings.Contains(gatewayErr.Message, "circuit breaker") {
 		t.Errorf("expected circuit breaker message, got: %s", gatewayErr.Message)
 	}
+	if !strings.Contains(gatewayErr.Message, "provider test") {
+		t.Errorf("expected circuit breaker message to identify provider, got: %s", gatewayErr.Message)
+	}
 
 	// Should have made exactly 3 requests (threshold)
 	if attempts.Load() != 3 {

@@ -46,7 +46,7 @@ type streamConverter struct {
 	created           int64
 	nextToolCallIndex int
 	toolCalls         map[int]*streamToolCallState
-	thinkingBlocks    map[int]bool // tracks which content block indices are thinking blocks
+	thinking          thinkingReplayState
 	usage             anthropicUsage
 	hasUsage          bool
 	buffer            streaming.StreamBuffer
@@ -67,13 +67,13 @@ type streamToolCallState struct {
 
 func newStreamConverter(body io.ReadCloser, model string) *streamConverter {
 	return &streamConverter{
-		reader:         bufio.NewReader(body),
-		body:           body,
-		model:          model,
-		created:        time.Now().Unix(),
-		toolCalls:      make(map[int]*streamToolCallState),
-		thinkingBlocks: make(map[int]bool),
-		buffer:         streaming.NewStreamBuffer(1024),
+		reader:    bufio.NewReader(body),
+		body:      body,
+		model:     model,
+		created:   time.Now().Unix(),
+		toolCalls: make(map[int]*streamToolCallState),
+		thinking:  newThinkingReplayState(),
+		buffer:    streaming.NewStreamBuffer(1024),
 	}
 }
 
@@ -185,8 +185,7 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		return ""
 
 	case "content_block_start":
-		if event.ContentBlock != nil && event.ContentBlock.Type == "thinking" {
-			sc.thinkingBlocks[event.Index] = true
+		if sc.thinking.track(event.Index, event.ContentBlock) {
 			return ""
 		}
 		if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
@@ -230,14 +229,17 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 
 		switch event.Delta.Type {
 		case "thinking_delta":
-			if sc.thinkingBlocks[event.Index] && event.Delta.Thinking != "" {
+			if sc.thinking.isThinking(event.Index) && event.Delta.Thinking != "" {
+				sc.thinking.appendThinking(event.Index, event.Delta.Thinking)
 				return sc.formatChatChunk(map[string]any{
 					"reasoning_content": event.Delta.Thinking,
 				}, nil, nil)
 			}
 		case "signature_delta":
-			// Signature deltas are internal to Anthropic's thinking protocol;
-			// no OpenAI-compatible equivalent to emit.
+			// A signature has no OpenAI-compatible field of its own; it is
+			// held until the block closes and then handed over as replay
+			// state, which is what the client must echo back.
+			sc.thinking.appendSignature(event.Index, event.Delta.Signature)
 			return ""
 		case "text_delta":
 			if event.Delta.Text != "" {
@@ -285,6 +287,15 @@ func (sc *streamConverter) convertEvent(event *anthropicStreamEvent) string {
 		}
 
 	case "content_block_stop":
+		// The completed thinking block is published before any text follows,
+		// so a client that closes it on the first text delta still sees the
+		// signature.
+		if sc.thinking.tracked(event.Index) {
+			if extra := sc.thinking.extraContent(); extra != nil {
+				return sc.formatChatChunk(map[string]any{core.ExtraContentField: extra}, nil, nil)
+			}
+			return ""
+		}
 		state := sc.toolCalls[event.Index]
 		if state != nil && !state.Started && state.PlaceholderObject {
 			state.Started = true

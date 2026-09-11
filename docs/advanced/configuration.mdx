@@ -49,6 +49,7 @@ The most common way to configure GoModel. Set any of the variables below to over
 | `STREAM_STALL_TIMEOUT` | Seconds one response write on a model route may wait for the client to read it; `0` disables | `60`                   |
 | `USER_PATH_HEADER`   | Header used to read/write request `user_path` values  | `X-GoModel-User-Path`  |
 | `SWAGGER_ENABLED`    | Expose [Swagger UI](/advanced/swagger-ui); needs a `-tags=swagger` build | `false`                |
+| `AUTH_VERIFY_ENABLED` | Expose [`GET /v1/auth/verify`](/advanced/api-endpoints#key-verification), which reports whether the API key a request carries is valid | `false`                |
 | `PID_FILE`           | Where the running gateway records its process id for `gomodel --reload`. Changing it needs a restart | `data/gomodel.pid` next to a `./data` directory, otherwise the per-user data directory |
 
 `STREAM_STALL_TIMEOUT` (`server.stream_stall_timeout` in YAML) protects the
@@ -56,8 +57,9 @@ gateway from clients that open a streaming response and stop reading it. Each
 write to the client gets a fresh deadline, so it fires only when the client's
 socket stays full for that long, never while a slow model has nothing to send.
 When it fires the connection is closed, the upstream provider request is
-cancelled, and the audit entry records `client_stalled`. Raise it for clients
-that legitimately pause reading a stream for over a minute; set `0` to disable.
+cancelled, and the audit entry records `client_stalled`, also when the stream
+was served from the response cache. Raise it for clients that legitimately
+pause reading a stream for over a minute; set `0` to disable.
 
 Set `GOMODEL_DEMO_MODE=true` for a public or shared demonstration instance.
 GoModel logs a warning at startup and every five minutes, renders a persistent

@@ -99,25 +99,3 @@ func (w *stallDeadlineWriter) classify(err error) error {
 	}
 	return err
 }
-
-// stallReporter is implemented by stallDeadlineWriter and looked up through
-// the Unwrap chain of whatever writer a handler holds.
-type stallReporter interface {
-	StallError() error
-}
-
-// findStallReporter walks the Unwrap chain from w down to the stall writer,
-// or returns nil when the route runs without one.
-func findStallReporter(w any) stallReporter {
-	for w != nil {
-		if reporter, ok := w.(stallReporter); ok {
-			return reporter
-		}
-		unwrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
-		if !ok {
-			return nil
-		}
-		w = unwrapper.Unwrap()
-	}
-	return nil
-}

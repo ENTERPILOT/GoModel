@@ -237,3 +237,141 @@ func TestStreamConverterMessageStartInputEstimate(t *testing.T) {
 		t.Errorf("message_delta usage = %+v, want real 11/1", finalUsage)
 	}
 }
+
+// TestStreamConverterThinkingSignature pins the streaming half of the thinking
+// round trip: a client that assembles the SSE events into an assistant turn
+// must end up with a signature on the thinking block, or its next request is
+// rejected by Anthropic.
+func TestStreamConverterThinkingSignature(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Let me "},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"think."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"Let me think.","signature":"sig-1"}]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+	got := eventTypes(events)
+	want := []string{
+		"message_start",
+		"content_block_start", "content_block_delta", "content_block_delta", "content_block_delta", "content_block_stop",
+		"content_block_start", "content_block_delta", "content_block_stop",
+		"message_delta", "message_stop",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("event types = %v, want %v", got, want)
+	}
+
+	signature := events[4]["delta"].(map[string]any)
+	if signature["type"] != "signature_delta" || signature["signature"] != "sig-1" {
+		t.Fatalf("event 4 delta = %v, want a signature_delta carrying sig-1", signature)
+	}
+	if idx, _ := events[4]["index"].(float64); int(idx) != 0 {
+		t.Errorf("signature_delta index = %v, want the open thinking block (0)", events[4]["index"])
+	}
+	for _, event := range events {
+		if _, ok := event["extra_content"]; ok {
+			t.Errorf("event %v leaks the gateway's extra_content member", event["type"])
+		}
+	}
+}
+
+// A redacted thinking block has no deltas of its own: it arrives whole, and
+// the converter must open and close a content block for it so the client can
+// replay the opaque payload.
+func TestStreamConverterRedactedThinking(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[{"type":"redacted_thinking","data":"opaque"}]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+	block := events[1]["content_block"].(map[string]any)
+	if events[1]["type"] != "content_block_start" || block["type"] != "redacted_thinking" || block["data"] != "opaque" {
+		t.Fatalf("event 1 = %v, want a redacted_thinking block carrying the opaque data", events[1])
+	}
+	if events[2]["type"] != "content_block_stop" {
+		t.Fatalf("event 2 = %v, want the redacted block closed immediately", events[2]["type"])
+	}
+}
+
+// The cumulative extra_content a chunk carries must not re-emit signatures the
+// converter already wrote: only blocks it has not seen yet produce events.
+func TestStreamConverterThinkingSignatureNotRepeated(t *testing.T) {
+	first := `{"type":"thinking","thinking":"a","signature":"sig-a"}`
+	second := `{"type":"thinking","thinking":"b","signature":"sig-b"}`
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"a"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[` + first + `]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"b"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[` + first + `,` + second + `]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	signatures := []string{}
+	for _, event := range drainConverter(t, chatStream) {
+		delta, ok := event["delta"].(map[string]any)
+		if !ok || delta["type"] != "signature_delta" {
+			continue
+		}
+		signatures = append(signatures, delta["signature"].(string))
+	}
+	if strings.Join(signatures, ",") != "sig-a,sig-b" {
+		t.Fatalf("signature deltas = %v, want each block signed exactly once", signatures)
+	}
+}
+
+// Interleaved thinking puts text between two thinking blocks. The second
+// block's signature must land in the second thinking block, not the first,
+// and the text block in between must be closed before it opens.
+func TestStreamConverterThinkingBlocksAroundText(t *testing.T) {
+	first := `{"type":"thinking","thinking":"a","signature":"sig-a"}`
+	second := `{"type":"thinking","thinking":"b","signature":"sig-b"}`
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"a"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[` + first + `]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"mid"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"b"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":{"anthropic":{"thinking_blocks":[` + first + `,` + second + `]}}},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	var got []string
+	for _, event := range drainConverter(t, chatStream) {
+		switch event["type"] {
+		case "content_block_start":
+			got = append(got, "start:"+event["content_block"].(map[string]any)["type"].(string))
+		case "content_block_delta":
+			delta := event["delta"].(map[string]any)
+			entry := "delta:" + delta["type"].(string)
+			if sig, ok := delta["signature"].(string); ok {
+				entry += ":" + sig
+			}
+			got = append(got, entry)
+		case "content_block_stop":
+			got = append(got, "stop")
+		}
+	}
+	want := []string{
+		"start:thinking", "delta:thinking_delta", "delta:signature_delta:sig-a", "stop",
+		"start:text", "delta:text_delta", "stop",
+		"start:thinking", "delta:thinking_delta", "delta:signature_delta:sig-b", "stop",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("content events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}

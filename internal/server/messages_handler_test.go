@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -368,5 +370,60 @@ func TestCountMessageTokens(t *testing.T) {
 	tokens, ok := resp["input_tokens"].(float64)
 	if !ok || tokens <= 0 {
 		t.Errorf("input_tokens = %v, want > 0", resp["input_tokens"])
+	}
+}
+
+type tokenCountingMockProvider struct {
+	*mockProvider
+	count    int
+	countErr error
+	calls    int
+}
+
+func (m *tokenCountingMockProvider) CountMessagesTokens(_ context.Context, _ string, _ []byte) (int, error) {
+	m.calls++
+	if m.countErr != nil {
+		return 0, m.countErr
+	}
+	return m.count, nil
+}
+
+// When the route can count tokens itself the answer is exact; when it cannot,
+// or the upstream call fails, the heuristic estimate still answers so the
+// endpoint never stops working.
+func TestCountMessageTokens_ProviderBacked(t *testing.T) {
+	body := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"count these tokens please"}]}`
+	call := func(t *testing.T, provider core.RoutableProvider) float64 {
+		t.Helper()
+		handler := NewHandler(provider, nil, nil, nil)
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		if err := handler.CountMessageTokens(echo.New().NewContext(req, rec)); err != nil {
+			t.Fatalf("CountMessageTokens: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return resp["input_tokens"].(float64)
+	}
+
+	exact := &tokenCountingMockProvider{mockProvider: &mockProvider{supportedModels: []string{"claude-test"}}, count: 4321}
+	if got := call(t, exact); got != 4321 || exact.calls != 1 {
+		t.Errorf("provider-backed count = %v (calls %d), want 4321 from the provider", got, exact.calls)
+	}
+
+	heuristic := call(t, &mockProvider{supportedModels: []string{"claude-test"}})
+	if heuristic <= 0 || heuristic == 4321 {
+		t.Errorf("heuristic count = %v, want the estimate when the provider cannot count", heuristic)
+	}
+
+	failing := &tokenCountingMockProvider{mockProvider: &mockProvider{supportedModels: []string{"claude-test"}}, countErr: errors.New("upstream down")}
+	if got := call(t, failing); got != heuristic {
+		t.Errorf("count after upstream failure = %v, want the heuristic %v", got, heuristic)
 	}
 }

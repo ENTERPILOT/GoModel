@@ -8,6 +8,9 @@
   // disabled, onchange(nextConfig). The component never mutates `config`;
   // every edit produces a new object through the pure helpers.
   import InlineHelpSection from "./InlineHelpSection.svelte";
+  import SearchSelect from "./SearchSelect.svelte";
+  import { modelsStore } from "$lib/stores/models.svelte.js";
+  import { modelPickerOptions } from "$lib/utils/modelSelectors.js";
   import {
     isSecretPlaceholder,
     schemaArrayFieldSelected,
@@ -24,6 +27,11 @@
     disabled = false,
     onchange,
   } = $props();
+
+  // `model` fields pick from the shared inventory (loaded at startup) the
+  // same way the playground and virtual-model editors do; aliases and
+  // virtual models are typed in as custom values.
+  const modelOptions = $derived(modelPickerOptions(modelsStore.models));
 
   function emit(next) {
     onchange?.(next);
@@ -51,7 +59,14 @@
   function placeholder(field) {
     if (field.placeholder) return field.placeholder;
     if (field.input === "model") return m.schema_fields_model_placeholder();
+    if (field.input === "list") return m.schema_fields_list_placeholder();
     return "";
+  }
+
+  // A bool renders as one toggle row like a checkbox group, so it shares
+  // that branch's layout instead of the labelled input layout.
+  function isToggleRow(field) {
+    return field.input === "checkboxes" || field.input === "bool";
   }
 
   function helpId(field) {
@@ -60,7 +75,7 @@
 </script>
 
 {#each fields as field (field.key)}
-  {#if field.input !== "checkboxes"}
+  {#if !isToggleRow(field)}
     <div class="form-field form-field-wide">
       <InlineHelpSection
         copyId={idPrefix + "-help-" + field.key}
@@ -98,11 +113,33 @@
           {disabled}
           oninput={(event) => set(field, event.currentTarget.value)}
         ></textarea>
+      {:else if field.input === "list"}
+        <textarea
+          id={idPrefix + "-" + field.key}
+          class="mono"
+          placeholder={placeholder(field)}
+          value={schemaFieldValue(config, field).join("\n")}
+          aria-describedby={helpId(field)}
+          {disabled}
+          onchange={(event) => set(field, event.currentTarget.value)}
+        ></textarea>
+      {:else if field.input === "model"}
+        <SearchSelect
+          id={idPrefix + "-" + field.key}
+          options={modelOptions}
+          value={schemaFieldValue(config, field)}
+          onchange={(value) => set(field, value)}
+          placeholder={placeholder(field)}
+          searchPlaceholder={m.schema_fields_model_search_placeholder()}
+          ariaLabel={field.label}
+          {disabled}
+          allowCustom
+          mono
+        />
       {:else}
         <input
           id={idPrefix + "-" + field.key}
           type={inputType(field)}
-          class:mono={field.input === "model"}
           placeholder={placeholder(field)}
           value={schemaFieldValue(config, field)}
           autocomplete={field.input === "secret" ? "new-password" : undefined}
@@ -113,6 +150,25 @@
         {#if field.input === "secret" && isSecretPlaceholder(schemaFieldValue(config, field))}
           <small class="form-hint">{m.schema_fields_secret_stored()}</small>
         {/if}
+      {/if}
+    </div>
+  {:else if field.input === "bool"}
+    <div class="form-field form-field-wide">
+      <label class="workflow-feature-toggle">
+        <input
+          id={idPrefix + "-" + field.key}
+          type="checkbox"
+          checked={schemaFieldValue(config, field)}
+          aria-describedby={helpId(field)}
+          {disabled}
+          onchange={(event) => set(field, event.currentTarget.checked)}
+        />
+        <span>{field.label}</span>
+      </label>
+      {#if field.help}
+        <small class="form-hint" id={idPrefix + "-help-" + field.key}
+          >{field.help}</small
+        >
       {/if}
     </div>
   {:else}

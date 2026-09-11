@@ -85,18 +85,33 @@ func rewriteBlocks(blocks []any, role pluginapi.Role, parts []pluginapi.Part) ([
 	}
 	out := cloneAnySlice(blocks)
 	for i, part := range parts {
-		if part.Kind != pluginapi.PartText {
-			continue
-		}
-		m, ok := out[i].(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("exchange: content block %d is not a text block", i)
-		}
-		switch m["type"] {
-		case "input_text", "output_text", "text":
-			m["text"] = part.Text
-		default:
-			return nil, fmt.Errorf("exchange: content block %d is not a text block", i)
+		switch part.Kind {
+		case pluginapi.PartText:
+			m, ok := out[i].(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("exchange: content block %d is not a text block", i)
+			}
+			switch m["type"] {
+			case "input_text", "output_text", "text":
+				m["text"] = part.Text
+			default:
+				return nil, fmt.Errorf("exchange: content block %d is not a text block", i)
+			}
+		case pluginapi.PartImage:
+			// A replaced payload (Prompt.SetMedia) has no Raw any more and
+			// carries a data URI; the block keeps its other members.
+			m, ok := out[i].(map[string]any)
+			if !ok || len(part.Raw) > 0 || part.URL == "" || m["type"] != "input_image" {
+				continue
+			}
+			if image, isMap := m["image_url"].(map[string]any); isMap {
+				// The nested map is shared with the caller's request.
+				image = cloneAnyMap(image)
+				image["url"] = part.URL
+				m["image_url"] = image
+			} else {
+				m["image_url"] = part.URL
+			}
 		}
 	}
 	return out, nil

@@ -46,7 +46,8 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 
 	scope.breaker = c.breakerForModel(scope.requestInfo.Model)
 	if scope.breaker == nil && c.circuitBreaker != nil {
-		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable, "model circuit breaker capacity exhausted", nil)
+		err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
+			"model circuit breaker capacity exhausted for provider "+c.config.ProviderName, nil)
 		c.finishRequest(scope, http.StatusServiceUnavailable, err)
 		return requestScope{}, err
 	}
@@ -54,7 +55,7 @@ func (c *Client) beginRequest(ctx context.Context, req Request, stream bool) (re
 		allowed, probe := scope.breaker.acquire()
 		if !allowed {
 			err := core.NewProviderError(c.config.ProviderName, http.StatusServiceUnavailable,
-				"circuit breaker is open - provider temporarily unavailable", nil)
+				"circuit breaker is open - provider "+c.config.ProviderName+" temporarily unavailable", nil)
 			c.finishRequest(scope, http.StatusServiceUnavailable, err)
 			return requestScope{}, err
 		}
@@ -197,7 +198,8 @@ func (c *Client) releaseHalfOpenProbe(scope requestScope) {
 // fallback shared by the retrying entry points (DoRaw, DoPassthrough). The
 // returned error is also reported through the scope.
 func (c *Client) failAfterRetries(scope requestScope) error {
-	err := core.NewProviderError(c.config.ProviderName, http.StatusBadGateway, "request failed after retries", nil)
+	err := core.NewProviderError(c.config.ProviderName, http.StatusBadGateway,
+		"request failed after retries for provider "+c.config.ProviderName, nil)
 	c.completeScope(scope, http.StatusBadGateway, err, err)
 	return err
 }

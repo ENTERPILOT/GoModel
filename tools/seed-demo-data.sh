@@ -5,13 +5,14 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 db_path="${SQLITE_PATH:-data/gomodel.db}"
 days="${DEMO_DAYS:-90}"
 end_date="${DEMO_END_DATE:-}"
-avg_requests="${DEMO_AVG_REQUESTS_PER_DAY:-850}"
-max_requests="${DEMO_MAX_REQUESTS_PER_DAY:-1600}"
+avg_requests="${DEMO_AVG_REQUESTS_PER_DAY:-2000}"
+max_requests="${DEMO_MAX_REQUESTS_PER_DAY:-3800}"
 token_scale="${DEMO_TOKEN_SCALE:-3}"
 exact_cache_pct="${DEMO_EXACT_CACHE_PCT:-12}"
 semantic_cache_pct="${DEMO_SEMANTIC_CACHE_PCT:-7}"
 prompt_cache_pct="${DEMO_PROMPT_CACHE_PCT:-28}"
 rewrite_pct="${DEMO_REWRITE_PCT:-18}"
+guardrail_edit_pct="${DEMO_GUARDRAIL_EDIT_PCT:-24}"
 prefix="${DEMO_SEED_PREFIX:-demo-generated}"
 seed_utc_epoch="$(date -u +%s)"
 current_utc_second=$((seed_utc_epoch % 86400))
@@ -24,13 +25,14 @@ Environment:
   SQLITE_PATH                     SQLite DB path (default: data/gomodel.db)
   DEMO_DAYS                       Rolling day count (default: 90)
   DEMO_END_DATE                   End date YYYY-MM-DD (default: today UTC)
-  DEMO_AVG_REQUESTS_PER_DAY       Average daily request count (default: 850)
-  DEMO_MAX_REQUESTS_PER_DAY       Upper slot cap per day (default: 1600)
+  DEMO_AVG_REQUESTS_PER_DAY       Average daily request count (default: 2000)
+  DEMO_MAX_REQUESTS_PER_DAY       Upper slot cap per day (default: 3800)
   DEMO_TOKEN_SCALE                Token volume multiplier (default: 3)
   DEMO_EXACT_CACHE_PCT            Local exact cache hit percentage (default: 12)
   DEMO_SEMANTIC_CACHE_PCT         Local semantic cache hit percentage (default: 7)
   DEMO_PROMPT_CACHE_PCT           Provider prompt-cache percentage (default: 28)
   DEMO_REWRITE_PCT                Eligible text requests with rewrite savings (default: 18)
+  DEMO_GUARDRAIL_EDIT_PCT         Guarded requests a redaction guardrail edits (default: 24)
   DEMO_SEED_PREFIX                Generated row/source prefix; reruns replace this prefix only (default: demo-generated)
 EOF
 }
@@ -57,6 +59,7 @@ require_int DEMO_EXACT_CACHE_PCT "$exact_cache_pct"
 require_int DEMO_SEMANTIC_CACHE_PCT "$semantic_cache_pct"
 require_int DEMO_PROMPT_CACHE_PCT "$prompt_cache_pct"
 require_int DEMO_REWRITE_PCT "$rewrite_pct"
+require_int DEMO_GUARDRAIL_EDIT_PCT "$guardrail_edit_pct"
 
 if (( days < 1 )); then
   echo "DEMO_DAYS must be at least 1" >&2
@@ -80,6 +83,10 @@ if (( prompt_cache_pct > 85 )); then
 fi
 if (( rewrite_pct > 60 )); then
   echo "DEMO_REWRITE_PCT must be <= 60" >&2
+  exit 2
+fi
+if (( guardrail_edit_pct > 80 )); then
+  echo "DEMO_GUARDRAIL_EDIT_PCT must be <= 80" >&2
   exit 2
 fi
 if [[ -n "$end_date" && ! "$end_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -116,6 +123,57 @@ demo_key_redacted_sales="sk_gom_...${demo_key_secret_sales: -4}"
 demo_audio_mp3_base64="$(tr -d '\r\n' < "$script_dir/fixtures/demo-prompt-caching.mp3.base64")"
 demo_audio_mp3_bytes="$(printf '%s' "$demo_audio_mp3_base64" | openssl base64 -d -A | wc -c | awk '{print $1}')"
 
+# Guardrail instances (plugin configurations) referenced by the seeded
+# workflows below. Each config is written exactly as the matching built-in
+# plugin parses it: the plugins reject unknown keys, so the demo doubles as a
+# worked example of every built-in type. Single-quoted here so regular
+# expression backslashes and $1 capture groups survive into the SQL heredoc.
+guardrail_config_pii='{"rules":"[\\w.%+-]+@[\\w.-]+\\.[A-Za-z]{2,} => [redacted-email]\n\\+?[0-9][0-9 ().-]{9,}[0-9] => [redacted-phone]\nsk-[A-Za-z0-9]{20,} => [redacted-key]\n([0-9]{3})-([0-9]{2})-[0-9]{4} => $1-$2-XXXX","mode":"regex","case_insensitive":true,"roles":["user","assistant","tool"],"on_match":"replace"}'
+guardrail_config_blocked_terms='{"rules":"(project|codename)[ -]nightingale => \nunreleased pricing sheet => ","mode":"regex","case_insensitive":true,"roles":["user"],"on_match":"block","message":"This request mentions material that may not leave the tenant. Remove it and try again.","block_status":403}'
+guardrail_config_sales_tone='{"mode":"decorator","content":"Answer as a concise sales engineer. Never invent pricing, quote only figures present in the context, and end with one clear next step."}'
+guardrail_config_headers='{"response_add":"X-GoModel-Demo: true","upstream_set":"X-Tenant: gomodel-demo","response_remove":"X-Powered-By"}'
+guardrail_config_injection_judge='{"model":"openai/gpt-5-nano-2025-08-07","target":"last_user","action":"block","message":"This prompt was rejected as a prompt-injection attempt.","block_status":400,"on_unclear":"warn","max_tokens":128,"temperature":0}'
+guardrail_config_quality_judge='{"model":"groq/llama-3.1-8b-instant","action":"warn","message":"The answer did not cite the retrieved context.","on_unclear":"allow","max_tokens":128,"temperature":0}'
+guardrail_config_normalizer='{"model":"groq/llama-3.1-8b-instant","roles":["user"],"max_tokens":2048,"prompt":"Rewrite the message as one self-contained question. Keep every fact, identifier, and instruction, and return only the rewritten text."}'
+
+# Workflow payloads. Guardrail references are written as @@name and expanded
+# to the prefixed instance names below, so a generated workflow can never bind
+# to an operator-owned guardrail that happens to share a plain name: that
+# guardrail could be of a type the referencing phase does not support, and the
+# workflow would then fail to compile and stop the gateway from starting.
+# The stored hash is the SHA-256 of the expanded JSON, which is the encoding
+# GoModel writes: schema version, canonical feature order, and steps sorted by
+# phase, step, then ref.
+workflow_payload_baseline_v1='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":false,"failover":true}}'
+workflow_payload_baseline='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@pii-redaction","phase":"prompt","step":0},{"ref":"@@gateway-headers","phase":"prompt","step":1},{"ref":"@@pii-redaction","phase":"response","step":0},{"ref":"@@gateway-headers","phase":"response","step":1}]}'
+workflow_payload_sales='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@pii-redaction","phase":"prompt","step":0},{"ref":"@@sales-assistant-tone","phase":"prompt","step":1},{"ref":"@@answer-quality-judge","phase":"response","step":0}]}'
+workflow_payload_agents='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@prompt-normalizer","phase":"prompt","step":0},{"ref":"@@blocked-terms","phase":"prompt","step":1}]}'
+workflow_payload_batch='{"schema_version":2,"features":{"cache":true,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":false},"steps":[{"ref":"@@prompt-normalizer","phase":"prompt","step":0},{"ref":"@@pii-redaction","phase":"prompt","step":1}]}'
+workflow_payload_anthropic='{"schema_version":2,"features":{"cache":false,"audit":true,"usage":true,"budget":true,"guardrails":true,"failover":true},"steps":[{"ref":"@@prompt-injection-judge","phase":"prompt","step":0},{"ref":"@@pii-redaction","phase":"prompt","step":1},{"ref":"@@pii-redaction","phase":"response","step":0}]}'
+
+# Expand @@name guardrail references to the prefixed instance names.
+expand_refs() {
+  printf '%s' "${1//@@/${prefix}-}"
+}
+
+payload_hash() {
+  printf '%s' "$1" | openssl dgst -sha256 -r | awk '{print $1}'
+}
+
+workflow_payload_baseline_v1="$(expand_refs "$workflow_payload_baseline_v1")"
+workflow_payload_baseline="$(expand_refs "$workflow_payload_baseline")"
+workflow_payload_sales="$(expand_refs "$workflow_payload_sales")"
+workflow_payload_agents="$(expand_refs "$workflow_payload_agents")"
+workflow_payload_batch="$(expand_refs "$workflow_payload_batch")"
+workflow_payload_anthropic="$(expand_refs "$workflow_payload_anthropic")"
+
+workflow_hash_baseline_v1="$(payload_hash "$workflow_payload_baseline_v1")"
+workflow_hash_baseline="$(payload_hash "$workflow_payload_baseline")"
+workflow_hash_sales="$(payload_hash "$workflow_payload_sales")"
+workflow_hash_agents="$(payload_hash "$workflow_payload_agents")"
+workflow_hash_batch="$(payload_hash "$workflow_payload_batch")"
+workflow_hash_anthropic="$(payload_hash "$workflow_payload_anthropic")"
+
 mkdir -p "$(dirname "$db_path")"
 
 sqlite3 "$db_path" "PRAGMA journal_mode = WAL;" >/dev/null
@@ -136,6 +194,11 @@ sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN source TEXT NOT NULL DEFAULT 
 sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN last_reset_at INTEGER;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE budgets ADD COLUMN per_child INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
 sqlite3 "$db_path" "ALTER TABLE auth_keys ADD COLUMN allowed_models JSON;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE guardrail_definitions ADD COLUMN user_path TEXT;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE guardrail_definitions ADD COLUMN fail_mode TEXT NOT NULL DEFAULT '';" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE guardrail_definitions ADD COLUMN timeout_ms INTEGER NOT NULL DEFAULT 0;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE workflow_versions ADD COLUMN scope_user_path TEXT;" 2>/dev/null || true
+sqlite3 "$db_path" "ALTER TABLE workflow_versions ADD COLUMN managed_default INTEGER NOT NULL DEFAULT FALSE;" 2>/dev/null || true
 
 # make demo seeds before app startup, so migrate the rate-limit table here
 # when the database predates scoped user-path/provider/model rules.
@@ -371,6 +434,34 @@ CREATE TABLE IF NOT EXISTS tagging_settings (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS guardrail_definitions (
+  name TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  user_path TEXT,
+  config JSON NOT NULL,
+  fail_mode TEXT NOT NULL DEFAULT '',
+  timeout_ms INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workflow_versions (
+  id TEXT PRIMARY KEY,
+  scope_provider TEXT,
+  scope_model TEXT,
+  scope_user_path TEXT,
+  scope_key TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT TRUE,
+  managed_default INTEGER NOT NULL DEFAULT FALSE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  workflow_payload JSON NOT NULL,
+  workflow_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  CHECK (scope_provider IS NOT NULL OR scope_model IS NULL)
+);
 
 CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage(timestamp);
 CREATE INDEX IF NOT EXISTS idx_usage_request_id ON usage(request_id);
@@ -395,6 +486,11 @@ CREATE INDEX IF NOT EXISTS idx_auth_keys_enabled ON auth_keys(enabled);
 CREATE INDEX IF NOT EXISTS idx_auth_keys_created_at ON auth_keys(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_virtual_models_enabled ON virtual_models(enabled);
 CREATE INDEX IF NOT EXISTS idx_virtual_models_updated_at ON virtual_models(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_guardrail_definitions_type ON guardrail_definitions(type);
+CREATE INDEX IF NOT EXISTS idx_guardrail_definitions_updated_at ON guardrail_definitions(updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_scope_version ON workflow_versions(scope_key, version);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_versions_active_scope ON workflow_versions(scope_key) WHERE active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_workflow_versions_active_created_at ON workflow_versions(active, created_at DESC);
 
 BEGIN IMMEDIATE;
 
@@ -406,6 +502,8 @@ DELETE FROM rate_limits WHERE source = '${prefix}';
 DELETE FROM auth_keys WHERE id GLOB '${prefix}-key-*';
 DELETE FROM virtual_models WHERE description GLOB '${prefix}:*';
 DELETE FROM users WHERE description GLOB '${prefix}:*';
+DELETE FROM workflow_versions WHERE id GLOB '${prefix}-wf-*';
+DELETE FROM guardrail_definitions WHERE description GLOB '${prefix}:*';
 
 DROP TABLE IF EXISTS temp.demo_days;
 CREATE TEMP TABLE demo_days AS
@@ -504,6 +602,12 @@ SELECT
   abs(random()) % 10000 AS rewrite_bucket,
   abs(random()) % 10000 AS label_bucket,
   abs(random()) % 10000 AS session_bucket,
+  abs(random()) % 10000 AS guardrail_bucket,
+  abs(random()) % 10000 AS redact_bucket,
+  abs(random()) % 10000 AS normalize_bucket,
+  abs(random()) % 10000 AS outcome_bucket,
+  abs(random()) % 10000 AS alias_bucket,
+  abs(random()) % 10000 AS retarget_bucket,
   abs(random()) % CASE WHEN d.day = date(${seed_utc_epoch}, 'unixepoch')
     THEN ${current_utc_second} + 1
     ELSE 86400
@@ -514,11 +618,55 @@ JOIN demo_slots s ON s.slot_idx < d.request_count;
 
 DROP TABLE IF EXISTS temp.demo_generated;
 CREATE TEMP TABLE demo_generated AS
-WITH chosen AS (
+WITH pathed AS (
   SELECT
     b.*,
     p.user_path,
-    p.min_bucket AS path_min,
+    p.min_bucket AS path_min
+  FROM demo_random b
+  JOIN demo_paths p ON b.path_bucket >= p.min_bucket AND b.path_bucket < p.max_bucket
+),
+-- Paths that carry a model allowlist (see the users table below) draw only
+-- from the templates their policy permits, so the generated history never
+-- shows a request the gateway would have rejected. A node's allowlist bounds
+-- its whole subtree, which is why the two group rules apply to every path
+-- under them. Offsets land inside the template ranges declared above.
+routed AS (
+  SELECT
+    *,
+    CASE
+      -- gemini/ and openai/gpt-5-nano-2025-08-07: the two chat templates.
+      WHEN user_path = '/agents/team1/research' THEN
+        CASE retarget_bucket % 2
+          WHEN 0 THEN template_bucket % 1700           -- chat-openai
+          ELSE 3150 + (template_bucket % 1300)         -- chat-gemini
+        END
+      -- groq/llama-3.1-8b-instant and qwen-flash, which both bailian
+      -- templates serve.
+      WHEN user_path = '/engineering/ai/bot/batch' THEN
+        CASE retarget_bucket % 3
+          WHEN 0 THEN 1700 + (template_bucket % 1450)  -- chat-groq
+          WHEN 1 THEN 4450 + (template_bucket % 1200)  -- chat-bailian
+          ELSE 5650 + (template_bucket % 1200)         -- responses
+        END
+      -- /agents allows every provider except anthropic.
+      WHEN user_path GLOB '/agents*' AND template_bucket >= 6850 AND template_bucket < 7850 THEN
+        1700 + (template_bucket % 1450)                -- chat-groq
+      -- /sales allows openai/ and anthropic/claude-haiku-4-5-20251001.
+      WHEN user_path GLOB '/sales*' AND template_bucket >= 1700 AND template_bucket < 6850 THEN
+        CASE retarget_bucket % 4
+          WHEN 0 THEN template_bucket % 1700           -- chat-openai
+          WHEN 1 THEN 6850 + (template_bucket % 1000)  -- messages
+          WHEN 2 THEN 7850 + (template_bucket % 700)   -- embeddings
+          ELSE 8550 + (template_bucket % 1400)         -- stt and tts
+        END
+      ELSE template_bucket
+    END AS routed_template_bucket
+  FROM pathed
+),
+chosen AS (
+  SELECT
+    b.*,
     t.min_bucket AS template_min,
     t.label,
     t.endpoint,
@@ -532,10 +680,21 @@ WITH chosen AS (
     t.input_price,
     t.output_price,
     t.local_cache_eligible,
-    t.prompt_cache_eligible
-  FROM demo_random b
-  JOIN demo_paths p ON b.path_bucket >= p.min_bucket AND b.path_bucket < p.max_bucket
-  JOIN demo_templates t ON b.template_bucket >= t.min_bucket AND b.template_bucket < t.max_bucket
+    t.prompt_cache_eligible,
+    -- The workflow a request resolves to, replicating the gateway's
+    -- most-specific-scope match: the deepest user-path scope first, then a
+    -- provider scope, then the global baseline.
+    CASE
+      WHEN b.user_path GLOB '/sales*' THEN '${prefix}-wf-sales'
+      WHEN b.user_path GLOB '/agents/team1*' THEN '${prefix}-wf-agents'
+      WHEN b.user_path GLOB '/engineering/ai/bot/batch*' THEN '${prefix}-wf-batch'
+      WHEN b.user_path GLOB '/engineering/ai/mike*' THEN '${prefix}-wf-evals'
+      WHEN t.provider = 'anthropic' THEN '${prefix}-wf-anthropic'
+      ELSE '${prefix}-wf-global-v2'
+    END AS workflow_version_id,
+    CASE WHEN b.user_path GLOB '/engineering/ai/mike*' THEN 0 ELSE 1 END AS workflow_guardrails
+  FROM routed b
+  JOIN demo_templates t ON b.routed_template_bucket >= t.min_bucket AND b.routed_template_bucket < t.max_bucket
 ),
 tokens AS (
   SELECT
@@ -544,22 +703,33 @@ tokens AS (
     (output_min + ((token_noise / 97) % output_span)) * ${token_scale} AS output_tokens
   FROM chosen
 ),
+-- Local cache eligibility also depends on the matched workflow: the
+-- Anthropic policy turns the response cache off, so its traffic never reports
+-- a local hit. Provider prompt caching is upstream telemetry and unaffected.
 cache_decisions AS (
   SELECT
     *,
     CASE
-      WHEN local_cache_eligible = 1 AND cache_bucket < (${exact_cache_pct} * 100) THEN 'exact'
-      WHEN local_cache_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100) THEN 'semantic'
+      WHEN cache_workflow_eligible = 1 AND cache_bucket < (${exact_cache_pct} * 100) THEN 'exact'
+      WHEN cache_workflow_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100) THEN 'semantic'
       ELSE NULL
     END AS cache_type,
     CASE
       WHEN prompt_cache_eligible = 1
-        AND NOT (local_cache_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100))
+        AND NOT (cache_workflow_eligible = 1 AND cache_bucket < ((${exact_cache_pct} + ${semantic_cache_pct}) * 100))
         AND prompt_bucket < (${prompt_cache_pct} * 100)
       THEN 1
       ELSE 0
     END AS prompt_cache_hit
-  FROM tokens
+  FROM (
+    SELECT
+      *,
+      CASE
+        WHEN local_cache_eligible = 1 AND workflow_version_id != '${prefix}-wf-anthropic' THEN 1
+        ELSE 0
+      END AS cache_workflow_eligible
+    FROM tokens
+  )
 ),
 rewrite_decisions AS (
   SELECT
@@ -609,9 +779,87 @@ session_turns AS (
     row_number() OVER (PARTITION BY session_key ORDER BY second_of_day, slot_idx) AS session_turn,
     lag(slot_idx) OVER (PARTITION BY session_key ORDER BY second_of_day, slot_idx) AS previous_session_slot_idx
   FROM session_keys
+),
+-- Outcomes follow the request pipeline. Prompt guardrails run before the
+-- response cache is consulted and the budget is enforced on dispatch, so a
+-- locally cached answer can never be blocked or fail upstream; requests a
+-- guardrail or a budget stopped are audited without a usage row, the way the
+-- gateway records a request that produced no usage.
+outcomes AS (
+  SELECT
+    *,
+    CASE
+      WHEN cache_type IS NOT NULL THEN 'ok'
+      WHEN workflow_version_id = '${prefix}-wf-agents' AND guardrail_bucket < 120 THEN 'guardrail_blocked'
+      WHEN workflow_version_id = '${prefix}-wf-anthropic' AND guardrail_bucket < 180 THEN 'guardrail_blocked'
+      WHEN user_path IN ('/agents/team2/ops', '/sales/john/prospects') AND outcome_bucket < 250 THEN 'budget_blocked'
+      WHEN abs(token_noise / 131) % 1000 >= 994 THEN 'provider_error'
+      WHEN abs(token_noise / 131) % 1000 >= 985 THEN 'rate_limited'
+      ELSE 'ok'
+    END AS request_outcome
+  FROM session_turns
 )
 SELECT
   *,
+  CASE WHEN request_outcome IN ('budget_blocked', 'guardrail_blocked') THEN 0 ELSE 1 END AS usage_recorded,
+  -- Prompt-phase guardrail effects. The prompt phase runs before the cache
+  -- lookup and the budget check, so a cached or budget-stopped request still
+  -- carries the steps that ran; a step that comes after a blocking one in its
+  -- workflow never ran at all.
+  CASE
+    WHEN workflow_version_id = '${prefix}-wf-anthropic'
+      AND request_outcome != 'guardrail_blocked'
+      AND guardrail_bucket >= 180 AND guardrail_bucket < 720
+    THEN 1
+    ELSE 0
+  END AS guardrail_warned,
+  CASE
+    WHEN workflow_version_id IN ('${prefix}-wf-agents', '${prefix}-wf-batch')
+      AND normalize_bucket >= 3300
+    THEN 1
+    ELSE 0
+  END AS guardrail_normalized,
+  CASE
+    WHEN workflow_version_id IN (
+        '${prefix}-wf-global-v2', '${prefix}-wf-sales',
+        '${prefix}-wf-batch', '${prefix}-wf-anthropic')
+      AND request_outcome != 'guardrail_blocked'
+      AND redact_bucket < (${guardrail_edit_pct} * 100)
+    THEN 1
+    ELSE 0
+  END AS guardrail_redacted,
+  -- Roughly a fifth of conversational traffic asks for a virtual model
+  -- instead of a concrete one. The alias is drawn from those whose target
+  -- pool contains the resolved provider, so requested and resolved models
+  -- stay consistent; 'quality' is scoped to engineering and agents.
+  CASE
+    WHEN label NOT IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses', 'messages') THEN NULL
+    WHEN alias_bucket >= 2200 THEN NULL
+    WHEN provider = 'anthropic' THEN CASE
+      WHEN (user_path GLOB '/engineering*' OR user_path GLOB '/agents*') AND alias_bucket % 2 = 0 THEN 'quality'
+      ELSE 'smart'
+    END
+    WHEN provider = 'groq' THEN CASE alias_bucket % 3
+      WHEN 0 THEN 'fast'
+      WHEN 1 THEN 'cheap'
+      ELSE 'resilient'
+    END
+    WHEN provider = 'openai' THEN CASE alias_bucket % 4
+      WHEN 0 THEN 'smart'
+      WHEN 1 THEN 'cheap'
+      WHEN 2 THEN 'normal'
+      ELSE CASE
+        WHEN user_path GLOB '/engineering*' OR user_path GLOB '/agents*' THEN 'quality'
+        ELSE 'resilient'
+      END
+    END
+    ELSE CASE alias_bucket % 4
+      WHEN 0 THEN 'smart'
+      WHEN 1 THEN 'fast'
+      WHEN 2 THEN 'cheap'
+      ELSE 'resilient'
+    END
+  END AS alias_source,
   input_tokens + output_tokens AS total_tokens,
   CASE
     WHEN rewrite_hit = 1 THEN CAST(input_tokens * (8 + ((token_noise / 17) % 23)) / 100 AS INTEGER)
@@ -640,7 +888,7 @@ SELECT
   '${prefix}-audit-' || day_idx || '-' || slot_idx AS audit_id,
   '${prefix}-req-' || day_idx || '-' || slot_idx AS request_id,
   '${prefix}-provider-' || day_idx || '-' || slot_idx AS provider_id
-FROM session_turns;
+FROM outcomes;
 
 INSERT INTO usage (
   id, request_id, provider_id, timestamp, model, provider, provider_name,
@@ -735,7 +983,181 @@ SELECT
     ELSE 'demo_model_pricing'
   END AS cost_source,
   ''
-FROM demo_generated;
+-- Requests stopped by a budget or a prompt guardrail never reach a provider,
+-- so they are audited without a usage row.
+FROM demo_generated
+WHERE usage_recorded = 1;
+
+-- The audit request-revision chain, one row per step that changed the
+-- request or objected to it: first the ingress rewriters, then the prompt
+-- guardrails in the step order of the matched workflow, exactly as the
+-- gateway records them. Steps that allowed a request without touching it
+-- leave no entry, and each entry starts from the size the previous step
+-- produced, so the chain reads as one request being reshaped.
+DROP TABLE IF EXISTS temp.demo_revisions;
+CREATE TEMP TABLE demo_revisions AS
+WITH candidates AS (
+  SELECT *, 8000 + (token_noise % 18000) AS bytes_original
+  FROM demo_generated
+  WHERE rewrite_hit = 1
+     OR guardrail_normalized = 1
+     OR guardrail_redacted = 1
+     OR guardrail_warned = 1
+     OR request_outcome = 'guardrail_blocked'
+     OR workflow_version_id = '${prefix}-wf-sales'
+),
+after_rewriter AS (
+  SELECT *, CASE
+    WHEN rewrite_hit = 1 THEN CAST(bytes_original * (62 + (rewrite_bucket % 24)) / 100 AS INTEGER)
+    ELSE bytes_original
+  END AS bytes_rewritten
+  FROM candidates
+),
+after_normalizer AS (
+  SELECT *, CASE
+    WHEN guardrail_normalized = 1 THEN CAST(bytes_rewritten * (74 + (normalize_bucket % 19)) / 100 AS INTEGER)
+    ELSE bytes_rewritten
+  END AS bytes_normalized
+  FROM after_rewriter
+),
+after_redaction AS (
+  SELECT *, CASE
+    WHEN guardrail_redacted = 1 THEN bytes_normalized - (12 + (redact_bucket % 40))
+    ELSE bytes_normalized
+  END AS bytes_redacted
+  FROM after_normalizer
+),
+chain AS (
+  SELECT *, CASE
+    WHEN workflow_version_id = '${prefix}-wf-sales' THEN bytes_redacted + 214
+    ELSE bytes_redacted
+  END AS bytes_toned
+  FROM after_redaction
+)
+SELECT
+  audit_id,
+  1 AS step_order,
+  json_object(
+    'rewriter', 'demo-context-compression',
+    'bytes_before', bytes_original,
+    'bytes_after', bytes_rewritten,
+    'tokens_saved', rewrite_tokens_saved,
+    'body', json_object(
+      'model', coalesce(alias_source, provider_name || '/' || model),
+      'input', 'Compressed context for ' || user_path || ': retain gateway totals, cache behavior, budget risk, and action items.',
+      'metadata', json_object('demo', json('true'), 'rewritten', json('true'))
+    ),
+    'detail', json_object(
+      'strategy', 'context-compression',
+      'tokens_saved_estimate', rewrite_tokens_saved,
+      'preserved_sections', json_array('usage', 'cache', 'budget', 'actions')
+    )
+  ) AS revision
+FROM chain
+WHERE rewrite_hit = 1
+
+UNION ALL
+SELECT
+  audit_id,
+  2,
+  json_object(
+    'rewriter', '${prefix}-prompt-normalizer',
+    'bytes_before', bytes_rewritten,
+    'bytes_after', bytes_normalized,
+    'body', json_object(
+      'model', coalesce(alias_source, provider_name || '/' || model),
+      'messages', json_array(json_object(
+        'role', 'user',
+        'content', 'Normalized turn ' || session_turn || ' for ' || user_path || ': one self-contained question with the run identifiers kept.'
+      ))
+    ),
+    'detail', json_object('phase', 'prompt', 'action', 'allow')
+  )
+FROM chain
+WHERE guardrail_normalized = 1
+
+UNION ALL
+SELECT
+  audit_id,
+  3,
+  json_object(
+    'rewriter', '${prefix}-prompt-injection-judge',
+    'bytes_before', bytes_normalized,
+    'bytes_after', bytes_normalized,
+    'no_change', json('true'),
+    'detail', json_object(
+      'phase', 'prompt',
+      'action', 'warn',
+      'code', 'guardrail_warning',
+      'message', 'The judge verdict was unclear; the request was allowed and flagged.'
+    )
+  )
+FROM chain
+WHERE guardrail_warned = 1
+
+UNION ALL
+SELECT
+  audit_id,
+  4,
+  json_object(
+    'rewriter', '${prefix}-pii-redaction',
+    'bytes_before', bytes_normalized,
+    'bytes_after', bytes_redacted,
+    'detail', json_object('phase', 'prompt', 'action', 'allow')
+  )
+FROM chain
+WHERE guardrail_redacted = 1
+
+UNION ALL
+SELECT
+  audit_id,
+  5,
+  json_object(
+    'rewriter', '${prefix}-sales-assistant-tone',
+    'bytes_before', bytes_redacted,
+    'bytes_after', bytes_toned,
+    'detail', json_object('phase', 'prompt', 'action', 'allow')
+  )
+FROM chain
+WHERE workflow_version_id = '${prefix}-wf-sales'
+
+UNION ALL
+SELECT
+  audit_id,
+  6,
+  json_object(
+    'rewriter', CASE WHEN workflow_version_id = '${prefix}-wf-agents' THEN '${prefix}-blocked-terms' ELSE '${prefix}-prompt-injection-judge' END,
+    'bytes_before', bytes_normalized,
+    'bytes_after', bytes_normalized,
+    'no_change', json('true'),
+    'detail', json_object(
+      'phase', 'prompt',
+      'action', 'block',
+      'code', 'guardrail_blocked',
+      'message', CASE
+        WHEN workflow_version_id = '${prefix}-wf-agents'
+          THEN 'This request mentions material that may not leave the tenant. Remove it and try again.'
+        ELSE 'This prompt was rejected as a prompt-injection attempt.'
+      END
+    )
+  )
+FROM chain
+WHERE request_outcome = 'guardrail_blocked';
+
+DROP TABLE IF EXISTS temp.demo_revision_arrays;
+CREATE TEMP TABLE demo_revision_arrays AS
+SELECT audit_id, json_group_array(json(json_set(revision, '$.seq', rn))) AS revisions
+FROM (
+  SELECT
+    audit_id,
+    revision,
+    row_number() OVER (PARTITION BY audit_id ORDER BY step_order) AS rn
+  FROM demo_revisions
+  ORDER BY audit_id, step_order
+)
+GROUP BY audit_id;
+
+CREATE UNIQUE INDEX temp.idx_demo_revision_arrays ON demo_revision_arrays(audit_id);
 
 INSERT INTO audit_logs (
   id, timestamp, duration_ns, requested_model, resolved_model, provider, provider_name,
@@ -747,7 +1169,13 @@ SELECT
   timestamp,
   -- Each provider gets its own latency profile so the dashboard's provider
   -- latency chart shows distinct, plausible lines instead of overlapping noise.
-  CASE WHEN cache_type IS NOT NULL THEN 8000000 + (token_noise % 12000000)
+  -- Requests stopped early are fast, and a cache hit skips the provider.
+  CASE
+    WHEN request_outcome = 'budget_blocked' THEN 900000 + (token_noise % 2200000)
+    WHEN request_outcome = 'guardrail_blocked' AND workflow_version_id = '${prefix}-wf-agents'
+      THEN 1400000 + (token_noise % 3600000)
+    WHEN request_outcome = 'guardrail_blocked' THEN 190000000 + (token_noise % 520000000)
+    WHEN cache_type IS NOT NULL THEN 8000000 + (token_noise % 12000000)
     ELSE CAST((90000000 + (token_noise % 260000000)) * CASE provider
       WHEN 'groq' THEN 0.45
       WHEN 'gemini' THEN 0.8
@@ -755,43 +1183,117 @@ SELECT
       WHEN 'bailian' THEN 2.2
       ELSE 1.0
     END AS INTEGER)
-  END,
-  provider_name || '/' || model,
+  END
+  -- The prompt phase runs first, so a guardrail that calls a model is part of
+  -- the total whatever the request did next: a cache hit skipped the provider,
+  -- and a later step blocked the request only after this call had been paid
+  -- for.
+  + CASE WHEN guardrail_normalized = 1 THEN 210000000 + (token_noise % 260000000) ELSE 0 END
+  + CASE WHEN guardrail_warned = 1 THEN 170000000 + (token_noise % 240000000) ELSE 0 END,
+  coalesce(alias_source, provider_name || '/' || model),
   provider_name || '/' || model,
   provider,
   provider_name,
-  0,
-  NULL,
+  CASE WHEN alias_source IS NOT NULL THEN 1 ELSE 0 END,
+  workflow_version_id,
   cache_type,
-  CASE
-    WHEN abs(token_noise / 131) % 1000 < 985 THEN 200
-    WHEN abs(token_noise / 131) % 1000 < 994 THEN 429
-    ELSE 500
+  CASE request_outcome
+    WHEN 'budget_blocked' THEN 429
+    WHEN 'guardrail_blocked' THEN
+      CASE WHEN workflow_version_id = '${prefix}-wf-agents' THEN 403 ELSE 400 END
+    WHEN 'rate_limited' THEN 429
+    WHEN 'provider_error' THEN 500
+    ELSE 200
   END,
   request_id,
-  NULL,
-  'master_key',
-  '127.0.0.1',
+  -- The generated demo keys own the traffic of their user paths, except where
+  -- a key could not have made the request: the sales key allows only openai/,
+  -- so its path's other providers were reached with the master key.
+  CASE
+    WHEN user_path GLOB '/agents/team1*' THEN '${prefix}-key-team1'
+    WHEN user_path GLOB '/engineering/ai*' THEN '${prefix}-key-engineering'
+    WHEN user_path GLOB '/sales/john*' AND provider = 'openai' THEN '${prefix}-key-sales'
+    ELSE NULL
+  END,
+  CASE
+    WHEN user_path GLOB '/agents/team1*'
+      OR user_path GLOB '/engineering/ai*'
+      OR (user_path GLOB '/sales/john*' AND provider = 'openai') THEN 'api_key'
+    ELSE 'master_key'
+  END,
+  '10.42.' || (abs(token_noise / 7) % 6) || '.' || ((abs(token_noise / 13) % 250) + 2),
   'POST',
   endpoint,
   user_path,
   session_id,
-  0,
+  -- Streaming is what the client asked for, so a request a guardrail or a
+  -- budget stopped keeps the flag its body carries.
   CASE
-    WHEN abs(token_noise / 131) % 1000 < 985 THEN ''
-    WHEN abs(token_noise / 131) % 1000 < 994 THEN 'rate_limit_exceeded'
-    ELSE 'provider_error'
+    WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian', 'responses', 'messages')
+      AND slot_idx % 5 = 0
+    THEN 1
+    ELSE 0
+  END,
+  CASE request_outcome
+    WHEN 'budget_blocked' THEN 'rate_limit_error'
+    WHEN 'guardrail_blocked' THEN 'invalid_request_error'
+    WHEN 'rate_limited' THEN 'rate_limit_error'
+    WHEN 'provider_error' THEN 'provider_error'
+    ELSE ''
   END,
   json_object(
     'demo_seed', 1,
+    -- The effective features of the workflow this request matched.
     'workflow_features', json_object(
-      'cache', json('true'),
+      'cache', json(CASE WHEN workflow_version_id = '${prefix}-wf-anthropic' THEN 'false' ELSE 'true' END),
       'audit', json('true'),
       'usage', json('true'),
       'budget', json('true'),
-      'guardrails', json('false'),
-      'failover', json('true')
+      'guardrails', json(CASE WHEN workflow_guardrails = 1 THEN 'true' ELSE 'false' END),
+      'failover', json(CASE WHEN workflow_version_id = '${prefix}-wf-batch' THEN 'false' ELSE 'true' END)
     ),
+    'error_code', CASE request_outcome
+      WHEN 'budget_blocked' THEN 'budget_exceeded'
+      WHEN 'guardrail_blocked' THEN 'guardrail_blocked'
+      WHEN 'rate_limited' THEN 'demo_rate_limit'
+      WHEN 'provider_error' THEN 'demo_provider_error'
+      ELSE NULL
+    END,
+    'error_message', CASE request_outcome
+      WHEN 'budget_blocked' THEN 'daily budget for ' || user_path || ' exceeded'
+      WHEN 'guardrail_blocked' THEN
+        CASE
+          WHEN workflow_version_id = '${prefix}-wf-agents'
+            THEN 'This request mentions material that may not leave the tenant. Remove it and try again.'
+          ELSE 'This prompt was rejected as a prompt-injection attempt.'
+        END
+      WHEN 'rate_limited' THEN 'Synthetic rate limit for demo audit inspection. Retry after a moment.'
+      WHEN 'provider_error' THEN 'Synthetic upstream provider error for demo audit inspection.'
+      ELSE NULL
+    END,
+    -- Gateway-raised errors name no provider; a budget stop names the budget
+    -- checker, which is how the dashboard tells them apart from upstream ones.
+    'error_provider', CASE request_outcome
+      WHEN 'budget_blocked' THEN 'budget'
+      WHEN 'rate_limited' THEN provider_name
+      WHEN 'provider_error' THEN provider_name
+      ELSE NULL
+    END,
+    -- The failover snapshot names the target the redirect moved to; it is
+    -- present exactly when the seeded attempt trail shows a failover.
+    -- Only a workflow with failover on can redirect, so the batch workflow's
+    -- failures carry no target and get no failover attempt below.
+    'failover', json(CASE
+      WHEN request_outcome = 'provider_error' AND workflow_version_id != '${prefix}-wf-batch'
+      THEN json_object('target_model', CASE provider
+        WHEN 'openai' THEN 'groq/llama-3.1-8b-instant'
+        WHEN 'groq' THEN 'gemini/gemini-2.5-flash-lite'
+        WHEN 'gemini' THEN 'groq/llama-3.1-8b-instant'
+        WHEN 'bailian' THEN 'groq/llama-3.1-8b-instant'
+        ELSE 'openai/gpt-5-nano-2025-08-07'
+      END)
+      ELSE 'null'
+    END),
     'cache_type', cache_type,
     'cache_story', CASE
       WHEN cache_type = 'exact' THEN 'Exact response cache hit'
@@ -799,29 +1301,12 @@ SELECT
       WHEN prompt_cache_hit = 1 THEN 'Provider prompt cache telemetry'
       ELSE 'Uncached provider request'
     END,
-    'request_revisions', json(CASE
-      WHEN rewrite_hit = 1 THEN json_array(json_object(
-        'seq', 1,
-        'rewriter', 'demo-context-compression',
-        'bytes_before', 12000 + (token_noise % 28000),
-        'bytes_after', CAST((12000 + (token_noise % 28000)) * (62 + (rewrite_bucket % 24)) / 100 AS INTEGER),
-        'tokens_saved', rewrite_tokens_saved,
-        'body', json_object(
-          'model', provider_name || '/' || model,
-          'input', 'Compressed context for ' || user_path || ': retain gateway totals, cache behavior, budget risk, and action items.',
-          'metadata', json_object('demo', json('true'), 'rewritten', json('true'))
-        ),
-        'detail', json_object(
-          'strategy', 'context-compression',
-          'tokens_saved_estimate', rewrite_tokens_saved,
-          'preserved_sections', json_array('usage', 'cache', 'budget', 'actions')
-        )
-      ))
-      ELSE 'null'
-    END),
+    -- One entry per rewriter or prompt guardrail that changed the request or
+    -- objected to it, in application order (see temp.demo_revisions).
+    'request_revisions', json(coalesce(revisions, 'null')),
     'request_body', json(CASE
       WHEN label IN ('chat-openai', 'chat-groq', 'chat-gemini', 'chat-bailian') THEN json_object(
-        'model', provider_name || '/' || model,
+        'model', coalesce(alias_source, provider_name || '/' || model),
         'session_id', session_id,
         'messages', json_array(
           json_object('role', 'system', 'content', 'You are a concise assistant for internal demo traffic. Respect the user path and return actionable JSON when useful.'),
@@ -839,13 +1324,14 @@ SELECT
         )
       )
       WHEN label = 'responses' THEN json_object(
-        'model', provider_name || '/' || model,
+        'model', coalesce(alias_source, provider_name || '/' || model),
         'session_id', session_id,
         'input', json_array(
           json_object('role', 'system', 'content', 'You are GoModel demo analysis worker.'),
           json_object('role', 'user', 'content', 'Create a short incident-style report for ' || user_path || ' on session turn ' || session_turn || ' using token totals and cache telemetry.')
         ),
         'instructions', 'Return sections named summary, observations, and recommendation.',
+        'stream', CASE WHEN slot_idx % 5 = 0 THEN json('true') ELSE json('false') END,
         'previous_response_id', CASE
           WHEN previous_session_slot_idx IS NOT NULL THEN '${prefix}-response-' || day_idx || '-' || previous_session_slot_idx
           ELSE NULL
@@ -854,7 +1340,7 @@ SELECT
         'metadata', json_object('demo', json('true'), 'request_id', request_id)
       )
       WHEN label = 'messages' THEN json_object(
-        'model', provider_name || '/' || model,
+        'model', coalesce(alias_source, provider_name || '/' || model),
         'session_id', session_id,
         'system', 'You help the engineering and sales teams reason about AI gateway telemetry.',
         'messages', json_array(
@@ -863,6 +1349,7 @@ SELECT
           ))
         ),
         'max_tokens', output_tokens,
+        'stream', CASE WHEN slot_idx % 5 = 0 THEN json('true') ELSE json('false') END,
         'temperature', round(0.10 + ((token_noise % 55) / 100.0), 2)
       )
       WHEN label = 'embeddings' THEN json_object(
@@ -899,7 +1386,27 @@ SELECT
       ELSE json_object('model', provider_name || '/' || model, 'input', 'Generated demo request')
     END),
     'response_body', json(CASE
-      WHEN abs(token_noise / 131) % 1000 >= 994 THEN json_object(
+      WHEN request_outcome = 'budget_blocked' THEN json_object(
+        'error', json_object(
+          'message', 'daily budget for ' || user_path || ' exceeded',
+          'type', 'rate_limit_error',
+          'code', 'budget_exceeded',
+          'param', NULL
+        )
+      )
+      WHEN request_outcome = 'guardrail_blocked' THEN json_object(
+        'error', json_object(
+          'message', CASE
+            WHEN workflow_version_id = '${prefix}-wf-agents'
+              THEN 'This request mentions material that may not leave the tenant. Remove it and try again.'
+            ELSE 'This prompt was rejected as a prompt-injection attempt.'
+          END,
+          'type', 'invalid_request_error',
+          'code', 'guardrail_blocked',
+          'param', NULL
+        )
+      )
+      WHEN request_outcome = 'provider_error' THEN json_object(
         'error', json_object(
           'message', 'Synthetic upstream provider error for demo audit inspection.',
           'type', 'provider_error',
@@ -907,10 +1414,10 @@ SELECT
           'param', 'model'
         )
       )
-      WHEN abs(token_noise / 131) % 1000 >= 985 THEN json_object(
+      WHEN request_outcome = 'rate_limited' THEN json_object(
         'error', json_object(
           'message', 'Synthetic rate limit for demo audit inspection. Retry after a moment.',
-          'type', 'rate_limit_exceeded',
+          'type', 'rate_limit_error',
           'code', 'demo_rate_limit',
           'param', NULL
         )
@@ -1008,7 +1515,7 @@ SELECT
       ELSE json_object('id', '${prefix}-response-' || day_idx || '-' || slot_idx, 'object', label)
     END)
   )
-FROM demo_generated;
+FROM demo_generated LEFT JOIN demo_revision_arrays USING (audit_id);
 
 -- Attempt trails feed the request drawer's failover pips. Failed entries show
 -- a primary attempt plus a cross-provider failover that also failed (the
@@ -1025,7 +1532,7 @@ SELECT
   'Synthetic upstream 502 from ' || provider_name || ' for demo failover inspection.',
   timestamp, 90000000 + (token_noise % 140000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 >= 994
+WHERE request_outcome = 'provider_error'
 UNION ALL
 SELECT
   audit_id, 2, 'failover',
@@ -1043,7 +1550,8 @@ SELECT
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
   80000000 + (token_noise % 110000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 >= 994
+WHERE request_outcome = 'provider_error'
+  AND workflow_version_id != '${prefix}-wf-batch'
   AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
 
 INSERT INTO audit_log_attempts (
@@ -1057,7 +1565,7 @@ SELECT
   'Provider returned 429 for demo inspection; the gateway retried with backoff.',
   timestamp, 40000000 + (token_noise % 50000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 < 985 AND cache_type IS NULL AND token_noise % 37 = 0
+WHERE request_outcome = 'ok' AND cache_type IS NULL AND token_noise % 37 = 0
 UNION ALL
 SELECT
   audit_id, 2, 'retry', provider, provider_name, model,
@@ -1065,10 +1573,150 @@ SELECT
   strftime('%Y-%m-%dT%H:%M:%fZ', day || ' 00:00:00', '+' || (second_of_day + 1) || ' seconds'),
   90000000 + (token_noise % 200000000)
 FROM demo_generated
-WHERE abs(token_noise / 131) % 1000 < 985
+WHERE request_outcome = 'ok'
   AND cache_type IS NULL
   AND token_noise % 37 = 0
   AND (day != date(${seed_utc_epoch}, 'unixepoch') OR second_of_day < ${current_utc_second});
+
+-- Guardrail instances are plugin configurations the workflows below
+-- reference by name. Types cover every built-in plugin, so the Guardrails
+-- page shows a working example of each. INSERT OR IGNORE keeps an
+-- operator-created instance of the same name untouched; the demo rows are
+-- recognised by their prefixed description and replaced on reseed.
+-- The two model-backed instances fail open so a demo gateway without the
+-- matching provider key keeps serving traffic instead of rejecting it.
+INSERT OR IGNORE INTO guardrail_definitions (
+  name, type, description, user_path, config, fail_mode, timeout_ms, created_at, updated_at
+)
+VALUES
+  (
+    '${prefix}-pii-redaction', 'string_replace',
+    '${prefix}: masks emails, phone numbers, keys, and SSNs in prompts and answers',
+    NULL, '${guardrail_config_pii}', 'closed', 0,
+    ${seed_utc_epoch} - 5184000, ${seed_utc_epoch} - 604800
+  ),
+  (
+    '${prefix}-blocked-terms', 'string_replace',
+    '${prefix}: rejects prompts naming confidential programs',
+    NULL, '${guardrail_config_blocked_terms}', 'closed', 0,
+    ${seed_utc_epoch} - 4320000, ${seed_utc_epoch} - 1209600
+  ),
+  (
+    '${prefix}-sales-assistant-tone', 'system_prompt',
+    '${prefix}: decorates the system prompt for sales conversations',
+    '/sales', '${guardrail_config_sales_tone}', '', 0,
+    ${seed_utc_epoch} - 3888000, ${seed_utc_epoch} - 259200
+  ),
+  (
+    '${prefix}-gateway-headers', 'header_edit',
+    '${prefix}: tags responses and forwards the tenant header upstream',
+    NULL, '${guardrail_config_headers}', 'open', 0,
+    ${seed_utc_epoch} - 3456000, ${seed_utc_epoch} - 259200
+  ),
+  (
+    '${prefix}-prompt-injection-judge', 'llm_judge',
+    '${prefix}: blocks prompt-injection attempts before the provider call',
+    NULL, '${guardrail_config_injection_judge}', 'open', 4000,
+    ${seed_utc_epoch} - 2592000, ${seed_utc_epoch} - 86400
+  ),
+  (
+    '${prefix}-answer-quality-judge', 'llm_judge',
+    '${prefix}: flags answers that ignore the retrieved context',
+    '/sales', '${guardrail_config_quality_judge}', 'open', 6000,
+    ${seed_utc_epoch} - 1728000, ${seed_utc_epoch} - 86400
+  ),
+  (
+    '${prefix}-prompt-normalizer', 'llm_based_altering',
+    '${prefix}: rewrites agent and batch prompts into self-contained questions',
+    NULL, '${guardrail_config_normalizer}', 'open', 8000,
+    ${seed_utc_epoch} - 2160000, ${seed_utc_epoch} - 172800
+  );
+
+-- Workflows are immutable versions selected per request by the most specific
+-- matching scope. The seeded set covers a global baseline (with one
+-- superseded version so the history view is not empty), three user-path
+-- scopes, and one provider scope, and attaches the guardrails above across
+-- the prompt and response phases. Active rows for these scopes are retired
+-- first, exactly as publishing a new version does; the gateway leaves an
+-- operator-authored active global workflow in place, so the managed default
+-- is not recreated over this one.
+UPDATE workflow_versions
+SET active = FALSE
+WHERE active = TRUE
+  AND scope_key IN (
+    'global', 'path:/sales', 'path:/agents/team1',
+    'path:/engineering/ai/bot/batch', 'path:/engineering/ai/mike', 'provider:anthropic'
+  );
+
+INSERT INTO workflow_versions (
+  id, scope_provider, scope_model, scope_user_path, scope_key, version,
+  active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+)
+SELECT '${prefix}-wf-global-v1', NULL, NULL, NULL, 'global',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'global') + 1,
+  FALSE, FALSE, 'Gateway baseline',
+  'Superseded: cache, audit, usage, budgets, and failover without guardrails',
+  '${workflow_payload_baseline_v1}', '${workflow_hash_baseline_v1}', ${seed_utc_epoch} - 5184000;
+
+INSERT INTO workflow_versions (
+  id, scope_provider, scope_model, scope_user_path, scope_key, version,
+  active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+)
+SELECT '${prefix}-wf-global-v2', NULL, NULL, NULL, 'global',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'global') + 1,
+  TRUE, FALSE, 'Gateway baseline',
+  'Default for unscoped traffic: redaction and response tagging on every request',
+  '${workflow_payload_baseline}', '${workflow_hash_baseline}', ${seed_utc_epoch} - 2592000;
+
+INSERT INTO workflow_versions (
+  id, scope_provider, scope_model, scope_user_path, scope_key, version,
+  active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+)
+SELECT '${prefix}-wf-sales', NULL, NULL, '/sales', 'path:/sales',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/sales') + 1,
+  TRUE, FALSE, 'Sales assistant',
+  'Redacts customer data, sets the sales tone, and judges answer quality',
+  '${workflow_payload_sales}', '${workflow_hash_sales}', ${seed_utc_epoch} - 1728000;
+
+INSERT INTO workflow_versions (
+  id, scope_provider, scope_model, scope_user_path, scope_key, version,
+  active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+)
+SELECT '${prefix}-wf-agents', NULL, NULL, '/agents/team1', 'path:/agents/team1',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/agents/team1') + 1,
+  TRUE, FALSE, 'Agent research',
+  'Normalizes long agent prompts and rejects confidential program names',
+  '${workflow_payload_agents}', '${workflow_hash_agents}', ${seed_utc_epoch} - 2160000;
+
+INSERT INTO workflow_versions (
+  id, scope_provider, scope_model, scope_user_path, scope_key, version,
+  active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+)
+SELECT '${prefix}-wf-batch', NULL, NULL, '/engineering/ai/bot/batch', 'path:/engineering/ai/bot/batch',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/engineering/ai/bot/batch') + 1,
+  TRUE, FALSE, 'Batch jobs',
+  'Prompt normalization and redaction for batch traffic, failover off',
+  '${workflow_payload_batch}', '${workflow_hash_batch}', ${seed_utc_epoch} - 1296000;
+
+INSERT INTO workflow_versions (
+  id, scope_provider, scope_model, scope_user_path, scope_key, version,
+  active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+)
+SELECT '${prefix}-wf-evals', NULL, NULL, '/engineering/ai/mike', 'path:/engineering/ai/mike',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'path:/engineering/ai/mike') + 1,
+  TRUE, FALSE, 'Evaluation harness',
+  'Guardrails off so evaluation prompts reach the model exactly as written',
+  '${workflow_payload_baseline_v1}', '${workflow_hash_baseline_v1}', ${seed_utc_epoch} - 1036800;
+
+INSERT INTO workflow_versions (
+  id, scope_provider, scope_model, scope_user_path, scope_key, version,
+  active, managed_default, name, description, workflow_payload, workflow_hash, created_at
+)
+SELECT '${prefix}-wf-anthropic', 'anthropic', NULL, NULL, 'provider:anthropic',
+  (SELECT coalesce(max(version), 0) FROM workflow_versions WHERE scope_key = 'provider:anthropic') + 1,
+  TRUE, FALSE, 'Anthropic policy',
+  'Judges prompts for injection and redacts both sides; response cache off',
+  '${workflow_payload_anthropic}', '${workflow_hash_anthropic}', ${seed_utc_epoch} - 864000;
 
 DROP TABLE IF EXISTS temp.demo_budget_paths;
 CREATE TEMP TABLE demo_budget_paths(user_path TEXT, daily_amount REAL, weekly_amount REAL, monthly_amount REAL);
@@ -1291,7 +1939,8 @@ VALUES
 -- Selectors show every canonical form: provider-wide "provider/", exact
 -- "provider/model", and model-wide "model". An empty list keeps the node
 -- unrestricted while still carrying a description. INSERT OR IGNORE leaves
--- operator-created policies for the same path untouched.
+-- operator-created policies for the same path untouched. The generated
+-- traffic is routed to respect every list here (see the routed CTE above).
 INSERT OR IGNORE INTO users (user_path, allowed_models, description, created_at, updated_at)
 VALUES
   (
@@ -1441,6 +2090,19 @@ SELECT 'mcp_server_rows', count(*) FROM mcp_servers
 WHERE name GLOB 'demo-' || substr(lower(replace('${prefix}', '.', '-')), 1, 44) || '-*';
 SELECT 'auth_key_rows', count(*) FROM auth_keys WHERE id GLOB '${prefix}-key-*';
 SELECT 'virtual_model_rows', count(*) FROM virtual_models WHERE description GLOB '${prefix}:*';
+SELECT 'guardrail_rows', count(*) FROM guardrail_definitions WHERE description GLOB '${prefix}:*';
+SELECT 'guardrail_types', type, count(*) FROM guardrail_definitions
+WHERE description GLOB '${prefix}:*' GROUP BY 2 ORDER BY 2;
+SELECT 'workflow_rows', count(*), sum(active) FROM workflow_versions WHERE id GLOB '${prefix}-wf-*';
+SELECT 'workflow_traffic', workflow_version_id, count(*)
+FROM audit_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 3 DESC;
+SELECT 'request_revisions', count(*) FROM audit_logs
+WHERE id GLOB '${prefix}-*' AND json_extract(data, '$.request_revisions') IS NOT NULL;
+SELECT 'audit_status_mix', status_code, count(*)
+FROM audit_logs WHERE id GLOB '${prefix}-*' GROUP BY 2 ORDER BY 2;
+SELECT 'blocked_requests', coalesce(json_extract(data, '$.error_code'), 'none'), count(*)
+FROM audit_logs WHERE id GLOB '${prefix}-*' AND status_code >= 400 GROUP BY 2 ORDER BY 2;
+SELECT 'alias_requests', count(*) FROM audit_logs WHERE id GLOB '${prefix}-*' AND alias_used = 1;
 SELECT 'cache_mix', coalesce(cache_type, CASE
   WHEN coalesce(json_extract(raw_data, '$.prompt_cached_tokens'), 0) > 0
     OR coalesce(json_extract(raw_data, '$.cached_tokens'), 0) > 0
@@ -1489,6 +2151,15 @@ datasets side by side, use a different DEMO_SEED_PREFIX.
 Audit entries carry session ids, so the Audit Logs page groups them into
 threads by default ("Group by session"); failed and retried requests carry
 attempt trails visible in the request drawer.
+
+Every request resolves to one of the seeded workflows, so the request drawer
+renders its pipeline. Guardrails cover all built-in plugin types and are
+attached across the prompt and response phases; requests a prompt guardrail
+blocked, and requests a budget stopped, are audited without a usage row, the
+way the gateway records a request that never reached a provider. Start the
+gateway with GUARDRAILS_ENABLED=true (make demo does) to see the Guardrails
+and Plugins pages live; the two model-backed guardrails fail open, so a
+gateway without those provider keys keeps serving traffic.
 
 The Users page shows per-user-path model allowlists (groups bound their
 subtrees; /agents/team1/research and /engineering/ai/bot/batch narrow their

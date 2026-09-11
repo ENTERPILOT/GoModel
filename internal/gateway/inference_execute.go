@@ -203,7 +203,26 @@ func (o *InferenceOrchestrator) executeResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, o.responsesProviderCall, responsesResponseProvider)
+	return executeTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.responsesProviderCall), responsesResponseProvider)
+}
+
+// patchedResponsesCall runs the Responses attempt patcher, when configured,
+// in front of call. The attempt's provider type comes from the request's own
+// selector, which the primary carries after resolution and a failover clone
+// carries from its target, falling back to the workflow's provider type.
+func patchedResponsesCall[T any](o *InferenceOrchestrator, workflow *core.Workflow, call func(context.Context, *core.ResponsesRequest) (T, error)) func(context.Context, *core.ResponsesRequest) (T, error) {
+	if o.responsesAttemptPatcher == nil {
+		return call
+	}
+	return func(ctx context.Context, req *core.ResponsesRequest) (T, error) {
+		providerType := o.ProviderTypeForSelector(core.ModelSelector{Model: req.Model, Provider: req.Provider}, ProviderTypeFromWorkflow(workflow))
+		patched, err := o.responsesAttemptPatcher.PatchResponsesAttempt(ctx, req, providerType)
+		if err != nil {
+			var zero T
+			return zero, err
+		}
+		return call(ctx, patched)
+	}
 }
 
 func (o *InferenceOrchestrator) streamResponses(
@@ -215,7 +234,7 @@ func (o *InferenceOrchestrator) streamResponses(
 	if err := o.validateProviderAndRequest(req != nil, "responses request is required"); err != nil {
 		return nil, ExecutionMeta{}, err
 	}
-	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, o.streamResponsesProviderCall)
+	return streamTranslatedProviderRequest(o, ctx, workflow, req, req.Model, req.Provider, providerType, providerName, usageModel, CloneResponsesRequestForSelector, patchedResponsesCall(o, workflow, o.streamResponsesProviderCall))
 }
 
 type translatedExecutionSpec[Req any, Resp any, Result any] struct {

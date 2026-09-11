@@ -22,6 +22,9 @@ type chatChunk struct {
 			ReasoningContent string              `json:"reasoning_content"`
 			StopSequence     string              `json:"stop_sequence"`
 			ToolCalls        []chatToolCallDelta `json:"tool_calls"`
+			// ExtraContent is provider replay state for the turn so far;
+			// Anthropic thinking signatures arrive here.
+			ExtraContent json.RawMessage `json:"extra_content"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -87,14 +90,17 @@ type streamConverter struct {
 	buffer streaming.StreamBuffer
 	model  string
 
-	started       bool
-	blockOpen     bool
-	blockType     string
-	curIndex      int
-	nextIndex     int
-	toolBlock     map[int]int
-	stopReason    string
-	stopSequence  string
+	started      bool
+	blockOpen    bool
+	blockType    string
+	curIndex     int
+	nextIndex    int
+	toolBlock    map[int]int
+	stopReason   string
+	stopSequence string
+	// thinkingSeen counts the thinking blocks already rendered from the
+	// cumulative replay state, so a later chunk repeating them adds nothing.
+	thinkingSeen  int
 	inputEstimate int
 	usage         chatUsage
 	finalized     bool
@@ -180,6 +186,7 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 				"delta": map[string]any{"type": "thinking_delta", "thinking": choice.Delta.ReasoningContent},
 			})
 		}
+		sc.handleThinkingReplay(choice.Delta.ExtraContent)
 		if choice.Delta.Content != "" {
 			sc.ensureBlock("text")
 			sc.emit("content_block_delta", map[string]any{
@@ -198,6 +205,51 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 			sc.stopReason = stopReasonFromFinish(choice.FinishReason, len(sc.toolBlock) > 0)
 		}
 	}
+}
+
+// handleThinkingReplay renders the Anthropic thinking blocks a chunk carries
+// as replay state. A signed thinking block is closed by writing its
+// signature_delta into the block already open from the reasoning deltas; a
+// redacted block has no deltas at all and is emitted whole. The gateway's own
+// extra_content member never reaches the client here: the Anthropic dialect
+// has native fields for both.
+func (sc *streamConverter) handleThinkingReplay(raw json.RawMessage) {
+	vendor := core.KeepExtraContentVendor(raw, core.ExtraContentVendorAnthropic)
+	if len(vendor) == 0 {
+		return
+	}
+	var extra struct {
+		Anthropic struct {
+			ThinkingBlocks []ResponseContentBlock `json:"thinking_blocks"`
+		} `json:"anthropic"`
+	}
+	if err := json.Unmarshal(vendor, &extra); err != nil {
+		return
+	}
+	blocks := extra.Anthropic.ThinkingBlocks
+	if len(blocks) <= sc.thinkingSeen {
+		return
+	}
+	for _, block := range blocks[sc.thinkingSeen:] {
+		switch block.Type {
+		case "redacted_thinking":
+			sc.closeBlock()
+			sc.openBlock("redacted_thinking", map[string]any{"type": "redacted_thinking", "data": block.Data})
+			sc.closeBlock()
+		default:
+			if block.Signature == "" {
+				continue
+			}
+			sc.ensureBlock("thinking")
+			sc.emit("content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": sc.curIndex,
+				"delta": map[string]any{"type": "signature_delta", "signature": block.Signature},
+			})
+			sc.closeBlock()
+		}
+	}
+	sc.thinkingSeen = len(blocks)
 }
 
 func (sc *streamConverter) handleToolCall(call chatToolCallDelta) {

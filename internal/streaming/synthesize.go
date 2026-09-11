@@ -48,6 +48,12 @@ func SynthesizeChatStream(resp *core.ChatResponse, includeUsage bool) []byte {
 		if raw := choice.Message.ExtraFields.Lookup("reasoning_content"); len(raw) > 0 {
 			delta(choice.Index, map[string]any{"reasoning_content": json.RawMessage(raw)})
 		}
+		// Replay state (Anthropic thinking signatures) has to reach the client
+		// here too: a synthesized stream is indistinguishable from a real one
+		// to the caller, and its next turn is rejected without it.
+		if raw := choice.Message.ExtraFields.Lookup(core.ExtraContentField); len(raw) > 0 {
+			delta(choice.Index, map[string]any{core.ExtraContentField: json.RawMessage(raw)})
+		}
 		if text := core.ExtractTextContent(choice.Message.Content); text != "" {
 			delta(choice.Index, map[string]any{"content": text})
 		}

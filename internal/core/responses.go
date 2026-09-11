@@ -193,6 +193,9 @@ type ResponsesResponse struct {
 	Output    []ResponsesOutputItem `json:"output"`
 	Usage     *ResponsesUsage       `json:"usage,omitempty"`
 	Error     *ResponsesError       `json:"error,omitempty"`
+	// PreviousResponseID names the response this one was chained from, as
+	// OpenAI echoes it; stored snapshots follow it to rebuild the history.
+	PreviousResponseID string `json:"previous_response_id,omitempty"`
 }
 
 // ResponsesOutputItem represents an item in the output array.

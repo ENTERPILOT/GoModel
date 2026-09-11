@@ -49,7 +49,7 @@ Anthropic unchanged.
 | Endpoint | Behavior |
 | --- | --- |
 | `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
-| `POST /v1/messages/count_tokens` | Returns a heuristic input token estimate. |
+| `POST /v1/messages/count_tokens` | Counts input tokens. Exact for models whose provider has a counting endpoint (Anthropic); a calibrated estimate otherwise. |
 | `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. |
 | `POST /v1/messages/batches` | Creates a Message Batch. Inline `requests[].params` are translated per item, so a batch can target any provider with native batch support (Anthropic, OpenAI, …), not only Anthropic. |
 | `GET /v1/messages/batches` | Lists batches (`limit`, `after_id`). |
@@ -192,9 +192,11 @@ features that have no canonical equivalent are not preserved end to end:
   (Claude Code appends system reminders this way, and its prompt caching
   depends on them staying in place). On older Claude models, which reject the
   role, their text is hoisted into the top-level system prompt instead.
-- **`thinking` and `redacted_thinking` blocks** on assistant turns are replayed
-  verbatim (signatures included) when routed to Anthropic, so thinking-enabled
-  tool-use turns continue correctly. Other providers never see them.
+- **`thinking` and `redacted_thinking` blocks** travel both ways verbatim,
+  signatures included: responses carry the `signature` Anthropic issued (as a
+  `signature_delta` when streaming), and an assistant turn echoed back is
+  replayed unchanged, so thinking-enabled conversations and tool-use loops
+  continue correctly. Other providers never see them.
 - **`tool_result.is_error`** is preserved when routed to Anthropic. Other
   providers have no equivalent flag and receive the result content only.
 - **`tool_use.extra_content`** carries another provider's replay state, such as
@@ -227,9 +229,20 @@ features that have no canonical equivalent are not preserved end to end:
   providers conflate stop-parameter hits with natural stops in `finish_reason`,
   so completions there report `stop_reason: "end_turn"` (output is still truncated
   correctly).
-- **`count_tokens`** returns a provider-agnostic heuristic estimate (≈ characters / 4),
-  not a tokenizer-exact count. Use it for budgeting and UX sizing, not hard
-  context-limit decisions. The same estimate seeds `usage.input_tokens` in the
+- **`count_tokens`** is exact when the model's provider can count tokens itself:
+  Anthropic models are counted by Anthropic's own `count_tokens` endpoint. The
+  forwarded request carries the resolved model (an alias is resolved first)
+  and only the members that endpoint accepts: `messages`, `system`, `tools`,
+  `tool_choice`, `thinking`, `cache_control`, and `output_config`; `max_tokens`,
+  `stream`, `metadata`, and the sampling controls are left out because Anthropic
+  rejects them there. For every other provider, and whenever
+  that call fails, the gateway answers with an estimate that weights text by
+  how densely it tokenizes (prose, code and JSON, CJK, emoji), adds per-message
+  and per-tool framing plus the tool-use system prompt, and prices images by
+  their pixel area. On ordinary agent traffic the estimate lands within about
+  ten percent of a tokenizer-exact count; raw base64 in text stays
+  under-counted, and an image whose size cannot be read is charged the largest
+  size the provider keeps. The same estimate seeds `usage.input_tokens` in the
   streaming `message_start` event; the authoritative counts arrive in the final
   `message_delta` event, which SDK accumulators prefer.
 

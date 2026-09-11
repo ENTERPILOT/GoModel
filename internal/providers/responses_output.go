@@ -30,6 +30,11 @@ func ResponsesFunctionCallItemID(callID string) string {
 func buildResponsesMessageContent(content any) []core.ResponsesContentItem {
 	switch c := content.(type) {
 	case string:
+		// An empty string is no content: OpenAI never emits an empty text
+		// part, and a tool-call turn must not gain a blank message item.
+		if c == "" {
+			return nil
+		}
 		return []core.ResponsesContentItem{
 			{
 				Type:        "output_text",
@@ -123,18 +128,27 @@ func buildResponsesContentItemsFromParts(parts []core.ContentPart) []core.Respon
 // BuildResponsesOutputItems converts a response message into Responses API output items.
 func BuildResponsesOutputItems(msg core.ResponseMessage) []core.ResponsesOutputItem {
 	reasoningContent := responseMessageReasoningContent(msg)
+	// Replay state on the assistant message belongs to its reasoning, not to
+	// its text: Anthropic thinking signatures ride here. It is emitted even
+	// when there is no readable reasoning text, because a redacted thinking
+	// block has none and still has to reach the client.
+	reasoningExtra := msg.ExtraFields.Lookup(core.ExtraContentField)
 	output := make([]core.ResponsesOutputItem, 0, len(msg.ToolCalls)+2)
-	if reasoningContent != "" {
+	if reasoningContent != "" || len(reasoningExtra) > 0 {
+		extra := map[string]json.RawMessage{"summary": json.RawMessage(`[]`)}
+		if len(reasoningExtra) > 0 {
+			extra[core.ExtraContentField] = reasoningExtra
+		}
+		content := []core.ResponsesContentItem{}
+		if reasoningContent != "" {
+			content = append(content, core.ResponsesContentItem{Type: "reasoning_text", Text: reasoningContent})
+		}
 		output = append(output, core.ResponsesOutputItem{
-			ID:     "rs_" + uuid.New().String(),
-			Type:   "reasoning",
-			Status: "completed",
-			Content: []core.ResponsesContentItem{
-				{Type: "reasoning_text", Text: reasoningContent},
-			},
-			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-				"summary": json.RawMessage(`[]`),
-			}),
+			ID:          "rs_" + uuid.New().String(),
+			Type:        "reasoning",
+			Status:      "completed",
+			Content:     content,
+			ExtraFields: core.UnknownJSONFieldsFromMap(extra),
 		})
 	}
 	contentItems := buildResponsesMessageContent(msg.Content)

@@ -3,6 +3,7 @@ package responsecache
 import (
 	"bytes"
 	stdjson "encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 var (
@@ -145,6 +147,26 @@ func isEventStreamContentType(contentType string) bool {
 	return strings.EqualFold(strings.TrimSpace(mediaType), "text/event-stream")
 }
 
+// ReplayError reports that a cached stream could not be delivered to the
+// client: the write or the final flush failed after the response was
+// committed. The caller records the cause (a stalled or vanished client)
+// instead of writing an error response.
+type ReplayError struct {
+	Err error
+}
+
+func (e *ReplayError) Error() string { return "replay cached stream: " + e.Err.Error() }
+func (e *ReplayError) Unwrap() error { return e.Err }
+
+// replayCommitted reports whether a failed replay had already committed the
+// response to the client. Such a request is served as far as it can be: it
+// must not fall through to the handler, which would spend on a provider call
+// for a client that is gone and write a second response.
+func replayCommitted(err error) bool {
+	_, ok := errors.AsType[*ReplayError](err)
+	return ok
+}
+
 func writeCachedResponse(c *echo.Context, path string, requestBody, cached []byte, cacheType string) error {
 	cacheHeader := cacheHeaderValue(cacheType)
 	if isStreamingRequest(path, requestBody) {
@@ -155,7 +177,21 @@ func writeCachedResponse(c *echo.Context, path string, requestBody, cached []byt
 		c.Response().Header().Set("Connection", "keep-alive")
 		c.Response().Header().Set("X-Cache", cacheHeader)
 		c.Response().WriteHeader(http.StatusOK)
-		_, _ = c.Response().Write(cached)
+		if _, err := c.Response().Write(cached); err != nil {
+			return &ReplayError{Err: err}
+		}
+		// The write may only have filled the socket buffer; a client that
+		// stopped reading is caught by the flush, which the route's stall
+		// deadline bounds. The wrappers above the stall writer drop flush
+		// errors, so the stall is asked for directly, as the live path does.
+		if err := http.NewResponseController(c.Response()).Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return &ReplayError{Err: err}
+		}
+		if stalls := streaming.FindStallReporter(c.Response()); stalls != nil {
+			if err := stalls.StallError(); err != nil {
+				return &ReplayError{Err: err}
+			}
+		}
 		return nil
 	}
 

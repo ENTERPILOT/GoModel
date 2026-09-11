@@ -4,6 +4,7 @@
   import Icon from "$lib/components/atoms/Icon.svelte";
   import { createCopyState } from "$lib/utils/clipboard.svelte.js";
   import { Copy } from "lucide";
+  import * as m from "$lib/paraglide/messages.js";
 
   let { workflowID = "" } = $props();
 
@@ -18,10 +19,10 @@
 
   const title = $derived(
     copyState.error
-      ? "Unable to copy workflow ID"
+      ? m.workflows_copy_id_failed()
       : copyState.copied
-        ? "Workflow ID copied"
-        : "Copy workflow ID",
+        ? m.workflows_id_copied()
+        : m.workflows_copy_id(),
   );
   const ariaLabel = $derived(workflowID ? title + " " + workflowID : title);
 

@@ -63,3 +63,17 @@ type RouteStrategy interface {
 type CompleteHook interface {
 	OnComplete(ctx context.Context, x *Exchange)
 }
+
+// HealthChecker is implemented by plugins whose instances depend on
+// something outside the process: a sidecar, a remote classifier, a policy
+// service. GoModel calls Health off the request path, once an instance is
+// built and again on every guardrail refresh (one minute by default), with
+// a short deadline. A non-nil error marks the instance degraded in the
+// admin views and the dashboard, with the error text as the reason. That
+// text is shown to operators and logged, so like [Decision.Detail] it must
+// not contain secrets; it is truncated to a few hundred characters. Health
+// never changes how traffic is handled: fail_mode decides what a failing
+// hook does. Plugins without external dependencies need not implement it.
+type HealthChecker interface {
+	Health(ctx context.Context) error
+}

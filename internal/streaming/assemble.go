@@ -1,6 +1,7 @@
 package streaming
 
 import (
+	"bytes"
 	"errors"
 	"sort"
 
@@ -26,6 +27,7 @@ type chatAssembleChunk struct {
 			Content          *string         `json:"content"`
 			ReasoningContent json.RawMessage `json:"reasoning_content"`
 			Reasoning        json.RawMessage `json:"reasoning"`
+			ExtraContent     json.RawMessage `json:"extra_content"`
 			ToolCalls        []struct {
 				Index    *int   `json:"index"`
 				ID       string `json:"id"`
@@ -48,6 +50,9 @@ type chatAssembledChoice struct {
 	hasContent   bool
 	reasoning    []byte
 	reasoningKey string
+	// extraContent is the provider replay state of the turn. Chunks carry the
+	// cumulative value, so the last one seen wins rather than accumulating.
+	extraContent json.RawMessage
 	toolCalls    map[int]*core.ToolCall
 	toolOrder    []int
 	finishReason string
@@ -105,6 +110,9 @@ func AssembleChatResponse(events []Event) (*core.ChatResponse, error) {
 				if state.reasoningKey == "" {
 					state.reasoningKey = "reasoning"
 				}
+			}
+			if extra := bytes.TrimSpace(delta.ExtraContent); len(extra) > 0 && !core.IsJSONNull(extra) {
+				state.extraContent = extra
 			}
 			for pos, call := range delta.ToolCalls {
 				index := pos
@@ -182,12 +190,22 @@ func (c *chatAssembledChoice) build() (core.Choice, error) {
 		}
 		message.ToolCalls = append(message.ToolCalls, tool)
 	}
+	fields := map[string]json.RawMessage{}
 	if c.reasoningKey != "" {
 		raw, err := json.Marshal(string(c.reasoning))
 		if err != nil {
 			return core.Choice{}, err
 		}
-		message.ExtraFields = core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{c.reasoningKey: raw})
+		fields[c.reasoningKey] = raw
+	}
+	// Replay state must survive a buffered plugin run: the response is
+	// assembled here and re-synthesized afterwards, and a turn that lost its
+	// Anthropic thinking signature on the way cannot be continued.
+	if len(c.extraContent) > 0 {
+		fields[core.ExtraContentField] = c.extraContent
+	}
+	if len(fields) > 0 {
+		message.ExtraFields = core.UnknownJSONFieldsFromMap(fields)
 	}
 	return core.Choice{Index: c.index, Message: message, FinishReason: c.finishReason}, nil
 }

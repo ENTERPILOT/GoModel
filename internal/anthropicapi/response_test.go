@@ -223,3 +223,65 @@ func TestFromChatResponseStopSequenceDoesNotOverrideToolUse(t *testing.T) {
 		t.Errorf("got stop_reason=%q stop_sequence=%v, want tool_use/nil", out.StopReason, out.StopSequence)
 	}
 }
+
+// FromChatResponse renders thinking from the replay state a provider attached
+// when it has one, and falls back to plain reasoning_content text otherwise —
+// a provider with no thinking protocol of its own (DeepSeek, Cohere, …) still
+// has its reasoning surfaced, just without a signature to replay.
+func TestFromChatResponseThinkingBlocks(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields map[string]json.RawMessage
+		want   string
+	}{
+		{
+			name: "signed blocks are rendered verbatim",
+			fields: map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`"Let me think."`),
+				core.ExtraContentField: json.RawMessage(
+					`{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"Let me think.","signature":"sig-1"},{"type":"redacted_thinking","data":"opaque"}]}}`),
+			},
+			want: `[{"type":"thinking","thinking":"Let me think.","signature":"sig-1"},{"type":"redacted_thinking","data":"opaque"},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name:   "reasoning_content alone still renders a thinking block",
+			fields: map[string]json.RawMessage{"reasoning_content": json.RawMessage(`"Let me think."`)},
+			want:   `[{"type":"thinking","thinking":"Let me think."},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "another vendor's replay state is not thinking",
+			fields: map[string]json.RawMessage{
+				core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"}}`),
+			},
+			want: `[{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "a malformed member falls back to the reasoning text",
+			fields: map[string]json.RawMessage{
+				"reasoning_content":    json.RawMessage(`"Let me think."`),
+				core.ExtraContentField: json.RawMessage(`{"anthropic":{"thinking_blocks":"nope"}}`),
+			},
+			want: `[{"type":"thinking","thinking":"Let me think."},{"type":"text","text":"Hi"}]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &core.ChatResponse{Choices: []core.Choice{{
+				Message: core.ResponseMessage{
+					Role:        "assistant",
+					Content:     "Hi",
+					ExtraFields: core.UnknownJSONFieldsFromMap(tt.fields),
+				},
+				FinishReason: "stop",
+			}}}
+			got, err := json.Marshal(FromChatResponse(resp).Content)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("content = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}

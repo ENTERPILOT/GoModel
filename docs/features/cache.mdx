@@ -78,7 +78,11 @@ Supported vector stores:
 
 Both cache layers run after workflow and guardrail patching, so they operate on
 the final request sent upstream. Use `Cache-Control: no-cache` or
-`Cache-Control: no-store` to bypass caching per request.
+`Cache-Control: no-store` to bypass caching per request. A
+[plugin](/advanced/plugins#decisions) can also keep one response out of both
+layers with `NoStore` on its decision, which a guardrail that restores
+request-specific data into the reply uses so the restored text is never
+replayed to another caller.
 
 For the full semantic-cache design and storage options, see
 [ADR-0006](/adr/0006-semantic-response-cache).

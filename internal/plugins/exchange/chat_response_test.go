@@ -118,3 +118,49 @@ func TestCompletionToChatResponse(t *testing.T) {
 		t.Error("nil completion must still yield one choice")
 	}
 }
+
+func TestApplyToChatResponseToolArguments(t *testing.T) {
+	resp, c := chatCompletion(t)
+	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{"to":"a@b.c"}`)); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyToChatResponse(resp, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applied.Choices[0].Message.ToolCalls[0].Function.Arguments; got != `{"to":"a@b.c"}` {
+		t.Errorf("arguments = %q", got)
+	}
+	if resp.Choices[0].Message.ToolCalls[0].Function.Arguments != "{}" {
+		t.Error("original mutated")
+	}
+	// A replaced text keeps the argument edit, whichever came first.
+	for _, first := range []string{"replace", "arguments"} {
+		resp, c := chatCompletion(t)
+		edits := []func() error{
+			func() error { return c.ReplaceText(0, "[x]") },
+			func() error { return c.SetToolArguments(0, "c1", json.RawMessage(`{"to":"a@b.c"}`)) },
+		}
+		if first == "arguments" {
+			edits[0], edits[1] = edits[1], edits[0]
+		}
+		for _, edit := range edits {
+			if err := edit(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		applied, err := ApplyToChatResponse(resp, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if applied.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"to":"a@b.c"}` || core.ExtractTextContent(applied.Choices[0].Message.Content) != "[x]" {
+			t.Errorf("%s first: %+v", first, applied.Choices[0].Message)
+		}
+	}
+	if err := c.SetToolArguments(0, "nope", json.RawMessage(`{}`)); err == nil {
+		t.Error("unknown call accepted")
+	}
+	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{`)); err == nil {
+		t.Error("invalid JSON accepted")
+	}
+}

@@ -260,3 +260,97 @@ func TestAppendOutputText_BoundsContentIndex(t *testing.T) {
 		t.Fatalf("after index 1: %+v", item.Content[:2])
 	}
 }
+
+// A synthesized stream is indistinguishable from a real one to the client, so
+// it must carry the provider replay state the response holds; without it an
+// Anthropic thinking turn cannot be continued.
+func TestSynthesizeChatStream_CarriesReplayState(t *testing.T) {
+	const replay = `{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"hm","signature":"sig-1"}]}}`
+	resp := &core.ChatResponse{
+		ID:    "chatcmpl-3",
+		Model: "claude-sonnet-4-5",
+		Choices: []core.Choice{{
+			Index: 0,
+			Message: core.ResponseMessage{
+				Role:    "assistant",
+				Content: "done",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"reasoning_content":    json.RawMessage(`"hm"`),
+					core.ExtraContentField: json.RawMessage(replay),
+				}),
+			},
+			FinishReason: "stop",
+		}},
+	}
+
+	var got string
+	extraAt, textAt := -1, -1
+	for i, event := range decodeStreamEvents(t, SynthesizeChatStream(resp, false)) {
+		delta := event["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)
+		if extra, ok := delta[core.ExtraContentField]; ok {
+			encoded, _ := json.Marshal(extra)
+			got = string(encoded)
+			if extraAt < 0 {
+				extraAt = i
+			}
+		}
+		if _, ok := delta["content"]; ok && textAt < 0 {
+			textAt = i
+		}
+	}
+	if got == "" {
+		t.Fatal("no chunk carried extra_content")
+	}
+	// The Anthropic Messages converter closes the thinking block when the
+	// first text arrives, so a signature that came after it would be dropped.
+	if textAt >= 0 && extraAt > textAt {
+		t.Errorf("extra_content at chunk %d, first content at %d; want the replay state first", extraAt, textAt)
+	}
+	var want, have any
+	if err := json.Unmarshal([]byte(replay), &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(got), &have); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(want, have) {
+		t.Errorf("extra_content = %s, want %s", got, replay)
+	}
+}
+
+// A buffered plugin run assembles the stream, hands the response to the
+// plugin, and re-synthesizes it. Replay state has to survive that round trip
+// or a response-phase plugin silently strips the Anthropic thinking signature
+// from an otherwise untouched turn.
+func TestAssembleChatResponse_KeepsReplayState(t *testing.T) {
+	const replay = `{"anthropic":{"thinking_blocks":[{"type":"thinking","thinking":"hm","signature":"sig-1"}]}}`
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl-4","model":"claude-sonnet-4-5","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"hm"}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"extra_content":` + replay + `}}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}`,
+		"",
+	}, "\n\n")
+
+	resp, err := AssembleChatResponse(decodeChatEvents(t, []byte(stream)))
+	if err != nil {
+		t.Fatalf("AssembleChatResponse: %v", err)
+	}
+	got := resp.Choices[0].Message.ExtraFields.Lookup(core.ExtraContentField)
+	if len(got) == 0 {
+		t.Fatal("the assembled response lost extra_content")
+	}
+	var want, have any
+	if err := json.Unmarshal([]byte(replay), &want); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(got, &have); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(want, have) {
+		t.Errorf("extra_content = %s, want %s", got, replay)
+	}
+	if reasoning := resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content"); string(reasoning) != `"hm"` {
+		t.Errorf("reasoning_content = %s, want \"hm\"", reasoning)
+	}
+}

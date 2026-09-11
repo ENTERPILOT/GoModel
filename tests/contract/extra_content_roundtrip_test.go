@@ -164,3 +164,103 @@ func TestAnthropicThinkingBlocksReplay(t *testing.T) {
 	toolResult := messages[2].(map[string]any)["content"].([]any)[0].(map[string]any)
 	require.Equal(t, true, toolResult["is_error"])
 }
+
+// The signature and the opaque redacted payload of the thinking fixture. A
+// signature is bound to the exact thinking text, so a gateway that rebuilds
+// the block from reasoning_content alone cannot produce a usable one: it has
+// to carry back what the model returned, byte for byte.
+const (
+	signedThinkingSignature = "ErUBCkYIBRgCIkDPthinkingSignatureFixtureForContractTestsEgxSaW5nU2lnbmF0dXJlGgz//8AB"
+	signedThinkingText      = "The user asked for the weather in Paris. I should call get_weather."
+	redactedThinkingData    = "EroBCoYBEncKdG9wYXF1ZS1yZWRhY3RlZC10aGlua2luZy1maXh0dXJl"
+)
+
+// TestAnthropicThinkingSignatureRoundTrip is the response-side mirror of
+// TestAnthropicThinkingBlocksReplay: that test proves a client's thinking
+// blocks survive the trip upstream, this one proves the gateway hands the
+// client blocks worth replaying in the first place. Anthropic rejects a
+// thinking-enabled turn whose thinking block has no signature
+// ("messages.N.content.0.thinking.signature: Field required"), so an agent
+// loop that echoes the assistant turn back fails on the second request unless
+// every dialect carries the signature out and back.
+func TestAnthropicThinkingSignatureRoundTrip(t *testing.T) {
+	const model = "claude-sonnet-4-5"
+	client, captured := newCapturingJSONClient(t, "anthropic/messages_thinking_tool_use.json")
+	provider := anthropic.NewWithHTTPClient("sk-ant-test", client, llmclient.Hooks{})
+	provider.SetBaseURL("https://replay.local")
+
+	user := core.Message{Role: "user", Content: "What is the weather in Paris?"}
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: model, Messages: []core.Message{user}, Tools: weatherTools})
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	message := resp.Choices[0].Message
+	require.Len(t, message.ToolCalls, 1)
+	callID := message.ToolCalls[0].ID
+
+	require.JSONEq(t,
+		`{"thinking_blocks":[
+			{"type":"thinking","thinking":"`+signedThinkingText+`","signature":"`+signedThinkingSignature+`"},
+			{"type":"redacted_thinking","data":"`+redactedThinkingData+`"}
+		]}`,
+		string(message.ExtraFields.ExtraContent(core.ExtraContentVendorAnthropic)),
+		"the chat response must expose the signed thinking blocks under extra_content.anthropic")
+
+	histories := map[string]func(t *testing.T) []core.Message{
+		"chat_completions":   func(t *testing.T) []core.Message { return chatHistory(resp, callID) },
+		"responses":          func(t *testing.T) []core.Message { return responsesHistory(t, resp, callID) },
+		"anthropic_messages": func(t *testing.T) []core.Message { return anthropicHistory(t, resp, callID) },
+	}
+	for name, build := range histories {
+		t.Run(name, func(t *testing.T) {
+			messages := append([]core.Message{user}, build(t)...)
+			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: model, Messages: messages, Tools: weatherTools})
+			require.NoError(t, err)
+
+			upstream := captured.jsonBody(t)["messages"].([]any)
+			require.Len(t, upstream, 3, "user, assistant, tool result")
+			assistant := upstream[1].(map[string]any)["content"].([]any)
+			require.GreaterOrEqual(t, len(assistant), 2, "thinking blocks must lead the assistant content")
+
+			thinking, _ := json.Marshal(assistant[0])
+			redacted, _ := json.Marshal(assistant[1])
+			require.JSONEq(t, `{"type":"thinking","thinking":"`+signedThinkingText+`","signature":"`+signedThinkingSignature+`"}`, string(thinking),
+				"the thinking block must be replayed verbatim, signature included")
+			require.JSONEq(t, `{"type":"redacted_thinking","data":"`+redactedThinkingData+`"}`, string(redacted))
+			for _, block := range assistant {
+				require.NotContains(t, block.(map[string]any), "extra_content", "no block may carry the gateway's own member upstream")
+			}
+		})
+	}
+}
+
+// TestAnthropicThinkingSignatureSurvivesMessagesDialect pins the client-facing
+// half of the round trip: /v1/messages must render the signature on the
+// thinking block itself, because that is the only field Anthropic clients know
+// to echo back. extra_content is the carrier for dialects that have no
+// thinking block; it must not leak into the Anthropic response shape.
+func TestAnthropicThinkingSignatureSurvivesMessagesDialect(t *testing.T) {
+	client, _ := newCapturingJSONClient(t, "anthropic/messages_thinking_tool_use.json")
+	provider := anthropic.NewWithHTTPClient("sk-ant-test", client, llmclient.Hooks{})
+	provider.SetBaseURL("https://replay.local")
+
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "claude-sonnet-4-5",
+		Messages: []core.Message{{Role: "user", Content: "What is the weather in Paris?"}},
+		Tools:    weatherTools,
+	})
+	require.NoError(t, err)
+
+	rendered, err := json.Marshal(anthropicapi.FromChatResponse(resp).Content)
+	require.NoError(t, err)
+	var blocks []map[string]any
+	require.NoError(t, json.Unmarshal(rendered, &blocks))
+
+	require.GreaterOrEqual(t, len(blocks), 2)
+	require.Equal(t, "thinking", blocks[0]["type"])
+	require.Equal(t, signedThinkingText, blocks[0]["thinking"])
+	require.Equal(t, signedThinkingSignature, blocks[0]["signature"])
+	require.NotContains(t, blocks[0], "extra_content", "the Anthropic dialect carries the signature natively")
+	require.Equal(t, "redacted_thinking", blocks[1]["type"])
+	require.Equal(t, redactedThinkingData, blocks[1]["data"])
+	require.NotContains(t, blocks[1], "thinking", "a redacted block has no readable thinking text")
+}

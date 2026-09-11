@@ -84,6 +84,15 @@ caller should see an error.
 
 `Detail` is stored in the audit record and must not contain secrets.
 
+`NoStore` on any decision keeps the response out of the
+[response cache](/features/cache), exact and semantic, so the next request
+with the same or a similar body runs the plugins again instead of replaying
+a stored answer. Set it when the reply carries request-specific data a plugin
+restores on the way out, for example a de-anonymizer that puts the caller's
+PII back into the assistant text: a cached copy would hand that text to
+whoever sends a matching prompt next. It is honoured from any phase and any
+instance of the request, whatever the merged decision was.
+
 ### Audit trail
 
 Every instance that ran leaves an outcome in the audit entry's
@@ -173,7 +182,7 @@ one of three modes in `StreamHook.StreamPolicy()`:
 | Mode | What the plugin can do | Latency cost |
 | --- | --- | --- |
 | `observe` | read every event; decisions are ignored except `terminate` | none |
-| `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice |
+| `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice, plus up to `MinChunkChars` while a run is collected |
 | `buffer` | nothing per event; GoModel collects the whole stream and runs the plugin's `OnResponse` on the assembled completion (a `buffer` plugin must implement `ResponseHook`; loading fails otherwise) | time-to-first-token becomes time-to-last-token |
 
 **Lookbehind** (`transform` only): GoModel withholds the last `LookbehindChars`
@@ -189,6 +198,18 @@ a rule like `a => aa` is applied once, not on its own output). A chat chunk
 that carries text together with `finish_reason` or `usage` is re-segmented
 too; those members go out once, with the chunk's last text, or on a chunk
 with empty text when the plugin removed that text.
+
+**Coalescing** (`transform` only): a hook whose per-call cost is high, such
+as a classifier or a named-entity detector calling a sidecar, cannot afford a
+call per token. `MinChunkChars` makes GoModel collect the text deltas of a
+choice until at least that many new characters are pending and present them
+as one text event; a non-text event and the end of the stream flush a shorter
+run. It composes with lookbehind: the withheld tail leads the window and
+`Overlap` still counts it, so the same edit contract applies. The client
+waits for up to `MinChunkChars` characters at a time, and the largest value
+among the transform instances of a stream applies to all of them, capped at
+16384 characters. `0`, the
+default, presents deltas as they arrive.
 
 **Chat chunks with several choices** are split into one chunk per choice
 before plugins see them, so every choice is inspected; provider `usage`
@@ -243,8 +264,8 @@ of a request:
 | Field | Type | Contents |
 | --- | --- | --- |
 | `Meta` | `Meta` | read-only request facts: request id, dialect, endpoint, user path, key id, labels, session id, requested and resolved model, provider, workflow version and features, `Stream`, provider `Attempts` (response phases), prompt-cache planning |
-| `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam` |
-| `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason` |
+| `Prompt` | `*Prompt` | the conversation (`Messages` with stable IDs and typed `Parts`: text, image, audio, file, tool call, tool result, reasoning, refusal, opaque), `Tools`, `Params`, raw body. Edit through `SetText`, `SetMedia`, `SetToolArguments`, `SetToolResult`, `Insert`, `Append`, `Remove`, `SetParam`; `TextTargets(roles...)` lists every text part, tool-result text included, and `SetTargetText` writes one back |
+| `Response` | `*Completion` | the response, `nil` until the response phase: `Choices` with the same `Part` model, `Usage`, raw body. Edit through `SetText`, `ReplaceText`, `SetFinishReason`, `SetToolArguments`; `TextTargets` and `SetTargetText` work as on `Prompt` |
 | `Stream` | `*StreamState` | text accumulated so far per choice and the event count; `nil` for non-streaming requests |
 | `Headers` | `*Headers` | `Request` (inbound, credentials redacted; prompt-phase edits apply to the live request for later plugins and request logging, not to the provider call), `Response` (applied to the client response; a header set to the empty string is removed, including ones the gateway adds such as `X-Request-Id`), `Upstream` (recorded, not forwarded in this release) |
 | `Values` | `Values` | per-request bag shared by every hook of the request; prefix keys with the plugin name |
@@ -255,6 +276,23 @@ what changed and untouched messages keep every provider-specific field
 carries a tool call whose result is still present (or the reverse) returns a
 `DanglingToolError` naming the partner message; the request is rejected if
 the pair stays broken.
+
+A plugin that scans or rewrites text does not need to walk parts itself:
+`Prompt.TextTargets(roles...)` returns one `TextTarget` per text part (plain
+text, and text inside tool results) with the message ID, role, part indexes,
+and current text, and `Prompt.SetTargetText(target, text)` writes the edit
+back. `Completion.TextTargets()` and `Completion.SetTargetText` do the same
+for the choices of a response. The built-in `string_replace` and
+`llm_based_altering` are written this way.
+
+Media can be edited too. `Part.DecodeMedia()` returns the inline bytes and
+media type of an image sent as a data URI or of chat input audio, and
+`Prompt.SetMedia(msgID, partIdx, mediaType, data)` replaces the payload of an
+image or audio part: the part goes back out as a data URI (images) or base64
+input audio, and the other members of the wire part, such as an image's
+`detail`, are kept. An image referenced by URL has nothing inline to decode;
+a plugin that wants to redact it fetches it itself. Media inside a tool
+result is replaced with `SetToolResult`.
 
 `Meta.Cache.PlannedPrefixMessages` tells a prompt plugin how many leading
 messages the provider cache planner will mark as the cached prefix. Appending
@@ -325,9 +363,12 @@ instances run on traffic.
 - **Plugins & Guardrails page**: *Create Guardrail* lists every plugin that implements a
   `prompt`, `response`, or `stream` hook. The form is generated from the
   plugin's `ConfigSchema`: `text`, `textarea`, `number`, `select`,
-  `checkboxes`, `secret` (masked; `GET` returns `********` and sending that
-  literal back keeps the stored value), and `model` (a provider/model or alias
-  picker). The **Advanced** section holds *Fail mode* (Default, Closed, Open)
+  `checkboxes`, `bool` (a toggle), `list` (free-text entries, one per line,
+  stored as a string array), `secret` (masked; `GET` returns `********` and
+  sending that literal back keeps the stored value), and `model` (the same
+  searchable model picker as the playground and virtual-model editors, listing
+  the gateway's models; an alias or virtual model is typed in). The
+  **Advanced** section holds *Fail mode* (Default, Closed, Open)
   and *Timeout (ms)*; they apply to the instance in every workflow that
   references it.
 - **Plugins list**: at the bottom of the Plugins & Guardrails page, every
@@ -462,10 +503,13 @@ func main() {}
 Notes for authors:
 
 - `Init` receives the config after validation against `ConfigSchema`:
-  defaults applied, numbers and lists coerced, unknown keys rejected,
-  required keys checked. Line-oriented `textarea` fields accept a YAML list
-  of strings as well as a block scalar. It is called once per configured
-  instance and again when the instance is edited.
+  defaults applied, numbers, booleans, and lists coerced, unknown keys
+  rejected, required keys checked. Line-oriented `textarea` fields accept a
+  YAML list of strings as well as a block scalar; `list` fields accept a
+  list or one comma-separated line and arrive as a JSON array; `bool`
+  fields accept `true`/`false` as booleans or text and arrive as a JSON
+  boolean. It is called once per configured instance and again when the
+  instance is edited.
 - Export a **constructor** (`func GoModelPlugin() pluginapi.Plugin`) so one
   file can back several instances. A `var GoModelPlugin pluginapi.Plugin`
   works too but limits the file to a single instance.
@@ -481,13 +525,30 @@ Notes for authors:
 - The `Host` passed to `Init` offers `Logger()` (pre-tagged with plugin and
   instance), `Inference().Complete(...)` (a chat completion through the
   gateway with origin `plugin`, scoped to `<user path>/guardrails/<instance>`
-  for budgets and audit), and `Metrics()` (names prefixed `plugin_<name>_`).
-  `History()` returns an error in this release.
+  for budgets and audit), `Metrics()` (names prefixed `plugin_<name>_`), and
+  `HTTPClient()` for calls to external services such as a classifier or a
+  PII detector. The client is shared by every instance, uses the gateway's
+  proxy environment and connection pool, and has a 60 s timeout as a
+  backstop; build requests with `http.NewRequestWithContext` so the
+  instance `timeout_ms` bounds each call. `History()` returns an error in
+  this release.
 - Add `Summarize(config json.RawMessage) string` to render a one-line summary
   in the guardrails list, and `Normalize(config) (json.RawMessage, error)` to
   canonicalize a config before it is stored. Both are optional.
+- Implement `pluginapi.HealthChecker` (`Health(ctx) error`) when an instance
+  depends on something outside the process, such as a classifier sidecar.
+  GoModel probes it off the request path once the instance is built and on
+  every guardrail refresh (`workflows.refresh_interval`, one minute by
+  default), with a 5 s deadline. A failing probe marks the instance
+  `degraded` in `GET /admin/guardrails` and on the dashboard, with the error
+  as the reason, and is logged once per transition; the error text must not
+  contain secrets and is truncated to 256 characters. Health is informational:
+  traffic still runs through the instance under its `fail_mode`.
 - Field inputs `secret` and `model` exist for API keys of external classifiers
   and for model pickers; a `secret` value is masked in every admin response.
+  Use `bool` for a switch and `list` for an open-ended list of strings
+  (entity types, an allow list) instead of encoding them in a `select` or a
+  `textarea`.
 - Add `Scope: pluginapi.ScopeRoute` to fields that belong to a virtual model
   rather than to the instance (routing strategies only).
 
@@ -612,13 +673,16 @@ hook, in the shape the guardrail editor renders:
 
 `phases`, `source`, `mutates`, and `guardrail` are new (instance views from
 `GET /admin/guardrails` carry `guardrail` as well); `fields[].input` may now be
-`secret` or `model`, and `fields[].scope` is `""` (instance) or `"route"`.
+`secret`, `model`, `bool`, or `list`, and `fields[].scope` is `""` (instance)
+or `"route"`.
 
 ### GET, PUT, DELETE /admin/guardrails
 
 Definitions gain `fail_mode` (`closed` | `open`, empty for the phase default)
 and `timeout_ms` (`0` for none); views additionally carry `phases` (from the
-plugin manifest) and `summary`. `PUT` accepts both new fields. A stored
+plugin manifest), `summary`, and `health` (`ok` | `degraded`, with
+`health_error` and `health_checked_at` for plugins that implement a health
+probe). `PUT` accepts both new fields. A stored
 `secret` value is returned as `********`; send it back unchanged to keep it,
 or `""` to clear it.
 

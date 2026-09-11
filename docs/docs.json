@@ -157,6 +157,7 @@
                             "about/who-we-are",
                             "about/values",
                             "about/technical-philosophy",
+                            "about/why-go",
                             "about/roadmap",
                             "about/license",
                             "about/benchmarks",
@@ -171,6 +172,7 @@
                 "pages": [
                     "guides/production",
                     "guides/updating",
+                    "guides/caddy",
                     "guides/openai-agents-sdk",
                     "guides/openclaw",
                     "guides/n8n",

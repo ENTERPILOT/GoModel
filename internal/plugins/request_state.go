@@ -22,6 +22,7 @@ type RequestState struct {
 	ResponseHeaders http.Header
 	Decisions       []DecisionRecord
 	upstreamLogged  bool
+	noStore         bool
 	// requestHeaders is the editable, redacted copy of the inbound headers
 	// shared by every Exchange; originalHeaders is what it started as, so
 	// ApplyRequestHeaders can replay only the differences.
@@ -176,7 +177,8 @@ func RequestStateFromContext(ctx context.Context) *RequestState {
 	return nil
 }
 
-// Record appends decisions.
+// Record appends decisions. A decision carrying NoStore vetoes storing the
+// response in the response cache (see NoStore).
 func (s *RequestState) Record(records ...DecisionRecord) {
 	if s == nil {
 		return
@@ -184,6 +186,23 @@ func (s *RequestState) Record(records ...DecisionRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Decisions = append(s.Decisions, records...)
+	for _, record := range records {
+		if record.Decision.NoStore {
+			s.noStore = true
+		}
+	}
+}
+
+// NoStore reports whether any recorded decision asked for the response not
+// to be stored in the response cache. It implements core.ResponseCacheVeto,
+// which the cache consults after the handler ran.
+func (s *RequestState) NoStore() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.noStore
 }
 
 // Snapshot returns a copy of the recorded decisions.

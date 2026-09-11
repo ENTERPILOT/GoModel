@@ -53,7 +53,7 @@
         />
       </div>
       <div class="table-toolbar-actions">
-        <span class="model-count">{wf.filteredWorkflows.length + " active scopes"}</span>
+        <span class="model-count">{m.workflows_active_scopes({ count: wf.filteredWorkflows.length })}</span>
       </div>
     </div>
   {/if}

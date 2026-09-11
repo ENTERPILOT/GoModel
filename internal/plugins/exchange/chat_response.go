@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -80,7 +81,7 @@ func ApplyToChatResponse(original *core.ChatResponse, c *pluginapi.Completion) (
 		unified := c.Choices[idx]
 		target := &result.Choices[idx]
 		target.FinishReason = unified.FinishReason
-		content, _ := splitParts(unified.Message)
+		content, calls := splitParts(unified.Message)
 		switch kind {
 		case pluginapi.ChangeReplaced:
 			target.Message.Content = joinText(content)
@@ -91,8 +92,26 @@ func ApplyToChatResponse(original *core.ChatResponse, c *pluginapi.Completion) (
 			}
 			target.Message.Content = rewritten
 		}
+		applyToolArguments(target.Message.ToolCalls, calls)
 	}
 	return &result, nil
+}
+
+// applyToolArguments writes the arguments of the unified calls back to the
+// response tool calls with the same ID. Calls the plugin did not touch keep
+// their arguments byte for byte.
+func applyToolArguments(target []core.ToolCall, calls []pluginapi.ToolCall) {
+	for _, call := range calls {
+		for i := range target {
+			if target[i].ID != call.ID {
+				continue
+			}
+			if !bytes.Equal(argumentsFromString(target[i].Function.Arguments), call.Arguments) {
+				target[i].Function.Arguments = argumentsToString(call.Arguments)
+			}
+			break
+		}
+	}
 }
 
 // textOnly keeps the parts that live in a chat response's content field:

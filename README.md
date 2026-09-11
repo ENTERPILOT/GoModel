@@ -184,15 +184,33 @@ for the full list of settings.
 - [Cost tracking](https://gomodel.enterpilot.io/docs/features/cost-tracking?utm_source=readme) - per-request cost estimates, usage analytics, and spending breakdowns in the dashboard
 - [Budgets](https://gomodel.enterpilot.io/docs/features/budgets?utm_source=readme) - hard spend limits per user, team, or key
 - [Rate limits](https://gomodel.enterpilot.io/docs/features/rate-limits?utm_source=readme) - requests, tokens, and concurrency caps per user path, provider, or model
+- [Usage API](https://gomodel.enterpilot.io/docs/advanced/usage-api?utm_source=readme) - clients check their own usage, remaining budget, and rate-limit headroom with the key they already use for inference
 - [Virtual models](https://gomodel.enterpilot.io/docs/features/virtual-models?utm_source=readme) - aliases and load balancing (round-robin or cost-based) behind stable model names
+- [Session keeping](https://gomodel.enterpilot.io/docs/features/session-keeping?utm_source=readme) - detect a client session and pin it to one target and provider key, so provider prompt caches stay warm and audit logs read as threads
 - [Failover](https://gomodel.enterpilot.io/docs/features/failover?utm_source=readme) - automatic rerouting to backup providers, with [retries and circuit breakers](https://gomodel.enterpilot.io/docs/advanced/resilience?utm_source=readme)
 - [Labelling](https://gomodel.enterpilot.io/docs/features/labelling?utm_source=readme) - tag requests from HTTP headers or API keys and break down usage by label
 - [User paths](https://gomodel.enterpilot.io/docs/features/user-path?utm_source=readme) - hierarchical scoping of keys, model access, budgets, usage, and audit logs
+- [Model access control](https://gomodel.enterpilot.io/docs/features/users?utm_source=readme) - per-group, per-user, and per-key model allowlists that intersect down the user-path tree
 - [MCP gateway](https://gomodel.enterpilot.io/docs/features/mcp-gateway?utm_source=readme) - aggregate your MCP servers behind one authenticated endpoint
 - [Passthrough API](https://gomodel.enterpilot.io/docs/features/passthrough-api?utm_source=readme) - provider-native APIs under `/p/{provider}/...`, with GoModel auth and tracking
+- [Audio and image APIs](https://gomodel.enterpilot.io/docs/advanced/audio-api?utm_source=readme) - OpenAI-compatible text-to-speech, transcription, and [image generation and editing](https://gomodel.enterpilot.io/docs/advanced/images-api?utm_source=readme) with the same access rules, budgets, and cost tracking as chat
+- [Provider replay state](https://gomodel.enterpilot.io/docs/advanced/extra-content?utm_source=readme) - preserves Gemini thought signatures and Anthropic thinking blocks across turns, APIs, and providers
 - [Guardrails](https://gomodel.enterpilot.io/docs/advanced/guardrails?utm_source=readme) - request and response policies enforced at the gateway
+- [Plugins](https://gomodel.enterpilot.io/docs/advanced/plugins?utm_source=readme) - one contract for guardrails, response and stream filters, header edits, and routing strategies; built in, compiled in, or loaded from a `.so` at startup
+- [Workflows](https://gomodel.enterpilot.io/docs/advanced/workflows?utm_source=readme) - versioned per-request policies that scope cache, budgets, audit logging, guardrail phases, and failover by user path, provider, or model
 - [Provider key rotation](https://gomodel.enterpilot.io/docs/providers/key-rotation?utm_source=readme) - round-robin over multiple API keys to lift per-key rate limits
 - [Observability](https://gomodel.enterpilot.io/docs/guides/prometheus-metrics?utm_source=readme) - Prometheus metrics, [OpenTelemetry](https://gomodel.enterpilot.io/docs/guides/opentelemetry?utm_source=readme) traces, audit logs, and live request streaming in the dashboard
+- [Playground](https://gomodel.enterpilot.io/docs/features/playground?utm_source=readme) - try any model or virtual model from the dashboard and inspect the exact request and response JSON
+
+## GoModel Pro
+
+[GoModel Pro](https://gomodel.enterpilot.io/docs/pro/overview?utm_source=readme) is the commercial build: the same gateway, configuration, and dashboard, with licensed extensions.
+
+- [Prompt compression](https://gomodel.enterpilot.io/docs/pro/compression?utm_source=readme) - remove repeated and structural context before it reaches the provider, without changing the request shape
+- [Intelligent routing](https://gomodel.enterpilot.io/docs/pro/intelligent-routing?utm_source=readme) - classify each request as easy or hard, then pick the healthiest and cheapest provider in that tier
+- [OIDC single sign-on](https://gomodel.enterpilot.io/docs/pro/sso?utm_source=readme) - protect the dashboard with your identity provider using Authorization Code flow with PKCE
+
+More in the documentation...
 
 ## Roadmap
 

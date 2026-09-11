@@ -13,6 +13,7 @@ import {
   schemaFieldValue,
   setSchemaFieldValue,
 } from "../src/lib/utils/schemaFields.js";
+import { modelPickerOptions } from "../src/lib/utils/modelSelectors.js";
 
 const FIELDS = [
   { key: "api_key", input: "secret" },
@@ -65,4 +66,45 @@ test("model fields store the raw selector text", () => {
   assert.deepEqual(setSchemaFieldValue({}, field, "openai/gpt-4o-mini"), {
     model: "openai/gpt-4o-mini",
   });
+});
+
+test("list fields read arrays or free text and store a de-duplicated array", () => {
+  const field = { key: "entities", input: "list" };
+  assert.deepEqual(schemaFieldValue({}, field), []);
+  assert.deepEqual(schemaFieldValue({ entities: ["PERSON", " EMAIL "] }, field), ["PERSON", "EMAIL"]);
+  assert.deepEqual(schemaFieldValue({ entities: "PERSON, EMAIL\nPHONE" }, field), ["PERSON", "EMAIL", "PHONE"]);
+  assert.deepEqual(setSchemaFieldValue({}, field, "PERSON\n\nEMAIL,PERSON"), {
+    entities: ["PERSON", "EMAIL"],
+  });
+  assert.deepEqual(setSchemaFieldValue({ entities: ["x"] }, field, ""), { entities: [] });
+});
+
+test("bool fields read stored booleans and words and store a boolean", () => {
+  const field = { key: "reversible", input: "bool" };
+  assert.equal(schemaFieldValue({}, field), false);
+  assert.equal(schemaFieldValue({ reversible: true }, field), true);
+  assert.equal(schemaFieldValue({ reversible: "true" }, field), true);
+  assert.equal(schemaFieldValue({ reversible: "yes" }, field), true);
+  assert.equal(schemaFieldValue({ reversible: 1 }, field), true);
+  assert.equal(schemaFieldValue({ reversible: "false" }, field), false);
+  assert.equal(schemaFieldValue({ reversible: "" }, field), false);
+  assert.deepEqual(setSchemaFieldValue({}, field, true), { reversible: true });
+  assert.deepEqual(setSchemaFieldValue({ reversible: true }, field, false), { reversible: false });
+});
+
+test("modelPickerOptions lists enabled selectors sorted with their provider", () => {
+  const models = [
+    { selector: "openai/gpt-4o-mini", provider_name: "openai" },
+    { selector: "anthropic/claude-haiku-4-5", provider_name: "anthropic" },
+    { selector: "openai/gpt-4o-mini", provider_name: "openai" },
+    { selector: "openai/o1", provider_name: "openai", access: { effective_enabled: false } },
+    { model: { id: "gemini/flash" }, provider_name: "gemini" },
+    { selector: "", provider_name: "empty" },
+  ];
+  assert.deepEqual(modelPickerOptions(models), [
+    { value: "anthropic/claude-haiku-4-5", label: "anthropic/claude-haiku-4-5", description: "anthropic" },
+    { value: "gemini/flash", label: "gemini/flash", description: "gemini" },
+    { value: "openai/gpt-4o-mini", label: "openai/gpt-4o-mini", description: "openai" },
+  ]);
+  assert.deepEqual(modelPickerOptions(undefined), []);
 });

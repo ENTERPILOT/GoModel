@@ -47,8 +47,16 @@ run:
 	LOG_LEVEL="$(LOG_LEVEL)" SWAGGER_ENABLED="$(SWAGGER_ENABLED)" exec ./bin/gomodel
 
 # Seed the local SQLite database and start GoModel with a populated dashboard.
+# Guardrails (which imply plugins) are on so the seeded guardrail instances and
+# the workflows referencing them are live rather than capped off at runtime.
+# Audit retention is raised to the seeded window: the 30-day default would
+# delete two thirds of the demo audit log on the first startup sweep.
+# Exported so the seeder reads the same window as the retention settings: a
+# maintainer changing this default must not leave them out of step.
+export DEMO_DAYS ?= 90
 demo: seed-demo-data
-	$(MAKE) run GOMODEL_DEMO_MODE=true
+	$(MAKE) run GOMODEL_DEMO_MODE=true GUARDRAILS_ENABLED=true \
+		LOGGING_RETENTION_DAYS=$(DEMO_DAYS) USAGE_RETENTION_DAYS=$(DEMO_DAYS)
 
 # Clean build artifacts
 clean:

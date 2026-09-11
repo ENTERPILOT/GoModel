@@ -86,7 +86,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return s.respondAudio(c, resp) // emits the 502 guard; no usage for a failed call
+		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard; no usage for a failed call
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		return usage.ExtractFromSpeechRequest(req.Input, resp.Data, speechResponseFormat(req, resp), route.requestID, route.model, route.providerType, pricing)
@@ -94,7 +94,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return s.respondAudio(c, resp)
+	return s.respondAudio(c, route.providerName, resp)
 }
 
 // speechResponseFormat resolves the codec of the synthesized audio so usage can
@@ -171,7 +171,7 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 		return handleError(c, err)
 	}
 	if resp == nil {
-		return s.respondAudio(c, resp) // emits the 502 guard before resp.Data is read
+		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard before resp.Data is read
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
 		if translation {
@@ -182,7 +182,7 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
 	}
-	return s.respondAudio(c, resp)
+	return s.respondAudio(c, route.providerName, resp)
 }
 
 func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFields bool) (*core.AudioTranscriptionRequest, error) {
@@ -245,9 +245,10 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 	}, nil
 }
 
-func (s *audioService) respondAudio(c *echo.Context, resp *core.AudioResponse) error {
+func (s *audioService) respondAudio(c *echo.Context, providerName string, resp *core.AudioResponse) error {
 	if resp == nil {
-		return handleError(c, core.NewProviderError("", http.StatusBadGateway, "provider returned empty audio response", nil))
+		return handleError(c, core.NewProviderError(providerName, http.StatusBadGateway,
+			"provider "+providerName+" returned empty audio response", nil))
 	}
 	contentType := strings.TrimSpace(resp.ContentType)
 	if contentType == "" {
