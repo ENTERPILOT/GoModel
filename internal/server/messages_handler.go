@@ -192,7 +192,7 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	recordPromptPluginRevisions(c, s.logger, req, prepared)
 	applyPluginRequestHeaders(c)
 
-	if s.canForwardMessagesNatively(ctx, workflow) {
+	if s.canForwardMessagesNatively(ctx, workflow, anthropicapi.HasUnsignedThinking(decoded)) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
 	}
 	if translateErr != nil {

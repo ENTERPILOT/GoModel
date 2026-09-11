@@ -31,7 +31,7 @@ func FromChatResponse(resp *core.ChatResponse) *MessagesResponse {
 		if blocks, ok := thinkingBlocks(choice.Message.ExtraFields); ok {
 			out.Content = append(out.Content, blocks...)
 		} else if thinking := reasoningContent(choice.Message.ExtraFields); thinking != "" {
-			out.Content = append(out.Content, ResponseContentBlock{Type: "thinking", Thinking: thinking})
+			out.Content = append(out.Content, unsignedThinkingBlock(thinking))
 		}
 		if text := core.ExtractTextContent(choice.Message.Content); text != "" {
 			out.Content = append(out.Content, ResponseContentBlock{Type: "text", Text: text})
@@ -101,7 +101,27 @@ func thinkingBlocks(fields core.UnknownJSONFields) ([]ResponseContentBlock, bool
 	if err := json.Unmarshal(raw, &extra); err != nil || len(extra.ThinkingBlocks) == 0 {
 		return nil, false
 	}
+	for i, block := range extra.ThinkingBlocks {
+		if block.Type == "thinking" && block.Signature == nil {
+			extra.ThinkingBlocks[i].Signature = emptySignature()
+		}
+	}
 	return extra.ThinkingBlocks, true
+}
+
+// unsignedThinkingBlock renders reasoning text a provider produced without a
+// signature. The Anthropic schema marks signature required on a thinking
+// block, so a strictly typed client rejects a block that omits it; the empty
+// string says "this reasoning is not signed" without pretending otherwise.
+// Anthropic refuses any signature it did not mint, so the gateway drops such a
+// block again on its way back in rather than forwarding it to Claude.
+func unsignedThinkingBlock(thinking string) ResponseContentBlock {
+	return ResponseContentBlock{Type: "thinking", Thinking: thinking, Signature: emptySignature()}
+}
+
+func emptySignature() *string {
+	empty := ""
+	return &empty
 }
 
 // reasoningContent extracts the reasoning_content surfaced by providers (e.g.

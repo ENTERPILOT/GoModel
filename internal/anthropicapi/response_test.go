@@ -227,7 +227,8 @@ func TestFromChatResponseStopSequenceDoesNotOverrideToolUse(t *testing.T) {
 // FromChatResponse renders thinking from the replay state a provider attached
 // when it has one, and falls back to plain reasoning_content text otherwise —
 // a provider with no thinking protocol of its own (DeepSeek, Cohere, …) still
-// has its reasoning surfaced, just without a signature to replay.
+// has its reasoning surfaced, with the empty signature the Anthropic schema
+// requires on every thinking block.
 func TestFromChatResponseThinkingBlocks(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -246,7 +247,7 @@ func TestFromChatResponseThinkingBlocks(t *testing.T) {
 		{
 			name:   "reasoning_content alone still renders a thinking block",
 			fields: map[string]json.RawMessage{"reasoning_content": json.RawMessage(`"Let me think."`)},
-			want:   `[{"type":"thinking","thinking":"Let me think."},{"type":"text","text":"Hi"}]`,
+			want:   `[{"type":"thinking","thinking":"Let me think.","signature":""},{"type":"text","text":"Hi"}]`,
 		},
 		{
 			name: "another vendor's replay state is not thinking",
@@ -261,7 +262,7 @@ func TestFromChatResponseThinkingBlocks(t *testing.T) {
 				"reasoning_content":    json.RawMessage(`"Let me think."`),
 				core.ExtraContentField: json.RawMessage(`{"anthropic":{"thinking_blocks":"nope"}}`),
 			},
-			want: `[{"type":"thinking","thinking":"Let me think."},{"type":"text","text":"Hi"}]`,
+			want: `[{"type":"thinking","thinking":"Let me think.","signature":""},{"type":"text","text":"Hi"}]`,
 		},
 	}
 

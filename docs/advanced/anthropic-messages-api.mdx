@@ -197,6 +197,13 @@ features that have no canonical equivalent are not preserved end to end:
   `signature_delta` when streaming), and an assistant turn echoed back is
   replayed unchanged, so thinking-enabled conversations and tool-use loops
   continue correctly. Other providers never see them.
+- **Reasoning from a provider that does not sign it** (DeepSeek, Fireworks, …)
+  is returned as a `thinking` block with `signature: ""` — the member is
+  required by the Anthropic schema, and the empty value says the reasoning is
+  unsigned. Echo the turn back as-is: the block replays to that provider like
+  any other. Anthropic accepts only signatures it minted itself, so a turn
+  carrying an unsigned block is stripped of it before reaching Claude (the rest
+  of the turn is sent unchanged).
 - **`tool_result.is_error`** is preserved when routed to Anthropic. Other
   providers have no equivalent flag and receive the result content only.
 - **`tool_use.extra_content`** carries another provider's replay state, such as

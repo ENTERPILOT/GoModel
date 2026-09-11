@@ -280,6 +280,37 @@ func TestStreamConverterThinkingSignature(t *testing.T) {
 	}
 }
 
+// A provider that reasons without signing its output (DeepSeek, Fireworks, …)
+// still has to produce a schema-valid thinking block: Anthropic opens one with
+// "signature": "" and the gateway must do the same, so a strictly typed client
+// can accumulate the stream. No signature_delta follows, because there is no
+// signature to report.
+func TestStreamConverterUnsignedThinkingCarriesEmptySignature(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"deepseek-flash","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Let me think."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+	block := events[1]["content_block"].(map[string]any)
+	if events[1]["type"] != "content_block_start" || block["type"] != "thinking" {
+		t.Fatalf("event 1 = %v, want a thinking content_block_start", events[1])
+	}
+	signature, ok := block["signature"]
+	if !ok || signature != "" {
+		t.Fatalf("content_block = %v, want an empty signature member", block)
+	}
+	for _, event := range events {
+		if delta, ok := event["delta"].(map[string]any); ok && delta["type"] == "signature_delta" {
+			t.Fatalf("unsigned reasoning emitted %v, want no signature_delta", delta)
+		}
+	}
+}
+
 // A redacted thinking block has no deltas of its own: it arrives whole, and
 // the converter must open and close a content block for it so the client can
 // replay the opaque payload.

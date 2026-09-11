@@ -221,6 +221,42 @@ func TestMessages_NativeForwardingSurvivesUntranslatableContent(t *testing.T) {
 	}
 }
 
+// A turn produced by another provider replays a thinking block Anthropic never
+// signed. Forwarding it verbatim would fail the request upstream, so the
+// request takes the translated pipeline, which drops the block.
+func TestMessages_UnsignedThinkingSkipsNativeForwarding(t *testing.T) {
+	provider := &mockProvider{
+		supportedModels: []string{"claude-test"},
+		providerTypes:   map[string]string{"claude-test": "anthropic"},
+		response: &core.ChatResponse{
+			ID:      "msg_1",
+			Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "ok"}, FinishReason: "stop"}},
+		},
+	}
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hi"},` +
+		`{"role":"assistant","content":[{"type":"thinking","thinking":"foreign","signature":""},{"type":"text","text":"391"}]},` +
+		`{"role":"user","content":"and now?"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if provider.lastPassthroughReq != nil {
+		t.Error("request was forwarded natively; Anthropic rejects an unsigned thinking block")
+	}
+	if !strings.Contains(rec.Body.String(), `"text":"ok"`) {
+		t.Errorf("body = %s, want the translated Anthropic envelope", rec.Body.String())
+	}
+}
+
 func TestMessages_TranslatedPipelineStillRejectsUntranslatableContent(t *testing.T) {
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-test"},
