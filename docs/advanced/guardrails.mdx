@@ -470,8 +470,8 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
 | `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
-| `stream_chunk` | No | `256` | Characters of streamed text collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
-| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a value or placeholder split across two chunks is still handled. |
+| `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. |
 
 Every text part is analyzed on its own (one analyzer call each, up to eight
 in flight), so the analyzer never sees the whole conversation as one text and
@@ -512,9 +512,8 @@ a placeholder, so a user cannot make the model reveal it. A value the model
 produced on its own is still anonymized on the way out. Such responses are
 kept out of the [response cache](/features/cache).
 
-Streamed tool-call arguments are not rewritten in the stream phase; use the
-response phase (which buffers the stream) when agents must receive restored
-arguments.
+Streamed tool-call arguments are restored in flight as well, each call's
+arguments as a window of its own under `stream_lookbehind`.
 
 #### Example
 

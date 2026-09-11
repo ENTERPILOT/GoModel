@@ -37,6 +37,10 @@ type responsesItem struct {
 	raw          json.RawMessage
 	text         strings.Builder
 	arguments    strings.Builder
+	// argsOpen says an arguments delta was decoded for the item, so the
+	// events restating its arguments are rewritten to what was emitted
+	// even when that is nothing.
+	argsOpen     bool
 	contentIndex int
 	partOpen     bool
 	done         bool
@@ -109,7 +113,7 @@ func (c *responsesCodec) Decode(raw RawEvent, seq int) Event {
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		ev.Kind, ev.Text = KindReasoningDelta, view.Delta
 	case "response.function_call_arguments.delta":
-		ev.Kind, ev.Text = KindToolCallDelta, view.Delta
+		ev.Kind, ev.Text, ev.Call = KindToolCallDelta, view.Delta, view.OutputIndex
 	case "response.completed", "response.incomplete", "response.failed":
 		ev.Kind = KindFinish
 	}
@@ -143,6 +147,9 @@ func (c *responsesCodec) remember(view *responsesEventView) {
 		c.openPart()
 	case "response.function_call_arguments.delta":
 		c.argsIndex = view.OutputIndex
+		if item := c.items[c.argsIndex]; item != nil {
+			item.argsOpen = true
+		}
 	}
 }
 
@@ -226,7 +233,7 @@ func (c *responsesCodec) Track(ev Event) {
 }
 
 func (c *responsesCodec) RewriteText(ev Event, text string) (Event, error) {
-	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+	if !isDelta(ev.Kind) {
 		return ev, ErrNotTextEvent
 	}
 	var top map[string]json.RawMessage
@@ -277,6 +284,8 @@ func (c *responsesCodec) Restate(ev Event) (Event, bool) {
 		changed = c.restateText(top, "text", view.OutputIndex, view.ContentIndex, false)
 	case "response.reasoning_summary_text.done":
 		changed = c.restateText(top, "text", view.OutputIndex, view.SummaryIndex, true)
+	case "response.function_call_arguments.done":
+		changed = c.restateArguments(top, c.items[view.OutputIndex])
 	case "response.content_part.done":
 		changed = c.restateNested(top, "part", func(part map[string]json.RawMessage) bool {
 			return c.restateText(part, "text", view.OutputIndex, view.ContentIndex, false)
@@ -330,6 +339,23 @@ func (c *responsesCodec) restateText(obj map[string]json.RawMessage, key string,
 	return true
 }
 
+// restateArguments sets obj["arguments"] to the emitted arguments of a
+// function-call item when deltas were tracked for it and they differ.
+func (c *responsesCodec) restateArguments(obj map[string]json.RawMessage, item *responsesItem) bool {
+	if item == nil || !item.argsOpen {
+		return false
+	}
+	if current, ok := jsonStringOf(obj["arguments"]); ok && current == item.arguments.String() {
+		return false
+	}
+	encoded, err := json.Marshal(item.arguments.String())
+	if err != nil {
+		return false
+	}
+	obj["arguments"] = encoded
+	return true
+}
+
 // restateNested decodes obj[key] as an object, lets fn edit it, and writes
 // it back when fn reports a change.
 func (c *responsesCodec) restateNested(obj map[string]json.RawMessage, key string, fn func(map[string]json.RawMessage) bool) bool {
@@ -355,7 +381,7 @@ func (c *responsesCodec) restateItem(obj map[string]json.RawMessage, item *respo
 	if item == nil {
 		return false
 	}
-	changed := false
+	changed := c.restateArguments(obj, item)
 	for _, member := range []struct {
 		key     string
 		emitted map[int]*strings.Builder

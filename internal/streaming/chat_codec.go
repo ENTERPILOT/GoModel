@@ -36,6 +36,7 @@ type chatDeltaView struct {
 }
 
 type chatToolCallView struct {
+	Index    *int `json:"index"`
 	Function *struct {
 		Arguments string `json:"arguments"`
 	} `json:"function"`
@@ -97,6 +98,9 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 			}
 			if len(delta.ToolCalls) > 0 {
 				ev.Kind = KindToolCallDelta
+				if idx := delta.ToolCalls[0].Index; idx != nil {
+					ev.Call = *idx
+				}
 				if fn := delta.ToolCalls[0].Function; fn != nil {
 					ev.Text = fn.Arguments
 				}
@@ -146,7 +150,7 @@ func (c *chatCodec) Track(ev Event) {
 }
 
 func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
-	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+	if !isDelta(ev.Kind) {
 		return ev, ErrNotTextEvent
 	}
 	var top map[string]json.RawMessage
@@ -168,20 +172,26 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 	if delta == nil {
 		delta = make(map[string]json.RawMessage, 1)
 	}
-	key := "content"
-	if ev.Kind == KindReasoningDelta {
-		key = "reasoning_content"
+	encoded, err := json.Marshal(text)
+	if err != nil {
+		return ev, err
+	}
+	switch ev.Kind {
+	case KindToolCallDelta:
+		if err := rewriteToolArguments(delta, encoded); err != nil {
+			return ev, err
+		}
+	case KindReasoningDelta:
+		key := "reasoning_content"
 		if _, ok := delta["reasoning_content"]; !ok {
 			if _, ok := delta["reasoning"]; ok {
 				key = "reasoning"
 			}
 		}
+		delta[key] = encoded
+	default:
+		delta["content"] = encoded
 	}
-	encoded, err := json.Marshal(text)
-	if err != nil {
-		return ev, err
-	}
-	delta[key] = encoded
 	if choices[pos]["delta"], err = json.Marshal(delta); err != nil {
 		return ev, err
 	}
@@ -197,10 +207,45 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 	return ev, nil
 }
 
+// rewriteToolArguments sets the arguments of the delta's first tool call
+// (the one Decode classified on) to the encoded JSON string.
+func rewriteToolArguments(delta map[string]json.RawMessage, encoded json.RawMessage) error {
+	var calls []map[string]json.RawMessage
+	if err := json.Unmarshal(delta["tool_calls"], &calls); err != nil || len(calls) == 0 {
+		return fmt.Errorf("streaming: chat delta carries no tool call: %w", err)
+	}
+	var fn map[string]json.RawMessage
+	if raw, ok := calls[0]["function"]; ok && jsonNonNull(raw) {
+		if err := json.Unmarshal(raw, &fn); err != nil {
+			return fmt.Errorf("streaming: decode tool call function: %w", err)
+		}
+	}
+	if fn == nil {
+		fn = make(map[string]json.RawMessage, 1)
+	}
+	fn["arguments"] = encoded
+	encodedFn, err := json.Marshal(fn)
+	if err != nil {
+		return err
+	}
+	calls[0]["function"] = encodedFn
+	encodedCalls, err := json.Marshal(calls)
+	if err != nil {
+		return err
+	}
+	delta["tool_calls"] = encodedCalls
+	return nil
+}
+
+// isDelta reports whether kind carries rewritable delta text.
+func isDelta(kind EventKind) bool {
+	return kind == KindTextDelta || kind == KindReasoningDelta || kind == KindToolCallDelta
+}
+
 // StripTerminal drops a non-null finish_reason of the event's choice and a
 // non-null top-level usage.
 func (c *chatCodec) StripTerminal(ev Event) (Event, bool) {
-	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+	if !isDelta(ev.Kind) {
 		return ev, false
 	}
 	var top map[string]json.RawMessage

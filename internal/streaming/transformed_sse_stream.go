@@ -20,8 +20,8 @@ const (
 // Decision is a Transformer's verdict on one event.
 type Decision struct {
 	Action Action
-	// Text is the replacement delta text for ActionReplace. Only text and
-	// reasoning deltas can be replaced.
+	// Text is the replacement delta text for ActionReplace. Text,
+	// reasoning, and tool-call argument deltas can be replaced.
 	Text string
 	// Terminate describes how to end the stream for ActionTerminate; nil
 	// selects the codec defaults (finish_reason "content_filter").
@@ -89,19 +89,28 @@ const MaxMinChunkChars = 16 * 1024
 // Reads return io.EOF.
 //
 // Lookbehind re-segmentation (LookbehindChars = N > 0) applies to text
-// deltas only and works per choice with a withheld tail of at most N
-// characters (runes), initially empty:
+// deltas and to tool-call argument deltas, each kind in its own window: a
+// choice's text is one window and each of its tool calls' arguments
+// (Event.Call) another, with a withheld tail of at most N characters
+// (runes), initially empty:
 //
-//  1. When a text delta arrives, t sees one text event whose Text is the
+//  1. When a delta arrives, t sees one event of its kind whose Text is the
 //     window tail+delta (Event.Overlap is the tail's length). Its decision
 //     applies to the whole window: pass keeps it, replace substitutes
 //     Decision.Text for it, drop discards it (tail included).
 //  2. Of the resulting window, everything but the last N characters is
 //     emitted to the client; the last N become the new tail.
-//  3. A non-text event of any kind (tool call, finish, usage, other) first
-//     flushes every choice's tail, and the upstream end flushes them before
-//     OnEnd: t sees the tail once more as a text event (Overlap equal to
-//     its length) and the result is emitted in full.
+//  3. An event that is not held (reasoning, finish, usage, other, a tool
+//     call announced with empty arguments) first flushes every window, a
+//     delta for another window of the same choice flushes that choice's
+//     other windows, and the upstream end flushes them all before OnEnd:
+//     t sees the tail once more (Overlap equal to its length) and the
+//     result is emitted in full. Events therefore keep their order.
+//
+// The first chunk of a window's run stays the template of its re-segmented
+// events until something is emitted from it, so members only that chunk
+// carries (a tool call's id and name sent with its first arguments) reach
+// the client once.
 //
 // Consequently a pattern of up to N+1 characters is always visible to t in
 // one event before any of its characters reaches the client, at the cost of
@@ -134,7 +143,7 @@ func NewTransformedSSEStream(upstream io.ReadCloser, codec Codec, t Transformer,
 		opts:     opts,
 		scanner:  EventScanner{MaxEventBytes: opts.MaxEventBytes},
 		readBuf:  make([]byte, transformReadBufferSize),
-		pending:  make(map[int]*pendingText),
+		pending:  make(map[pendingKey]*pendingText),
 	}
 }
 
@@ -150,8 +159,8 @@ type transformedSSEStream struct {
 	outPos int
 	seq    int
 
-	pending      map[int]*pendingText
-	pendingOrder []int
+	pending      map[pendingKey]*pendingText
+	pendingOrder []pendingKey
 
 	ended          bool
 	endCalled      bool
@@ -160,7 +169,30 @@ type transformedSSEStream struct {
 	finalErr       error
 }
 
-// pendingText is the withheld text of one choice: the lookbehind tail the
+// pendingKey identifies a window: a choice's text, or the arguments of one
+// of its tool calls.
+type pendingKey struct {
+	choice int
+	call   int
+	kind   EventKind
+}
+
+func keyOf(ev Event) pendingKey {
+	key := pendingKey{choice: ev.Choice, kind: ev.Kind}
+	if ev.Kind == KindToolCallDelta {
+		key.call = ev.Call
+	}
+	return key
+}
+
+// held reports whether ev is re-segmented rather than relayed: text deltas
+// and tool-call deltas carrying arguments. A tool call announced with
+// empty arguments passes through, so its id and name are relayed at once.
+func held(ev Event) bool {
+	return ev.Kind == KindTextDelta || (ev.Kind == KindToolCallDelta && ev.Text != "")
+}
+
+// pendingText is the withheld text of one window: the lookbehind tail the
 // transformer already saw and the pending run it has not, together with the
 // chunks re-segmented events are rendered from.
 type pendingText struct {
@@ -178,7 +210,10 @@ type pendingText struct {
 	template         Event
 	head             Event
 	templateTerminal bool
-	dataBuf          []byte
+	// armed says the template is the first chunk of the run and nothing
+	// was emitted from it yet, so it is kept until something is.
+	armed   bool
+	dataBuf []byte
 	// closer is the latest chunk of the run that carried once-per-choice
 	// members (a chat chunk's finish_reason and usage), owed to the client
 	// while terminal is set.
@@ -318,7 +353,7 @@ func (s *transformedSSEStream) handleOne(raw RawEvent) {
 		s.write(raw.Raw)
 		return
 	}
-	if (s.opts.LookbehindChars > 0 || s.opts.MinChunkChars > 0) && ev.Kind == KindTextDelta {
+	if (s.opts.LookbehindChars > 0 || s.opts.MinChunkChars > 0) && held(ev) {
 		s.hold(ev)
 		return
 	}
@@ -431,22 +466,29 @@ func (s *transformedSSEStream) callEnd() {
 	}
 }
 
-// hold adds the delta to the pending text of the event's choice and, once
+// hold adds the delta to the pending text of its window and, once
 // MinChunkChars are pending, shows the transformer the window tail+pending,
 // emits all but the last N characters of the result and keeps the rest as
-// the new tail.
+// the new tail. A delta for another window of the same choice first
+// flushes that choice's other windows, so events keep their order.
 func (s *transformedSSEStream) hold(ev Event) {
-	p := s.pending[ev.Choice]
+	key := keyOf(ev)
+	s.flushOthers(key)
+	if s.ended {
+		return
+	}
+	p := s.pending[key]
 	if p == nil {
 		p = &pendingText{}
-		s.pending[ev.Choice] = p
+		s.pending[key] = p
 	}
 	if !p.queued {
 		p.queued = true
-		s.pendingOrder = append(s.pendingOrder, ev.Choice)
+		s.pendingOrder = append(s.pendingOrder, key)
 	}
-	if p.pending == "" {
+	if p.pending == "" && !p.armed {
 		s.setTemplate(p, ev)
+		p.armed = true
 	}
 	if _, terminal := s.codec.StripTerminal(ev); terminal {
 		s.setCloser(p, ev)
@@ -458,75 +500,105 @@ func (s *transformedSSEStream) hold(ev Event) {
 	}
 	window := p.tail + p.pending
 	p.pending = ""
-	result, ok := s.inspect(ev.Choice, p, window, utf8.RuneCountInString(p.tail))
+	result, ok := s.inspect(key, p, window, utf8.RuneCountInString(p.tail))
 	if !ok {
 		p.tail = ""
 		return
 	}
 	head, tail := splitTail(result, s.opts.LookbehindChars)
 	p.tail = tail
-	s.emitText(ev.Choice, p.head, head)
+	if head != "" {
+		s.emitText(key, p.head, head)
+		p.armed = false
+	}
 	// The withheld tail continues under the latest chunk, so once-per-choice
-	// members it carries go out with the choice's last text.
-	s.setTemplate(p, ev)
+	// members it carries go out with the choice's last text; a template
+	// nothing was emitted from yet stays.
+	if !p.armed {
+		s.setTemplate(p, ev)
+	}
 }
 
-// flushPending shows the transformer every choice's tail (once more) and
+// flushPending shows the transformer every window's tail (once more) and
 // pending text and emits the results in full, in the order the windows were
 // opened.
 func (s *transformedSSEStream) flushPending() {
-	for _, choice := range s.pendingOrder {
-		p := s.pending[choice]
-		if p == nil {
-			continue
-		}
-		p.queued = false
-		window := p.tail + p.pending
-		if window == "" {
-			s.emitEnvelope(choice, p)
-			continue
-		}
-		overlap := utf8.RuneCountInString(p.tail)
-		p.tail, p.pending = "", ""
-		result, ok := s.inspect(choice, p, window, overlap)
+	for _, key := range s.pendingOrder {
+		s.flushOne(key)
 		if s.ended {
 			return
-		}
-		switch {
-		case !ok || result == "":
-			s.emitEnvelope(choice, p)
-		case p.terminal && !p.templateTerminal:
-			// The run's template is not the chunk that carries the
-			// once-per-choice members: the text goes out from it and the
-			// owed chunk follows with empty text.
-			s.emitText(choice, p.head, result)
-			s.emitEnvelope(choice, p)
-		default:
-			s.emitText(choice, p.template, result)
-			p.terminal = false
 		}
 	}
 	s.pendingOrder = s.pendingOrder[:0]
 }
 
+// flushOthers flushes the windows of key's choice other than key.
+func (s *transformedSSEStream) flushOthers(key pendingKey) {
+	kept := s.pendingOrder[:0]
+	for _, other := range s.pendingOrder {
+		if other.choice != key.choice || other == key {
+			kept = append(kept, other)
+			continue
+		}
+		s.flushOne(other)
+		if s.ended {
+			return
+		}
+	}
+	s.pendingOrder = kept
+}
+
+func (s *transformedSSEStream) flushOne(key pendingKey) {
+	p := s.pending[key]
+	if p == nil {
+		return
+	}
+	p.queued = false
+	window := p.tail + p.pending
+	if window == "" {
+		s.emitEnvelope(key, p)
+		return
+	}
+	overlap := utf8.RuneCountInString(p.tail)
+	p.tail, p.pending = "", ""
+	result, ok := s.inspect(key, p, window, overlap)
+	if s.ended {
+		return
+	}
+	switch {
+	case !ok || result == "":
+		s.emitEnvelope(key, p)
+	case p.terminal && !p.templateTerminal:
+		// The run's template is not the chunk that carries the
+		// once-per-choice members: the text goes out from it and the
+		// owed chunk follows with empty text.
+		s.emitText(key, p.head, result)
+		s.emitEnvelope(key, p)
+	default:
+		s.emitText(key, p.template, result)
+		p.terminal = false
+	}
+	p.armed = false
+}
+
 // emitEnvelope delivers the owed once-per-choice members when their chunk's
 // text was dropped, emptied, or emitted from another template: the chunk
 // goes out with empty text. Nothing is emitted when none are owed.
-func (s *transformedSSEStream) emitEnvelope(choice int, p *pendingText) {
+func (s *transformedSSEStream) emitEnvelope(key pendingKey, p *pendingText) {
 	if !p.terminal {
 		return
 	}
 	p.terminal = false
-	ev := s.resegment(choice, p.closer, "")
+	ev := s.resegment(key, p.closer, "")
 	s.codec.Track(ev)
 	s.out = ev.appendEncoded(s.out)
 }
 
-// inspect hands text to the transformer as one text event built from the
-// choice's template chunk and returns the text to emit; ok is false when
-// nothing should be emitted (drop) or the stream ended.
-func (s *transformedSSEStream) inspect(choice int, p *pendingText, text string, overlap int) (string, bool) {
-	ev := s.resegment(choice, p.template, text)
+// inspect hands text to the transformer as one event of the window's kind
+// built from its template chunk and returns the text to emit; ok is false
+// when nothing should be emitted (drop) or the stream ended.
+func (s *transformedSSEStream) inspect(key pendingKey, p *pendingText, text string, overlap int) (string, bool) {
+	ev := s.resegment(key, p.template, text)
 	ev.Seq = s.seq
 	ev.Overlap = overlap
 	s.seq++
@@ -544,26 +616,26 @@ func (s *transformedSSEStream) inspect(choice int, p *pendingText, text string, 
 	}
 }
 
-// emitText renders text as a re-segmented event of the choice built from
+// emitText renders text as a re-segmented event of the window built from
 // template.
-func (s *transformedSSEStream) emitText(choice int, template Event, text string) {
+func (s *transformedSSEStream) emitText(key pendingKey, template Event, text string) {
 	if text == "" {
 		return
 	}
-	ev := s.resegment(choice, template, text)
+	ev := s.resegment(key, template, text)
 	s.codec.Track(ev)
 	s.out = ev.appendEncoded(s.out)
 }
 
-func (s *transformedSSEStream) resegment(choice int, template Event, text string) Event {
+func (s *transformedSSEStream) resegment(key pendingKey, template Event, text string) Event {
 	ev := template
-	ev.Choice = choice
+	ev.Choice = key.choice
 	if ev.Text == text {
 		return ev
 	}
 	rewritten, err := s.codec.RewriteText(ev, text)
 	if err != nil {
-		s.report(fmt.Errorf("streaming: re-segment text for choice %d: %w", choice, err))
+		s.report(fmt.Errorf("streaming: re-segment %s for choice %d: %w", ev.Kind, key.choice, err))
 		ev.Text = text
 		return ev
 	}

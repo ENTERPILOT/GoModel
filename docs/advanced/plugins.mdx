@@ -159,13 +159,17 @@ one of three modes in `StreamHook.StreamPolicy()`:
 | Mode | What the plugin can do | Latency cost |
 | --- | --- | --- |
 | `observe` | read every event; decisions are ignored except `terminate` | none |
-| `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice, plus up to `MinChunkChars` while a run is collected |
+| `transform` | `pass`, `drop`, `replace` (text, reasoning, and tool-call argument deltas), or `terminate` each event | `LookbehindChars` characters of delay per window, plus up to `MinChunkChars` while a run is collected |
 | `buffer` | nothing per event; GoModel collects the whole stream and runs the plugin's `OnResponse` on the assembled completion (a `buffer` plugin must implement `ResponseHook`; loading fails otherwise) | time-to-first-token becomes time-to-last-token |
 
 **Lookbehind** (`transform` only): GoModel withholds the last `LookbehindChars`
-characters of text per choice and presents each delta together with that
-tail, so a pattern spanning two chunks (a phone number, an API key) is
-visible in one event before any of it reaches the client. A pattern of up to
+characters per window and presents each delta together with that tail, so a
+pattern spanning two chunks (a phone number, an API key) is visible in one
+event before any of it reaches the client. A choice's text is one window and
+the arguments of each of its tool calls (`StreamEvent.Call`) another, so a
+placeholder split across two argument deltas is rewritten the same way; a
+delta for another window of the same choice flushes that choice's other
+windows first, so events keep their order. A pattern of up to
 `LookbehindChars + 1` characters is always caught. `0` disables it. The tail
 comes back already carrying the plugin's earlier edits, and
 `StreamEvent.Overlap` says how many leading characters it spans: a plugin

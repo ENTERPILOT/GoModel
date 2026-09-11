@@ -73,14 +73,16 @@ func TestRunStreamTransformLookbehind(t *testing.T) {
 	if res.Text[0] != "my [x] is safe" {
 		t.Errorf("text = %q", res.Text[0])
 	}
-	// Window 2 shows the withheld tail "y se" in front of "cret is".
-	if len(r.windows) != 3 || r.windows[1] != "y secret is" {
+	// Window 2 shows the withheld tail "y se" in front of "cret is"; the
+	// finish event flushes the last tail, shown once more on its own.
+	if len(r.windows) != 4 || r.windows[1] != "y secret is" || r.windows[3] != "safe" {
 		t.Errorf("windows = %q", r.windows)
 	}
 	if res.End.Message != "my [x] is safe" {
 		t.Errorf("stream state at end = %q", res.End.Message)
 	}
-	if res.Terminated != nil || len(res.Events) == 0 || res.Events[len(res.Events)-2].Kind != pluginapi.EventFinish {
+	// The finish event flushed the tail before it was delivered itself.
+	if res.Terminated != nil || len(res.Events) != 5 || res.Events[3].Text != "safe" || res.Events[4].Kind != pluginapi.EventFinish {
 		t.Errorf("events = %+v", res.Events)
 	}
 }
@@ -249,5 +251,43 @@ func TestHostReplyMayInspectHost(t *testing.T) {
 	c, err := h.Complete(context.Background(), pluginapi.InferenceRequest{})
 	if err != nil || c.Text(0) != "n=1" || h.Recorded().Counts["seen"] != 1 {
 		t.Errorf("reply = %+v, %v", c, err)
+	}
+}
+
+// argsRedactor replaces "secret" in text and tool-call windows.
+type argsRedactor struct{ redactor }
+
+func (a *argsRedactor) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *pluginapi.StreamEvent) (pluginapi.StreamDecision, error) {
+	if ev.Kind == pluginapi.EventToolCallDelta {
+		copy := *ev
+		copy.Kind = pluginapi.EventTextDelta
+		return a.redactor.OnStreamEvent(ctx, x, &copy)
+	}
+	return a.redactor.OnStreamEvent(ctx, x, ev)
+}
+
+func TestRunStreamToolCallWindows(t *testing.T) {
+	a := &argsRedactor{redactor{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamTransform, LookbehindChars: 4}}}
+	res, err := RunStream(context.Background(), a, nil, []*pluginapi.StreamEvent{
+		TextDelta("text se"),
+		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `{"a":"se`},
+		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `cret"}`},
+		{Kind: pluginapi.EventToolCallDelta, Call: 1, Text: `{"b":1}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first tool-call delta flushed the text window, so its
+	// unfinished "se" was delivered as is; call 0's split match was
+	// rewritten; call 1 has its own window.
+	if res.Text[0] != "text se" || res.ToolArguments[0][0] != `{"a":"[x]"}` || res.ToolArguments[0][1] != `{"b":1}` {
+		t.Errorf("result = %+v", res)
+	}
+	// Every window is shown on arrival and once more, in full, when it is
+	// flushed: the text by call 0's first delta, call 0 by call 1's, call
+	// 1 by the end of the stream.
+	want := []string{"text se", "t se", `{"a":"se`, `:"secret"}`, `x]"}`, `{"b":1}`, `":1}`}
+	if strings.Join(a.windows, "|") != strings.Join(want, "|") {
+		t.Errorf("windows = %q, want %q", a.windows, want)
 	}
 }
