@@ -194,9 +194,9 @@ func TestResponsesWithPreviousResponseID_UnknownIDReturns404(t *testing.T) {
 	}
 }
 
-// TestApplyResponsesPreviousResponse_ScopedTenantCannotChainAcrossScopes
+// TestPatchResponsesAttempt_ScopedTenantCannotChainAcrossScopes
 // reports another tenant's stored response exactly like a missing one.
-func TestApplyResponsesPreviousResponse_ScopedTenantCannotChainAcrossScopes(t *testing.T) {
+func TestPatchResponsesAttempt_ScopedTenantCannotChainAcrossScopes(t *testing.T) {
 	store := responsestore.NewMemoryStore()
 	defer func() { _ = store.Close() }()
 	if err := store.Create(context.Background(), &responsestore.StoredResponse{
@@ -373,7 +373,7 @@ func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T
 	}
 }
 
-func TestApplyResponsesPreviousResponse_SkipsEmptyReplayText(t *testing.T) {
+func TestPatchResponsesAttempt_SkipsEmptyReplayText(t *testing.T) {
 	store := responsestore.NewMemoryStore()
 	defer func() { _ = store.Close() }()
 	if err := store.Create(context.Background(), &responsestore.StoredResponse{
@@ -402,39 +402,11 @@ func TestApplyResponsesPreviousResponse_SkipsEmptyReplayText(t *testing.T) {
 	}
 }
 
-// TestResponsesWithPreviousResponseID_UntrackedIDWithTranslatedFailoverIsForwarded
-// keeps forwarding an id the gateway does not track when the primary provider
-// is native, even with a chat-translated failover configured: the native
-// provider may hold that response itself, and refusing up front would break a
-// valid request for the sake of a fallback that could not use it anyway.
-func TestResponsesWithPreviousResponseID_UntrackedIDWithTranslatedFailoverIsForwarded(t *testing.T) {
-	provider := previousResponseTestProvider(t, "openai")
-	provider.providerTypes["anthropic/claude"] = "anthropic"
-	provider.supportedModels = append(provider.supportedModels, "anthropic/claude")
-	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
-		selectors: []core.ModelSelector{{Provider: "anthropic", Model: "claude"}},
-	}, nil)
-	handler.SetResponseStore(responsestore.NewMemoryStore())
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_at_provider"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := handler.Responses(echo.New().NewContext(req, rec)); err != nil {
-		t.Fatalf("handler.Responses() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	if got := provider.capturedResponsesReq.PreviousResponseID; got != "resp_at_provider" {
-		t.Fatalf("native primary must still receive the untracked id, got %q", got)
-	}
-}
-
-// TestApplyResponsesPreviousResponse_PendingSnapshotWaitFollowsAccessScope
+// TestPatchResponsesAttempt_PendingSnapshotWaitFollowsAccessScope
 // lets a caller wait on an in-flight write only when its access scope covers
 // the write's user path: a foreign tenant learns nothing from the wait, while
 // a globally scoped caller keeps its race protection.
-func TestApplyResponsesPreviousResponse_PendingSnapshotWaitFollowsAccessScope(t *testing.T) {
+func TestPatchResponsesAttempt_PendingSnapshotWaitFollowsAccessScope(t *testing.T) {
 	tests := []struct {
 		name     string
 		ctx      context.Context

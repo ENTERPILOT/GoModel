@@ -49,8 +49,9 @@ This enables:
 - `DELETE /v1/responses/{id}` even when the provider does not expose native
   response deletion.
 - `previous_response_id` on chat-translated providers such as Anthropic and
-  Gemini: GoModel prepends the stored response's input items and output to the
-  new input, so the provider receives the whole chain each turn. On these
+  Gemini: GoModel follows the stored response and each response it was chained
+  from, and prepends their input items and output to the new input, so the
+  provider receives the whole chain each turn. On these
   providers an id that is not stored (the previous response was streamed or
   sent with `store: false`), or belongs to another tenant, returns 404. Native
   Responses providers receive the id itself and resolve it on their side, so
