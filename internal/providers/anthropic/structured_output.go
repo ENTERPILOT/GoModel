@@ -91,7 +91,12 @@ func dropUnsupportedVerbosity(extraFields core.UnknownJSONFields) {
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return
 	}
-	slog.Warn("dropping verbosity; Anthropic has no equivalent parameter", "verbosity", string(raw))
+	verbosity := string(raw)
+	var value string
+	if err := json.Unmarshal(raw, &value); err == nil {
+		verbosity = value
+	}
+	slog.Warn("dropping verbosity; Anthropic has no equivalent parameter", "verbosity", verbosity)
 }
 
 // unsupportedSchemaKeywords are the JSON Schema keywords Anthropic's structured
