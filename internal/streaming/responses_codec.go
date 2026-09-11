@@ -31,12 +31,12 @@ type responsesEventView struct {
 // responsesItem tracks an output item announced by response.output_item.added
 // so a cut stream can close it.
 type responsesItem struct {
-	index        int
-	id           string
-	itemType     string
-	raw          json.RawMessage
-	text         strings.Builder
-	arguments    strings.Builder
+	index     int
+	id        string
+	itemType  string
+	raw       json.RawMessage
+	text      strings.Builder
+	arguments strings.Builder
 	// argsOpen says an arguments delta was decoded for the item, so the
 	// events restating its arguments are rewritten to what was emitted
 	// even when that is nothing.
