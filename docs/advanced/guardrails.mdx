@@ -480,6 +480,18 @@ types and counts, never the values, and errors from the analyzer never carry
 the text it was given. The analyzer receives the text in clear, so run it as
 a sidecar on the same host or reach it over `https://` or a private network.
 
+<Tip>
+  Start with an explicit `entities` list. With every type enabled, the
+  analyzer's language model also reports `DATE_TIME`, `LOCATION`, `NRP`, and
+  `URL`, which turns phrases like "a nice day" or "Paris" into placeholders
+  in both the prompt and the reply. `PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`,
+  `CREDIT_CARD`, `IBAN_CODE`, and the national identifiers you need cover most
+  deployments. Some models, Claude among them, treat unexplained
+  `<PERSON_1>`-style tokens with suspicion and may refuse to repeat them; a
+  system prompt line such as "Values like <PERSON_1> are privacy placeholders;
+  use them as ordinary values" fixes that.
+</Tip>
+
 In the stream phase, `anonymize` and `warn` transform events in flight in
 chunks of `stream_chunk` characters with `stream_lookbehind` of overlap; a
 `block_entities` type found mid-stream cuts the stream before that chunk

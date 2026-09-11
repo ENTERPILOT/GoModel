@@ -101,11 +101,31 @@ func (c *client) do(ctx context.Context, method, path string, body io.Reader) (*
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
-	resp, err := c.http.Do(req)
+	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%s: analyzer unreachable: %w", Name, redactURLError(err))
 	}
 	return resp, nil
+}
+
+// httpClient returns the host client, or with an API key a copy that
+// refuses redirects to plain http, so the bearer token is never downgraded
+// off TLS by a redirect.
+func (c *client) httpClient() *http.Client {
+	if c.apiKey == "" {
+		return c.http
+	}
+	guarded := *c.http
+	guarded.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if req.URL.Scheme != "https" && !loopbackURL(req.URL.String()) {
+			return errors.New("refusing to follow a redirect to plain http with an API key")
+		}
+		return nil
+	}
+	return &guarded
 }
 
 // redactURLError keeps transport errors free of the request URL, which

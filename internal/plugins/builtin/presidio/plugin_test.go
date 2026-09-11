@@ -625,6 +625,22 @@ func TestRestoreProvenance(t *testing.T) {
 	if !d.NoStore {
 		t.Errorf("restored response must not be cached: %+v", d)
 	}
+	// A value the system prompt mentions first becomes restorable once the
+	// user sends it too.
+	z := exchange(prompt(
+		text(pluginapi.RoleSystem, "m0", "The customer is Ann Lee."),
+		text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
+	), nil)
+	if _, err := in.OnPrompt(context.Background(), z); err != nil {
+		t.Fatal(err)
+	}
+	z.Response = completion("Hello <PERSON_1>.")
+	if _, err := out.OnResponse(context.Background(), z); err != nil {
+		t.Fatal(err)
+	}
+	if got := z.Response.Text(0); got != "Hello Ann Lee." {
+		t.Errorf("response = %q", got)
+	}
 
 	// A prompt instance without restore never hands values to a response
 	// instance with restore.
@@ -732,5 +748,33 @@ func TestAPIKeyNeedsHTTPS(t *testing.T) {
 		if err := New().Init(context.Background(), json.RawMessage(cfg), fakeHost{}); err != nil {
 			t.Errorf("%s: %v", cfg, err)
 		}
+	}
+}
+
+func TestAPIKeyIsNotFollowedToPlainHTTP(t *testing.T) {
+	a := newAnalyzer(t, "Ann")
+	// A TLS front that redirects to a plain-http host.
+	target := "http://presidio.invalid"
+	front := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(front.Close)
+	p := newPlugin(t, nil, `{"analyzer_url": "`+front.URL+`", "api_key": "tok"}`)
+	p.client.http = front.Client()
+	x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Ann is here")), nil)
+	_, err := p.OnPrompt(context.Background(), x)
+	if err == nil || !strings.Contains(err.Error(), "redirect to plain http") {
+		t.Fatalf("err = %v", err)
+	}
+	// A loopback sidecar may still be reached over plain http, and without
+	// a key any redirect is followed as usual.
+	target = a.srv.URL
+	if _, err := p.OnPrompt(context.Background(), x); err != nil {
+		t.Fatalf("loopback redirect: %v", err)
+	}
+	p = newPlugin(t, nil, `{"analyzer_url": "`+front.URL+`"}`)
+	p.client.http = front.Client()
+	if _, err := p.OnPrompt(context.Background(), x); err != nil {
+		t.Fatalf("err = %v", err)
 	}
 }

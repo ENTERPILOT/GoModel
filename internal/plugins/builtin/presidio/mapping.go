@@ -31,19 +31,21 @@ func newMapping() *mapping {
 }
 
 // placeholder returns the placeholder for value as entity, allocating the
-// next number of the type on first sight. fromPrompt marks it restorable.
-func (m *mapping) placeholder(entity, value string, fromPrompt bool) string {
+// next number of the type on first sight. restorable marks it so; a value
+// first seen where it is not restorable (a system message) becomes
+// restorable once the user sends it too.
+func (m *mapping) placeholder(entity, value string, restorable bool) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := entity + "\x00" + value
-	if p, ok := m.byValue[key]; ok {
-		return p
+	p, ok := m.byValue[key]
+	if !ok {
+		m.seq[entity]++
+		p = fmt.Sprintf("<%s_%d>", entity, m.seq[entity])
+		m.byValue[key] = p
+		m.byPlaceholder[p] = value
 	}
-	m.seq[entity]++
-	p := fmt.Sprintf("<%s_%d>", entity, m.seq[entity])
-	m.byValue[key] = p
-	m.byPlaceholder[p] = value
-	if fromPrompt {
+	if restorable {
 		m.restorable[p] = true
 	}
 	return p
