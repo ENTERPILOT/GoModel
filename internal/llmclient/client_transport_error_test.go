@@ -83,6 +83,46 @@ func TestTransportErrorMessage(t *testing.T) {
 	}
 }
 
+// The server-side log keeps the upstream URL for diagnosis, but not a
+// credential an operator embedded in a custom base_url.
+func TestSanitizedTransportError(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		want       string
+		wantAbsent string
+	}{
+		{
+			name:       "query credential is dropped",
+			err:        &url.Error{Op: "Post", URL: "https://host.internal:8443/v1/chat/completions?key=s3cret", Err: errors.New("connection refused")},
+			want:       `Post "https://host.internal:8443/v1/chat/completions": connection refused`,
+			wantAbsent: "s3cret",
+		},
+		{
+			name:       "userinfo is dropped",
+			err:        &url.Error{Op: "Post", URL: "https://user:p4ssw0rd@host.internal/v1/chat/completions", Err: errors.New("connection refused")},
+			want:       `Post "https://host.internal/v1/chat/completions": connection refused`,
+			wantAbsent: "p4ssw0rd",
+		},
+		{
+			name: "non-URL errors pass through",
+			err:  errors.New("connection reset by peer"),
+			want: "connection reset by peer",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizedTransportError(tt.err)
+			if got != tt.want {
+				t.Fatalf("sanitizedTransportError() = %q, want %q", got, tt.want)
+			}
+			if tt.wantAbsent != "" && strings.Contains(got, tt.wantAbsent) {
+				t.Fatalf("sanitizedTransportError() = %q, must not contain %q", got, tt.wantAbsent)
+			}
+		})
+	}
+}
+
 func TestReadErrorMessage(t *testing.T) {
 	if got := readErrorMessage(context.DeadlineExceeded); got != "timed out reading provider response" {
 		t.Fatalf("readErrorMessage(timeout) = %q", got)

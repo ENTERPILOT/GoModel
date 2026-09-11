@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"syscall"
 
@@ -85,14 +86,46 @@ func (c *Client) doHTTPRequest(ctx context.Context, req Request) (*http.Response
 	return resp, nil
 }
 
-// logTransportError records the full transport error — including the upstream
-// URL the client never sees — for operators.
+// logTransportError records the transport error for operators, including the
+// upstream URL the client never sees — minus any credential an operator
+// embedded in a custom base_url.
 func logTransportError(message, providerName, endpoint string, err error) {
 	slog.Warn(message,
 		"provider", providerName,
 		"endpoint", endpoint,
-		"error", err,
+		"error", sanitizedTransportError(err),
 	)
+}
+
+// sanitizedTransportError renders a transport error with the upstream URL
+// stripped of userinfo, query and fragment: a base_url may carry a token in
+// any of them, and secrets must not reach the logs either.
+func sanitizedTransportError(err error) string {
+	if err == nil {
+		return ""
+	}
+	urlErr, ok := errors.AsType[*url.Error](err)
+	if !ok {
+		return err.Error()
+	}
+	inner := "unknown error"
+	if urlErr.Err != nil {
+		inner = urlErr.Err.Error()
+	}
+	return fmt.Sprintf("%s %q: %s", urlErr.Op, redactedURL(urlErr.URL), inner)
+}
+
+func redactedURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "[unparsable url]"
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	return parsed.String()
 }
 
 // transportErrorMessage summarizes a transport failure for the client. The
