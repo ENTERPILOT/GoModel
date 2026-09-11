@@ -73,6 +73,16 @@ func TestResponsesRequestEcho(t *testing.T) {
 	}
 }
 
+// truncation is an enum: the echo carries the canonical spelling the validator
+// accepted, not the caller's padding, so a strict client still sees a legal value.
+func TestResponsesRequestEchoCanonicalizesTruncation(t *testing.T) {
+	req := &core.ResponsesRequest{Model: "m", Input: "hi", Truncation: " disabled "}
+
+	if got := string(ResponsesRequestEcho(req)["truncation"]); got != `"disabled"` {
+		t.Fatalf("truncation = %s, want \"disabled\"", got)
+	}
+}
+
 // A member the provider itself returned must win over the echoed request value.
 func TestApplyResponsesRequestEchoKeepsProviderMembers(t *testing.T) {
 	resp := &core.ResponsesResponse{

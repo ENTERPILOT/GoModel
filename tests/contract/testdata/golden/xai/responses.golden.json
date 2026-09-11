@@ -1,6 +1,14 @@
 {
+  "background": false,
+  "completed_at": 1772295250,
   "created_at": 0,
+  "frequency_penalty": 0,
   "id": "afd66348-34f4-4057-3c98-abfc8078703c",
+  "incomplete_details": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "metadata": {},
   "model": "grok-3-mini",
   "object": "response",
   "output": [
@@ -30,8 +38,29 @@
       "type": "message"
     }
   ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0,
+  "prompt_cache_key": null,
   "provider": "",
+  "reasoning": {
+    "effort": "medium",
+    "summary": "detailed"
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
   "status": "completed",
+  "store": true,
+  "temperature": 0.7,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "tool_choice": "auto",
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.95,
+  "truncation": "disabled",
   "usage": {
     "cost_in_usd_ticks": 1424250,
     "input_tokens": 17,
@@ -51,5 +80,6 @@
       "rejected_prediction_tokens": 0
     },
     "total_tokens": 293
-  }
+  },
+  "user": null
 }

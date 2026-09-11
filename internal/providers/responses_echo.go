@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"strings"
+
 	"github.com/goccy/go-json"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -61,8 +63,10 @@ func ResponsesRequestEcho(req *core.ResponsesRequest) map[string]json.RawMessage
 	if req.Reasoning != nil {
 		add("reasoning", req.Reasoning)
 	}
-	if req.Truncation != "" {
-		add("truncation", req.Truncation)
+	// truncation is an enum, so the echo carries the canonical spelling the
+	// validator accepted rather than the caller's padding.
+	if truncation := strings.TrimSpace(req.Truncation); truncation != "" {
+		add("truncation", truncation)
 	}
 	if req.User != "" {
 		add("user", req.User)
