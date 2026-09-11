@@ -39,10 +39,10 @@ type StreamResult struct {
 // runes of a delivered window are withheld and shown again in front of the
 // next delta with Overlap set, and pass, replace, drop, and terminate are
 // applied to the whole window. Reasoning deltas are presented as they
-// arrive and may be replaced or dropped too. A delta for another window of
-// the same choice flushes that choice's other windows, an event that is
-// not held flushes every window, and so does the end of the stream. In
-// observe mode only terminate has an effect.
+// arrive and may be replaced or dropped too. A delta of another kind for
+// the same choice flushes that choice's windows of other kinds, an event
+// that is not held flushes every window, and so does the end of the
+// stream. In observe mode only terminate has an effect.
 //
 // In buffer mode nothing is presented per event: the deltas are assembled
 // into a completion (text and reasoning parts, "stop" as finish reason)
@@ -139,7 +139,9 @@ func (d *driver) hold(w window, text string) {
 // pending text and delivers the results in full, as the host does before
 // an event that is not held and at the end.
 func (d *driver) flushAll(ctx context.Context) error {
-	for _, w := range d.order {
+	order := d.order
+	d.order = nil
+	for _, w := range order {
 		if err := d.present(ctx, w, true); err != nil || d.result.Terminated != nil {
 			return err
 		}
@@ -147,17 +149,22 @@ func (d *driver) flushAll(ctx context.Context) error {
 	return nil
 }
 
-// flushOthers flushes the other windows of w's choice, as the host does
-// when a delta for another window arrives.
+// flushOthers flushes the windows of w's choice that are of another kind,
+// as the host does when a delta of another kind arrives.
 func (d *driver) flushOthers(ctx context.Context, w window) error {
+	kept := d.order[:0:0]
 	for _, other := range d.order {
-		if other.choice != w.choice || other == w {
+		if other.choice != w.choice || other.kind == w.kind {
+			kept = append(kept, other)
 			continue
 		}
 		if err := d.present(ctx, other, true); err != nil || d.result.Terminated != nil {
 			return err
 		}
 	}
+	// A flushed window leaves the order and is requeued by its next
+	// delta, behind windows still pending.
+	d.order = kept
 	return nil
 }
 

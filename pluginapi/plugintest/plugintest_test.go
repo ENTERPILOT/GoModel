@@ -284,10 +284,33 @@ func TestRunStreamToolCallWindows(t *testing.T) {
 		t.Errorf("result = %+v", res)
 	}
 	// Every window is shown on arrival and once more, in full, when it is
-	// flushed: the text by call 0's first delta, call 0 by call 1's, call
-	// 1 by the end of the stream.
-	want := []string{"text se", "t se", `{"a":"se`, `:"secret"}`, `x]"}`, `{"b":1}`, `":1}`}
+	// flushed: the text by call 0's first delta (another kind), both calls
+	// by the end of the stream. Parallel calls do not flush each other.
+	want := []string{"text se", "t se", `{"a":"se`, `:"secret"}`, `{"b":1}`, `x]"}`, `":1}`}
 	if strings.Join(a.windows, "|") != strings.Join(want, "|") {
 		t.Errorf("windows = %q, want %q", a.windows, want)
+	}
+}
+
+func TestRunStreamReopenedWindowQueuesBehindPending(t *testing.T) {
+	a := &argsRedactor{redactor{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamTransform, MinChunkChars: 100}}}
+	res, err := RunStream(context.Background(), a, nil, []*pluginapi.StreamEvent{
+		{Kind: pluginapi.EventTextDelta, Choice: 0, Text: "zero-a"},
+		{Kind: pluginapi.EventTextDelta, Choice: 1, Text: "one"},
+		{Kind: pluginapi.EventToolCallDelta, Choice: 0, Call: 0, Text: "{}"}, // flushes choice 0's text
+		{Kind: pluginapi.EventTextDelta, Choice: 0, Text: "zero-b"},          // reopens it, behind choice 1
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, ev := range res.Events {
+		order = append(order, string(ev.Kind)+":"+ev.Text)
+	}
+	// The tool-call delta flushed choice 0's text; reopening that text
+	// flushed the tool call and queued the text behind choice 1's.
+	want := "text_delta:zero-a,tool_call_delta:{},text_delta:one,text_delta:zero-b"
+	if strings.Join(order, ",") != want {
+		t.Errorf("order = %v, want %s", order, want)
 	}
 }

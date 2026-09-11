@@ -81,14 +81,14 @@ type responsesCodec struct {
 	seq                 int
 	items               map[int]*responsesItem
 	order               []int
-	// textIndex and argsIndex are the output_index of the most recently
-	// decoded text and function-call delta; emitted deltas (which may be
-	// re-segmented copies) are attributed to them by Track. textPart is
-	// the content or summary index of that text delta and textSummary says
-	// which of the two it is.
-	textIndex, argsIndex int
-	textPart             int
-	textSummary          bool
+	// textIndex is the output_index of the most recently decoded text
+	// delta; emitted text deltas (which may be re-segmented copies) are
+	// attributed to it by Track. textPart is the content or summary index
+	// of that delta and textSummary says which of the two it is. Tool-call
+	// deltas carry their item in Event.Call instead.
+	textIndex   int
+	textPart    int
+	textSummary bool
 }
 
 // ResponsesCodec returns a codec for Responses API event streams.
@@ -146,8 +146,7 @@ func (c *responsesCodec) remember(view *responsesEventView) {
 		c.textIndex, c.textPart, c.textSummary = view.OutputIndex, view.SummaryIndex, true
 		c.openPart()
 	case "response.function_call_arguments.delta":
-		c.argsIndex = view.OutputIndex
-		if item := c.items[c.argsIndex]; item != nil {
+		if item := c.items[view.OutputIndex]; item != nil {
 			item.argsOpen = true
 		}
 	}
@@ -189,7 +188,9 @@ func (c *responsesCodec) Track(ev Event) {
 		}
 		return
 	case KindToolCallDelta:
-		if item := c.items[c.argsIndex]; item != nil {
+		// The event names its item: a window flushed by a later item's
+		// delta must not be credited to that later item.
+		if item := c.items[ev.Call]; item != nil {
 			item.arguments.WriteString(ev.Text)
 		}
 		return

@@ -94,9 +94,10 @@ func TestTransformedSSEStream_ToolCallsAreSeparateWindows(t *testing.T) {
 			seen = append(seen, string(rune('0'+ev.Call))+":"+ev.Text)
 		}
 	}
-	// Each window is seen on arrival and once more when it is flushed:
-	// call 0 by call 1's first delta, call 1 by the finish chunk.
-	want := []string{`0:{"a":"<EMA`, `0:{"a":"<EMA`, `1:{"b":"<EMA`, `1:{"b":"<EMAIL_1>"}`, `1:"b":"a@b.c"}`}
+	// Parallel calls are independent windows: call 1's deltas do not
+	// flush call 0. Each is seen on arrival and once more, in order, when
+	// the finish chunk flushes them.
+	want := []string{`0:{"a":"<EMA`, `1:{"b":"<EMA`, `1:{"b":"<EMAIL_1>"}`, `0:{"a":"<EMA`, `1:"b":"a@b.c"}`}
 	if !equalStrings(seen, want) {
 		t.Errorf("windows = %q, want %q", seen, want)
 	}
@@ -142,8 +143,14 @@ func TestCodecs_RewriteToolCallArguments(t *testing.T) {
 		t.Errorf("chat rewrite = %s, %v", rewritten.Data, err)
 	}
 	stripped, ok := chat.StripTerminal(ev)
-	if !ok || strings.Contains(string(stripped.Data), "tool_calls\"}") && strings.Contains(string(stripped.Data), `"finish_reason":"tool_calls"`) {
-		t.Errorf("strip = %s, %v", stripped.Data, ok)
+	if !ok || stripped.ClosesChoice {
+		t.Errorf("strip reported no change: %s", stripped.Data)
+	}
+	if strings.Contains(string(stripped.Data), `"finish_reason":"tool_calls"`) {
+		t.Errorf("finish_reason not stripped: %s", stripped.Data)
+	}
+	if !strings.Contains(string(stripped.Data), `"arguments":"{\"x\""`) {
+		t.Errorf("arguments lost by strip: %s", stripped.Data)
 	}
 	responses := ResponsesCodec()
 	ev = responses.Decode(RawEvent{Name: "response.function_call_arguments.delta", Data: []byte(`{"type":"response.function_call_arguments.delta","output_index":3,"delta":"ab"}`)}, 0)
@@ -178,9 +185,9 @@ func TestTransformedSSEStream_ParallelToolCallsInOneDelta(t *testing.T) {
 			calls = append(calls, ev.Call)
 		}
 	}
-	// Call 0 is seen on arrival and once more when call 1's delta flushes
-	// it; call 1 on arrival, on its second delta, and at the final flush.
-	if strings.Trim(strings.Join(strings.Fields(strings.Trim(fmt.Sprint(calls), "[]")), ","), ",") != "0,0,1,1,1" {
+	// Both calls are seen on arrival, call 1 again on its second delta,
+	// and both once more at the final flush.
+	if strings.Trim(strings.Join(strings.Fields(strings.Trim(fmt.Sprint(calls), "[]")), ","), ",") != "0,1,1,0,1" {
 		t.Errorf("transformer saw calls %v", calls)
 	}
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
@@ -196,5 +203,36 @@ func TestTransformedSSEStream_ParallelToolCallsInOneDelta(t *testing.T) {
 	}
 	if n := strings.Count(string(got), `"finish_reason":"tool_calls"`); n != 1 {
 		t.Errorf("finish_reason emitted %d times", n)
+	}
+}
+
+func TestTransformedSSEStream_ResponsesInterleavedToolCalls(t *testing.T) {
+	// Two function-call items stream their arguments turn by turn. Each
+	// flush of the older window must be credited to its own item, so the
+	// restating events carry the right arguments.
+	item := func(i int, name string) string {
+		return "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":" + string(rune('0'+i)) + ",\"item\":{\"id\":\"fc_" + string(rune('0'+i)) + "\",\"type\":\"function_call\",\"call_id\":\"c" + string(rune('0'+i)) + "\",\"name\":\"" + name + "\",\"arguments\":\"\"}}\n\n"
+	}
+	delta := func(i int, text string) string {
+		return "event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":" + string(rune('0'+i)) + ",\"delta\":\"" + text + "\"}\n\n"
+	}
+	done := func(i int, args string) string {
+		return "event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"output_index\":" + string(rune('0'+i)) + ",\"arguments\":\"" + args + "\"}\n\n"
+	}
+	input := item(0, "f") + item(1, "g") +
+		delta(0, "{\\\"a\\\":\\\"<EMA") + delta(1, "{\\\"b\\\":1") + delta(0, "IL_1>\\\"}") + delta(1, "}") +
+		done(0, "{\\\"a\\\":\\\"<EMAIL_1>\\\"}") + done(1, "{\\\"b\\\":1}")
+	tr := restoreTransformer()
+	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ResponsesCodec(), tr, TransformOptions{LookbehindChars: 12})
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(got)
+	if strings.Contains(out, "EMAIL_1") {
+		t.Errorf("placeholder leaked:\n%s", out)
+	}
+	if !strings.Contains(out, `"arguments":"{\"a\":\"a@b.c\"}"`) || !strings.Contains(out, `"arguments":"{\"b\":1}"`) {
+		t.Errorf("done events restated wrongly:\n%s", out)
 	}
 }

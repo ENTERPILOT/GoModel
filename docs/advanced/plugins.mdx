@@ -167,9 +167,10 @@ characters per window and presents each delta together with that tail, so a
 pattern spanning two chunks (a phone number, an API key) is visible in one
 event before any of it reaches the client. A choice's text is one window and
 the arguments of each of its tool calls (`StreamEvent.Call`) another, so a
-placeholder split across two argument deltas is rewritten the same way; a
-delta for another window of the same choice flushes that choice's other
-windows first, so events keep their order. A pattern of up to
+placeholder split across two argument deltas is rewritten the same way. A
+delta of another kind for the same choice flushes that choice's windows of
+other kinds first, so text and tool calls keep their order, while parallel
+tool calls stream independently. A pattern of up to
 `LookbehindChars + 1` characters is always caught. `0` disables it. The tail
 comes back already carrying the plugin's earlier edits, and
 `StreamEvent.Overlap` says how many leading characters it spans: a plugin

@@ -102,10 +102,12 @@ const MaxMinChunkChars = 16 * 1024
 //     emitted to the client; the last N become the new tail.
 //  3. An event that is not held (reasoning, finish, usage, other, a tool
 //     call announced with empty arguments) first flushes every window, a
-//     delta for another window of the same choice flushes that choice's
-//     other windows, and the upstream end flushes them all before OnEnd:
-//     t sees the tail once more (Overlap equal to its length) and the
-//     result is emitted in full. Events therefore keep their order.
+//     delta of another kind for the same choice flushes that choice's
+//     windows of other kinds (its text before its first tool call), and
+//     the upstream end flushes them all before OnEnd: t sees the tail once
+//     more (Overlap equal to its length) and the result is emitted in
+//     full. Windows of one kind (parallel tool calls) are independent and
+//     may interleave without flushing each other.
 //
 // The first chunk of a window's run stays the template of its re-segmented
 // events until something is emitted from it, so members only that chunk
@@ -469,8 +471,9 @@ func (s *transformedSSEStream) callEnd() {
 // hold adds the delta to the pending text of its window and, once
 // MinChunkChars are pending, shows the transformer the window tail+pending,
 // emits all but the last N characters of the result and keeps the rest as
-// the new tail. A delta for another window of the same choice first
-// flushes that choice's other windows, so events keep their order.
+// the new tail. A delta of another kind for the same choice first flushes
+// that choice's windows of other kinds, so text and tool calls keep their
+// order.
 func (s *transformedSSEStream) hold(ev Event) {
 	key := keyOf(ev)
 	s.flushOthers(key)
@@ -532,11 +535,11 @@ func (s *transformedSSEStream) flushPending() {
 	s.pendingOrder = s.pendingOrder[:0]
 }
 
-// flushOthers flushes the windows of key's choice other than key.
+// flushOthers flushes the windows of key's choice that are of another kind.
 func (s *transformedSSEStream) flushOthers(key pendingKey) {
 	kept := s.pendingOrder[:0]
 	for _, other := range s.pendingOrder {
-		if other.choice != key.choice || other == key {
+		if other.choice != key.choice || other.kind == key.kind {
 			kept = append(kept, other)
 			continue
 		}
