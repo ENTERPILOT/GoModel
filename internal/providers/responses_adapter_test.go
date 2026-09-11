@@ -1516,31 +1516,29 @@ func TestStreamResponsesViaChat_DoesNotInjectUsageWhenPolicyDisabled(t *testing.
 
 func TestResponsesViaChatRejectsEmptyChatResponse(t *testing.T) {
 	tests := []struct {
-		name         string
-		chatResp     *core.ChatResponse
-		wantMessage  string
-		wantProvider string
+		name        string
+		chatResp    *core.ChatResponse
+		wantMessage string
 	}{
 		{name: "nil response", wantMessage: "provider returned empty response"},
 		{
-			name:         "no choices",
-			chatResp:     &core.ChatResponse{ID: "chatcmpl-1", Provider: "gemini"},
-			wantMessage:  "provider returned no choices",
-			wantProvider: "gemini",
+			name:        "no choices",
+			chatResp:    &core.ChatResponse{ID: "chatcmpl-1"},
+			wantMessage: "provider returned no choices",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := &capturingChatProvider{chatResp: tt.chatResp}
 
-			resp, err := ResponsesViaChat(context.Background(), provider, &core.ResponsesRequest{Model: "m", Input: "hi"})
+			resp, err := ResponsesViaChat(context.Background(), provider, &core.ResponsesRequest{Model: "m", Input: "hi"}, "groq")
 
 			var gatewayErr *core.GatewayError
 			if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
 				t.Fatalf("ResponsesViaChat() = %+v, %v; want 502 provider error", resp, err)
 			}
-			if gatewayErr.Message != tt.wantMessage || gatewayErr.Provider != tt.wantProvider {
-				t.Fatalf("error = %q from %q, want %q from %q", gatewayErr.Message, gatewayErr.Provider, tt.wantMessage, tt.wantProvider)
+			if gatewayErr.Message != tt.wantMessage || gatewayErr.Provider != "groq" {
+				t.Fatalf("error = %q from %q, want %q from groq", gatewayErr.Message, gatewayErr.Provider, tt.wantMessage)
 			}
 		})
 	}

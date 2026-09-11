@@ -76,7 +76,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Responses sends a Responses API request to MiniMax using chat-completions
 // translation, dispatched through the clamped ChatCompletion above.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "minimax")
 }
 
 // StreamResponses streams a Responses API request to MiniMax using

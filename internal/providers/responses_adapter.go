@@ -359,7 +359,9 @@ func cloneStringAnyMap(src map[string]any) map[string]any {
 }
 
 // ResponsesViaChat implements the Responses API by converting to/from Chat format.
-func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+// providerName attributes errors raised here, before the router stamps the
+// response with its provider.
+func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRequest, providerName string) (*core.ResponsesResponse, error) {
 	chatReq, err := ConvertResponsesRequestToChat(req)
 	if err != nil {
 		return nil, err
@@ -370,10 +372,10 @@ func ResponsesViaChat(ctx context.Context, p ChatProvider, req *core.ResponsesRe
 		return nil, err
 	}
 	if chatResp == nil {
-		return nil, core.NewEmptyProviderResponseError("")
+		return nil, core.NewEmptyProviderResponseError(providerName)
 	}
 	if len(chatResp.Choices) == 0 {
-		return nil, core.NewNoChoicesProviderError(chatResp.Provider)
+		return nil, core.NewNoChoicesProviderError(providerName)
 	}
 
 	return ConvertChatResponseToResponses(chatResp), nil

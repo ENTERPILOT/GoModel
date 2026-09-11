@@ -103,7 +103,7 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // Responses sends a Responses API request translated through chat completions.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "bailian")
 }
 
 // StreamResponses streams a Responses API request translated through chat completions.

@@ -223,7 +223,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "vertex")
 }
 
 // StreamResponses returns a raw response body for streaming Responses API.
