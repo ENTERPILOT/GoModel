@@ -289,8 +289,9 @@ func jsonNonNull(raw json.RawMessage) bool {
 }
 
 // Split turns a chunk with several choices into one chunk per choice, and
-// a choice whose delta carries several tool calls into one chunk per tool
-// call, so each is decoded and transformed on its own. Every top-level
+// a choice whose delta carries several tool calls, or text alongside tool
+// calls, into one chunk per part, so each is decoded and transformed on
+// its own. Every top-level
 // member is copied; usage and a choice's finish_reason stay on the last
 // part only so downstream accounting sees them once.
 func (c *chatCodec) Split(raw RawEvent) []RawEvent {
@@ -338,10 +339,16 @@ func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 	return out
 }
 
-// splitToolCalls returns one copy of the choice per entry of its delta's
-// tool_calls, each carrying a single tool call; the choice's finish_reason
-// stays on the last copy. A choice with at most one tool call is returned
-// as is. ok is false when the choice cannot be decoded.
+// textMembers are the delta members Decode classifies on before tool
+// calls; a delta carrying one of them alongside tool calls is split so the
+// text and every call are transformed on their own.
+var textMembers = []string{"content", "reasoning_content", "reasoning"}
+
+// splitToolCalls divides a choice whose delta carries several tool calls, or
+// text alongside tool calls, into copies that each carry one thing: the
+// text first, then one tool call each. The choice's finish_reason stays on
+// the last copy. A choice that needs no splitting is returned as is. ok
+// is false when the choice cannot be decoded.
 func splitToolCalls(choice json.RawMessage) ([]json.RawMessage, bool) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(choice, &obj); err != nil {
@@ -359,24 +366,44 @@ func splitToolCalls(choice json.RawMessage) ([]json.RawMessage, bool) {
 	} else if err := json.Unmarshal(raw, &calls); err != nil {
 		return nil, false
 	}
-	if len(calls) <= 1 {
+	hasText := false
+	for _, member := range textMembers {
+		if text, ok := jsonStringOf(delta[member]); ok && text != "" {
+			hasText = true
+		}
+	}
+	if len(calls) == 0 || (len(calls) == 1 && !hasText) {
 		return []json.RawMessage{choice}, true
 	}
-	out := make([]json.RawMessage, 0, len(calls))
-	for i, call := range calls {
-		partDelta := make(map[string]json.RawMessage, len(delta))
-		maps.Copy(partDelta, delta)
+	var deltas []map[string]json.RawMessage
+	if hasText {
+		textDelta := make(map[string]json.RawMessage, len(delta))
+		maps.Copy(textDelta, delta)
+		delete(textDelta, "tool_calls")
+		deltas = append(deltas, textDelta)
+	}
+	for _, call := range calls {
+		callDelta := make(map[string]json.RawMessage, len(delta))
+		maps.Copy(callDelta, delta)
+		for _, member := range textMembers {
+			delete(callDelta, member)
+		}
 		single, err := json.Marshal([]json.RawMessage{call})
 		if err != nil {
 			return nil, false
 		}
-		partDelta["tool_calls"] = single
+		callDelta["tool_calls"] = single
+		deltas = append(deltas, callDelta)
+	}
+	out := make([]json.RawMessage, 0, len(deltas))
+	for i, partDelta := range deltas {
 		partChoice := make(map[string]json.RawMessage, len(obj))
 		maps.Copy(partChoice, obj)
+		var err error
 		if partChoice["delta"], err = json.Marshal(partDelta); err != nil {
 			return nil, false
 		}
-		if i < len(calls)-1 && jsonNonNull(partChoice["finish_reason"]) {
+		if i < len(deltas)-1 && jsonNonNull(partChoice["finish_reason"]) {
 			partChoice["finish_reason"] = json.RawMessage("null")
 		}
 		encoded, err := json.Marshal(partChoice)

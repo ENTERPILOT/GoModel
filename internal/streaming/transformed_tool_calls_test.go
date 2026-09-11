@@ -236,3 +236,39 @@ func TestTransformedSSEStream_ResponsesInterleavedToolCalls(t *testing.T) {
 		t.Errorf("done events restated wrongly:\n%s", out)
 	}
 }
+
+func TestTransformedSSEStream_TextAlongsideToolCalls(t *testing.T) {
+	// One delta carries content and two tool calls: the text is emitted
+	// once and every call is transformed.
+	input := `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"hi <EMAIL_1>","tool_calls":[{"index":0,"id":"c0","function":{"name":"f","arguments":"{\"a\":\"<EMAIL_1>\"}"}},{"index":1,"id":"c1","function":{"name":"g","arguments":"{\"b\":\"<EMAIL_1>\"}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	tr := restoreTransformer()
+	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{LookbehindChars: 12})
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "EMAIL_1") {
+		t.Errorf("placeholder leaked:\n%s", got)
+	}
+	var seen []string
+	for _, ev := range tr.seen {
+		seen = append(seen, string(ev.Kind))
+	}
+	// The text part comes first and is flushed (seen once more) by the
+	// first tool-call part, another kind.
+	if !strings.HasPrefix(strings.Join(seen, ","), "text_delta,text_delta,tool_call_delta,tool_call_delta") {
+		t.Errorf("transformer saw %v", seen)
+	}
+	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := resp.Choices[0].Message
+	if msg.Content != "hi a@b.c" || len(msg.ToolCalls) != 2 || msg.ToolCalls[0].Function.Arguments != `{"a":"a@b.c"}` || msg.ToolCalls[1].Function.Arguments != `{"b":"a@b.c"}` || msg.ToolCalls[1].ID != "c1" {
+		t.Errorf("assembled = %+v", msg)
+	}
+	if resp.Choices[0].FinishReason != "tool_calls" || strings.Count(string(got), `"finish_reason":"tool_calls"`) != 1 {
+		t.Errorf("finish = %q", resp.Choices[0].FinishReason)
+	}
+}
