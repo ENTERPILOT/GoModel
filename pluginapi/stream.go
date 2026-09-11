@@ -14,8 +14,8 @@ const (
 	// decisions are ignored except [StreamTerminate].
 	StreamObserve StreamMode = "observe"
 	// StreamTransform lets the hook rewrite, drop, or terminate events in
-	// flight, holding back LookbehindChars of text so a match spanning
-	// events can be rewritten.
+	// flight, holding back LookbehindChars of text (and of tool-call
+	// arguments, per call) so a match spanning events can be rewritten.
 	StreamTransform StreamMode = "transform"
 	// StreamBuffer collects the whole stream (up to MaxBufferBytes) and runs
 	// the plugin's [ResponseHook] on the assembled completion.
@@ -29,7 +29,8 @@ type StreamPolicy struct {
 	// transform mode so the hook can rewrite text that spans events.
 	LookbehindChars int
 	// MinChunkChars, in transform mode, makes GoModel collect the text
-	// deltas of a choice until at least this many new characters (runes)
+	// deltas of a choice (and, per call, its tool-call argument deltas)
+	// until at least this many new characters (runes)
 	// are pending and present them to the hook as one text event, so a
 	// hook whose per-call cost is high (a classifier, a named-entity
 	// detector) runs on windows of useful size instead of on every token.
@@ -67,14 +68,19 @@ type StreamEvent struct {
 	Kind EventKind
 	// Choice is the choice index the event belongs to.
 	Choice int
+	// Call is the index of the tool call a tool-call delta belongs to
+	// within its choice; 0 for other kinds. Each tool call's arguments are
+	// a window of their own under lookbehind and coalescing.
+	Call int
 	// Text is the delta text for text, tool-call argument, and reasoning
 	// deltas.
 	Text string
 	// Overlap is the number of leading characters (runes) of Text that were
-	// already presented in an earlier event of this choice: under a
-	// lookbehind StreamPolicy GoModel withholds a tail of text and shows it
-	// again in front of the next delta, after this plugin's earlier decision
-	// was applied to it. An edit whose match ends within the first Overlap
+	// already presented in an earlier event of this window (a choice's
+	// text, or the arguments of one of its tool calls): under a lookbehind
+	// StreamPolicy GoModel withholds a tail of text and shows it again in
+	// front of the next delta, after this plugin's earlier decision was
+	// applied to it. An edit whose match ends within the first Overlap
 	// characters was applied then and must not be applied again; edits that
 	// extend past Overlap are new. 0 when nothing was withheld.
 	Overlap int
@@ -91,7 +97,7 @@ const (
 	// StreamDrop suppresses the event.
 	StreamDrop StreamAction = "drop"
 	// StreamReplace forwards the event with StreamDecision.Text instead of
-	// its own text.
+	// its own text: a text, reasoning, or tool-call argument delta.
 	StreamReplace StreamAction = "replace"
 	// StreamTerminate ends the stream with StreamDecision.Terminate.
 	StreamTerminate StreamAction = "terminate"

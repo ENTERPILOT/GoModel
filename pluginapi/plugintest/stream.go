@@ -15,6 +15,9 @@ import (
 type StreamResult struct {
 	// Text is the delivered text per choice, after the hook's edits.
 	Text map[int]string
+	// ToolArguments is the delivered tool-call arguments per choice and
+	// call index, after the hook's edits.
+	ToolArguments map[int]map[int]string
 	// Events are the delivered events in order, text and reasoning deltas
 	// carrying the text as delivered.
 	Events []*pluginapi.StreamEvent
@@ -30,13 +33,16 @@ type StreamResult struct {
 }
 
 // RunStream drives hook with events the way GoModel does under its
-// StreamPolicy: in transform mode text deltas of a choice are coalesced
-// until MinChunkChars runes are pending, the last LookbehindChars runes of
-// delivered text are withheld and shown again in front of the next delta
-// with Overlap set, and pass, replace, drop, and terminate are applied to
-// the whole window. Reasoning deltas are presented as they arrive and may
-// be replaced or dropped too. A non-text event and the end of the stream
-// flush what is pending. In observe mode only terminate has an effect.
+// StreamPolicy: in transform mode the text deltas of a choice, and the
+// argument deltas of each of its tool calls, form windows that are
+// coalesced until MinChunkChars runes are pending; the last LookbehindChars
+// runes of a delivered window are withheld and shown again in front of the
+// next delta with Overlap set, and pass, replace, drop, and terminate are
+// applied to the whole window. Reasoning deltas are presented as they
+// arrive and may be replaced or dropped too. A delta of another kind for
+// the same choice flushes that choice's windows of other kinds, an event
+// that is not held flushes every window, and so does the end of the
+// stream. In observe mode only terminate has an effect.
 //
 // In buffer mode nothing is presented per event: the deltas are assembled
 // into a completion (text and reasoning parts, "stop" as finish reason)
@@ -60,15 +66,19 @@ func RunStream(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Exch
 	if policy.Mode == pluginapi.StreamBuffer {
 		return runBuffered(ctx, hook, x, events)
 	}
-	d := &driver{hook: hook, x: x, policy: policy, result: &StreamResult{Text: map[int]string{}}, pending: map[int]string{}, tail: map[int]string{}}
+	d := &driver{hook: hook, x: x, policy: policy, result: &StreamResult{Text: map[int]string{}, ToolArguments: map[int]map[int]string{}}, pending: map[window]string{}, tail: map[window]string{}}
 	for _, ev := range events {
 		if ev == nil {
 			continue
 		}
-		if ev.Kind == pluginapi.EventTextDelta {
-			d.hold(ev.Choice, ev.Text)
-			if policy.Mode != pluginapi.StreamTransform || policy.MinChunkChars == 0 || utf8.RuneCountInString(d.pending[ev.Choice]) >= policy.MinChunkChars {
-				if err := d.flush(ctx, ev.Choice); err != nil || d.result.Terminated != nil {
+		if ev.Kind == pluginapi.EventTextDelta || (ev.Kind == pluginapi.EventToolCallDelta && ev.Text != "") {
+			w := windowOf(ev)
+			if err := d.flushOthers(ctx, w); err != nil || d.result.Terminated != nil {
+				return d.result, err
+			}
+			d.hold(w, ev.Text)
+			if policy.Mode != pluginapi.StreamTransform || policy.MinChunkChars == 0 || utf8.RuneCountInString(d.pending[w]) >= policy.MinChunkChars {
+				if err := d.present(ctx, w, false); err != nil || d.result.Terminated != nil {
 					return d.result, err
 				}
 			}
@@ -84,11 +94,6 @@ func RunStream(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Exch
 	if err := d.flushAll(ctx); err != nil || d.result.Terminated != nil {
 		return d.result, err
 	}
-	for _, choice := range d.order {
-		if tail := d.tail[choice]; tail != "" {
-			d.deliverText(choice, tail)
-		}
-	}
 	end, err := hook.OnStreamEnd(ctx, x)
 	if err != nil {
 		return d.result, err
@@ -97,52 +102,85 @@ func RunStream(ctx context.Context, hook pluginapi.StreamHook, x *pluginapi.Exch
 	return d.result, nil
 }
 
+// window identifies a choice's text or one of its tool calls' arguments.
+type window struct {
+	choice int
+	call   int
+	kind   pluginapi.EventKind
+}
+
+func windowOf(ev *pluginapi.StreamEvent) window {
+	w := window{choice: ev.Choice, kind: ev.Kind}
+	if ev.Kind == pluginapi.EventToolCallDelta {
+		w.call = ev.Call
+	}
+	return w
+}
+
 type driver struct {
 	hook    pluginapi.StreamHook
 	x       *pluginapi.Exchange
 	policy  pluginapi.StreamPolicy
 	result  *StreamResult
-	pending map[int]string
-	tail    map[int]string
-	order   []int // choices in order of first appearance
+	pending map[window]string
+	tail    map[window]string
+	order   []window // windows in order of first appearance
 	seq     int
 }
 
-func (d *driver) hold(choice int, text string) {
-	if !slices.Contains(d.order, choice) {
-		d.order = append(d.order, choice)
+func (d *driver) hold(w window, text string) {
+	if !slices.Contains(d.order, w) {
+		d.order = append(d.order, w)
 	}
-	d.pending[choice] += text
+	d.pending[w] += text
 }
 
-// flushAll presents the pending text of every choice, in order of first
-// appearance, as the host does before a non-text event and at the end.
+// flushAll shows the transformer every window's tail once more with its
+// pending text and delivers the results in full, as the host does before
+// an event that is not held and at the end.
 func (d *driver) flushAll(ctx context.Context) error {
-	for _, choice := range d.order {
-		if err := d.flush(ctx, choice); err != nil || d.result.Terminated != nil {
+	order := d.order
+	d.order = nil
+	for _, w := range order {
+		if err := d.present(ctx, w, true); err != nil || d.result.Terminated != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// flush presents the pending text of a choice, if any.
-func (d *driver) flush(ctx context.Context, choice int) error {
-	text := d.pending[choice]
-	if text == "" {
-		return nil
+// flushOthers flushes the windows of w's choice that are of another kind,
+// as the host does when a delta of another kind arrives.
+func (d *driver) flushOthers(ctx context.Context, w window) error {
+	kept := d.order[:0:0]
+	for _, other := range d.order {
+		if other.choice != w.choice || other.kind == w.kind {
+			kept = append(kept, other)
+			continue
+		}
+		if err := d.present(ctx, other, true); err != nil || d.result.Terminated != nil {
+			return err
+		}
 	}
-	d.pending[choice] = ""
-	return d.present(ctx, choice, text)
+	// A flushed window leaves the order and is requeued by its next
+	// delta, behind windows still pending.
+	d.order = kept
+	return nil
 }
 
-// present shows text to the hook with the withheld tail in front of it
-// and applies the decision to the whole window.
-func (d *driver) present(ctx context.Context, choice int, text string) error {
+// present shows the window (the withheld tail followed by the pending
+// text) to the hook and applies the decision to all of it. A final flush
+// delivers the result in full; otherwise the last LookbehindChars runes
+// are withheld as the new tail.
+func (d *driver) present(ctx context.Context, w window, final bool) error {
+	full := d.tail[w] + d.pending[w]
+	if full == "" {
+		return nil
+	}
+	overlap := utf8.RuneCountInString(d.tail[w])
+	d.tail[w], d.pending[w] = "", ""
 	d.seq++
-	overlap := utf8.RuneCountInString(d.tail[choice])
-	window := d.tail[choice] + text
-	ev := &pluginapi.StreamEvent{Seq: d.seq, Kind: pluginapi.EventTextDelta, Choice: choice, Text: window, Overlap: overlap}
+	ev := &pluginapi.StreamEvent{Seq: d.seq, Kind: w.kind, Choice: w.choice, Call: w.call, Text: full, Overlap: overlap}
 	decision, err := d.hook.OnStreamEvent(ctx, d.x, ev)
 	if err != nil {
 		return err
@@ -151,7 +189,7 @@ func (d *driver) present(ctx context.Context, choice int, text string) error {
 		d.terminate(decision)
 		return nil
 	}
-	out := window
+	out := full
 	if d.policy.Mode == pluginapi.StreamTransform {
 		switch decision.Action {
 		case pluginapi.StreamReplace:
@@ -162,7 +200,7 @@ func (d *driver) present(ctx context.Context, choice int, text string) error {
 	}
 	d.x.Stream.ReplaceTail(ev, overlap, out)
 	keep := 0
-	if d.policy.Mode == pluginapi.StreamTransform {
+	if d.policy.Mode == pluginapi.StreamTransform && !final {
 		keep = d.policy.LookbehindChars
 	}
 	cut := len(out)
@@ -170,9 +208,9 @@ func (d *driver) present(ctx context.Context, choice int, text string) error {
 		_, size := utf8.DecodeLastRuneInString(out[:cut])
 		cut -= size
 	}
-	d.tail[choice] = out[cut:]
+	d.tail[w] = out[cut:]
 	if cut > 0 {
-		d.deliverText(choice, out[:cut])
+		d.deliver(w, out[:cut])
 	}
 	return nil
 }
@@ -208,9 +246,16 @@ func (d *driver) other(ctx context.Context, ev *pluginapi.StreamEvent) error {
 	return nil
 }
 
-func (d *driver) deliverText(choice int, text string) {
-	d.result.Text[choice] += text
-	d.result.Events = append(d.result.Events, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Choice: choice, Text: text})
+func (d *driver) deliver(w window, text string) {
+	if w.kind == pluginapi.EventToolCallDelta {
+		if d.result.ToolArguments[w.choice] == nil {
+			d.result.ToolArguments[w.choice] = map[int]string{}
+		}
+		d.result.ToolArguments[w.choice][w.call] += text
+	} else {
+		d.result.Text[w.choice] += text
+	}
+	d.result.Events = append(d.result.Events, &pluginapi.StreamEvent{Kind: w.kind, Choice: w.choice, Call: w.call, Text: text})
 }
 
 func (d *driver) terminate(decision pluginapi.StreamDecision) {

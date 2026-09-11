@@ -370,7 +370,7 @@ func instanceNames(instances []*plugins.Instance) []string {
 // the walk, so a later instance's OnStreamEnd sees replaced and dropped
 // text that way rather than the original.
 func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error) {
-	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Text: ev.Text, Overlap: ev.Overlap, Raw: ev.Data}
+	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Call: ev.Call, Text: ev.Text, Overlap: ev.Overlap, Raw: ev.Data}
 	result := streaming.Decision{Action: streaming.ActionPass}
 	for _, entry := range ps.inFlight {
 		inst, observe := entry.inst, entry.observe
@@ -408,7 +408,7 @@ func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error)
 			ps.x.Stream.ReplaceTail(pev, ev.Overlap, "")
 			return streaming.Decision{Action: streaming.ActionDrop}, nil
 		case pluginapi.StreamReplace:
-			if observe || pev.Kind != pluginapi.EventTextDelta && pev.Kind != pluginapi.EventReasoningDelta {
+			if observe || !replaceable(pev.Kind) {
 				continue
 			}
 			ps.countEdit(&ps.replaced, inst.Name)
@@ -518,6 +518,12 @@ func (ps *pluginStream) appendState(ev *pluginapi.StreamEvent, overlap int) {
 	fresh := *ev
 	fresh.Text = ev.Text[offset:]
 	ps.x.Stream.Append(&fresh)
+}
+
+// replaceable reports whether a replace decision applies to the kind: text,
+// reasoning, and tool-call argument deltas.
+func replaceable(kind pluginapi.EventKind) bool {
+	return kind == pluginapi.EventTextDelta || kind == pluginapi.EventReasoningDelta || kind == pluginapi.EventToolCallDelta
 }
 
 func pluginEventKind(kind streaming.EventKind) pluginapi.EventKind {

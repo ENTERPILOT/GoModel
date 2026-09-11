@@ -101,6 +101,43 @@ func TestPlugins_Presidio_E2E(t *testing.T) {
 		assert.True(t, chunks[len(chunks)-1].Done)
 	})
 
+	t.Run("streamed tool-call arguments are restored in flight", func(t *testing.T) {
+		t.Cleanup(func() { fx.reset(t) })
+		scriptMockToolStream(t, "send_email", []string{`{"to":"<EMAIL_ADD`, `RESS_1>","body":"Hi <PERS`, `ON_1>"}`})
+		fx.mustPutGuardrail(t, guardrailDef("pii-in", "presidio", presidioConfig(analyzer.URL, nil), nil))
+		fx.mustPutGuardrail(t, guardrailDef("pii-out", "presidio", presidioConfig(analyzer.URL, map[string]any{"stream_chunk": 8, "stream_lookbehind": 16}), nil))
+		fx.activate(t, workflowStep{Ref: "pii-in", Phase: "prompt", Step: 1}, workflowStep{Ref: "pii-out", Phase: "stream", Step: 1})
+
+		resp := fx.chat(t, userText, true)
+		defer closeBody(resp)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		chunks := readStreamingResponse(t, resp.Body)
+		require.NotEmpty(t, chunks)
+		args, id, name := "", "", ""
+		for _, chunk := range chunks {
+			for _, choice := range chunk.Choices {
+				delta, _ := choice["delta"].(map[string]any)
+				calls, _ := delta["tool_calls"].([]any)
+				for _, c := range calls {
+					call, _ := c.(map[string]any)
+					if v, _ := call["id"].(string); v != "" {
+						id = v
+					}
+					fn, _ := call["function"].(map[string]any)
+					if v, _ := fn["name"].(string); v != "" {
+						name = v
+					}
+					v, _ := fn["arguments"].(string)
+					args += v
+				}
+			}
+		}
+		assert.Equal(t, "call_1", id)
+		assert.Equal(t, "send_email", name)
+		assert.Equal(t, `{"to":"ann@example.com","body":"Hi Ann Lee"}`, args)
+		assert.True(t, chunks[len(chunks)-1].Done)
+	})
+
 	t.Run("blocking entity rejects the prompt", func(t *testing.T) {
 		t.Cleanup(func() { fx.reset(t) })
 		fx.mustPutGuardrail(t, guardrailDef("pii-in", "presidio", presidioConfig(analyzer.URL, map[string]any{"block_entities": []string{"EMAIL_ADDRESS"}, "message": "no e-mail addresses"}), nil))
@@ -126,4 +163,41 @@ func TestPlugins_Presidio_E2E(t *testing.T) {
 		require.Len(t, views, 1)
 		assert.Equal(t, "degraded", views[0].Health)
 	})
+}
+
+// scriptMockToolStream makes the shared mock answer streaming chat
+// completions with one tool call whose arguments arrive in the given
+// chunks: the first chunk carries the call's id and name, the last the
+// finish_reason.
+func scriptMockToolStream(t *testing.T, name string, argChunks []string) {
+	t.Helper()
+	mockServer.SetCustomHandler(func(w http.ResponseWriter, r *http.Request) bool {
+		req, ok := decodeMockChat(r)
+		if !ok || !req.Stream {
+			return false
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		for i, chunk := range argChunks {
+			call := map[string]any{"index": 0, "function": map[string]any{"arguments": chunk}}
+			if i == 0 {
+				call["id"] = "call_1"
+				call["type"] = "function"
+				call["function"] = map[string]any{"name": name, "arguments": chunk}
+			}
+			choice := map[string]any{"index": 0, "delta": map[string]any{"tool_calls": []any{call}}, "finish_reason": nil}
+			if i == len(argChunks)-1 {
+				choice["finish_reason"] = "tool_calls"
+			}
+			data, _ := json.Marshal(map[string]any{"id": "chatcmpl-tool-stream", "object": "chat.completion.chunk", "model": req.Model, "created": 1, "choices": []any{choice}})
+			_, _ = w.Write([]byte("data: " + string(data) + "\n\n"))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		return true
+	})
+	t.Cleanup(resetMock)
 }
