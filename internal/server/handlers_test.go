@@ -5830,8 +5830,11 @@ func TestGetFileContent_TypedNilResponseReturnsBadGateway(t *testing.T) {
 	if !strings.Contains(body, "provider_error") {
 		t.Fatalf("expected provider_error body, got: %s", body)
 	}
-	if !strings.Contains(body, "provider returned empty file content response") {
+	if !strings.Contains(body, "provider openai returned empty file content response") {
 		t.Fatalf("expected empty file content response message, got: %s", body)
+	}
+	if !strings.Contains(body, `"provider":"openai"`) {
+		t.Fatalf("expected provider in response body, got: %s", body)
 	}
 }
 

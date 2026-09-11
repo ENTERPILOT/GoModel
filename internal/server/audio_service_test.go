@@ -994,8 +994,11 @@ func TestAudioSpeech_NoAudioBodyWhenBodiesDisabled(t *testing.T) {
 // provider returns no response and no error, the gateway must report a 502.
 func TestAudioSpeech_NilResponseReturns502(t *testing.T) {
 	mock := &audioMockProvider{
-		mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}},
-		speechResp:   nil, // provider returns (nil, nil)
+		mockProvider: &mockProvider{
+			supportedModels: []string{"gpt-4o-mini-tts"},
+			providerNames:   map[string]string{"gpt-4o-mini-tts": "audio-primary"},
+		},
+		speechResp: nil, // provider returns (nil, nil)
 	}
 	handler := NewHandler(mock, nil, nil, nil)
 
@@ -1010,6 +1013,9 @@ func TestAudioSpeech_NilResponseReturns502(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `"provider":"audio-primary"`) {
+		t.Errorf("response does not identify the provider: %s", rec.Body.String())
 	}
 }
 
