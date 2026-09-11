@@ -72,7 +72,8 @@ run, so they check and rewrite it like any other input: a stored response
 holds what its client saw, and a [presidio](/advanced/guardrails#presidio)
 guardrail anonymizes the values it restored there again before the next turn
 reaches the provider. A native primary receives the replayed history instead
-of the id as well when a guardrail that edits content runs on the prompt, or
+of the id as well when a guardrail that rewrites content runs on the prompt
+(an instance configured only to flag or block does not count), or
 when a failover target is chat-translated. Without such a guardrail the id is
 forwarded untouched, so the provider keeps serving the chain from its own
 state.

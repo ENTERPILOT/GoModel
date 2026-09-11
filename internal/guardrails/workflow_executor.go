@@ -36,14 +36,15 @@ func (p *WorkflowRequestPatcher) PatchResponsesRequest(ctx context.Context, req 
 	return processGuardedResponses(ctx, p.chain(ctx), req)
 }
 
-// EditsPromptContent reports whether the request's prompt chain holds a
-// plugin that edits content, such as an anonymizing guardrail. A chained
+// EditsPromptContent reports whether the request's prompt chain holds an
+// instance that edits content, such as an anonymizing guardrail. A chained
 // Responses request only needs its stored history expanded into the input
-// when such a plugin runs; otherwise the request reaches the provider as the
-// client sent it.
+// when such an instance runs; otherwise the request reaches the provider as
+// the client sent it. An instance configured only to flag or block counts as
+// non-editing.
 func (p *WorkflowRequestPatcher) EditsPromptContent(ctx context.Context) bool {
 	for _, instance := range p.chain(ctx).Instances() {
-		if instance.Mutates() {
+		if instance.EditsContent() {
 			return true
 		}
 	}
