@@ -56,8 +56,8 @@ func sessionCapture(detector *session.Detector, parentLookup interactionParentLo
 			}
 
 			// Header rules do not need the body. Resolve them first so an
-			// explicit session header keeps large/chunked requests on the
-			// zero-copy path.
+			// explicit session header keeps large/chunked requests off the
+			// materialization below.
 			if detectAndStamp(snapshot) {
 				return next(c)
 			}
@@ -65,7 +65,7 @@ func sessionCapture(detector *session.Detector, parentLookup interactionParentLo
 			var err error
 			snapshot, err = sessionDetectionSnapshot(c, snapshot)
 			if err != nil {
-				return handleError(c, core.NewInvalidRequestError("failed to read request body", err))
+				return handleError(c, bodyReadError(err))
 			}
 			detectAndStamp(snapshot)
 			return next(c)
@@ -101,19 +101,58 @@ func interactionParentSession(c *echo.Context, lookup interactionParentLookup, a
 }
 
 // sessionDetectionSnapshot returns a snapshot whose complete body is available
-// for session detection, up to MaxBodyCapture. It never reads a known-oversized
-// body and peeks only limit+1 bytes from an unknown-length body. Oversized
-// bodies are replayed intact for the handler and fall back to header signals.
+// for session detection. JSON endpoints materialize the whole body: the handler
+// decodes every byte of it anyway and the server's body size limit already
+// bounds the read, so a long conversation keeps its body signals and
+// content-derived id past the audit capture limit. Opaque bodies are forwarded
+// upstream as a stream, so they are only peeked up to MaxBodyCapture and
+// replayed intact; larger ones fall back to header signals.
 func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) (*core.RequestSnapshot, error) {
-	switch core.DescribeEndpoint(snapshot.Method, snapshot.Path).BodyMode {
-	case core.BodyModeJSON, core.BodyModeOpaque:
-	default:
-		return snapshot, nil
-	}
 	req := c.Request()
 	if req.Body == nil {
 		return snapshot, nil
 	}
+	switch core.DescribeEndpoint(snapshot.Method, snapshot.Path).BodyMode {
+	case core.BodyModeJSON:
+		return materializeSessionBody(c, snapshot)
+	case core.BodyModeOpaque:
+		return peekSessionBody(c, snapshot)
+	default:
+		return snapshot, nil
+	}
+}
+
+// materializeSessionBody reads the complete JSON body once, replays it from
+// memory for the handler, and returns a snapshot carrying every byte for
+// detection. The audit capture on the shared snapshot still stops at
+// MaxBodyCapture; only the detection view sees an oversized body.
+func materializeSessionBody(c *echo.Context, snapshot *core.RequestSnapshot) (*core.RequestSnapshot, error) {
+	req := c.Request()
+	originalBody := req.Body
+	body, err := io.ReadAll(originalBody)
+	if err != nil {
+		// Preserve the bytes already consumed even though this request will be
+		// rejected, keeping the helper's ownership contract explicit.
+		req.Body = &combinedReadCloser{
+			Reader: io.MultiReader(bytes.NewReader(body), originalBody),
+			rc:     originalBody,
+		}
+		return snapshot, err
+	}
+	// The server owns the original body and closes it after the handler;
+	// requestBodyBytes hands this buffer to the handler without another copy.
+	req.Body = newBytesReadCloser(body)
+	if complete := storeRequestBodySnapshot(c, body); complete != nil {
+		return complete, nil
+	}
+	return snapshot, nil
+}
+
+// peekSessionBody reads an opaque body up to MaxBodyCapture for detection and
+// replays it intact. It never reads a known-oversized body and peeks only
+// limit+1 bytes from an unknown-length one.
+func peekSessionBody(c *echo.Context, snapshot *core.RequestSnapshot) (*core.RequestSnapshot, error) {
+	req := c.Request()
 	if req.ContentLength > auditlog.MaxBodyCapture {
 		return markSessionBodyNotCaptured(c, snapshot), nil
 	}
@@ -121,8 +160,6 @@ func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) (
 	originalBody := req.Body
 	body, err := io.ReadAll(io.LimitReader(originalBody, auditlog.MaxBodyCapture+1))
 	if err != nil {
-		// Preserve the bytes already consumed even though this request will be
-		// rejected, keeping the helper's ownership contract explicit.
 		req.Body = &combinedReadCloser{
 			Reader: io.MultiReader(bytes.NewReader(body), originalBody),
 			rc:     originalBody,
@@ -140,11 +177,20 @@ func sessionDetectionSnapshot(c *echo.Context, snapshot *core.RequestSnapshot) (
 	// The full body fit. Cache it on the shared snapshot and replay the same
 	// bytes to downstream code without another read or allocation.
 	req.Body = &combinedReadCloser{Reader: bytes.NewReader(body), rc: originalBody}
-	storeRequestBodySnapshot(c, body)
-	if refreshed := core.GetRequestSnapshot(c.Request().Context()); refreshed != nil {
-		return refreshed, nil
+	if complete := storeRequestBodySnapshot(c, body); complete != nil {
+		return complete, nil
 	}
 	return snapshot, nil
+}
+
+// bodyReadError shapes a failed request body read. The body size limit
+// reports its 413 on the error itself; anything else is a client that stopped
+// sending.
+func bodyReadError(err error) error {
+	if echo.StatusCode(err) > 0 {
+		return escapedGatewayError(err)
+	}
+	return core.NewInvalidRequestError("failed to read request body", err)
 }
 
 func markSessionBodyNotCaptured(c *echo.Context, snapshot *core.RequestSnapshot) *core.RequestSnapshot {

@@ -16,9 +16,19 @@ import (
 	"github.com/enterpilot/gomodel/internal/session"
 )
 
+// partialErrorReadCloser yields data once, then fails with err (a generic
+// failure when unset).
 type partialErrorReadCloser struct {
 	data []byte
+	err  error
 	read bool
+}
+
+func (r *partialErrorReadCloser) failure() error {
+	if r.err != nil {
+		return r.err
+	}
+	return errors.New("injected request body failure")
 }
 
 type sessionLiveEvent struct {
@@ -48,11 +58,11 @@ func (p *sessionLivePublisher) PublishLiveEvent(eventType string, entry *auditlo
 
 func (r *partialErrorReadCloser) Read(p []byte) (int, error) {
 	if r.read {
-		return 0, errors.New("injected request body failure")
+		return 0, r.failure()
 	}
 	r.read = true
 	n := copy(p, r.data)
-	return n, errors.New("injected request body failure")
+	return n, r.failure()
 }
 
 func (r *partialErrorReadCloser) Close() error {
@@ -399,14 +409,101 @@ func TestSessionCaptureMaterializesChunkedBody(t *testing.T) {
 	}
 }
 
-func TestSessionCaptureDoesNotPreReadKnownOversizedBody(t *testing.T) {
+// JSON bodies past the audit capture limit still carry session signals: the
+// handler decodes the whole body anyway, so detection reads it once and the
+// handler reuses the same buffer. Only the audit capture stays bounded.
+func TestSessionCaptureDetectsBodySignalPastAuditCaptureLimit(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+	padding := strings.Repeat("x", int(auditlog.MaxBodyCapture))
+	bodyText := `{"model":"gpt-4o","messages":[{"role":"user","content":"` + padding + `"}],"session_id":"huge-body-session"}`
+	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
+
+	c, _ := sessionBodyTestContext(
+		t,
+		"/v1/chat/completions",
+		body,
+		int64(len(bodyText)),
+		true,
+	)
+
+	var got string
+	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
+		got = core.SessionIDFromContext(c.Request().Context())
+		if body.read != int64(len(bodyText)) {
+			t.Fatalf("session detection read = %d, want the complete body %d", body.read, len(bodyText))
+		}
+
+		snapshot := core.GetRequestSnapshot(c.Request().Context())
+		if snapshot == nil || !snapshot.BodyNotCaptured || snapshot.CapturedBodyView() != nil {
+			t.Fatal("audit capture must stay bounded for an oversized body")
+		}
+
+		first, err := requestBodyBytes(c)
+		if err != nil {
+			t.Fatalf("handler body read: %v", err)
+		}
+		if string(first) != bodyText {
+			t.Fatal("handler did not receive the complete body")
+		}
+		second, err := requestBodyBytes(c)
+		if err != nil {
+			t.Fatalf("second handler body read: %v", err)
+		}
+		if &first[0] != &second[0] {
+			t.Fatal("handler copied the materialized body instead of reusing it")
+		}
+		if body.read != int64(len(bodyText)) {
+			t.Fatalf("source read again by handler: %d bytes", body.read)
+		}
+		return nil
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if got != "huge-body-session" {
+		t.Fatalf("session id = %q, want body signal from an oversized body", got)
+	}
+}
+
+func TestSessionCaptureAutoDetectsChunkedBodyPastAuditCaptureLimit(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+	padding := strings.Repeat("x", int(auditlog.MaxBodyCapture))
+	bodyText := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"` + padding + `"}]}`
+	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
+
+	c, _ := sessionBodyTestContext(t, "/v1/chat/completions", body, -1, false)
+
+	var got string
+	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
+		got = core.SessionIDFromContext(c.Request().Context())
+		remaining, err := io.ReadAll(c.Request().Body)
+		if err != nil {
+			t.Fatalf("handler body read: %v", err)
+		}
+		if string(remaining) != bodyText {
+			t.Fatal("materialized body was not replayed intact")
+		}
+		return nil
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if !strings.HasPrefix(got, "auto-") {
+		t.Fatalf("session id = %q, want content-derived id from an oversized chunked body", got)
+	}
+}
+
+// Opaque bodies are streamed upstream, so detection only peeks them: a
+// known-oversized body is never read ahead of the handler and an
+// unknown-length one is bounded and replayed intact.
+func TestSessionCaptureDoesNotPreReadKnownOversizedOpaqueBody(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
 	bodyText := strings.Repeat("x", int(auditlog.MaxBodyCapture)+1)
 	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
 
 	c, _ := sessionBodyTestContext(
 		t,
-		"/v1/chat/completions",
+		"/p/openai/v1/chat/completions",
 		body,
 		int64(len(bodyText)),
 		true,
@@ -430,14 +527,14 @@ func TestSessionCaptureDoesNotPreReadKnownOversizedBody(t *testing.T) {
 	}
 }
 
-func TestSessionCaptureBoundsUnknownOversizedBodyAndReplaysIt(t *testing.T) {
+func TestSessionCaptureBoundsUnknownOversizedOpaqueBodyAndReplaysIt(t *testing.T) {
 	detector := session.NewDetector(session.BuiltinRules(), true)
 	bodyText := strings.Repeat("x", int(auditlog.MaxBodyCapture)+128)
 	body := &countingReadCloser{reader: strings.NewReader(bodyText)}
 
 	c, _ := sessionBodyTestContext(
 		t,
-		"/v1/chat/completions",
+		"/p/openai/v1/chat/completions",
 		body,
 		-1,
 		false,
@@ -458,6 +555,30 @@ func TestSessionCaptureBoundsUnknownOversizedBodyAndReplaysIt(t *testing.T) {
 	})
 	if err := handler(c); err != nil {
 		t.Fatalf("handler error = %v", err)
+	}
+}
+
+// The body size limit trips while detection materializes a chunked JSON body;
+// the client must still see the limit's 413, not a generic read failure.
+func TestSessionCaptureKeepsBodyLimitStatus(t *testing.T) {
+	detector := session.NewDetector(session.BuiltinRules(), true)
+	body := &partialErrorReadCloser{data: []byte(`{"model":"gpt-4o"`), err: echo.ErrStatusRequestEntityTooLarge}
+
+	c, rec := sessionBodyTestContext(t, "/v1/chat/completions", body, -1, false)
+
+	called := false
+	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
+		called = true
+		return nil
+	})
+	if err := handler(c); err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if called {
+		t.Fatal("downstream handler called after the body limit tripped")
+	}
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
 	}
 }
 
