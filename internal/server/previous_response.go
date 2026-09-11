@@ -23,14 +23,87 @@ import (
 // the way a gateway-managed conversation is; the field is stripped before
 // dispatch. Deciding per attempt keeps a native primary's request unchanged
 // and still gives a translated failover target a request it can serve.
+//
+// Most requests arrive here already expanded (see ResolveResponsesHistory);
+// only an id kept for a native primary can still need it.
 func (s *translatedInferenceService) PatchResponsesAttempt(ctx context.Context, req *core.ResponsesRequest, providerType string) (*core.ResponsesRequest, error) {
+	if req == nil || strings.TrimSpace(req.PreviousResponseID) == "" || s.providerTypeResolvesPreviousResponse(providerType) {
+		return req, nil
+	}
+	return s.withPreviousResponseHistory(ctx, req)
+}
+
+// ResolveResponsesHistory expands the history a Responses request refers to
+// before the prompt phase, so guardrails see (and anonymize, block, or
+// rewrite) the replayed turns exactly as they would in an input the client
+// replayed itself. A stored response holds what its client saw, restored
+// values included, so replaying it past the guardrails would hand those
+// values to the provider. The client's own turn is kept in the context for
+// the response snapshot. previous_response_id is expanded when the primary
+// target (providerTypes[0]) is chat-translated, or when a failover target is
+// and guardrails run on the request; otherwise a native primary keeps the
+// id, which it resolves itself, and PatchResponsesAttempt expands it for a
+// translated failover attempt. A native primary also keeps an id the
+// gateway has not stored.
+func (s *translatedInferenceService) ResolveResponsesHistory(ctx context.Context, req *core.ResponsesRequest, providerTypes []string) (context.Context, *core.ResponsesRequest, error) {
 	if req == nil {
-		return req, nil
+		return ctx, req, nil
 	}
+	ctx = context.WithValue(ctx, clientTurnKey{}, &clientTurn{previousResponseID: req.PreviousResponseID, input: req.Input})
+	ctx, req, err := s.applyResponsesConversation(ctx, req)
+	if err != nil || strings.TrimSpace(req.PreviousResponseID) == "" {
+		return ctx, req, err
+	}
+	translated := func(providerType string) bool { return !s.providerTypeResolvesPreviousResponse(providerType) }
+	primaryTranslated := len(providerTypes) > 0 && translated(providerTypes[0])
+	guarded := s.translatedRequestPatcher != nil && core.GetWorkflow(ctx).GuardrailsEnabled() && slices.ContainsFunc(providerTypes, translated)
+	if !primaryTranslated && !guarded {
+		return ctx, req, nil
+	}
+	patched, err := s.withPreviousResponseHistory(ctx, req)
+	if err != nil && !primaryTranslated {
+		if gatewayErr, ok := errors.AsType[*core.GatewayError](err); ok && gatewayErr.Type == core.ErrorTypeNotFound {
+			return ctx, req, nil
+		}
+	}
+	return ctx, patched, err
+}
+
+// clientTurn is a Responses request's own turn as the client sent it, before
+// history expansion and the prompt phase: the snapshot stores its input
+// items, as OpenAI's input_items do, and names its predecessor.
+type clientTurn struct {
+	previousResponseID string
+	input              any
+}
+
+type clientTurnKey struct{}
+
+// clientInput returns the request whose input the snapshot of req stores:
+// the client's own turn when it was recorded, req itself otherwise.
+func clientInput(ctx context.Context, req *core.ResponsesRequest) *core.ResponsesRequest {
+	if turn, ok := ctx.Value(clientTurnKey{}).(*clientTurn); ok {
+		return &core.ResponsesRequest{Input: turn.input}
+	}
+	return req
+}
+
+// chainedFrom returns the previous_response_id the client sent, which
+// expansion clears from req.
+func chainedFrom(ctx context.Context, req *core.ResponsesRequest) string {
+	if turn, ok := ctx.Value(clientTurnKey{}).(*clientTurn); ok {
+		return turn.previousResponseID
+	}
+	if req == nil {
+		return ""
+	}
+	return req.PreviousResponseID
+}
+
+// withPreviousResponseHistory prepends the stored history behind
+// req.PreviousResponseID to its input and clears the field.
+func (s *translatedInferenceService) withPreviousResponseHistory(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
 	id := strings.TrimSpace(req.PreviousResponseID)
-	if id == "" || s.providerTypeResolvesPreviousResponse(providerType) {
-		return req, nil
-	}
 	store := s.currentResponseStore()
 	if store == nil {
 		// No local store: keep the historical behavior, where the provider

@@ -29,6 +29,10 @@ func TestByteSpans(t *testing.T) {
 	if out := rewrite(text, got, func(s span, v string) string { return "<" + s.entity + ">" }); out != "<DATE_TIME>ë 😀 <PERSON>" {
 		t.Errorf("rewrite = %q", out)
 	}
+	// One offset per code point, allocated for the 9 runes, not the 13 bytes.
+	if o := runeOffsets(text); len(o) != 9 || cap(o) != 9 || o[4] != 5 || o[8] != 12 {
+		t.Errorf("runeOffsets = %v (cap %d)", o, cap(o))
+	}
 	if runeBytes(text, 5) != 9 || runeBytes(text, 100) != len(text) || runeBytes(text, 0) != 0 {
 		t.Error("runeBytes")
 	}

@@ -865,3 +865,31 @@ func TestStreamRestoresToolCallArguments(t *testing.T) {
 		t.Errorf("end = %+v", res.End)
 	}
 }
+
+// Gemini returns tool-call arguments with angle brackets escaped: the
+// stream still restores those placeholders, and a restored value is
+// JSON-escaped so the arguments stay valid.
+func TestStreamRestoresEscapedToolCallArguments(t *testing.T) {
+	a := newAnalyzer(t, `Ann "Lee"`)
+	in := newPlugin(t, a, `{"restore": true}`)
+	out := newPlugin(t, a, `{"restore": true, "stream_lookbehind": 32}`)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", `Email ann@x.io for Ann "Lee"`)), nil)
+	if _, err := in.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	res, err := plugintest.RunStream(context.Background(), out, x, []*pluginapi.StreamEvent{
+		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `{"to":"\u003cEMAIL_ADD`},
+		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `RESS_1\u003e","name":"\u003cPERSON_1\u003e","raw":"\\u003cPERSON_1\u003e"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := res.ToolArguments[0][0]
+	if want := `{"to":"ann@x.io","name":"Ann \"Lee\"","raw":"\\u003cPERSON_1\u003e"}`; got != want {
+		t.Fatalf("arguments = %s, want %s", got, want)
+	}
+	var args map[string]string
+	if err := json.Unmarshal([]byte(got), &args); err != nil {
+		t.Fatalf("restored arguments are not JSON: %v", err)
+	}
+}

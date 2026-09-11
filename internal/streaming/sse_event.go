@@ -37,6 +37,10 @@ type Event struct {
 	// re-segmented under lookbehind, where consecutive windows overlap;
 	// Text[Overlap:] is the new text.
 	Overlap int
+	// Final marks the last event of a window: its text is emitted in full
+	// after the decision (the stream ended, or a delta of another kind
+	// flushed the window), so nothing of it is withheld for a next event.
+	Final bool
 	// ClosesChoice marks a delta event whose chunk also carries the
 	// finish_reason of its choice (a chat stream may end text and finish in
 	// one chunk), so once it is emitted the choice needs no finish chunk

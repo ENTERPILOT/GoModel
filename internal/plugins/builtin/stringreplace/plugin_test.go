@@ -135,7 +135,7 @@ func TestApplyRules(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, tt.cfg)
-			got, n := apply(p.rules, tt.in, 0)
+			got, n := apply(p.rules, tt.in, whole)
 			if got != tt.want || n != tt.count {
 				t.Errorf("apply = %q (%d), want %q (%d)", got, n, tt.want, tt.count)
 			}
@@ -383,11 +383,12 @@ func TestStreamPolicy(t *testing.T) {
 }
 
 func TestStreamEvents(t *testing.T) {
+	// Each text delta closes its window (Final), so a match at its end is due.
 	events := []*pluginapi.StreamEvent{
-		{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "Hello ACME"},
+		{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "Hello ACME", Final: true},
 		{Seq: 2, Kind: pluginapi.EventReasoningDelta, Text: "ACME"},
 		{Seq: 3, Kind: pluginapi.EventToolCallDelta, Text: `{"q":"ACME"}`},
-		{Seq: 4, Kind: pluginapi.EventTextDelta, Text: " and ACME"},
+		{Seq: 4, Kind: pluginapi.EventTextDelta, Text: " and ACME", Final: true},
 		{Seq: 5, Kind: pluginapi.EventTextDelta, Text: " bye"},
 		{Seq: 6, Kind: pluginapi.EventFinish},
 	}
@@ -510,10 +511,41 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 			name: "expanding rule is applied once",
 			cfg:  `{"rules": "a => aa"}`,
 			events: []*pluginapi.StreamEvent{
-				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "a"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "aa", Overlap: 2}, // the flushed tail
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "ab"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "aab c", Overlap: 3},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Replace("aa"), pluginapi.Pass()},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("aab"), pluginapi.Pass()},
+			total: 1,
+		},
+		{
+			name: "match at the window end waits until it stops growing",
+			cfg:  `{"rules": "sk-[A-Z]{3,} => [k]", "mode": "regex"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "key sk-ABC"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "key sk-ABCDEF", Overlap: 10},
+				{Seq: 3, Kind: pluginapi.EventTextDelta, Text: "key sk-ABCDEF end", Overlap: 13},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Pass(), pluginapi.Replace("key [k] end")},
+			total: 1,
+		},
+		{
+			name: "held match is applied when the window closes",
+			cfg:  `{"rules": "sk-[A-Z]{3,} => [k]", "mode": "regex"}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "key sk-ABC"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "key sk-ABC", Overlap: 10, Final: true},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Replace("key [k]")},
+			total: 1,
+		},
+		{
+			name: "match longer than the lookbehind is not held",
+			cfg:  `{"rules": "secret => [x]", "stream_lookbehind": 4}`,
+			events: []*pluginapi.StreamEvent{
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "my secret"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "[x] ok", Overlap: 3},
+			},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("my [x]"), pluginapi.Pass()},
 			total: 1,
 		},
 		{
@@ -521,19 +553,19 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 			cfg:  `{"rules": "ab => X"}`,
 			events: []*pluginapi.StreamEvent{
 				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "a"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ab", Overlap: 1},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ab c", Overlap: 1},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Replace("X")},
+			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Replace("X c")},
 			total: 1,
 		},
 		{
 			name: "match inside the overlap is skipped but a later one in the same window is not",
 			cfg:  `{"rules": "é => e"}`,
 			events: []*pluginapi.StreamEvent{
-				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "é"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "e é", Overlap: 1},
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "é x"},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "e x é y", Overlap: 3},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Replace("e"), pluginapi.Replace("e e")},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("e x"), pluginapi.Replace("e x e y")},
 			total: 2,
 		},
 		{
@@ -541,17 +573,17 @@ func TestStreamOverlapIsNotReprocessed(t *testing.T) {
 			cfg:  `{"rules": "(\\d+)-(\\d+) => $2-$1", "mode": "regex"}`,
 			events: []*pluginapi.StreamEvent{
 				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "12-34 "},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "34-12 56-78", Overlap: 6},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "34-12 56-78 ", Overlap: 6},
 			},
-			want:  []pluginapi.StreamDecision{pluginapi.Replace("34-12 "), pluginapi.Replace("34-12 78-56")},
+			want:  []pluginapi.StreamDecision{pluginapi.Replace("34-12 "), pluginapi.Replace("34-12 78-56 ")},
 			total: 2,
 		},
 		{
 			name: "warn counts only new matches",
 			cfg:  `{"rules": "ACME => x", "on_match": "warn"}`,
 			events: []*pluginapi.StreamEvent{
-				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "ACME"},
-				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ACME ACME", Overlap: 4},
+				{Seq: 1, Kind: pluginapi.EventTextDelta, Text: "ACME "},
+				{Seq: 2, Kind: pluginapi.EventTextDelta, Text: "ACME ACME ", Overlap: 5},
 			},
 			want:  []pluginapi.StreamDecision{pluginapi.Pass(), pluginapi.Pass()},
 			total: 2,
@@ -635,5 +667,25 @@ func TestStreamDriver(t *testing.T) {
 	res, err = plugintest.RunStream(context.Background(), p, plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{plugintest.TextDelta("a se"), plugintest.TextDelta("cret")})
 	if err != nil || res.End.Action != pluginapi.ActionBlock || res.End.Message != "leak" || len(res.Text) != 0 {
 		t.Errorf("buffered block = %+v, %v", res, err)
+	}
+}
+
+// TestStreamOpenEndedPatternMasksWholeKey streams a key in three-character
+// deltas: an open-ended pattern must cover the whole key, not stop at
+// whatever had arrived when the minimum length first matched.
+func TestStreamOpenEndedPatternMasksWholeKey(t *testing.T) {
+	p := newPlugin(t, `{"rules": "sk-[A-Za-z0-9]{20,} => [redacted]", "mode": "regex"}`)
+	for _, text := range []string{"my key is sk-ABCDEFGHIJKLMNOPQRSTUV end", "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij and more", "last: sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ"} {
+		var events []*pluginapi.StreamEvent
+		for i := 0; i < len(text); i += 3 {
+			events = append(events, plugintest.TextDelta(text[i:min(i+3, len(text))]))
+		}
+		res, err := plugintest.RunStream(context.Background(), p, plugintest.Exchange(nil, nil), append(events, plugintest.Event(pluginapi.EventFinish)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := res.Text[0]; strings.Contains(got, "ABC") || strings.Contains(got, "UV") || !strings.Contains(got, "[redacted]") {
+			t.Errorf("%q streamed as %q", text, got)
+		}
 	}
 }
