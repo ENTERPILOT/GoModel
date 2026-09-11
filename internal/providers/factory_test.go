@@ -453,6 +453,12 @@ func TestProviderFactory_Create_PassesInstanceName(t *testing.T) {
 	if got := receivedOpts.ClientName("test"); got != "test-eu" {
 		t.Fatalf("ClientName() = %q, want test-eu", got)
 	}
+	if _, err := factory.Create(ProviderConfig{Name: "  test-us  ", Type: "test"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedOpts.Name != "test-us" {
+		t.Fatalf("receivedOpts.Name = %q, want the trimmed test-us", receivedOpts.Name)
+	}
 	if got := (ProviderOptions{}).ClientName("test"); got != "test" {
 		t.Fatalf("ClientName() without a name = %q, want the type", got)
 	}

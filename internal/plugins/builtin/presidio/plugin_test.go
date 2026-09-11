@@ -792,7 +792,7 @@ func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
 	// Assistant arguments are not analyzed with roles [user], but their
 	// placeholder, JSON-escaped here, must still keep its number.
 	call := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
-		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"name": "<PERSON_1>"}`)}},
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"name": "\u003cPERSON_1\u003e"}`)}},
 	}}
 	x := plugintest.Exchange(plugintest.Prompt(call, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
 	if _, err := in.OnPrompt(context.Background(), x); err != nil {
@@ -807,5 +807,16 @@ func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
 	}
 	if got := x.Response.Text(0); got != "<PERSON_1> is not Ann Lee" {
 		t.Errorf("response = %q", got)
+	}
+	// Arguments that are a JSON string rather than an object are decoded too.
+	scalar := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`"\u003cPERSON_1\u003e"`)}},
+	}}
+	y := plugintest.Exchange(plugintest.Prompt(scalar, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := in.OnPrompt(context.Background(), y); err != nil {
+		t.Fatal(err)
+	}
+	if got := y.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("scalar prompt = %q", got)
 	}
 }

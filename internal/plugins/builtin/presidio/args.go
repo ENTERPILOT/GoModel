@@ -90,3 +90,21 @@ func sortedKeys(m map[string]any) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// reserveArgs reserves the placeholder-shaped text of tool-call arguments
+// that are not analyzed. It reads decoded strings: an object or array's
+// string values, a JSON string's value, or else the raw text.
+func reserveArgs(m *mapping, args json.RawMessage) {
+	if _, values, ok := argStrings(args); ok {
+		for _, v := range values {
+			m.reserve(v)
+		}
+		return
+	}
+	var s string
+	if json.Unmarshal(args, &s) == nil {
+		m.reserve(s)
+		return
+	}
+	m.reserve(string(args))
+}

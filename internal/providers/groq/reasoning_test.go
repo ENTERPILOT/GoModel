@@ -20,7 +20,13 @@ func TestChatCompletion_MapsReasoningPerModelFamily(t *testing.T) {
 	}{
 		{name: "gpt-oss keeps the effort", model: "openai/gpt-oss-20b", effort: "low", wantEffort: "low"},
 		{name: "gpt-oss caps max", model: "openai/gpt-oss-120b", effort: "max", wantEffort: "high"},
-		{name: "qwen3 turns reasoning on", model: "qwen/qwen3.6-27b", effort: "medium", wantEffort: "default"},
+		{name: "gpt-oss cannot turn reasoning off", model: "openai/gpt-oss-20b", effort: "none", wantEffort: "low"},
+		{name: "gpt-oss minimal", model: "openai/gpt-oss-20b", effort: "minimal", wantEffort: "low"},
+		{name: "qwen3.6 turns reasoning on", model: "qwen/qwen3.6-27b", effort: "medium", wantEffort: "default"},
+		{name: "qwen3.6 keeps none", model: "qwen/qwen3.6-27b", effort: "none", wantEffort: "none"},
+		{name: "qwen3.8 keeps the level", model: "qwen/qwen3.8-27b", effort: "medium", wantEffort: "medium"},
+		{name: "qwen3.8 keeps none", model: "qwen/qwen3.8-27b", effort: "none", wantEffort: "none"},
+		{name: "qwen3.8 caps max", model: "qwen/qwen3.8-27b", effort: "max", wantEffort: "high"},
 		{name: "other models drop it", model: "llama-3.3-70b-versatile", effort: "high"},
 		{name: "empty effort drops it", model: "openai/gpt-oss-20b"},
 	}

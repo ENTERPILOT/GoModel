@@ -152,9 +152,12 @@ func (f *ProviderFactory) Create(cfg ProviderConfig) (core.Provider, error) {
 
 	// One Keyring per provider instance: every client this provider builds
 	// shares session affinity and the sessionless round-robin sequence.
+	// One trimmed name for the clients and the hooks, so both attribute a
+	// request to the same instance.
+	name := strings.TrimSpace(cfg.Name)
 	opts := ProviderOptions{
-		Name:       cfg.Name,
-		Hooks:      hooksWithProviderIdentity(hooks, cfg.Name, cfg.Type),
+		Name:       name,
+		Hooks:      hooksWithProviderIdentity(hooks, name, cfg.Type),
 		Models:     cfg.Models,
 		Resilience: cfg.Resilience,
 		Keys:       NewKeyringWithSessionStickiness(cfg.SessionStickyKeys, cfg.APIKeys...),
