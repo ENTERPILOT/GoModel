@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -115,6 +116,9 @@ func (t *Tracker) Hooks() llmclient.Hooks {
 		OnRequestEnd: func(_ context.Context, info llmclient.ResponseInfo) {
 			t.Record(info)
 		},
+		OnEmptyResponse: func(_ context.Context, info llmclient.EmptyResponseInfo) {
+			t.RecordEmptyResponse(info)
+		},
 	}
 }
 
@@ -128,11 +132,7 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	provider := t.providers[info.Provider]
-	if provider == nil {
-		provider = &providerState{models: make(map[string]*modelState)}
-		t.providers[info.Provider] = provider
-	}
+	provider := t.provider(info.Provider)
 	if info.CircuitState != "" {
 		provider.circuitState = info.CircuitState
 	}
@@ -150,14 +150,7 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 	}
 
 	now := t.now()
-	model := provider.models[info.Model]
-	if model == nil {
-		if len(provider.models) >= maxTrackedModels {
-			evictStalestModel(provider.models)
-		}
-		model = &modelState{}
-		provider.models[info.Model] = model
-	}
+	model := provider.model(info.Model)
 
 	failed := info.Error != nil || info.StatusCode >= 400
 	model.events = append(model.events, event{at: now, failed: failed})
@@ -170,6 +163,41 @@ func (t *Tracker) Record(info llmclient.ResponseInfo) {
 		}
 	}
 	model.prune(now)
+}
+
+// RecordEmptyResponse marks a 200 response without choices, output, or usage
+// as a failure. OnRequestEnd already recorded the call as a success, so the
+// model's most recent success is turned into a failure instead of adding a
+// second request.
+func (t *Tracker) RecordEmptyResponse(info llmclient.EmptyResponseInfo) {
+	if info.Provider == "" || info.Model == "" || info.Model == llmclient.UnknownModel {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := t.now()
+	model := t.provider(info.Provider).model(info.Model)
+	model.prune(now)
+
+	flipped := false
+	for i := len(model.events) - 1; i >= 0; i-- {
+		if !model.events[i].failed {
+			model.events[i].failed = true
+			flipped = true
+			break
+		}
+	}
+	if !flipped {
+		model.events = append(model.events, event{at: now, failed: true})
+	}
+	model.lastActivity = now
+	model.lastError = &ErrorInfo{
+		StatusCode: http.StatusOK,
+		Message:    "provider returned 200 with an empty response (" + info.Reason + ")",
+		At:         now,
+	}
 }
 
 // Snapshot returns windowed health per provider name. Providers without any
@@ -231,6 +259,31 @@ func (p ProviderHealth) FlaggedModels() []string {
 		}
 	}
 	return flagged
+}
+
+// provider returns the named provider's state, creating it on first use.
+// Callers hold t.mu.
+func (t *Tracker) provider(name string) *providerState {
+	provider := t.providers[name]
+	if provider == nil {
+		provider = &providerState{models: make(map[string]*modelState)}
+		t.providers[name] = provider
+	}
+	return provider
+}
+
+// model returns the named model's state, evicting the least recently active
+// model when the provider is at capacity.
+func (p *providerState) model(name string) *modelState {
+	model := p.models[name]
+	if model == nil {
+		if len(p.models) >= maxTrackedModels {
+			evictStalestModel(p.models)
+		}
+		model = &modelState{}
+		p.models[name] = model
+	}
+	return model
 }
 
 func (m *modelState) prune(now time.Time) {

@@ -135,6 +135,16 @@ Labels: `provider`.
 Alerting example: `gomodel_circuit_breaker_state == 2` for more than a
 minute means a provider is being actively short-circuited.
 
+### `gomodel_empty_responses_total`
+
+Counter. Buffered chat and Responses API calls that returned 200 without
+choices (`no_choices`), without output (`no_output`, completed Responses API
+calls only), or without token usage (`no_usage`). The provider router detects
+these after decoding and fires `Hooks.OnEmptyResponse`; the llmclient never
+calls it. `gomodel_requests_total` still records these calls as successes.
+
+Labels: `provider`, `model`, `reason`.
+
 ## Helpers in `client.go`
 
 - `extractModel(body any) string` — pulls `Model` from `*core.ChatRequest` or

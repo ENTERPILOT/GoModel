@@ -215,6 +215,45 @@ func TestTrackerHooksFeedRecord(t *testing.T) {
 	}
 }
 
+func TestTrackerEmptyResponsesFlagModel(t *testing.T) {
+	tests := []struct {
+		name         string
+		successes    int
+		empties      int
+		wantRequests int
+		wantErrors   int
+		wantFlagged  bool
+	}{
+		{name: "empty responses replace their recorded successes", successes: 4, empties: 3, wantRequests: 4, wantErrors: 3, wantFlagged: true},
+		{name: "a single empty response does not flag", successes: 4, empties: 1, wantRequests: 4, wantErrors: 1},
+		{name: "empty response without a recorded request adds a failure", empties: 1, wantRequests: 1, wantErrors: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker, _ := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
+			hooks := tracker.Hooks()
+			for range tt.successes {
+				hooks.OnRequestEnd(t.Context(), llmclient.ResponseInfo{Provider: "openai", Model: "gpt-4o", StatusCode: 200})
+			}
+			for range tt.empties {
+				hooks.OnEmptyResponse(t.Context(), llmclient.EmptyResponseInfo{Provider: "openai", Model: "gpt-4o", Reason: llmclient.EmptyReasonNoChoices})
+			}
+
+			snapshot := tracker.Snapshot()["openai"]
+			if len(snapshot.Models) != 1 {
+				t.Fatalf("models = %+v, want one row", snapshot.Models)
+			}
+			row := snapshot.Models[0]
+			if row.Requests != tt.wantRequests || row.Errors != tt.wantErrors || row.Flagged != tt.wantFlagged {
+				t.Fatalf("row = %+v, want requests=%d errors=%d flagged=%v", row, tt.wantRequests, tt.wantErrors, tt.wantFlagged)
+			}
+			if row.LastError == nil || row.LastError.StatusCode != 200 || !strings.Contains(row.LastError.Message, "no_choices") {
+				t.Fatalf("last error = %+v, want a 200 no_choices error", row.LastError)
+			}
+		})
+	}
+}
+
 func TestTrackerEvictsStalestModel(t *testing.T) {
 	tracker, now := newTestTracker(time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC))
 	for i := range maxTrackedModels {
