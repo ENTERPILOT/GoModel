@@ -225,6 +225,7 @@ Returns aggregate token usage statistics over a configurable time window.
 | `start_date` | string | Range start in `YYYY-MM-DD` format                       | 29 days before end   |
 | `end_date`   | string | Range end in `YYYY-MM-DD` format                         | Today                |
 | `days`       | int    | Shorthand for look-back window (ignored if dates are set) | `30`                |
+| `cache_mode` | string | Which requests to count: `uncached`, `cached`, `all` (see [Cache mode](#cache-mode)) | `uncached` |
 
 Use `start_date`/`end_date` for explicit ranges or `days` as a shorthand. When both are provided, `start_date`/`end_date` take priority.
 
@@ -253,6 +254,7 @@ Returns per-period token usage breakdown over a configurable time window, groupe
 | `end_date`   | string | Range end in `YYYY-MM-DD` format                         | Today                |
 | `days`       | int    | Shorthand for look-back window (ignored if dates are set) | `30`                |
 | `interval`   | string | Grouping: `daily`, `weekly`, `monthly`, `yearly`         | `daily`              |
+| `cache_mode` | string | Which requests to count: `uncached`, `cached`, `all` (see [Cache mode](#cache-mode)) | `uncached` |
 
 The `date` field in the response changes format based on the interval: `YYYY-MM-DD` (daily), `YYYY-Www` (weekly), `YYYY-MM` (monthly), or `YYYY` (yearly).
 
@@ -323,6 +325,33 @@ provider-bound requests only, so avoided cache cost is not reported as spend.
   "offset": 0
 }
 ```
+
+### Cache mode
+
+Every [response-cache](/features/cache) hit is recorded as a usage entry, with
+the caller's `user_path` and a `cache_type` of `exact` or `semantic`. The usage
+endpoints leave those entries out by default, so requests, tokens, and cost all
+describe provider spend. Pass `cache_mode` to change that:
+
+| Value      | Counts                                                    |
+| ---------- | --------------------------------------------------------- |
+| `uncached` | Provider-bound requests only — the default                 |
+| `cached`   | Local cache hits only — what the cache served for free     |
+| `all`      | Both, the gateway's total request volume                   |
+
+```bash
+curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode=all" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+Accepted by `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
+`/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`, and
+`/v1/usage` (see the [usage API](/advanced/usage-api#cache-mode)). Unrecognized
+values fall back to `uncached`.
+
+Two endpoints ignore it by design: `/admin/cache/overview` always reports cache
+hits only, and `/admin/usage/sessions` always includes them (its cost fields
+stay provider-only).
 
 ### GET /admin/audit/stats
 

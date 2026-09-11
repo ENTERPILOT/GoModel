@@ -101,6 +101,14 @@ virtual model that shadows exactly that model and lists it as a target (the
 shape the Models page creates for a real model), since that virtual model adds
 failover to the model rather than replacing it.
 
+<Note>
+  A response produced by a failover target is not written to the
+  [response cache](/features/cache#responses-served-through-failover-are-not-cached):
+  the cache key is hashed from the pre-failover resolution, so the backup's
+  answer would otherwise be replayed under the primary's key. While a first
+  target is down, every request to that chain therefore misses the cache.
+</Note>
+
 Set `FAILOVER_ENABLED=false` (or `failover.enabled: false`) to switch the
 sweep off globally; a [workflow](/advanced/workflows) can also turn it off for
 its scope. The chosen target is still served, without retries.
