@@ -272,6 +272,7 @@ func TestImageEdits_ProviderErrorIsSurfaced(t *testing.T) {
 func TestImageEdits_NilProviderResponseIs502(t *testing.T) {
 	mock := newImageEditMock()
 	mock.imageResp = nil
+	mock.providerNames = map[string]string{"gpt-image-1": "image-primary"}
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	svc := &imageService{provider: mock, usageLogger: logger}
@@ -282,6 +283,12 @@ func TestImageEdits_NilProviderResponseIs502(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"provider":"image-primary"`) {
+		t.Errorf("response does not identify the provider: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "provider image-primary returned empty image response") {
+		t.Errorf("response does not identify the provider in its message: %s", rec.Body.String())
 	}
 	if captured != nil {
 		t.Error("no usage entry should be written for a failed call")

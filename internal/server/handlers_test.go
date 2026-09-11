@@ -5806,6 +5806,9 @@ func TestGetFileContent_TypedNilResponseReturnsBadGateway(t *testing.T) {
 		providerTypes: map[string]string{
 			"gpt-4o-mini": "openai",
 		},
+		providerNames: map[string]string{
+			"gpt-4o-mini": "openai-primary",
+		},
 		fileContentByProv: map[string]*core.FileContentResponse{
 			"openai": nil,
 		},
@@ -5830,8 +5833,11 @@ func TestGetFileContent_TypedNilResponseReturnsBadGateway(t *testing.T) {
 	if !strings.Contains(body, "provider_error") {
 		t.Fatalf("expected provider_error body, got: %s", body)
 	}
-	if !strings.Contains(body, "provider returned empty file content response") {
+	if !strings.Contains(body, "provider openai-primary returned empty file content response") {
 		t.Fatalf("expected empty file content response message, got: %s", body)
+	}
+	if !strings.Contains(body, `"provider":"openai-primary"`) {
+		t.Fatalf("expected provider in response body, got: %s", body)
 	}
 }
 

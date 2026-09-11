@@ -57,8 +57,19 @@ func TestModelBreakerCapacityRejectsWithoutBypassingProtection(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "capacity exhausted") {
 		t.Fatalf("error=%v", err)
 	}
+	if !strings.Contains(err.Error(), "provider test") {
+		t.Fatalf("error=%v, want provider name", err)
+	}
 	if len(client.modelBreakers) != maxModelBreakers {
 		t.Fatal("capacity exceeded")
+	}
+}
+
+func TestFailAfterRetriesIncludesProviderName(t *testing.T) {
+	client := New(DefaultConfig("test", ""), nil)
+	err := client.failAfterRetries(requestScope{})
+	if err == nil || !strings.Contains(err.Error(), "request failed after retries for provider test") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
