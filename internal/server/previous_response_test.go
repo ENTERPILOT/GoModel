@@ -381,23 +381,42 @@ func TestResponsesWithPreviousResponseID_UntrackedIDWithTranslatedFailoverIsForw
 	}
 }
 
-// TestApplyResponsesPreviousResponse_PendingSnapshotIsScopedToTenant keeps
-// another tenant's in-flight write invisible: the caller does not wait on it.
-func TestApplyResponsesPreviousResponse_PendingSnapshotIsScopedToTenant(t *testing.T) {
-	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: responsestore.NewMemoryStore()}
-	ownerCtx := core.WithEffectiveUserPath(context.Background(), "/tenant-b")
-	done := s.trackPendingSnapshot(pendingSnapshotKey(ownerCtx, "resp_t"))
-	defer s.finishPendingSnapshot(pendingSnapshotKey(ownerCtx, "resp_t"), done)
+// TestApplyResponsesPreviousResponse_PendingSnapshotWaitFollowsAccessScope
+// lets a caller wait on an in-flight write only when its access scope covers
+// the write's user path: a foreign tenant learns nothing from the wait, while
+// a globally scoped caller keeps its race protection.
+func TestApplyResponsesPreviousResponse_PendingSnapshotWaitFollowsAccessScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		wantWait bool
+	}{
+		{name: "foreign tenant does not wait", ctx: core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-a"}), wantWait: false},
+		{name: "global scope waits", ctx: context.Background(), wantWait: true},
+		{name: "owning tenant waits", ctx: core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-b"}), wantWait: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: responsestore.NewMemoryStore()}
+			done := s.trackPendingSnapshot("resp_t", "/tenant-b")
 
-	foreignCtx := core.WithEffectiveUserPath(core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-a"}), "/tenant-a")
-	finished := make(chan struct{})
-	go func() {
-		defer close(finished)
-		_, _ = s.applyResponsesPreviousResponse(foreignCtx, &core.ResponsesRequest{Model: "gpt-5-mini", Input: "x", PreviousResponseID: "resp_t"}, &core.Workflow{ProviderType: "anthropic"})
-	}()
-	select {
-	case <-finished:
-	case <-time.After(2 * time.Second):
-		t.Fatal("a foreign tenant's request waited on another tenant's pending snapshot")
+			finished := make(chan struct{})
+			go func() {
+				defer close(finished)
+				_, _ = s.applyResponsesPreviousResponse(tt.ctx, &core.ResponsesRequest{Model: "gpt-5-mini", Input: "x", PreviousResponseID: "resp_t"}, &core.Workflow{ProviderType: "anthropic"})
+			}()
+			select {
+			case <-finished:
+				if tt.wantWait {
+					t.Fatal("request did not wait for the pending snapshot")
+				}
+			case <-time.After(150 * time.Millisecond):
+				if !tt.wantWait {
+					t.Fatal("request waited on a pending snapshot outside its access scope")
+				}
+			}
+			s.finishPendingSnapshot("resp_t", done)
+			<-finished
+		})
 	}
 }

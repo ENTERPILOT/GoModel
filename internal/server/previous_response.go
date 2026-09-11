@@ -48,7 +48,7 @@ func (s *translatedInferenceService) applyResponsesPreviousResponse(ctx context.
 
 	// The predecessor's snapshot is written in the background; a client that
 	// chains as soon as it has the response must not race that write.
-	s.awaitPendingSnapshot(ctx, pendingSnapshotKey(ctx, id))
+	s.awaitPendingSnapshot(ctx, id)
 	stored, err := store.Get(ctx, id)
 	if err != nil {
 		if !errors.Is(err, responsestore.ErrNotFound) {
@@ -143,50 +143,53 @@ func previousResponseNotFound(id string) error {
 	return core.NewNotFoundError(fmt.Sprintf("Previous response with id '%s' not found.", id))
 }
 
-// pendingSnapshotKey scopes an in-flight snapshot write to the user path it
-// was written under, so a caller can only wait for its own tenant's writes
-// and learns nothing about another tenant's in-flight response ids.
-func pendingSnapshotKey(ctx context.Context, id string) string {
-	return core.UserPathFromContext(ctx) + "\x00" + id
+// pendingSnapshot is one in-flight snapshot write: the user path it is
+// written under and the channel closed when it lands.
+type pendingSnapshot struct {
+	userPath string
+	done     chan struct{}
 }
 
-// trackPendingSnapshot registers an in-flight snapshot write under key, so a
-// request chained on that response can wait for it.
-func (s *translatedInferenceService) trackPendingSnapshot(key string) chan struct{} {
+// trackPendingSnapshot registers an in-flight snapshot write for a response
+// id, so a request chained on that response can wait for it.
+func (s *translatedInferenceService) trackPendingSnapshot(id, userPath string) chan struct{} {
 	done := make(chan struct{})
 	s.pendingSnapshotMu.Lock()
 	if s.pendingSnapshots == nil {
-		s.pendingSnapshots = make(map[string]chan struct{})
+		s.pendingSnapshots = make(map[string]pendingSnapshot)
 	}
-	s.pendingSnapshots[key] = done
+	s.pendingSnapshots[id] = pendingSnapshot{userPath: userPath, done: done}
 	s.pendingSnapshotMu.Unlock()
 	return done
 }
 
 // finishPendingSnapshot releases the waiters of one snapshot write.
-func (s *translatedInferenceService) finishPendingSnapshot(key string, done chan struct{}) {
+func (s *translatedInferenceService) finishPendingSnapshot(id string, done chan struct{}) {
 	s.pendingSnapshotMu.Lock()
-	if s.pendingSnapshots[key] == done {
-		delete(s.pendingSnapshots, key)
+	if s.pendingSnapshots[id].done == done {
+		delete(s.pendingSnapshots, id)
 	}
 	s.pendingSnapshotMu.Unlock()
 	close(done)
 }
 
-// awaitPendingSnapshot blocks until the snapshot write under key, if one is
-// in flight, has finished; it gives up with the request or after the write's
-// own timeout, in which case the store lookup decides.
-func (s *translatedInferenceService) awaitPendingSnapshot(ctx context.Context, key string) {
+// awaitPendingSnapshot blocks until the snapshot write for id, if one is in
+// flight, has finished; it gives up with the request or after the write's
+// own timeout, in which case the store lookup decides. Only a caller whose
+// access scope covers the write's user path waits, so a tenant learns
+// nothing about another tenant's in-flight response ids, while global and
+// parent scopes keep their race protection.
+func (s *translatedInferenceService) awaitPendingSnapshot(ctx context.Context, id string) {
 	s.pendingSnapshotMu.Lock()
-	done := s.pendingSnapshots[key]
+	pending, ok := s.pendingSnapshots[id]
 	s.pendingSnapshotMu.Unlock()
-	if done == nil {
+	if !ok || !core.AccessScopeFromContext(ctx).Allows(pending.userPath) {
 		return
 	}
 	timer := time.NewTimer(snapshotWriteTimeout)
 	defer timer.Stop()
 	select {
-	case <-done:
+	case <-pending.done:
 	case <-ctx.Done():
 	case <-timer.C:
 	}
