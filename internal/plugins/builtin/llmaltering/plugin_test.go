@@ -4,39 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
-	"net/http"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/enterpilot/gomodel/pluginapi/plugintest"
 )
-
-type fakeHost struct {
-	mu       sync.Mutex
-	requests []pluginapi.InferenceRequest
-	reply    func(req pluginapi.InferenceRequest) (*pluginapi.Completion, error)
-}
-
-func (h *fakeHost) Logger() *slog.Logger           { return slog.Default() }
-func (h *fakeHost) Inference() pluginapi.Inference { return h }
-func (h *fakeHost) History(context.Context, pluginapi.Meta) ([]pluginapi.Message, error) {
-	return nil, nil
-}
-func (h *fakeHost) Metrics() pluginapi.Metrics { return noopMetrics{} }
-func (h *fakeHost) HTTPClient() *http.Client   { return http.DefaultClient }
-func (h *fakeHost) Complete(_ context.Context, req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
-	h.mu.Lock()
-	h.requests = append(h.requests, req)
-	h.mu.Unlock()
-	return h.reply(req)
-}
-
-type noopMetrics struct{}
-
-func (noopMetrics) Inc(string, map[string]string)              {}
-func (noopMetrics) Observe(string, float64, map[string]string) {}
 
 func replyWith(text string) *pluginapi.Completion {
 	return &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.TextMessage(pluginapi.RoleAssistant, text), FinishReason: "stop"}}}
@@ -48,7 +21,7 @@ func upper(req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
 	return replyWith("<TEXT_TO_ALTER>\n" + strings.ToUpper(inner) + "\n</TEXT_TO_ALTER>"), nil
 }
 
-func newPlugin(t *testing.T, cfg string, host *fakeHost) *Plugin {
+func newPlugin(t *testing.T, cfg string, host *plugintest.Host) *Plugin {
 	t.Helper()
 	p := New().(*Plugin)
 	if err := p.Init(context.Background(), json.RawMessage(cfg), host); err != nil {
@@ -67,7 +40,7 @@ func prompt(msgs ...pluginapi.Message) *pluginapi.Prompt {
 }
 
 func TestOnPromptRewritesSelectedRoles(t *testing.T) {
-	host := &fakeHost{reply: upper}
+	host := &plugintest.Host{Reply: upper}
 	p := newPlugin(t, `{"model":"gpt","provider":"openai","roles":["user","tool"],"skip_content_prefix":"### safe","max_tokens":7}`, host)
 	toolMsg := pluginapi.Message{Role: pluginapi.RoleTool, ToolCallID: "c1", Parts: []pluginapi.Part{{Kind: pluginapi.PartToolResult, ToolResult: &pluginapi.ToolResult{CallID: "c1", Parts: []pluginapi.Part{{Kind: pluginapi.PartText, Text: "result"}}}}}}
 	pr := prompt(
@@ -100,10 +73,10 @@ func TestOnPromptRewritesSelectedRoles(t *testing.T) {
 	if changes.Messages["m1"] != pluginapi.ChangeEdited || changes.Messages["m4"] != pluginapi.ChangeEdited || changes.Messages["m0"] != "" {
 		t.Fatalf("changes = %+v", changes)
 	}
-	if len(host.requests) != 4 {
-		t.Fatalf("requests = %d, want 4", len(host.requests))
+	if len(host.Requests()) != 4 {
+		t.Fatalf("requests = %d, want 4", len(host.Requests()))
 	}
-	req := host.requests[0]
+	req := host.Requests()[0]
 	if req.Model != "openai/gpt" || req.MaxTokens != 7 || req.Temperature == nil || *req.Temperature != 0 || req.Messages[0].Text() != DefaultPrompt {
 		t.Fatalf("request = %+v", req)
 	}
@@ -132,7 +105,7 @@ func TestOnPromptReturnsRewriteFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := newPlugin(t, `{"model":"m"}`, &fakeHost{reply: tt.reply})
+			p := newPlugin(t, `{"model":"m"}`, &plugintest.Host{Reply: tt.reply})
 			pr := prompt(pluginapi.TextMessage(pluginapi.RoleUser, "hello"))
 			if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); err == nil {
 				t.Fatal("OnPrompt() error = nil, want the rewrite failure")
@@ -145,7 +118,7 @@ func TestOnPromptReturnsRewriteFailures(t *testing.T) {
 }
 
 func TestOnPromptPropagatesCancellation(t *testing.T) {
-	p := newPlugin(t, `{"model":"m"}`, &fakeHost{reply: func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return nil, context.Canceled }})
+	p := newPlugin(t, `{"model":"m"}`, &plugintest.Host{Reply: func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return nil, context.Canceled }})
 	pr := prompt(pluginapi.TextMessage(pluginapi.RoleUser, "hello"))
 	if _, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: pr, Values: pluginapi.Values{}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
@@ -153,7 +126,7 @@ func TestOnPromptPropagatesCancellation(t *testing.T) {
 }
 
 func TestOnResponseRewritesAssistant(t *testing.T) {
-	host := &fakeHost{reply: upper}
+	host := &plugintest.Host{Reply: upper}
 	completion := &pluginapi.Completion{Choices: []pluginapi.Choice{
 		{Index: 0, Message: pluginapi.TextMessage(pluginapi.RoleAssistant, "one")},
 		{Index: 1, Message: pluginapi.Message{Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{{Kind: pluginapi.PartReasoning, Text: "think"}, {Kind: pluginapi.PartText, Text: "two"}}}},
@@ -163,7 +136,7 @@ func TestOnResponseRewritesAssistant(t *testing.T) {
 	if _, err := newPlugin(t, `{"model":"m","roles":["user"]}`, host).OnResponse(context.Background(), x); err != nil {
 		t.Fatal(err)
 	}
-	if completion.Text(0) != "one" || len(host.requests) != 0 {
+	if completion.Text(0) != "one" || len(host.Requests()) != 0 {
 		t.Fatal("assistant not selected but response rewritten")
 	}
 	if _, err := newPlugin(t, `{"model":"m","roles":["assistant"]}`, host).OnResponse(context.Background(), x); err != nil {
@@ -232,7 +205,7 @@ func TestSummarize(t *testing.T) {
 
 // "system" covers developer messages, the Responses spelling of system.
 func TestOnPromptSystemRoleIncludesDeveloper(t *testing.T) {
-	host := &fakeHost{reply: upper}
+	host := &plugintest.Host{Reply: upper}
 	p := newPlugin(t, `{"model":"gpt","provider":"openai","roles":["system"]}`, host)
 	pr := prompt(
 		pluginapi.TextMessage(pluginapi.RoleDeveloper, "dev rules"),

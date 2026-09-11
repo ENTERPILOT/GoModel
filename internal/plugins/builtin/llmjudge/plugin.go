@@ -77,11 +77,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				Help:        "Error message for block and audit note for warn.",
 				Placeholder: DefaultMessage,
 			},
-			{
-				Key: "block_status", Label: "Block status", Input: pluginapi.InputNumber,
-				Help:        "One HTTP status code between 400 and 599 that a blocked request returns, for example 403. Leave empty to use the phase default: 400 when the prompt is blocked, 502 when the response is blocked.",
-				Placeholder: "phase default",
-			},
+			pluginapi.BlockStatusField(),
 			{
 				Key: "respond_text", Label: "Respond text", Input: pluginapi.InputTextarea, Default: DefaultRespondText,
 				Help:        "Assistant reply sent to the client when the action is respond.",
@@ -134,5 +130,5 @@ func (p *Plugin) Summarize(raw json.RawMessage) string {
 	if err != nil {
 		return ""
 	}
-	return fmt.Sprintf("%s, %s, target %s, unclear: %s", s.model, s.action, s.target, s.onUnclear)
+	return fmt.Sprintf("%s, %s, target %s, unclear: %s", s.model, s.enforcement.Action, s.target, s.onUnclear)
 }

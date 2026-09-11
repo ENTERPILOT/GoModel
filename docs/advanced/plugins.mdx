@@ -433,7 +433,10 @@ import (
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
-type wordBlock struct{ words []string }
+type wordBlock struct {
+	words   []string
+	enforce pluginapi.Enforcement
+}
 
 func (p *wordBlock) Manifest() pluginapi.Manifest {
 	return pluginapi.Manifest{
@@ -441,20 +444,36 @@ func (p *wordBlock) Manifest() pluginapi.Manifest {
 		Version:   "1.0.0",
 		Kinds:     []pluginapi.Kind{pluginapi.KindPrompt},
 		Guardrail: true,
-		ConfigSchema: []pluginapi.Field{{
-			Key: "words", Label: "Blocked words", Input: pluginapi.InputTextarea,
-			Required: true, Help: "One word per line.",
-		}},
+		ConfigSchema: []pluginapi.Field{
+			{
+				Key: "words", Label: "Blocked words", Input: pluginapi.InputList,
+				Required: true, Help: "One word per line.",
+			},
+			{
+				Key: "action", Label: "On match", Input: pluginapi.InputSelect, Default: "block",
+				Help: "Block rejects, respond answers with the message, warn records the match.",
+				Options: []pluginapi.Option{{Value: "block", Label: "Block"}, {Value: "respond", Label: "Respond"}, {Value: "warn", Label: "Warn"}},
+			},
+			{Key: "message", Label: "Message", Input: pluginapi.InputText, Default: "request blocked by policy", Help: "Error, reply, or audit note."},
+			pluginapi.BlockStatusField(),
+		},
 	}
 }
 
-func (p *wordBlock) Init(_ context.Context, cfg json.RawMessage, _ pluginapi.Host) error {
-	var c struct{ Words string `json:"words"` }
-	if err := json.Unmarshal(cfg, &c); err != nil {
+func (p *wordBlock) Init(_ context.Context, raw json.RawMessage, _ pluginapi.Host) error {
+	cfg, err := pluginapi.ParseConfig("word_block", p.Manifest().ConfigSchema, raw)
+	if err != nil {
 		return err
 	}
-	p.words = strings.Fields(strings.ToLower(c.Words))
-	return nil
+	for _, w := range cfg.List("words") {
+		p.words = append(p.words, strings.ToLower(w))
+	}
+	p.enforce = pluginapi.Enforcement{
+		Action:      pluginapi.Action(cfg.Choice("action", "block", "block", "respond", "warn")),
+		Message:     cfg.String("message", "request blocked by policy"),
+		BlockStatus: cfg.BlockStatus("block_status"),
+	}
+	return cfg.Err()
 }
 
 func (p *wordBlock) Close(context.Context) error { return nil }
@@ -466,7 +485,7 @@ func (p *wordBlock) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginap
 	text := strings.ToLower(x.Prompt.LastUser().Text())
 	for _, w := range p.words {
 		if strings.Contains(text, w) {
-			return pluginapi.Block(0, "word_block", "request blocked by policy"), nil
+			return p.enforce.Enforce("word_block", map[string]any{"word": w}), nil
 		}
 	}
 	return pluginapi.Allow(), nil
@@ -487,6 +506,20 @@ Notes for authors:
   fields accept `true`/`false` as booleans or text and arrive as a JSON
   boolean. It is called once per configured instance and again when the
   instance is edited.
+- Read the config with `pluginapi.ParseConfig` and its typed readers
+  (`String`, `Choice`, `Bool`, `Int`, `Float`, `OptionalFloat`, `List`,
+  `Lines`, `Roles`, `BlockStatus`) instead of a struct: each reader applies
+  the same coercions the dashboard and config.yaml need, returns its
+  default on a problem, and `Err()` reports the first one with the key
+  named, so a decoder is a straight list of assignments and one check.
+  `RoleOptions()` is the checkbox list `Roles` understands.
+- Render findings through `pluginapi.Enforcement`: read `action`,
+  `message`, `block_status`, and optionally `respond_text` into it, then
+  `Enforce(code, detail)` gives the block error, the respond completion, or
+  the warning, and `Reject(code, detail)` gives block or respond even when
+  the action is warn (for a finding that must not pass). `BlockStatusField()`
+  is the conventional `block_status` field. The built-in guardrails share
+  this, so their block, respond, and warn behave alike.
 - Export a **constructor** (`func GoModelPlugin() pluginapi.Plugin`) so one
   file can back several instances. A `var GoModelPlugin pluginapi.Plugin`
   works too but limits the file to a single instance.
@@ -532,6 +565,39 @@ Notes for authors:
 `docs/example_plugins/keywordblock/main.go` is a fuller, commented example with
 `prompt` and `response` hooks, and the built-ins under
 `internal/plugins/builtin/` are reference implementations of every hook kind.
+
+### Testing a plugin
+
+`pluginapi/plugintest` tests a plugin without GoModel:
+
+- `plugintest.NewHost(replies...)` is a fake `Host`: scripted inference
+  replies (or a `Reply` function, or an `Err`), recorded `Requests()`,
+  recorded `Recorded()` metrics, and a settable HTTP client for a fake
+  sidecar started with `httptest`.
+- `plugintest.Init`, `Text`, `Prompt`, `Completion`, and `Exchange` build
+  the fixtures a hook call needs, with clean change tracking and a Values
+  bag.
+- `plugintest.RunStream(ctx, hook, x, events)` drives a `StreamHook` the way
+  the host does under its `StreamPolicy`: chunk coalescing, the withheld
+  lookbehind tail shown again with `Overlap`, pass, replace, drop, and
+  terminate applied to the whole window, and the buffered mode assembling
+  the completion for `OnResponse`. The result holds the text a client
+  would have received per choice, the delivered events, the terminate
+  decision, and the end decision.
+
+From the `string_replace` tests, where `New` is that plugin's constructor:
+
+```go
+p := plugintest.Init(t, New, `{"rules": "secret => [x]", "stream_lookbehind": 4}`, nil)
+res, err := plugintest.RunStream(ctx, p.(pluginapi.StreamHook), plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{
+	plugintest.TextDelta("my se"), plugintest.TextDelta("cret is safe"),
+})
+// res.Text[0] == "my [x] is safe": the match split across two deltas was rewritten once.
+```
+
+Buffered mode assembles the completion from the text and reasoning deltas
+alone; set `x.Response` yourself before calling `RunStream` when the hook
+must see tool calls, usage, or a finish reason.
 
 ## Routing strategy plugins
 

@@ -151,7 +151,7 @@ func summarizeEdits(edits []edit) string {
 func compile(cfg config) (request, response, upstream []edit, err error) {
 	groups := []struct {
 		field   string
-		entries json.RawMessage
+		entries []string
 		o       op
 		dst     *[]edit
 	}{
