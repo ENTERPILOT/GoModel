@@ -377,6 +377,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}
+		stream = s.snapshotStream(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID, stream)
 		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})
