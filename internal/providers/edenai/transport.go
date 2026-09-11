@@ -92,6 +92,14 @@ func guardedHTTPClient(base *http.Client) *http.Client {
 // an overwritten CheckRedirect never runs and the redirect is followed anyway),
 // which is why the guard composes here the same way secureTransport wraps the
 // caller's transport rather than replacing it.
+//
+// Eden's rules are checked twice, before and after the callback, because
+// net/http hands CheckRedirect the very *http.Request it is about to send and
+// honors any change made to it (verified: a callback that rewrites req.URL
+// redirects the request to the rewritten target). Validating only up front
+// would leave the checks describing a URL that is no longer the one going out,
+// so a callback that rewrites the host -- a region or proxy rewrite as much as
+// anything hostile -- would carry the request past them.
 func redirectPolicy(caller func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if err := checkRedirect(req, via); err != nil {
@@ -100,7 +108,13 @@ func redirectPolicy(caller func(*http.Request, []*http.Request) error) func(*htt
 		if caller == nil {
 			return nil
 		}
-		return caller(req, via)
+		if err := caller(req, via); err != nil {
+			// Returned unchanged: the caller may be signalling
+			// http.ErrUseLastResponse, which net/http reads as "stop here and
+			// hand back the redirect response" rather than as a failure.
+			return err
+		}
+		return checkRedirect(req, via)
 	}
 }
 

@@ -463,6 +463,129 @@ func TestRedirectPolicy_PropagatesErrUseLastResponse(t *testing.T) {
 	}
 }
 
+// TestRedirectPolicy_RecheckAfterCallerMutation is the check-then-mutate case.
+//
+// net/http passes CheckRedirect the very request it is about to send and
+// honors edits to it, so a callback that approves a hop and rewrites req.URL
+// on the way out would move the request past checks that already ran. Eden's
+// rules are therefore re-applied to whatever the callback leaves behind.
+func TestRedirectPolicy_RecheckAfterCallerMutation(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*http.Request)
+		wantErr string
+	}{
+		{
+			name: "rewritten to another https host",
+			mutate: func(req *http.Request) {
+				req.URL.Host = "attacker.example.com"
+			},
+			wantErr: "cross-host",
+		},
+		{
+			name: "rewritten to a subdomain of the original host",
+			mutate: func(req *http.Request) {
+				req.URL.Host = "evil.api.edenai.run"
+			},
+			wantErr: "cross-host",
+		},
+		{
+			name: "downgraded to cleartext",
+			mutate: func(req *http.Request) {
+				req.URL.Scheme = "http"
+			},
+			wantErr: "cleartext",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := mustRequest(t, "https://api.edenai.run/v3/models")
+			// A target Eden approves on its own, so only the mutation can
+			// make it fail.
+			target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+
+			policy := redirectPolicy(func(req *http.Request, _ []*http.Request) error {
+				tc.mutate(req)
+				return nil
+			})
+
+			err := policy(target, []*http.Request{origin})
+			if err == nil {
+				t.Fatalf("policy = nil, want a refusal after the callback rewrote the target to %s", target.URL)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("policy = %v, want an error mentioning %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestRedirectPolicy_AllowsHarmlessCallerMutation asserts the re-check is not
+// blanket paranoia: a callback that rewrites only the path, staying on the
+// configured host over TLS, is still allowed through.
+func TestRedirectPolicy_AllowsHarmlessCallerMutation(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+
+	policy := redirectPolicy(func(req *http.Request, _ []*http.Request) error {
+		req.URL.Path = "/v3/models-rewritten"
+		return nil
+	})
+
+	if err := policy(target, []*http.Request{origin}); err != nil {
+		t.Errorf("policy = %v, want nil: a same-host path rewrite is fine", err)
+	}
+}
+
+// TestRedirectPolicy_CallerErrorsPropagateUnchanged asserts every non-nil
+// result from the callback reaches net/http exactly as returned, so the
+// re-check cannot convert a caller's decision into a different outcome.
+// http.ErrUseLastResponse matters most: net/http reads it as "stop here and
+// return the redirect response", not as a failure.
+func TestRedirectPolicy_CallerErrorsPropagateUnchanged(t *testing.T) {
+	sentinel := errors.New("caller rejected this destination")
+
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"use last response", http.ErrUseLastResponse},
+		{"caller error", sentinel},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			origin := mustRequest(t, "https://api.edenai.run/v3/models")
+			target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+
+			policy := redirectPolicy(func(*http.Request, []*http.Request) error {
+				return tc.err
+			})
+			if err := policy(target, []*http.Request{origin}); !errors.Is(err, tc.err) {
+				t.Errorf("policy = %v, want %v returned unchanged", err, tc.err)
+			}
+		})
+	}
+}
+
+// TestRedirectPolicy_CallerErrorSurvivesAMutation asserts the error path wins
+// over the re-check: a callback that both rewrites the target and returns a
+// sentinel must have its sentinel propagated, not replaced by Eden's refusal.
+func TestRedirectPolicy_CallerErrorSurvivesAMutation(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+
+	policy := redirectPolicy(func(req *http.Request, _ []*http.Request) error {
+		req.URL.Host = "attacker.example.com"
+		return http.ErrUseLastResponse
+	})
+
+	if err := policy(target, []*http.Request{origin}); !errors.Is(err, http.ErrUseLastResponse) {
+		t.Errorf("policy = %v, want http.ErrUseLastResponse propagated unchanged", err)
+	}
+}
+
 // TestRedirectPolicy_EdenRefusalWinsOverPermissiveCaller asserts a caller
 // cannot waive Eden's guarantees: Eden's rules run first and a refusal is
 // final, so a policy that approves everything still cannot allow a cleartext or
