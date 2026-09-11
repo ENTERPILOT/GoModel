@@ -1,11 +1,14 @@
 <script>
   // Metadata badge strip under an expanded audit entry.
   import { providerDisplayValue, qualifiedResolvedModelDisplay } from "$lib/utils/format.js";
-  import { workflowFailoverTarget } from "./audit-logic.js";
+  import { auditGuardrailVerdict, workflowFailoverTarget } from "./audit-logic.js";
   import { usagePage } from "../usage/usage.svelte.js";
   import * as m from "$lib/paraglide/messages.js";
 
   let { entry } = $props();
+
+  // The guardrail that stopped the request (or the first that warned).
+  const guardrail = $derived(auditGuardrailVerdict(entry));
 
   // Badges in render order. `mono` marks machine values; entries with a falsy
   // text are dropped, so optional fields simply disappear.
@@ -37,6 +40,14 @@
         mono: true,
       },
       { key: "stream", text: entry.stream && "stream" },
+      {
+        key: "guardrail",
+        text: guardrail && guardrail.text,
+        class:
+          guardrail && guardrail.tone === "danger"
+            ? "audit-guardrail-badge-danger"
+            : "audit-guardrail-badge-warning",
+      },
       { key: "error_type", text: entry.error_type },
     ].filter((b) => !!b.text),
   );
@@ -92,6 +103,20 @@
     background: color-mix(in srgb, var(--accent) 14%, var(--bg));
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
     color: var(--accent-strong, var(--accent));
+  }
+
+  /* Guardrail verdict badges; the class is picked in script, so the compound
+     :global keeps the rule visible to the compiler at the base's specificity. */
+  .provider-badge:global(.audit-guardrail-badge-danger) {
+    background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+    border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+    color: var(--danger);
+  }
+
+  .provider-badge:global(.audit-guardrail-badge-warning) {
+    background: color-mix(in srgb, var(--warning) 12%, var(--bg));
+    border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+    color: var(--warning);
   }
 
   .audit-session-usage-link {

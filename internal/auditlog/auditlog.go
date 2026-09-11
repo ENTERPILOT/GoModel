@@ -45,6 +45,22 @@ const (
 	AttemptKindRetry    = "retry"
 )
 
+// Guardrail outcome actions: the plugin decisions plus "failure" for an
+// instance that errored instead of deciding.
+const (
+	GuardrailActionAllow   = "allow"
+	GuardrailActionWarn    = "warn"
+	GuardrailActionBlock   = "block"
+	GuardrailActionRespond = "respond"
+	GuardrailActionFailure = "failure"
+
+	GuardrailFailModeOpen   = "open"
+	GuardrailFailModeClosed = "closed"
+
+	GuardrailTargetRequest  = "request"
+	GuardrailTargetResponse = "response"
+)
+
 const (
 	LiveEventAuditStarted   = "audit.started"
 	LiveEventAuditUpdated   = "audit.updated"
@@ -82,6 +98,10 @@ type LogEntry struct {
 	// pendingRevisions is revision work still running off the request path;
 	// CompleteRequestRevisions folds it in before the entry is written.
 	pendingRevisions []*pendingRequestRevisions
+	// guardrailOutcomes rebuilds Data.Guardrails right before the entry is
+	// written: the response and stream phases finish after the handler
+	// returned (see EnrichEntryWithGuardrailOutcomes).
+	guardrailOutcomes func() []GuardrailOutcomeSnapshot
 
 	// ID is a unique identifier for this log entry (UUID)
 	ID string `json:"id" bson:"_id"`
@@ -160,6 +180,14 @@ type LogData struct {
 	// when every step was a no-op there is no such revision and the original
 	// body is what went upstream.
 	RequestRevisions []RequestRevisionSnapshot `json:"request_revisions,omitempty" bson:"request_revisions,omitempty"`
+
+	// Guardrails records the outcome of every guardrail (plugin instance)
+	// that ran for the request, in execution order across the prompt,
+	// response and stream phases: what each decided, whether it edited the
+	// request or response, and how it failed. It is the decision trail;
+	// RequestRevisions is the body trail. A configured step without an
+	// outcome did not run (an earlier block, a cache hit).
+	Guardrails []GuardrailOutcomeSnapshot `json:"guardrails,omitempty" bson:"guardrails,omitempty"`
 
 	// Request parameters
 	Temperature *float64 `json:"temperature,omitempty" bson:"temperature,omitempty"`
@@ -241,6 +269,35 @@ type RequestRevisionSnapshot struct {
 	NoChange bool `json:"no_change,omitempty" bson:"no_change,omitempty"`
 }
 
+// GuardrailOutcomeSnapshot stores the outcome of one guardrail instance for
+// one request. Detail is the plugin's own audit summary and must not contain
+// secrets; the admin list projection and live previews leave it out.
+type GuardrailOutcomeSnapshot struct {
+	Seq      int    `json:"seq" bson:"seq"`
+	Phase    string `json:"phase" bson:"phase"`
+	Step     int    `json:"step,omitempty" bson:"step,omitempty"`
+	Instance string `json:"instance" bson:"instance"`
+	Type     string `json:"type,omitempty" bson:"type,omitempty"`
+	// Action is the decision (allow, warn, block, respond) or "failure" when
+	// the instance errored; FailMode then says whether the chain carried on
+	// ("open") or the request failed ("closed").
+	Action   string `json:"action" bson:"action"`
+	Code     string `json:"code,omitempty" bson:"code,omitempty"`
+	Message  string `json:"message,omitempty" bson:"message,omitempty"`
+	Detail   any    `json:"detail,omitempty" bson:"detail,omitempty"`
+	Error    string `json:"error,omitempty" bson:"error,omitempty"`
+	FailMode string `json:"fail_mode,omitempty" bson:"fail_mode,omitempty"`
+	// Edited reports that the instance changed the request (prompt phase)
+	// or the response (response and stream phases); Target names which.
+	Edited bool   `json:"edited,omitempty" bson:"edited,omitempty"`
+	Target string `json:"target,omitempty" bson:"target,omitempty"`
+	// ReplacedEvents and DroppedEvents count the stream events an in-flight
+	// stream instance rewrote or withheld.
+	ReplacedEvents int   `json:"replaced_events,omitempty" bson:"replaced_events,omitempty"`
+	DroppedEvents  int   `json:"dropped_events,omitempty" bson:"dropped_events,omitempty"`
+	DurationNs     int64 `json:"duration_ns,omitempty" bson:"duration_ns,omitempty"`
+}
+
 // AttemptSnapshot stores one external provider attempt made for a logical
 // request. It intentionally stores structured errors, not raw upstream bodies.
 type AttemptSnapshot struct {
@@ -319,6 +376,53 @@ func normalizeAttemptSnapshots(attempts []AttemptSnapshot) []AttemptSnapshot {
 		normalized = append(normalized, attempt)
 	}
 	return normalized
+}
+
+// normalizeGuardrailOutcomes trims the outcomes, drops those without an
+// instance or action, numbers them in order and bounds the error text.
+func normalizeGuardrailOutcomes(outcomes []GuardrailOutcomeSnapshot) []GuardrailOutcomeSnapshot {
+	if len(outcomes) == 0 {
+		return nil
+	}
+	normalized := make([]GuardrailOutcomeSnapshot, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		outcome.Instance = strings.TrimSpace(outcome.Instance)
+		outcome.Action = normalizeGuardrailAction(outcome.Action)
+		if outcome.Instance == "" || outcome.Action == "" {
+			continue
+		}
+		outcome.Seq = len(normalized) + 1
+		outcome.Phase = strings.ToLower(strings.TrimSpace(outcome.Phase))
+		outcome.Type = strings.TrimSpace(outcome.Type)
+		outcome.Code = strings.TrimSpace(outcome.Code)
+		outcome.Message = strings.TrimSpace(outcome.Message)
+		outcome.Error = truncateAttemptErrorMessage(strings.TrimSpace(outcome.Error))
+		if outcome.Action != GuardrailActionFailure {
+			outcome.FailMode = ""
+		}
+		if !outcome.Edited {
+			outcome.Target = ""
+		}
+		normalized = append(normalized, outcome)
+	}
+	return normalized
+}
+
+func normalizeGuardrailAction(action string) string {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case GuardrailActionAllow, "":
+		return GuardrailActionAllow
+	case GuardrailActionWarn:
+		return GuardrailActionWarn
+	case GuardrailActionBlock:
+		return GuardrailActionBlock
+	case GuardrailActionRespond:
+		return GuardrailActionRespond
+	case GuardrailActionFailure:
+		return GuardrailActionFailure
+	default:
+		return ""
+	}
 }
 
 func normalizeAttemptKind(kind string) string {

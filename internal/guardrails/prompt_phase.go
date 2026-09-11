@@ -34,17 +34,7 @@ func (r promptRun) run(ctx context.Context, prompt *pluginapi.Prompt, observe pl
 		r.state.Finish(x)
 		edited = prompt.Changes().Dirty
 	}
-	records := make([]plugins.DecisionRecord, 0, len(outcome.Records))
-	for _, record := range outcome.Records {
-		records = append(records, plugins.DecisionRecord{
-			Phase:    pluginapi.KindPrompt,
-			Instance: record.Instance,
-			Decision: record.Decision,
-			Err:      record.Err,
-			Edited:   record.Edited,
-		})
-	}
-	r.state.Record(records...)
+	r.state.Record(plugins.DecisionRecordsOf(pluginapi.KindPrompt, outcome, runErr)...)
 
 	if runErr != nil {
 		if pluginErr, ok := errors.AsType[*plugins.PluginError](runErr); ok {

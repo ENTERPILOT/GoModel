@@ -702,3 +702,11 @@ endpoints and `stop_reason: "end_turn"` on `/v1/messages`.
 A blocked request never reaches the provider; a blocked response never
 reaches the client. See [Plugins](/advanced/plugins#decisions) for how
 decisions merge when several guardrails run at the same order.
+
+Every outcome, a silent allow included, is recorded in the request's audit
+entry under `data.guardrails`, with the phase, step, decision, whether the
+guardrail edited the request or response, and how it failed. The dashboard
+colors the guardrail steps of an audit entry's workflow chart from it: green
+when the step passed or edited, amber for a warning or a fail-open error,
+red for a block, an answer or a fail-closed error, dimmed when the step never
+ran. See [Plugins](/advanced/plugins#audit-trail) for the fields.

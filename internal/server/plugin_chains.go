@@ -287,18 +287,17 @@ func pluginMeta(ctx context.Context, workflow *core.Workflow) pluginapi.Meta {
 	return plugins.WithAttempts(meta, converted)
 }
 
-// logResponseDecisions records response and stream phase outcomes: the audit
-// revision chain is request-only, so these are logged with the request id.
-func logResponseDecisions(requestID string, phase pluginapi.Kind, outcome plugins.Outcome, state *plugins.RequestState) {
-	records := make([]plugins.DecisionRecord, 0, len(outcome.Records))
-	for _, record := range outcome.Records {
-		records = append(records, plugins.DecisionRecord{Phase: phase, Instance: record.Instance, Decision: record.Decision, Err: record.Err})
+// logResponseDecisions records response and stream phase decisions in the
+// request state, which the audit entry's guardrail outcome trail is built
+// from when it is written, and logs the objections with the request id.
+func logResponseDecisions(requestID string, state *plugins.RequestState, records []plugins.DecisionRecord) {
+	for _, record := range records {
 		if record.Decision.Action == pluginapi.ActionAllow && record.Err == nil {
 			continue
 		}
 		slog.Info("plugin decision",
 			"request_id", requestID,
-			"phase", string(phase),
+			"phase", string(record.Phase),
 			"instance", record.Instance,
 			"action", string(plugins.NormalizeDecision(record.Decision).Action),
 			"code", record.Decision.Code,
@@ -306,4 +305,65 @@ func logResponseDecisions(requestID string, phase pluginapi.Kind, outcome plugin
 		)
 	}
 	state.Record(records...)
+}
+
+// recordGuardrailOutcomes attaches the request's guardrail outcome trail to
+// the audit entry when the workflow runs any plugin: the decisions known now
+// (the prompt phase) go on the live entry, and the trail is rebuilt from the
+// request state when the entry is written, so the response and stream
+// phases, which finish after the handler returned, are included. It runs
+// once the prepared workflow is on the request context.
+func (s *translatedInferenceService) recordGuardrailOutcomes(c *echo.Context) {
+	ctx := c.Request().Context()
+	chains := s.pluginChainsFor(ctx)
+	if chains == nil || (chains.Prompt.Empty() && chains.Response.Empty() && chains.Stream.Empty()) {
+		return
+	}
+	auditlog.EnrichEntryWithGuardrailOutcomes(c, func() []auditlog.GuardrailOutcomeSnapshot {
+		return guardrailOutcomes(plugins.RequestStateFromContext(ctx).Snapshot())
+	})
+}
+
+// guardrailOutcomes converts the recorded decisions into the audit outcome
+// trail, in the order they were recorded: phases run in sequence, so that is
+// execution order. An instance that errored is a failure carrying its fail
+// mode; its decision, allow by construction, is not reported.
+func guardrailOutcomes(records []plugins.DecisionRecord) []auditlog.GuardrailOutcomeSnapshot {
+	if len(records) == 0 {
+		return nil
+	}
+	outcomes := make([]auditlog.GuardrailOutcomeSnapshot, 0, len(records))
+	for _, record := range records {
+		decision := plugins.NormalizeDecision(record.Decision)
+		outcome := auditlog.GuardrailOutcomeSnapshot{
+			Phase:          string(record.Phase),
+			Step:           record.Step,
+			Instance:       record.Instance,
+			Type:           record.Type,
+			Action:         string(decision.Action),
+			Code:           decision.Code,
+			Message:        decision.Message,
+			Detail:         decision.Detail,
+			Edited:         record.Edited,
+			ReplacedEvents: record.Replaced,
+			DroppedEvents:  record.Dropped,
+			DurationNs:     record.Duration.Nanoseconds(),
+		}
+		if record.Err != nil {
+			outcome.Action = auditlog.GuardrailActionFailure
+			outcome.Error = record.Err.Error()
+			outcome.FailMode = auditlog.GuardrailFailModeOpen
+			if record.FailedClosed {
+				outcome.FailMode = auditlog.GuardrailFailModeClosed
+			}
+		}
+		if record.Edited {
+			outcome.Target = auditlog.GuardrailTargetResponse
+			if record.Phase == pluginapi.KindPrompt {
+				outcome.Target = auditlog.GuardrailTargetRequest
+			}
+		}
+		outcomes = append(outcomes, outcome)
+	}
+	return outcomes
 }
