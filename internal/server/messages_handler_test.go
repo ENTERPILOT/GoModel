@@ -257,6 +257,48 @@ func TestMessages_UnsignedThinkingSkipsNativeForwarding(t *testing.T) {
 	}
 }
 
+// Untranslatable content wins over the unsigned-thinking detour: the
+// translated pipeline would reject the request outright, so the body is still
+// forwarded verbatim and Anthropic decides.
+func TestMessages_UnsignedThinkingKeepsNativeForwardingForUntranslatableContent(t *testing.T) {
+	nativeResponse := `{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"native"}],"model":"claude-test","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`
+	provider := &mockProvider{
+		supportedModels: []string{"claude-test"},
+		providerTypes:   map[string]string{"claude-test": "anthropic"},
+		passthroughResponse: &core.PassthroughResponse{
+			StatusCode: http.StatusOK,
+			Headers:    map[string][]string{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(nativeResponse)),
+		},
+	}
+	e := echo.New()
+	handler := NewHandler(provider, nil, nil, nil)
+
+	reqBody := `{"model":"claude-test","max_tokens":64,"tools":[{"type":"web_search_20250305","name":"web_search"}],"messages":[{"role":"user","content":"search"},` +
+		`{"role":"assistant","content":[{"type":"thinking","thinking":"foreign","signature":""},{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"q"}},{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[]}]},` +
+		`{"role":"user","content":"and?"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	if err := handler.Messages(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Messages: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if provider.lastPassthroughReq == nil {
+		t.Fatal("provider did not receive a passthrough request")
+	}
+	forwardedBody, err := io.ReadAll(provider.lastPassthroughReq.Body)
+	if err != nil {
+		t.Fatalf("read forwarded body: %v", err)
+	}
+	if string(forwardedBody) != reqBody {
+		t.Errorf("forwarded body = %s, want original request verbatim", forwardedBody)
+	}
+}
+
 func TestMessages_TranslatedPipelineStillRejectsUntranslatableContent(t *testing.T) {
 	provider := &mockProvider{
 		supportedModels: []string{"gpt-test"},
