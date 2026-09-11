@@ -45,7 +45,7 @@ func sequenceNumbers(t *testing.T, out []byte) ([]int, string) {
 			t.Fatalf("decode %q: %v", data, err)
 		}
 		if view.SequenceNumber == nil {
-			continue
+			t.Fatalf("event %q has no sequence_number:\n%s", view.Type, out)
 		}
 		numbers = append(numbers, *view.SequenceNumber)
 		last = view.Type
@@ -164,15 +164,26 @@ func TestTransformedSSEStream_ResponsesSequenceNumbersStayContiguous(t *testing.
 	}
 }
 
-// An upstream stream that is already gapped is renumbered too.
-func TestTransformedSSEStream_ResponsesRenumbersGappedUpstream(t *testing.T) {
-	input := strings.ReplaceAll(responsesSeqFixture, "\"sequence_number\":9", "\"sequence_number\":42")
-	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ResponsesCodec(), &funcTransformer{}, TransformOptions{})
-	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
+// An upstream stream that is already gapped, or that leaves an event
+// unnumbered, is numbered for the client all the same.
+func TestTransformedSSEStream_ResponsesRenumbersMalformedUpstream(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "gapped", input: strings.ReplaceAll(responsesSeqFixture, "\"sequence_number\":9", "\"sequence_number\":42")},
+		{name: "unnumbered event", input: strings.ReplaceAll(responsesSeqFixture, "\"sequence_number\":4,", "")},
 	}
-	assertContiguous(t, got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(tc.input)), ResponsesCodec(), &funcTransformer{}, TransformOptions{})
+			got, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertContiguous(t, got)
+		})
+	}
 }
 
 // Chat streams carry no sequence numbers, so a pass-through stays byte

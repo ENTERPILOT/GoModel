@@ -131,18 +131,15 @@ func (c *responsesCodec) BeginRenumber() { c.renumbering = true }
 
 // Renumber stamps the next outgoing sequence_number on an event about to
 // reach the client, so a stream that drops, merges, splits or injects events
-// still delivers 0..N without gaps. An event whose number is already the
-// right one is left untouched (ok is false), which keeps an unedited
-// pass-through byte identical.
+// still delivers 0..N without gaps. An event that arrived without a number
+// gets one; an event whose number is already the right one is left untouched
+// (ok is false), which keeps an unedited pass-through byte identical.
 func (c *responsesCodec) Renumber(ev Event) (Event, bool) {
 	if ev.Kind == KindDone || !jsonObject(ev.Data) {
 		return ev, false
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(ev.Data, &top); err != nil {
-		return ev, false
-	}
-	if _, numbered := top["sequence_number"]; !numbered {
 		return ev, false
 	}
 	next := c.nextSeq()
