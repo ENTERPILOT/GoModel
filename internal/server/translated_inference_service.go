@@ -59,6 +59,10 @@ type translatedInferenceService struct {
 	snapshotWrites   sync.WaitGroup
 	snapshotMu       sync.RWMutex
 	snapshotDraining bool
+	// pendingSnapshots holds the in-flight snapshot write per response id, so
+	// a request chained on a just-returned response can wait for its snapshot.
+	pendingSnapshots  map[string]pendingSnapshot
+	pendingSnapshotMu sync.Mutex
 
 	orchestrator *gateway.InferenceOrchestrator
 
@@ -85,9 +89,12 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		FailoverResolver:         s.failoverResolver,
 		FailoverPolicy:           s.failoverPolicy,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
-		UsageLogger:              s.usageLogger,
-		PricingResolver:          s.pricingResolver,
-		GuardrailsHash:           s.guardrailsHash,
+		// previous_response_id is resolved per attempt, for targets that
+		// cannot resolve it themselves.
+		ResponsesAttemptPatcher: s,
+		UsageLogger:             s.usageLogger,
+		PricingResolver:         s.pricingResolver,
+		GuardrailsHash:          s.guardrailsHash,
 	}
 	// Guarded assignment keeps the gate nil when rate limits are off (a nil
 	// RateLimiter assigned unconditionally would arrive as a typed non-nil
@@ -412,6 +419,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			))
 		}
 	}
+	// A chained response names its predecessor, as OpenAI's does: the client
+	// sees the link, and a later chained turn walks it to rebuild the history.
+	result.Response.PreviousResponseID = req.PreviousResponseID
 	s.storeResponseSnapshotAsync(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 
 	applyPluginResponseHeaders(c)
@@ -464,7 +474,9 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 
 	writeCtx := context.WithoutCancel(ctx)
+	pending := s.trackPendingSnapshot(resp.ID, core.UserPathFromContext(ctx))
 	scheduled := s.goSnapshotWrite(func() {
+		defer s.finishPendingSnapshot(resp.ID, pending)
 		writeCtx, cancel := context.WithTimeout(writeCtx, snapshotWriteTimeout)
 		defer cancel()
 		if err := snapshot.Persist(writeCtx, store); err != nil {
@@ -472,6 +484,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 		}
 	})
 	if !scheduled {
+		s.finishPendingSnapshot(resp.ID, pending)
 		s.recordResponseSnapshotStoreFailure(failure, errors.New("server shutting down, snapshot write skipped"))
 	}
 }

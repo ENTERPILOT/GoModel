@@ -32,8 +32,9 @@ providers, see [Responses compatibility](/advanced/responses-compatibility).
 
 ## Stored responses
 
-For non-streaming `POST /v1/responses` calls, GoModel stores the normalized
-response body and the normalized input items from the request. The snapshot is
+For non-streaming `POST /v1/responses` calls, unless the request sets
+`store: false`, GoModel stores the normalized response body and the normalized
+input items from the request. The snapshot is
 written in the background after the response is returned, so storage latency
 never delays the client. A `GET /v1/responses/{id}` issued immediately after
 the `POST` can arrive before the snapshot is stored; graceful shutdown waits
@@ -47,8 +48,18 @@ This enables:
 - `GET /v1/responses/{id}/input_items` for the original normalized input.
 - `DELETE /v1/responses/{id}` even when the provider does not expose native
   response deletion.
+- `previous_response_id` on chat-translated providers such as Anthropic and
+  Gemini: GoModel follows the stored response and each response it was chained
+  from, and prepends their input items and output to the new input, so the
+  provider receives the whole chain each turn. On these
+  providers an id that is not stored (the previous response was streamed or
+  sent with `store: false`), or belongs to another tenant, returns 404. Native
+  Responses providers receive the id itself and resolve it on their side, so
+  they need no GoModel snapshot.
 
-Streaming responses are not stored as response snapshots.
+Streaming responses are not stored as response snapshots, so on chat-translated
+providers a chained turn must follow a non-streaming response with `store` left
+on.
 
 ## Native provider lookup
 

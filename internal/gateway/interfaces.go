@@ -53,6 +53,16 @@ type TranslatedRequestPatcher interface {
 	PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error)
 }
 
+// ResponsesAttemptPatcher adapts a Responses request to the provider one
+// attempt is about to reach, after failover has chosen the target. It runs
+// for the primary attempt and for every failover attempt with that target's
+// provider type, so a field one provider resolves itself (previous_response_id
+// on a native Responses provider) can be rewritten only for targets that
+// cannot.
+type ResponsesAttemptPatcher interface {
+	PatchResponsesAttempt(ctx context.Context, req *core.ResponsesRequest, providerType string) (*core.ResponsesRequest, error)
+}
+
 // BatchRequestPreparer rewrites a native batch request before provider
 // submission. This keeps batch-specific policy out of provider decorators.
 type BatchRequestPreparer interface {
