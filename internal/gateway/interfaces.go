@@ -63,6 +63,17 @@ type ResponsesAttemptPatcher interface {
 	PatchResponsesAttempt(ctx context.Context, req *core.ResponsesRequest, providerType string) (*core.ResponsesRequest, error)
 }
 
+// ResponsesHistoryResolver expands the history a Responses request refers to
+// (a gateway-managed conversation, a stored previous response) into its
+// input. It runs once the workflow is resolved and before the prompt-phase
+// patch, so guardrails see every message the provider will receive.
+// providerTypes lists the primary target's provider type, then each failover
+// target's. The returned context carries whatever the resolver keeps for the
+// rest of the request.
+type ResponsesHistoryResolver interface {
+	ResolveResponsesHistory(ctx context.Context, req *core.ResponsesRequest, providerTypes []string) (context.Context, *core.ResponsesRequest, error)
+}
+
 // BatchRequestPreparer rewrites a native batch request before provider
 // submission. This keeps batch-specific policy out of provider decorators.
 type BatchRequestPreparer interface {

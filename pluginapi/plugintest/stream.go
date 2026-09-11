@@ -180,7 +180,7 @@ func (d *driver) present(ctx context.Context, w window, final bool) error {
 	overlap := utf8.RuneCountInString(d.tail[w])
 	d.tail[w], d.pending[w] = "", ""
 	d.seq++
-	ev := &pluginapi.StreamEvent{Seq: d.seq, Kind: w.kind, Choice: w.choice, Call: w.call, Text: full, Overlap: overlap}
+	ev := &pluginapi.StreamEvent{Seq: d.seq, Kind: w.kind, Choice: w.choice, Call: w.call, Text: full, Overlap: overlap, Final: final}
 	decision, err := d.hook.OnStreamEvent(ctx, d.x, ev)
 	if err != nil {
 		return err

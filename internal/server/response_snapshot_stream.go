@@ -79,7 +79,7 @@ func (o *responseSnapshotStreamObserver) OnJSONEvent(payload map[string]any) {
 		return
 	}
 	o.stored = true
-	resp.PreviousResponseID = o.req.PreviousResponseID
+	resp.PreviousResponseID = chainedFrom(o.ctx, o.req)
 	o.service.storeResponseSnapshotAsync(o.ctx, o.workflow, o.req, &resp, o.providerType, o.providerName, o.requestID)
 }
 

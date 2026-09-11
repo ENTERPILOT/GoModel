@@ -336,7 +336,7 @@ text split across two parts is not matched.
 | `on_match` | No | `replace` | `replace` substitutes; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the match. Only `replace` edits the text. |
 | `message` | No | `Request blocked by policy` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
-| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. Used by `replace` and `warn`. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. A match at the end of the text streamed so far is held until it stops growing, so an open-ended pattern such as `sk-[A-Za-z0-9]{20,}` masks the whole value when it is at most this long. Used by `replace` and `warn`. |
 
 In the stream phase, `replace` and `warn` transform events in flight with the
 configured lookbehind. `block` and `respond` buffer the whole stream so
@@ -515,7 +515,9 @@ already in the conversation, such as a `<PERSON_2>` an earlier reply carried
 back, is left as it is and its number is never reused for a new value.
 
 Streamed tool-call arguments are restored in flight as well, each call's
-arguments as a window of its own under `stream_lookbehind`.
+arguments as a window of its own under `stream_lookbehind`, including
+placeholders whose angle brackets the provider escaped (Gemini returns
+`\u003cPERSON_1\u003e`).
 
 #### Example
 

@@ -96,6 +96,7 @@ type pass struct {
 	// model that repeats their placeholder cannot disclose them.
 	prompt    bool
 	restore   bool // put restorable placeholders back
+	json      bool // the text is raw JSON: streamed tool-call arguments
 	requestID string
 }
 
@@ -318,7 +319,11 @@ func (p *Plugin) rewriteOne(text string, spans []span, u unit, restorable bool, 
 	}
 	if ps.restore {
 		var n int
-		out, n = m.restore(out)
+		if ps.json {
+			out, n = m.restoreJSON(out)
+		} else {
+			out, n = m.restore(out)
+		}
 		rep.add(0, n)
 	}
 	return out

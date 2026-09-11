@@ -89,12 +89,14 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		FailoverResolver:         s.failoverResolver,
 		FailoverPolicy:           s.failoverPolicy,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
-		// previous_response_id is resolved per attempt, for targets that
-		// cannot resolve it themselves.
-		ResponsesAttemptPatcher: s,
-		UsageLogger:             s.usageLogger,
-		PricingResolver:         s.pricingResolver,
-		GuardrailsHash:          s.guardrailsHash,
+		// Conversations and previous_response_id are expanded before the
+		// prompt phase; an id left for a native primary is resolved per
+		// attempt for a failover target that cannot resolve it itself.
+		ResponsesHistoryResolver: s,
+		ResponsesAttemptPatcher:  s,
+		UsageLogger:              s.usageLogger,
+		PricingResolver:          s.pricingResolver,
+		GuardrailsHash:           s.guardrailsHash,
 	}
 	// Guarded assignment keeps the gate nil when rate limits are off (a nil
 	// RateLimiter assigned unconditionally would arrive as a typed non-nil
@@ -270,15 +272,11 @@ func prepareResponsesRequest(
 	req *core.ResponsesRequest,
 	meta gateway.RequestMeta,
 ) (context.Context, *core.ResponsesRequest, *core.Workflow, error) {
+	// The orchestrator expands conversations and previous_response_id
+	// (ResolveResponsesHistory) before the prompt phase, so guardrails,
+	// the cache key, and the provider all see the merged history.
 	prepared, err := s.inference().PrepareResponsesRequest(ctx, req, meta)
-	ctx, preparedReq, workflow, err := unpackPrepared(ctx, prepared, err, responsesPreparedFields)
-	if err != nil {
-		return ctx, preparedReq, workflow, err
-	}
-	// Resolve gateway-managed conversations before caching and dispatch so the
-	// cache key reflects the merged history and providers never see local IDs.
-	ctx, preparedReq, err = s.applyResponsesConversation(ctx, preparedReq)
-	return ctx, preparedReq, workflow, err
+	return unpackPrepared(ctx, prepared, err, responsesPreparedFields)
 }
 
 func unpackPrepared[Prepared any, Req any](
@@ -425,7 +423,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	}
 	// A chained response names its predecessor, as OpenAI's does: the client
 	// sees the link, and a later chained turn walks it to rebuild the history.
-	result.Response.PreviousResponseID = req.PreviousResponseID
+	result.Response.PreviousResponseID = chainedFrom(ctx, req)
 	s.storeResponseSnapshotAsync(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 
 	applyPluginResponseHeaders(c)
@@ -464,7 +462,7 @@ func (s *translatedInferenceService) storeResponseSnapshotAsync(ctx context.Cont
 	}
 	snapshot, err := responsestore.Detach(&responsestore.StoredResponse{
 		Response:           resp,
-		InputItems:         normalizedResponseInputItems(resp.ID, req),
+		InputItems:         normalizedResponseInputItems(resp.ID, clientInput(ctx, req)),
 		Provider:           strings.TrimSpace(providerType),
 		ProviderName:       strings.TrimSpace(providerName),
 		ProviderResponseID: resp.ID,

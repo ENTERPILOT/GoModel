@@ -84,6 +84,10 @@ type StreamEvent struct {
 	// characters was applied then and must not be applied again; edits that
 	// extend past Overlap are new. 0 when nothing was withheld.
 	Overlap int
+	// Final marks the last event of a window (the stream ended, or a delta
+	// of another kind closed it): nothing is withheld after it, so an edit
+	// a plugin put off because the text could still grow is due now.
+	Final bool
 	// Raw is the event as received. Read-only.
 	Raw json.RawMessage
 }
