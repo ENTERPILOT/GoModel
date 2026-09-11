@@ -65,6 +65,14 @@ func TestModelBreakerCapacityRejectsWithoutBypassingProtection(t *testing.T) {
 	}
 }
 
+func TestFailAfterRetriesIncludesProviderName(t *testing.T) {
+	client := New(DefaultConfig("test", ""), nil)
+	err := client.failAfterRetries(requestScope{})
+	if err == nil || !strings.Contains(err.Error(), "request failed after retries for provider test") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestUnknownModelUsesProviderBreaker(t *testing.T) {
 	cfg := DefaultConfig("test", "")
 	cfg.CircuitBreaker.Scope = "model"

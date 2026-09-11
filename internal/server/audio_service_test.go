@@ -1046,7 +1046,10 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 		var captured *usage.UsageEntry
 		logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 		svc := &audioService{
-			provider:    &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-transcribe"}}, transcriptionResp: nil},
+			provider: &audioMockProvider{mockProvider: &mockProvider{
+				supportedModels: []string{"gpt-4o-transcribe"},
+				providerNames:   map[string]string{"gpt-4o-transcribe": "audio-transcription"},
+			}, transcriptionResp: nil},
 			usageLogger: logger}
 		c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio-bytes"))
 
@@ -1056,6 +1059,47 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 		}
 		if rec.Code != http.StatusBadGateway {
 			t.Fatalf("status = %d, want 502", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), `"provider":"audio-transcription"`) ||
+			!strings.Contains(rec.Body.String(), "provider audio-transcription returned empty audio response") {
+			t.Errorf("response does not identify the provider: %s", rec.Body.String())
+		}
+		if captured != nil {
+			t.Errorf("no usage should be written for a failed call, got %+v", captured)
+		}
+	})
+
+	t.Run("translation", func(t *testing.T) {
+		var captured *usage.UsageEntry
+		logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
+		svc := &audioService{
+			provider: &audioMockProvider{mockProvider: &mockProvider{
+				supportedModels: []string{"gpt-4o-translate"},
+				providerNames:   map[string]string{"gpt-4o-translate": "audio-translation"},
+			}, translationResp: nil},
+			usageLogger: logger,
+		}
+
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		_ = writer.WriteField("model", "gpt-4o-translate")
+		part, _ := writer.CreateFormFile("file", "speech.mp3")
+		_, _ = part.Write([]byte("audio-bytes"))
+		_ = writer.Close()
+		req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		rec := httptest.NewRecorder()
+		c := echo.New().NewContext(req, rec)
+
+		if err := svc.CreateTranslation(c); err != nil {
+			t.Fatalf("CreateTranslation returned error: %v", err)
+		}
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), `"provider":"audio-translation"`) ||
+			!strings.Contains(rec.Body.String(), "provider audio-translation returned empty audio response") {
+			t.Errorf("response does not identify the provider: %s", rec.Body.String())
 		}
 		if captured != nil {
 			t.Errorf("no usage should be written for a failed call, got %+v", captured)

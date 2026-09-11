@@ -287,6 +287,9 @@ func TestImageEdits_NilProviderResponseIs502(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"provider":"image-primary"`) {
 		t.Errorf("response does not identify the provider: %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "provider image-primary returned empty image response") {
+		t.Errorf("response does not identify the provider in its message: %s", rec.Body.String())
+	}
 	if captured != nil {
 		t.Error("no usage entry should be written for a failed call")
 	}

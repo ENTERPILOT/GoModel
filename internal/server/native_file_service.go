@@ -21,6 +21,17 @@ type nativeFileService struct {
 	fileStore filestore.Store
 }
 
+// providerName returns the configured provider instance for a native-file
+// provider type, falling back to the type when the router cannot resolve it.
+func (s *nativeFileService) providerName(providerType string) string {
+	if resolver, ok := s.provider.(core.ProviderTypeNameResolver); ok {
+		if providerName := strings.TrimSpace(resolver.GetProviderNameForType(providerType)); providerName != "" {
+			return providerName
+		}
+	}
+	return strings.TrimSpace(providerType)
+}
+
 func (s *nativeFileService) router() (core.NativeFileRoutableProvider, error) {
 	nativeRouter, ok := s.provider.(core.NativeFileRoutableProvider)
 	if !ok {
@@ -84,7 +95,7 @@ func (s *nativeFileService) fileByID(
 				return handleError(c, err)
 			}
 		}
-		return respondFn(c, providerType, result)
+		return respondFn(c, s.providerName(providerType), result)
 	}
 
 	if tracked {
@@ -97,7 +108,7 @@ func (s *nativeFileService) fileByID(
 					return handleError(c, err)
 				}
 			}
-			return respondFn(c, providerType, result)
+			return respondFn(c, s.providerName(providerType), result)
 		}
 		if !isNotFoundGatewayError(err) && !isUnsupportedNativeFilesError(err) {
 			return handleError(c, err)
@@ -127,7 +138,7 @@ func (s *nativeFileService) fileByID(
 					return handleError(c, err)
 				}
 			}
-			return respondFn(c, candidate, result)
+			return respondFn(c, s.providerName(candidate), result)
 		}
 		if isNotFoundGatewayError(err) || isUnsupportedNativeFilesError(err) {
 			continue
