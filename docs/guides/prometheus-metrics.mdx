@@ -283,6 +283,27 @@ If you need to protect the metrics endpoint further:
    }
    ```
 
+## Alerting on Empty Responses
+
+A provider sometimes answers `200` but returns no choices, no output, or no
+token usage. `gomodel_requests_total` counts those calls as successes, so
+GoModel also increments `gomodel_empty_responses_total` and logs a warning
+(`provider returned 200 with an empty response`).
+
+| Label      | Values                                    |
+| ---------- | ----------------------------------------- |
+| `provider` | Provider name from your configuration     |
+| `model`    | Model sent upstream                       |
+| `reason`   | `no_choices`, `no_output`, or `no_usage`  |
+
+A chat completion without choices also returns `502` to the client, or fails
+over when a failover target exists. A response with content but no usage is
+still returned; it only breaks usage and cost tracking.
+
+```promql
+sum(rate(gomodel_empty_responses_total[5m])) by (provider, model, reason) > 0
+```
+
 ## Prometheus Configuration
 
 ### Scrape Config

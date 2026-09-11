@@ -291,7 +291,8 @@ Expand a card (the arrow strip at the bottom, or the section-wide
   at least 3 errors making up half or more of its windowed requests is
   flagged in red — this catches a single broken model on an otherwise
   healthy provider, which model discovery alone cannot see. Hover a row for
-  the model's latest error message.
+  the model's latest error message. A `200` response with no choices, no
+  output, or no token usage counts as an error here too.
 
 Request-health tracking is passive: it observes traffic your clients already
 send (the gateway's own background probes — model discovery and availability

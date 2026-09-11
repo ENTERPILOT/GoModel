@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/llmclient"
 )
 
 // ErrRegistryNotInitialized is returned when the router is used before the registry has any models.
@@ -27,6 +28,9 @@ type Router struct {
 	// unqualifiedModelIDs makes ListModels advertise bare model IDs instead of
 	// provider-qualified ones.
 	unqualifiedModelIDs bool
+	// onEmptyResponse observes 200 responses without choices, output, or
+	// usage; nil disables the hook (the warning log still fires).
+	onEmptyResponse func(context.Context, llmclient.EmptyResponseInfo)
 }
 
 // lookupCaps records which optional interfaces the lookup implements. A nil

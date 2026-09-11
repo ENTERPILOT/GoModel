@@ -151,7 +151,8 @@ retry_on_errors:
 
 A non-streaming chat completion that returns `200` with an empty `choices`
 array is treated as a `502` (`provider returned no choices`), so it fails over
-under the default `5xx` status rule.
+under the default `5xx` status rule. Each such attempt is also logged and
+counted in `gomodel_empty_responses_total`.
 
 Example: try at most one backup, treat timeouts as failover-eligible but
 keep serving `429` responses to the client, and add a provider-specific
