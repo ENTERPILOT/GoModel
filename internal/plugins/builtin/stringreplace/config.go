@@ -27,13 +27,14 @@ const (
 	DefaultStreamLookbehind = 64
 )
 
-// defaultMessage is the message an instance that configures none falls back
-// to: the block-phrased default for the outcomes that stop the request, and
-// none for warn, whose message is only an audit note and would otherwise read
-// as a block in the dashboard.
-func defaultMessage(onMatch string) string {
-	if onMatch == OnMatchWarn {
-		return ""
+// enforcementMessage resolves the configured message. A blank one — unset, or
+// cleared in the dashboard — falls back to the block-phrased default for the
+// outcomes that stop the request, so a block never answers with an empty
+// error; warn keeps no note, since its message is only an audit note and the
+// default would read as a block in the dashboard.
+func enforcementMessage(configured, onMatch string) string {
+	if configured != "" || onMatch == OnMatchWarn {
+		return configured
 	}
 	return DefaultMessage
 }
@@ -63,7 +64,7 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 	}
 	s.enforcement = pluginapi.Enforcement{
 		Action:      pluginapi.Action(s.onMatch),
-		Message:     cfg.String("message", defaultMessage(s.onMatch)),
+		Message:     enforcementMessage(cfg.String("message", ""), s.onMatch),
 		BlockStatus: cfg.BlockStatus("block_status"),
 	}
 	ruleLines := cfg.Lines("rules")
