@@ -396,13 +396,20 @@ func (s *nativeResponseService) refreshStoredResponse(
 	resp, err := router.GetResponse(ctx, providerRoute, gateway.FirstNonEmpty(stored.ProviderResponseID, id), params)
 	if err != nil || resp == nil {
 		if err != nil && !isUnsupportedNativeResponseError(err) && !isNotFoundGatewayError(err) {
-			slog.Warn("response refresh failed, serving stored snapshot", "response_id", id, "error", err)
+			// The response id comes straight from the request path, so it is
+			// left out of the log line; the audit entry already carries it.
+			slog.Warn("response refresh failed, serving stored snapshot", "provider", providerRoute, "error", err)
 		}
 		return nil
 	}
 
 	providerType := storedProvider(stored)
 	normalizeLifecycleResponse(resp, id, providerType)
+	if resp.PreviousResponseID == "" {
+		// The create path names the predecessor the client asked for; keep it
+		// when the provider does not echo one back.
+		resp.PreviousResponseID = stored.Response.PreviousResponseID
+	}
 	if responseStatusPending(resp.Status) {
 		return resp
 	}
@@ -411,7 +418,7 @@ func (s *nativeResponseService) refreshStoredResponse(
 	if updateErr := s.responseStore.Update(ctx, stored); updateErr != nil && !errors.Is(updateErr, responsestore.ErrNotFound) {
 		// The refreshed response is already correct; a failed write only means
 		// the next poll refreshes again.
-		slog.Warn("failed to persist refreshed response snapshot", "response_id", id, "error", updateErr)
+		slog.Warn("failed to persist refreshed response snapshot", "provider", providerRoute, "error", updateErr)
 	}
 	return resp
 }
