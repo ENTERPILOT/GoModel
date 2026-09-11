@@ -271,4 +271,7 @@ func TestTransformedSSEStream_TextAlongsideToolCalls(t *testing.T) {
 	if resp.Choices[0].FinishReason != "tool_calls" || strings.Count(string(got), `"finish_reason":"tool_calls"`) != 1 {
 		t.Errorf("finish = %q", resp.Choices[0].FinishReason)
 	}
+	if strings.Count(string(got), `"role":"assistant"`) != 1 {
+		t.Errorf("role repeated across the split parts:\n%s", got)
+	}
 }

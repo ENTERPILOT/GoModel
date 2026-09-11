@@ -395,6 +395,10 @@ func splitToolCalls(choice json.RawMessage) ([]json.RawMessage, bool) {
 		callDelta["tool_calls"] = single
 		deltas = append(deltas, callDelta)
 	}
+	// The role announces the message once; it stays on the first part only.
+	for _, partDelta := range deltas[1:] {
+		delete(partDelta, "role")
+	}
 	out := make([]json.RawMessage, 0, len(deltas))
 	for i, partDelta := range deltas {
 		partChoice := make(map[string]json.RawMessage, len(obj))
