@@ -355,6 +355,12 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
+	// Checked here, after history resolution has had its chance to supply the
+	// input, so a request with nothing to send never reaches a provider.
+	if err := req.ValidateInput(); err != nil {
+		return handleError(c, err)
+	}
+
 	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
 		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
 	if err != nil {

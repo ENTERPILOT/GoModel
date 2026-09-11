@@ -15,6 +15,7 @@ var (
 	responsesRequestFields        = jsonFieldSetOf(ResponsesRequest{})
 	responsesUtilityRequestFields = jsonFieldSetOf(ResponseInputTokensRequest{})
 	responsesOutputItemFields     = jsonFieldSetOf(ResponsesOutputItem{})
+	responsesResponseFields       = jsonFieldSetOf(ResponsesResponse{})
 )
 
 // responsesExtrasAndInput finishes a responses-shaped decode: it captures
@@ -317,6 +318,33 @@ func (e ResponsesInputElement) MarshalJSON() ([]byte, error) {
 			Type: e.Type,
 		}, e.ExtraFields)
 	}
+}
+
+// UnmarshalJSON preserves every Response member the gateway does not model
+// itself. OpenAI echoes the whole request back on the Response object
+// (instructions, metadata, tools, tool_choice, temperature, text, reasoning,
+// truncation, …) and clients read those members back, so they must survive a
+// decode/encode round trip through the gateway.
+func (r *ResponsesResponse) UnmarshalJSON(data []byte) error {
+	type alias ResponsesResponse
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	extraFields, err := extractUnknownJSONFieldsSet(data, responsesResponseFields)
+	if err != nil {
+		return err
+	}
+	*r = ResponsesResponse(decoded)
+	r.ExtraFields = extraFields
+	return nil
+}
+
+// MarshalJSON emits the typed Response members together with every unknown
+// member retained during decoding or echoed from the request.
+func (r ResponsesResponse) MarshalJSON() ([]byte, error) {
+	type alias ResponsesResponse
+	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }
 
 // UnmarshalJSON preserves variant-specific Responses output item fields. This
