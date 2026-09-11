@@ -89,9 +89,12 @@ func (s *translatedInferenceService) newInferenceOrchestrator() *gateway.Inferen
 		FailoverResolver:         s.failoverResolver,
 		FailoverPolicy:           s.failoverPolicy,
 		TranslatedRequestPatcher: s.translatedRequestPatcher,
-		UsageLogger:              s.usageLogger,
-		PricingResolver:          s.pricingResolver,
-		GuardrailsHash:           s.guardrailsHash,
+		// previous_response_id is resolved per attempt, for targets that
+		// cannot resolve it themselves.
+		ResponsesAttemptPatcher: s,
+		UsageLogger:             s.usageLogger,
+		PricingResolver:         s.pricingResolver,
+		GuardrailsHash:          s.guardrailsHash,
 	}
 	// Guarded assignment keeps the gate nil when rate limits are off (a nil
 	// RateLimiter assigned unconditionally would arrive as a typed non-nil
@@ -272,11 +275,6 @@ func prepareResponsesRequest(
 	// Resolve gateway-managed conversations before caching and dispatch so the
 	// cache key reflects the merged history and providers never see local IDs.
 	ctx, preparedReq, err = s.applyResponsesConversation(ctx, preparedReq)
-	if err != nil {
-		return ctx, preparedReq, workflow, err
-	}
-	// Likewise for a previous_response_id the route's provider cannot resolve.
-	preparedReq, err = s.applyResponsesPreviousResponse(ctx, preparedReq, workflow)
 	return ctx, preparedReq, workflow, err
 }
 
@@ -421,6 +419,9 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			))
 		}
 	}
+	// A chained response names its predecessor, as OpenAI's does: the client
+	// sees the link, and a later chained turn walks it to rebuild the history.
+	result.Response.PreviousResponseID = req.PreviousResponseID
 	s.storeResponseSnapshotAsync(ctx, workflow, req, result.Response, result.Meta.ProviderType, result.Meta.ProviderName, requestID)
 
 	applyPluginResponseHeaders(c)

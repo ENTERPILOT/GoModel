@@ -15,28 +15,23 @@ import (
 	"github.com/enterpilot/gomodel/internal/responsestore"
 )
 
-// applyResponsesPreviousResponse resolves previous_response_id for routes
-// whose provider cannot. A chat-translated provider keeps no response state,
-// so the referenced response is loaded from the gateway's response store and
-// its input items and output are prepended to the request input, the way a
-// gateway-managed conversation is; the field is stripped before dispatch. A
-// stored response's input items already carry the history it was chained
-// from, so one hop reconstructs the whole chain.
-//
-// A route whose primary and failover targets all support the native
-// Responses lifecycle keeps the id untouched, since those providers hold that
-// state themselves. When any target is chat-translated the history is
-// resolved up front, so a failover attempt never receives an id it cannot use.
-func (s *translatedInferenceService) applyResponsesPreviousResponse(ctx context.Context, req *core.ResponsesRequest, workflow *core.Workflow) (*core.ResponsesRequest, error) {
+// PatchResponsesAttempt resolves previous_response_id for an attempt whose
+// provider cannot. It runs once per dispatch attempt with that attempt's
+// provider type: a native Responses provider keeps the id untouched, since it
+// holds that state itself, while a chat-translated provider keeps no response
+// state, so the referenced response is loaded from the gateway's response
+// store and its input items and output are prepended to the request input,
+// the way a gateway-managed conversation is; the field is stripped before
+// dispatch. A stored response's input items already carry the history it was
+// chained from, so one hop reconstructs the whole chain. Deciding per attempt
+// keeps a native primary's request unchanged and still gives a translated
+// failover target a request it can serve.
+func (s *translatedInferenceService) PatchResponsesAttempt(ctx context.Context, req *core.ResponsesRequest, providerType string) (*core.ResponsesRequest, error) {
 	if req == nil {
 		return req, nil
 	}
 	id := strings.TrimSpace(req.PreviousResponseID)
-	if id == "" {
-		return req, nil
-	}
-	primaryNative := s.providerTypeResolvesPreviousResponse(workflow.ProviderType)
-	if primaryNative && !s.anyFailoverTargetTranslated(workflow) {
+	if id == "" || s.providerTypeResolvesPreviousResponse(providerType) {
 		return req, nil
 	}
 	store := s.currentResponseStore()
@@ -46,37 +41,9 @@ func (s *translatedInferenceService) applyResponsesPreviousResponse(ctx context.
 		return req, nil
 	}
 
-	// The predecessor's snapshot is written in the background; a client that
-	// chains as soon as it has the response must not race that write.
-	s.awaitPendingSnapshot(ctx, id)
-	stored, err := store.Get(ctx, id)
+	history, err := s.previousResponseHistory(ctx, store, id)
 	if err != nil {
-		if !errors.Is(err, responsestore.ErrNotFound) {
-			return req, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to load previous response", err)
-		}
-		if primaryNative {
-			// Not tracked by the gateway; the native provider may still know it.
-			return req, nil
-		}
-		return req, previousResponseNotFound(id)
-	}
-	// Another tenant's response is indistinguishable from a missing one.
-	if stored == nil || stored.Response == nil || !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
-		return req, previousResponseNotFound(id)
-	}
-
-	history := make([]json.RawMessage, 0, len(stored.InputItems)+len(stored.Response.Output))
-	history = append(history, stored.InputItems...)
-	for _, item := range stored.Response.Output {
-		item, ok := replayableOutputItem(item)
-		if !ok {
-			continue
-		}
-		raw, err := json.Marshal(item)
-		if err != nil {
-			return req, core.NewProviderError("response_store", http.StatusInternalServerError, "stored response output is not serializable", err)
-		}
-		history = append(history, raw)
+		return req, err
 	}
 	merged, err := mergeConversationInput(history, req.Input)
 	if err != nil {
@@ -87,6 +54,68 @@ func (s *translatedInferenceService) applyResponsesPreviousResponse(ctx context.
 	patched.Input = merged
 	patched.PreviousResponseID = ""
 	return &patched, nil
+}
+
+// maxPreviousResponseChain bounds the walk back through stored responses, so
+// a corrupted or adversarial chain cannot keep a request busy indefinitely.
+const maxPreviousResponseChain = 256
+
+// previousResponseHistory reconstructs the conversation behind a stored
+// response: each stored response holds only its own input items and output,
+// as OpenAI's input_items do, and links to its own predecessor, so the chain
+// is walked back to its root and replayed oldest first. The head must exist
+// for the caller; an ancestor that has expired or is out of scope ends the
+// walk, leaving the history that is still available.
+func (s *translatedInferenceService) previousResponseHistory(ctx context.Context, store responsestore.Store, id string) ([]json.RawMessage, error) {
+	var segments [][]json.RawMessage
+	seen := make(map[string]struct{})
+	for hop := 0; id != ""; hop++ {
+		if hop >= maxPreviousResponseChain {
+			return nil, core.NewInvalidRequestError(fmt.Sprintf("previous_response_id chain exceeds %d responses", maxPreviousResponseChain), nil)
+		}
+		if _, cyclic := seen[id]; cyclic {
+			break
+		}
+		seen[id] = struct{}{}
+
+		// The predecessor's snapshot is written in the background; a client
+		// that chains as soon as it has the response must not race that write.
+		s.awaitPendingSnapshot(ctx, id)
+		stored, err := store.Get(ctx, id)
+		if err != nil && !errors.Is(err, responsestore.ErrNotFound) {
+			return nil, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to load previous response", err)
+		}
+		// Another tenant's response is indistinguishable from a missing one.
+		missing := err != nil || stored == nil || stored.Response == nil || !core.AccessScopeFromContext(ctx).Allows(stored.UserPath)
+		if missing {
+			if hop == 0 {
+				return nil, previousResponseNotFound(id)
+			}
+			break
+		}
+
+		segment := make([]json.RawMessage, 0, len(stored.InputItems)+len(stored.Response.Output))
+		segment = append(segment, stored.InputItems...)
+		for _, item := range stored.Response.Output {
+			item, ok := replayableOutputItem(item)
+			if !ok {
+				continue
+			}
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return nil, core.NewProviderError("response_store", http.StatusInternalServerError, "stored response output is not serializable", err)
+			}
+			segment = append(segment, raw)
+		}
+		segments = append(segments, segment)
+		id = strings.TrimSpace(stored.Response.PreviousResponseID)
+	}
+
+	var history []json.RawMessage
+	for _, segment := range slices.Backward(segments) {
+		history = append(history, segment...)
+	}
+	return history, nil
 }
 
 // replayableOutputItem drops the output_text parts of a message that carry no
@@ -123,20 +152,6 @@ func (s *translatedInferenceService) providerTypeResolvesPreviousResponse(provid
 		return true
 	}
 	return slices.Contains(native, providerType)
-}
-
-// anyFailoverTargetTranslated reports whether a failover attempt could land
-// on a provider without the native Responses lifecycle.
-func (s *translatedInferenceService) anyFailoverTargetTranslated(workflow *core.Workflow) bool {
-	if s.orchestrator == nil {
-		return false
-	}
-	for _, selector := range s.orchestrator.FailoverSelectors(workflow) {
-		if !s.providerTypeResolvesPreviousResponse(s.provider.GetProviderType(selector.QualifiedModel())) {
-			return true
-		}
-	}
-	return false
 }
 
 func previousResponseNotFound(id string) error {

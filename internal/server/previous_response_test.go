@@ -77,6 +77,9 @@ func TestResponsesWithPreviousResponseID_ResolvesFromStoreForTranslatedProvider(
 	if rec.Code != http.StatusOK {
 		t.Fatalf("chained responses status = %d (%s)", rec.Code, rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"previous_response_id":"resp_conv_1"`) {
+		t.Fatalf("chained response must echo previous_response_id: %s", rec.Body.String())
+	}
 	forwarded := provider.capturedResponsesReq
 	if forwarded.PreviousResponseID != "" {
 		t.Fatalf("previous_response_id must be stripped before dispatch, got %q", forwarded.PreviousResponseID)
@@ -121,6 +124,18 @@ func TestResponsesWithPreviousResponseID_ChainCarriesFullHistory(t *testing.T) {
 	items := forwardedInputItems(t, provider.capturingProvider)
 	if len(items) != 5 {
 		t.Fatalf("turn three forwarded %d items, want 5 (two full turns + new input): %#v", len(items), items)
+	}
+	if text, _ := json.Marshal(items[2]["content"]); !strings.Contains(string(text), "turn two") {
+		t.Fatalf("history is not oldest first: %#v", items)
+	}
+
+	// Each snapshot keeps only its own input and links to its predecessor.
+	second, err := store.Get(context.Background(), "resp_conv_2")
+	if err != nil {
+		t.Fatalf("load turn two: %v", err)
+	}
+	if second.Response.PreviousResponseID != "resp_conv_1" || len(second.InputItems) != 1 {
+		t.Fatalf("turn two snapshot previous=%q input items=%d, want resp_conv_1 and 1", second.Response.PreviousResponseID, len(second.InputItems))
 	}
 }
 
@@ -195,16 +210,15 @@ func TestApplyResponsesPreviousResponse_ScopedTenantCannotChainAcrossScopes(t *t
 		t.Fatalf("store: %v", err)
 	}
 	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: store}
-	workflow := &core.Workflow{ProviderType: "anthropic"}
 	req := &core.ResponsesRequest{Model: "gpt-5-mini", Input: "again?", PreviousResponseID: "resp_t"}
 
 	foreign := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-a"})
-	if _, err := s.applyResponsesPreviousResponse(foreign, req, workflow); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := s.PatchResponsesAttempt(foreign, req, "anthropic"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("foreign scope error = %v, want not found", err)
 	}
 
 	owner := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-b"})
-	patched, err := s.applyResponsesPreviousResponse(owner, req, workflow)
+	patched, err := s.PatchResponsesAttempt(owner, req, "anthropic")
 	if err != nil {
 		t.Fatalf("owner scope: %v", err)
 	}
@@ -284,14 +298,40 @@ func TestResponsesWithPreviousResponseID_WaitsForPendingSnapshot(t *testing.T) {
 	}
 }
 
-// TestResponsesWithPreviousResponseID_TranslatedFailoverTargetResolvesUpFront
-// resolves the history before dispatch when a failover target is
-// chat-translated, so a failed native attempt does not hand the fallback an id
-// it cannot use.
-func TestResponsesWithPreviousResponseID_TranslatedFailoverTargetResolvesUpFront(t *testing.T) {
-	provider := previousResponseTestProvider(t, "openai")
-	provider.providerTypes["anthropic/claude"] = "anthropic"
-	provider.supportedModels = append(provider.supportedModels, "anthropic/claude")
+// chainingFailoverProvider records the request each attempt received and
+// reports which provider types resolve previous_response_id natively.
+type chainingFailoverProvider struct {
+	*failoverProvider
+	native   []string
+	requests map[string]*core.ResponsesRequest
+}
+
+func (p *chainingFailoverProvider) NativeResponseProviderTypes() []string { return p.native }
+
+func (p *chainingFailoverProvider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+	p.requests[requestSelector(req.Model, req.Provider)] = req
+	return p.failoverProvider.Responses(ctx, req)
+}
+
+// TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt keeps the id
+// on the native primary's request and hands the chat-translated failover
+// target the replayed history instead, so a failed native attempt does not
+// leave the fallback with an id it cannot use and a healthy native primary
+// never sees its request rewritten.
+func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T) {
+	provider := &chainingFailoverProvider{
+		failoverProvider: &failoverProvider{
+			responsesErrors: map[string]error{
+				"gpt-5-mini": core.NewProviderError("openai", http.StatusServiceUnavailable, "model temporarily unavailable", nil),
+			},
+			responsesResponses: map[string]*core.ResponsesResponse{
+				"anthropic/claude": {ID: "resp_failover", Object: "response", Status: "completed", Output: []core.ResponsesOutputItem{}},
+			},
+			supportedModels: map[string]string{"gpt-5-mini": "openai", "anthropic/claude": "anthropic"},
+		},
+		native:   []string{"openai"},
+		requests: map[string]*core.ResponsesRequest{},
+	}
 	handler := newHandler(provider, nil, nil, nil, nil, nil, failoverResolverStub{
 		selectors: []core.ModelSelector{{Provider: "anthropic", Model: "claude"}},
 	}, nil)
@@ -316,11 +356,20 @@ func TestResponsesWithPreviousResponseID_TranslatedFailoverTargetResolvesUpFront
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
 	}
-	if provider.capturedResponsesReq.PreviousResponseID != "" {
-		t.Fatal("previous_response_id must be resolved up front when a failover target is chat-translated")
+	primary := provider.requests["gpt-5-mini"]
+	if primary == nil || primary.PreviousResponseID != "resp_native" {
+		t.Fatalf("native primary request = %#v, want previous_response_id kept", primary)
 	}
-	if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
-		t.Fatalf("forwarded %d items, want 3", len(items))
+	if _, ok := primary.Input.(string); !ok {
+		t.Fatalf("native primary input must be untouched, got %#v", primary.Input)
+	}
+	fallback := provider.requests["anthropic/claude"]
+	if fallback == nil || fallback.PreviousResponseID != "" {
+		t.Fatalf("translated failover request = %#v, want previous_response_id resolved and stripped", fallback)
+	}
+	items, ok := fallback.Input.([]any)
+	if !ok || len(items) != 3 {
+		t.Fatalf("translated failover input = %#v, want replayed history + new input (3 items)", fallback.Input)
 	}
 }
 
@@ -340,7 +389,7 @@ func TestApplyResponsesPreviousResponse_SkipsEmptyReplayText(t *testing.T) {
 		t.Fatalf("store: %v", err)
 	}
 	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: store}
-	patched, err := s.applyResponsesPreviousResponse(context.Background(), &core.ResponsesRequest{Model: "gpt-5-mini", Input: "and?", PreviousResponseID: "resp_e"}, &core.Workflow{ProviderType: "anthropic"})
+	patched, err := s.PatchResponsesAttempt(context.Background(), &core.ResponsesRequest{Model: "gpt-5-mini", Input: "and?", PreviousResponseID: "resp_e"}, "anthropic")
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -403,7 +452,7 @@ func TestApplyResponsesPreviousResponse_PendingSnapshotWaitFollowsAccessScope(t 
 			finished := make(chan struct{})
 			go func() {
 				defer close(finished)
-				_, _ = s.applyResponsesPreviousResponse(tt.ctx, &core.ResponsesRequest{Model: "gpt-5-mini", Input: "x", PreviousResponseID: "resp_t"}, &core.Workflow{ProviderType: "anthropic"})
+				_, _ = s.PatchResponsesAttempt(tt.ctx, &core.ResponsesRequest{Model: "gpt-5-mini", Input: "x", PreviousResponseID: "resp_t"}, "anthropic")
 			}()
 			select {
 			case <-finished:

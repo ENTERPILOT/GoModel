@@ -10886,6 +10886,10 @@ const docTemplate = `{
                         "$ref": "#/definitions/core.ResponsesOutputItem"
                     }
                 },
+                "previous_response_id": {
+                    "description": "PreviousResponseID names the response this one was chained from, as\nOpenAI echoes it; stored snapshots follow it to rebuild the history.",
+                    "type": "string"
+                },
                 "provider": {
                     "type": "string"
                 },
