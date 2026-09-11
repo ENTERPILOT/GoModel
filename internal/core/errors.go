@@ -182,6 +182,19 @@ func NewNoChoicesProviderError(provider string) *GatewayError {
 	return NewProviderError(provider, http.StatusBadGateway, "provider returned no choices", nil)
 }
 
+// NewInternalErrorWithStatus creates an error raised by the gateway itself
+// rather than by an upstream provider. Use it for 5xx failures with no
+// provider behind them, so clients do not read "provider_error" on a fault the
+// gateway owns.
+func NewInternalErrorWithStatus(statusCode int, message string, err error) *GatewayError {
+	return &GatewayError{
+		Type:       ErrorTypeInternal,
+		Message:    message,
+		StatusCode: statusCode,
+		Err:        err,
+	}
+}
+
 // NewRateLimitError creates a new rate limit error (429)
 func NewRateLimitError(provider string, message string) *GatewayError {
 	return &GatewayError{

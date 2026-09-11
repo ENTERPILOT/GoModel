@@ -467,8 +467,71 @@ func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) 
 	rec.Header().Set(ext.AuthenticationUserHeader, "/users/sso")
 	require.NoError(t, handler(e.NewContext(req, rec)))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
-	assert.Empty(t, rec.Header().Get(ext.AuthenticationUserHeader))
+	assert.Empty(t, rec.Header().Values(ext.AuthenticationUserHeader))
 	assert.Zero(t, requestAuth.calls)
+}
+
+// An identity-less request must not advertise an empty user path: the header is
+// omitted entirely rather than sent with a blank value.
+func TestAuthMiddlewareOmitsEmptyAuthenticationUserHeader(t *testing.T) {
+	tests := []struct {
+		name          string
+		masterKey     string
+		authenticator BearerTokenAuthenticator
+		token         string
+		wantHeader    string
+	}{
+		{name: "master key", masterKey: "master", token: "master"},
+		{
+			name: "managed key without user path",
+			authenticator: mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"managed": "key-1"},
+			},
+			token: "managed",
+		},
+		{
+			name: "managed key with blank user path",
+			authenticator: mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"managed": "key-1"},
+				tokenPath: map[string]string{"managed": "   "},
+			},
+			token: "managed",
+		},
+		{
+			name: "managed key with user path",
+			authenticator: mockAuthenticator{
+				enabled:   true,
+				tokenToID: map[string]string{"managed": "key-1"},
+				tokenPath: map[string]string{"managed": "/team/alpha"},
+			},
+			token:      "managed",
+			wantHeader: "/team/alpha",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := AuthMiddlewareWithAuthenticator(tt.masterKey, tt.authenticator, nil)(func(c *echo.Context) error {
+				return c.NoContent(http.StatusNoContent)
+			})
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			req.Header.Set("Authorization", "Bearer "+tt.token)
+			rec := httptest.NewRecorder()
+			require.NoError(t, handler(e.NewContext(req, rec)))
+			assert.Equal(t, http.StatusNoContent, rec.Code)
+
+			values := rec.Header().Values(ext.AuthenticationUserHeader)
+			if tt.wantHeader == "" {
+				assert.Empty(t, values, "expected no %s header", ext.AuthenticationUserHeader)
+				return
+			}
+			assert.Equal(t, []string{tt.wantHeader}, values)
+		})
+	}
 }
 
 func TestAuthMiddleware_InteractionContinuationAccess(t *testing.T) {

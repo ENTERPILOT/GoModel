@@ -71,7 +71,12 @@ type CompatibleProvider struct {
 	// keys resolves the credential for each outbound request. Providers in this
 	// package read it directly (see realtime.go) so a websocket dial picks up
 	// the same rotation as the HTTP endpoints.
-	keys               *providers.Keyring
+	keys *providers.Keyring
+	// providerName names this provider in the values clients see — the
+	// response's provider field, file objects, translation errors. It is the
+	// configured instance name when the factory supplied one (so two
+	// instances of one type stay distinguishable), the provider type
+	// otherwise.
 	providerName       string
 	requestMutator     RequestMutator
 	adaptChatRequest   func(*core.ChatRequest) (*core.ChatRequest, error)
@@ -81,7 +86,7 @@ type CompatibleProvider struct {
 func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg CompatibleProviderConfig) *CompatibleProvider {
 	p := &CompatibleProvider{
 		keys:               opts.Keyring(apiKey),
-		providerName:       cfg.ProviderName,
+		providerName:       opts.ClientName(cfg.ProviderName),
 		requestMutator:     cfg.RequestMutator,
 		adaptChatRequest:   cfg.AdaptChatRequest,
 		chatRequestHeaders: cfg.ChatRequestHeaders,
@@ -131,6 +136,14 @@ func NewCompatibleProviderWithHTTPClient(apiKey string, httpClient *http.Client,
 
 func (p *CompatibleProvider) SetBaseURL(url string) {
 	p.client.SetBaseURL(url)
+}
+
+// ProviderName returns the name this provider reports to clients: the
+// configured instance name when there is one, the provider type otherwise.
+// Providers that translate the Responses API themselves pass it on, so their
+// responses name the same instance the errors do.
+func (p *CompatibleProvider) ProviderName() string {
+	return p.providerName
 }
 
 // GetBaseURL returns the provider's current base URL. It reads from the client so

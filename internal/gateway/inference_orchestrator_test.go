@@ -120,6 +120,63 @@ func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t
 	}
 }
 
+// The response's provider field names the configured instance that served the
+// request, while the execution metadata keeps the provider type that drives
+// routing and audit filters.
+func TestExecuteChatCompletionNamesTheProviderInstance(t *testing.T) {
+	tests := []struct {
+		name         string
+		providerName string
+		wantProvider string
+	}{
+		{name: "configured instance name", providerName: "mockds", wantProvider: "mockds"},
+		{name: "no configured instance name", wantProvider: "deepseek"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &providerTypeResolverStub{
+				chatResponse: &core.ChatResponse{
+					ID:       "chatcmpl-test",
+					Model:    "deepseek-chat",
+					Provider: "deepseek",
+					Choices:  []core.Choice{{FinishReason: "stop"}},
+				},
+			}
+			orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: provider})
+			workflow := &core.Workflow{
+				ProviderType: "deepseek",
+				Resolution: &core.RequestModelResolution{
+					Requested:        core.NewRequestedModelSelector("deepseek/deepseek-chat", ""),
+					ResolvedSelector: core.ModelSelector{Provider: "deepseek", Model: "deepseek-chat"},
+					ProviderType:     "deepseek",
+					ProviderName:     tt.providerName,
+				},
+			}
+
+			result, err := orchestrator.ExecuteChatCompletion(
+				context.Background(),
+				workflow,
+				&core.ChatRequest{Model: "deepseek/deepseek-chat"},
+				"req-provider-name",
+				"/v1/chat/completions",
+			)
+			if err != nil {
+				t.Fatalf("ExecuteChatCompletion() error = %v", err)
+			}
+			if got := result.Response.Provider; got != tt.wantProvider {
+				t.Errorf("response provider = %q, want %q", got, tt.wantProvider)
+			}
+			if got := result.Meta.ProviderType; got != "deepseek" {
+				t.Errorf("meta provider type = %q, want the type deepseek", got)
+			}
+			if got := result.Meta.ProviderName; got != tt.providerName {
+				t.Errorf("meta provider name = %q, want %q", got, tt.providerName)
+			}
+		})
+	}
+}
+
 func TestInferenceOrchestratorLogUsageSkipsWhenWorkflowDisablesUsage(t *testing.T) {
 	logger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{UsageLogger: logger})

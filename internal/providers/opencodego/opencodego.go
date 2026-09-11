@@ -170,13 +170,13 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Responses dispatches through this provider's ChatCompletion so /v1/responses
 // honors the per-model /messages routing.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req, "opencode_go")
+	return providers.ResponsesViaChat(ctx, p, req, p.ProviderName())
 }
 
 // StreamResponses dispatches through this provider's streaming ChatCompletion so
 // /v1/responses honors the per-model /messages routing.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return providers.StreamResponsesViaChat(ctx, p, req, "opencode_go")
+	return providers.StreamResponsesViaChat(ctx, p, req, p.ProviderName())
 }
 
 // Passthrough forwards an opaque request with the identification headers

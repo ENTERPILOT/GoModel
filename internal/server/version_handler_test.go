@@ -114,7 +114,10 @@ func TestVersionEndpointChecksOnFirstVisit(t *testing.T) {
 	}
 
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
-	if date != time.Now().Format(time.DateOnly) || id == "" {
+	// The visit cookie's day is UTC (versioncheck.NewVisit), so the comparison
+	// must be too: a local date fails for every run made on the other side of
+	// midnight UTC.
+	if date != time.Now().UTC().Format(time.DateOnly) || id == "" {
 		t.Fatalf("visit cookie = %q, want today plus a fresh id", visitCookie(t, rec))
 	}
 	if headers().Get("X-GoModel-Date") != visitCookie(t, rec) {
@@ -152,14 +155,14 @@ func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
 	srv, calls, _ := versionTestServer(t, manifestOK)
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
-	yesterday := time.Now().AddDate(0, 0, -1).Format(time.DateOnly)
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format(time.DateOnly)
 	req.AddCookie(&http.Cookie{Name: versioncheck.CookieName, Value: yesterday + "-3f2504e0-4f89-11d3-9a0c-0305e82c3301"})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
 	awaitChecks(t, calls, 1)
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
-	if date != time.Now().Format(time.DateOnly) {
+	if date != time.Now().UTC().Format(time.DateOnly) {
 		t.Errorf("cookie date = %q, want it rolled to today", date)
 	}
 	if id != "3f2504e0-4f89-11d3-9a0c-0305e82c3301" {

@@ -191,12 +191,12 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 
 // Responses sends a Responses API request to Ollama (converted to chat format)
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req, "ollama")
+	return providers.ResponsesViaChat(ctx, p, req, p.compat.ProviderName())
 }
 
 // StreamResponses returns a raw response body for streaming Responses API (caller must close)
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return providers.StreamResponsesViaChat(ctx, p, req, "ollama")
+	return providers.StreamResponsesViaChat(ctx, p, req, p.compat.ProviderName())
 }
 
 type ollamaEmbedRequest struct {
