@@ -72,3 +72,14 @@ func TestAdaptReasoningEffortRequestPreservesExistingExtraFields(t *testing.T) {
 		t.Fatalf("reasoning_effort = %s, want adaptation to win over stale extra field", got)
 	}
 }
+
+func TestDropReasoning(t *testing.T) {
+	req := &core.ChatRequest{Model: "m", Reasoning: &core.Reasoning{Effort: "low"}}
+	got := DropReasoning(req)
+	if got.Reasoning != nil {
+		t.Fatalf("Reasoning = %+v, want nil", got.Reasoning)
+	}
+	if req.Reasoning == nil || got.Model != "m" {
+		t.Fatalf("DropReasoning mutated its input or lost fields: in=%+v out=%+v", req, got)
+	}
+}

@@ -2,6 +2,7 @@ package presidio
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -24,10 +25,37 @@ type mapping struct {
 	// those go back into the response, so a value the model produced
 	// itself and that was anonymized on the way out stays anonymized.
 	restorable map[string]bool
+	// taken holds placeholder-shaped text already present in the request,
+	// whose numbers are never allocated (see reserve).
+	taken map[string]bool
 }
 
+// placeholderPattern matches text shaped like a placeholder this plugin
+// allocates ("<PERSON_1>", "<EMAIL_ADDRESS_12>").
+var placeholderPattern = regexp.MustCompile(`<[A-Z][A-Z0-9_]*_[0-9]+>`)
+
 func newMapping() *mapping {
-	return &mapping{seq: map[string]int{}, byValue: map[string]string{}, byPlaceholder: map[string]string{}, restorable: map[string]bool{}}
+	return &mapping{seq: map[string]int{}, byValue: map[string]string{}, byPlaceholder: map[string]string{}, restorable: map[string]bool{}, taken: map[string]bool{}}
+}
+
+// reserve marks the placeholder-shaped tokens in text as taken so allocation
+// skips their numbers. Without it a literal "<PERSON_2>" (typed by the user,
+// or a placeholder an earlier response carried back unrestored) would share
+// its placeholder with a new value, the model would see two people as one,
+// and restore would put that value in place of the literal.
+func (m *mapping) reserve(text string) {
+	if !strings.Contains(text, "<") {
+		return
+	}
+	tokens := placeholderPattern.FindAllString(text, -1)
+	if len(tokens) == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range tokens {
+		m.taken[t] = true
+	}
 }
 
 // placeholder returns the placeholder for value as entity, allocating the
@@ -40,8 +68,13 @@ func (m *mapping) placeholder(entity, value string, restorable bool) string {
 	key := entity + "\x00" + value
 	p, ok := m.byValue[key]
 	if !ok {
-		m.seq[entity]++
-		p = fmt.Sprintf("<%s_%d>", entity, m.seq[entity])
+		for {
+			m.seq[entity]++
+			p = fmt.Sprintf("<%s_%d>", entity, m.seq[entity])
+			if !m.taken[p] {
+				break
+			}
+		}
 		m.byValue[key] = p
 		m.byPlaceholder[p] = value
 	}

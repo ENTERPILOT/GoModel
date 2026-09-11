@@ -77,7 +77,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 		batchResultEndpoints: make(map[string]map[string]string),
 	}
 	clientCfg := llmclient.Config{
-		ProviderName:   "anthropic",
+		ProviderName:   opts.ClientName("anthropic"),
 		BaseURL:        providers.ResolveBaseURL(providerCfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

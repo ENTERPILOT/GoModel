@@ -87,7 +87,7 @@ func NewCompatibleProvider(apiKey string, opts providers.ProviderOptions, cfg Co
 		chatRequestHeaders: cfg.ChatRequestHeaders,
 	}
 	clientCfg := llmclient.Config{
-		ProviderName:   cfg.ProviderName,
+		ProviderName:   opts.ClientName(cfg.ProviderName),
 		BaseURL:        cfg.BaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

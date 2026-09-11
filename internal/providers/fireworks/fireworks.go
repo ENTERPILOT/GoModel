@@ -3,6 +3,7 @@ package fireworks
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -35,8 +36,9 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new Fireworks AI provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-		ProviderName: "fireworks",
-		BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		ProviderName:     "fireworks",
+		BaseURL:          providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		AdaptChatRequest: adaptChatRequest,
 	})}
 }
 
@@ -44,7 +46,23 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	return &Provider{openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-		ProviderName: "fireworks",
-		BaseURL:      providers.ResolveBaseURL(baseURL, defaultBaseURL),
+		ProviderName:     "fireworks",
+		BaseURL:          providers.ResolveBaseURL(baseURL, defaultBaseURL),
+		AdaptChatRequest: adaptChatRequest,
 	})}
+}
+
+// adaptChatRequest maps GoModel's nested reasoning shape (set by the Messages
+// API's thinking and by clients sending reasoning.effort) onto the flat
+// reasoning_effort field: Fireworks rejects "reasoning" but accepts
+// reasoning_effort on its chat models.
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req == nil || req.Reasoning == nil {
+		return req, nil
+	}
+	effort := strings.TrimSpace(req.Reasoning.Effort)
+	if effort == "" {
+		return providers.DropReasoning(req), nil
+	}
+	return providers.AdaptReasoningEffortRequest(req, effort)
 }

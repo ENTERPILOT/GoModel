@@ -740,6 +740,108 @@ func TestAPIKeyIsNotFollowedToPlainHTTP(t *testing.T) {
 	}
 }
 
+func TestPlaceholdersSkipLiteralTokens(t *testing.T) {
+	a := newAnalyzer(t, "Jakub Nowak", "Jan Kowalczyk", "Zoe Ray")
+	in := newPlugin(t, a, `{"restore": true}`)
+	out := newPlugin(t, a, `{"restore": true}`)
+	// The history carries a placeholder an earlier response left unrestored
+	// (a person the model invented), and the unanalyzed system message a
+	// literal one; neither number may be handed to a new value.
+	x := plugintest.Exchange(plugintest.Prompt(
+		plugintest.Text(pluginapi.RoleSystem, "m0", "Template slot: <PERSON_3>."),
+		plugintest.Text(pluginapi.RoleUser, "m1", "I am Jakub Nowak."),
+		plugintest.Text(pluginapi.RoleAssistant, "m2", "Meet <PERSON_2>, a historian."),
+		plugintest.Text(pluginapi.RoleUser, "m3", "My colleague Jan Kowalczyk wants to meet <PERSON_2>."),
+	), nil)
+	if _, err := in.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Prompt.Message("m3").Text(); got != "My colleague <PERSON_4> wants to meet <PERSON_2>." {
+		t.Fatalf("prompt = %q", got)
+	}
+	x.Response = plugintest.Completion("<PERSON_4> meets <PERSON_2>; <PERSON_1> watches.")
+	if _, err := out.OnResponse(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Response.Text(0); got != "Jan Kowalczyk meets <PERSON_2>; Jakub Nowak watches." {
+		t.Errorf("response = %q", got)
+	}
+	// A value the model produces next to a literal placeholder gets a fresh
+	// number, in the response phase and in a stream.
+	y := plugintest.Exchange(nil, plugintest.Completion("<PERSON_1> meets Zoe Ray"))
+	if _, err := out.OnResponse(context.Background(), y); err != nil {
+		t.Fatal(err)
+	}
+	if got := y.Response.Text(0); got != "<PERSON_1> meets <PERSON_2>" {
+		t.Errorf("response = %q", got)
+	}
+	z := plugintest.Exchange(nil, nil)
+	got, err := out.OnStreamEvent(context.Background(), z, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "<PERSON_1> meets Zoe Ray"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != "<PERSON_1> meets <PERSON_2>" {
+		t.Errorf("stream = %+v", got)
+	}
+}
+
+func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
+	a := newAnalyzer(t, "Ann Lee")
+	in := newPlugin(t, a, `{"restore": true, "roles": ["user"]}`)
+	out := newPlugin(t, a, `{"restore": true}`)
+	// Assistant arguments are not analyzed with roles [user], but their
+	// placeholder, JSON-escaped here, must still keep its number.
+	call := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"name": "\u003cPERSON_1\u003e"}`)}},
+	}}
+	x := plugintest.Exchange(plugintest.Prompt(call, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := in.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("prompt = %q", got)
+	}
+	x.Response = plugintest.Completion("<PERSON_1> is not <PERSON_2>")
+	if _, err := out.OnResponse(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Response.Text(0); got != "<PERSON_1> is not Ann Lee" {
+		t.Errorf("response = %q", got)
+	}
+	// Arguments that are a JSON string rather than an object are decoded too.
+	scalar := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`"\u003cPERSON_1\u003e"`)}},
+	}}
+	y := plugintest.Exchange(plugintest.Prompt(scalar, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := in.OnPrompt(context.Background(), y); err != nil {
+		t.Fatal(err)
+	}
+	if got := y.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("scalar prompt = %q", got)
+	}
+	// Object keys are reserved as well as values.
+	keyed := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"\u003cPERSON_1\u003e": "x"}`)}},
+	}}
+	z := plugintest.Exchange(plugintest.Prompt(keyed, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := in.OnPrompt(context.Background(), z); err != nil {
+		t.Fatal(err)
+	}
+	if got := z.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("keyed prompt = %q", got)
+	}
+	// With assistant analysis on (the default roles), a scalar argument is
+	// not analyzed but still reserved.
+	all := newPlugin(t, a, `{"restore": true}`)
+	w := plugintest.Exchange(plugintest.Prompt(scalar, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := all.OnPrompt(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("analyzed-role scalar prompt = %q", got)
+	}
+}
+
 func TestStreamRestoresToolCallArguments(t *testing.T) {
 	a := newAnalyzer(t, "Ann Lee")
 	in := newPlugin(t, a, `{"restore": true}`)

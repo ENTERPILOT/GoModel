@@ -90,3 +90,33 @@ func sortedKeys(m map[string]any) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// reserveArgs reserves the placeholder-shaped text of tool-call arguments:
+// every decoded string, object keys included, or the raw text when the
+// arguments are not JSON. It covers what analysis does not read: keys,
+// scalar arguments, and the arguments of roles left out of analysis.
+// Decoding matters because JSON may escape "<" as "\u003c".
+func reserveArgs(m *mapping, args json.RawMessage) {
+	var v any
+	if json.Unmarshal(args, &v) != nil {
+		m.reserve(string(args))
+		return
+	}
+	reserveTree(m, v)
+}
+
+func reserveTree(m *mapping, v any) {
+	switch t := v.(type) {
+	case string:
+		m.reserve(t)
+	case []any:
+		for _, item := range t {
+			reserveTree(m, item)
+		}
+	case map[string]any:
+		for key, item := range t {
+			m.reserve(key)
+			reserveTree(m, item)
+		}
+	}
+}

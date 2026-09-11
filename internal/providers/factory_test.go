@@ -431,3 +431,35 @@ func TestProviderFactory_Create_PassesConfiguredModels(t *testing.T) {
 		t.Fatalf("receivedOpts.Models = %v, want [model-a model-b]", receivedOpts.Models)
 	}
 }
+
+func TestProviderFactory_Create_PassesInstanceName(t *testing.T) {
+	factory := NewProviderFactory()
+
+	var receivedOpts ProviderOptions
+	factory.Add(Registration{
+		Type: "test",
+		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
+			receivedOpts = opts
+			return &factoryMockProvider{}
+		},
+	})
+
+	if _, err := factory.Create(ProviderConfig{Name: "test-eu", Type: "test"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedOpts.Name != "test-eu" {
+		t.Fatalf("receivedOpts.Name = %q, want test-eu", receivedOpts.Name)
+	}
+	if got := receivedOpts.ClientName("test"); got != "test-eu" {
+		t.Fatalf("ClientName() = %q, want test-eu", got)
+	}
+	if _, err := factory.Create(ProviderConfig{Name: "  test-us  ", Type: "test"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if receivedOpts.Name != "test-us" {
+		t.Fatalf("receivedOpts.Name = %q, want the trimmed test-us", receivedOpts.Name)
+	}
+	if got := (ProviderOptions{}).ClientName("test"); got != "test" {
+		t.Fatalf("ClientName() without a name = %q, want the type", got)
+	}
+}

@@ -88,7 +88,7 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	p.compat = openai.NewCompatibleProvider(providerCfg.APIKey, opts, compatibleConfig(defaultBaseURL))
 
 	nativeCfg := llmclient.Config{
-		ProviderName:   "ollama",
+		ProviderName:   opts.ClientName("ollama"),
 		BaseURL:        defaultNativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

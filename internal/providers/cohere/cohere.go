@@ -38,7 +38,7 @@ var _ core.PassthroughProvider = (*Provider)(nil)
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	p := &Provider{keys: opts.Keyring(cfg.APIKey)}
 	clientCfg := llmclient.Config{
-		ProviderName:   "cohere",
+		ProviderName:   opts.ClientName("cohere"),
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,

@@ -96,7 +96,8 @@ relied on rate limits leaving the breaker closed can set
 `failure_on_statuses: [5xx]` to retain that behavior.
 
 While the circuit is open, requests fail fast with a `503` and the message
-`circuit breaker is open - provider <name> temporarily unavailable`. After
+`circuit breaker is open - provider <name> temporarily unavailable`, where
+`<name>` is the configured provider name (`openai-eu`, not its type). After
 `timeout` elapses, a single probe request is let through while concurrent
 requests keep failing fast; `success_threshold` consecutive successful
 probes close the circuit, and a failure matching the breaker policy reopens it. Probes make only one
