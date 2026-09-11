@@ -13,7 +13,7 @@ them, in one of three phases:
 
 - **prompt**: after routing, before the request reaches the provider
 - **response**: on the complete response, before it reaches the client
-- **stream**: on each streamed event (or on the buffered stream, depending on the plugin)
+- **stream**: on each streamed event (or on the buffered stream, depending on the plugin) — only for requests with `stream: true`; a non-streaming request never runs a stream-phase guardrail
 
 A guardrail can edit content, add headers, reject the request with an error,
 answer it with a safe message, or let it through with a warning.
@@ -334,9 +334,9 @@ text split across two parts is not matched.
 | `case_insensitive` | No | `false` | Match regardless of letter case. |
 | `roles` | No | `["user"]` | Prompt messages the rules apply to: `system` (includes developer), `user`, `assistant`, `tool`. In the response phase the assistant text is always the target. |
 | `on_match` | No | `replace` | `replace` substitutes; `block` rejects with an error; `respond` answers with `message` as an assistant reply; `warn` continues and records the match. Only `replace` edits the text. |
-| `message` | No | `Request blocked by policy` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
+| `message` | No | `Request blocked by policy` for `block` and `respond`, none for `warn` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. A `warn` records a note only when you set one, so the outcome is not labelled as a block in the dashboard. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
-| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. A match at the end of the text streamed so far is held until it stops growing, so an open-ended pattern such as `sk-[A-Za-z0-9]{20,}` masks the whole value when it is at most this long. Used by `replace` and `warn`. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a match spanning two chunks is still rewritten; set it to at least the longest find text. A match at the end of the text streamed so far is held until it stops growing, so an open-ended pattern such as `sk-[A-Za-z0-9_-]{20,}` masks the whole value when it is at most this long — a longer value keeps the part beyond the lookbehind, so raise it above the longest secret you expect. Used by `replace` and `warn`. |
 
 In the stream phase, `replace` and `warn` transform events in flight with the
 configured lookbehind. `block` and `respond` buffer the whole stream so
@@ -480,6 +480,17 @@ types and counts, never the values, and errors from the analyzer never carry
 the text it was given. The analyzer receives the text in clear, so run it as
 a sidecar on the same host or reach it over `https://` or a private network.
 
+<Warning>
+  Anonymizing hides the values from the provider, not from your audit log.
+  `LOGGING_LOG_BODIES` defaults to `true`, and the stored `request_body` and
+  `response_body` are the ones the client sent and received, with the personal
+  data in clear — only the rewritten body kept under `request_revisions` is
+  anonymized. Set
+  [`LOGGING_LOG_BODIES=false`](/advanced/configuration#audit-logging) (or
+  `LOGGING_LOG_REVISION_BODIES=false` to drop just the rewritten copies) when
+  the audit store must not hold personal data.
+</Warning>
+
 <Tip>
   Start with an explicit `entities` list. With every type enabled, the
   analyzer's language model also reports `DATE_TIME`, `LOCATION`, `NRP`, and
@@ -489,7 +500,12 @@ a sidecar on the same host or reach it over `https://` or a private network.
   deployments. Some models, Claude among them, treat unexplained
   `<PERSON_1>`-style tokens with suspicion and may refuse to repeat them; a
   system prompt line such as `Values like <PERSON_1> are privacy placeholders;
-  use them as ordinary values` fixes that.
+  use them as ordinary values` fixes that. The analyzer's `PERSON` spans can
+  also swallow a neighbouring all-caps token (`TOOLESC Katarzyna` is reported
+  as one `PERSON`), so a `presidio` step that runs before a `string_replace`
+  step can replace the very text the later rule looks for; when a rule has to
+  see the original words, give the `string_replace` step the lower `order` so
+  it runs first, or add those words to `allow_list`.
 </Tip>
 
 In the stream phase, `anonymize` and `warn` transform events in flight in
@@ -506,7 +522,20 @@ phase puts the values back where the model repeats a placeholder, in text
 and in tool-call arguments, so the client sees its own data while the
 provider never does. Set `restore` on the instances in both phases: the
 prompt-phase instance records the values, the response-phase instance
-restores them. Only values from user messages, earlier assistant turns, and
+restores them.
+
+<Warning>
+  Pair the prompt-phase instance with a **response**-phase one. The response
+  phase covers both kinds of request — it buffers a streamed one — while a
+  stream-phase instance runs on streamed responses only. With a stream-phase
+  instance alone, a non-streaming request returns the raw `<PERSON_1>`
+  placeholders to the client and any personal data the model invented on its
+  own reaches the client unmasked. A stream-phase instance is the right choice
+  only when every request that needs restoring is streamed and delivery has to
+  stay incremental.
+</Warning>
+
+Only values from user messages, earlier assistant turns, and
 tool results are put back; a value from a system or developer message stays
 a placeholder, so a user cannot make the model reveal it. A value the model
 produced on its own is still anonymized on the way out. Such responses are
@@ -640,9 +669,12 @@ guardrails:
 ### Stream Phase: Redact In Flight and Judge the Whole Answer
 
 The same instance can be referenced in several phases. `mask-keys` transforms
-streamed chunks in flight (64 characters of lookbehind, so a key split across
-two chunks is still caught). `answer-judge` needs the whole answer, so it
-buffers the stream and the client receives it once the verdict is in.
+streamed chunks in flight; `stream_lookbehind` is how much text it holds back,
+so set it above the longest secret you expect (provider keys such as
+`sk-proj-…` and `sk-ant-…` run well past the 64-character default, and
+anything beyond the lookbehind reaches the client unmasked). `answer-judge`
+needs the whole answer, so it buffers the stream and the client receives it
+once the verdict is in.
 
 ```yaml
 guardrails:
@@ -654,8 +686,9 @@ guardrails:
       order: 10
       config:
         mode: "regex"
+        stream_lookbehind: 256
         rules: |
-          sk-[A-Za-z0-9]{20,} => [redacted]
+          sk-[A-Za-z0-9_-]{20,} => [redacted]
 
     - name: "answer-judge"
       type: "llm_judge"

@@ -248,7 +248,8 @@ func TestOnPromptDecisions(t *testing.T) {
 		{"block default status", `{"rules": "ACME => x", "on_match": "block"}`, pluginapi.ActionBlock, 0, DefaultMessage, map[string]any{"matches": 3, "messages": 2}},
 		{"block custom", `{"rules": "ACME => x", "on_match": "block", "block_status": 446, "message": "nope"}`, pluginapi.ActionBlock, 446, "nope", map[string]any{"matches": 3, "messages": 2}},
 		{"respond", `{"rules": "ACME => x", "on_match": "respond", "message": "I cannot discuss that."}`, pluginapi.ActionRespond, 0, "", map[string]any{"matches": 3, "messages": 2}},
-		{"warn", `{"rules": "ACME => x", "on_match": "warn", "roles": ["system"]}`, pluginapi.ActionWarn, 0, DefaultMessage, map[string]any{"matches": 1, "messages": 1}},
+		{"warn keeps no default note", `{"rules": "ACME => x", "on_match": "warn", "roles": ["system"]}`, pluginapi.ActionWarn, 0, "", map[string]any{"matches": 1, "messages": 1}},
+		{"warn custom note", `{"rules": "ACME => x", "on_match": "warn", "roles": ["system"], "message": "vendor name seen"}`, pluginapi.ActionWarn, 0, "vendor name seen", map[string]any{"matches": 1, "messages": 1}},
 		{"no match allows", `{"rules": "zzz => x", "on_match": "block"}`, pluginapi.ActionAllow, 0, "", nil},
 	}
 	for _, tt := range tests {
@@ -454,7 +455,7 @@ func TestStreamEvents(t *testing.T) {
 			if tt.detail != nil && !reflect.DeepEqual(d.Detail, tt.detail) {
 				t.Errorf("end detail = %v, want %v", d.Detail, tt.detail)
 			}
-			if tt.end == pluginapi.ActionWarn && (d.Code != Code || d.Message != DefaultMessage) {
+			if tt.end == pluginapi.ActionWarn && (d.Code != Code || d.Message != "") {
 				t.Errorf("warn decision = %+v", d)
 			}
 		})
