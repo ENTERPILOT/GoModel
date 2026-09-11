@@ -470,8 +470,8 @@ docker run -d -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer:latest
 | `restore` | No | `false` | Put the original values back where the model repeats a placeholder. Needs `operator: replace`; see below. |
 | `message` | No | `Request blocked: it contains personal data` | Error message for `block`, assistant reply for `respond`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
-| `stream_chunk` | No | `256` | Characters of streamed text collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
-| `stream_lookbehind` | No | `64` | Characters of streamed text held back so a value or placeholder split across two chunks is still handled. |
+| `stream_chunk` | No | `256` | Characters of streamed text (or tool-call arguments) collected before the analyzer runs on them, so it sees whole sentences and runs once per chunk. The client waits for at most this much text at a time. |
+| `stream_lookbehind` | No | `64` | Characters of streamed text (or tool-call arguments) held back so a value or placeholder split across two chunks is still handled. |
 
 Every text part is analyzed on its own (one analyzer call each, up to eight
 in flight), so the analyzer never sees the whole conversation as one text and
@@ -514,9 +514,8 @@ kept out of the [response cache](/features/cache). Placeholder-shaped text
 already in the conversation, such as a `<PERSON_2>` an earlier reply carried
 back, is left as it is and its number is never reused for a new value.
 
-Streamed tool-call arguments are not rewritten in the stream phase; use the
-response phase (which buffers the stream) when agents must receive restored
-arguments.
+Streamed tool-call arguments are restored in flight as well, each call's
+arguments as a window of its own under `stream_lookbehind`.
 
 #### Example
 
@@ -704,3 +703,11 @@ endpoints and `stop_reason: "end_turn"` on `/v1/messages`.
 A blocked request never reaches the provider; a blocked response never
 reaches the client. See [Plugins](/advanced/plugins#decisions) for how
 decisions merge when several guardrails run at the same order.
+
+Every outcome, a silent allow included, is recorded in the request's audit
+entry under `data.guardrails`, with the phase, step, decision, whether the
+guardrail edited the request or response, and how it failed. The dashboard
+colors the guardrail steps of an audit entry's workflow chart from it: green
+when the step passed or edited, amber for a warning or a fail-open error,
+red for a block, an answer or a fail-closed error, dimmed when the step never
+ran. See [Plugins](/advanced/plugins#audit-trail) for the fields.

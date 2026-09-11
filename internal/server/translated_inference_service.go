@@ -205,16 +205,19 @@ func handleTranslatedJSON[Req any](
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+			s.recordGuardrailOutcomes(c)
 			recordPromptPluginRevisions(c, s.logger, req, nil)
 			return shortCircuit(s, c, workflow, req, short)
 		}
 		// A block or fail-closed outcome still belongs to the resolved
 		// workflow: the audit entry must carry it like every other outcome.
 		attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
+		s.recordGuardrailOutcomes(c)
 		recordPromptPluginRevisions(c, s.logger, req, nil)
 		return handleError(c, err)
 	}
 	attachPreparedWorkflow(c, ctx, workflow)
+	s.recordGuardrailOutcomes(c)
 	recordPromptPluginRevisions(c, s.logger, req, preparedReq)
 	applyPluginRequestHeaders(c)
 
@@ -377,6 +380,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}
+		stream = s.snapshotStream(ctx, workflow, req, result.Meta.ProviderType, result.Meta.ProviderName, requestID, stream)
 		return s.handleStreamingReadCloser(c, workflow, result.Meta, stream, func(stream io.ReadCloser) io.ReadCloser {
 			return result.WrapDeliveryStream(ctx, stream)
 		})

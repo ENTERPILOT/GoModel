@@ -250,7 +250,7 @@ when the upstream provider does not support response retrieval. If the SDK sends
 - `previous_response_id` is forwarded to native Responses providers. For
   chat-translated providers GoModel resolves it from its stored responses and
   replays the previous turn's input and output, so the previous response must
-  have been created non-streaming with `store` left on. `conversation` is
+  have been created with `store` left on. `conversation` is
   resolved from gateway-managed conversations for every provider.
 - Tracing is separate from model routing. Disable SDK tracing or configure a
   real OpenAI tracing key.

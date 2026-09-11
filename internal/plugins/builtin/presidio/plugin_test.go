@@ -841,3 +841,27 @@ func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
 		t.Fatalf("analyzed-role scalar prompt = %q", got)
 	}
 }
+
+func TestStreamRestoresToolCallArguments(t *testing.T) {
+	a := newAnalyzer(t, "Ann Lee")
+	in := newPlugin(t, a, `{"restore": true}`)
+	out := newPlugin(t, a, `{"restore": true, "stream_lookbehind": 12}`)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Email ann@x.io for Ann Lee")), nil)
+	if _, err := in.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	res, err := plugintest.RunStream(context.Background(), out, x, []*pluginapi.StreamEvent{
+		plugintest.TextDelta("Sending to <PERSON_1>."),
+		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `{"to":"<EMAIL_ADD`},
+		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `RESS_1>","cc":"bob@y.io"}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text[0] != "Sending to Ann Lee." || res.ToolArguments[0][0] != `{"to":"ann@x.io","cc":"<EMAIL_ADDRESS_2>"}` {
+		t.Errorf("result = %+v", res)
+	}
+	if res.End.Detail.(map[string]any)["restored"] != 2 {
+		t.Errorf("end = %+v", res.End)
+	}
+}

@@ -22,7 +22,7 @@ providers, see [Responses compatibility](/advanced/responses-compatibility).
 
 | Endpoint | Behavior |
 | --- | --- |
-| `POST /v1/responses` | Creates a response through translated model routing. Non-streaming responses are stored for later retrieval. |
+| `POST /v1/responses` | Creates a response through translated model routing. Responses are stored for later retrieval. |
 | `GET /v1/responses/{id}` | Returns a stored gateway response when available. Otherwise, proxies to a native provider lookup when supported. |
 | `GET /v1/responses/{id}/input_items` | Returns normalized input items captured from the original create request when available. Otherwise, proxies to a native provider lookup when supported. |
 | `POST /v1/responses/{id}/cancel` | Cancels the response through the native provider when supported. |
@@ -32,12 +32,13 @@ providers, see [Responses compatibility](/advanced/responses-compatibility).
 
 ## Stored responses
 
-For non-streaming `POST /v1/responses` calls, unless the request sets
-`store: false`, GoModel stores the normalized response body and the normalized
-input items from the request. The snapshot is
-written in the background after the response is returned, so storage latency
-never delays the client. A `GET /v1/responses/{id}` issued immediately after
-the `POST` can arrive before the snapshot is stored; graceful shutdown waits
+For `POST /v1/responses` calls, unless the request sets `store: false`,
+GoModel stores the normalized response body and the normalized input items
+from the request. A streamed response is stored from its terminal event
+(`response.completed`, `response.incomplete`, or `response.failed`). The snapshot is written in the background after
+the response is returned, so storage latency never delays the client. A
+`GET /v1/responses/{id}` issued immediately after the `POST` can arrive before
+the snapshot is stored; graceful shutdown waits
 for pending snapshot writes, but a hard process exit can lose one that has not
 finished. A snapshot write that fails is logged and counted in the
 `gomodel_response_snapshot_store_failures_total` metric.
@@ -52,14 +53,10 @@ This enables:
   Gemini: GoModel follows the stored response and each response it was chained
   from, and prepends their input items and output to the new input, so the
   provider receives the whole chain each turn. On these
-  providers an id that is not stored (the previous response was streamed or
-  sent with `store: false`), or belongs to another tenant, returns 404. Native
+  providers an id that is not stored (the previous response was sent with
+  `store: false`), or belongs to another tenant, returns 404. Native
   Responses providers receive the id itself and resolve it on their side, so
   they need no GoModel snapshot.
-
-Streaming responses are not stored as response snapshots, so on chat-translated
-providers a chained turn must follow a non-streaming response with `store` left
-on.
 
 ## Native provider lookup
 

@@ -493,7 +493,9 @@ func TestTransformedSSEStream_LookbehindOrderingWithToolCallAndFinish(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []EventKind{KindTextDelta, KindTextDelta, KindToolCallDelta, KindTextDelta, KindTextDelta, KindFinish}
+	// The tool call's arguments are a window of their own: seen once on
+	// arrival and once more when the next text delta flushes them.
+	want := []EventKind{KindTextDelta, KindTextDelta, KindToolCallDelta, KindToolCallDelta, KindTextDelta, KindTextDelta, KindFinish}
 	if strings.Join(kindStrings(kinds(tr.seen)), ",") != strings.Join(kindStrings(want), ",") {
 		t.Errorf("transformer saw %v, want %v", kinds(tr.seen), want)
 	}

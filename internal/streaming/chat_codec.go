@@ -36,6 +36,7 @@ type chatDeltaView struct {
 }
 
 type chatToolCallView struct {
+	Index    *int `json:"index"`
 	Function *struct {
 		Arguments string `json:"arguments"`
 	} `json:"function"`
@@ -97,6 +98,9 @@ func (c *chatCodec) Decode(raw RawEvent, seq int) Event {
 			}
 			if len(delta.ToolCalls) > 0 {
 				ev.Kind = KindToolCallDelta
+				if idx := delta.ToolCalls[0].Index; idx != nil {
+					ev.Call = *idx
+				}
 				if fn := delta.ToolCalls[0].Function; fn != nil {
 					ev.Text = fn.Arguments
 				}
@@ -146,7 +150,7 @@ func (c *chatCodec) Track(ev Event) {
 }
 
 func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
-	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+	if !isDelta(ev.Kind) {
 		return ev, ErrNotTextEvent
 	}
 	var top map[string]json.RawMessage
@@ -168,20 +172,26 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 	if delta == nil {
 		delta = make(map[string]json.RawMessage, 1)
 	}
-	key := "content"
-	if ev.Kind == KindReasoningDelta {
-		key = "reasoning_content"
+	encoded, err := json.Marshal(text)
+	if err != nil {
+		return ev, err
+	}
+	switch ev.Kind {
+	case KindToolCallDelta:
+		if err := rewriteToolArguments(delta, encoded); err != nil {
+			return ev, err
+		}
+	case KindReasoningDelta:
+		key := "reasoning_content"
 		if _, ok := delta["reasoning_content"]; !ok {
 			if _, ok := delta["reasoning"]; ok {
 				key = "reasoning"
 			}
 		}
+		delta[key] = encoded
+	default:
+		delta["content"] = encoded
 	}
-	encoded, err := json.Marshal(text)
-	if err != nil {
-		return ev, err
-	}
-	delta[key] = encoded
 	if choices[pos]["delta"], err = json.Marshal(delta); err != nil {
 		return ev, err
 	}
@@ -197,10 +207,45 @@ func (c *chatCodec) RewriteText(ev Event, text string) (Event, error) {
 	return ev, nil
 }
 
+// rewriteToolArguments sets the arguments of the delta's first tool call
+// (the one Decode classified on) to the encoded JSON string.
+func rewriteToolArguments(delta map[string]json.RawMessage, encoded json.RawMessage) error {
+	var calls []map[string]json.RawMessage
+	if err := json.Unmarshal(delta["tool_calls"], &calls); err != nil || len(calls) == 0 {
+		return fmt.Errorf("streaming: chat delta carries no tool call: %w", err)
+	}
+	var fn map[string]json.RawMessage
+	if raw, ok := calls[0]["function"]; ok && jsonNonNull(raw) {
+		if err := json.Unmarshal(raw, &fn); err != nil {
+			return fmt.Errorf("streaming: decode tool call function: %w", err)
+		}
+	}
+	if fn == nil {
+		fn = make(map[string]json.RawMessage, 1)
+	}
+	fn["arguments"] = encoded
+	encodedFn, err := json.Marshal(fn)
+	if err != nil {
+		return err
+	}
+	calls[0]["function"] = encodedFn
+	encodedCalls, err := json.Marshal(calls)
+	if err != nil {
+		return err
+	}
+	delta["tool_calls"] = encodedCalls
+	return nil
+}
+
+// isDelta reports whether kind carries rewritable delta text.
+func isDelta(kind EventKind) bool {
+	return kind == KindTextDelta || kind == KindReasoningDelta || kind == KindToolCallDelta
+}
+
 // StripTerminal drops a non-null finish_reason of the event's choice and a
 // non-null top-level usage.
 func (c *chatCodec) StripTerminal(ev Event) (Event, bool) {
-	if ev.Kind != KindTextDelta && ev.Kind != KindReasoningDelta {
+	if !isDelta(ev.Kind) {
 		return ev, false
 	}
 	var top map[string]json.RawMessage
@@ -243,9 +288,12 @@ func jsonNonNull(raw json.RawMessage) bool {
 	return len(trimmed) > 0 && string(trimmed) != "null"
 }
 
-// Split turns a chunk with several choices into one chunk per choice. Every
-// top-level member is copied; usage, when present, stays on the last chunk
-// only so downstream accounting sees it once.
+// Split turns a chunk with several choices into one chunk per choice, and
+// a choice whose delta carries several tool calls, or text alongside tool
+// calls, into one chunk per part, so each is decoded and transformed on
+// its own. Every top-level
+// member is copied; usage and a choice's finish_reason stay on the last
+// part only so downstream accounting sees them once.
 func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 	if raw.Comment || raw.Oversized || !jsonObject(raw.Data) {
 		return nil
@@ -255,11 +303,22 @@ func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 		return nil
 	}
 	var choices []json.RawMessage
-	if err := json.Unmarshal(top["choices"], &choices); err != nil || len(choices) <= 1 {
+	if err := json.Unmarshal(top["choices"], &choices); err != nil || len(choices) == 0 {
 		return nil
 	}
-	out := make([]RawEvent, 0, len(choices))
-	for i, choice := range choices {
+	var parts []json.RawMessage
+	for _, choice := range choices {
+		split, ok := splitToolCalls(choice)
+		if !ok {
+			return nil
+		}
+		parts = append(parts, split...)
+	}
+	if len(parts) <= 1 {
+		return nil
+	}
+	out := make([]RawEvent, 0, len(parts))
+	for i, choice := range parts {
 		part := make(map[string]json.RawMessage, len(top))
 		maps.Copy(part, top)
 		single, err := json.Marshal([]json.RawMessage{choice})
@@ -267,7 +326,7 @@ func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 			return nil
 		}
 		part["choices"] = single
-		if i < len(choices)-1 {
+		if i < len(parts)-1 {
 			delete(part, "usage")
 		}
 		data, err := json.Marshal(part)
@@ -278,6 +337,86 @@ func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 		out = append(out, RawEvent{Name: raw.Name, Data: data, Raw: ev.Encode()})
 	}
 	return out
+}
+
+// textMembers are the delta members Decode classifies on before tool
+// calls; a delta carrying one of them alongside tool calls is split so the
+// text and every call are transformed on their own.
+var textMembers = []string{"content", "reasoning_content", "reasoning"}
+
+// splitToolCalls divides a choice whose delta carries several tool calls, or
+// text alongside tool calls, into copies that each carry one thing: the
+// text first, then one tool call each. The choice's finish_reason stays on
+// the last copy. A choice that needs no splitting is returned as is. ok
+// is false when the choice cannot be decoded.
+func splitToolCalls(choice json.RawMessage) ([]json.RawMessage, bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(choice, &obj); err != nil {
+		return nil, false
+	}
+	var delta map[string]json.RawMessage
+	if raw, ok := obj["delta"]; !ok || !jsonObject(raw) {
+		return []json.RawMessage{choice}, true
+	} else if err := json.Unmarshal(raw, &delta); err != nil {
+		return nil, false
+	}
+	var calls []json.RawMessage
+	if raw, ok := delta["tool_calls"]; !ok || len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '[' {
+		return []json.RawMessage{choice}, true
+	} else if err := json.Unmarshal(raw, &calls); err != nil {
+		return nil, false
+	}
+	hasText := false
+	for _, member := range textMembers {
+		if text, ok := jsonStringOf(delta[member]); ok && text != "" {
+			hasText = true
+		}
+	}
+	if len(calls) == 0 || (len(calls) == 1 && !hasText) {
+		return []json.RawMessage{choice}, true
+	}
+	var deltas []map[string]json.RawMessage
+	if hasText {
+		textDelta := make(map[string]json.RawMessage, len(delta))
+		maps.Copy(textDelta, delta)
+		delete(textDelta, "tool_calls")
+		deltas = append(deltas, textDelta)
+	}
+	for _, call := range calls {
+		callDelta := make(map[string]json.RawMessage, len(delta))
+		maps.Copy(callDelta, delta)
+		for _, member := range textMembers {
+			delete(callDelta, member)
+		}
+		single, err := json.Marshal([]json.RawMessage{call})
+		if err != nil {
+			return nil, false
+		}
+		callDelta["tool_calls"] = single
+		deltas = append(deltas, callDelta)
+	}
+	// The role announces the message once; it stays on the first part only.
+	for _, partDelta := range deltas[1:] {
+		delete(partDelta, "role")
+	}
+	out := make([]json.RawMessage, 0, len(deltas))
+	for i, partDelta := range deltas {
+		partChoice := make(map[string]json.RawMessage, len(obj))
+		maps.Copy(partChoice, obj)
+		var err error
+		if partChoice["delta"], err = json.Marshal(partDelta); err != nil {
+			return nil, false
+		}
+		if i < len(deltas)-1 && jsonNonNull(partChoice["finish_reason"]) {
+			partChoice["finish_reason"] = json.RawMessage("null")
+		}
+		encoded, err := json.Marshal(partChoice)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, encoded)
+	}
+	return out, true
 }
 
 // Restate is a no-op: chat chunks never repeat streamed text.

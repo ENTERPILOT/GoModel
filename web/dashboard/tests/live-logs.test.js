@@ -1247,3 +1247,43 @@ test("re-fold keeps the newest request as head when completions arrive out of or
   assert.equal(app.auditLog.entries[0].session_count, 2);
   assert.equal(app.auditLog.total, 1);
 });
+
+test("live guardrail outcomes survive the merge into the audit row", () => {
+  const app = createLiveLogsApp();
+
+  app.applyLiveLogEvent({
+    seq: 1,
+    type: "audit.started",
+    data: { id: "audit-1", request_id: "req-1", method: "POST", path: "/v1/chat/completions" },
+  });
+  app.applyLiveLogEvent({
+    seq: 2,
+    type: "audit.completed",
+    data: {
+      id: "audit-1",
+      request_id: "req-1",
+      status_code: 403,
+      duration_ns: 1000,
+      data: {
+        guardrails: [
+          { seq: 1, phase: "prompt", step: 10, instance: "policy", action: "block", code: "content_policy" },
+        ],
+      },
+    },
+  });
+
+  const completed = app.auditLog.entries[0];
+  assert.equal(completed.data.guardrails.length, 1);
+  assert.equal(completed.data.guardrails[0].action, "block");
+
+  // The flush carries no data of its own: the outcomes stay on the row.
+  app.applyLiveLogEvent({
+    seq: 3,
+    type: "audit.flushed",
+    data: { id: "audit-1", request_id: "req-1", status_code: 403, duration_ns: 1000 },
+  });
+  const flushed = app.auditLog.entries[0];
+  assert.equal(flushed._live_state, "audit.flushed");
+  assert.equal(flushed.data.guardrails[0].instance, "policy");
+  assert.equal(flushed.data.guardrails[0].code, "content_policy");
+});

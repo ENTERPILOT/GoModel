@@ -19,11 +19,12 @@ func (p *Plugin) StreamPolicy() pluginapi.StreamPolicy {
 	}
 }
 
-// OnStreamEvent analyzes each text window, rewrites it for anonymize, puts
-// restorable values back, and cuts the stream when a blocking entity type
-// appears. Under a buffering policy every event passes; OnResponse decides.
+// OnStreamEvent analyzes each text or tool-call argument window, rewrites
+// it for anonymize, puts restorable values back, and cuts the stream when a
+// blocking entity type appears. Under a buffering policy every event
+// passes; OnResponse decides.
 func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *pluginapi.StreamEvent) (pluginapi.StreamDecision, error) {
-	if ev == nil || ev.Kind != pluginapi.EventTextDelta || ev.Text == "" || x == nil {
+	if ev == nil || x == nil || ev.Text == "" || (ev.Kind != pluginapi.EventTextDelta && ev.Kind != pluginapi.EventToolCallDelta) {
 		return pluginapi.Pass(), nil
 	}
 	if p.action == ActionBlock || p.action == ActionRespond {

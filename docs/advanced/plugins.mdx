@@ -93,7 +93,29 @@ PII back into the assistant text: a cached copy would hand that text to
 whoever sends a matching prompt next. It is honoured from any phase and any
 instance of the request, whatever the merged decision was.
 
-Prompt-phase decisions are appended to the request's revision chain (the same
+### Audit trail
+
+Every instance that ran leaves an outcome in the audit entry's
+`data.guardrails` list, in execution order across the prompt, response and
+stream phases, silent allows included:
+
+| Field | Meaning |
+| --- | --- |
+| `phase`, `step`, `instance`, `type` | Where the instance ran: the workflow phase and step, the instance name (the workflow's `ref`) and its plugin type. |
+| `action` | `allow`, `warn`, `block`, `respond`, or `failure` when the hook errored instead of deciding. |
+| `code`, `message`, `detail` | The decision's fields. The dashboard list and live views omit `detail`; the entry detail carries it. |
+| `error`, `fail_mode` | With `failure`: the error text and whether the chain carried on (`open`) or the request failed (`closed`). |
+| `edited`, `target` | Whether the instance changed the `request` (prompt phase) or the `response` (response and stream phases). |
+| `replaced_events`, `dropped_events` | For an in-flight stream instance, how many events it rewrote or withheld. |
+| `duration_ns` | The hook's run time. |
+
+A configured step without an outcome did not run: an earlier block or answer
+ended the request, or a cache hit skipped the model call. The dashboard
+colors the workflow chart of an audit entry from this list, and its
+"Guardrails" tab lists the outcomes. The list is the decision trail; the
+request revisions below are the body trail.
+
+Prompt-phase decisions are also appended to the request's revision chain (the same
 place request rewrites are recorded), one entry per instance in step order.
 An instance that edited the prompt is a changed revision carrying the request
 as it stood right after that step, sizes included, so a chain of edits reads
@@ -104,8 +126,9 @@ behind on the request path; applying those copies to the request and encoding
 the bodies runs afterwards, alongside the provider call.
 `LOGGING_LOG_GUARDRAIL_STEPS=false` skips them and records a chain's edits as
 one revision carrying the request as forwarded. A warning, block, answer or failure without an edit is a no-change
-entry carrying the decision. Response and stream
-decisions are logged with the request id.
+entry carrying the decision; a silent allow leaves no revision. Response and
+stream decisions are recorded in `data.guardrails` only, and the objections
+among them are logged with the request id.
 
 ## Fail modes and timeouts
 
@@ -159,13 +182,18 @@ one of three modes in `StreamHook.StreamPolicy()`:
 | Mode | What the plugin can do | Latency cost |
 | --- | --- | --- |
 | `observe` | read every event; decisions are ignored except `terminate` | none |
-| `transform` | `pass`, `drop`, `replace` (text and reasoning deltas), or `terminate` each event | `LookbehindChars` characters of delay per choice, plus up to `MinChunkChars` while a run is collected |
+| `transform` | `pass`, `drop`, `replace` (text, reasoning, and tool-call argument deltas), or `terminate` each event | `LookbehindChars` characters of delay per window, plus up to `MinChunkChars` while a run is collected |
 | `buffer` | nothing per event; GoModel collects the whole stream and runs the plugin's `OnResponse` on the assembled completion (a `buffer` plugin must implement `ResponseHook`; loading fails otherwise) | time-to-first-token becomes time-to-last-token |
 
 **Lookbehind** (`transform` only): GoModel withholds the last `LookbehindChars`
-characters of text per choice and presents each delta together with that
-tail, so a pattern spanning two chunks (a phone number, an API key) is
-visible in one event before any of it reaches the client. A pattern of up to
+characters per window and presents each delta together with that tail, so a
+pattern spanning two chunks (a phone number, an API key) is visible in one
+event before any of it reaches the client. A choice's text is one window and
+the arguments of each of its tool calls (`StreamEvent.Call`) another, so a
+placeholder split across two argument deltas is rewritten the same way. A
+delta of another kind for the same choice flushes that choice's windows of
+other kinds first, so text and tool calls keep their order, while parallel
+tool calls stream independently. A pattern of up to
 `LookbehindChars + 1` characters is always caught. `0` disables it. The tail
 comes back already carrying the plugin's earlier edits, and
 `StreamEvent.Overlap` says how many leading characters it spans: a plugin

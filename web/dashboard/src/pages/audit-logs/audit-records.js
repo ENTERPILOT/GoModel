@@ -32,6 +32,8 @@ export function mergeAuditRecord(previous, incoming) {
       patch.data.request_revisions,
     );
     if (revisions) merged.data.request_revisions = revisions;
+    const guardrails = mergedGuardrails(current.data.guardrails, patch.data.guardrails);
+    if (guardrails) merged.data.guardrails = guardrails;
   }
 
   // Lifecycle fields belong to the live transport. Persisted/list projections
@@ -90,6 +92,34 @@ function mergedRequestRevisions(currentRevisions, patchRevisions) {
     }
     return richer;
   });
+}
+
+// Guardrail outcomes carry their plugin detail only on the detail endpoint;
+// list rows and live events ship them without it, and a live event may ship
+// fewer of them than already held. Merge per seq: the patch updates what it
+// carries, keeps the detail already loaded, and never drops an outcome the
+// record already has.
+function mergedGuardrails(currentOutcomes, patchOutcomes) {
+  if (!Array.isArray(currentOutcomes) || !Array.isArray(patchOutcomes)) {
+    return null;
+  }
+  const seqOf = (outcome) => Number((outcome && outcome.seq) || 0);
+  const merged = new Map();
+  for (const outcome of currentOutcomes) {
+    merged.set(seqOf(outcome), outcome);
+  }
+  for (const outcome of patchOutcomes) {
+    const seq = seqOf(outcome);
+    const previous = merged.get(seq);
+    if (previous && plainObject(outcome) && outcome.detail == null && previous.detail != null) {
+      merged.set(seq, { ...outcome, detail: previous.detail });
+    } else {
+      merged.set(seq, outcome);
+    }
+  }
+  return Array.from(merged.keys())
+    .sort((a, b) => a - b)
+    .map((seq) => merged.get(seq));
 }
 
 function plainObject(value) {

@@ -17,6 +17,10 @@ import (
 // Record is one instance's contribution to a chain run, kept for audit.
 type Record struct {
 	Instance string
+	// Type is the plugin type of the instance.
+	Type string
+	// Step is the chain step the instance ran in.
+	Step     int
 	Decision pluginapi.Decision
 	Duration time.Duration
 	// Err is set when the instance failed; a fail-open failure still leaves
@@ -109,6 +113,9 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, observe EditObse
 			readers = append(readers, inst)
 		}
 		records, err := c.runReaders(ctx, readers, x, call)
+		for i := range records {
+			records[i].Step = step.Order
+		}
 		outcome.absorb(records)
 		if err != nil {
 			return outcome, err
@@ -116,6 +123,7 @@ func (c *Chain) run(ctx context.Context, x *pluginapi.Exchange, observe EditObse
 		if mutator != nil {
 			before := edits(x)
 			record, err := c.invoke(ctx, mutator, x, call, true)
+			record.Step = step.Order
 			// An abandoned mutator may still be editing x, so x is not read.
 			if !Abandoned(record.Err) {
 				record.Edited = edits(x) != before
@@ -185,7 +193,7 @@ func (c *Chain) runReaders(ctx context.Context, readers []*Instance, x *pluginap
 func (c *Chain) invoke(ctx context.Context, inst *Instance, x *pluginapi.Exchange, call hookCall, shared bool) (Record, error) {
 	start := time.Now()
 	decision, err := callHook(ctx, inst, x, call)
-	record := Record{Instance: inst.Name, Decision: NormalizeDecision(decision), Duration: time.Since(start), Err: err}
+	record := Record{Instance: inst.Name, Type: inst.Type, Decision: NormalizeDecision(decision), Duration: time.Since(start), Err: err}
 	if err == nil {
 		return record, nil
 	}

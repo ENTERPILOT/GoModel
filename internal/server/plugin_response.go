@@ -75,7 +75,7 @@ func (p responsePhase[Req, Resp]) run(s *translatedInferenceService, c *echo.Con
 		state.Finish(x)
 	}
 	requestID := requestIDFromContextOrHeader(c.Request())
-	logResponseDecisions(requestID, pluginapi.KindResponse, outcome, state)
+	logResponseDecisions(requestID, state, plugins.DecisionRecordsOf(pluginapi.KindResponse, outcome, runErr))
 	if runErr != nil {
 		var zero Resp
 		if pluginErr, ok := errors.AsType[*plugins.PluginError](runErr); ok {

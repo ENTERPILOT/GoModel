@@ -35,6 +35,22 @@
     openPhase = openPhase === phase ? null : phase;
   }
 
+  // Tooltip of a step-flow chip: the recorded outcome (verdict, message,
+  // error), what it edited, and the mutator note.
+  function refTitle(outcome, mutator) {
+    return [
+      outcome && outcome.title,
+      outcome && outcome.edited
+        ? openPhase === "prompt"
+          ? m.workflows_guardrail_flow_edited_request()
+          : m.workflows_guardrail_flow_edited_response()
+        : "",
+      mutator ? m.workflows_guardrail_flow_mutator() : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   // Close the panel when its phase drops out of the chart (audit rows swap
   // charts in place, editor previews re-render on each keystroke).
   $effect(() => {
@@ -46,8 +62,9 @@
 
 <!-- One pipeline node. `icon` is a lucide icon (omitted for the AI node);
      `variant` carries the structural class, `state` the computed status
-     class from workflowChartLogic.js. -->
-{#snippet nodeBody({ icon, label, variant, sub, badge })}
+     class from workflowChartLogic.js. `badge` names a structural fact (a
+     phase), `status` the recorded outcome; both render as pills. -->
+{#snippet nodeBody({ icon, label, variant, sub, badge, status })}
   {#if icon}
     <div
       class="workflow-node-icon"
@@ -60,26 +77,29 @@
   {#if badge}
     <span class="workflow-node-badge">{badge}</span>
   {/if}
+  {#if status}
+    <span class="workflow-node-badge">{status}</span>
+  {/if}
   {#if sub}
     <span class="workflow-node-sub">{sub}</span>
   {/if}
 {/snippet}
 
-{#snippet node({ icon, label, variant = "workflow-node-feature", state, sub, badge })}
+{#snippet node({ icon, label, variant = "workflow-node-feature", state, sub, badge, status })}
   <div class={["workflow-node", variant, state]}>
-    {@render nodeBody({ icon, label, variant, sub, badge })}
+    {@render nodeBody({ icon, label, variant, sub, badge, status })}
   </div>
 {/snippet}
 
 <!-- A Guardrails node: a button that expands the phase's step flow under
      the pipeline. Disabled (plain node) when the phase has no steps to show. -->
-{#snippet guardrailNode({ phase, badge, sub })}
+{#snippet guardrailNode({ phase, badge, sub, state, status })}
   {@const flow = (chart.guardrailFlows && chart.guardrailFlows[phase]) || []}
   {@const open = openPhase === phase}
   {#if flow.length > 0}
     <button
       type="button"
-      class={["workflow-node", "workflow-node-feature", "workflow-node-button"]}
+      class={["workflow-node", "workflow-node-feature", "workflow-node-button", state]}
       class:workflow-node-open={open}
       aria-expanded={open}
       aria-controls={open ? panelID : undefined}
@@ -87,10 +107,10 @@
       title={m.workflows_guardrail_flow_toggle({ phase: phaseLabel(phase) })}
       onclick={() => toggleGuardrails(phase)}
     >
-      {@render nodeBody({ icon: Shield, label: m.workflows_guardrails(), badge, sub })}
+      {@render nodeBody({ icon: Shield, label: m.workflows_guardrails(), badge, sub, status })}
     </button>
   {:else}
-    {@render node({ icon: Shield, label: m.workflows_guardrails(), badge, sub })}
+    {@render node({ icon: Shield, label: m.workflows_guardrails(), badge, sub, state, status })}
   {/if}
 {/snippet}
 
@@ -135,6 +155,8 @@
         phase: "prompt",
         badge: chart.guardrailBadge,
         sub: chart.guardrailLabel,
+        state: chart.guardrailNodeClass,
+        status: chart.guardrailStatusLabel,
       })}
     {/if}
 
@@ -163,6 +185,8 @@
         phase: "response",
         badge: chart.responseGuardrailBadge,
         sub: chart.responseGuardrailLabel,
+        state: chart.responseGuardrailNodeClass,
+        status: chart.responseGuardrailStatusLabel,
       })}
     {/if}
 
@@ -172,6 +196,8 @@
         phase: "stream",
         badge: chart.streamGuardrailBadge,
         sub: chart.streamGuardrailLabel,
+        state: chart.streamGuardrailNodeClass,
+        status: chart.streamGuardrailStatusLabel,
       })}
     {/if}
 
@@ -182,6 +208,7 @@
       variant: "workflow-node-endpoint",
       state: chart.responseNodeClass,
       sub: chart.responseNodeSublabel,
+      status: chart.responseNodeBadge,
     })}
   </div>
 
@@ -204,7 +231,7 @@
         </span>
       </div>
       <ol class="workflow-guardrail-flow-row">
-        {#each openFlow as stage, index (openPhase + "-" + stage.step)}
+        {#each openFlow as stage, index (openPhase + "-" + (stage.id || "step-" + stage.step))}
           {#if index > 0}
             <li class="workflow-conn workflow-flow-conn" aria-hidden="true"></li>
           {/if}
@@ -220,16 +247,28 @@
             <ul class="workflow-flow-refs">
               {#each stage.refs as ref, refIndex (refIndex + ":" + ref)}
                 {@const mutator = !!ref && ref === stage.mutator}
+                {@const outcome = (ref && stage.outcomes && stage.outcomes[ref]) || null}
+                {@const tone = outcome ? outcome.tone : ""}
+                <!-- Recorded runs tint the chip by the instance's outcome;
+                     configuration charts have no outcomes and keep the
+                     accent look. -->
                 <li
                   class="workflow-flow-ref"
                   class:workflow-flow-ref-blank={!ref}
                   class:workflow-flow-ref-mutator={mutator}
-                  title={mutator ? m.workflows_guardrail_flow_mutator() : undefined}
+                  class:workflow-flow-ref-success={tone === "success"}
+                  class:workflow-flow-ref-warning={tone === "warning"}
+                  class:workflow-flow-ref-danger={tone === "danger"}
+                  class:workflow-flow-ref-skipped={tone === "skipped"}
+                  title={refTitle(outcome, mutator) || undefined}
                 >
                   {#if mutator}
                     <Icon icon={Pencil} />
                   {/if}
                   {ref || m.workflows_select_guardrail()}
+                  {#if outcome && outcome.edited}
+                    <span class="workflow-flow-ref-edited">{m.workflows_guardrail_flow_edited()}</span>
+                  {/if}
                 </li>
               {/each}
             </ul>
@@ -711,6 +750,43 @@
     border-style: dashed;
     color: var(--text-muted);
     font-weight: 500;
+  }
+
+  /* Recorded outcome of the instance (audit charts only). These follow the
+     base and mutator rules so the tint wins at equal specificity. */
+  .workflow-flow-ref-success {
+    border-color: color-mix(in srgb, var(--success) 52%, var(--border));
+    background: color-mix(in srgb, var(--success) 9%, var(--bg-surface));
+  }
+
+  .workflow-flow-ref-warning {
+    border-color: color-mix(in srgb, var(--warning) 52%, var(--border));
+    background: color-mix(in srgb, var(--warning) 9%, var(--bg-surface));
+  }
+
+  .workflow-flow-ref-danger {
+    border-color: color-mix(in srgb, var(--danger) 52%, var(--border));
+    background: color-mix(in srgb, var(--danger) 9%, var(--bg-surface));
+  }
+
+  .workflow-flow-ref-skipped {
+    opacity: 0.4;
+  }
+
+  /* "edited" marker of an instance that changed the request or response. */
+  .workflow-flow-ref-edited {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--text-muted) 14%, var(--bg));
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: middle;
   }
 
   /* Fork/join bracket around a parallel stack: a vertical bar on each side
