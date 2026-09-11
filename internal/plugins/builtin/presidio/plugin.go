@@ -84,7 +84,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			{
 				Key: "roles", Label: "Prompt roles", Input: pluginapi.InputCheckboxes, Default: []string{"user", "assistant", "tool"},
 				Help:    "Which prompt messages are analyzed, tool-result text included. Assistant covers earlier turns of the conversation, which carry restored values when restore is on. In the response phase the assistant text is always analyzed.",
-				Options: roleOptions,
+				Options: pluginapi.RoleOptions(),
 			},
 			{
 				Key: "action", Label: "On detection", Input: pluginapi.InputSelect, Default: ActionAnonymize,
@@ -115,11 +115,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				Help:        "Error message for block, assistant reply for respond, and audit note for warn.",
 				Placeholder: DefaultMessage,
 			},
-			{
-				Key: "block_status", Label: "Block status", Input: pluginapi.InputNumber,
-				Help:        "One HTTP status code between 400 and 599 that a blocked request returns, for example 403. Leave empty to use the phase default: 400 when the prompt is blocked, 502 when the response is blocked.",
-				Placeholder: "phase default",
-			},
+			pluginapi.BlockStatusField(),
 			{
 				Key: "stream_chunk", Label: "Stream chunk", Input: pluginapi.InputNumber, Default: DefaultStreamChunk,
 				Help:        "Characters of streamed text collected before the analyzer is called on them, so it sees whole sentences and runs once per chunk rather than once per token. The client waits for at most this much text at a time. 0 analyzes every delta as it arrives.",

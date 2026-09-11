@@ -351,30 +351,14 @@ func (p *Plugin) decide(rep *report) pluginapi.Decision {
 	var d pluginapi.Decision
 	switch {
 	case rep.blocked != "":
-		d = p.enforce(CodeBlocked, detail)
-	case rep.found() && (p.action == ActionBlock || p.action == ActionRespond):
-		d = p.enforce(Code, detail)
-	case rep.found() && p.action == ActionWarn:
-		d = pluginapi.Warn(Code, p.message, detail)
+		d = p.enforcement.Reject(CodeBlocked, detail)
+	case rep.found() && p.action != ActionAnonymize:
+		d = p.enforcement.Enforce(Code, detail)
 	case len(detail) == 0:
 		return pluginapi.Allow()
 	default:
 		d = pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: detail}
 	}
 	d.NoStore = rep.restored > 0
-	return d
-}
-
-// enforce renders a detection as the blocking action: respond when that is
-// the configured action, block otherwise.
-func (p *Plugin) enforce(code string, detail map[string]any) pluginapi.Decision {
-	if p.action == ActionRespond {
-		d := pluginapi.Respond(p.message)
-		d.Code = code
-		d.Detail = detail
-		return d
-	}
-	d := pluginapi.Block(p.blockStatus, code, p.message)
-	d.Detail = detail
 	return d
 }

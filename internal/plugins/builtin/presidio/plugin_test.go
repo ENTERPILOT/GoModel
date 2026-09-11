@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -16,22 +15,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/enterpilot/gomodel/pluginapi/plugintest"
 )
-
-type fakeHost struct{}
-
-func (fakeHost) Logger() *slog.Logger           { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-func (fakeHost) Inference() pluginapi.Inference { return nil }
-func (fakeHost) History(context.Context, pluginapi.Meta) ([]pluginapi.Message, error) {
-	return nil, nil
-}
-func (fakeHost) Metrics() pluginapi.Metrics { return noopMetrics{} }
-func (fakeHost) HTTPClient() *http.Client   { return http.DefaultClient }
-
-type noopMetrics struct{}
-
-func (noopMetrics) Inc(string, map[string]string)              {}
-func (noopMetrics) Observe(string, float64, map[string]string) {}
 
 // analyzer is a fake Presidio analyzer: it finds e-mail addresses, credit
 // card numbers, and the names listed in persons, reporting code-point
@@ -130,34 +115,10 @@ func newPlugin(t *testing.T, a *analyzer, cfg string) *Plugin {
 	}
 	raw, _ := json.Marshal(m)
 	p := New()
-	if err := p.Init(context.Background(), raw, fakeHost{}); err != nil {
+	if err := p.Init(context.Background(), raw, plugintest.NewHost()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	return p.(*Plugin)
-}
-
-func exchange(prompt *pluginapi.Prompt, resp *pluginapi.Completion) *pluginapi.Exchange {
-	return &pluginapi.Exchange{Meta: pluginapi.Meta{RequestID: "req-1"}, Prompt: prompt, Response: resp, Values: pluginapi.Values{}}
-}
-
-func text(role pluginapi.Role, id, s string) pluginapi.Message {
-	m := pluginapi.TextMessage(role, s)
-	m.ID = id
-	return m
-}
-
-func prompt(msgs ...pluginapi.Message) *pluginapi.Prompt {
-	p := &pluginapi.Prompt{Messages: msgs}
-	p.Reset()
-	return p
-}
-
-func completion(texts ...string) *pluginapi.Completion {
-	c := &pluginapi.Completion{}
-	for i, s := range texts {
-		c.Choices = append(c.Choices, pluginapi.Choice{Index: i, Message: pluginapi.TextMessage(pluginapi.RoleAssistant, s), FinishReason: "stop"})
-	}
-	return c
 }
 
 func TestManifest(t *testing.T) {
@@ -213,11 +174,11 @@ func TestInitErrors(t *testing.T) {
 		{"status low", `{"block_status": 302}`, "block_status must be an HTTP status between 400 and 599"},
 		{"recognizers not array", `{"ad_hoc_recognizers": "{\"a\":1}"}`, "ad_hoc_recognizers must be a JSON array"},
 		{"entities type", `{"entities": 5}`, "entities must be a list of strings"},
-		{"chunk high", `{"stream_chunk": 100000}`, "stream_chunk must be a whole number between 0 and 16384"},
+		{"chunk high", `{"stream_chunk": 100000}`, "stream_chunk must be between 0 and 16384"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := New().Init(context.Background(), json.RawMessage(tt.cfg), fakeHost{})
+			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)
 			}
@@ -227,7 +188,7 @@ func TestInitErrors(t *testing.T) {
 
 func TestDefaults(t *testing.T) {
 	p := newPlugin(t, nil, `{}`)
-	if p.analyzerURL != DefaultAnalyzerURL || p.language != "en" || p.action != ActionAnonymize || p.operator != OperatorReplace || p.restore || p.message != DefaultMessage || p.streamChunk != DefaultStreamChunk || p.lookbehind != DefaultStreamLookbehind {
+	if p.analyzerURL != DefaultAnalyzerURL || p.language != "en" || p.action != ActionAnonymize || p.operator != OperatorReplace || p.restore || p.enforcement.Message != DefaultMessage || p.streamChunk != DefaultStreamChunk || p.lookbehind != DefaultStreamLookbehind {
 		t.Errorf("settings = %+v", p.settings)
 	}
 	if p.entities != nil || p.scoreThreshold != nil || p.allowList != nil || p.adHocRecognizers != nil || p.blockEntities != nil {
@@ -257,11 +218,11 @@ func TestDefaults(t *testing.T) {
 func TestOnPromptAnonymizes(t *testing.T) {
 	a := newAnalyzer(t, "John Smith")
 	p := newPlugin(t, a, `{"api_key": "tok", "entities": ["PERSON", "EMAIL_ADDRESS"], "score_threshold": 0.3, "allow_list": ["ACME"]}`)
-	x := exchange(prompt(
-		text(pluginapi.RoleSystem, "m0", "Reply to john@acme.com politely."),
-		text(pluginapi.RoleUser, "m1", "I am John Smith, mail john@acme.com. My friend is also John Smith."),
-		text(pluginapi.RoleAssistant, "m2", "Hello John Smith"),
-		text(pluginapi.RoleUser, "m3", "   "),
+	x := plugintest.Exchange(plugintest.Prompt(
+		plugintest.Text(pluginapi.RoleSystem, "m0", "Reply to john@acme.com politely."),
+		plugintest.Text(pluginapi.RoleUser, "m1", "I am John Smith, mail john@acme.com. My friend is also John Smith."),
+		plugintest.Text(pluginapi.RoleAssistant, "m2", "Hello John Smith"),
+		plugintest.Text(pluginapi.RoleUser, "m3", "   "),
 	), nil)
 	d, err := p.OnPrompt(context.Background(), x)
 	if err != nil {
@@ -288,7 +249,7 @@ func TestOnPromptAnonymizes(t *testing.T) {
 		t.Fatalf("analyzer calls = %v", texts)
 	}
 	req := a.requests[0]
-	if req.Language != "en" || !reflect.DeepEqual(req.Entities, []string{"PERSON", "EMAIL_ADDRESS"}) || req.ScoreThreshold == nil || *req.ScoreThreshold != 0.3 || !reflect.DeepEqual(req.AllowList, []string{"ACME"}) || req.CorrelationID != "req-1" {
+	if req.Language != "en" || !reflect.DeepEqual(req.Entities, []string{"PERSON", "EMAIL_ADDRESS"}) || req.ScoreThreshold == nil || *req.ScoreThreshold != 0.3 || !reflect.DeepEqual(req.AllowList, []string{"ACME"}) || req.CorrelationID != "test-request" {
 		t.Errorf("request = %+v", req)
 	}
 	if a.auth != "Bearer tok" {
@@ -304,7 +265,7 @@ func TestOnPromptOperators(t *testing.T) {
 		{OperatorHash, "Hi 8be13b5f5b46f0ffe89b4a6ec43ed6cab28c2b6ac5bc4df1a7ee9c3ffd0a6db6, mail 2ab0e5ff9e6acd6de6fc2d14ff0dc5a4d2a5c6f8fb0a66a45c9ac9a1a2b9e82b"},
 	} {
 		p := newPlugin(t, a, `{"operator": "`+tt.operator+`"}`)
-		x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Hi Zoë, mail zoe@example.org")), nil)
+		x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Hi Zoë, mail zoe@example.org")), nil)
 		if _, err := p.OnPrompt(context.Background(), x); err != nil {
 			t.Fatal(err)
 		}
@@ -344,7 +305,7 @@ func TestOnPromptDecisions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := newPlugin(t, a, tt.cfg)
-			x := exchange(prompt(text(pluginapi.RoleUser, "m1", tt.text)), nil)
+			x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", tt.text)), nil)
 			d, err := p.OnPrompt(context.Background(), x)
 			if err != nil {
 				t.Fatal(err)
@@ -375,7 +336,7 @@ func TestOnPromptToolCallsAndResults(t *testing.T) {
 	result := pluginapi.Message{ID: "m2", Role: pluginapi.RoleTool, Parts: []pluginapi.Part{
 		{Kind: pluginapi.PartToolResult, ToolResult: &pluginapi.ToolResult{CallID: "c1", Parts: []pluginapi.Part{{Kind: pluginapi.PartText, Text: "Ann <ann@x.io>"}}}},
 	}}
-	x := exchange(prompt(call, result), nil)
+	x := plugintest.Exchange(plugintest.Prompt(call, result), nil)
 	if _, err := p.OnPrompt(context.Background(), x); err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +361,7 @@ func TestOnPromptAnalyzerErrorsFailWithoutEditing(t *testing.T) {
 	a := newAnalyzer(t, "Ann")
 	a.status = http.StatusInternalServerError
 	p := newPlugin(t, a, `{}`)
-	x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Ann is here")), nil)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Ann is here")), nil)
 	_, err := p.OnPrompt(context.Background(), x)
 	if err == nil || !strings.Contains(err.Error(), "analyzer returned HTTP 500") {
 		t.Fatalf("err = %v", err)
@@ -421,7 +382,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 	a := newAnalyzer(t, "Ann Lee")
 	in := newPlugin(t, a, `{"restore": true}`)
 	out := newPlugin(t, a, `{"restore": true}`)
-	x := exchange(prompt(text(pluginapi.RoleUser, "m1", "I am Ann Lee (ann@x.io). Draft an email to Bob.")), nil)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee (ann@x.io). Draft an email to Bob.")), nil)
 	d, err := in.OnPrompt(context.Background(), x)
 	if err != nil {
 		t.Fatal(err)
@@ -434,7 +395,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 	}
 	// The model repeats the placeholders, reveals a new address of its
 	// own, and calls a tool with a placeholder argument.
-	x.Response = completion("Dear Bob, <PERSON_1> (<EMAIL_ADDRESS_1>) wrote; cc bob@y.io.")
+	x.Response = plugintest.Completion("Dear Bob, <PERSON_1> (<EMAIL_ADDRESS_1>) wrote; cc bob@y.io.")
 	x.Response.Choices[0].Message.Parts = append(x.Response.Choices[0].Message.Parts, pluginapi.Part{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "send", Arguments: json.RawMessage(`{"to":"<EMAIL_ADDRESS_1>"}`)}})
 	d, err = out.OnResponse(context.Background(), x)
 	if err != nil {
@@ -455,7 +416,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 	}
 	// Without a prompt-phase mapping there is nothing to restore and the
 	// model's own values are still anonymized.
-	y := exchange(nil, completion("Write to <PERSON_1> at bob@y.io"))
+	y := plugintest.Exchange(nil, plugintest.Completion("Write to <PERSON_1> at bob@y.io"))
 	if _, err := out.OnResponse(context.Background(), y); err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +428,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 func TestOnResponseDecisions(t *testing.T) {
 	a := newAnalyzer(t, "Ann")
 	p := newPlugin(t, a, `{"action": "block", "block_entities": ["EMAIL_ADDRESS"]}`)
-	x := exchange(nil, completion("clean", "Ann was here"))
+	x := plugintest.Exchange(nil, plugintest.Completion("clean", "Ann was here"))
 	d, err := p.OnResponse(context.Background(), x)
 	if err != nil {
 		t.Fatal(err)
@@ -475,12 +436,12 @@ func TestOnResponseDecisions(t *testing.T) {
 	if d.Action != pluginapi.ActionBlock || d.Code != Code || d.Status != 0 {
 		t.Errorf("decision = %+v", d)
 	}
-	x = exchange(nil, completion("mail ann@x.io"))
+	x = plugintest.Exchange(nil, plugintest.Completion("mail ann@x.io"))
 	if d, _ = p.OnResponse(context.Background(), x); d.Code != CodeBlocked {
 		t.Errorf("decision = %+v", d)
 	}
 	p = newPlugin(t, a, `{"action": "warn"}`)
-	x = exchange(nil, completion("Ann was here"))
+	x = plugintest.Exchange(nil, plugintest.Completion("Ann was here"))
 	if d, _ = p.OnResponse(context.Background(), x); d.Action != pluginapi.ActionWarn || x.Response.Text(0) != "Ann was here" {
 		t.Errorf("decision = %+v, text %q", d, x.Response.Text(0))
 	}
@@ -503,7 +464,7 @@ func TestStreamEvents(t *testing.T) {
 	a := newAnalyzer(t, "Ann Lee")
 	in := newPlugin(t, a, `{"restore": true}`)
 	p := newPlugin(t, a, `{"restore": true, "block_entities": ["CREDIT_CARD"]}`)
-	x := exchange(prompt(text(pluginapi.RoleUser, "m1", "I am Ann Lee")), nil)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee")), nil)
 	if _, err := in.OnPrompt(context.Background(), x); err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +505,7 @@ func TestStreamEvents(t *testing.T) {
 		t.Errorf("end = %+v", d)
 	}
 	// A clean stream ends with a plain allow.
-	if d, _ := p.OnStreamEnd(context.Background(), exchange(nil, nil)); d.Action != pluginapi.ActionAllow || d.Detail != nil {
+	if d, _ := p.OnStreamEnd(context.Background(), plugintest.Exchange(nil, nil)); d.Action != pluginapi.ActionAllow || d.Detail != nil {
 		t.Errorf("clean end = %+v", d)
 	}
 }
@@ -552,7 +513,7 @@ func TestStreamEvents(t *testing.T) {
 func TestStreamWarn(t *testing.T) {
 	a := newAnalyzer(t, "Ann")
 	p := newPlugin(t, a, `{"action": "warn"}`)
-	x := exchange(nil, nil)
+	x := plugintest.Exchange(nil, nil)
 	got, err := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "Ann"})
 	if err != nil || got.Action != pluginapi.StreamPass {
 		t.Fatalf("event = %+v, %v", got, err)
@@ -565,7 +526,7 @@ func TestStreamWarn(t *testing.T) {
 	if got, _ := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "Ann"}); got.Action != pluginapi.StreamPass {
 		t.Errorf("buffered event = %+v", got)
 	}
-	if d, _ := p.OnStreamEnd(context.Background(), exchange(nil, nil)); d.Action != pluginapi.ActionAllow {
+	if d, _ := p.OnStreamEnd(context.Background(), plugintest.Exchange(nil, nil)); d.Action != pluginapi.ActionAllow {
 		t.Errorf("buffered end = %+v", d)
 	}
 }
@@ -602,9 +563,9 @@ func TestRestoreProvenance(t *testing.T) {
 	a := newAnalyzer(t, "Ann Lee", "Sam Ops")
 	in := newPlugin(t, a, `{"restore": true, "roles": ["system", "user"]}`)
 	out := newPlugin(t, a, `{"restore": true}`)
-	x := exchange(prompt(
-		text(pluginapi.RoleSystem, "m0", "Escalate to Sam Ops at ops@corp.io."),
-		text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
+	x := plugintest.Exchange(plugintest.Prompt(
+		plugintest.Text(pluginapi.RoleSystem, "m0", "Escalate to Sam Ops at ops@corp.io."),
+		plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
 	), nil)
 	if _, err := in.OnPrompt(context.Background(), x); err != nil {
 		t.Fatal(err)
@@ -614,7 +575,7 @@ func TestRestoreProvenance(t *testing.T) {
 	}
 	// The model is talked into repeating the system placeholders: they
 	// stay placeholders, while the user's own value comes back.
-	x.Response = completion("Contact <PERSON_1> at <EMAIL_ADDRESS_1>, <PERSON_2>.")
+	x.Response = plugintest.Completion("Contact <PERSON_1> at <EMAIL_ADDRESS_1>, <PERSON_2>.")
 	d, err := out.OnResponse(context.Background(), x)
 	if err != nil {
 		t.Fatal(err)
@@ -627,14 +588,14 @@ func TestRestoreProvenance(t *testing.T) {
 	}
 	// A value the system prompt mentions first becomes restorable once the
 	// user sends it too.
-	z := exchange(prompt(
-		text(pluginapi.RoleSystem, "m0", "The customer is Ann Lee."),
-		text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
+	z := plugintest.Exchange(plugintest.Prompt(
+		plugintest.Text(pluginapi.RoleSystem, "m0", "The customer is Ann Lee."),
+		plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
 	), nil)
 	if _, err := in.OnPrompt(context.Background(), z); err != nil {
 		t.Fatal(err)
 	}
-	z.Response = completion("Hello <PERSON_1>.")
+	z.Response = plugintest.Completion("Hello <PERSON_1>.")
 	if _, err := out.OnResponse(context.Background(), z); err != nil {
 		t.Fatal(err)
 	}
@@ -645,12 +606,12 @@ func TestRestoreProvenance(t *testing.T) {
 	// A prompt instance without restore never hands values to a response
 	// instance with restore.
 	plain := newPlugin(t, a, `{}`)
-	y := exchange(prompt(text(pluginapi.RoleUser, "m1", "I am Ann Lee.")), nil)
+	y := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee.")), nil)
 	d, err = plain.OnPrompt(context.Background(), y)
 	if err != nil || d.NoStore {
 		t.Fatalf("prompt = %+v, %v", d, err)
 	}
-	y.Response = completion("Hello <PERSON_1>.")
+	y.Response = plugintest.Completion("Hello <PERSON_1>.")
 	if d, err = out.OnResponse(context.Background(), y); err != nil || d.NoStore {
 		t.Fatalf("response = %+v, %v", d, err)
 	}
@@ -674,7 +635,7 @@ func TestPartialAnalyzerFailureLeavesNoState(t *testing.T) {
 	t.Cleanup(proxy.Close)
 	p.client.baseURL = proxy.URL
 
-	x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Ann one"), text(pluginapi.RoleUser, "m2", "Ann two")), nil)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Ann one"), plugintest.Text(pluginapi.RoleUser, "m2", "Ann two")), nil)
 	if _, err := p.OnPrompt(context.Background(), x); err == nil {
 		t.Fatal("expected the phase to fail")
 	}
@@ -686,7 +647,7 @@ func TestPartialAnalyzerFailureLeavesNoState(t *testing.T) {
 	}
 	// A later response phase (fail_mode open let the request continue)
 	// finds nothing to restore.
-	x.Response = completion("Hi <PERSON_1>")
+	x.Response = plugintest.Completion("Hi <PERSON_1>")
 	restore := newPlugin(t, a, `{"restore": true}`)
 	if _, err := restore.OnResponse(context.Background(), x); err != nil {
 		t.Fatal(err)
@@ -700,7 +661,7 @@ func TestPlaceholdersAreNumberedInDocumentOrder(t *testing.T) {
 	a := newAnalyzer(t, "Ann", "Bob", "Cid")
 	p := newPlugin(t, a, `{}`)
 	for range 5 {
-		x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Cid"), text(pluginapi.RoleUser, "m2", "Bob"), text(pluginapi.RoleUser, "m3", "Ann and Cid")), nil)
+		x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Cid"), plugintest.Text(pluginapi.RoleUser, "m2", "Bob"), plugintest.Text(pluginapi.RoleUser, "m3", "Ann and Cid")), nil)
 		if _, err := p.OnPrompt(context.Background(), x); err != nil {
 			t.Fatal(err)
 		}
@@ -717,7 +678,7 @@ func TestToolArgumentsKeepLargeNumbers(t *testing.T) {
 	call := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
 		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "f", Arguments: json.RawMessage(`{"id":9007199254740993,"name":"Ann","ratio":1.10}`)}},
 	}}
-	x := exchange(prompt(call), nil)
+	x := plugintest.Exchange(plugintest.Prompt(call), nil)
 	if _, err := p.OnPrompt(context.Background(), x); err != nil {
 		t.Fatal(err)
 	}
@@ -734,7 +695,7 @@ func TestAPIKeyNeedsHTTPS(t *testing.T) {
 		`{"api_key": "tok", "analyzer_url": "http://presidio.internal:5002"}`,
 		`{"api_key": "tok", "analyzer_url": "http://10.0.0.5:5002"}`,
 	} {
-		if err := New().Init(context.Background(), json.RawMessage(cfg), fakeHost{}); err == nil || !strings.Contains(err.Error(), "api_key needs an https:// analyzer_url") {
+		if err := New().Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost()); err == nil || !strings.Contains(err.Error(), "api_key needs an https:// analyzer_url") {
 			t.Errorf("%s: err = %v", cfg, err)
 		}
 	}
@@ -745,7 +706,7 @@ func TestAPIKeyNeedsHTTPS(t *testing.T) {
 		`{"api_key": "tok", "analyzer_url": "http://[::1]:5002"}`,
 		`{"analyzer_url": "http://presidio.internal:5002"}`,
 	} {
-		if err := New().Init(context.Background(), json.RawMessage(cfg), fakeHost{}); err != nil {
+		if err := New().Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost()); err != nil {
 			t.Errorf("%s: %v", cfg, err)
 		}
 	}
@@ -761,7 +722,7 @@ func TestAPIKeyIsNotFollowedToPlainHTTP(t *testing.T) {
 	t.Cleanup(front.Close)
 	p := newPlugin(t, nil, `{"analyzer_url": "`+front.URL+`", "api_key": "tok"}`)
 	p.client.http = front.Client()
-	x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Ann is here")), nil)
+	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Ann is here")), nil)
 	_, err := p.OnPrompt(context.Background(), x)
 	if err == nil || !strings.Contains(err.Error(), "redirect to plain http") {
 		t.Fatalf("err = %v", err)

@@ -128,7 +128,7 @@ func (p *Plugin) OnStreamEnd(_ context.Context, x *pluginapi.Exchange) (pluginap
 	n := p.streamCount(x)
 	switch {
 	case p.onMatch == OnMatchWarn && n > 0:
-		return pluginapi.Warn(Code, p.message, map[string]any{"matches": n}), nil
+		return p.enforcement.Enforce(Code, map[string]any{"matches": n}), nil
 	case p.onMatch == OnMatchReplace && n > 0:
 		return allowWith(map[string]any{"replacements": n}), nil
 	}
@@ -156,20 +156,7 @@ func (p *Plugin) decide(matches, messages int) pluginapi.Decision {
 	if matches == 0 {
 		return pluginapi.Allow()
 	}
-	detail := map[string]any{"matches": matches, "messages": messages}
-	switch p.onMatch {
-	case OnMatchBlock:
-		d := pluginapi.Block(p.blockStatus, Code, p.message)
-		d.Detail = detail
-		return d
-	case OnMatchRespond:
-		d := pluginapi.Respond(p.message)
-		d.Code = Code
-		d.Detail = detail
-		return d
-	default:
-		return pluginapi.Warn(Code, p.message, detail)
-	}
+	return p.enforcement.Enforce(Code, map[string]any{"matches": matches, "messages": messages})
 }
 
 func replaceDetail(replacements, messages int) map[string]any {

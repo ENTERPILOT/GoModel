@@ -59,7 +59,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			{
 				Key: "roles", Label: "Prompt roles", Input: pluginapi.InputCheckboxes, Default: []string{"user"},
 				Help:    "Which prompt messages the rules apply to. In the response phase the assistant text is always the target.",
-				Options: roleOptions,
+				Options: pluginapi.RoleOptions(),
 			},
 			{
 				Key: "on_match", Label: "On match", Input: pluginapi.InputSelect, Default: OnMatchReplace,
@@ -76,11 +76,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 				Help:        "Error message for block, assistant reply for respond, and audit note for warn.",
 				Placeholder: DefaultMessage,
 			},
-			{
-				Key: "block_status", Label: "Block status", Input: pluginapi.InputNumber,
-				Help:        "One HTTP status code between 400 and 599 that a blocked request returns, for example 403. Leave empty to use the phase default: 400 when the prompt is blocked, 502 when the response is blocked.",
-				Placeholder: "phase default",
-			},
+			pluginapi.BlockStatusField(),
 			{
 				Key: "stream_lookbehind", Label: "Stream lookbehind", Input: pluginapi.InputNumber, Default: DefaultStreamLookbehind,
 				Help:        "Characters of streamed text held back so a match that spans two chunks is still rewritten; set it to at least the longest find text. Used by replace and warn. Block and respond buffer the whole stream instead, so nothing leaks before the decision, at the cost of delaying the first token until the response is complete.",

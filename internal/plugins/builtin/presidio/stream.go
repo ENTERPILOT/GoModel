@@ -36,7 +36,7 @@ func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *p
 	}
 	out := p.rewriteOne(ev.Text, spans, unit{choice: ev.Choice}, false, p.mapping(x), rep, pass{restore: p.restore, requestID: x.Meta.RequestID})
 	if rep.blocked != "" {
-		return pluginapi.Terminate(p.enforce(CodeBlocked, rep.detail())), nil
+		return pluginapi.Terminate(p.enforcement.Reject(CodeBlocked, rep.detail())), nil
 	}
 	if out == ev.Text {
 		return pluginapi.Pass(), nil

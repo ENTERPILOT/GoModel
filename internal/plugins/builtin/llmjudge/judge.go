@@ -157,31 +157,14 @@ func (p *Plugin) decide(v verdict, cached bool) pluginapi.Decision {
 	case VerdictAllow:
 		return pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: detail}
 	case VerdictBlock:
-		return p.enforce(Code, detail)
+		return p.enforcement.Enforce(Code, detail)
 	}
 	switch p.onUnclear {
 	case UnclearAllow:
 		return pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: detail}
 	case UnclearBlock:
-		return p.enforce(CodeUnclear, detail)
+		return p.enforcement.Enforce(CodeUnclear, detail)
 	default:
 		return pluginapi.Warn(CodeUnclear, "judge verdict unclear", detail)
-	}
-}
-
-// enforce renders a block verdict as the configured action.
-func (p *Plugin) enforce(code string, detail map[string]any) pluginapi.Decision {
-	switch p.action {
-	case ActionRespond:
-		d := pluginapi.Respond(p.respondText)
-		d.Code = code
-		d.Detail = detail
-		return d
-	case ActionWarn:
-		return pluginapi.Warn(code, p.message, detail)
-	default:
-		d := pluginapi.Block(p.blockStatus, code, p.message)
-		d.Detail = detail
-		return d
 	}
 }

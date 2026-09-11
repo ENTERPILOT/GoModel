@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/enterpilot/gomodel/pluginapi"
 )
 
 // op is what an edit does to a header.
@@ -27,29 +29,12 @@ type edit struct {
 // is a textarea holding one entry per line; values stay raw so decoding
 // errors can name the key.
 type config struct {
-	RequestSet     json.RawMessage `json:"request_set"`
-	RequestRemove  json.RawMessage `json:"request_remove"`
-	ResponseSet    json.RawMessage `json:"response_set"`
-	ResponseAdd    json.RawMessage `json:"response_add"`
-	ResponseRemove json.RawMessage `json:"response_remove"`
-	UpstreamSet    json.RawMessage `json:"upstream_set"`
-}
-
-// parseLines decodes a textarea value: a JSON string (one entry per line)
-// or a JSON array of strings.
-func parseLines(key string, raw json.RawMessage) ([]string, error) {
-	if len(raw) == 0 || string(raw) == "null" {
-		return nil, nil
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return strings.Split(text, "\n"), nil
-	}
-	var list []string
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, fmt.Errorf("header_edit: %s must be text or a list of strings", key)
-	}
-	return list, nil
+	RequestSet     []string
+	RequestRemove  []string
+	ResponseSet    []string
+	ResponseAdd    []string
+	ResponseRemove []string
+	UpstreamSet    []string
 }
 
 // credentialHeaders can never be set, added, or removed by this plugin.
@@ -66,26 +51,25 @@ var credentialHeaders = map[string]bool{
 }
 
 func decodeConfig(raw json.RawMessage) (config, error) {
-	var cfg config
-	if len(strings.TrimSpace(string(raw))) == 0 || string(raw) == "null" {
-		return cfg, nil
+	cfg, err := pluginapi.ParseConfig(Name, New().Manifest().ConfigSchema, raw)
+	if err != nil {
+		return config{}, err
 	}
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
-		return cfg, fmt.Errorf("header_edit: invalid config: %w", err)
+	c := config{
+		RequestSet:     cfg.Lines("request_set"),
+		RequestRemove:  cfg.Lines("request_remove"),
+		ResponseSet:    cfg.Lines("response_set"),
+		ResponseAdd:    cfg.Lines("response_add"),
+		ResponseRemove: cfg.Lines("response_remove"),
+		UpstreamSet:    cfg.Lines("upstream_set"),
 	}
-	return cfg, nil
+	return c, cfg.Err()
 }
 
 // parseEdits turns the lines of one config field into edits. Blank lines and
 // lines starting with # are ignored. Set and add lines look like
 // "Name: value"; remove lines are a bare "Name".
-func parseEdits(field string, raw json.RawMessage, o op) ([]edit, error) {
-	entries, err := parseLines(field, raw)
-	if err != nil {
-		return nil, err
-	}
+func parseEdits(field string, entries []string, o op) ([]edit, error) {
 	var out []edit
 	for i, line := range entries {
 		line = strings.TrimSpace(line)

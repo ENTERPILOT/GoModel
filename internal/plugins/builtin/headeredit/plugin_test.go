@@ -3,37 +3,19 @@ package headeredit
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/enterpilot/gomodel/pluginapi/plugintest"
 )
-
-type fakeHost struct{}
-
-func (fakeHost) Logger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-func (fakeHost) Inference() pluginapi.Inference {
-	return nil
-}
-func (fakeHost) History(context.Context, pluginapi.Meta) ([]pluginapi.Message, error) {
-	return nil, nil
-}
-func (fakeHost) Metrics() pluginapi.Metrics { return noopMetrics{} }
-func (fakeHost) HTTPClient() *http.Client   { return http.DefaultClient }
-
-type noopMetrics struct{}
-
-func (noopMetrics) Inc(string, map[string]string)              {}
-func (noopMetrics) Observe(string, float64, map[string]string) {}
 
 func newPlugin(t *testing.T, cfg string) *Plugin {
 	t.Helper()
 	p := New()
-	if err := p.Init(context.Background(), json.RawMessage(cfg), fakeHost{}); err != nil {
+	if err := p.Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
 	return p.(*Plugin)
@@ -89,7 +71,7 @@ func TestInitErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := New().Init(context.Background(), json.RawMessage(tt.cfg), fakeHost{})
+			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want containing %q", err, tt.want)
 			}
@@ -112,7 +94,7 @@ func TestInitAccepts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := New().Init(context.Background(), json.RawMessage(tt.cfg), fakeHost{}); err != nil {
+			if err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost()); err != nil {
 				t.Fatalf("Init: %v", err)
 			}
 		})
