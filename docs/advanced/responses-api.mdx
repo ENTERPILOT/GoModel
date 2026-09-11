@@ -53,7 +53,8 @@ This enables:
 - `previous_response_id` on chat-translated providers such as Anthropic and
   Gemini: GoModel follows the stored response and each response it was chained
   from, and prepends their input items and output to the new input, so the
-  provider receives the whole chain each turn. On these
+  provider receives the whole chain each turn. The response names its
+  predecessor in `previous_response_id`, streamed or not. On these
   providers an id that is not stored (the previous response was sent with
   `store: false`), or belongs to another tenant, returns 404. Native
   Responses providers receive the id itself and resolve it on their side, so
