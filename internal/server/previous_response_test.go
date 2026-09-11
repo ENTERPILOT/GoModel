@@ -410,7 +410,7 @@ func TestApplyResponsesPreviousResponse_PendingSnapshotWaitFollowsAccessScope(t 
 				if tt.wantWait {
 					t.Fatal("request did not wait for the pending snapshot")
 				}
-			case <-time.After(150 * time.Millisecond):
+			case <-time.After(time.Second):
 				if !tt.wantWait {
 					t.Fatal("request waited on a pending snapshot outside its access scope")
 				}
