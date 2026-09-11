@@ -69,6 +69,9 @@ func TestDispatchChatCompletionEmptyChoices(t *testing.T) {
 				if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
 					t.Fatalf("DispatchChatCompletion() error = %v, want 502 provider error", err)
 				}
+				if gatewayErr.Message != "provider returned no choices" {
+					t.Fatalf("error message = %q, want %q", gatewayErr.Message, "provider returned no choices")
+				}
 			}
 			if len(calls) != len(tt.wantCalls) {
 				t.Fatalf("upstream calls = %v, want %v", calls, tt.wantCalls)
