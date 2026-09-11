@@ -90,9 +90,11 @@ or request IDs that flow through the rest of the request.
 
 ## Instrumentation Points
 
-Hooks fire at the **logical request** level via `beginRequest` /
+The llmclient hooks fire at the **logical request** level via `beginRequest` /
 `finishRequest`, not per HTTP attempt. This means a request that retries 3
-times produces one counter increment, not three.
+times produces one counter increment, not three. `OnEmptyResponse` is the
+exception: the provider router fires it, not the llmclient (see
+`gomodel_empty_responses_total`).
 
 Three call sites in `client.go` use them:
 
@@ -159,7 +161,10 @@ Counter. Buffered chat and Responses API calls that returned 200 without
 choices (`no_choices`), without output (`no_output`, completed Responses API
 calls only), or without token usage (`no_usage`). The provider router detects
 these after decoding and fires `Hooks.OnEmptyResponse`; the llmclient never
-calls it. `gomodel_requests_total` still records these calls as successes.
+calls it. It fires once per provider call: llmclient retries within one call
+count once, but a failover target is another call, so a request whose primary
+and failover both return empty increments the counter twice.
+`gomodel_requests_total` still records these calls as successes.
 
 Labels: `provider`, `model`, `reason`.
 
