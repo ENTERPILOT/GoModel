@@ -92,25 +92,28 @@ func (h *Host) HTTPClient() *http.Client {
 // Complete implements pluginapi.Inference with the scripted replies.
 func (h *Host) Complete(_ context.Context, req pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.requests = append(h.requests, req)
-	if h.Reply != nil {
-		return h.Reply(req)
+	reply := h.Reply
+	h.mu.Unlock()
+	if reply != nil {
+		return reply(req)
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.Err != nil {
 		return nil, h.Err
 	}
 	if len(h.Replies) == 0 {
 		return &pluginapi.Completion{}, nil
 	}
-	reply := h.Replies[0]
+	text := h.Replies[0]
 	h.Replies = h.Replies[1:]
 	finish := h.Finish
 	if finish == "" {
 		finish = "stop"
 	}
 	return &pluginapi.Completion{Choices: []pluginapi.Choice{{
-		Message: pluginapi.TextMessage(pluginapi.RoleAssistant, reply), FinishReason: finish,
+		Message: pluginapi.TextMessage(pluginapi.RoleAssistant, text), FinishReason: finish,
 	}}}, nil
 }
 

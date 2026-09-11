@@ -585,6 +585,8 @@ Notes for authors:
   would have received per choice, the delivered events, the terminate
   decision, and the end decision.
 
+From the `string_replace` tests, where `New` is that plugin's constructor:
+
 ```go
 p := plugintest.Init(t, New, `{"rules": "secret => [x]", "stream_lookbehind": 4}`, nil)
 res, err := plugintest.RunStream(ctx, p.(pluginapi.StreamHook), plugintest.Exchange(nil, nil), []*pluginapi.StreamEvent{
@@ -592,6 +594,10 @@ res, err := plugintest.RunStream(ctx, p.(pluginapi.StreamHook), plugintest.Excha
 })
 // res.Text[0] == "my [x] is safe": the match split across two deltas was rewritten once.
 ```
+
+Buffered mode assembles the completion from the text and reasoning deltas
+alone; set `x.Response` yourself before calling `RunStream` when the hook
+must see tool calls, usage, or a finish reason.
 
 ## Routing strategy plugins
 

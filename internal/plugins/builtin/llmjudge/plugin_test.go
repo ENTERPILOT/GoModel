@@ -80,7 +80,7 @@ func TestInitErrors(t *testing.T) {
 		{"bad action", `{"model": "a/b", "action": "drop"}`, "action must be one of block, respond, warn"},
 		{"bad on_unclear", `{"model": "a/b", "on_unclear": "panic"}`, "on_unclear must be one of allow, warn, block"},
 		{"status low", `{"model": "a/b", "block_status": 302}`, "block_status must be an HTTP status between 400 and 599"},
-		{"status high", `{"model": "a/b", "block_status": 600}`, "block_status must be between 0 and 599"},
+		{"status high", `{"model": "a/b", "block_status": 600}`, "block_status must be an HTTP status between 400 and 599"},
 		{"status text", `{"model": "a/b", "block_status": "abc"}`, "block_status must be a number"},
 		{"max_tokens zero", `{"model": "a/b", "max_tokens": 0}`, "max_tokens must be between 1"},
 		{"max_tokens fraction", `{"model": "a/b", "max_tokens": 1.5}`, "max_tokens must be a whole number"},

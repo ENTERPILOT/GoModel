@@ -157,3 +157,94 @@ func TestHostAndFixtures(t *testing.T) {
 		t.Error("Init")
 	}
 }
+
+// lower is a transform hook that lower-cases reasoning deltas and drops
+// usage events.
+type lower struct{ redactor }
+
+func (l *lower) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *pluginapi.StreamEvent) (pluginapi.StreamDecision, error) {
+	switch ev.Kind {
+	case pluginapi.EventReasoningDelta:
+		return pluginapi.Replace(strings.ToLower(ev.Text)), nil
+	case pluginapi.EventUsage:
+		return pluginapi.Drop(), nil
+	}
+	return l.redactor.OnStreamEvent(ctx, x, ev)
+}
+
+func TestRunStreamMultiChoiceAndOtherEvents(t *testing.T) {
+	l := &lower{redactor{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamTransform, MinChunkChars: 100}}}
+	res, err := RunStream(context.Background(), l, nil, []*pluginapi.StreamEvent{
+		{Kind: pluginapi.EventTextDelta, Choice: 1, Text: "one"},
+		{Kind: pluginapi.EventTextDelta, Choice: 0, Text: "zero"},
+		{Kind: pluginapi.EventReasoningDelta, Text: "THINK"},
+		{Kind: pluginapi.EventUsage},
+		{Kind: pluginapi.EventTextDelta, Choice: 0, Text: " more"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, ev := range res.Events {
+		kinds = append(kinds, string(ev.Kind)+":"+ev.Text)
+	}
+	// Both pending choices flush, in order of first appearance, before the
+	// reasoning delta; the usage event was dropped; the tail comes last.
+	want := []string{"text_delta:one", "text_delta:zero", "reasoning_delta:think", "text_delta: more"}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Errorf("events = %v, want %v", kinds, want)
+	}
+	if res.Text[0] != "zero more" || res.Text[1] != "one" || len(res.Text) != 2 {
+		t.Errorf("text = %v", res.Text)
+	}
+	// A dropped event never reached the stream state; the reasoning one did.
+	if l.end.Message != "zero more" || res.Events[2].Seq == 0 {
+		t.Errorf("end = %+v", l.end)
+	}
+}
+
+func TestRunStreamBufferedRespondAndPresetResponse(t *testing.T) {
+	r := &redactor{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamBuffer}}
+	x := Exchange(nil, nil)
+	res, err := RunStream(context.Background(), r, x, []*pluginapi.StreamEvent{
+		{Kind: pluginapi.EventReasoningDelta, Text: "hmm"}, TextDelta("a secret"),
+	})
+	if err != nil || res.Text[0] != "a [x]" || len(res.Response.Choices[0].Message.Parts) != 2 || res.Response.Choices[0].Message.Parts[0].Kind != pluginapi.PartReasoning {
+		t.Errorf("assembled = %+v, %v", res, err)
+	}
+	// A preset response is handed to the hook as is.
+	preset := Completion("keep")
+	preset.Choices[0].FinishReason = "length"
+	x = Exchange(nil, preset)
+	res, err = RunStream(context.Background(), r, x, []*pluginapi.StreamEvent{TextDelta("ignored")})
+	if err != nil || res.Text[0] != "keep" || res.Response.Choices[0].FinishReason != "length" {
+		t.Errorf("preset = %+v, %v", res, err)
+	}
+	// A respond decision is what the client receives.
+	answer := &responder{}
+	res, err = RunStream(context.Background(), answer, Exchange(nil, nil), []*pluginapi.StreamEvent{TextDelta("anything")})
+	if err != nil || res.Text[0] != "no" || res.End.Action != pluginapi.ActionRespond {
+		t.Errorf("respond = %+v, %v", res, err)
+	}
+}
+
+type responder struct{ redactor }
+
+func (r *responder) StreamPolicy() pluginapi.StreamPolicy {
+	return pluginapi.StreamPolicy{Mode: pluginapi.StreamBuffer}
+}
+func (r *responder) OnResponse(context.Context, *pluginapi.Exchange) (pluginapi.Decision, error) {
+	return pluginapi.Respond("no"), nil
+}
+
+func TestHostReplyMayInspectHost(t *testing.T) {
+	h := NewHost()
+	h.Reply = func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
+		h.Metrics().Inc("seen", nil)
+		return &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.TextMessage(pluginapi.RoleAssistant, "n="+string(rune('0'+len(h.Requests()))))}}}, nil
+	}
+	c, err := h.Complete(context.Background(), pluginapi.InferenceRequest{})
+	if err != nil || c.Text(0) != "n=1" || h.Recorded().Counts["seen"] != 1 {
+		t.Errorf("reply = %+v, %v", c, err)
+	}
+}

@@ -49,6 +49,11 @@ func TestConfigReaders(t *testing.T) {
 	if !c.Bool("flag") || c.Bool("missing") {
 		t.Error("Bool")
 	}
+	for raw, want := range map[string]bool{`true`: true, `false`: false, `"on"`: true, `"off"`: false, `"1"`: true, `"0"`: false, `"YES"`: true, `"no"`: false, `""`: false} {
+		if got := parse(t, `{"flag": `+raw+`}`).Bool("flag"); got != want {
+			t.Errorf("Bool(%s) = %v", raw, got)
+		}
+	}
 	if c.Int("n", 0, 0, 100) != 42 || c.Int("missing", 7, 0, 100) != 7 {
 		t.Error("Int")
 	}
@@ -116,7 +121,7 @@ func TestConfigErrors(t *testing.T) {
 		{`{"f": 3}`, func(c *Config) { c.Float("f", 0, 0, 2) }, "demo: f must be between 0 and 2, got 3"},
 		{`{"opt": -1}`, func(c *Config) { c.OptionalFloat("opt", 0, 1) }, "demo: opt must be between 0 and 1, got -1"},
 		{`{"status": 302}`, func(c *Config) { c.BlockStatus("status") }, "demo: status must be an HTTP status between 400 and 599, got 302"},
-		{`{"status": 600}`, func(c *Config) { c.BlockStatus("status") }, "demo: status must be between 0 and 599, got 600"},
+		{`{"status": 600}`, func(c *Config) { c.BlockStatus("status") }, "demo: status must be an HTTP status between 400 and 599, got 600"},
 		{`{"list": 5}`, func(c *Config) { c.List("list") }, "demo: list must be a list of strings"},
 		{`{"lines": 5}`, func(c *Config) { c.Lines("lines") }, "demo: lines must be text or a list of strings"},
 		{`{"roles": ["robot"]}`, func(c *Config) { c.Roles("roles") }, `demo: roles has unknown role "robot"`},

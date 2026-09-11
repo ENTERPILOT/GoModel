@@ -201,8 +201,8 @@ func (c *Config) Int(key string, def, lo, hi int) int {
 // BlockStatus reads an HTTP status for [Decision.Status]: empty means the
 // phase default (0), anything else must be between 400 and 599.
 func (c *Config) BlockStatus(key string) int {
-	n := c.Int(key, 0, 0, 599)
-	if n != 0 && n < 400 {
+	n := c.Int(key, 0, 0, 1<<20)
+	if n != 0 && (n < 400 || n > 599) {
 		c.fail(key, "must be an HTTP status between 400 and 599, got %d", n)
 		return 0
 	}
