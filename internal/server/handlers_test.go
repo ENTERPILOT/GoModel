@@ -475,6 +475,7 @@ type mockProvider struct {
 	passthroughResponse     *core.PassthroughResponse
 	passthroughErr          error
 	chatCompletionCalls     int
+	embeddingCalls          int
 	lastPassthroughProvider string
 	lastPassthroughReq      *core.PassthroughRequest
 
@@ -820,6 +821,7 @@ func (m *mockProvider) StreamResponses(_ context.Context, _ *core.ResponsesReque
 }
 
 func (m *mockProvider) Embeddings(_ context.Context, _ *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
+	m.embeddingCalls++
 	if m.embeddingErr != nil {
 		return nil, m.embeddingErr
 	}
@@ -3256,6 +3258,135 @@ func TestEmbeddings_ProviderReturnsError(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "embeddings not supported") {
 		t.Errorf("expected error message about embeddings, got: %s", body)
+	}
+}
+
+// TestEmbeddings_ExactCache covers the exact cache on /v1/embeddings: an
+// identical repeat is served from the cache, and anything the provider would
+// answer differently for (input, model, dimensions, encoding_format) or a
+// no-store request still reaches the provider.
+func TestEmbeddings_ExactCache(t *testing.T) {
+	const firstBody = `{"model":"text-embedding-3-small","input":"hello world","dimensions":256,"encoding_format":"float"}`
+
+	tests := []struct {
+		name       string
+		secondBody string
+		header     string
+		wantHit    bool
+	}{
+		{name: "identical request hits", secondBody: firstBody, wantHit: true},
+		{name: "reformatted request hits", secondBody: `{ "input":"hello world", "model":"text-embedding-3-small", "encoding_format":"float", "dimensions":256 }`, wantHit: true},
+		{name: "different input misses", secondBody: `{"model":"text-embedding-3-small","input":"goodbye world","dimensions":256,"encoding_format":"float"}`},
+		{name: "different model misses", secondBody: `{"model":"text-embedding-3-large","input":"hello world","dimensions":256,"encoding_format":"float"}`},
+		{name: "different dimensions misses", secondBody: `{"model":"text-embedding-3-small","input":"hello world","dimensions":512,"encoding_format":"float"}`},
+		{name: "different encoding_format misses", secondBody: `{"model":"text-embedding-3-small","input":"hello world","dimensions":256,"encoding_format":"base64"}`},
+		{name: "different user misses", secondBody: `{"model":"text-embedding-3-small","input":"hello world","dimensions":256,"encoding_format":"float","user":"tenant-b"}`},
+		{name: "no-store bypasses", secondBody: firstBody, header: "no-store"},
+		{name: "no-cache bypasses", secondBody: firstBody, header: "no-cache"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockProvider{
+				supportedModels: []string{"text-embedding-3-small", "text-embedding-3-large"},
+				embeddingResponse: &core.EmbeddingResponse{
+					Object: "list",
+					Data: []core.EmbeddingData{
+						{Object: "embedding", Embedding: json.RawMessage(`[0.1,0.2,0.3]`), Index: 0},
+					},
+					Model: "text-embedding-3-small",
+					Usage: core.EmbeddingUsage{PromptTokens: 5, TotalTokens: 5},
+				},
+			}
+
+			store := cache.NewMapStore()
+			defer store.Close()
+			mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+			defer mw.Close()
+
+			e := echo.New()
+			handler := NewHandler(mock, nil, nil, nil)
+			handler.responseCache = mw
+
+			call := func(body, cacheControl string) *httptest.ResponseRecorder {
+				t.Helper()
+				req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				if cacheControl != "" {
+					req.Header.Set("Cache-Control", cacheControl)
+				}
+				rec := httptest.NewRecorder()
+				if err := handler.Embeddings(e.NewContext(req, rec)); err != nil {
+					t.Fatalf("handler.Embeddings() error = %v", err)
+				}
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+				}
+				return rec
+			}
+
+			first := call(firstBody, "")
+			if got := first.Header().Get("X-Cache"); got != "" {
+				t.Fatalf("first request X-Cache = %q, want empty", got)
+			}
+			// The cache write is asynchronous; drain it before the repeat.
+			if err := mw.Close(); err != nil {
+				t.Fatalf("flush cache writes: %v", err)
+			}
+
+			second := call(tt.secondBody, tt.header)
+			gotHit := second.Header().Get("X-Cache") == "HIT (exact)"
+			if gotHit != tt.wantHit {
+				t.Fatalf("second request X-Cache = %q, want hit = %v", second.Header().Get("X-Cache"), tt.wantHit)
+			}
+			wantCalls := 2
+			if tt.wantHit {
+				wantCalls = 1
+				if second.Body.String() != first.Body.String() {
+					t.Fatalf("cached body = %s, want %s", second.Body.String(), first.Body.String())
+				}
+			}
+			if mock.embeddingCalls != wantCalls {
+				t.Fatalf("provider calls = %d, want %d", mock.embeddingCalls, wantCalls)
+			}
+		})
+	}
+}
+
+// TestEmbeddings_ProviderErrorNotCached ensures a failed embeddings request is
+// not stored, so the retry still reaches the provider.
+func TestEmbeddings_ProviderErrorNotCached(t *testing.T) {
+	mock := &mockProvider{
+		supportedModels: []string{"text-embedding-3-small"},
+		embeddingErr:    core.NewProviderError("openai", http.StatusInternalServerError, "boom", nil),
+	}
+
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	defer mw.Close()
+
+	e := echo.New()
+	handler := NewHandler(mock, nil, nil, nil)
+	handler.responseCache = mw
+
+	const body = `{"model":"text-embedding-3-small","input":"hello world"}`
+	for i := range 2 {
+		req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		if err := handler.Embeddings(e.NewContext(req, rec)); err != nil {
+			t.Fatalf("handler.Embeddings() error = %v", err)
+		}
+		if rec.Code == http.StatusOK {
+			t.Fatalf("request %d: status = 200, want an error status", i+1)
+		}
+		if got := rec.Header().Get("X-Cache"); got != "" {
+			t.Fatalf("request %d: X-Cache = %q, want empty", i+1, got)
+		}
+	}
+	if mock.embeddingCalls != 2 {
+		t.Fatalf("provider calls = %d, want 2", mock.embeddingCalls)
 	}
 }
 
