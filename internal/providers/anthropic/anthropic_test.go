@@ -1624,6 +1624,11 @@ func TestSanitizeAnthropicSchema(t *testing.T) {
 			want:  `{"type":"object","properties":{"minimum":{"type":"number"},"not":{"type":"string"}},"required":["minimum"],"additionalProperties":false}`,
 		},
 		{
+			name:  "drops string length bounds but keeps pattern",
+			input: `{"type":"object","properties":{"s":{"type":"string","minLength":1,"maxLength":8,"pattern":"^P"}}}`,
+			want:  `{"type":"object","properties":{"s":{"type":"string","pattern":"^P"}},"additionalProperties":false}`,
+		},
+		{
 			name:  "keeps enums and nullable unions",
 			input: `{"type":"object","properties":{"c":{"type":"string","enum":["a","b"]},"d":{"type":["string","null"]}}}`,
 			want:  `{"type":"object","properties":{"c":{"type":"string","enum":["a","b"]},"d":{"type":["string","null"]}},"additionalProperties":false}`,

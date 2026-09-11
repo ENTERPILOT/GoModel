@@ -180,9 +180,10 @@ Anthropic's schema compiler is stricter than OpenAI's, so GoModel adapts the
 schema before sending it:
 
 - every object schema gets the mandatory `"additionalProperties": false`
-- validation-only keywords Anthropic rejects (`minimum`, `maximum`,
-  `multipleOf`, `minItems`, `maxItems`, `uniqueItems`, `propertyNames`, `not`,
-  `if`/`then`/`else`, …) are dropped
+- validation-only keywords Anthropic does not honor (`minimum`, `maximum`,
+  `multipleOf`, `minItems`, `maxItems`, `uniqueItems`, `minLength`,
+  `maxLength`, `propertyNames`, `not`, `if`/`then`/`else`, …) are dropped;
+  `pattern` is kept, because Anthropic does enforce it
 - `oneOf` is relaxed to `anyOf`, and unknown string `format` values are dropped
 
 Nested objects, arrays, `enum`, `const`, `anyOf`, and `$ref`/`$defs` are passed

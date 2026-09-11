@@ -100,8 +100,10 @@ func dropUnsupportedVerbosity(extraFields core.UnknownJSONFields) {
 }
 
 // unsupportedSchemaKeywords are the JSON Schema keywords Anthropic's structured
-// output compiler rejects outright. They are validation-only constraints, so
-// dropping them keeps the schema's shape intact.
+// output compiler does not honor: most are rejected outright, and the string
+// length bounds are documented as unsupported and silently ignored. They are
+// validation-only constraints, so dropping them keeps the schema's shape
+// intact. "pattern" is absent on purpose — Anthropic does enforce it.
 var unsupportedSchemaKeywords = map[string]struct{}{
 	"$schema":               {},
 	"contains":              {},
@@ -114,10 +116,12 @@ var unsupportedSchemaKeywords = map[string]struct{}{
 	"if":                    {},
 	"maxContains":           {},
 	"maxItems":              {},
+	"maxLength":             {},
 	"maxProperties":         {},
 	"maximum":               {},
 	"minContains":           {},
 	"minItems":              {},
+	"minLength":             {},
 	"minProperties":         {},
 	"minimum":               {},
 	"multipleOf":            {},
