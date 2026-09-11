@@ -1,6 +1,7 @@
 package core
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -54,6 +55,43 @@ func TestNewInvalidRequestBodyErrorNamesMemberOnCanonicalRequests(t *testing.T) 
 				t.Errorf("message = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The Responses input union is decoded from its own fragment, so its decoder
+// positions mean nothing in the request body: the error must name "input", and
+// never an innocent member that happens to sit at that byte.
+func TestNewInvalidRequestBodyErrorAttributesNestedResponsesInput(t *testing.T) {
+	body := []byte(`{"model":"gpt-4.1-mini","metadata":{"k":"v"},"input":[5]}`)
+	err := json.Unmarshal(body, &ResponsesRequest{})
+	if err == nil {
+		t.Fatal("body decoded without error")
+	}
+	gatewayErr := NewInvalidRequestBodyError(body, err)
+	if gatewayErr.Message != "invalid request body: input: must be an object" {
+		t.Errorf("message = %q, want it to blame input", gatewayErr.Message)
+	}
+	if gatewayErr.Param == nil || *gatewayErr.Param != "input" {
+		t.Errorf("param = %v, want input", gatewayErr.Param)
+	}
+}
+
+// A position landing on a member that already holds the expected type cannot
+// be the one that failed — it comes from a fragment the decoder handled on its
+// own — so the error must not be pinned on that member.
+func TestDescribeJSONDecodeErrorDiscardsMisleadingPositions(t *testing.T) {
+	body := []byte(`{"model":"gpt-4.1-mini","messages":[{"role":"user"}]}`)
+	// An offset inside "messages", which is already the array the decoder wanted.
+	detail, param := describeJSONDecodeError(body, &json.UnmarshalTypeError{
+		Value:  "string",
+		Type:   reflect.TypeOf([]string{}),
+		Offset: 35,
+	})
+	if detail != "a field has the wrong type: expected an array" {
+		t.Errorf("detail = %q, want the unattributed message", detail)
+	}
+	if param != "" {
+		t.Errorf("param = %q, want empty", param)
 	}
 }
 
