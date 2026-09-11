@@ -375,6 +375,7 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 			markRequestFailoverUsed(c)
 		}
 		stream := s.wrapPluginStream(ctx, workflow, responsesStreamDialect(), func() *pluginapi.Prompt { return promptOf(exchange.FromResponsesRequest(req)) }, result.Stream)
+		stream = withPreviousResponseID(stream, chainedFrom(ctx, req))
 		if turn := conversationTurnFromContext(ctx); turn != nil {
 			stream = turn.persistingStream(ctx, stream)
 		}

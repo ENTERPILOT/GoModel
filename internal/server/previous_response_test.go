@@ -252,8 +252,12 @@ func TestResponsesWithPreviousResponseID_StreamedPredecessorChains(t *testing.T)
 	srv := New(provider, nil)
 	store := srv.handler.currentResponseStore()
 
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra","stream":true}`); rec.Code != http.StatusOK {
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra","stream":true}`)
+	if rec.Code != http.StatusOK {
 		t.Fatalf("turn one status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "previous_response_id") {
+		t.Fatalf("an unchained stream must not name a predecessor: %s", rec.Body.String())
 	}
 	waitForStoredResponse(t, store, "resp_s1")
 	stored, err := store.Get(context.Background(), "resp_s1")
@@ -265,8 +269,13 @@ func TestResponsesWithPreviousResponseID_StreamedPredecessorChains(t *testing.T)
 	}
 
 	provider.streamData = streamedResponseData("resp_s2", "still zebra")
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"sure?","previous_response_id":"resp_s1","stream":true}`); rec.Code != http.StatusOK {
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"sure?","previous_response_id":"resp_s1","stream":true}`)
+	if rec.Code != http.StatusOK {
 		t.Fatalf("turn two status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	// The client sees the link on the streamed response, as on a buffered one.
+	if !strings.Contains(rec.Body.String(), `"previous_response_id":"resp_s1"`) {
+		t.Fatalf("streamed chained response must name its predecessor: %s", rec.Body.String())
 	}
 	waitForStoredResponse(t, store, "resp_s2")
 	stored, err = store.Get(context.Background(), "resp_s2")
