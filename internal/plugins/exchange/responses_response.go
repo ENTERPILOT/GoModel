@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -153,10 +154,15 @@ func ApplyToResponsesResponse(original *core.ResponsesResponse, c *pluginapi.Com
 			return nil, fmt.Errorf("exchange: choice parts changed structurally (%d parts, %d output entries); use ReplaceText", len(parts), len(locs))
 		}
 		for i, part := range parts {
-			if part.Kind != pluginapi.PartText || locs[i].content < 0 {
-				continue
+			switch {
+			case part.Kind == pluginapi.PartText && locs[i].content >= 0:
+				result.Output[locs[i].item].Content[locs[i].content].Text = part.Text
+			case part.Kind == pluginapi.PartToolCall && part.ToolCall != nil && locs[i].content < 0:
+				item := &result.Output[locs[i].item]
+				if item.Type == "function_call" && !bytes.Equal(argumentsFromString(item.Arguments), part.ToolCall.Arguments) {
+					item.Arguments = argumentsToString(part.ToolCall.Arguments)
+				}
 			}
-			result.Output[locs[i].item].Content[locs[i].content].Text = part.Text
 		}
 	}
 	return &result, nil

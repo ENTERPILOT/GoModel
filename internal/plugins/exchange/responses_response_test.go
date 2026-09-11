@@ -137,3 +137,20 @@ func TestCompletionToResponsesResponse(t *testing.T) {
 		t.Errorf("nil completion output = %+v", empty.Output)
 	}
 }
+
+func TestApplyToResponsesResponseToolArguments(t *testing.T) {
+	resp, c := responsesCompletion(t)
+	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{"a":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyToResponsesResponse(resp, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applied.Output[2].Arguments; got != `{"a":2}` {
+		t.Errorf("arguments = %q", got)
+	}
+	if resp.Output[2].Arguments != `{"a":1}` {
+		t.Error("original mutated")
+	}
+}

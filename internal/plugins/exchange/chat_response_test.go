@@ -118,3 +118,26 @@ func TestCompletionToChatResponse(t *testing.T) {
 		t.Error("nil completion must still yield one choice")
 	}
 }
+
+func TestApplyToChatResponseToolArguments(t *testing.T) {
+	resp, c := chatCompletion(t)
+	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{"to":"a@b.c"}`)); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := ApplyToChatResponse(resp, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := applied.Choices[0].Message.ToolCalls[0].Function.Arguments; got != `{"to":"a@b.c"}` {
+		t.Errorf("arguments = %q", got)
+	}
+	if resp.Choices[0].Message.ToolCalls[0].Function.Arguments != "{}" {
+		t.Error("original mutated")
+	}
+	if err := c.SetToolArguments(0, "nope", json.RawMessage(`{}`)); err == nil {
+		t.Error("unknown call accepted")
+	}
+	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{`)); err == nil {
+		t.Error("invalid JSON accepted")
+	}
+}

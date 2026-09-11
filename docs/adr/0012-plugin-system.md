@@ -298,8 +298,8 @@ list them first, while all instances stay in one store and one editor.
 A plugin type reaches the catalog in one of three ways:
 
 - built in: `internal/plugins/builtin` registers `system_prompt`,
-  `llm_based_altering`, `string_replace`, `header_edit`, `llm_judge`, and
-  the `cheapest_healthy` route strategy, each importing only `pluginapi` so
+  `llm_based_altering`, `string_replace`, `header_edit`, `llm_judge`,
+  `presidio`, and the `cheapest_healthy` route strategy, each importing only `pluginapi` so
   they double as reference implementations;
 - compiled in: `ext.RegisterPlugin(factory)` before `run.Run`, the same
   surface Pro uses for rewriters;

@@ -341,7 +341,8 @@ guardrails:
   rules:
     # Each entry is a guardrail instance built from a plugin (`type`). Built-in
     # plugins: system_prompt, llm_based_altering, string_replace, header_edit,
-    # llm_judge; loaded .so plugins are referenced by their manifest name.
+    # llm_judge, presidio; loaded .so plugins are referenced by their manifest
+    # name.
     # Instances are seeded into the guardrails store and referenced by the
     # default workflow at `order` in `phase` (prompt | response | stream,
     # default prompt). Guardrails with the same "order" run in parallel;
@@ -366,6 +367,17 @@ guardrails:
     #     mode: "regex"                 # literal (default) | regex
     #     rules: |                      # one "find => replace" per line (a YAML list also works)
     #       sk-[A-Za-z0-9]{20,} => [redacted]
+
+    # Example: anonymize personal data with a Presidio analyzer sidecar
+    # (docker run -p 5002:3000 ghcr.io/data-privacy-stack/presidio-analyzer).
+    # - name: "pii"
+    #   type: "presidio"
+    #   order: 1
+    #   timeout_ms: 5000
+    #   config:
+    #     analyzer_url: "http://localhost:5002"
+    #     entities: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"]
+    #     block_entities: ["CREDIT_CARD"]
 
     # Example: a second system_prompt instance running at the same order (parallel)
     # - name: "compliance-prompt"
