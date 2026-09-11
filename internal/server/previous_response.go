@@ -26,10 +26,17 @@ import (
 // and still gives a translated failover target a request it can serve.
 //
 // Most requests arrive here already expanded (see ResolveResponsesHistory);
-// only an id kept for a native primary can still need it.
+// only an id kept for a native primary can still need it. An id forwarded to
+// a native provider passes the ownership check every attempt, so a stored
+// response outside the caller's access scope is never resolved upstream under
+// the gateway's shared provider credential.
 func (s *translatedInferenceService) PatchResponsesAttempt(ctx context.Context, req *core.ResponsesRequest, providerType string) (*core.ResponsesRequest, error) {
-	if req == nil || strings.TrimSpace(req.PreviousResponseID) == "" || s.providerTypeResolvesPreviousResponse(providerType) {
+	if req == nil || strings.TrimSpace(req.PreviousResponseID) == "" {
 		return req, nil
+	}
+	if s.providerTypeResolvesPreviousResponse(providerType) {
+		_, err := s.nativePreviousResponse(ctx, req.PreviousResponseID)
+		return req, err
 	}
 	return s.withPreviousResponseHistory(ctx, req)
 }
@@ -47,7 +54,9 @@ func (s *translatedInferenceService) PatchResponsesAttempt(ctx context.Context, 
 // chat-translated provider, which a native provider cannot resolve.
 // Otherwise a native primary keeps the id, which it resolves itself, and
 // PatchResponsesAttempt expands it for a translated failover attempt. A
-// native primary also keeps an id the gateway has not stored.
+// native primary also keeps an id the gateway has not stored. An id whose
+// stored response belongs to another tenant is reported missing whatever the
+// target resolves it.
 func (s *translatedInferenceService) ResolveResponsesHistory(ctx context.Context, req *core.ResponsesRequest, providerTypes []string) (context.Context, *core.ResponsesRequest, error) {
 	if req == nil {
 		return ctx, req, nil
@@ -61,10 +70,16 @@ func (s *translatedInferenceService) ResolveResponsesHistory(ctx context.Context
 	primaryTranslated := len(providerTypes) > 0 && translated(providerTypes[0])
 	guarded := s.promptPhaseRuns(ctx) &&
 		(slices.ContainsFunc(providerTypes, translated) || s.promptPhaseEditsContent(ctx))
-	// The store lookup runs last: it is only needed while the id would
-	// otherwise be forwarded to a native provider.
-	if !primaryTranslated && !guarded && !s.gatewayOwnedPreviousResponse(ctx, req.PreviousResponseID) {
-		return ctx, req, nil
+	if !primaryTranslated {
+		// A chat-translated primary loads the stored response below, which
+		// enforces the same ownership rule; a native one has to be told.
+		replay, err := s.nativePreviousResponse(ctx, req.PreviousResponseID)
+		if err != nil {
+			return ctx, req, err
+		}
+		if !guarded && !replay {
+			return ctx, req, nil
+		}
 	}
 	patched, err := s.withPreviousResponseHistory(ctx, req)
 	if err != nil && !primaryTranslated {
@@ -91,27 +106,40 @@ func (s *translatedInferenceService) promptPhaseEditsContent(ctx context.Context
 	return !ok || editor.EditsPromptContent(ctx)
 }
 
-// gatewayOwnedPreviousResponse reports whether the referenced response is one
-// the gateway minted while serving a chat-translated provider. Such an id
-// exists only in the gateway's store, so a native Responses provider rejects
-// it; the history behind it has to be replayed instead. An id the gateway
-// does not hold (a response created directly against the provider, or one
-// that was not stored) is still forwarded untouched.
-func (s *translatedInferenceService) gatewayOwnedPreviousResponse(ctx context.Context, id string) bool {
+// nativePreviousResponse inspects the stored response behind an id that would
+// otherwise be forwarded to a native Responses provider, which resolves it
+// upstream under the gateway's shared provider credential. It reports whether
+// the gateway has to replay the history itself: a response the gateway minted
+// while serving a chat-translated provider exists only in its store, so a
+// native provider rejects the id. A stored response outside the caller's
+// access scope is reported missing, exactly as GET /v1/responses/{id} reports
+// it, so one tenant cannot continue (and read back) another tenant's
+// conversation. An id the gateway does not hold — a response created directly
+// against the provider, or one that was not stored — is still forwarded
+// untouched.
+func (s *translatedInferenceService) nativePreviousResponse(ctx context.Context, id string) (bool, error) {
 	id = strings.TrimSpace(id)
 	store := s.currentResponseStore()
 	if id == "" || store == nil {
-		return false
+		return false, nil
 	}
 	// A client that chains as soon as it has the response must not race the
 	// background snapshot write.
 	s.awaitPendingSnapshot(ctx, id)
 	stored, err := store.Get(ctx, id)
-	// Another tenant's response is indistinguishable from a missing one.
-	if err != nil || stored == nil || stored.Response == nil || !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
-		return false
+	if err != nil {
+		if errors.Is(err, responsestore.ErrNotFound) {
+			return false, nil
+		}
+		return false, core.NewProviderError("response_store", http.StatusInternalServerError, "failed to load previous response", err)
 	}
-	return !s.providerTypeResolvesPreviousResponse(stored.Provider)
+	if stored == nil || stored.Response == nil {
+		return false, nil
+	}
+	if !core.AccessScopeFromContext(ctx).Allows(stored.UserPath) {
+		return false, previousResponseNotFound(id)
+	}
+	return !s.providerTypeResolvesPreviousResponse(stored.Provider), nil
 }
 
 // clientTurn is a Responses request's own turn as the client sent it, before

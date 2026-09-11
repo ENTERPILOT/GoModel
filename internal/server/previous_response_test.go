@@ -246,19 +246,86 @@ func TestResponsesWithPreviousResponseID_NativeProviderReplaysGatewayMintedChain
 	}
 }
 
-// Another tenant's stored response stays invisible: it is neither replayed
-// nor reported, and the id reaches the provider as any unknown id does.
-func TestResponsesWithPreviousResponseID_ForeignTenantChainIsNotReplayed(t *testing.T) {
-	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "openai"), responseStore: responsestore.NewMemoryStore()}
-	storeChainedResponse(t, s.responseStore, "resp_other", "anthropic", "/tenant-b")
-
-	foreign := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-a"})
-	if s.gatewayOwnedPreviousResponse(foreign, "resp_other") {
-		t.Fatal("a foreign tenant must not reach another tenant's stored chain")
+// A native provider resolves previous_response_id upstream under the
+// gateway's shared credential, so forwarding another tenant's id would let
+// one tenant continue - and read back - a conversation the same gateway hides
+// from it on GET. Such an id is reported missing instead; an id the gateway
+// does not hold still reaches the provider, so chains created against it
+// directly keep working.
+func TestResponsesWithPreviousResponseID_NativeProviderEnforcesOwnership(t *testing.T) {
+	newService := func(t *testing.T) *translatedInferenceService {
+		t.Helper()
+		s := &translatedInferenceService{provider: previousResponseTestProvider(t, "openai"), responseStore: responsestore.NewMemoryStore()}
+		storeChainedResponse(t, s.responseStore, "resp_owned", "openai", "/tenant-b")
+		storeChainedResponse(t, s.responseStore, "resp_translated", "anthropic", "/tenant-b")
+		return s
 	}
-	owner := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-b"})
-	if !s.gatewayOwnedPreviousResponse(owner, "resp_other") {
-		t.Fatal("the owning tenant must replay its own gateway-minted chain")
+	scoped := func(path string) context.Context {
+		return core.WithAccessScope(context.Background(), core.AccessScope{UserPath: path})
+	}
+
+	tests := []struct {
+		name       string
+		ctx        context.Context
+		id         string
+		wantReplay bool
+		wantErr    bool
+	}{
+		{name: "foreign tenant is refused", ctx: scoped("/tenant-a"), id: "resp_owned", wantErr: true},
+		{name: "foreign tenant is refused for a gateway-minted id", ctx: scoped("/tenant-a"), id: "resp_translated", wantErr: true},
+		{name: "owner forwards its native id", ctx: scoped("/tenant-b"), id: "resp_owned"},
+		{name: "owner replays its gateway-minted id", ctx: scoped("/tenant-b"), id: "resp_translated", wantReplay: true},
+		{name: "unknown id is forwarded", ctx: scoped("/tenant-a"), id: "resp_unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newService(t)
+			replay, err := s.nativePreviousResponse(tt.ctx, tt.id)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "not found") {
+					t.Fatalf("error = %v, want not found", err)
+				}
+				return
+			}
+			if err != nil || replay != tt.wantReplay {
+				t.Fatalf("nativePreviousResponse() = %v, %v, want %v, nil", replay, err, tt.wantReplay)
+			}
+			// Every dispatch attempt re-checks, so a native attempt of any
+			// request is covered even when the history was not expanded.
+			req := &core.ResponsesRequest{Model: "gpt-5-mini", Input: "again?", PreviousResponseID: tt.id}
+			if _, err := s.PatchResponsesAttempt(tt.ctx, req, "openai"); err != nil {
+				t.Fatalf("PatchResponsesAttempt() error = %v", err)
+			}
+		})
+	}
+}
+
+// The foreign-tenant rejection reaches the client as a 404, streamed or not,
+// the way an unknown id does on a chat-translated provider.
+func TestResponsesWithPreviousResponseID_ForeignTenantChainReturns404(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		provider := previousResponseTestProvider(t, "openai")
+		srv := New(provider, nil)
+		storeChainedResponse(t, srv.handler.currentResponseStore(), "resp_owned", "openai", "/tenant-b")
+
+		body := `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_owned","stream":` + map[bool]string{false: "false", true: "true"}[stream] + `}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		c := echo.New().NewContext(req, rec)
+		c.SetRequest(req.WithContext(core.WithAccessScope(req.Context(), core.AccessScope{UserPath: "/tenant-a"})))
+		if err := srv.handler.Responses(c); err != nil {
+			t.Fatalf("stream=%v handler.Responses() error = %v", stream, err)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("stream=%v status = %d (%s), want 404", stream, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "Previous response with id 'resp_owned' not found.") {
+			t.Fatalf("stream=%v body = %s, want the not-found message", stream, rec.Body.String())
+		}
+		if provider.capturedResponsesReq != nil {
+			t.Fatalf("stream=%v another tenant's chain must not reach the provider", stream)
+		}
 	}
 }
 

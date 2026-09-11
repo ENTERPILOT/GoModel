@@ -60,7 +60,11 @@ This enables:
   Responses providers receive the id itself and resolve it on their side, so
   they need no GoModel snapshot. An id GoModel minted for a chat-translated
   provider is replayed for them too, so a chain can move from Gemini or
-  Anthropic to OpenAI mid-conversation.
+  Anthropic to OpenAI mid-conversation. Ownership is enforced on every
+  provider: an id whose stored response belongs to another
+  [user path](/features/user-path#object-ownership) returns 404 instead of
+  being resolved upstream, while an id GoModel never stored is still
+  forwarded.
 
 The replayed history, like the items of a gateway-managed `conversation`, is
 merged into the input before the prompt-phase [guardrails](/advanced/guardrails)
