@@ -32,8 +32,19 @@ func withPreviousResponseID(stream io.ReadCloser, id string) io.ReadCloser {
 	if stream == nil || strings.TrimSpace(id) == "" {
 		return stream
 	}
-	return &chainedResponseStream{upstream: stream, id: id, buf: make([]byte, 32*1024)}
+	return &chainedResponseStream{
+		upstream: stream,
+		id:       id,
+		scanner:  streaming.EventScanner{MaxEventBytes: chainedEventMaxBytes},
+		buf:      make([]byte, 32*1024),
+	}
 }
+
+// chainedEventMaxBytes bounds the events held for rewriting, as transform
+// streams bound theirs: the terminal event repeats the whole output, so it
+// can far exceed the scanner's default. A larger event passes through
+// unnamed.
+const chainedEventMaxBytes = 4 * 1024 * 1024
 
 func (s *chainedResponseStream) Read(p []byte) (int, error) {
 	for len(s.out) == 0 {
@@ -60,20 +71,60 @@ func (s *chainedResponseStream) Close() error {
 	return s.upstream.Close()
 }
 
-var responseMemberKey = []byte(`"response":`)
+// responseEventTypes are the quoted types of the events that carry the
+// response object. Matching the type value, not the member layout, keeps the
+// check independent of how the provider formats its JSON while text deltas
+// are never decoded.
+var responseEventTypes = [][]byte{
+	[]byte(`"response.created"`),
+	[]byte(`"response.in_progress"`),
+	[]byte(`"response.queued"`),
+	[]byte(`"response.completed"`),
+	[]byte(`"response.incomplete"`),
+	[]byte(`"response.failed"`),
+}
+
+func carriesResponse(data []byte) bool {
+	for _, t := range responseEventTypes {
+		if bytes.Contains(data, t) {
+			return true
+		}
+	}
+	return false
+}
 
 // appendEvent appends ev to out, naming the predecessor on the response
 // object it carries.
 func (s *chainedResponseStream) appendEvent(out []byte, ev streaming.RawEvent) []byte {
-	if ev.Comment || ev.Oversized || !bytes.Contains(ev.Data, responseMemberKey) {
+	if ev.Comment || ev.Oversized || !carriesResponse(ev.Data) {
 		return append(out, ev.Raw...)
 	}
 	data, ok := s.nameResponse(ev.Data)
 	if !ok {
 		return append(out, ev.Raw...)
 	}
-	named := streaming.Event{Name: ev.Name, Data: data}
-	return append(out, named.Encode()...)
+	return appendWithData(out, ev.Raw, data)
+}
+
+// appendWithData appends the SSE block raw with its data lines replaced by
+// one line carrying data. Every other field (event, id, retry, comments)
+// stays in place, so reconnection metadata survives the rewrite.
+func appendWithData(out, raw, data []byte) []byte {
+	written := false
+	for line := range bytes.SplitSeq(bytes.TrimRight(raw, "\r\n"), []byte("\n")) {
+		if bytes.HasPrefix(line, []byte("data:")) {
+			if !written {
+				out = append(out, "data: "...)
+				out = append(out, data...)
+				out = append(out, '\n')
+				written = true
+			}
+			continue
+		}
+		out = append(out, line...)
+		out = append(out, '\n')
+	}
+	return append(out, '\n')
 }
 
 // nameResponse returns the event payload with previous_response_id set on
