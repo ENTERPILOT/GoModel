@@ -27,6 +27,11 @@ answer it with a safe message, or let it through with a warning.
   streams too; a plugin whose stream policy buffers has the same effect.
 </Warning>
 
+On `/v1/responses`, a stream-phase guardrail may drop, merge, or split events,
+so GoModel renumbers what it delivers: `sequence_number` still runs from `0`
+without gaps, up to the terminal `response.completed` (or `response.incomplete`
+/ `response.failed` on a cut stream).
+
 Guardrails work across all text-based endpoints:
 
 - `/v1/chat/completions`

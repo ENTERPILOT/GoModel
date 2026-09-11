@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +80,12 @@ type responsesCodec struct {
 	id, model, provider string
 	createdAt           int64
 	seq                 int
-	items               map[int]*responsesItem
+	// out is the next outgoing sequence_number while renumbering, and
+	// renumbering says the codec, not the upstream, numbers the events the
+	// client sees. See Renumber.
+	out         int
+	renumbering bool
+	items       map[int]*responsesItem
 	order               []int
 	// textIndex is the output_index of the most recently decoded text
 	// delta; emitted text deltas (which may be re-segmented copies) are
@@ -118,6 +124,56 @@ func (c *responsesCodec) Decode(raw RawEvent, seq int) Event {
 		ev.Kind = KindFinish
 	}
 	return ev
+}
+
+// BeginRenumber puts the codec in renumbering mode.
+func (c *responsesCodec) BeginRenumber() { c.renumbering = true }
+
+// Renumber stamps the next outgoing sequence_number on an event about to
+// reach the client, so a stream that drops, merges, splits or injects events
+// still delivers 0..N without gaps. An event whose number is already the
+// right one is left untouched (ok is false), which keeps an unedited
+// pass-through byte identical.
+func (c *responsesCodec) Renumber(ev Event) (Event, bool) {
+	if ev.Kind == KindDone || !jsonObject(ev.Data) {
+		return ev, false
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(ev.Data, &top); err != nil {
+		return ev, false
+	}
+	if _, numbered := top["sequence_number"]; !numbered {
+		return ev, false
+	}
+	next := c.nextSeq()
+	if current, err := strconv.Atoi(string(bytes.TrimSpace(top["sequence_number"]))); err == nil && current == next {
+		return ev, false
+	}
+	encoded, err := json.Marshal(next)
+	if err != nil {
+		return ev, false
+	}
+	top["sequence_number"] = encoded
+	data, err := json.Marshal(top)
+	if err != nil {
+		return ev, false
+	}
+	ev.Data = data
+	return ev, true
+}
+
+// nextSeq returns the number the next emitted event carries: the outgoing
+// count while renumbering, and otherwise one past the highest number seen
+// upstream.
+func (c *responsesCodec) nextSeq() int {
+	if c.renumbering {
+		n := c.out
+		c.out++
+		return n
+	}
+	n := c.seq
+	c.seq++
+	return n
 }
 
 func (c *responsesCodec) remember(view *responsesEventView) {
@@ -256,8 +312,8 @@ func (c *responsesCodec) RewriteText(ev Event, text string) (Event, error) {
 }
 
 // StripTerminal is a no-op: a Responses text delta carries no per-choice
-// terminal members. A re-segmented delta repeats its sequence_number, which
-// clients do not act on.
+// terminal members. A re-segmented delta is renumbered on its way out, so it
+// does not repeat the sequence_number of the chunk it was rendered from.
 func (c *responsesCodec) StripTerminal(ev Event) (Event, bool) { return ev, false }
 
 // Split is a no-op: a Responses event carries one delta.
@@ -474,8 +530,7 @@ func isResponsesRestatingEvent(ev Event) bool {
 // emit appends one event with the next sequence_number.
 func (c *responsesCodec) emit(out [][]byte, name string, payload map[string]any) [][]byte {
 	payload["type"] = name
-	payload["sequence_number"] = c.seq
-	c.seq++
+	payload["sequence_number"] = c.nextSeq()
 	encoded, err := encodeJSONEvent(name, payload)
 	if err != nil {
 		return out

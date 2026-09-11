@@ -138,7 +138,7 @@ func NewTransformedSSEStream(upstream io.ReadCloser, codec Codec, t Transformer,
 	if opts.MinChunkChars > MaxMinChunkChars {
 		opts.MinChunkChars = MaxMinChunkChars
 	}
-	return &transformedSSEStream{
+	s := &transformedSSEStream{
 		upstream: upstream,
 		codec:    codec,
 		t:        t,
@@ -147,11 +147,20 @@ func NewTransformedSSEStream(upstream io.ReadCloser, codec Codec, t Transformer,
 		readBuf:  make([]byte, transformReadBufferSize),
 		pending:  make(map[pendingKey]*pendingText),
 	}
+	// Dropped, merged, split and injected events would leave gaps in a
+	// numbered dialect, so the codec numbers what actually goes out.
+	if r, ok := codec.(Renumberer); ok {
+		r.BeginRenumber()
+		s.renumber = r
+	}
+	return s
 }
 
 type transformedSSEStream struct {
 	upstream io.ReadCloser
 	codec    Codec
+	// renumber is codec when its dialect numbers events, nil otherwise.
+	renumber Renumberer
 	t        Transformer
 	opts     TransformOptions
 	scanner  EventScanner
@@ -389,13 +398,12 @@ func (s *transformedSSEStream) apply(ev Event, raw []byte) {
 		rewritten, err := s.codec.RewriteText(ev, decision.Text)
 		if err != nil {
 			s.report(fmt.Errorf("streaming: replace on event %d (%s): %w", ev.Seq, ev.Kind, err))
-			s.pass(ev, raw)
+			s.deliver(ev, raw)
 			return
 		}
-		s.codec.Track(rewritten)
-		s.out = rewritten.appendEncoded(s.out)
+		s.deliver(rewritten, nil)
 	default:
-		s.pass(ev, raw)
+		s.deliver(ev, raw)
 	}
 }
 
@@ -418,7 +426,15 @@ func (s *transformedSSEStream) decide(ev *Event) (Decision, bool) {
 	return decision, true
 }
 
-func (s *transformedSSEStream) pass(ev Event, raw []byte) {
+// deliver numbers ev for the client when the dialect numbers events, records
+// it as emitted and writes it out. raw, when set, is relayed verbatim unless
+// renumbering rewrote the payload.
+func (s *transformedSSEStream) deliver(ev Event, raw []byte) {
+	if s.renumber != nil {
+		if renumbered, changed := s.renumber.Renumber(ev); changed {
+			ev, raw = renumbered, nil
+		}
+	}
 	s.codec.Track(ev)
 	if raw != nil {
 		s.write(raw)
@@ -592,9 +608,7 @@ func (s *transformedSSEStream) emitEnvelope(key pendingKey, p *pendingText) {
 		return
 	}
 	p.terminal = false
-	ev := s.resegment(key, p.closer, "")
-	s.codec.Track(ev)
-	s.out = ev.appendEncoded(s.out)
+	s.deliver(s.resegment(key, p.closer, ""), nil)
 }
 
 // inspect hands text to the transformer as one event of the window's kind
@@ -626,9 +640,7 @@ func (s *transformedSSEStream) emitText(key pendingKey, template Event, text str
 	if text == "" {
 		return
 	}
-	ev := s.resegment(key, template, text)
-	s.codec.Track(ev)
-	s.out = ev.appendEncoded(s.out)
+	s.deliver(s.resegment(key, template, text), nil)
 }
 
 func (s *transformedSSEStream) resegment(key pendingKey, template Event, text string) Event {
