@@ -35,24 +35,100 @@ type modelInfo struct {
 	ContextLength int            `json:"context_length"`
 }
 
-// modelPricing holds one of Eden's per-token USD rate blocks.
+// modelPricing holds one of Eden's per-token USD rate blocks. Only the rates
+// whose unit and meaning both map onto a core.ModelPricing field are decoded.
+//
+// Left unread on purpose:
+//   - Context-length-tiered variants (input_cost_per_token_above_200k_tokens),
+//     the tiered_pricing list, and per-query search fees (an object, not a
+//     scalar). The gateway's pricing model has no equivalent, so reading them
+//     into a flat per-Mtok field would misprice the model.
+//   - output_cost_per_reasoning_token and input_cost_per_audio_token. The rates
+//     exist in Eden's catalog, but the gateway would apply them through usage's
+//     OpenAI-compatible mappings, which treat reasoning and audio counts as
+//     already included in the base completion/prompt totals and subtract the
+//     base rate accordingly. Eden's documented usage object carries only
+//     prompt_tokens, completion_tokens, and total_tokens -- no reasoning or
+//     audio breakdown -- so there is nothing to confirm that assumption
+//     against. Mapping them would stake cost math on an unverified split for
+//     token counts Eden does not currently report.
 type modelPricing struct {
-	InputCostPerToken       *float64 `json:"input_cost_per_token"`
-	OutputCostPerToken      *float64 `json:"output_cost_per_token"`
-	CacheReadInputTokenCost *float64 `json:"cache_read_input_token_cost"`
+	InputCostPerToken           *float64 `json:"input_cost_per_token"`
+	OutputCostPerToken          *float64 `json:"output_cost_per_token"`
+	CacheReadInputTokenCost     *float64 `json:"cache_read_input_token_cost"`
+	CacheCreationInputTokenCost *float64 `json:"cache_creation_input_token_cost"`
 }
 
-// effectivePricing picks the rate card to publish. Eden's `pricing` is what
-// the account is actually charged (any discount already applied), so it wins
-// whenever it carries a usable rate. `list_pricing` is the undiscounted card
-// and is used only as a fallback: an approximate rate still lets price
-// filters and the cost load-balancing strategy rank the model, whereas no
-// rate at all drops it from both.
+// pricingRate pairs one Eden per-token rate with the core.ModelPricing field
+// it feeds, so effectivePricing can resolve every rate the same way instead of
+// repeating the fallback per field. The shape follows usage.tokenCostMapping,
+// which already expresses the same read-field/write-field pairing.
+var pricingRates = []struct {
+	rate   func(*modelPricing) *float64
+	assign func(*core.ModelPricing, float64)
+}{
+	{
+		func(p *modelPricing) *float64 { return p.InputCostPerToken },
+		func(c *core.ModelPricing, v float64) { c.InputPerMtok = &v },
+	},
+	{
+		func(p *modelPricing) *float64 { return p.OutputCostPerToken },
+		func(c *core.ModelPricing, v float64) { c.OutputPerMtok = &v },
+	},
+	{
+		func(p *modelPricing) *float64 { return p.CacheReadInputTokenCost },
+		func(c *core.ModelPricing, v float64) { c.CachedInputPerMtok = &v },
+	},
+	{
+		func(p *modelPricing) *float64 { return p.CacheCreationInputTokenCost },
+		func(c *core.ModelPricing, v float64) { c.CacheWritePerMtok = &v },
+	},
+}
+
+// effectivePricing builds the rate card to publish, resolving each rate
+// independently.
+//
+// Eden's `pricing` is what the account is actually charged — the undiscounted
+// `list_pricing` with the account discount already applied — so a usable
+// account rate always wins, including an explicit 0 for a genuinely free
+// model. `list_pricing` fills in only the individual rates `pricing` leaves
+// unusable. The fallback is per field rather than per block so a block that
+// prices some token types and not others keeps its account rates instead of
+// losing the rates it does not carry.
+//
+// Eden currently publishes the same key set in both blocks, so in practice
+// every rate resolves from `pricing`; the per-field path is what keeps that
+// from being load-bearing. A rate perMtok rejects as unusable (negative,
+// non-finite, overflowing) is treated the same as an absent one and may fall
+// back, since an approximate rate still lets price filters and the cost
+// load-balancing strategy rank the model, whereas no rate at all drops it
+// from both.
 func (m modelInfo) effectivePricing() *core.ModelPricing {
-	if pricing := m.Pricing.toCore(); pricing != nil {
-		return pricing
+	pricing := &core.ModelPricing{Currency: "USD"}
+	priced := false
+	for _, mapping := range pricingRates {
+		rate, ok := perMtok(rateFrom(m.Pricing, mapping.rate))
+		if !ok {
+			rate, ok = perMtok(rateFrom(m.ListPricing, mapping.rate))
+		}
+		if !ok {
+			continue
+		}
+		mapping.assign(pricing, rate)
+		priced = true
 	}
-	return m.ListPricing.toCore()
+	if !priced {
+		return nil
+	}
+	return pricing
+}
+
+// rateFrom reads one rate out of a rate block Eden may have omitted entirely.
+func rateFrom(block *modelPricing, field func(*modelPricing) *float64) *float64 {
+	if block == nil {
+		return nil
+	}
+	return field(block)
 }
 
 // ListModels returns Eden's live catalog, retaining the context window,
@@ -211,41 +287,17 @@ func stringSlice(value any) []string {
 	return result
 }
 
-// toCore converts one of Eden's per-token USD rate blocks into the gateway's
-// per-million-token pricing. Eden names the unit in each field
-// (input_cost_per_token), so the ×1e6 scaling is read off the contract rather
-// than assumed. A rate Eden omits stays absent: costing a token type at zero
-// because no price was published would understate spend, so only a rate Eden
-// explicitly reports as 0 prices at zero.
-func (p *modelPricing) toCore() *core.ModelPricing {
-	if p == nil {
-		return nil
-	}
-	input, hasInput := perMtok(p.InputCostPerToken)
-	output, hasOutput := perMtok(p.OutputCostPerToken)
-	cachedInput, hasCachedInput := perMtok(p.CacheReadInputTokenCost)
-	if !hasInput && !hasOutput && !hasCachedInput {
-		return nil
-	}
-
-	pricing := &core.ModelPricing{Currency: "USD"}
-	if hasInput {
-		pricing.InputPerMtok = &input
-	}
-	if hasOutput {
-		pricing.OutputPerMtok = &output
-	}
-	if hasCachedInput {
-		pricing.CachedInputPerMtok = &cachedInput
-	}
-	return pricing
-}
-
-// perMtok scales one per-token USD rate to per million tokens. Rates that are
-// absent, negative, or non-finite report no price rather than a wrong one, and
-// so does a rate large enough that scaling overflows to infinity: a corrupt
-// number here would propagate into every price comparison, budget total, and
-// cost-strategy decision downstream.
+// perMtok scales one per-token USD rate to per million tokens. Eden names the
+// unit in each field (input_cost_per_token), so the x1e6 scaling is read off
+// the contract rather than assumed.
+//
+// Rates that are absent, negative, or non-finite report no price rather than a
+// wrong one, and so does a rate large enough that scaling overflows to
+// infinity: a corrupt number here would propagate into every price comparison,
+// budget total, and cost-strategy decision downstream. A rate Eden explicitly
+// reports as 0 is a real price and is kept -- costing a token type at zero
+// because no price was published would understate spend, but a published zero
+// means free.
 func perMtok(perToken *float64) (float64, bool) {
 	if perToken == nil {
 		return 0, false

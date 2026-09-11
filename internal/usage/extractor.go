@@ -193,6 +193,11 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 		Endpoint:    endpoint,
 		InputTokens: resp.Usage.PromptTokens,
 		TotalTokens: resp.Usage.TotalTokens,
+		// Carry the provider's extra usage members into the cost pipeline, so
+		// an embeddings provider that returns an exact per-request charge is
+		// costed from that figure rather than from token rates. Nil for
+		// providers that report nothing beyond the token counts.
+		RawData: cloneRawData(resp.Usage.RawUsage),
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
@@ -201,8 +206,11 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 	// rates and understates the real call. Flag that — but not when the
 	// configured pricing determines the cost without token counts (a
 	// per-request price, or an explicit zero rate), where the recorded cost is
-	// correct and calling it uncalculated would be false.
+	// correct and calling it uncalculated would be false, and not when the
+	// cost came from a figure the provider itself reported, which is
+	// authoritative however many tokens it counted.
 	if resp.Usage.PromptTokens == 0 && resp.Usage.TotalTokens == 0 &&
+		!isProviderReportedCostSource(entry.CostSource) &&
 		tokenRatesAffectCost(effectiveEndpointPricing(endpoint, pricing...)) &&
 		entry.CostsCalculationCaveat == "" {
 		entry.CostsCalculationCaveat = caveatEmbeddingMissingUsage

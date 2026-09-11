@@ -223,3 +223,28 @@ func TestResponses_InheritsCostLifting(t *testing.T) {
 		t.Fatalf("Responses usage cost = %#v, want 0.0002349 carried through the chat translation", resp.Usage.RawUsage["cost"])
 	}
 }
+
+// TestChatCompletion_PropagatesUpstreamErrorWithoutNormalizing asserts an
+// upstream failure is returned as-is. Normalization must not run on an error
+// path, where there is no response to reconcile.
+func TestChatCompletion_PropagatesUpstreamErrorWithoutNormalizing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad model","type":"invalid_request_error"}}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("edenai-key", server.URL, server.Client(), llmclient.Hooks{})
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    slashedModel,
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+	})
+
+	if err == nil {
+		t.Fatal("ChatCompletion() error = nil, want the upstream error propagated")
+	}
+	if resp != nil {
+		t.Errorf("response = %+v, want nil alongside the error", resp)
+	}
+}

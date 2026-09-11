@@ -600,6 +600,20 @@ func isEdenAIProvider(providerType string) bool {
 	return strings.EqualFold(strings.TrimSpace(providerType), "edenai")
 }
 
+// isProviderReportedCostSource reports whether a CostSource names a charge the
+// provider itself returned, rather than one reconstructed from token counts and
+// a rate card. Callers use it to suppress caveats that only make sense for a
+// rate-card reconstruction: a provider-reported total is authoritative no
+// matter what token counts came with it.
+func isProviderReportedCostSource(source string) bool {
+	switch strings.TrimSpace(source) {
+	case CostSourceOpenRouterCredits, CostSourceXAITicks, CostSourceEdenAICost:
+		return true
+	default:
+		return false
+	}
+}
+
 func openRouterCreditCostSplit(rawData map[string]any, total float64) (float64, float64, bool) {
 	details, ok := nestedUsageMap(rawData["cost_details"])
 	if !ok {

@@ -27,6 +27,15 @@ endpoint:
 EDENAI_BASE_URL=https://api.edenai.run/v3
 ```
 
+<Warning>
+  Use an `https://` endpoint. GoModel withholds the Eden API key from any
+  cleartext destination, so an `http://` base URL reaches Eden
+  unauthenticated and fails with a 401 rather than sending the key in the
+  clear. The same applies to redirects: an HTTPS endpoint that redirects to
+  `http://` is refused instead of followed. Cleartext to `localhost` is
+  allowed, which is what keeps a local Eden-compatible proxy usable.
+</Warning>
+
 Or in `config.yaml`:
 
 ```yaml
@@ -34,6 +43,7 @@ providers:
   edenai:
     type: edenai
     api_key: "${EDENAI_API_KEY}"
+    # base_url: "https://api.edenai.run/v3"
 ```
 
 You can also add the credential from the **Providers** page in the admin
@@ -71,37 +81,65 @@ the router, filters, and cost strategies use:
 | Eden field | GoModel metadata |
 | ---------- | ---------------- |
 | `context_length` | context window |
-| `capabilities.supports_*` | capabilities (`reasoning`, `function_calling`, `prompt_caching`, …) |
+| `capabilities.supports_*` | capabilities, with the prefix stripped (`reasoning`, `function_calling`, `prompt_caching`, …) |
 | `capabilities.input_modalities` | `vision` / `audio` / `video` capabilities |
 | `capabilities.output_modalities` | modes and categories |
 | `pricing` | per-model pricing (see below) |
 
-Output modalities also decide what GoModel advertises: Eden's image- and
-speech-only models are filtered out of `/v1/models`, because this provider
-serves chat, embeddings, and passthrough only.
+Output modalities also decide what GoModel advertises: a model whose only
+output is audio or images is left out of `/v1/models`, because Eden here
+serves chat, embeddings, and passthrough only. In practice Eden's catalog
+publishes text output for every model, including the handful that also return
+images, so nothing is currently filtered.
 
 ## Pricing
 
 Eden publishes per-token USD rates per model, and GoModel converts them to its
 per-million-token representation (`input_cost_per_token: 6e-8` → `$0.06 /
-MTok`). Rates come from Eden's `pricing` block, which is what the account is
-actually charged; the undiscounted `list_pricing` block is ignored.
+MTok`).
+
+Rates come from Eden's `pricing` block, which is what the account is actually
+charged — the undiscounted `list_pricing` with any account discount already
+applied. Each rate is resolved on its own: a usable account rate always wins,
+and `list_pricing` supplies only the individual rates `pricing` does not carry.
+Eden currently publishes the same rates in both blocks, so in practice
+everything resolves from `pricing`; the per-rate fallback is what keeps a
+partially priced model from losing the rates it is missing, which would
+otherwise bill those token types at $0.
+
+A rate Eden reports as `0` is treated as genuinely free rather than missing,
+and a rate neither block publishes usably is left unset rather than invented.
+
+These rates cover input, output, cache reads, and cache writes. Eden's
+context-length-tiered rates (`input_cost_per_token_above_200k_tokens`), its
+`tiered_pricing` list, and its per-query search fees have no GoModel
+equivalent and are not read.
+
+Eden's reasoning and audio rates (`output_cost_per_reasoning_token`,
+`input_cost_per_audio_token`) are also left unread. GoModel would price those
+token types by subtracting the base rate, which assumes the counts are already
+part of the base totals — and Eden's usage object reports only
+`prompt_tokens`, `completion_tokens`, and `total_tokens`, so there is no
+breakdown to confirm that against. Those token types fall back to the base
+input/output rates instead.
 
 Pricing is read live from Eden — nothing is hard-coded, and Eden models do not
 need to be present in GoModel's central model catalog. This makes
 `EDENAI_MODEL_FILTER_MAX_PRICE_PER_MTOK`, cost-based load balancing, and
 price display work for Eden models.
 
-A rate Eden does not publish is left unset rather than treated as free, so a
-partially priced model is never silently undercounted.
+This discovered pricing is what model metadata shows, and what cost accounting
+falls back to when a response carries no exact charge. The exact per-request
+cost Eden returns takes precedence whenever it is available (see below).
 
 ## Request cost
 
 Eden returns the exact USD charge for each request as a top-level `cost`
-member, and GoModel records that figure as the request's cost instead of
-recomputing it from token counts. Eden reprices its upstreams automatically
-and applies account-level discounts, so its own number is authoritative in a
-way a rate-card reconstruction is not.
+member — on chat completions and on embeddings alike — and GoModel
+records that figure as the request's cost instead of recomputing it from token
+counts. Eden reprices its upstreams automatically and applies account-level
+discounts, so its own number is authoritative in a way a rate-card
+reconstruction is not.
 
 This makes Eden spend visible to usage records, budgets, cost dashboards, and
 observability, and the usage entry is labelled with the cost source
@@ -150,6 +188,12 @@ Eden's `/embeddings` route is OpenAI-compatible and uses the same
 ```json
 { "model": "openai/text-embedding-3-small", "input": "hello" }
 ```
+
+Embeddings responses carry the same Eden extensions as chat completions, so the
+exact `cost` Eden reports is recorded for them too. Eden's LLM catalog
+(`GET /v3/models`) does not list embedding models, so embedding IDs are
+forwarded without discovered metadata; pin them under `models:` if you want
+them advertised on `/v1/models`.
 
 ## Passthrough
 

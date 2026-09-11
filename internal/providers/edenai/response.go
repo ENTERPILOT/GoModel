@@ -113,14 +113,50 @@ func normalizeUpstreamProvider(resp *core.ChatResponse) {
 	resp.ExtraFields = merged
 }
 
-// normalizeEmbeddingResponse applies the same provider-field reasoning to
-// embeddings, which Eden also annotates with the upstream provider and which
-// feeds the same gateway.ResponseProviderType labeling. core.EmbeddingResponse
-// models no unknown-field container, so the upstream value is dropped rather
-// than relocated.
-func normalizeEmbeddingResponse(resp *core.EmbeddingResponse) {
+// embeddingResponse is Eden's embeddings envelope: the OpenAI-compatible shape
+// plus the two members Eden adds to it, the exact per-request "cost" in USD and
+// the upstream "provider" that served the request. Both sit at the response
+// root, which is why the provider decodes into this wrapper instead of straight
+// into core.EmbeddingResponse.
+type embeddingResponse struct {
+	core.EmbeddingResponse
+	Cost json.RawMessage `json:"cost"`
+}
+
+// normalizeEmbeddingResponse reconciles Eden's embeddings extensions with
+// GoModel's response semantics, the same way normalizeChatResponse does for
+// chat completions.
+func normalizeEmbeddingResponse(resp *embeddingResponse) {
 	if resp == nil {
 		return
 	}
+	liftEmbeddingCost(resp)
+	// Eden reports the upstream that served the request; Provider means the
+	// provider GoModel executed against, and the gateway treats a populated
+	// value as authoritative when labeling telemetry (see
+	// normalizeUpstreamProvider). Embeddings carry no unknown-field container
+	// to relocate the value into, so it is dropped rather than re-exposed.
 	resp.Provider = ""
+}
+
+// liftEmbeddingCost copies Eden's root-level embeddings "cost" into
+// Usage.RawUsage, where usage.ExtractFromEmbeddingResponse picks it up and
+// hands it to the cost pipeline as an exact, provider-reported charge.
+//
+// This is the embeddings twin of liftResponseCost, and screens the value the
+// same way: an existing usage-level cost is the more specific reading and wins,
+// and a null or otherwise unusable member is ignored so it cannot be recorded
+// as a real $0.00 charge.
+func liftEmbeddingCost(resp *embeddingResponse) {
+	cost, ok := decodeCost(resp.Cost)
+	if !ok {
+		return
+	}
+	if resp.Usage.RawUsage == nil {
+		resp.Usage.RawUsage = make(map[string]any, 1)
+	}
+	if _, exists := resp.Usage.RawUsage[costField]; exists {
+		return
+	}
+	resp.Usage.RawUsage[costField] = cost
 }

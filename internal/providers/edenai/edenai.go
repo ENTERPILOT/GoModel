@@ -62,29 +62,54 @@ var (
 	_ core.PassthroughProvider = (*Provider)(nil)
 )
 
-// New creates a new Eden AI provider.
+// New creates a new Eden AI provider. NewCompatibleProvider takes its
+// transport from CompatibleProviderConfig.HTTPClient, so the guarded client
+// compatibleConfig installs is the one that reaches the network.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{compat: openai.NewCompatibleProvider(cfg.APIKey, opts, compatibleConfig(
 		providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
+		nil,
 	))}
 }
 
 // NewWithHTTPClient creates a new Eden AI provider with a custom HTTP client.
 // If httpClient is nil, http.DefaultClient is used.
 //
+// The nil default is applied here rather than left to
+// NewCompatibleProviderWithHTTPClient so it stays the same default every other
+// chat-compatible provider gets from that helper. Eden always hands it a
+// non-nil client, so the helper's own nil branch is never reached.
+//
+// Either way the client carries Eden's redirect guard (see guardedHTTPClient),
+// installed on a copy so a shared client -- http.DefaultClient above all -- is
+// never modified.
+//
+// Unlike NewCompatibleProvider, NewCompatibleProviderWithHTTPClient takes its
+// transport from the positional argument and ignores
+// CompatibleProviderConfig.HTTPClient entirely, so the guarded client has to be
+// handed over there as well. Passing the raw caller client here would leave
+// this construction path — and only this one — following credential-leaking
+// redirects.
+//
 // The signature matches every other chat-compatible provider on main:
 // (apiKey, baseURL, httpClient, hooks).
 func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
-	return &Provider{compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(
-		providers.ResolveBaseURL(baseURL, defaultBaseURL),
-	))}
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	cfg := compatibleConfig(providers.ResolveBaseURL(baseURL, defaultBaseURL), httpClient)
+	return &Provider{compat: openai.NewCompatibleProviderWithHTTPClient(apiKey, cfg.HTTPClient, hooks, cfg)}
 }
 
-// compatibleConfig returns the shared OpenAI-compatible transport settings for Eden AI.
-func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+// compatibleConfig returns the shared OpenAI-compatible transport settings for
+// Eden AI. httpClient is the caller-supplied client, or nil to build the
+// gateway default; either way it is wrapped by guardedHTTPClient, so both
+// constructors get the same redirect policy from one place.
+func compatibleConfig(baseURL string, httpClient *http.Client) openai.CompatibleProviderConfig {
 	return openai.CompatibleProviderConfig{
 		ProviderName: providerType,
 		BaseURL:      baseURL,
+		HTTPClient:   guardedHTTPClient(httpClient),
 		SetHeaders:   setHeaders,
 	}
 }
@@ -92,7 +117,17 @@ func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 // setHeaders applies Eden AI's bearer-token authentication. CompatibleProvider
 // sends no credential when SetHeaders is nil (unlike ChatCompatible, which
 // defaults to bearer), so this must stay wired up.
+//
+// The credential is withheld from a destination that would carry it in
+// cleartext. Eden's base URL is operator-supplied, so an http:// override —
+// whether set by mistake or by a downgrade attempt — would otherwise put the
+// gateway's Eden key on the wire in plain text. Loopback is exempt, which is
+// what keeps local proxies and this package's httptest servers working. A
+// withheld credential yields an Eden 401 rather than a leaked key.
 func setHeaders(req *http.Request, apiKey string) {
+	if !credentialSafeURL(req.URL) {
+		return
+	}
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})
 }
 
@@ -146,13 +181,32 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 
 // Embeddings sends an embeddings request to Eden AI. Eden's /embeddings route
 // is OpenAI-compatible and takes the same provider/model IDs.
+//
+// The request is issued through the raw transport rather than
+// CompatibleProvider.Embeddings because Eden annotates the embeddings envelope
+// with the same two extensions it puts on chat completions — a root-level
+// "cost" and the upstream "provider" — and core.EmbeddingResponse models no
+// unknown-field container, so decoding straight into it would discard the
+// exact charge before anything could read it. Everything else matches what the
+// shared helper does: same endpoint, same operation label, and the same
+// EnsureModel backfill for a response that omits the model.
 func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (*core.EmbeddingResponse, error) {
-	resp, err := p.compat.Embeddings(ctx, req)
-	if err != nil {
+	if req == nil {
+		return nil, core.NewInvalidRequestError("embedding request is required", nil)
+	}
+	var resp embeddingResponse
+	if err := p.compat.Do(ctx, llmclient.Request{
+		Method:    http.MethodPost,
+		Endpoint:  "/embeddings",
+		Operation: llmclient.OperationEmbeddings,
+		Model:     req.Model,
+		Body:      req,
+	}, &resp); err != nil {
 		return nil, err
 	}
-	normalizeEmbeddingResponse(resp)
-	return resp, nil
+	core.EnsureModel(&resp.Model, req.Model)
+	normalizeEmbeddingResponse(&resp)
+	return &resp.EmbeddingResponse, nil
 }
 
 // Passthrough forwards an opaque request to Eden AI.

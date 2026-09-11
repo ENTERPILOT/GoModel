@@ -182,10 +182,31 @@ func TestListModels_FallsBackToListPricing(t *testing.T) {
 }
 
 // TestListModels_ListPricingDoesNotMaskApplicablePricing asserts the fallback
-// never overrides a usable applicable rate, including a partial one: a model
-// priced only for input keeps that rate rather than swapping in the full list
-// card.
+// never overrides a usable account rate: a model priced for input keeps its own
+// input rate even though the list card also carries one.
 func TestListModels_ListPricingDoesNotMaskApplicablePricing(t *testing.T) {
+	model := firstModel(t, `{"object":"list","data":[{
+		"id":"openai/gpt-4","object":"model",
+		"pricing": {"input_cost_per_token": 6e-8, "output_cost_per_token": 1.8e-7},
+		"list_pricing": {"input_cost_per_token": 9e-8, "output_cost_per_token": 2.8e-7}
+	}]}`)
+
+	assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.06)
+	assertPrice(t, "OutputPerMtok", model.Metadata.Pricing.OutputPerMtok, 0.18)
+}
+
+// TestListModels_ListPricingFillsOnlyMissingRates asserts the fallback is per
+// rate, not per block: an account block that prices input but not output keeps
+// its own input rate and takes only the missing output rate from the list card.
+//
+// Leaving the gap unpriced is not the safer option it looks like. A nil
+// OutputPerMtok makes usage.CalculateGranularCost skip the output side
+// entirely, so output tokens are billed at $0 and the recorded total is
+// silently short, with no caveat attached. The undiscounted list rate
+// overstates the output somewhat, which is the same trade the whole-block
+// fallback already accepts (see TestListModels_FallsBackToListPricing), and is
+// far closer to the real charge than zero.
+func TestListModels_ListPricingFillsOnlyMissingRates(t *testing.T) {
 	model := firstModel(t, `{"object":"list","data":[{
 		"id":"openai/gpt-4","object":"model",
 		"pricing": {"input_cost_per_token": 6e-8},
@@ -193,9 +214,146 @@ func TestListModels_ListPricingDoesNotMaskApplicablePricing(t *testing.T) {
 	}]}`)
 
 	assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.06)
+	assertPrice(t, "OutputPerMtok", model.Metadata.Pricing.OutputPerMtok, 0.28)
+}
+
+// TestListModels_ListPricingFillsMissingInputRate is the mirror case: an
+// account block that prices only output keeps that rate and fills input from
+// the list card.
+func TestListModels_ListPricingFillsMissingInputRate(t *testing.T) {
+	model := firstModel(t, `{"object":"list","data":[{
+		"id":"openai/gpt-4","object":"model",
+		"pricing": {"output_cost_per_token": 1.8e-7},
+		"list_pricing": {"input_cost_per_token": 9e-8, "output_cost_per_token": 2.8e-7}
+	}]}`)
+
+	assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.09)
+	assertPrice(t, "OutputPerMtok", model.Metadata.Pricing.OutputPerMtok, 0.18)
+}
+
+// TestListModels_ListPricingFillsSeveralMissingRates covers an account block
+// missing more than one rate, and confirms the rates it does carry -- including
+// an explicit zero -- are still preferred field by field.
+func TestListModels_ListPricingFillsSeveralMissingRates(t *testing.T) {
+	model := firstModel(t, `{"object":"list","data":[{
+		"id":"openai/gpt-4","object":"model",
+		"pricing": {"input_cost_per_token": 0},
+		"list_pricing": {
+			"input_cost_per_token": 9e-8,
+			"output_cost_per_token": 2.8e-7,
+			"cache_read_input_token_cost": 1.2e-8,
+			"cache_creation_input_token_cost": 1.5e-7
+		}
+	}]}`)
+
+	pricing := model.Metadata.Pricing
+	// An explicit account zero is a real price and must not be filled in.
+	assertPrice(t, "InputPerMtok", pricing.InputPerMtok, 0)
+	assertPrice(t, "OutputPerMtok", pricing.OutputPerMtok, 0.28)
+	assertPrice(t, "CachedInputPerMtok", pricing.CachedInputPerMtok, 0.012)
+	assertPrice(t, "CacheWritePerMtok", pricing.CacheWritePerMtok, 0.15)
+}
+
+// TestListModels_UnusableAccountRateFallsBackToList asserts a rate the account
+// block publishes but perMtok rejects (negative, non-finite, overflowing) is
+// treated like an absent one, so the list card can still supply a usable number
+// instead of the model losing that rate entirely.
+func TestListModels_UnusableAccountRateFallsBackToList(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rate string
+	}{
+		{"negative", "-1e-8"},
+		{"overflowing", "1e308"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := firstModel(t, `{"object":"list","data":[{
+				"id":"openai/gpt-4","object":"model",
+				"pricing": {"input_cost_per_token": `+tc.rate+`, "output_cost_per_token": 1.8e-7},
+				"list_pricing": {"input_cost_per_token": 9e-8, "output_cost_per_token": 2.8e-7}
+			}]}`)
+
+			assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.09)
+			assertPrice(t, "OutputPerMtok", model.Metadata.Pricing.OutputPerMtok, 0.18)
+		})
+	}
+}
+
+// TestListModels_UnusableRateInBothBlocksStaysUnpriced asserts a rate no block
+// publishes usably is left absent rather than invented.
+func TestListModels_UnusableRateInBothBlocksStaysUnpriced(t *testing.T) {
+	model := firstModel(t, `{"object":"list","data":[{
+		"id":"openai/gpt-4","object":"model",
+		"pricing": {"input_cost_per_token": 6e-8, "output_cost_per_token": -2e-7},
+		"list_pricing": {"input_cost_per_token": 9e-8, "output_cost_per_token": -2.8e-7}
+	}]}`)
+
+	assertPrice(t, "InputPerMtok", model.Metadata.Pricing.InputPerMtok, 0.06)
 	if model.Metadata.Pricing.OutputPerMtok != nil {
-		t.Errorf("OutputPerMtok = %v, want nil: the list card must not fill gaps in applicable pricing",
+		t.Errorf("OutputPerMtok = %v, want nil: neither block published a usable output rate",
 			*model.Metadata.Pricing.OutputPerMtok)
+	}
+}
+
+// TestListModels_CachePricingFields asserts both of Eden's cache rates reach
+// the matching core.ModelPricing fields, and that the rates whose usage
+// semantics are unconfirmed stay unmapped.
+//
+// The reasoning and audio rates are the ones deliberately skipped: see
+// modelPricing. Asserting they stay nil keeps a future change from wiring them
+// up without first establishing how Eden reports the matching token counts.
+func TestListModels_CachePricingFields(t *testing.T) {
+	model := firstModel(t, `{"object":"list","data":[{
+		"id":"openai/gpt-4","object":"model",
+		"pricing": {
+			"input_cost_per_token": 6e-8,
+			"output_cost_per_token": 1.8e-7,
+			"cache_read_input_token_cost": 1.2e-8,
+			"cache_creation_input_token_cost": 7.5e-8,
+			"output_cost_per_reasoning_token": 3.6e-7,
+			"input_cost_per_audio_token": 1e-6
+		}
+	}]}`)
+
+	pricing := model.Metadata.Pricing
+	assertPrice(t, "CachedInputPerMtok", pricing.CachedInputPerMtok, 0.012)
+	assertPrice(t, "CacheWritePerMtok", pricing.CacheWritePerMtok, 0.075)
+	if pricing.ReasoningOutputPerMtok != nil {
+		t.Errorf("ReasoningOutputPerMtok = %v, want nil: Eden reports no reasoning token count to price against",
+			*pricing.ReasoningOutputPerMtok)
+	}
+	if pricing.AudioInputPerMtok != nil {
+		t.Errorf("AudioInputPerMtok = %v, want nil: Eden reports no audio token count to price against",
+			*pricing.AudioInputPerMtok)
+	}
+}
+
+// TestListModels_TieredAndPerQueryPricingIgnored asserts the Eden pricing
+// members the gateway has no equivalent for are skipped rather than guessed at.
+// Eden publishes context-length-tiered rates, a tiered_pricing list, and
+// per-query search fees (an object, not a scalar); reading any of them into a
+// flat per-Mtok field would misprice the model.
+func TestListModels_TieredAndPerQueryPricingIgnored(t *testing.T) {
+	model := firstModel(t, `{"object":"list","data":[{
+		"id":"openai/gpt-4","object":"model",
+		"pricing": {
+			"input_cost_per_token": 6e-8,
+			"output_cost_per_token": 1.8e-7,
+			"input_cost_per_token_above_200k_tokens": 1.2e-7,
+			"output_cost_per_token_above_200k_tokens": 3.6e-7,
+			"search_context_cost_per_query": {"search_context_size_low": 0.01},
+			"tiered_pricing": [{"input_cost_per_token": 5e-8}]
+		}
+	}]}`)
+
+	pricing := model.Metadata.Pricing
+	assertPrice(t, "InputPerMtok", pricing.InputPerMtok, 0.06)
+	assertPrice(t, "OutputPerMtok", pricing.OutputPerMtok, 0.18)
+	if len(pricing.Tiers) != 0 {
+		t.Errorf("Tiers = %v, want empty: Eden's tiered_pricing shape is not mapped", pricing.Tiers)
+	}
+	if pricing.PerRequest != nil {
+		t.Errorf("PerRequest = %v, want nil: per-query search fees are not per-request charges", *pricing.PerRequest)
 	}
 }
 
@@ -328,6 +486,29 @@ func TestListModels_ModalityMapping(t *testing.T) {
 			capabilities:     `{"output_modalities":["text"],"input_modalities":["text","image","audio","video"]}`,
 			wantModes:        []string{"chat", "responses"},
 			wantCapabilities: []string{"vision", "audio", "video"},
+		},
+		{
+			// Eden's live catalog never publishes a video output modality
+			// (video appears only as an input), but the mode is mapped so a
+			// model Eden adds later is classified rather than silently
+			// advertised as chat.
+			name:         "video output becomes video_generation",
+			capabilities: `{"output_modalities":["video"]}`,
+			wantModes:    []string{"video_generation"},
+		},
+		{
+			// A model that outputs both text and video keeps its chat modes,
+			// so it stays advertised and is reached through chat.
+			name:         "video alongside text keeps the chat modes",
+			capabilities: `{"output_modalities":["text","video"]}`,
+			wantModes:    []string{"chat", "responses", "video_generation"},
+		},
+		{
+			// Text maps to two modes, so a repeated modality would duplicate
+			// them without the dedup in modes().
+			name:         "repeated modality is deduplicated",
+			capabilities: `{"output_modalities":["text","text","image","image"]}`,
+			wantModes:    []string{"chat", "responses", "image_generation"},
 		},
 		{
 			name:         "unknown modality is ignored",
