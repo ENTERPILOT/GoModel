@@ -31,7 +31,10 @@ func fakeAnalyzer(t *testing.T) *httptest.Server {
 		var req struct {
 			Text string `json:"text"`
 		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		type result struct {
 			EntityType string  `json:"entity_type"`
 			Start      int     `json:"start"`
@@ -49,7 +52,7 @@ func fakeAnalyzer(t *testing.T) *httptest.Server {
 			add("PERSON", i, i+len("Ann Lee"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(results))
+		_ = json.NewEncoder(w).Encode(results)
 	}))
 	t.Cleanup(srv.Close)
 	return srv

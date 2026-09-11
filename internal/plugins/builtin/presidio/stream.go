@@ -30,11 +30,11 @@ func (p *Plugin) OnStreamEvent(ctx context.Context, x *pluginapi.Exchange, ev *p
 		return pluginapi.Pass(), nil
 	}
 	rep := p.streamReport(x)
-	skip := runeBytes(ev.Text, ev.Overlap)
-	out, err := p.process(ctx, ev.Text, skip, unit{choice: ev.Choice}, p.mapping(x), rep, pass{restore: p.restore, requestID: x.Meta.RequestID})
+	spans, err := p.analyze(ctx, ev.Text, runeBytes(ev.Text, ev.Overlap), x.Meta.RequestID)
 	if err != nil {
 		return pluginapi.StreamDecision{}, err
 	}
+	out := p.rewriteOne(ev.Text, spans, unit{choice: ev.Choice}, false, p.mapping(x), rep, pass{restore: p.restore, requestID: x.Meta.RequestID})
 	if rep.blocked != "" {
 		return pluginapi.Terminate(p.enforce(CodeBlocked, rep.detail())), nil
 	}

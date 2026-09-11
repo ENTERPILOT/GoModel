@@ -3,7 +3,9 @@ package presidio
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -36,10 +38,12 @@ type unit struct {
 // tool call's arguments (one input per string value). apply writes the
 // outputs back.
 type job struct {
-	unit    unit
-	inputs  []string
-	outputs []string
-	apply   func(outputs []string) error
+	unit       unit
+	inputs     []string
+	spans      [][]span
+	outputs    []string
+	restorable bool
+	apply      func(outputs []string) error
 }
 
 // report accumulates what a phase found.
@@ -86,9 +90,13 @@ func (r *report) detail() map[string]any {
 
 // pass is what one phase does with the content it analyzes.
 type pass struct {
-	fromPrompt bool // placeholders allocated here are restorable
-	restore    bool // put restorable placeholders back
-	requestID  string
+	// prompt marks the prompt phase: placeholders allocated there for user,
+	// assistant, and tool content are restorable when restore is on.
+	// System and developer values are anonymized but never restored, so a
+	// model that repeats their placeholder cannot disclose them.
+	prompt    bool
+	restore   bool // put restorable placeholders back
+	requestID string
 }
 
 // OnPrompt analyzes the text of the prompt messages of the configured
@@ -100,13 +108,13 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 	var jobs []job
 	for _, t := range x.Prompt.TextTargets() {
 		if p.roles[t.Role] {
-			jobs = append(jobs, textJob(t, x.Prompt.SetTargetText))
+			jobs = append(jobs, textJob(t, p.restorable(t.Role), x.Prompt.SetTargetText))
 		}
 	}
 	if p.roles[pluginapi.RoleAssistant] {
 		for _, ref := range x.Prompt.ToolCalls() {
 			msgID, callID := ref.MessageID, ref.Call.ID
-			if j, ok := argsJob(unit{message: msgID}, ref.Call.Arguments, func(args json.RawMessage) error {
+			if j, ok := argsJob(unit{message: msgID}, ref.Call.Arguments, p.restorable(pluginapi.RoleAssistant), func(args json.RawMessage) error {
 				return x.Prompt.SetToolArguments(msgID, callID, args)
 			}); ok {
 				jobs = append(jobs, j)
@@ -115,11 +123,11 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 	}
 	rep := newReport()
 	m := p.mapping(x)
-	if err := p.run(ctx, jobs, m, rep, pass{fromPrompt: true, requestID: x.Meta.RequestID}); err != nil {
+	if err := p.run(ctx, jobs, m, rep, pass{prompt: true, requestID: x.Meta.RequestID}); err != nil {
 		return pluginapi.Decision{}, err
 	}
 	d := p.decide(rep)
-	if p.restore && !d.Blocks() && m.hasRestorable() {
+	if !d.Blocks() && m.hasRestorable() {
 		d.NoStore = true
 	}
 	return d, nil
@@ -133,7 +141,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 	}
 	var jobs []job
 	for _, t := range x.Response.TextTargets() {
-		jobs = append(jobs, textJob(t, x.Response.SetTargetText))
+		jobs = append(jobs, textJob(t, false, x.Response.SetTargetText))
 	}
 	for i, choice := range x.Response.Choices {
 		for _, part := range choice.Message.Parts {
@@ -141,7 +149,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 				continue
 			}
 			callID := part.ToolCall.ID
-			if j, ok := argsJob(unit{choice: i}, part.ToolCall.Arguments, func(args json.RawMessage) error {
+			if j, ok := argsJob(unit{choice: i}, part.ToolCall.Arguments, false, func(args json.RawMessage) error {
 				return x.Response.SetToolArguments(i, callID, args)
 			}); ok {
 				jobs = append(jobs, j)
@@ -155,22 +163,31 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 	return p.decide(rep), nil
 }
 
-func textJob(t pluginapi.TextTarget, set func(pluginapi.TextTarget, string) error) job {
+// restorable reports whether values of a prompt role may be put back into
+// the response: never for system and developer messages, and only when
+// this instance restores.
+func (p *Plugin) restorable(role pluginapi.Role) bool {
+	return p.restore && role != pluginapi.RoleSystem && role != pluginapi.RoleDeveloper
+}
+
+func textJob(t pluginapi.TextTarget, restorable bool, set func(pluginapi.TextTarget, string) error) job {
 	return job{
-		unit:   unit{message: t.MessageID, choice: t.Choice},
-		inputs: []string{t.Text},
-		apply:  func(out []string) error { return set(t, out[0]) },
+		unit:       unit{message: t.MessageID, choice: t.Choice},
+		inputs:     []string{t.Text},
+		restorable: restorable,
+		apply:      func(out []string) error { return set(t, out[0]) },
 	}
 }
 
-func argsJob(u unit, args json.RawMessage, set func(json.RawMessage) error) (job, bool) {
+func argsJob(u unit, args json.RawMessage, restorable bool, set func(json.RawMessage) error) (job, bool) {
 	tree, inputs, ok := argStrings(args)
 	if !ok || len(inputs) == 0 {
 		return job{}, false
 	}
 	return job{
-		unit:   u,
-		inputs: inputs,
+		unit:       u,
+		inputs:     inputs,
+		restorable: restorable,
 		apply: func(out []string) error {
 			encoded, err := withArgStrings(tree, out)
 			if err != nil {
@@ -181,43 +198,23 @@ func argsJob(u unit, args json.RawMessage, set func(json.RawMessage) error) (job
 	}, true
 }
 
-// run analyzes every job (at most 8 analyzer calls in flight), records the
-// findings in rep, and writes the rewritten content back when the action
-// edits or values are restored. A failed analyzer call fails the phase, so
-// fail_mode decides; nothing is written back then.
+// run analyzes every input (at most 8 analyzer calls in flight), then
+// rewrites them in document order and writes the results back when the
+// action edits or values are restored. Nothing is recorded or written, the
+// placeholder table included, until every analyzer call has succeeded: a
+// failed call fails the phase, so fail_mode decides.
 func (p *Plugin) run(ctx context.Context, jobs []job, m *mapping, rep *report, ps pass) error {
 	if len(jobs) == 0 {
 		return nil
 	}
-	errs := make([]error, len(jobs))
-	sem := make(chan struct{}, maxConcurrentAnalyses)
-	var wg sync.WaitGroup
-	for i := range jobs {
-		wg.Add(1)
-		go func(j *job, i int) {
-			defer wg.Done()
-			j.outputs = make([]string, len(j.inputs))
-			for k, text := range j.inputs {
-				select {
-				case sem <- struct{}{}:
-				case <-ctx.Done():
-					errs[i] = ctx.Err()
-					return
-				}
-				out, err := p.process(ctx, text, 0, j.unit, m, rep, ps)
-				<-sem
-				if err != nil {
-					errs[i] = err
-					return
-				}
-				j.outputs[k] = out
-			}
-		}(&jobs[i], i)
+	if err := p.analyzeAll(ctx, jobs, ps.requestID); err != nil {
+		return err
 	}
-	wg.Wait()
-	for _, err := range errs {
-		if err != nil {
-			return err
+	for i := range jobs {
+		j := &jobs[i]
+		j.outputs = make([]string, len(j.inputs))
+		for k, text := range j.inputs {
+			j.outputs[k] = p.rewriteOne(text, j.spans[k], j.unit, j.restorable, m, rep, ps)
 		}
 	}
 	if rep.blocked != "" || (p.action != ActionAnonymize && !ps.restore) {
@@ -225,14 +222,7 @@ func (p *Plugin) run(ctx context.Context, jobs []job, m *mapping, rep *report, p
 	}
 	for i := range jobs {
 		j := &jobs[i]
-		changed := false
-		for k := range j.inputs {
-			if j.inputs[k] != j.outputs[k] {
-				changed = true
-				break
-			}
-		}
-		if !changed {
+		if slices.Equal(j.inputs, j.outputs) {
 			continue
 		}
 		if err := j.apply(j.outputs); err != nil {
@@ -242,34 +232,72 @@ func (p *Plugin) run(ctx context.Context, jobs []job, m *mapping, rep *report, p
 	return nil
 }
 
-// process analyzes one string and returns it rewritten: anonymized when the
-// action is anonymize, then with restorable values put back when restoring.
-// Entities ending within the first skip bytes were seen in an earlier
-// stream event and are left alone.
-func (p *Plugin) process(ctx context.Context, text string, skip int, u unit, m *mapping, rep *report, ps pass) (string, error) {
+// analyzeAll fills j.spans for every job concurrently.
+func (p *Plugin) analyzeAll(ctx context.Context, jobs []job, requestID string) error {
+	errs := make([]error, len(jobs))
+	sem := make(chan struct{}, maxConcurrentAnalyses)
+	var wg sync.WaitGroup
+	for i := range jobs {
+		wg.Add(1)
+		go func(j *job, i int) {
+			defer wg.Done()
+			j.spans = make([][]span, len(j.inputs))
+			for k, text := range j.inputs {
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					errs[i] = ctx.Err()
+					return
+				}
+				spans, err := p.analyze(ctx, text, 0, requestID)
+				<-sem
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				j.spans[k] = spans
+			}
+		}(&jobs[i], i)
+	}
+	wg.Wait()
+	return errors.Join(errs...)
+}
+
+// analyze returns the entities of text as byte spans, leaving out those
+// ending within the first skip bytes (seen in an earlier stream event).
+// Blank text is not sent: the analyzer rejects it.
+func (p *Plugin) analyze(ctx context.Context, text string, skip int, requestID string) ([]span, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	results, err := p.client.analyze(ctx, text, requestID)
+	if err != nil {
+		return nil, err
+	}
+	var spans []span
+	for _, s := range byteSpans(text, results) {
+		if s.end > skip {
+			spans = append(spans, s)
+		}
+	}
+	return spans, nil
+}
+
+// rewriteOne records the spans of one string and returns it rewritten:
+// anonymized when the action is anonymize, then with restorable values put
+// back when restoring.
+func (p *Plugin) rewriteOne(text string, spans []span, u unit, restorable bool, m *mapping, rep *report, ps pass) string {
 	out := text
-	if strings.TrimSpace(text) != "" {
-		results, err := p.client.analyze(ctx, text, ps.requestID)
-		if err != nil {
-			return "", err
-		}
-		var spans []span
-		for _, s := range byteSpans(text, results) {
-			if s.end > skip {
-				spans = append(spans, s)
-			}
-		}
-		if len(spans) > 0 {
-			rep.record(u, spans, p.blockEntities)
-			if p.action == ActionAnonymize {
-				out = rewrite(text, spans, func(s span, value string) string {
-					if p.operator == OperatorReplace {
-						return m.placeholder(s.entity, value, ps.fromPrompt)
-					}
-					return staticReplacement(p.operator, value)
-				})
-				rep.add(len(spans), 0)
-			}
+	if len(spans) > 0 {
+		rep.record(u, spans, p.blockEntities)
+		if p.action == ActionAnonymize {
+			out = rewrite(text, spans, func(s span, value string) string {
+				if p.operator == OperatorReplace {
+					return m.placeholder(s.entity, value, ps.prompt && restorable)
+				}
+				return staticReplacement(p.operator, value)
+			})
+			rep.add(len(spans), 0)
 		}
 	}
 	if ps.restore {
@@ -277,7 +305,7 @@ func (p *Plugin) process(ctx context.Context, text string, skip int, u unit, m *
 		out, n = m.restore(out)
 		rep.add(0, n)
 	}
-	return out, nil
+	return out
 }
 
 func (r *report) record(u unit, spans []span, blocking map[string]bool) {
@@ -316,24 +344,25 @@ func (p *Plugin) mapping(x *pluginapi.Exchange) *mapping {
 	return m
 }
 
-// decide turns the findings into the configured decision.
+// decide turns the findings into the configured decision. A response
+// with restored values is kept out of the response cache.
 func (p *Plugin) decide(rep *report) pluginapi.Decision {
 	detail := rep.detail()
-	if rep.blocked != "" {
-		return p.enforce(CodeBlocked, detail)
-	}
-	if rep.found() {
-		switch p.action {
-		case ActionBlock, ActionRespond:
-			return p.enforce(Code, detail)
-		case ActionWarn:
-			return pluginapi.Warn(Code, p.message, detail)
-		}
-	}
-	if len(detail) == 0 {
+	var d pluginapi.Decision
+	switch {
+	case rep.blocked != "":
+		d = p.enforce(CodeBlocked, detail)
+	case rep.found() && (p.action == ActionBlock || p.action == ActionRespond):
+		d = p.enforce(Code, detail)
+	case rep.found() && p.action == ActionWarn:
+		d = pluginapi.Warn(Code, p.message, detail)
+	case len(detail) == 0:
 		return pluginapi.Allow()
+	default:
+		d = pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: detail}
 	}
-	return pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: detail}
+	d.NoStore = rep.restored > 0
+	return d
 }
 
 // enforce renders a detection as the blocking action: respond when that is

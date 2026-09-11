@@ -49,7 +49,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "api_key", Label: "API key", Input: pluginapi.InputSecret,
-				Help: "Optional bearer token sent as the Authorization header, for an analyzer behind an authenticating proxy. Presidio itself needs none.",
+				Help: "Optional bearer token sent as the Authorization header, for an analyzer behind an authenticating proxy. Presidio itself needs none. Needs an https:// analyzer URL unless it points at localhost.",
 			},
 			{
 				Key: "language", Label: "Language", Input: pluginapi.InputText, Default: DefaultLanguage,
@@ -108,7 +108,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 			},
 			{
 				Key: "restore", Label: "Restore values in the response", Input: pluginapi.InputBool, Default: false,
-				Help: "Put the original values back where the model repeats a placeholder, so the client sees its own data while the provider never does. Needs operator replace, and the instance in the response or stream phase as well as the prompt phase. Such responses are kept out of the response cache.",
+				Help: "Put the original values back where the model repeats a placeholder, so the client sees its own data while the provider never does. Values from system and developer messages are never put back. Needs operator replace, and an instance with restore in the response or stream phase as well as in the prompt phase. Such responses are kept out of the response cache.",
 			},
 			{
 				Key: "message", Label: "Message", Input: pluginapi.InputText, Default: DefaultMessage,

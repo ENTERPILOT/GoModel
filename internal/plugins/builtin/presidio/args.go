@@ -3,6 +3,7 @@ package presidio
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"sort"
 )
 
@@ -11,8 +12,13 @@ import (
 // and put back with [withArgStrings]. Arguments that are not a JSON object
 // or array yield nothing.
 func argStrings(args json.RawMessage) (any, []string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(args))
+	dec.UseNumber() // large integers survive the round trip
 	var v any
-	if err := json.Unmarshal(args, &v); err != nil {
+	if err := dec.Decode(&v); err != nil {
+		return nil, nil, false
+	}
+	if _, err := dec.Token(); err != io.EOF {
 		return nil, nil, false
 	}
 	switch v.(type) {

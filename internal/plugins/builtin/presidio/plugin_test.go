@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"unicode/utf8"
 
@@ -587,12 +588,149 @@ func TestSummarize(t *testing.T) {
 	p := New().(*Plugin)
 	for cfg, want := range map[string]string{
 		`{}`: "anonymize (replace), all entities, en",
-		`{"entities": ["PERSON"], "restore": true, "language": "de"}`:                    "anonymize (replace), PERSON, restore, de",
+		`{"entities": ["PERSON"], "restore": true, "language": "de"}`:                      "anonymize (replace), PERSON, restore, de",
 		`{"action": "block", "entities": ["PERSON", "URL"], "block_entities": ["US_SSN"]}`: "block, 3 entity types, 1 blocking, en",
 		`{"bogus": 1}`: "",
 	} {
 		if got := p.Summarize(json.RawMessage(cfg)); got != want {
 			t.Errorf("%s: %q, want %q", cfg, got, want)
+		}
+	}
+}
+
+func TestRestoreProvenance(t *testing.T) {
+	a := newAnalyzer(t, "Ann Lee", "Sam Ops")
+	in := newPlugin(t, a, `{"restore": true, "roles": ["system", "user"]}`)
+	out := newPlugin(t, a, `{"restore": true}`)
+	x := exchange(prompt(
+		text(pluginapi.RoleSystem, "m0", "Escalate to Sam Ops at ops@corp.io."),
+		text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
+	), nil)
+	if _, err := in.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Prompt.Message("m0").Text(); got != "Escalate to <PERSON_1> at <EMAIL_ADDRESS_1>." {
+		t.Fatalf("system = %q", got)
+	}
+	// The model is talked into repeating the system placeholders: they
+	// stay placeholders, while the user's own value comes back.
+	x.Response = completion("Contact <PERSON_1> at <EMAIL_ADDRESS_1>, <PERSON_2>.")
+	d, err := out.OnResponse(context.Background(), x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Response.Text(0); got != "Contact <PERSON_1> at <EMAIL_ADDRESS_1>, Ann Lee." {
+		t.Errorf("response = %q", got)
+	}
+	if !d.NoStore {
+		t.Errorf("restored response must not be cached: %+v", d)
+	}
+
+	// A prompt instance without restore never hands values to a response
+	// instance with restore.
+	plain := newPlugin(t, a, `{}`)
+	y := exchange(prompt(text(pluginapi.RoleUser, "m1", "I am Ann Lee.")), nil)
+	d, err = plain.OnPrompt(context.Background(), y)
+	if err != nil || d.NoStore {
+		t.Fatalf("prompt = %+v, %v", d, err)
+	}
+	y.Response = completion("Hello <PERSON_1>.")
+	if d, err = out.OnResponse(context.Background(), y); err != nil || d.NoStore {
+		t.Fatalf("response = %+v, %v", d, err)
+	}
+	if got := y.Response.Text(0); got != "Hello <PERSON_1>." {
+		t.Errorf("response = %q", got)
+	}
+}
+
+func TestPartialAnalyzerFailureLeavesNoState(t *testing.T) {
+	a := newAnalyzer(t, "Ann")
+	p := newPlugin(t, a, `{"restore": true}`)
+	// One of the two parts hits an analyzer failure.
+	var calls atomic.Int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1)%2 == 0 {
+			http.Error(w, `{"error":"down"}`, http.StatusBadGateway)
+			return
+		}
+		a.handle(w, r)
+	}))
+	t.Cleanup(proxy.Close)
+	p.client.baseURL = proxy.URL
+
+	x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Ann one"), text(pluginapi.RoleUser, "m2", "Ann two")), nil)
+	if _, err := p.OnPrompt(context.Background(), x); err == nil {
+		t.Fatal("expected the phase to fail")
+	}
+	if x.Prompt.Changes().Dirty {
+		t.Error("prompt edited despite the failure")
+	}
+	if m := p.mapping(x); m.hasRestorable() || len(m.byPlaceholder) != 0 {
+		t.Errorf("mapping kept state from the failed phase: %v", m.byPlaceholder)
+	}
+	// A later response phase (fail_mode open let the request continue)
+	// finds nothing to restore.
+	x.Response = completion("Hi <PERSON_1>")
+	restore := newPlugin(t, a, `{"restore": true}`)
+	if _, err := restore.OnResponse(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Response.Text(0); got != "Hi <PERSON_1>" {
+		t.Errorf("response = %q", got)
+	}
+}
+
+func TestPlaceholdersAreNumberedInDocumentOrder(t *testing.T) {
+	a := newAnalyzer(t, "Ann", "Bob", "Cid")
+	p := newPlugin(t, a, `{}`)
+	for range 5 {
+		x := exchange(prompt(text(pluginapi.RoleUser, "m1", "Cid"), text(pluginapi.RoleUser, "m2", "Bob"), text(pluginapi.RoleUser, "m3", "Ann and Cid")), nil)
+		if _, err := p.OnPrompt(context.Background(), x); err != nil {
+			t.Fatal(err)
+		}
+		got := x.Prompt.Message("m1").Text() + " " + x.Prompt.Message("m2").Text() + " " + x.Prompt.Message("m3").Text()
+		if got != "<PERSON_1> <PERSON_2> <PERSON_3> and <PERSON_1>" {
+			t.Fatalf("numbering = %q", got)
+		}
+	}
+}
+
+func TestToolArgumentsKeepLargeNumbers(t *testing.T) {
+	a := newAnalyzer(t, "Ann")
+	p := newPlugin(t, a, `{}`)
+	call := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "f", Arguments: json.RawMessage(`{"id":9007199254740993,"name":"Ann","ratio":1.10}`)}},
+	}}
+	x := exchange(prompt(call), nil)
+	if _, err := p.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(x.Prompt.ToolCalls()[0].Call.Arguments); got != `{"id":9007199254740993,"name":"<PERSON_1>","ratio":1.10}` {
+		t.Errorf("arguments = %s", got)
+	}
+	if _, _, ok := argStrings(json.RawMessage(`{"a":"b"} {"c":"d"}`)); ok {
+		t.Error("two JSON values accepted")
+	}
+}
+
+func TestAPIKeyNeedsHTTPS(t *testing.T) {
+	for _, cfg := range []string{
+		`{"api_key": "tok", "analyzer_url": "http://presidio.internal:5002"}`,
+		`{"api_key": "tok", "analyzer_url": "http://10.0.0.5:5002"}`,
+	} {
+		if err := New().Init(context.Background(), json.RawMessage(cfg), fakeHost{}); err == nil || !strings.Contains(err.Error(), "api_key needs an https:// analyzer_url") {
+			t.Errorf("%s: err = %v", cfg, err)
+		}
+	}
+	for _, cfg := range []string{
+		`{"api_key": "tok", "analyzer_url": "https://presidio.internal"}`,
+		`{"api_key": "tok", "analyzer_url": "http://localhost:5002"}`,
+		`{"api_key": "tok", "analyzer_url": "http://127.0.0.1:5002"}`,
+		`{"api_key": "tok", "analyzer_url": "http://[::1]:5002"}`,
+		`{"analyzer_url": "http://presidio.internal:5002"}`,
+	} {
+		if err := New().Init(context.Background(), json.RawMessage(cfg), fakeHost{}); err != nil {
+			t.Errorf("%s: %v", cfg, err)
 		}
 	}
 }

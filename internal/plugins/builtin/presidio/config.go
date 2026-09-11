@@ -3,6 +3,8 @@ package presidio
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -110,6 +112,9 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 		return settings{}, err
 	}
 	s.apiKey = strings.TrimSpace(s.apiKey)
+	if s.apiKey != "" && !strings.HasPrefix(s.analyzerURL, "https://") && !loopbackURL(s.analyzerURL) {
+		return settings{}, fmt.Errorf("%s: api_key needs an https:// analyzer_url (plain http is only allowed for localhost), so the token is not sent in clear", Name)
+	}
 	if s.language, err = parseString("language", cfg.Language, s.language); err != nil {
 		return settings{}, err
 	}
@@ -185,6 +190,20 @@ func decodeConfig(raw json.RawMessage) (settings, error) {
 		return settings{}, err
 	}
 	return s, nil
+}
+
+// loopbackURL reports whether the URL points at this host.
+func loopbackURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func validRole(r string) bool {

@@ -91,8 +91,8 @@ func ApplyToChatResponse(original *core.ChatResponse, c *pluginapi.Completion) (
 				return nil, fmt.Errorf("exchange: choice %d: %w", idx, err)
 			}
 			target.Message.Content = rewritten
-			applyToolArguments(target.Message.ToolCalls, calls)
 		}
+		applyToolArguments(target.Message.ToolCalls, calls)
 	}
 	return &result, nil
 }
