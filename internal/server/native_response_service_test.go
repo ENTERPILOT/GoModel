@@ -236,33 +236,51 @@ func TestGetStoredResponseKeepsConcurrentCancellation(t *testing.T) {
 }
 
 func TestGetStoredResponseServesSnapshotWhenRefreshFails(t *testing.T) {
-	store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
-	err := store.Create(context.Background(), &responsestore.StoredResponse{
-		Response:           &core.ResponsesResponse{ID: "resp_gateway", Object: "response", Provider: "mock", Status: "in_progress"},
-		Provider:           "mock",
-		ProviderResponseID: "provider_resp",
-	})
-	if err != nil {
-		t.Fatalf("store.Create() error = %v", err)
+	tests := []struct {
+		name         string
+		lifecycleErr error
+	}{
+		{name: "unsupported operation", lifecycleErr: unsupportedResponseOperation("native response retrieval is not available for this provider")},
+		{name: "not found upstream", lifecycleErr: core.NewNotFoundError("response not found")},
+		{name: "unexpected provider error", lifecycleErr: errors.New("refresh failed")},
 	}
-	provider := &mockProvider{
-		responseLifecycleErr: unsupportedResponseOperation("native response retrieval is not available for this provider"),
-	}
-	srv := New(provider, &Config{ResponseStore: store})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_gateway", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := responsestore.NewMemoryStore(responsestore.WithUnboundedRetention())
+			err := store.Create(context.Background(), &responsestore.StoredResponse{
+				Response:           &core.ResponsesResponse{ID: "resp_gateway", Object: "response", Provider: "mock", Status: "in_progress"},
+				Provider:           "mock",
+				ProviderResponseID: "provider_resp",
+			})
+			if err != nil {
+				t.Fatalf("store.Create() error = %v", err)
+			}
+			provider := &mockProvider{responseLifecycleErr: tt.lifecycleErr}
+			srv := New(provider, &Config{ResponseStore: store})
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var resp core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Status != "in_progress" || resp.ID != "resp_gateway" {
-		t.Fatalf("response = %+v, want the stored snapshot", resp)
+			req := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_gateway", nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+			}
+			var resp core.ResponsesResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if resp.Status != "in_progress" || resp.ID != "resp_gateway" {
+				t.Fatalf("response = %+v, want the stored snapshot", resp)
+			}
+			stored, err := store.Get(context.Background(), "resp_gateway")
+			if err != nil {
+				t.Fatalf("store.Get() error = %v", err)
+			}
+			if stored.Response.Status != "in_progress" {
+				t.Fatalf("stored status = %q, want the snapshot left unchanged", stored.Response.Status)
+			}
+		})
 	}
 }
 
