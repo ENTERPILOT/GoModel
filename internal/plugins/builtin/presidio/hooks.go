@@ -116,20 +116,18 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 			m.reserve(t.Text)
 		}
 	}
-	if p.roles[pluginapi.RoleAssistant] {
-		for _, ref := range x.Prompt.ToolCalls() {
-			msgID, callID := ref.MessageID, ref.Call.ID
-			if j, ok := argsJob(unit{message: msgID}, ref.Call.Arguments, p.restorable(pluginapi.RoleAssistant), func(args json.RawMessage) error {
-				return x.Prompt.SetToolArguments(msgID, callID, args)
-			}); ok {
-				jobs = append(jobs, j)
-			}
+	for _, ref := range x.Prompt.ToolCalls() {
+		// Reserved whether or not the arguments are analyzed: analysis reads
+		// neither object keys nor scalar arguments.
+		reserveArgs(m, ref.Call.Arguments)
+		if !p.roles[pluginapi.RoleAssistant] {
+			continue
 		}
-	} else {
-		// Unanalyzed arguments are reserved like unanalyzed text. The
-		// decoded strings are read, since JSON may escape "<" as "\u003c".
-		for _, ref := range x.Prompt.ToolCalls() {
-			reserveArgs(m, ref.Call.Arguments)
+		msgID, callID := ref.MessageID, ref.Call.ID
+		if j, ok := argsJob(unit{message: msgID}, ref.Call.Arguments, p.restorable(pluginapi.RoleAssistant), func(args json.RawMessage) error {
+			return x.Prompt.SetToolArguments(msgID, callID, args)
+		}); ok {
+			jobs = append(jobs, j)
 		}
 	}
 	rep := newReport()
@@ -149,6 +147,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 	if x == nil || x.Response == nil {
 		return pluginapi.Allow(), nil
 	}
+	m := p.mapping(x)
 	var jobs []job
 	for _, t := range x.Response.TextTargets() {
 		jobs = append(jobs, textJob(t, false, x.Response.SetTargetText))
@@ -159,6 +158,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 				continue
 			}
 			callID := part.ToolCall.ID
+			reserveArgs(m, part.ToolCall.Arguments)
 			if j, ok := argsJob(unit{choice: i}, part.ToolCall.Arguments, false, func(args json.RawMessage) error {
 				return x.Response.SetToolArguments(i, callID, args)
 			}); ok {
@@ -167,7 +167,7 @@ func (p *Plugin) OnResponse(ctx context.Context, x *pluginapi.Exchange) (plugina
 		}
 	}
 	rep := newReport()
-	if err := p.run(ctx, jobs, p.mapping(x), rep, pass{restore: p.restore, requestID: x.Meta.RequestID}); err != nil {
+	if err := p.run(ctx, jobs, m, rep, pass{restore: p.restore, requestID: x.Meta.RequestID}); err != nil {
 		return pluginapi.Decision{}, err
 	}
 	return p.decide(rep), nil

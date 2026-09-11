@@ -819,4 +819,25 @@ func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
 	if got := y.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
 		t.Fatalf("scalar prompt = %q", got)
 	}
+	// Object keys are reserved as well as values.
+	keyed := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"\u003cPERSON_1\u003e": "x"}`)}},
+	}}
+	z := plugintest.Exchange(plugintest.Prompt(keyed, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := in.OnPrompt(context.Background(), z); err != nil {
+		t.Fatal(err)
+	}
+	if got := z.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("keyed prompt = %q", got)
+	}
+	// With assistant analysis on (the default roles), a scalar argument is
+	// not analyzed but still reserved.
+	all := newPlugin(t, a, `{"restore": true}`)
+	w := plugintest.Exchange(plugintest.Prompt(scalar, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := all.OnPrompt(context.Background(), w); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("analyzed-role scalar prompt = %q", got)
+	}
 }
