@@ -34,8 +34,8 @@ providers, see [Responses compatibility](/advanced/responses-compatibility).
 
 For `POST /v1/responses` calls, unless the request sets `store: false`,
 GoModel stores the normalized response body and the normalized input items
-from the request. A streamed response is stored from its terminal
-`response.completed` event. The snapshot is written in the background after
+from the request. A streamed response is stored from its terminal event
+(`response.completed`, `response.incomplete`, or `response.failed`). The snapshot is written in the background after
 the response is returned, so storage latency never delays the client. A
 `GET /v1/responses/{id}` issued immediately after the `POST` can arrive before
 the snapshot is stored; graceful shutdown waits

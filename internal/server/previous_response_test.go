@@ -232,8 +232,12 @@ func TestPatchResponsesAttempt_ScopedTenantCannotChainAcrossScopes(t *testing.T)
 }
 
 func streamedResponseData(id, text string) string {
-	return "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"" + id +
-		"\",\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_" + id +
+	return streamedTerminalData("response.completed", "completed", id, text)
+}
+
+func streamedTerminalData(event, status, id, text string) string {
+	return "event: " + event + "\ndata: {\"type\":\"" + event + "\",\"response\":{\"id\":\"" + id +
+		"\",\"object\":\"response\",\"status\":\"" + status + "\",\"output\":[{\"id\":\"msg_" + id +
 		"\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"" + text +
 		"\"}]}]}}\n\ndata: [DONE]\n\n"
 }
@@ -286,6 +290,43 @@ func TestResponsesWithPreviousResponseID_StreamedPredecessorChains(t *testing.T)
 	}
 	if text, _ := json.Marshal(items[1]["content"]); !strings.Contains(string(text), "the word is zebra") {
 		t.Fatalf("streamed output not replayed: %#v", items[1])
+	}
+}
+
+// TestResponsesWithPreviousResponseID_StreamedTerminalEventsAreStored covers
+// the other terminal events: a truncated or failed streamed turn is stored
+// like its buffered counterpart, so a client can retrieve it and chain on it.
+func TestResponsesWithPreviousResponseID_StreamedTerminalEventsAreStored(t *testing.T) {
+	for _, tc := range []struct{ event, status string }{
+		{"response.incomplete", "incomplete"},
+		{"response.failed", "failed"},
+	} {
+		t.Run(tc.event, func(t *testing.T) {
+			provider := previousResponseTestProvider(t, "anthropic")
+			provider.streamData = streamedTerminalData(tc.event, tc.status, "resp_t", "partial")
+			srv := New(provider, nil)
+			store := srv.handler.currentResponseStore()
+
+			if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"go","stream":true}`); rec.Code != http.StatusOK {
+				t.Fatalf("streaming status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			waitForStoredResponse(t, store, "resp_t")
+			stored, err := store.Get(context.Background(), "resp_t")
+			if err != nil {
+				t.Fatalf("get resp_t: %v", err)
+			}
+			if stored.Response.Status != tc.status {
+				t.Fatalf("stored status = %q, want %q", stored.Response.Status, tc.status)
+			}
+
+			provider.capturedResponsesReq = nil
+			if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"continue","previous_response_id":"resp_t"}`); rec.Code != http.StatusOK {
+				t.Fatalf("chained status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
+				t.Fatalf("forwarded %d items, want 3", len(items))
+			}
+		})
 	}
 }
 

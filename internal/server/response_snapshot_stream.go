@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"slices"
 
 	"github.com/goccy/go-json"
 
@@ -41,17 +42,17 @@ type responseSnapshotStreamObserver struct {
 	stored       bool
 }
 
-var responsesTerminalEventMarkers = [][]byte{
-	[]byte(`"response.completed"`),
-	[]byte(`"response.done"`),
-}
+// responsesTerminalEvents are the events that carry the finished response.
+// A truncated or failed turn is stored like its buffered counterpart, whose
+// status the client also sees, so it can be retrieved and chained on.
+var responsesTerminalEvents = []string{"response.completed", "response.incomplete", "response.failed", "response.done"}
 
 func (o *responseSnapshotStreamObserver) WantsJSONEvent(raw []byte) bool {
 	if o.stored {
 		return false
 	}
-	for _, marker := range responsesTerminalEventMarkers {
-		if bytes.Contains(raw, marker) {
+	for _, event := range responsesTerminalEvents {
+		if bytes.Contains(raw, []byte(event)) {
 			return true
 		}
 	}
@@ -62,8 +63,7 @@ func (o *responseSnapshotStreamObserver) OnJSONEvent(payload map[string]any) {
 	if o.stored {
 		return
 	}
-	eventType, _ := payload["type"].(string)
-	if eventType != "response.completed" && eventType != "response.done" {
+	if eventType, _ := payload["type"].(string); !slices.Contains(responsesTerminalEvents, eventType) {
 		return
 	}
 	body, ok := payload["response"].(map[string]any)
