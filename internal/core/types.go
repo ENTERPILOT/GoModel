@@ -516,7 +516,15 @@ type EmbeddingData struct {
 }
 
 // EmbeddingUsage represents token usage information for embeddings.
+//
+// RawUsage carries provider-reported usage members that have no typed field,
+// mirroring Usage.RawUsage on the chat surface. usage.ExtractFromEmbeddingResponse
+// forwards it to the cost pipeline, which is what lets a provider that returns
+// an exact per-request charge (Eden AI reports one as a root-level "cost")
+// have that figure recorded instead of a rate-card reconstruction. Providers
+// that report nothing extra leave it nil.
 type EmbeddingUsage struct {
-	PromptTokens int `json:"prompt_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	PromptTokens int            `json:"prompt_tokens"`
+	TotalTokens  int            `json:"total_tokens"`
+	RawUsage     map[string]any `json:"raw_usage,omitempty"`
 }

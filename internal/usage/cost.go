@@ -17,6 +17,7 @@ const (
 	CostSourceModelPricing      = "model_pricing"
 	CostSourceOpenRouterCredits = "openrouter_credits"
 	CostSourceXAITicks          = "xai_cost_in_usd_ticks"
+	CostSourceEdenAICost        = "edenai_cost"
 )
 
 // xAI reports usage.cost_in_usd_ticks as USD-denominated ticks, where 10^10
@@ -519,6 +520,9 @@ func CalculateUsageCost(inputTokens, outputTokens int, rawData map[string]any, p
 	if result, ok := xaiTicksCost(rawData, providerType); ok {
 		return result
 	}
+	if result, ok := edenAICost(rawData, providerType); ok {
+		return result
+	}
 	return CalculateGranularCost(inputTokens, outputTokens, rawData, providerType, pricing)
 }
 
@@ -566,6 +570,48 @@ func xaiTicksCost(rawData map[string]any, providerType string) (CostResult, bool
 
 func isXAIProvider(providerType string) bool {
 	return strings.EqualFold(strings.TrimSpace(providerType), "xai")
+}
+
+// edenAICost uses Eden AI's own per-request charge instead of recomputing cost
+// from token counts. Eden is a multi-provider gateway that reprices upstreams
+// automatically and applies per-account discounts, so the figure it returns is
+// authoritative in a way a rate-card reconstruction cannot be.
+//
+// Eden publishes cost at the response root rather than inside usage; the Eden
+// provider moves it into RawUsage so it arrives here on the same path as
+// OpenRouter's and xAI's. Eden reports no input/output split, so only the
+// total is set — the same shape xaiTicksCost produces.
+func edenAICost(rawData map[string]any, providerType string) (CostResult, bool) {
+	if !isEdenAIProvider(providerType) {
+		return CostResult{}, false
+	}
+	total, ok := extractFloat(rawData, "cost")
+	if !ok || !isFiniteCost(total) || total < 0 {
+		return CostResult{}, false
+	}
+
+	return CostResult{
+		TotalCost: &total,
+		Source:    CostSourceEdenAICost,
+	}, true
+}
+
+func isEdenAIProvider(providerType string) bool {
+	return strings.EqualFold(strings.TrimSpace(providerType), "edenai")
+}
+
+// isProviderReportedCostSource reports whether a CostSource names a charge the
+// provider itself returned, rather than one reconstructed from token counts and
+// a rate card. Callers use it to suppress caveats that only make sense for a
+// rate-card reconstruction: a provider-reported total is authoritative no
+// matter what token counts came with it.
+func isProviderReportedCostSource(source string) bool {
+	switch strings.TrimSpace(source) {
+	case CostSourceOpenRouterCredits, CostSourceXAITicks, CostSourceEdenAICost:
+		return true
+	default:
+		return false
+	}
 }
 
 func openRouterCreditCostSplit(rawData map[string]any, total float64) (float64, float64, bool) {

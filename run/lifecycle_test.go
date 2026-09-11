@@ -258,6 +258,24 @@ func TestMain_KimicodeProviderRegistration(t *testing.T) {
 	}
 }
 
+func TestMain_EdenAIProviderRegistration(t *testing.T) {
+	factory := defaultProviderFactory(&config.Config{})
+
+	registered := factory.RegisteredTypes()
+	found := slices.Contains(registered, "edenai")
+	if !found {
+		t.Fatalf("edenai not in RegisteredTypes() = %v", registered)
+	}
+
+	provider, err := factory.Create(providers.ProviderConfig{Type: "edenai", APIKey: "test"})
+	if err != nil {
+		t.Fatalf("factory.Create(edenai) error = %v, want nil", err)
+	}
+	if provider == nil {
+		t.Fatal("factory.Create(edenai) returned nil provider")
+	}
+}
+
 func TestMain_HetznerProviderRegistration(t *testing.T) {
 	factory := defaultProviderFactory(&config.Config{})
 

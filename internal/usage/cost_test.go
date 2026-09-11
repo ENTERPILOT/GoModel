@@ -820,3 +820,100 @@ func assertCostNear(t *testing.T, name string, got *float64, want float64) {
 		t.Fatalf("%s = %f, want %f", name, *got, want)
 	}
 }
+
+// --- Eden AI exact request cost ---
+
+// Eden AI is a multi-provider gateway that reports the exact USD charge for
+// each request. That figure is authoritative — it already reflects Eden's
+// upstream repricing and any account discount — so it must win over any rate
+// card GoModel happens to hold for the model.
+func TestCalculateUsageCost_EdenAICostOverridesStaticPricing(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:  new(100.0),
+		OutputPerMtok: new(100.0),
+	}
+
+	result := CalculateUsageCost(1170, 99, map[string]any{"cost": 0.0002349}, "edenai", pricing)
+
+	assertCostNear(t, "TotalCost", result.TotalCost, 0.0002349)
+	if result.Source != CostSourceEdenAICost {
+		t.Fatalf("Source = %q, want %q", result.Source, CostSourceEdenAICost)
+	}
+	// Eden reports no input/output split, so only the total is claimed rather
+	// than inventing a division of it.
+	if result.InputCost != nil || result.OutputCost != nil {
+		t.Fatalf("InputCost/OutputCost = %v/%v, want nil (Eden reports no split)", result.InputCost, result.OutputCost)
+	}
+}
+
+func TestCalculateUsageCost_EdenAIAcceptsZeroCost(t *testing.T) {
+	result := CalculateUsageCost(10, 4, map[string]any{"cost": 0.0}, "edenai", nil)
+
+	assertCostNear(t, "TotalCost", result.TotalCost, 0)
+	if result.Source != CostSourceEdenAICost {
+		t.Fatalf("Source = %q, want %q", result.Source, CostSourceEdenAICost)
+	}
+}
+
+// Without a usable cost the request must fall back to the ordinary token math
+// rather than recording nothing or a corrupt figure.
+func TestCalculateUsageCost_EdenAIFallsBackToModelPricingWhenCostUnusable(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:  new(1.0),
+		OutputPerMtok: new(2.0),
+	}
+
+	tests := []struct {
+		name    string
+		rawData map[string]any
+	}{
+		{name: "absent", rawData: map[string]any{}},
+		{name: "nil raw data", rawData: nil},
+		{name: "negative", rawData: map[string]any{"cost": -0.5}},
+		{name: "not a number", rawData: map[string]any{"cost": "free"}},
+		{name: "NaN", rawData: map[string]any{"cost": math.NaN()}},
+		{name: "positive infinity", rawData: map[string]any{"cost": math.Inf(1)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := CalculateUsageCost(1_000_000, 500_000, tt.rawData, "edenai", pricing)
+
+			assertCostNear(t, "InputCost", result.InputCost, 1.0)
+			assertCostNear(t, "OutputCost", result.OutputCost, 1.0)
+			assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
+			if result.Source != CostSourceModelPricing {
+				t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
+			}
+		})
+	}
+}
+
+// The Eden reading is provider-gated like OpenRouter's and xAI's: a "cost"
+// member from any other provider keeps its existing meaning.
+func TestCalculateUsageCost_EdenAICostIgnoredForOtherProviders(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok:  new(1.0),
+		OutputPerMtok: new(2.0),
+	}
+
+	result := CalculateUsageCost(1_000_000, 500_000, map[string]any{"cost": 0.0002349}, "openai", pricing)
+
+	assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
+	if result.Source != CostSourceModelPricing {
+		t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
+	}
+}
+
+// With no pricing and no usable cost the entry stays uncosted rather than
+// recording a fabricated zero.
+func TestCalculateUsageCost_EdenAIWithoutCostOrPricingRecordsNothing(t *testing.T) {
+	result := CalculateUsageCost(10, 4, map[string]any{}, "edenai", nil)
+
+	if result.TotalCost != nil {
+		t.Fatalf("TotalCost = %v, want nil", *result.TotalCost)
+	}
+	if result.Source != "" {
+		t.Fatalf("Source = %q, want empty", result.Source)
+	}
+}

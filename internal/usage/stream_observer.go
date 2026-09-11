@@ -232,6 +232,7 @@ func (o *StreamUsageObserver) extractUsageFromEvent(chunk map[string]any) *Usage
 	}
 
 	copyExtendedUsageFields(rawData, usageMap)
+	copyRootLevelCost(rawData, chunk)
 	copyUsageDetailsFields(rawData, usageMap["prompt_tokens_details"], "prompt_")
 	copyUsageDetailsFields(rawData, usageMap["input_tokens_details"], "prompt_")
 	copyUsageDetailsFields(rawData, usageMap["completion_tokens_details"], "completion_")
@@ -290,6 +291,27 @@ func (o *StreamUsageObserver) pricingProvider() string {
 		return providerName
 	}
 	return strings.TrimSpace(o.provider)
+}
+
+// copyRootLevelCost picks up a provider-reported per-request charge published
+// at the chunk root rather than inside usage. Eden AI reports cost there, and
+// a streamed chunk reaches the observer as raw JSON, so unlike the
+// non-streaming path the provider has no opportunity to relocate it first.
+//
+// A usage-level cost stays authoritative: it is the conventional location, so
+// a provider that reports both is taken at its more specific word. The value
+// is only ever interpreted as USD for providers that CalculateUsageCost gates
+// on, so harvesting it for everyone adds a raw-usage member without changing
+// any other provider's cost math.
+func copyRootLevelCost(rawData map[string]any, chunk map[string]any) {
+	if _, exists := rawData["cost"]; exists {
+		return
+	}
+	// A NaN fails this comparison and is dropped, matching how
+	// copyExtendedUsageFields screens the usage-level member.
+	if value, ok := numericFloat(chunk["cost"]); ok && value >= 0 {
+		rawData["cost"] = value
+	}
 }
 
 func copyExtendedUsageFields(rawData map[string]any, usageMap map[string]any) {
