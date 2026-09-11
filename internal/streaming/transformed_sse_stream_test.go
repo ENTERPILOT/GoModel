@@ -375,9 +375,11 @@ func TestTransformedSSEStream_LookbehindJoinsPatternAcrossChunks(t *testing.T) {
 		t.Errorf("windows = %q, want %q", texts(tr.seen), want)
 	}
 	var overlaps []int
+	var finals []bool
 	for _, ev := range tr.seen {
 		if ev.Kind == KindTextDelta {
 			overlaps = append(overlaps, ev.Overlap)
+			finals = append(finals, ev.Final)
 			if !strings.Contains(string(ev.Data), `"content":"`+jsonEscape(ev.Text)+`"`) {
 				t.Errorf("event Data does not carry the window text: %s vs %q", ev.Data, ev.Text)
 			}
@@ -385,6 +387,10 @@ func TestTransformedSSEStream_LookbehindJoinsPatternAcrossChunks(t *testing.T) {
 	}
 	if want := []int{0, 7, 8, 8}; !reflect.DeepEqual(overlaps, want) {
 		t.Errorf("overlaps = %v, want %v", overlaps, want)
+	}
+	// Only the flush before the finish event closes the window.
+	if want := []bool{false, false, false, true}; !reflect.DeepEqual(finals, want) {
+		t.Errorf("finals = %v, want %v", finals, want)
 	}
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
 	if err != nil {

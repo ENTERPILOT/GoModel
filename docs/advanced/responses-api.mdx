@@ -34,7 +34,8 @@ providers, see [Responses compatibility](/advanced/responses-compatibility).
 
 For `POST /v1/responses` calls, unless the request sets `store: false`,
 GoModel stores the normalized response body and the normalized input items
-from the request. A streamed response is stored from its terminal event
+of the request as the client sent them (before guardrails edit them, and
+without the history a `previous_response_id` or `conversation` added). A streamed response is stored from its terminal event
 (`response.completed`, `response.incomplete`, or `response.failed`). The snapshot is written in the background after
 the response is returned, so storage latency never delays the client. A
 `GET /v1/responses/{id}` issued immediately after the `POST` can arrive before
@@ -57,6 +58,15 @@ This enables:
   `store: false`), or belongs to another tenant, returns 404. Native
   Responses providers receive the id itself and resolve it on their side, so
   they need no GoModel snapshot.
+
+The replayed history, like the items of a gateway-managed `conversation`, is
+merged into the input before the prompt-phase [guardrails](/advanced/guardrails)
+run, so they check and rewrite it like any other input: a stored response
+holds what its client saw, and a [presidio](/advanced/guardrails#presidio)
+guardrail anonymizes the values it restored there again before the next turn
+reaches the provider. When guardrails run and a failover target is
+chat-translated, a native primary receives the replayed history instead of
+the id as well.
 
 ## Native provider lookup
 

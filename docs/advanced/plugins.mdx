@@ -199,7 +199,13 @@ comes back already carrying the plugin's earlier edits, and
 `StreamEvent.Overlap` says how many leading characters it spans: a plugin
 must only edit matches that extend past `Overlap`, since a match inside it
 was handled the previous time (the built-in `string_replace` does this, so
-a rule like `a => aa` is applied once, not on its own output). A chat chunk
+a rule like `a => aa` is applied once, not on its own output). A match that
+touches the end of the window may still grow with the next delta, so a plugin
+can leave it unedited: the tail shows it again next time. `StreamEvent.Final`
+marks the last event of a window (the stream ended or a delta of another kind
+flushed it), after which nothing is withheld, so an edit put off that way is
+due then. `string_replace` does this for matches that fit in its lookbehind,
+so an open-ended pattern covers the whole key. A chat chunk
 that carries text together with `finish_reason` or `usage` is re-segmented
 too; those members go out once, with the chunk's last text, or on a chunk
 with empty text when the plugin removed that text.

@@ -503,7 +503,7 @@ func (s *transformedSSEStream) hold(ev Event) {
 	}
 	window := p.tail + p.pending
 	p.pending = ""
-	result, ok := s.inspect(key, p, window, utf8.RuneCountInString(p.tail))
+	result, ok := s.inspect(key, p, window, utf8.RuneCountInString(p.tail), false)
 	if !ok {
 		p.tail = ""
 		return
@@ -564,7 +564,7 @@ func (s *transformedSSEStream) flushOne(key pendingKey) {
 	}
 	overlap := utf8.RuneCountInString(p.tail)
 	p.tail, p.pending = "", ""
-	result, ok := s.inspect(key, p, window, overlap)
+	result, ok := s.inspect(key, p, window, overlap, true)
 	if s.ended {
 		return
 	}
@@ -600,10 +600,11 @@ func (s *transformedSSEStream) emitEnvelope(key pendingKey, p *pendingText) {
 // inspect hands text to the transformer as one event of the window's kind
 // built from its template chunk and returns the text to emit; ok is false
 // when nothing should be emitted (drop) or the stream ended.
-func (s *transformedSSEStream) inspect(key pendingKey, p *pendingText, text string, overlap int) (string, bool) {
+func (s *transformedSSEStream) inspect(key pendingKey, p *pendingText, text string, overlap int, final bool) (string, bool) {
 	ev := s.resegment(key, p.template, text)
 	ev.Seq = s.seq
 	ev.Overlap = overlap
+	ev.Final = final
 	s.seq++
 	decision, ok := s.decide(&ev)
 	if !ok {

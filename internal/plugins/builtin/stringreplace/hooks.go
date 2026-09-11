@@ -67,14 +67,14 @@ func (p *Plugin) scan(targets []pluginapi.TextTarget, set func(pluginapi.TextTar
 	units := map[unit]bool{}
 	for _, t := range targets {
 		if set == nil {
-			n := count(p.rules, t.Text, 0)
+			n := count(p.rules, t.Text, whole)
 			if n > 0 {
 				total += n
 				units[unit{t.MessageID, t.Choice}] = true
 			}
 			continue
 		}
-		out, n := apply(p.rules, t.Text, 0)
+		out, n := apply(p.rules, t.Text, whole)
 		if n == 0 {
 			continue
 		}
@@ -105,17 +105,17 @@ func (p *Plugin) OnStreamEvent(_ context.Context, x *pluginapi.Exchange, ev *plu
 	if ev == nil || ev.Kind != pluginapi.EventTextDelta || ev.Text == "" {
 		return pluginapi.Pass(), nil
 	}
-	skip := overlapBytes(ev)
+	w := span{skip: overlapBytes(ev), hold: p.lookbehind, final: ev.Final}
 	switch p.onMatch {
 	case OnMatchReplace:
-		out, n := apply(p.rules, ev.Text, skip)
+		out, n := apply(p.rules, ev.Text, w)
 		if n == 0 {
 			return pluginapi.Pass(), nil
 		}
 		p.addCount(x, n)
 		return pluginapi.Replace(out), nil
 	case OnMatchWarn:
-		if n := count(p.rules, ev.Text, skip); n > 0 {
+		if n := count(p.rules, ev.Text, w); n > 0 {
 			p.addCount(x, n)
 		}
 	}

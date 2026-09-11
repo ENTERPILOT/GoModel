@@ -370,7 +370,7 @@ func instanceNames(instances []*plugins.Instance) []string {
 // the walk, so a later instance's OnStreamEnd sees replaced and dropped
 // text that way rather than the original.
 func (ps *pluginStream) OnEvent(ev *streaming.Event) (streaming.Decision, error) {
-	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Call: ev.Call, Text: ev.Text, Overlap: ev.Overlap, Raw: ev.Data}
+	pev := &pluginapi.StreamEvent{Seq: ev.Seq + 1, Kind: pluginEventKind(ev.Kind), Choice: ev.Choice, Call: ev.Call, Text: ev.Text, Overlap: ev.Overlap, Final: ev.Final, Raw: ev.Data}
 	result := streaming.Decision{Action: streaming.ActionPass}
 	for _, entry := range ps.inFlight {
 		inst, observe := entry.inst, entry.observe

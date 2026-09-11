@@ -1543,3 +1543,52 @@ func TestResponsesViaChatRejectsEmptyChatResponse(t *testing.T) {
 		})
 	}
 }
+
+func TestConvertResponsesRequestToChat_DropsResponsesOnlyTextMembers(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+	}{
+		{name: "map", input: []any{
+			map[string]any{
+				"type": "message",
+				"role": "assistant",
+				"content": []any{map[string]any{
+					"type": "output_text", "text": "OK", "annotations": []any{}, "logprobs": []any{},
+					"cache_control": map[string]any{"type": "ephemeral"},
+				}},
+			},
+		}},
+		{name: "typed", input: []core.ResponsesInputElement{{
+			Role: "assistant",
+			Content: []core.ContentPart{{
+				Type: "output_text",
+				Text: "OK",
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"annotations":   json.RawMessage(`[]`),
+					"logprobs":      json.RawMessage(`[]`),
+					"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
+				}),
+			}},
+		}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{Model: "test-model", Input: tt.input})
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			parts, ok := chatReq.Messages[0].Content.([]core.ContentPart)
+			if !ok {
+				t.Fatalf("Content type = %T, want []core.ContentPart", chatReq.Messages[0].Content)
+			}
+			extras := parts[0].ExtraFields
+			if extras.Lookup("annotations") != nil || extras.Lookup("logprobs") != nil {
+				t.Fatalf("Responses-only members forwarded to chat: %+v", parts[0])
+			}
+			if extras.Lookup("cache_control") == nil {
+				t.Fatal("cache_control dropped from the text part")
+			}
+		})
+	}
+}

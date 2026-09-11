@@ -24,12 +24,18 @@ type span struct {
 // longer one. The result is sorted by start.
 func byteSpans(text string, results []analyzerResult) []span {
 	offsets := runeOffsets(text)
+	byteAt := func(i int) int {
+		if i == len(offsets) {
+			return len(text)
+		}
+		return offsets[i]
+	}
 	spans := make([]span, 0, len(results))
 	for _, r := range results {
-		if r.Start < 0 || r.End > len(offsets)-1 || r.Start >= r.End || strings.TrimSpace(r.EntityType) == "" {
+		if r.Start < 0 || r.End > len(offsets) || r.Start >= r.End || strings.TrimSpace(r.EntityType) == "" {
 			continue
 		}
-		spans = append(spans, span{entity: r.EntityType, start: offsets[r.Start], end: offsets[r.End], score: r.Score})
+		spans = append(spans, span{entity: r.EntityType, start: byteAt(r.Start), end: byteAt(r.End), score: r.Score})
 	}
 	sort.Slice(spans, func(i, j int) bool {
 		if spans[i].score != spans[j].score {
@@ -57,14 +63,16 @@ func byteSpans(text string, results []analyzerResult) []span {
 	return kept
 }
 
-// runeOffsets returns the byte offset of every rune of text, plus one final
-// entry equal to len(text), so offsets[i] is where code point i starts.
+// runeOffsets returns the byte offset of every rune of text, so offsets[i]
+// is where code point i starts. It is sized by the rune count: sized by
+// len(text), a mostly multi-byte text would reserve several times the
+// offsets it needs.
 func runeOffsets(text string) []int {
-	offsets := make([]int, 0, len(text)+1)
+	offsets := make([]int, 0, utf8.RuneCountInString(text))
 	for i := range text {
 		offsets = append(offsets, i)
 	}
-	return append(offsets, len(text))
+	return offsets
 }
 
 // runeBytes returns the byte offset of the first n runes of text (len(text)
