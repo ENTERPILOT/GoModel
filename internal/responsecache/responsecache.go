@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/cache"
@@ -142,6 +143,12 @@ func (m *ResponseCacheMiddleware) handle(ex exchange, body []byte, next func() e
 	if shouldSkipAllCacheHeaders(ex.RequestHeader) {
 		return next()
 	}
+	if requestIsBackground(body) {
+		// A background create only returns a "queued" snapshot whose id is
+		// unique to that request. Replaying it would hand a later caller an
+		// id that belongs to someone else's response.
+		return next()
+	}
 
 	skipExact := strings.EqualFold(ex.RequestHeader("X-Cache-Type"), CacheTypeSemantic)
 	skipSemantic := m.semantic == nil || strings.EqualFold(ex.RequestHeader("X-Cache-Type"), CacheTypeExact)
@@ -165,6 +172,15 @@ func (m *ResponseCacheMiddleware) handle(ex exchange, body []byte, next func() e
 	}
 
 	return innerNext()
+}
+
+// requestIsBackground reports whether a request body asks for background
+// execution (`"background": true` on /v1/responses).
+func requestIsBackground(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	return gjson.GetBytes(body, "background").Bool()
 }
 
 // HandleInternalRequest runs the cache for a transport-free internal JSON

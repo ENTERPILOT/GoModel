@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,6 +48,9 @@ func (s *nativeResponseService) GetResponse(c *echo.Context) error {
 	stored, err := s.loadStoredResponse(ctx, id)
 	if err == nil {
 		auditResponseEntry(c, storedProvider(stored))
+		if refreshed := s.refreshStoredResponse(ctx, stored, id, params); refreshed != nil {
+			return c.JSON(http.StatusOK, refreshed)
+		}
 		return c.JSON(http.StatusOK, stored.Response)
 	}
 	if err != nil && !errors.Is(err, responsestore.ErrNotFound) {
@@ -122,7 +126,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 		if resp == nil {
 			return handleError(c, core.NewEmptyProviderResponseError(providerType))
 		}
-		normalizeCanceledResponse(resp, id, providerType)
+		normalizeLifecycleResponse(resp, id, providerType)
 		stored.Response = resp
 		stored.Provider = providerType
 		if updateErr := s.responseStore.Update(ctx, stored); updateErr != nil && !errors.Is(updateErr, responsestore.ErrNotFound) {
@@ -141,7 +145,7 @@ func (s *nativeResponseService) CancelResponse(c *echo.Context) error {
 	if resp == nil {
 		return handleError(c, core.NewEmptyProviderResponseError(providerType))
 	}
-	normalizeCanceledResponse(resp, id, providerType)
+	normalizeLifecycleResponse(resp, id, providerType)
 	auditResponseEntry(c, providerType)
 	return c.JSON(http.StatusOK, resp)
 }
@@ -352,7 +356,67 @@ func (s *nativeResponseService) cancelNativeResponseByRequest(ctx context.Contex
 	})
 }
 
-func normalizeCanceledResponse(resp *core.ResponsesResponse, id, providerType string) {
+// pendingResponseStatuses are the non-final Responses states. A background
+// create is stored as "queued" and only reaches its terminal state upstream,
+// so a snapshot in one of these states must be refreshed before it is served.
+// Every other status — including an empty one from a chat-translated provider
+// that has no native lifecycle to poll — is treated as final.
+var pendingResponseStatuses = map[string]struct{}{
+	"queued":      {},
+	"in_progress": {},
+}
+
+func responseStatusPending(status string) bool {
+	_, pending := pendingResponseStatuses[strings.ToLower(strings.TrimSpace(status))]
+	return pending
+}
+
+// refreshStoredResponse re-reads a pending snapshot from the provider that
+// produced it and persists the result once it is final. It returns nil when
+// the snapshot is already final or the provider cannot serve the lookup, in
+// which case the caller keeps serving the stored snapshot.
+func (s *nativeResponseService) refreshStoredResponse(
+	ctx context.Context,
+	stored *responsestore.StoredResponse,
+	id string,
+	params core.ResponseRetrieveParams,
+) *core.ResponsesResponse {
+	if stored == nil || stored.Response == nil || !responseStatusPending(stored.Response.Status) {
+		return nil
+	}
+	providerRoute := strings.TrimSpace(storedProviderRoute(stored))
+	if providerRoute == "" {
+		return nil
+	}
+	router, ok := s.provider.(core.NativeResponseLifecycleRoutableProvider)
+	if !ok {
+		return nil
+	}
+
+	resp, err := router.GetResponse(ctx, providerRoute, gateway.FirstNonEmpty(stored.ProviderResponseID, id), params)
+	if err != nil || resp == nil {
+		if err != nil && !isUnsupportedNativeResponseError(err) && !isNotFoundGatewayError(err) {
+			slog.Warn("response refresh failed, serving stored snapshot", "response_id", id, "error", err)
+		}
+		return nil
+	}
+
+	providerType := storedProvider(stored)
+	normalizeLifecycleResponse(resp, id, providerType)
+	if responseStatusPending(resp.Status) {
+		return resp
+	}
+	stored.Response = resp
+	stored.Provider = providerType
+	if updateErr := s.responseStore.Update(ctx, stored); updateErr != nil && !errors.Is(updateErr, responsestore.ErrNotFound) {
+		// The refreshed response is already correct; a failed write only means
+		// the next poll refreshes again.
+		slog.Warn("failed to persist refreshed response snapshot", "response_id", id, "error", updateErr)
+	}
+	return resp
+}
+
+func normalizeLifecycleResponse(resp *core.ResponsesResponse, id, providerType string) {
 	if resp == nil {
 		return
 	}

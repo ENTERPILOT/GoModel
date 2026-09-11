@@ -764,3 +764,32 @@ func TestLimitsConcurrentCacheWrites(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 }
+
+func TestHandleRequest_BackgroundResponsesAreNotCached(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","input":"hi","background":true}`)
+	callCount := 0
+	next := func(c *echo.Context) error {
+		callCount++
+		return c.JSON(http.StatusOK, map[string]string{"id": "resp_1", "status": "queued"})
+	}
+
+	if rec := driveHandleRequest(t, mw, workflow, body, nil, next); rec.Code != http.StatusOK {
+		t.Fatalf("first request: got status %d", rec.Code)
+	}
+	mw.simple.wg.Wait()
+
+	rec2 := driveHandleRequest(t, mw, workflow, body, nil, next)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second request: got status %d", rec2.Code)
+	}
+	if got := rec2.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("background create should never be cached, X-Cache=%s", got)
+	}
+	if callCount != 2 {
+		t.Fatalf("callCount = %d, want 2 (no cache replay)", callCount)
+	}
+}
