@@ -288,9 +288,11 @@ func jsonNonNull(raw json.RawMessage) bool {
 	return len(trimmed) > 0 && string(trimmed) != "null"
 }
 
-// Split turns a chunk with several choices into one chunk per choice. Every
-// top-level member is copied; usage, when present, stays on the last chunk
-// only so downstream accounting sees it once.
+// Split turns a chunk with several choices into one chunk per choice, and
+// a choice whose delta carries several tool calls into one chunk per tool
+// call, so each is decoded and transformed on its own. Every top-level
+// member is copied; usage and a choice's finish_reason stay on the last
+// part only so downstream accounting sees them once.
 func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 	if raw.Comment || raw.Oversized || !jsonObject(raw.Data) {
 		return nil
@@ -300,11 +302,22 @@ func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 		return nil
 	}
 	var choices []json.RawMessage
-	if err := json.Unmarshal(top["choices"], &choices); err != nil || len(choices) <= 1 {
+	if err := json.Unmarshal(top["choices"], &choices); err != nil || len(choices) == 0 {
 		return nil
 	}
-	out := make([]RawEvent, 0, len(choices))
-	for i, choice := range choices {
+	var parts []json.RawMessage
+	for _, choice := range choices {
+		split, ok := splitToolCalls(choice)
+		if !ok {
+			return nil
+		}
+		parts = append(parts, split...)
+	}
+	if len(parts) <= 1 {
+		return nil
+	}
+	out := make([]RawEvent, 0, len(parts))
+	for i, choice := range parts {
 		part := make(map[string]json.RawMessage, len(top))
 		maps.Copy(part, top)
 		single, err := json.Marshal([]json.RawMessage{choice})
@@ -312,7 +325,7 @@ func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 			return nil
 		}
 		part["choices"] = single
-		if i < len(choices)-1 {
+		if i < len(parts)-1 {
 			delete(part, "usage")
 		}
 		data, err := json.Marshal(part)
@@ -323,6 +336,56 @@ func (c *chatCodec) Split(raw RawEvent) []RawEvent {
 		out = append(out, RawEvent{Name: raw.Name, Data: data, Raw: ev.Encode()})
 	}
 	return out
+}
+
+// splitToolCalls returns one copy of the choice per entry of its delta's
+// tool_calls, each carrying a single tool call; the choice's finish_reason
+// stays on the last copy. A choice with at most one tool call is returned
+// as is. ok is false when the choice cannot be decoded.
+func splitToolCalls(choice json.RawMessage) ([]json.RawMessage, bool) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(choice, &obj); err != nil {
+		return nil, false
+	}
+	var delta map[string]json.RawMessage
+	if raw, ok := obj["delta"]; !ok || !jsonObject(raw) {
+		return []json.RawMessage{choice}, true
+	} else if err := json.Unmarshal(raw, &delta); err != nil {
+		return nil, false
+	}
+	var calls []json.RawMessage
+	if raw, ok := delta["tool_calls"]; !ok || len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '[' {
+		return []json.RawMessage{choice}, true
+	} else if err := json.Unmarshal(raw, &calls); err != nil {
+		return nil, false
+	}
+	if len(calls) <= 1 {
+		return []json.RawMessage{choice}, true
+	}
+	out := make([]json.RawMessage, 0, len(calls))
+	for i, call := range calls {
+		partDelta := make(map[string]json.RawMessage, len(delta))
+		maps.Copy(partDelta, delta)
+		single, err := json.Marshal([]json.RawMessage{call})
+		if err != nil {
+			return nil, false
+		}
+		partDelta["tool_calls"] = single
+		partChoice := make(map[string]json.RawMessage, len(obj))
+		maps.Copy(partChoice, obj)
+		if partChoice["delta"], err = json.Marshal(partDelta); err != nil {
+			return nil, false
+		}
+		if i < len(calls)-1 && jsonNonNull(partChoice["finish_reason"]) {
+			partChoice["finish_reason"] = json.RawMessage("null")
+		}
+		encoded, err := json.Marshal(partChoice)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, encoded)
+	}
+	return out, true
 }
 
 // Restate is a no-op: chat chunks never repeat streamed text.

@@ -1,6 +1,7 @@
 package streaming
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -152,5 +153,48 @@ func TestCodecs_RewriteToolCallArguments(t *testing.T) {
 	rewritten, err = responses.RewriteText(ev, "cd")
 	if err != nil || !strings.Contains(string(rewritten.Data), `"delta":"cd"`) {
 		t.Errorf("responses rewrite = %s, %v", rewritten.Data, err)
+	}
+}
+
+func TestTransformedSSEStream_ParallelToolCallsInOneDelta(t *testing.T) {
+	// One delta announces two tool calls with their first arguments; the
+	// second one's placeholder is completed by a later delta. The
+	// finish_reason arrives on the multi-call chunk's choice.
+	input := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c0","function":{"name":"f","arguments":"{\"a\":\"<EMAIL_1>\"}"}},{"index":1,"id":"c1","function":{"name":"g","arguments":"{\"b\":\"<EMA"}}]},"finish_reason":null}]}` + "\n\n" +
+		`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"IL_1>\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	tr := restoreTransformer()
+	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{LookbehindChars: 12})
+	got, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "EMAIL_1") || strings.Contains(string(got), "<EMA") {
+		t.Errorf("placeholder leaked:\n%s", got)
+	}
+	var calls []int
+	for _, ev := range tr.seen {
+		if ev.Kind == KindToolCallDelta {
+			calls = append(calls, ev.Call)
+		}
+	}
+	// Call 0 is seen on arrival and once more when call 1's delta flushes
+	// it; call 1 on arrival, on its second delta, and at the final flush.
+	if strings.Trim(strings.Join(strings.Fields(strings.Trim(fmt.Sprint(calls), "[]")), ","), ",") != "0,0,1,1,1" {
+		t.Errorf("transformer saw calls %v", calls)
+	}
+	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc := resp.Choices[0].Message.ToolCalls
+	if len(tc) != 2 || tc[0].ID != "c0" || tc[0].Function.Arguments != `{"a":"a@b.c"}` || tc[1].ID != "c1" || tc[1].Function.Arguments != `{"b":"a@b.c"}` {
+		t.Errorf("assembled = %+v", tc)
+	}
+	if resp.Choices[0].FinishReason != "tool_calls" || resp.Usage.TotalTokens != 3 {
+		t.Errorf("finish = %q usage = %+v", resp.Choices[0].FinishReason, resp.Usage)
+	}
+	if n := strings.Count(string(got), `"finish_reason":"tool_calls"`); n != 1 {
+		t.Errorf("finish_reason emitted %d times", n)
 	}
 }
