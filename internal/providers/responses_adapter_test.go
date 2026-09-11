@@ -3,8 +3,10 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,12 +16,13 @@ import (
 
 type capturingChatProvider struct {
 	capturedReq *core.ChatRequest
+	chatResp    *core.ChatResponse
 	streamData  string
 	streamErr   error
 }
 
 func (p *capturingChatProvider) ChatCompletion(_ context.Context, _ *core.ChatRequest) (*core.ChatResponse, error) {
-	return nil, nil
+	return p.chatResp, nil
 }
 
 func (p *capturingChatProvider) StreamChatCompletion(_ context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
@@ -1508,6 +1511,36 @@ func TestStreamResponsesViaChat_DoesNotInjectUsageWhenPolicyDisabled(t *testing.
 	}
 	if provider.capturedReq.StreamOptions != nil {
 		t.Fatalf("captured StreamOptions = %+v, want nil", provider.capturedReq.StreamOptions)
+	}
+}
+
+func TestResponsesViaChatRejectsEmptyChatResponse(t *testing.T) {
+	tests := []struct {
+		name        string
+		chatResp    *core.ChatResponse
+		wantMessage string
+	}{
+		{name: "nil response", wantMessage: "provider returned empty response"},
+		{
+			name:        "no choices",
+			chatResp:    &core.ChatResponse{ID: "chatcmpl-1"},
+			wantMessage: "provider returned no choices",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &capturingChatProvider{chatResp: tt.chatResp}
+
+			resp, err := ResponsesViaChat(context.Background(), provider, &core.ResponsesRequest{Model: "m", Input: "hi"}, "groq")
+
+			var gatewayErr *core.GatewayError
+			if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
+				t.Fatalf("ResponsesViaChat() = %+v, %v; want 502 provider error", resp, err)
+			}
+			if gatewayErr.Message != tt.wantMessage || gatewayErr.Provider != "groq" {
+				t.Fatalf("error = %q from %q, want %q from groq", gatewayErr.Message, gatewayErr.Provider, tt.wantMessage)
+			}
+		})
 	}
 }
 

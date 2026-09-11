@@ -170,7 +170,7 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Responses dispatches through this provider's ChatCompletion so /v1/responses
 // honors the per-model /messages routing.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req)
+	return providers.ResponsesViaChat(ctx, p, req, "opencode_go")
 }
 
 // StreamResponses dispatches through this provider's streaming ChatCompletion so

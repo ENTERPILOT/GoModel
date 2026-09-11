@@ -85,7 +85,7 @@ func (c *ChatCompatible) ListModels(ctx context.Context) (*core.ModelsResponse, 
 
 // Responses sends a Responses API request using chat-completions translation.
 func (c *ChatCompatible) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, c, req)
+	return providers.ResponsesViaChat(ctx, c, req, c.providerName)
 }
 
 // StreamResponses streams a Responses API request using chat-completions translation.

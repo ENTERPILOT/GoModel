@@ -32,7 +32,7 @@ func TestCloudflareTimeoutRetriesBeforeModelFailover(t *testing.T) {
 			w.WriteHeader(524)
 			return
 		}
-		_, _ = w.Write([]byte(`{"id":"backup","model":"model2","choices":[]}`))
+		_, _ = w.Write([]byte(`{"id":"backup","model":"model2","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`))
 	}))
 	defer server.Close()
 	cfg := llmclient.DefaultConfig("cloudflare", server.URL)
