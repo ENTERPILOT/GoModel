@@ -12,7 +12,7 @@ func (r *ChatRequest) UnmarshalJSON(data []byte) error {
 	type alias ChatRequest
 	var raw alias
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+		return wrapJSONDecodeError(err)
 	}
 
 	extraFields, err := extractUnknownJSONFieldsSet(data, chatRequestFields)

@@ -156,3 +156,84 @@ func TestProxyPassthroughNonStreamingSkipsNonAccountableResponses(t *testing.T) 
 		})
 	}
 }
+
+// The passthrough contract proxies provider-native error bodies: the Anthropic
+// SDK parses {"type":"error",...} and loses its typed errors — and the
+// request_id — when the gateway rewrites the body into the OpenAI envelope.
+func TestProxyPassthroughRelaysProviderErrorBody(t *testing.T) {
+	body := `{"type":"error","error":{"type":"invalid_request_error","message":"max_tokens: Field required"},"request_id":"req_011CexSaBK"}`
+	resp := &core.PassthroughResponse{
+		StatusCode: http.StatusBadRequest,
+		Headers: map[string][]string{
+			"Content-Type": {"application/json"},
+			"X-Upstream":   {"must-not-leak"},
+			"Set-Cookie":   {"session=secret"},
+		},
+		Body: io.NopCloser(strings.NewReader(body)),
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages"}
+	if err := proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp); err != nil {
+		t.Fatalf("proxyPassthroughResponse: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if rec.Body.String() != body {
+		t.Fatalf("error body not relayed verbatim: %s", rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", got)
+	}
+	for _, header := range []string{"X-Upstream", "Set-Cookie"} {
+		if got := rec.Header().Get(header); got != "" {
+			t.Errorf("%s should not be relayed, got %q", header, got)
+		}
+	}
+}
+
+// A provider error body the gateway cannot hand over as-is (an intermediary's
+// HTML page, an empty body, an oversized payload) still has to reach the
+// client as a parseable gateway error.
+func TestProxyPassthroughConvertsUnrelayableErrorBody(t *testing.T) {
+	cases := []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{name: "HTML error page", contentType: "text/html", body: "<html>502</html>"},
+		{name: "empty body", contentType: "application/json", body: ""},
+		{name: "invalid JSON", contentType: "application/json", body: "{"},
+		{name: "oversized body", contentType: "application/json", body: `{"error":"` + strings.Repeat("x", maxRelayedPassthroughErrorBytes) + `"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &core.PassthroughResponse{
+				StatusCode: http.StatusBadGateway,
+				Headers:    map[string][]string{"Content-Type": {tc.contentType}},
+				Body:       io.NopCloser(strings.NewReader(tc.body)),
+			}
+
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{}`))
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages"}
+			if err := proxyPassthroughResponse(c, nil, nil, nil, "anthropic", "anthropic", "messages", info, resp); err != nil {
+				t.Fatalf("proxyPassthroughResponse: %v", err)
+			}
+			if rec.Code != http.StatusBadGateway {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+			}
+			if !strings.Contains(rec.Body.String(), `"error"`) {
+				t.Fatalf("body is not a gateway error envelope: %s", rec.Body.String())
+			}
+		})
+	}
+}

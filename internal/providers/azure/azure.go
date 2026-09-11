@@ -38,9 +38,10 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 	// All three clients share opts.Keys, so the rotation is even across them.
 	p := &Provider{apiVersion: apiVersion, keys: opts.Keyring(providerCfg.APIKey)}
 	clientCfg := openai.CompatibleProviderConfig{
-		ProviderName: "azure",
-		BaseURL:      baseURL,
-		SetHeaders:   setHeaders,
+		ProviderName:     "azure",
+		BaseURL:          baseURL,
+		SetHeaders:       setHeaders,
+		AdaptChatRequest: adaptChatRequest,
 	}
 	p.CompatibleProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
 	p.resourceProvider = openai.NewCompatibleProvider(providerCfg.APIKey, opts, clientCfg)
@@ -55,9 +56,10 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 func NewWithHTTPClient(apiKey string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	p := &Provider{apiVersion: defaultAPIVersion, keys: providers.NewKeyring(apiKey)}
 	cfg := openai.CompatibleProviderConfig{
-		ProviderName: "azure",
-		BaseURL:      "https://example.invalid",
-		SetHeaders:   setHeaders,
+		ProviderName:     "azure",
+		BaseURL:          "https://example.invalid",
+		SetHeaders:       setHeaders,
+		AdaptChatRequest: adaptChatRequest,
 	}
 	p.CompatibleProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
 	p.resourceProvider = openai.NewCompatibleProviderWithHTTPClient(apiKey, httpClient, hooks, cfg)
@@ -160,6 +162,17 @@ func (p *Provider) mutateRequest(req *llmclient.Request) {
 	query.Set("api-version", p.apiVersion)
 	endpoint.RawQuery = query.Encode()
 	req.Endpoint = endpoint.String()
+}
+
+// maxStopSequences is the longest "stop" list Azure OpenAI accepts, the same
+// four-item limit as OpenAI's own chat completions.
+const maxStopSequences = 4
+
+// adaptChatRequest truncates an over-long "stop" list so a request carrying
+// more stop sequences than Azure allows (Anthropic's Messages API accepts
+// more) still reaches the model instead of failing upstream.
+func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	return providers.CapStopSequences(req, maxStopSequences)
 }
 
 func setHeaders(req *http.Request, apiKey string) {

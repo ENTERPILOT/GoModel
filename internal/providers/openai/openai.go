@@ -131,19 +131,30 @@ func isNonReasoningChatModel(model string) bool {
 	return strings.HasPrefix(m, "gpt-3.5") || strings.HasPrefix(m, "gpt-4") || strings.HasPrefix(m, "chatgpt-")
 }
 
-// adaptChatRequest maps GoModel's nested reasoning shape (set by the Messages
-// API's thinking and by clients sending reasoning.effort) onto the flat
-// reasoning_effort field: OpenAI Chat Completions rejects "reasoning".
-// Models that cannot reason reject reasoning_effort too, so it is dropped.
+// maxStopSequences is the longest "stop" list OpenAI Chat Completions accepts;
+// a longer one is rejected with "array too long".
+const maxStopSequences = 4
+
+// adaptChatRequest fits the canonical chat request to OpenAI Chat Completions:
+// it truncates an over-long "stop" list (clients coming from the Messages API
+// may send more) and maps GoModel's nested reasoning shape (set by the
+// Messages API's thinking and by clients sending reasoning.effort) onto the
+// flat reasoning_effort field, since OpenAI Chat Completions rejects
+// "reasoning". Models that cannot reason reject reasoning_effort too, so it is
+// dropped for them.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req == nil || req.Reasoning == nil {
-		return req, nil
+	adapted, err := providers.CapStopSequences(req, maxStopSequences)
+	if err != nil {
+		return nil, err
 	}
-	effort := strings.TrimSpace(req.Reasoning.Effort)
-	if effort == "" || isNonReasoningChatModel(req.Model) {
-		return providers.DropReasoning(req), nil
+	if adapted == nil || adapted.Reasoning == nil {
+		return adapted, nil
 	}
-	return providers.AdaptReasoningEffortRequest(req, effort)
+	effort := strings.TrimSpace(adapted.Reasoning.Effort)
+	if effort == "" || isNonReasoningChatModel(adapted.Model) {
+		return providers.DropReasoning(adapted), nil
+	}
+	return providers.AdaptReasoningEffortRequest(adapted, effort)
 }
 
 // chatRequestBody returns the appropriate request body for the model.

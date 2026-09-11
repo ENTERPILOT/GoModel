@@ -213,7 +213,7 @@ func (s *translatedInferenceService) CountMessageTokens(c *echo.Context) error {
 	}
 	req, err := anthropicapi.DecodeMessagesRequest(body)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if strings.TrimSpace(req.Model) == "" {
 		return handleError(c, core.NewInvalidRequestError("model is required", nil).WithParam("model"))
@@ -309,7 +309,7 @@ func decodeMessagesRequest(c *echo.Context) (*anthropicapi.MessagesRequest, erro
 	}
 	req, err := anthropicapi.DecodeMessagesRequest(body)
 	if err != nil {
-		return nil, core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
+		return nil, invalidRequestBodyError(c, err)
 	}
 	return req, nil
 }

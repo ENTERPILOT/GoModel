@@ -141,6 +141,18 @@ func requestDialect(c *echo.Context) string {
 	return core.DescribeEndpointPath(c.Request().URL.Path).Dialect
 }
 
+// invalidRequestBodyError renders a request-body decode failure for the client.
+// The JSON decoder's own wording names Go types and struct fields and, inside a
+// complete document, reports a type mismatch as an unexpected end of input, so
+// the body is re-read to name the offending member instead.
+func invalidRequestBodyError(c *echo.Context, err error) *core.GatewayError {
+	body, readErr := requestBodyBytes(c)
+	if readErr != nil {
+		return core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
+	}
+	return core.NewInvalidRequestBodyError(body, err)
+}
+
 type responseHeaderError interface {
 	ResponseHeaders() http.Header
 }

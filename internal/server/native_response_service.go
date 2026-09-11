@@ -263,7 +263,7 @@ func (s *nativeResponseService) CompactResponse(c *echo.Context) error {
 func (s *nativeResponseService) utilityRequest(c *echo.Context) (*core.ResponsesRequest, string, error) {
 	req, err := canonicalJSONRequestFromSemantics[*core.ResponsesRequest](c, core.DecodeResponsesRequest)
 	if err != nil {
-		return nil, "", core.NewInvalidRequestError("invalid request body: "+err.Error(), err)
+		return nil, "", invalidRequestBodyError(c, err)
 	}
 	if req == nil {
 		return nil, "", core.NewInvalidRequestError("responses request body is required", errors.New("responses request body is null"))

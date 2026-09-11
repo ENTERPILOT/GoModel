@@ -228,7 +228,9 @@ features that have no canonical equivalent are not preserved end to end:
   `stop_reason: "stop_sequence"` plus the `stop_sequence` value. OpenAI-family
   providers conflate stop-parameter hits with natural stops in `finish_reason`,
   so completions there report `stop_reason: "end_turn"` (output is still truncated
-  correctly).
+  correctly). OpenAI, Azure OpenAI, and Groq accept at most four stop sequences;
+  a longer list is truncated to the first four (with a warning in the gateway
+  log) instead of failing the request. Anthropic accepts the full list.
 - **`thinking`** on a non-Anthropic model becomes a reasoning effort (budget
   under 10000 tokens: `low`, under 20000: `medium`, otherwise `high`; adaptive:
   `medium`), sent as each provider's own field: `reasoning_effort` on OpenAI,

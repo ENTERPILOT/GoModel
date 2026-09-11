@@ -43,7 +43,7 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 		Input json.RawMessage `json:"input"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+		return wrapJSONDecodeError(err)
 	}
 	input, extraFields, err := responsesExtrasAndInput(data, raw.Input, responsesRequestFields)
 	if err != nil {
