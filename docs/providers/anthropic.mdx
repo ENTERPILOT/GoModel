@@ -135,6 +135,72 @@ Independently of the model, when extended thinking is engaged Anthropic
 requires `temperature = 1`. GoModel drops any other temperature value (and logs
 it) rather than failing the request.
 
+## Structured output
+
+`response_format` works on Anthropic models, mapped onto Claude's native
+structured outputs (`output_config.format`). The same applies to `text.format`
+on `/v1/responses`, which GoModel translates into `response_format` first.
+
+| `response_format` | What GoModel sends |
+| --- | --- |
+| `{"type": "text"}` (or omitted) | Nothing — Claude's default |
+| `{"type": "json_schema", ...}` | `output_config.format` with your schema, so Anthropic constrains the output |
+| `{"type": "json_object"}` | A system-prompt instruction — Anthropic's native format accepts only `json_schema` |
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer $GOMODEL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic/claude-haiku-4-5-20251001",
+    "messages": [{"role": "user", "content": "Describe Paris."}],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "city",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "properties": {"city": {"type": "string"}, "country": {"type": "string"}},
+          "required": ["city", "country"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }'
+```
+
+The response is an ordinary chat completion whose `message.content` is the JSON
+text, with `finish_reason: "stop"` — the same shape OpenAI returns. Streaming is
+unaffected: the JSON arrives as normal content deltas. Tools and
+`response_format` can be sent together; Claude either calls a tool
+(`finish_reason: "tool_calls"`) or answers with schema-constrained JSON.
+
+Anthropic's schema compiler is stricter than OpenAI's, so GoModel adapts the
+schema before sending it:
+
+- every object schema gets the mandatory `"additionalProperties": false`
+- validation-only keywords Anthropic rejects (`minimum`, `maximum`,
+  `multipleOf`, `minItems`, `maxItems`, `uniqueItems`, `propertyNames`, `not`,
+  `if`/`then`/`else`, …) are dropped
+- `oneOf` is relaxed to `anyOf`, and unknown string `format` values are dropped
+
+Nested objects, arrays, `enum`, `const`, `anyOf`, and `$ref`/`$defs` are passed
+through unchanged.
+
+<Note>
+  `strict` is not forwarded — Anthropic always enforces the schema it is given.
+  A non-strict schema is therefore enforced too, minus the constraints listed
+  above. Structured output is available on every Claude model GoModel can
+  currently reach.
+</Note>
+
+## Verbosity
+
+OpenAI's `verbosity` (and `text.verbosity` on `/v1/responses`) has no Anthropic
+equivalent. GoModel logs the requested value and drops it rather than failing
+the request. Ask for shorter or longer answers in the prompt instead.
+
 ## Forced tool choice on Fable 5.1
 
 Fable 5.1 and Mythos 5.1 accept only `tool_choice: "auto"` and `"none"`;
@@ -148,10 +214,8 @@ and every other Claude model keep forced tool use unchanged.
 
 <Warning>
   The instruction is strong guidance, not a hard guarantee: the model can still
-  answer in text. If you relied on forced tool choice to obtain JSON, check
-  `finish_reason` and retry, or use the
-  [native passthrough](#native-passthrough) with Anthropic's structured
-  outputs instead.
+  answer in text. If you relied on forced tool choice to obtain JSON, use
+  [structured output](#structured-output) instead.
 </Warning>
 
 ## Native passthrough

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1404,21 +1405,26 @@ func TestConvertToAnthropicRequest_MapsStopSequences(t *testing.T) {
 	}
 }
 
-func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
+func TestConvertToAnthropicRequest_RejectsUnsupportedResponseFormat(t *testing.T) {
 	tests := []struct {
 		name  string
-		field string
 		value json.RawMessage
+		want  string
 	}{
 		{
-			name:  "response format",
-			field: "response_format",
-			value: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer"}}`),
+			name:  "unknown type",
+			value: json.RawMessage(`{"type":"xml"}`),
+			want:  "unsupported response_format type",
 		},
 		{
-			name:  "verbosity",
-			field: "verbosity",
-			value: json.RawMessage(`"low"`),
+			name:  "not an object",
+			value: json.RawMessage(`"json_object"`),
+			want:  "response_format must be an object",
+		},
+		{
+			name:  "json_schema without json_schema member",
+			value: json.RawMessage(`{"type":"json_schema"}`),
+			want:  "response_format.json_schema is required",
 		},
 	}
 
@@ -1428,7 +1434,7 @@ func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
 				Model:    "claude-sonnet-4-5-20250929",
 				Messages: []core.Message{{Role: "user", Content: "hi"}},
 				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
-					tt.field: tt.value,
+					"response_format": tt.value,
 				}),
 			})
 			if err == nil {
@@ -1444,10 +1450,220 @@ func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
 			if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
 				t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
 			}
-			if !strings.Contains(gatewayErr.Message, tt.field) {
-				t.Fatalf("error message = %q, want mention %q", gatewayErr.Message, tt.field)
+			if !strings.Contains(gatewayErr.Message, tt.want) {
+				t.Fatalf("error message = %q, want mention %q", gatewayErr.Message, tt.want)
 			}
 		})
+	}
+}
+
+func TestConvertToAnthropicRequest_ResponseFormat(t *testing.T) {
+	tests := []struct {
+		name           string
+		responseFormat json.RawMessage
+		wantSchema     map[string]any
+		wantJSONPrompt bool
+	}{
+		{
+			name:           "json_object adds a system instruction",
+			responseFormat: json.RawMessage(`{"type":"json_object"}`),
+			wantJSONPrompt: true,
+		},
+		{
+			name:           "empty json_schema falls back to the instruction",
+			responseFormat: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer","schema":{}}}`),
+			wantJSONPrompt: true,
+		},
+		{
+			name:           "text stays a no-op",
+			responseFormat: json.RawMessage(`{"type":"text"}`),
+		},
+		{
+			name: "strict json_schema is sent natively",
+			responseFormat: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer","strict":true,` +
+				`"schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}}}`),
+			wantSchema: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"city": map[string]any{"type": "string"}},
+				"required":             []any{"city"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			name: "non-strict json_schema gains additionalProperties",
+			responseFormat: json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer",` +
+				`"schema":{"type":"object","properties":{"city":{"type":"string"}}}}}`),
+			wantSchema: map[string]any{
+				"type":                 "object",
+				"properties":           map[string]any{"city": map[string]any{"type": "string"}},
+				"additionalProperties": false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:    "claude-haiku-4-5-20251001",
+				Messages: []core.Message{{Role: "user", Content: "hi"}},
+				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+					"response_format": tt.responseFormat,
+				}),
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest() error = %v", err)
+			}
+
+			system, _ := result.System.(string)
+			if got := strings.Contains(system, "single valid JSON object"); got != tt.wantJSONPrompt {
+				t.Errorf("system instruction present = %v, want %v (system = %q)", got, tt.wantJSONPrompt, system)
+			}
+
+			if tt.wantSchema == nil {
+				if result.OutputConfig != nil && result.OutputConfig.Format != nil {
+					t.Fatalf("OutputConfig.Format = %+v, want nil", result.OutputConfig.Format)
+				}
+				return
+			}
+			if result.OutputConfig == nil || result.OutputConfig.Format == nil {
+				t.Fatal("OutputConfig.Format = nil, want a json_schema format")
+			}
+			if result.OutputConfig.Format.Type != "json_schema" {
+				t.Errorf("Format.Type = %q, want %q", result.OutputConfig.Format.Type, "json_schema")
+			}
+			assertJSONEqual(t, result.OutputConfig.Format.Schema, tt.wantSchema)
+		})
+	}
+}
+
+func TestConvertToAnthropicRequest_ResponseFormatKeepsTools(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:    "claude-haiku-4-5-20251001",
+		Messages: []core.Message{{Role: "user", Content: "hi"}},
+		Tools: []map[string]any{{
+			"type": "function",
+			"function": map[string]any{
+				"name":       "get_weather",
+				"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
+			},
+		}},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"response_format": json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer",` +
+				`"schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}`),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if len(result.Tools) != 1 {
+		t.Fatalf("Tools = %d, want 1", len(result.Tools))
+	}
+	if result.OutputConfig == nil || result.OutputConfig.Format == nil {
+		t.Fatal("OutputConfig.Format = nil, want a json_schema format alongside the tools")
+	}
+}
+
+func TestConvertToAnthropicRequest_ResponseFormatKeepsEffort(t *testing.T) {
+	result, err := convertToAnthropicRequest(&core.ChatRequest{
+		Model:     "claude-opus-4-8",
+		Messages:  []core.Message{{Role: "user", Content: "hi"}},
+		Reasoning: &core.Reasoning{Effort: "high"},
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"response_format": json.RawMessage(`{"type":"json_schema","json_schema":{"name":"answer",` +
+				`"schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}`),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("convertToAnthropicRequest() error = %v", err)
+	}
+	if result.OutputConfig == nil {
+		t.Fatal("OutputConfig = nil")
+	}
+	if result.OutputConfig.Effort != "high" {
+		t.Errorf("OutputConfig.Effort = %q, want %q", result.OutputConfig.Effort, "high")
+	}
+	if result.OutputConfig.Format == nil {
+		t.Error("OutputConfig.Format = nil, want a json_schema format")
+	}
+}
+
+func TestSanitizeAnthropicSchema(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "drops numeric and array constraints",
+			input: `{"type":"object","properties":{"n":{"type":"integer","minimum":1,"maximum":9,"multipleOf":3},"a":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":2,"uniqueItems":true}},"required":["n","a"]}`,
+			want:  `{"type":"object","properties":{"n":{"type":"integer"},"a":{"type":"array","items":{"type":"string"}}},"required":["n","a"],"additionalProperties":false}`,
+		},
+		{
+			name:  "forces additionalProperties false on nested objects",
+			input: `{"type":"object","properties":{"inner":{"type":"object","properties":{"b":{"type":"string"}},"additionalProperties":true}}}`,
+			want:  `{"type":"object","properties":{"inner":{"type":"object","properties":{"b":{"type":"string"}},"additionalProperties":false}},"additionalProperties":false}`,
+		},
+		{
+			name:  "relaxes oneOf to anyOf",
+			input: `{"type":"object","properties":{"v":{"oneOf":[{"type":"string"},{"type":"object","properties":{"x":{"type":"string"}}}]}}}`,
+			want:  `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"object","properties":{"x":{"type":"string"}},"additionalProperties":false}]}},"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps supported string formats and drops unknown ones",
+			input: `{"type":"object","properties":{"when":{"type":"string","format":"date-time"},"what":{"type":"string","format":"sku"}}}`,
+			want:  `{"type":"object","properties":{"when":{"type":"string","format":"date-time"},"what":{"type":"string"}},"additionalProperties":false}`,
+		},
+		{
+			name:  "sanitizes $defs referenced by $ref",
+			input: `{"type":"object","properties":{"l":{"$ref":"#/$defs/landmark"}},"$defs":{"landmark":{"type":"object","properties":{"year":{"type":"integer","minimum":0}}}},"$schema":"https://json-schema.org/draft/2020-12/schema"}`,
+			want:  `{"type":"object","properties":{"l":{"$ref":"#/$defs/landmark"}},"$defs":{"landmark":{"type":"object","properties":{"year":{"type":"integer"}},"additionalProperties":false}},"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps a property named like a dropped keyword",
+			input: `{"type":"object","properties":{"minimum":{"type":"number"},"not":{"type":"string"}},"required":["minimum"]}`,
+			want:  `{"type":"object","properties":{"minimum":{"type":"number"},"not":{"type":"string"}},"required":["minimum"],"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps enums and nullable unions",
+			input: `{"type":"object","properties":{"c":{"type":"string","enum":["a","b"]},"d":{"type":["string","null"]}}}`,
+			want:  `{"type":"object","properties":{"c":{"type":"string","enum":["a","b"]},"d":{"type":["string","null"]}},"additionalProperties":false}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var input map[string]any
+			if err := json.Unmarshal([]byte(tt.input), &input); err != nil {
+				t.Fatalf("invalid test input: %v", err)
+			}
+			var want map[string]any
+			if err := json.Unmarshal([]byte(tt.want), &want); err != nil {
+				t.Fatalf("invalid test expectation: %v", err)
+			}
+			assertJSONEqual(t, sanitizeAnthropicSchema(input), want)
+		})
+	}
+}
+
+func assertJSONEqual(t *testing.T, got, want any) {
+	t.Helper()
+	gotJSON, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal got: %v", err)
+	}
+	wantJSON, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal want: %v", err)
+	}
+	var gotAny, wantAny any
+	if err := json.Unmarshal(gotJSON, &gotAny); err != nil {
+		t.Fatalf("unmarshal got: %v", err)
+	}
+	if err := json.Unmarshal(wantJSON, &wantAny); err != nil {
+		t.Fatalf("unmarshal want: %v", err)
+	}
+	if !reflect.DeepEqual(gotAny, wantAny) {
+		t.Errorf("got %s, want %s", gotJSON, wantJSON)
 	}
 }
 
@@ -1471,6 +1687,13 @@ func TestConvertToAnthropicRequest_IgnoresNoopChatExtras(t *testing.T) {
 			name:  "null verbosity",
 			field: "verbosity",
 			value: json.RawMessage(`null`),
+		},
+		{
+			// Anthropic has no verbosity knob; the hint is dropped with a
+			// warning rather than failing the request.
+			name:  "verbosity",
+			field: "verbosity",
+			value: json.RawMessage(`"low"`),
 		},
 	}
 

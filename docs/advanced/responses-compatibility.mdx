@@ -43,9 +43,10 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
 | Responses websocket transport | Not implemented by GoModel | Not implemented by GoModel |
 
 <Note>
-  Anthropic does not currently accept translated `response_format` or
-  `text.verbosity` settings through GoModel's chat translation path. GoModel
-  rejects those fields instead of dropping them.
+  On Anthropic, `text.format` is served by the provider's native structured
+  outputs (`json_schema`) or by a system-prompt instruction (`json_object`) —
+  see [Anthropic](/providers/anthropic#structured-output).
+  `text.verbosity` has no Anthropic equivalent and is dropped with a warning.
 </Note>
 
 ## The `include` field
