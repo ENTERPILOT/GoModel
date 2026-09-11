@@ -118,14 +118,13 @@ func compatibleConfig(baseURL string, httpClient *http.Client) openai.Compatible
 // sends no credential when SetHeaders is nil (unlike ChatCompatible, which
 // defaults to bearer), so this must stay wired up.
 //
-// The credential is withheld from a destination that would carry it in
-// cleartext. Eden's base URL is operator-supplied, so an http:// override —
-// whether set by mistake or by a downgrade attempt — would otherwise put the
-// gateway's Eden key on the wire in plain text. Loopback is exempt, which is
-// what keeps local proxies and this package's httptest servers working. A
-// withheld credential yields an Eden 401 rather than a leaked key.
+// The credential is also withheld from a destination that would carry it in
+// cleartext. secureTransport already refuses such a request outright, so this
+// is defense in depth: it keeps the key out of the request even if the
+// transport guard is ever bypassed or removed. Loopback is exempt, which is
+// what keeps local proxies and this package's httptest servers working.
 func setHeaders(req *http.Request, apiKey string) {
-	if !credentialSafeURL(req.URL) {
+	if !secureDestination(req.URL) {
 		return
 	}
 	providers.SetAuthHeaders(req, apiKey, providers.AuthHeaderConfig{AuthScheme: "Bearer "})

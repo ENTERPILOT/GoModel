@@ -28,12 +28,23 @@ EDENAI_BASE_URL=https://api.edenai.run/v3
 ```
 
 <Warning>
-  Use an `https://` endpoint. GoModel withholds the Eden API key from any
-  cleartext destination, so an `http://` base URL reaches Eden
-  unauthenticated and fails with a 401 rather than sending the key in the
-  clear. The same applies to redirects: an HTTPS endpoint that redirects to
-  `http://` is refused instead of followed. Cleartext to `localhost` is
-  allowed, which is what keeps a local Eden-compatible proxy usable.
+  Use an `https://` endpoint. GoModel **refuses** any Eden request bound for a
+  cleartext destination rather than sending it, because the request body
+  carries the prompt or the embedding input, not just the API key. A
+  non-loopback `http://` base URL therefore fails with an explicit error
+  instead of transmitting anything.
+
+  Redirects are held to the same standard, and only a redirect that stays on
+  the host you configured is followed. A redirect to `http://`, or to any
+  other host — including a subdomain, which Go would otherwise let carry the
+  `Authorization` header — is refused rather than followed, so an
+  upstream-chosen `Location` cannot move your key or your prompt somewhere you
+  did not configure.
+
+  Cleartext to `localhost` (or `127.0.0.1`) is allowed, since that traffic
+  never reaches a network -- this is what keeps a local Eden-compatible proxy
+  usable. If you front Eden with a proxy on another host, terminate TLS on it
+  and point `EDENAI_BASE_URL` at its `https://` address.
 </Warning>
 
 Or in `config.yaml`:

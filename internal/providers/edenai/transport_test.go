@@ -2,6 +2,8 @@ package edenai
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -47,8 +49,8 @@ func TestCredentialSafeURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("url.Parse(%q) = %v", tc.raw, err)
 			}
-			if got := credentialSafeURL(parsed); got != tc.want {
-				t.Errorf("credentialSafeURL(%q) = %v, want %v", tc.raw, got, tc.want)
+			if got := secureDestination(parsed); got != tc.want {
+				t.Errorf("secureDestination(%q) = %v, want %v", tc.raw, got, tc.want)
 			}
 		})
 	}
@@ -57,8 +59,8 @@ func TestCredentialSafeURL(t *testing.T) {
 // TestCredentialSafeURL_NilIsUnsafe asserts the predicate fails closed. A
 // request with no parsable URL must not be treated as a TLS destination.
 func TestCredentialSafeURL_NilIsUnsafe(t *testing.T) {
-	if credentialSafeURL(nil) {
-		t.Error("credentialSafeURL(nil) = true, want false: the predicate must fail closed")
+	if secureDestination(nil) {
+		t.Error("secureDestination(nil) = true, want false: the predicate must fail closed")
 	}
 }
 
@@ -106,24 +108,31 @@ func TestSetHeaders_SendsCredentialOverLoopback(t *testing.T) {
 	}
 }
 
-// TestCleartextBaseURL_RequestCarriesNoCredential proves the guarantee end to
-// end rather than only at the header setter: a provider configured with a
-// non-loopback cleartext base URL reaches the upstream unauthenticated.
+// TestCleartextBaseURL_RequestRefusedBeforeSending is the payload half of the
+// cleartext guarantee, and the reason withholding the credential is not enough
+// on its own.
 //
-// The server here answers on a loopback address but is addressed through a
+// A request to a non-loopback http:// endpoint is written to the socket in
+// full before the upstream can reject it, so an unauthenticated send still
+// discloses the prompt — and on the embeddings surface, the input text — to
+// anyone on the path. Nothing may reach the endpoint at all.
+//
+// The server answers on a loopback address but is addressed through a
 // public-looking host, which is what a misconfigured or hijacked
 // EDENAI_BASE_URL would look like.
-func TestCleartextBaseURL_RequestCarriesNoCredential(t *testing.T) {
-	var gotAuth string
+func TestCleartextBaseURL_RequestRefusedBeforeSending(t *testing.T) {
+	var hits int
+	var gotAuth, gotBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
 		gotAuth = r.Header.Get("Authorization")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","model":"openai/text-embedding-3-small","data":[]}`))
+		_, _ = w.Write([]byte(`{"id":"x","choices":[]}`))
 	}))
 	defer server.Close()
 
-	// Rewrite the loopback host to a name that is not loopback, while still
-	// dialing the test server, by pointing the transport at it explicitly.
 	target, err := url.Parse(server.URL)
 	if err != nil {
 		t.Fatalf("url.Parse: %v", err)
@@ -131,13 +140,147 @@ func TestCleartextBaseURL_RequestCarriesNoCredential(t *testing.T) {
 	client := &http.Client{Transport: &cleartextRouteTransport{cleartext: target.Host}}
 
 	provider := NewWithHTTPClient("eden-key", "http://eden.example.com/v3", client, llmclient.Hooks{})
-	if _, err := provider.Embeddings(context.Background(), embeddingRequest()); err != nil {
-		t.Fatalf("Embeddings: %v", err)
+	_, err = provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    slashedModel,
+		Messages: []core.Message{{Role: "user", Content: "secret-prompt"}},
+	})
+	if err == nil {
+		t.Fatal("ChatCompletion succeeded against a cleartext endpoint, want the request refused")
 	}
 
-	if gotAuth != "" {
-		t.Errorf("upstream saw Authorization = %q, want empty: the Eden key must never travel in cleartext", gotAuth)
+	if hits != 0 {
+		t.Errorf("cleartext endpoint received %d request(s), want 0", hits)
 	}
+	if gotAuth != "" {
+		t.Errorf("cleartext endpoint saw Authorization = %q, want empty", gotAuth)
+	}
+	if strings.Contains(gotBody, "secret-prompt") {
+		t.Errorf("cleartext endpoint received the prompt body %q; the payload must never be sent", gotBody)
+	}
+	// The refusal must name the destination without quoting the whole URL.
+	if !strings.Contains(err.Error(), "eden.example.com") {
+		t.Errorf("error %q should name the refused host", err)
+	}
+}
+
+// TestCleartextLoopback_RequestStillSent pins the other side of the exemption:
+// a cleartext endpoint on the local machine is allowed through and still
+// authenticates, which is what keeps a local Eden-compatible proxy usable and
+// what every httptest-backed test in this package relies on.
+func TestCleartextLoopback_RequestStillSent(t *testing.T) {
+	var hits int
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","model":"openai/text-embedding-3-small","data":[]}`))
+	}))
+	defer server.Close()
+
+	provider := NewWithHTTPClient("eden-key", server.URL, server.Client(), llmclient.Hooks{})
+	if _, err := provider.Embeddings(context.Background(), embeddingRequest()); err != nil {
+		t.Fatalf("Embeddings against a loopback endpoint: %v", err)
+	}
+	if hits != 1 {
+		t.Errorf("loopback endpoint received %d request(s), want 1", hits)
+	}
+	if gotAuth != "Bearer eden-key" {
+		t.Errorf("loopback endpoint saw Authorization = %q, want %q", gotAuth, "Bearer eden-key")
+	}
+}
+
+// TestSecureTransport_RoundTrip covers the guard directly, including that an
+// allowed request is handed to the underlying transport unchanged and that a
+// nil base delegates to http.DefaultTransport the way net/http does.
+func TestSecureTransport_RoundTrip(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     string
+		wantCalled bool
+	}{
+		{"https", "https://api.edenai.run/v3/models", true},
+		{"loopback http", "http://127.0.0.1:9999/v3/models", true},
+		{"loopback name", "http://localhost:9999/v3/models", true},
+		{"public cleartext", "http://eden.example.com/v3/models", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &recordingRoundTripper{}
+			transport := &secureTransport{base: stub}
+
+			req, err := http.NewRequest(http.MethodGet, tc.target, nil)
+			if err != nil {
+				t.Fatalf("http.NewRequest: %v", err)
+			}
+			resp, err := transport.RoundTrip(req)
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+
+			if stub.calls != 0 != tc.wantCalled {
+				t.Errorf("underlying transport calls = %d, wantCalled = %v", stub.calls, tc.wantCalled)
+			}
+			if tc.wantCalled && err != nil {
+				t.Errorf("RoundTrip(%q) = %v, want the request passed through", tc.target, err)
+			}
+			if !tc.wantCalled && err == nil {
+				t.Errorf("RoundTrip(%q) = nil error, want a refusal", tc.target)
+			}
+		})
+	}
+}
+
+// TestSecureTransport_NilBaseUsesDefaultTransport asserts the nil-base fallback
+// is wired, since http.DefaultClient carries a nil Transport and Eden's guard
+// wraps exactly that on the NewWithHTTPClient nil path.
+func TestSecureTransport_NilBaseUsesDefaultTransport(t *testing.T) {
+	transport := &secureTransport{}
+
+	// A refused destination never reaches the base, so it proves the guard runs
+	// without needing a live server for the delegating case.
+	req, err := http.NewRequest(http.MethodGet, "http://eden.example.com/v3", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest: %v", err)
+	}
+	if _, err := transport.RoundTrip(req); err == nil {
+		t.Error("RoundTrip = nil error for a cleartext target, want a refusal")
+	}
+
+	// An allowed loopback destination must reach the network through
+	// http.DefaultTransport rather than panicking on the nil base.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	req, err = http.NewRequest(http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest: %v", err)
+	}
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip through the nil base: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusNoContent)
+	}
+}
+
+// recordingRoundTripper counts the requests that made it past the guard.
+type recordingRoundTripper struct {
+	calls int
+}
+
+func (r *recordingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	r.calls++
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       http.NoBody,
+		Header:     make(http.Header),
+	}, nil
 }
 
 // cleartextRouteTransport routes cleartext requests to a fixed address while
@@ -206,34 +349,186 @@ func TestGuardedHTTPClient_DoesNotMutateCallerClient(t *testing.T) {
 	}
 }
 
-// TestGuardedHTTPClient_PreservesCallerTransport asserts copying the client
-// keeps the transport, so a caller that configured TLS roots or a proxy (and
-// httptest's own client) still works.
-func TestGuardedHTTPClient_PreservesCallerTransport(t *testing.T) {
+// TestGuardedHTTPClient_WrapsCallerTransport asserts the guard is layered over
+// the caller's transport rather than replacing it, so a caller that configured
+// TLS roots or a proxy (and httptest's own client) still reaches its server.
+func TestGuardedHTTPClient_WrapsCallerTransport(t *testing.T) {
 	transport := &http.Transport{}
 	caller := &http.Client{Transport: transport}
 
-	if got := guardedHTTPClient(caller).Transport; got != transport {
-		t.Errorf("Transport = %v, want the caller's transport preserved", got)
+	guarded, ok := guardedHTTPClient(caller).Transport.(*secureTransport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *secureTransport wrapping the caller's", guardedHTTPClient(caller).Transport)
+	}
+	if guarded.base != transport {
+		t.Errorf("wrapped base = %v, want the caller's transport preserved", guarded.base)
+	}
+	if caller.Transport != transport {
+		t.Error("the caller's client was modified; the guard must go on a copy")
 	}
 }
 
-// TestCheckRedirect_AllowsHTTPSTargets asserts TLS redirects keep working,
-// including to a different host: that is an ordinary API redirect and the
-// credential stays encrypted.
-func TestCheckRedirect_AllowsHTTPSTargets(t *testing.T) {
+// TestCheckRedirect_AllowsSameHostHTTPS asserts the one redirect shape a REST
+// endpoint plausibly returns keeps working: a path change on the host the
+// request was already addressed to.
+func TestCheckRedirect_AllowsSameHostHTTPS(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/chat/completions")
+	target := mustRequest(t, "https://api.edenai.run/v3/chat/completions-moved")
+
+	if err := checkRedirect(target, []*http.Request{origin}); err != nil {
+		t.Errorf("checkRedirect same-host = %v, want nil", err)
+	}
+	// Host comparison is case-insensitive, as hostnames are.
+	upper := mustRequest(t, "https://API.EdenAI.run/v3/chat/completions-moved")
+	if err := checkRedirect(upper, []*http.Request{origin}); err != nil {
+		t.Errorf("checkRedirect differing-case host = %v, want nil", err)
+	}
+}
+
+// TestCheckRedirect_RefusesCrossHostHTTPS covers the credential-exposure path
+// that TLS alone does not close. Go's default policy forwards Authorization to
+// a subdomain of the original host, so an upstream-chosen Location is otherwise
+// enough to hand the Eden key to a neighbouring name — and following the hop
+// would ship the request body there too.
+func TestCheckRedirect_RefusesCrossHostHTTPS(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/chat/completions")
+
 	for _, target := range []string{
-		"https://api.edenai.run/v3/chat/completions",
-		"https://eu.edenai.run/v3/chat/completions",
+		"https://evil.api.edenai.run/v3/chat/completions", // subdomain: Go would forward the token
+		"https://eu.edenai.run/v3/chat/completions",       // sibling host
+		"https://attacker.example.com/v3/chat/completions",
 	} {
-		req, err := http.NewRequest(http.MethodGet, target, nil)
-		if err != nil {
-			t.Fatalf("http.NewRequest: %v", err)
+		req := mustRequest(t, target)
+		err := checkRedirect(req, []*http.Request{origin})
+		if err == nil {
+			t.Errorf("checkRedirect(%q) = nil, want a refusal", target)
+			continue
 		}
-		if err := checkRedirect(req, nil); err != nil {
-			t.Errorf("checkRedirect(%q) = %v, want nil", target, err)
+		if !strings.Contains(err.Error(), "cross-host") {
+			t.Errorf("checkRedirect(%q) = %v, want a cross-host refusal", target, err)
 		}
 	}
+}
+
+// TestCheckRedirect_ComparesAgainstOriginalHost asserts a chain cannot walk off
+// the configured host one hop at a time: the check is against the request the
+// caller made, not the previous hop.
+func TestCheckRedirect_ComparesAgainstOriginalHost(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+	hop := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+	target := mustRequest(t, "https://elsewhere.edenai.run/v3/models")
+
+	if err := checkRedirect(target, []*http.Request{origin, hop}); err == nil {
+		t.Error("checkRedirect = nil for a second hop leaving the original host, want a refusal")
+	}
+}
+
+// TestRedirectPolicy_PreservesCallerPolicy asserts the guard composes with the
+// policy a caller's client already carried instead of replacing it. Overwriting
+// the field would silently drop the caller's rules, letting an upstream Location
+// reach a destination the caller had rejected.
+func TestRedirectPolicy_PreservesCallerPolicy(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+	callerErr := errors.New("caller rejected this destination")
+
+	var called int
+	policy := redirectPolicy(func(*http.Request, []*http.Request) error {
+		called++
+		return callerErr
+	})
+
+	// Eden allows this same-host hop, so the caller's policy decides.
+	if err := policy(target, []*http.Request{origin}); !errors.Is(err, callerErr) {
+		t.Errorf("policy = %v, want the caller's error returned verbatim", err)
+	}
+	if called != 1 {
+		t.Errorf("caller policy invoked %d times, want 1", called)
+	}
+}
+
+// TestRedirectPolicy_PropagatesErrUseLastResponse asserts the sentinel a caller
+// uses to stop following redirects survives composition. Swallowing it would
+// turn "hand me the redirect response" into "follow the redirect".
+func TestRedirectPolicy_PropagatesErrUseLastResponse(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+
+	policy := redirectPolicy(func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	})
+
+	if err := policy(target, []*http.Request{origin}); !errors.Is(err, http.ErrUseLastResponse) {
+		t.Errorf("policy = %v, want http.ErrUseLastResponse propagated", err)
+	}
+}
+
+// TestRedirectPolicy_EdenRefusalWinsOverPermissiveCaller asserts a caller
+// cannot waive Eden's guarantees: Eden's rules run first and a refusal is
+// final, so a policy that approves everything still cannot allow a cleartext or
+// cross-host hop.
+func TestRedirectPolicy_EdenRefusalWinsOverPermissiveCaller(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+
+	var called int
+	policy := redirectPolicy(func(*http.Request, []*http.Request) error {
+		called++
+		return nil
+	})
+
+	for _, target := range []string{
+		"http://api.edenai.run/v3/models",       // cleartext downgrade
+		"https://evil.api.edenai.run/v3/models", // cross-host
+	} {
+		if err := policy(mustRequest(t, target), []*http.Request{origin}); err == nil {
+			t.Errorf("policy(%q) = nil, want Eden's refusal to stand", target)
+		}
+	}
+	if called != 0 {
+		t.Errorf("caller policy invoked %d times, want 0: Eden refuses before delegating", called)
+	}
+}
+
+// TestRedirectPolicy_NilCallerAllowsEdenApprovedHop asserts the common case —
+// a client with no policy of its own — still follows an Eden-approved redirect.
+func TestRedirectPolicy_NilCallerAllowsEdenApprovedHop(t *testing.T) {
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+
+	if err := redirectPolicy(nil)(target, []*http.Request{origin}); err != nil {
+		t.Errorf("redirectPolicy(nil) = %v, want nil for a same-host TLS hop", err)
+	}
+}
+
+// TestGuardedHTTPClient_ComposesCallerRedirectPolicy asserts the composition is
+// actually wired by the constructor, not only available as a helper.
+func TestGuardedHTTPClient_ComposesCallerRedirectPolicy(t *testing.T) {
+	var called bool
+	caller := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		called = true
+		return nil
+	}}
+
+	guarded := guardedHTTPClient(caller)
+	origin := mustRequest(t, "https://api.edenai.run/v3/models")
+	target := mustRequest(t, "https://api.edenai.run/v3/models-moved")
+
+	if err := guarded.CheckRedirect(target, []*http.Request{origin}); err != nil {
+		t.Fatalf("CheckRedirect = %v, want nil", err)
+	}
+	if !called {
+		t.Error("the caller's redirect policy was not invoked; the guard must compose, not replace")
+	}
+}
+
+// mustRequest builds a GET request for a URL a test controls.
+func mustRequest(t *testing.T, rawURL string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest(%q): %v", rawURL, err)
+	}
+	return req
 }
 
 // TestCheckRedirect_RefusesSchemeDowngrade is the core of the redirect
@@ -404,6 +699,72 @@ func TestRedirect_HTTPSToHTTPSStillFollowed(t *testing.T) {
 	}
 }
 
+// TestRedirect_HTTPSSubdomainDoesNotForwardCredential is the end-to-end form of
+// the cross-host rule, against a real TLS server and a real redirect.
+//
+// Both hops are served by the same httptest instance, addressed through two
+// different hostnames so Go sees a genuine subdomain redirect — the case where
+// its default policy forwards Authorization. Neither the credential nor the
+// request may reach the second name.
+func TestRedirect_HTTPSSubdomainDoesNotForwardCredential(t *testing.T) {
+	var secondHopHits int
+	var secondHopAuth string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v3/embeddings", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.eden.test/v3/stolen", http.StatusFound)
+	})
+	mux.HandleFunc("/v3/stolen", func(w http.ResponseWriter, r *http.Request) {
+		secondHopHits++
+		secondHopAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+	})
+	server := httptest.NewTLSServer(mux)
+	defer server.Close()
+
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+	client := server.Client()
+	// Route both hostnames to the one test server; the TLS config from
+	// server.Client() already trusts its certificate.
+	client.Transport = &hostPinnedTransport{base: client.Transport, addr: target.Host}
+
+	provider := NewWithHTTPClient("eden-key", "https://eden.test/v3", client, llmclient.Hooks{})
+	_, err = provider.Embeddings(context.Background(), embeddingRequest())
+	if err == nil {
+		t.Fatal("Embeddings followed an HTTPS subdomain redirect, want it refused")
+	}
+
+	if secondHopHits != 0 {
+		t.Errorf("subdomain endpoint received %d request(s), want 0", secondHopHits)
+	}
+	if secondHopAuth != "" {
+		t.Errorf("subdomain endpoint saw Authorization = %q, want empty: the Eden key must not follow an upstream-chosen host", secondHopAuth)
+	}
+}
+
+// hostPinnedTransport dials one fixed address whatever hostname the request
+// carries, so a test can exercise multi-host redirect rules against a single
+// server without DNS. The request URL's host is left intact, which is what the
+// redirect policy inspects.
+type hostPinnedTransport struct {
+	base http.RoundTripper
+	addr string
+}
+
+func (t *hostPinnedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	routed := req.Clone(req.Context())
+	routed.URL.Host = t.addr
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(routed)
+}
+
 // TestDefaultBaseURLIsHTTPS guards the default every deployment uses. The
 // credential guard keys off the request scheme, so a default that regressed to
 // http:// would silently withhold the API key on ordinary traffic.
@@ -459,8 +820,14 @@ func TestGuardedHTTPClient_PreservesDefaultClientSemantics(t *testing.T) {
 	if guarded.CheckRedirect == nil {
 		t.Error("CheckRedirect = nil, want Eden's redirect guard on the copy")
 	}
-	if guarded.Transport != http.DefaultClient.Transport {
-		t.Errorf("Transport = %v, want http.DefaultClient's transport preserved", guarded.Transport)
+	wrapped, ok := guarded.Transport.(*secureTransport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *secureTransport", guarded.Transport)
+	}
+	// http.DefaultClient leaves Transport nil, meaning http.DefaultTransport;
+	// the wrapper preserves that by delegating to it when its base is nil.
+	if wrapped.base != http.DefaultClient.Transport {
+		t.Errorf("wrapped base = %v, want http.DefaultClient's transport (nil)", wrapped.base)
 	}
 	if guarded.Timeout != http.DefaultClient.Timeout {
 		t.Errorf("Timeout = %v, want http.DefaultClient's %v, not the gateway client's", guarded.Timeout, http.DefaultClient.Timeout)

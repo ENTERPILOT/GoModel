@@ -316,6 +316,14 @@ func TestEmbeddings_ForwardsToEmbeddingsEndpoint(t *testing.T) {
 	if gotBody["model"] != "openai/text-embedding-3-small" {
 		t.Fatalf("request model = %#v, want provider/model ID forwarded unchanged", gotBody["model"])
 	}
+	// core.EmbeddingRequest.Provider is a gateway routing hint that the router
+	// clears on the forwarded clone (providers.forwardEmbeddingRequest) before
+	// any provider sees it, so it must not appear on the wire. Eden dispatches
+	// the request it is handed, exactly as the shared
+	// CompatibleProvider.Embeddings helper does.
+	if _, leaked := gotBody["provider"]; leaked {
+		t.Errorf("request body carried the gateway-only provider field: %#v", gotBody)
+	}
 	if len(resp.Data) != 1 || resp.Data[0].Index != 0 || len(resp.Data[0].Embedding) == 0 {
 		t.Fatalf("embedding data = %+v, want one populated vector", resp.Data)
 	}
