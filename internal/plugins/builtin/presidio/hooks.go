@@ -125,6 +125,18 @@ func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi
 				jobs = append(jobs, j)
 			}
 		}
+	} else {
+		// Unanalyzed arguments are reserved like unanalyzed text. The
+		// decoded strings are read, since JSON may escape "<" as "\u003c".
+		for _, ref := range x.Prompt.ToolCalls() {
+			if _, values, ok := argStrings(ref.Call.Arguments); ok {
+				for _, v := range values {
+					m.reserve(v)
+				}
+			} else {
+				m.reserve(string(ref.Call.Arguments))
+			}
+		}
 	}
 	rep := newReport()
 	if err := p.run(ctx, jobs, m, rep, pass{prompt: true, requestID: x.Meta.RequestID}); err != nil {

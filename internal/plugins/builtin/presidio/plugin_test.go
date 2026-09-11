@@ -784,3 +784,28 @@ func TestPlaceholdersSkipLiteralTokens(t *testing.T) {
 		t.Errorf("stream = %+v", got)
 	}
 }
+
+func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
+	a := newAnalyzer(t, "Ann Lee")
+	in := newPlugin(t, a, `{"restore": true, "roles": ["user"]}`)
+	out := newPlugin(t, a, `{"restore": true}`)
+	// Assistant arguments are not analyzed with roles [user], but their
+	// placeholder, JSON-escaped here, must still keep its number.
+	call := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"name": "<PERSON_1>"}`)}},
+	}}
+	x := plugintest.Exchange(plugintest.Prompt(call, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
+	if _, err := in.OnPrompt(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
+		t.Fatalf("prompt = %q", got)
+	}
+	x.Response = plugintest.Completion("<PERSON_1> is not <PERSON_2>")
+	if _, err := out.OnResponse(context.Background(), x); err != nil {
+		t.Fatal(err)
+	}
+	if got := x.Response.Text(0); got != "<PERSON_1> is not Ann Lee" {
+		t.Errorf("response = %q", got)
+	}
+}
