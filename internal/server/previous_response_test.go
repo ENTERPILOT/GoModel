@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -313,12 +314,16 @@ func (p *chainingFailoverProvider) Responses(ctx context.Context, req *core.Resp
 	return p.failoverProvider.Responses(ctx, req)
 }
 
-// TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt keeps the id
-// on the native primary's request and hands the chat-translated failover
-// target the replayed history instead, so a failed native attempt does not
-// leave the fallback with an id it cannot use and a healthy native primary
-// never sees its request rewritten.
-func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T) {
+func (p *chainingFailoverProvider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+	p.requests[requestSelector(req.Model, req.Provider)] = req
+	return p.failoverProvider.StreamResponses(ctx, req)
+}
+
+// newChainingFailoverHandler builds a handler whose native primary fails with
+// 503 and whose chat-translated failover target succeeds, with one stored
+// response to chain on.
+func newChainingFailoverHandler(t *testing.T) (*Handler, *chainingFailoverProvider) {
+	t.Helper()
 	provider := &chainingFailoverProvider{
 		failoverProvider: &failoverProvider{
 			responsesErrors: map[string]error{
@@ -326,6 +331,9 @@ func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T
 			},
 			responsesResponses: map[string]*core.ResponsesResponse{
 				"anthropic/claude": {ID: "resp_failover", Object: "response", Status: "completed", Output: []core.ResponsesOutputItem{}},
+			},
+			responsesStreams: map[string]string{
+				"anthropic/claude": "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_failover\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\ndata: [DONE]\n\n",
 			},
 			supportedModels: map[string]string{"gpt-5-mini": "openai", "anthropic/claude": "anthropic"},
 		},
@@ -346,16 +354,13 @@ func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T
 	}); err != nil {
 		t.Fatalf("store: %v", err)
 	}
+	return handler, provider
+}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_native"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := handler.Responses(echo.New().NewContext(req, rec)); err != nil {
-		t.Fatalf("handler.Responses() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
+// assertResolvedPerAttempt checks that the native primary received the id
+// untouched while the translated failover received the replayed history.
+func assertResolvedPerAttempt(t *testing.T, provider *chainingFailoverProvider) {
+	t.Helper()
 	primary := provider.requests["gpt-5-mini"]
 	if primary == nil || primary.PreviousResponseID != "resp_native" {
 		t.Fatalf("native primary request = %#v, want previous_response_id kept", primary)
@@ -370,6 +375,37 @@ func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T
 	items, ok := fallback.Input.([]any)
 	if !ok || len(items) != 3 {
 		t.Fatalf("translated failover input = %#v, want replayed history + new input (3 items)", fallback.Input)
+	}
+}
+
+// TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt keeps the id
+// on the native primary's request and hands the chat-translated failover
+// target the replayed history instead, so a failed native attempt does not
+// leave the fallback with an id it cannot use and a healthy native primary
+// never sees its request rewritten. Both dispatch paths go through the same
+// per-attempt hook.
+func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(map[bool]string{false: "buffered", true: "streaming"}[stream], func(t *testing.T) {
+			handler, provider := newChainingFailoverHandler(t)
+			body := `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_native"}`
+			if stream {
+				body = `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_native","stream":true}`
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			if err := handler.Responses(echo.New().NewContext(req, rec)); err != nil {
+				t.Fatalf("handler.Responses() error = %v", err)
+			}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+			}
+			if stream && !strings.Contains(rec.Body.String(), "response.completed") {
+				t.Fatalf("streaming fallback body = %s, want the fallback stream", rec.Body.String())
+			}
+			assertResolvedPerAttempt(t, provider)
+		})
 	}
 }
 
