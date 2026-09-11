@@ -77,7 +77,7 @@ Stateful note:
 - `S155`-`S159` exercise scoped rate limits (admin CRUD, user-path request and
   token enforcement, model-scope saturation, auth gating); each creates
   `$QA_SUFFIX`-scoped probe rules and deletes them, so they are
-  self-contained, but `S158` saturates `deepseek/deepseek-v4-flash` for up to
+  self-contained, but `S158` saturates `deepseek/deepseek-flash` for up to
   one minute after it runs
 - `S163`-`S172` exercise the MCP gateway (admin CRUD with secret redaction,
   aggregation/namespacing, tools/prompts/resources relay, usage and audit
@@ -964,20 +964,20 @@ jq '{model,provider,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "anthropic" "QA_ALIAS_SONNET_OK"
 ```
 
-### S26 Latest GPT reasoning on chat (negative)
+### S26 Latest GPT reasoning on chat
 
-Reproduces the current gap for `reasoning` on `gpt-5-nano` via chat completions.
+Checks that `reasoning` on `gpt-5-nano` via chat completions is accepted and
+mapped to OpenAI's `reasoning_effort`. The generous `max_tokens` leaves room for
+reasoning before the final content.
 
 ```bash
-HEADERS_FILE=$(mktemp "$QA_RUN_DIR/s26.headers.XXXXXX")
-BODY_FILE=$(mktemp "$QA_RUN_DIR/s26.body.XXXXXX")
-curl -sS -D "$HEADERS_FILE" -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
+RESP_FILE="$QA_RUN_DIR/s26.chat.json"
+curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-5-nano","messages":[{"role":"user","content":"Reply with exactly QA_GPT5_REASONING_OK"}],"reasoning":{"effort":"low"},"max_tokens":20}'
-sed -n '1,20p' "$HEADERS_FILE"
-jq '.' "$BODY_FILE"
-grep -Eiq '^HTTP/.* 400 ' "$HEADERS_FILE"
-jq -e '.error.type == "invalid_request_error"' "$BODY_FILE" >/dev/null
+  -d '{"model":"gpt-5-nano","messages":[{"role":"user","content":"Reply with exactly QA_GPT5_REASONING_OK"}],"reasoning":{"effort":"low"},"max_tokens":2000}' \
+  > "$RESP_FILE"
+jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
+assert_chat_response_contains "$RESP_FILE" "openai" "QA_GPT5_REASONING_OK"
 ```
 
 ## 4. Responses API
@@ -3445,7 +3445,7 @@ curl -fsS "$AUTH_BASE_URL/admin/tagging/settings" -H "$ADMIN_AUTH_HEADER" \
 
 These scenarios cover providers rewired through the shared OpenAI-compatible
 core (`#486`) and the new Fireworks provider (`#475`). DeepSeek scenarios use
-`deepseek-v4-flash`, a reasoning model that needs a generous `max_tokens`
+`deepseek-flash`, a reasoning model that needs a generous `max_tokens`
 budget before it emits final content.
 
 ### S149 DeepSeek non-streaming chat
@@ -3456,7 +3456,7 @@ Checks translated chat on DeepSeek through the shared OpenAI-compatible core.
 RESP_FILE="$QA_RUN_DIR/s149.chat.json"
 curl -fsS "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_OK"}],"max_tokens":2000}' \
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_OK"}],"max_tokens":2000}' \
   > "$RESP_FILE"
 jq '{model,provider,usage,answer:.choices[0].message.content}' "$RESP_FILE"
 assert_chat_response_contains "$RESP_FILE" "deepseek" "QA_DEEPSEEK_OK"
@@ -3470,7 +3470,7 @@ Checks SSE chat streaming and the final usage chunk on DeepSeek.
 SSE_FILE="$QA_RUN_DIR/s150.chat.sse"
 curl -fsS --no-buffer "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","stream":true,"messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_STREAM_OK"}],"max_tokens":2000}' \
+  -d '{"model":"deepseek-flash","stream":true,"messages":[{"role":"user","content":"Reply with exactly QA_DEEPSEEK_STREAM_OK"}],"max_tokens":2000}' \
   > "$SSE_FILE"
 sed -n '1,8p' "$SSE_FILE"
 assert_chat_stream_contains "$SSE_FILE" "QA_DEEPSEEK_STREAM_OK"
@@ -3737,7 +3737,7 @@ curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
 
 ### S158 Model-scope saturation returns 429 without alternatives
 
-Pins `deepseek/deepseek-v4-flash` to one request per minute; the second direct
+Pins `deepseek/deepseek-flash` to one request per minute; the second direct
 request has no alternative provider for the model and must be rejected with
 `429` instead of routed elsewhere. Leaves the model saturated for up to one
 minute after the scenario runs.
@@ -3747,24 +3747,24 @@ BODY_FILE="$QA_RUN_DIR/s158.body.json"
 
 curl -fsS -X PUT "$BASE_URL/admin/rate-limits" \
   -H 'Content-Type: application/json' \
-  -d '{"scope":"model","subject":"deepseek/deepseek-v4-flash","limit_key":{"period":"minute"},"max_requests":1}' \
-  | jq -e 'any(.rate_limits[]?; .scope == "model" and .subject == "deepseek/deepseek-v4-flash" and .max_requests == 1)' >/dev/null
+  -d '{"scope":"model","subject":"deepseek/deepseek-flash","limit_key":{"period":"minute"},"max_requests":1}' \
+  | jq -e 'any(.rate_limits[]?; .scope == "model" and .subject == "deepseek/deepseek-flash" and .max_requests == 1)' >/dev/null
 
 curl -fsS -o "$BODY_FILE" "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_OK"}],"max_tokens":2000}'
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_OK"}],"max_tokens":2000}'
 assert_chat_response_contains "$BODY_FILE" "deepseek" "QA_RL_MODEL_OK"
 
 curl -sS -o "$BODY_FILE" -w '%{http_code}' "$BASE_URL/v1/chat/completions" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_BLOCKED"}],"max_tokens":2000}' \
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_RL_MODEL_BLOCKED"}],"max_tokens":2000}' \
   | jq -R -e '. == "429"' >/dev/null
 jq -e '.error.type == "rate_limit_error" and .error.code == "rate_limit_exceeded"' "$BODY_FILE" >/dev/null
 
 curl -fsS -X DELETE "$BASE_URL/admin/rate-limits" \
   -H 'Content-Type: application/json' \
-  -d '{"scope":"model","subject":"deepseek/deepseek-v4-flash","limit_key":{"period":"minute"}}' \
-  | jq -e 'all(.rate_limits[]?; .subject != "deepseek/deepseek-v4-flash")' >/dev/null
+  -d '{"scope":"model","subject":"deepseek/deepseek-flash","limit_key":{"period":"minute"}}' \
+  | jq -e 'all(.rate_limits[]?; .subject != "deepseek/deepseek-flash")' >/dev/null
 ```
 
 ### S159 Rate limit admin requires authentication
@@ -6059,7 +6059,7 @@ overrides must win at every hour, which is verified against the token counts and
 costs persisted for a real request.
 
 ```bash
-SELECTOR="deepseek/deepseek-v4-flash"
+SELECTOR="deepseek/deepseek-flash"
 cleanup_s226() {
   curl -sS -X DELETE "$BASE_URL/admin/model-pricing-overrides" \
     -H 'Content-Type: application/json' -d "{\"selector\":\"$SELECTOR\"}" >/dev/null || true
@@ -6068,11 +6068,11 @@ trap cleanup_s226 EXIT
 curl -fsS -X PUT "$BASE_URL/admin/model-pricing-overrides" \
   -H 'Content-Type: application/json' \
   -d "{\"selector\":\"$SELECTOR\",\"pricing\":{\"input_per_mtok\":100,\"output_per_mtok\":200}}" \
-  | jq -e '.selector == "deepseek/deepseek-v4-flash" and .pricing.input_per_mtok == 100 and .pricing.output_per_mtok == 200' >/dev/null
+  | jq -e '.selector == "deepseek/deepseek-flash" and .pricing.input_per_mtok == 100 and .pricing.output_per_mtok == 200' >/dev/null
 RID="qa-pricing-window-$QA_SUFFIX"
 curl -fsS "$BASE_URL/v1/chat/completions" -H 'Content-Type: application/json' \
   -H "X-Request-ID: $RID" \
-  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"Reply with exactly QA_PRICING_WINDOW_OK"}],"max_tokens":2000}' >/dev/null
+  -d '{"model":"deepseek-flash","messages":[{"role":"user","content":"Reply with exactly QA_PRICING_WINDOW_OK"}],"max_tokens":2000}' >/dev/null
 USAGE_FILE="$QA_RUN_DIR/s226.usage.json"
 for _ in $(seq 1 15); do
   curl -fsS "$BASE_URL/admin/usage/log?search=$RID&limit=3" > "$USAGE_FILE"
