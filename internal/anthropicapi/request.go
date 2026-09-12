@@ -51,6 +51,33 @@ func ToChatRequestLenient(req *MessagesRequest) (*core.ChatRequest, error) {
 	return toChatRequest(req, true)
 }
 
+// HasUnsignedThinking reports whether an assistant turn replays a thinking
+// block with no signature. Such a block is reasoning some other provider
+// produced (the gateway renders it with an empty signature, because the
+// Anthropic schema requires the member); Anthropic refuses any signature it did
+// not mint, so a request carrying one must take the translated pipeline, which
+// drops the block, instead of being forwarded to Claude verbatim.
+func HasUnsignedThinking(req *MessagesRequest) bool {
+	if req == nil {
+		return false
+	}
+	for _, message := range req.Messages {
+		if message.Role != "assistant" {
+			continue
+		}
+		_, blocks, err := parseContent(message.Content)
+		if err != nil {
+			continue
+		}
+		for _, block := range blocks {
+			if block.Type == "thinking" && strings.TrimSpace(block.Signature) == "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func toChatRequest(req *MessagesRequest, lenient bool) (*core.ChatRequest, error) {
 	if req == nil {
 		return nil, core.NewInvalidRequestError("messages request is required", nil)

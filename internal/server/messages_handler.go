@@ -192,7 +192,11 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 	recordPromptPluginRevisions(c, s.logger, req, prepared)
 	applyPluginRequestHeaders(c)
 
-	if s.canForwardMessagesNatively(ctx, workflow) {
+	// An unsigned thinking block is worth leaving the native path for only when
+	// the translated pipeline can actually carry the request: content it cannot
+	// represent (server-tool history, …) still belongs upstream verbatim.
+	unsignedThinking := translateErr == nil && anthropicapi.HasUnsignedThinking(decoded)
+	if s.canForwardMessagesNatively(ctx, workflow, unsignedThinking) {
 		return s.dispatchMessagesNative(c, prepared, workflow)
 	}
 	if translateErr != nil {
