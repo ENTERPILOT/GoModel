@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/enterpilot/gomodel/egress"
 )
 
 const (
@@ -34,6 +36,7 @@ func NewRedisStore(cfg RedisStoreConfig) (*RedisStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
+	opts.Dialer = egress.DialContext
 	client := redis.NewClient(opts)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
