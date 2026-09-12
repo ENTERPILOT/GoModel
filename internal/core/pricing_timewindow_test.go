@@ -3,6 +3,8 @@ package core
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // deepSeekPricing mirrors the ai-model-list entry for deepseek-v4-flash: base
@@ -62,13 +64,11 @@ func TestModelPricingAtTime_DeepSeekSchedule(t *testing.T) {
 			if tc.offPeak {
 				wantInput, wantOutput, wantCached = 0.22, 0.66, 0.007
 			}
-			if *got.InputPerMtok != wantInput || *got.OutputPerMtok != wantOutput || *got.CachedInputPerMtok != wantCached {
-				t.Fatalf("AtTime(%s) = in %v out %v cached %v, want in %v out %v cached %v",
-					tc.at, *got.InputPerMtok, *got.OutputPerMtok, *got.CachedInputPerMtok, wantInput, wantOutput, wantCached)
-			}
-			if _, ok := got.TimeWindowAt(tc.at); ok != tc.offPeak {
-				t.Fatalf("TimeWindowAt(%s) matched = %v, want %v", tc.at, ok, tc.offPeak)
-			}
+			require.Equal(t, wantInput, *got.InputPerMtok)
+			require.Equal(t, wantOutput, *got.OutputPerMtok)
+			require.Equal(t, wantCached, *got.CachedInputPerMtok, "AtTime(%s) = in %v out %v cached %v, want in %v out %v cached %v", tc.at, *got.InputPerMtok, *got.OutputPerMtok, *got.CachedInputPerMtok, wantInput, wantOutput, wantCached)
+			_, ok := got.TimeWindowAt(tc.at)
+			require.Equal(t, tc.offPeak, ok, "TimeWindowAt(%s) matched", tc.at)
 		})
 	}
 }
@@ -76,15 +76,11 @@ func TestModelPricingAtTime_DeepSeekSchedule(t *testing.T) {
 func TestModelPricingAtTime_LeavesBaseUntouched(t *testing.T) {
 	pricing := deepSeekPricing()
 	offPeak := pricing.AtTime(time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
-	if offPeak == pricing {
-		t.Fatal("AtTime returned the receiver for a matching window")
-	}
-	if *pricing.InputPerMtok != 0.44 || *pricing.OutputPerMtok != 1.32 {
-		t.Fatalf("base pricing mutated: %v / %v", *pricing.InputPerMtok, *pricing.OutputPerMtok)
-	}
-	if pricing.CacheWritePerMtok != nil || offPeak.CacheWritePerMtok != nil {
-		t.Fatal("window without cache_write_per_mtok must not introduce one")
-	}
+	require.NotSame(t, pricing, offPeak)
+	require.Equal(t, 0.44, *pricing.InputPerMtok)
+	require.Equal(t, 1.32, *pricing.OutputPerMtok)
+	require.Nil(t, pricing.CacheWritePerMtok)
+	require.Nil(t, offPeak.CacheWritePerMtok)
 }
 
 func TestModelPricingAtTime_PartialWindowKeepsOtherBaseRates(t *testing.T) {
@@ -98,24 +94,19 @@ func TestModelPricingAtTime_PartialWindowKeepsOtherBaseRates(t *testing.T) {
 		}},
 	}
 	got := pricing.AtTime(time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC))
-	if *got.InputPerMtok != 0.5 || *got.OutputPerMtok != 2 {
-		t.Fatalf("AtTime = in %v out %v, want in 0.5 out 2", *got.InputPerMtok, *got.OutputPerMtok)
-	}
+	require.Equal(t, 0.5, *got.InputPerMtok)
+	require.Equal(t, float64(2), *got.OutputPerMtok)
 }
 
 func TestModelPricingAtTime_ReturnsReceiverWithoutWindowsOrTime(t *testing.T) {
 	var nilPricing *ModelPricing
-	if nilPricing.AtTime(time.Now()) != nil {
-		t.Fatal("nil receiver must stay nil")
-	}
+	require.Nil(t, nilPricing.AtTime(time.Now()))
+
 	plain := &ModelPricing{InputPerMtok: new(1.0)}
-	if plain.AtTime(time.Now()) != plain {
-		t.Fatal("pricing without windows must return the receiver")
-	}
+	require.Equal(t, plain, plain.AtTime(time.Now()))
+
 	windowed := deepSeekPricing()
-	if windowed.AtTime(time.Time{}) != windowed {
-		t.Fatal("zero time must price at the base rates")
-	}
+	require.Equal(t, windowed, windowed.AtTime(time.Time{}))
 }
 
 func TestModelPricingAtTime_FirstMatchingWindowWins(t *testing.T) {
@@ -126,12 +117,10 @@ func TestModelPricingAtTime_FirstMatchingWindowWins(t *testing.T) {
 			{Label: "second", UTCRanges: []ModelPricingUTCRange{{Start: "00:00", End: "24:00"}}, Pricing: ModelPricingTimeWindowRates{InputPerMtok: new(0.2)}},
 		},
 	}
-	if got := pricing.AtTime(time.Date(2026, 8, 24, 11, 0, 0, 0, time.UTC)); *got.InputPerMtok != 0.1 {
-		t.Fatalf("overlap: got %v, want first window's 0.1", *got.InputPerMtok)
-	}
-	if got := pricing.AtTime(time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC)); *got.InputPerMtok != 0.2 {
-		t.Fatalf("outside first: got %v, want second window's 0.2", *got.InputPerMtok)
-	}
+	got := pricing.AtTime(time.Date(2026, 8, 24, 11, 0, 0, 0, time.UTC))
+	require.Equal(t, 0.1, *got.InputPerMtok)
+	got = pricing.AtTime(time.Date(2026, 8, 24, 13, 0, 0, 0, time.UTC))
+	require.Equal(t, 0.2, *got.InputPerMtok)
 }
 
 func TestModelPricingUTCRangeContains(t *testing.T) {
@@ -168,9 +157,8 @@ func TestModelPricingUTCRangeContains(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.r.Contains(tc.at); got != tc.want {
-				t.Fatalf("Contains(%s) = %v, want %v", tc.at, got, tc.want)
-			}
+			got := tc.r.Contains(tc.at)
+			require.Equal(t, tc.want, got, "Contains(%s)", tc.at)
 		})
 	}
 }
@@ -178,47 +166,38 @@ func TestModelPricingUTCRangeContains(t *testing.T) {
 func TestModelPricingDropTimeWindowRatesOverriddenBy(t *testing.T) {
 	pricing := deepSeekPricing()
 	pricing.DropTimeWindowRatesOverriddenBy(&ModelPricing{InputPerMtok: new(9.0)})
-	if len(pricing.TimeWindows) != 1 {
-		t.Fatalf("windows = %d, want 1 (output and cached rates survive)", len(pricing.TimeWindows))
-	}
+	require.Len(t, pricing.TimeWindows, 1)
+
 	rates := pricing.TimeWindows[0].Pricing
-	if rates.InputPerMtok != nil || rates.OutputPerMtok == nil || rates.CachedInputPerMtok == nil {
-		t.Fatalf("rates after input override = %+v", rates)
-	}
+	require.Nil(t, rates.InputPerMtok)
+	require.NotNil(t, rates.OutputPerMtok)
+	require.NotNil(t, rates.CachedInputPerMtok, "rates after input override = %+v", rates)
 
 	pricing.DropTimeWindowRatesOverriddenBy(&ModelPricing{OutputPerMtok: new(9.0), CachedInputPerMtok: new(9.0)})
-	if pricing.TimeWindows != nil {
-		t.Fatalf("window with no rates left must be dropped, got %+v", pricing.TimeWindows)
-	}
+	require.Nil(t, pricing.TimeWindows)
 
 	untouched := deepSeekPricing()
 	untouched.DropTimeWindowRatesOverriddenBy(&ModelPricing{PerRequest: new(1.0)})
-	if len(untouched.TimeWindows) != 1 || untouched.TimeWindows[0].Pricing.InputPerMtok == nil {
-		t.Fatal("override of an unrelated field must keep window rates")
-	}
+	require.Len(t, untouched.TimeWindows, 1)
+	require.NotNil(t, untouched.TimeWindows[0].Pricing.InputPerMtok)
 }
 
 func TestModelPricingClone_DeepCopiesTimeWindows(t *testing.T) {
 	pricing := deepSeekPricing()
 	clone := pricing.Clone()
-	if len(clone.TimeWindows) != 1 || clone.TimeWindows[0].Pricing.InputPerMtok == pricing.TimeWindows[0].Pricing.InputPerMtok {
-		t.Fatal("Clone must re-allocate window rate pointers")
-	}
+	require.Len(t, clone.TimeWindows, 1)
+	require.NotSame(t, pricing.TimeWindows[0].Pricing.InputPerMtok, clone.TimeWindows[0].Pricing.InputPerMtok)
+
 	clone.TimeWindows[0].UTCRanges[0].Days[0] = "changed"
 	*clone.TimeWindows[0].Pricing.InputPerMtok = 99
-	if pricing.TimeWindows[0].UTCRanges[0].Days[0] != "mon" || *pricing.TimeWindows[0].Pricing.InputPerMtok != 0.22 {
-		t.Fatal("mutating the clone leaked into the original")
-	}
-	if sources := pricing.FieldSources("model_registry"); sources["time_windows"] != "model_registry" {
-		t.Fatalf("FieldSources = %v, want time_windows reported", sources)
-	}
+	require.Equal(t, "mon", pricing.TimeWindows[0].UTCRanges[0].Days[0])
+	require.Equal(t, 0.22, *pricing.TimeWindows[0].Pricing.InputPerMtok)
+	sources := pricing.FieldSources("model_registry")
+	require.Equal(t, "model_registry", sources["time_windows"], "FieldSources = %v, want time_windows reported", sources)
 
 	nilRanges := (&ModelPricing{TimeWindows: []ModelPricingTimeWindow{{Label: "x"}}}).Clone()
-	if nilRanges.TimeWindows[0].UTCRanges != nil {
-		t.Fatal("Clone must keep nil UTCRanges nil")
-	}
+	require.Nil(t, nilRanges.TimeWindows[0].UTCRanges)
+
 	emptyRanges := (&ModelPricing{TimeWindows: []ModelPricingTimeWindow{{Label: "x", UTCRanges: []ModelPricingUTCRange{}}}}).Clone()
-	if emptyRanges.TimeWindows[0].UTCRanges == nil {
-		t.Fatal("Clone must keep empty UTCRanges non-nil")
-	}
+	require.NotNil(t, emptyRanges.TimeWindows[0].UTCRanges)
 }

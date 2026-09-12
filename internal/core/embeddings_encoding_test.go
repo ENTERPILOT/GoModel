@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func b64OfFloats(vals []float32) string {
@@ -65,9 +68,8 @@ func TestNormalizeEmbeddingEncoding(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			resp := &EmbeddingResponse{Data: []EmbeddingData{{Embedding: tt.in}}}
 			NormalizeEmbeddingEncoding(resp, tt.format)
-			if got := string(resp.Data[0].Embedding); got != string(tt.want) {
-				t.Errorf("got %s, want %s", got, tt.want)
-			}
+			got := string(resp.Data[0].Embedding)
+			assert.Equal(t, string(tt.want), got)
 		})
 	}
 }
@@ -84,23 +86,14 @@ func TestNormalizeEmbeddingEncoding_RoundTrip(t *testing.T) {
 
 	resp := &EmbeddingResponse{Data: []EmbeddingData{{Embedding: rawFloats}}}
 	NormalizeEmbeddingEncoding(resp, "base64") // float -> base64
-	if resp.Data[0].Embedding[0] != '"' {
-		t.Fatalf("expected base64 string, got %s", resp.Data[0].Embedding)
-	}
+	require.Equal(t, byte('"'), resp.Data[0].Embedding[0], "expected base64 string, got %s", resp.Data[0].Embedding)
+
 	NormalizeEmbeddingEncoding(resp, "float") // base64 -> float
 
 	var back []float32
-	if err := json.Unmarshal(resp.Data[0].Embedding, &back); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(back) != len(orig) {
-		t.Fatalf("len = %d, want %d", len(back), len(orig))
-	}
-	for i := range orig {
-		if back[i] != orig[i] {
-			t.Errorf("index %d: got %v, want %v", i, back[i], orig[i])
-		}
-	}
+	err := json.Unmarshal(resp.Data[0].Embedding, &back)
+	require.NoError(t, err)
+	require.Equal(t, orig, back)
 }
 
 // TestNormalizeEmbeddingEncoding_Malformed ensures non-vector payloads are left
@@ -109,8 +102,7 @@ func TestNormalizeEmbeddingEncoding_Malformed(t *testing.T) {
 	for _, in := range []string{`null`, `"not-base64!!!"`, `{}`, `[`, ``} {
 		resp := &EmbeddingResponse{Data: []EmbeddingData{{Embedding: json.RawMessage(in)}}}
 		NormalizeEmbeddingEncoding(resp, "base64")
-		if got := string(resp.Data[0].Embedding); got != in {
-			t.Errorf("input %q mutated to %q", in, got)
-		}
+		got := string(resp.Data[0].Embedding)
+		assert.Equal(t, in, got)
 	}
 }

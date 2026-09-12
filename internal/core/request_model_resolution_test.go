@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestRequestModelResolutionRequestedQualifiedModel(t *testing.T) {
 	tests := []struct {
@@ -40,9 +44,8 @@ func TestRequestModelResolutionRequestedQualifiedModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.in.RequestedQualifiedModel(); got != tt.want {
-				t.Fatalf("RequestedQualifiedModel() = %q, want %q", got, tt.want)
-			}
+			got := tt.in.RequestedQualifiedModel()
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

@@ -3,6 +3,9 @@ package llmclient
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestJoinHooksChainsCallbacks(t *testing.T) {
@@ -27,9 +30,7 @@ func TestJoinHooksChainsCallbacks(t *testing.T) {
 	second := Hooks{
 		OnRequestStart: func(ctx context.Context, _ RequestInfo) context.Context {
 			order = append(order, "start-2")
-			if ctx.Value(ctxKey("first")) != true {
-				t.Errorf("second OnRequestStart did not receive first hook's context")
-			}
+			assert.Equal(t, true, ctx.Value(ctxKey("first")))
 			return ctx
 		},
 		OnRequestEnd: func(_ context.Context, _ ResponseInfo) {
@@ -50,32 +51,23 @@ func TestJoinHooksChainsCallbacks(t *testing.T) {
 	joined.OnEmptyResponse(ctx, EmptyResponseInfo{})
 
 	want := []string{"start-1", "start-2", "end-1", "end-2", "chunk-1", "chunk-2", "empty-1", "empty-2"}
-	if len(order) != len(want) {
-		t.Fatalf("callback order = %v, want %v", order, want)
-	}
-	for i := range want {
-		if order[i] != want[i] {
-			t.Fatalf("callback order = %v, want %v", order, want)
-		}
-	}
+	require.Equal(t, want, order)
 }
 
 func TestJoinHooksEmpty(t *testing.T) {
 	joined := JoinHooks(Hooks{}, Hooks{})
-	if joined.OnRequestStart != nil || joined.OnRequestEnd != nil || joined.OnStreamFirstChunk != nil || joined.OnEmptyResponse != nil {
-		t.Fatalf("JoinHooks of empty hooks should have nil callbacks")
-	}
+	require.Nil(t, joined.OnRequestStart)
+	require.Nil(t, joined.OnRequestEnd)
+	require.Nil(t, joined.OnStreamFirstChunk)
+	require.Nil(t, joined.OnEmptyResponse)
 }
 
 func TestJoinHooksSingleReusesCallback(t *testing.T) {
 	called := 0
 	only := Hooks{OnRequestEnd: func(context.Context, ResponseInfo) { called++ }}
 	joined := JoinHooks(Hooks{}, only)
-	if joined.OnRequestStart != nil {
-		t.Fatalf("expected nil OnRequestStart")
-	}
+	require.Nil(t, joined.OnRequestStart)
+
 	joined.OnRequestEnd(t.Context(), ResponseInfo{})
-	if called != 1 {
-		t.Fatalf("OnRequestEnd called %d times, want 1", called)
-	}
+	require.Equal(t, 1, called)
 }

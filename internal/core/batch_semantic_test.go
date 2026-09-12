@@ -3,15 +3,15 @@ package core
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeOperationPath(t *testing.T) {
 	t.Parallel()
 
 	got := NormalizeOperationPath(" https://provider.example/v1/responses/?foo=bar ")
-	if got != "/v1/responses" {
-		t.Fatalf("NormalizeOperationPath() = %q, want /v1/responses", got)
-	}
+	require.Equal(t, "/v1/responses", got)
 }
 
 func TestBatchItemRequestedModelSelector(t *testing.T) {
@@ -57,16 +57,12 @@ func TestBatchItemRequestedModelSelector(t *testing.T) {
 			t.Parallel()
 
 			requested, err := BatchItemRequestedModelSelector(tt.defaultEndpoint, tt.item)
-			if err != nil {
-				t.Fatalf("BatchItemRequestedModelSelector() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			selector, err := requested.Normalize()
-			if err != nil {
-				t.Fatalf("Normalize() error = %v", err)
-			}
-			if got := selector.QualifiedModel(); got != tt.want {
-				t.Fatalf("BatchItemRequestedModelSelector() = %q, want %q", got, tt.want)
-			}
+			require.NoError(t, err)
+			got := selector.QualifiedModel()
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -78,9 +74,7 @@ func TestBatchItemRequestedModelSelectorRejectsUnsupportedEndpoint(t *testing.T)
 		URL:  "/v1/files",
 		Body: json.RawMessage(`{"purpose":"batch"}`),
 	})
-	if err == nil {
-		t.Fatal("BatchItemRequestedModelSelector() error = nil, want unsupported endpoint error")
-	}
+	require.Error(t, err)
 }
 
 func TestDecodeKnownBatchItemRequest_NormalizesFullURLAndDecodesCanonicalRequest(t *testing.T) {
@@ -90,22 +84,14 @@ func TestDecodeKnownBatchItemRequest_NormalizesFullURLAndDecodesCanonicalRequest
 		URL:  "https://provider.example/v1/responses/?foo=bar",
 		Body: json.RawMessage(`{"model":"gpt-4o-mini","provider":"openai","input":"hi"}`),
 	})
-	if err != nil {
-		t.Fatalf("DecodeKnownBatchItemRequest() error = %v", err)
-	}
-	if decoded.Endpoint != "/v1/responses" {
-		t.Fatalf("Endpoint = %q, want /v1/responses", decoded.Endpoint)
-	}
-	if decoded.Operation != OperationResponses {
-		t.Fatalf("Operation = %q, want responses", decoded.Operation)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/v1/responses", decoded.Endpoint)
+	require.Equal(t, OperationResponses, decoded.Operation)
+
 	req, ok := decoded.Request.(*ResponsesRequest)
-	if !ok || req == nil {
-		t.Fatalf("Request = %T, want *ResponsesRequest", decoded.Request)
-	}
-	if req.Model != "gpt-4o-mini" {
-		t.Fatalf("ResponsesRequest.Model = %q, want gpt-4o-mini", req.Model)
-	}
+	require.True(t, ok)
+	require.NotNil(t, req, "Request = %T, want *ResponsesRequest", decoded.Request)
+	require.Equal(t, "gpt-4o-mini", req.Model)
 }
 
 func TestMaybeDecodeKnownBatchItemRequest_SkipsUnmatchedOperation(t *testing.T) {
@@ -116,15 +102,9 @@ func TestMaybeDecodeKnownBatchItemRequest_SkipsUnmatchedOperation(t *testing.T) 
 		URL:    "/v1/embeddings",
 		Body:   json.RawMessage(`{"model":"text-embedding-3-small","input":"hi"}`),
 	}, OperationChatCompletions, OperationResponses)
-	if err != nil {
-		t.Fatalf("MaybeDecodeKnownBatchItemRequest() error = %v, want nil", err)
-	}
-	if handled {
-		t.Fatal("MaybeDecodeKnownBatchItemRequest() handled = true, want false")
-	}
-	if decoded != nil {
-		t.Fatalf("MaybeDecodeKnownBatchItemRequest() decoded = %#v, want nil", decoded)
-	}
+	require.NoError(t, err)
+	require.False(t, handled)
+	require.Nil(t, decoded)
 }
 
 func TestDispatchDecodedBatchItem_RoutesTypedRequest(t *testing.T) {
@@ -134,19 +114,13 @@ func TestDispatchDecodedBatchItem_RoutesTypedRequest(t *testing.T) {
 		URL:  "/v1/responses",
 		Body: json.RawMessage(`{"model":"gpt-4o-mini","input":"hi"}`),
 	})
-	if err != nil {
-		t.Fatalf("DecodeKnownBatchItemRequest() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	got, err := DispatchDecodedBatchItem(decoded, DecodedBatchItemHandlers[string]{
 		Responses: func(req *ResponsesRequest) (string, error) {
 			return req.Model, nil
 		},
 	})
-	if err != nil {
-		t.Fatalf("DispatchDecodedBatchItem() error = %v", err)
-	}
-	if got != "gpt-4o-mini" {
-		t.Fatalf("DispatchDecodedBatchItem() = %q, want gpt-4o-mini", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "gpt-4o-mini", got)
 }

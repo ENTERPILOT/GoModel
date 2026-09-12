@@ -1,8 +1,9 @@
 package core
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMergeLabels(t *testing.T) {
@@ -41,9 +42,7 @@ func TestMergeLabels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := MergeLabels(tt.sets...)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("MergeLabels(%v) = %v, want %v", tt.sets, got, tt.want)
-			}
+			require.Equal(t, tt.want, got, "MergeLabels(%v)", tt.sets)
 		})
 	}
 }

@@ -3,42 +3,33 @@ package core
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestModelPricingTierUnmarshalUpToTokens(t *testing.T) {
 	var pricing ModelPricing
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"currency": "USD",
 		"tiers": [
 			{"up_to_tokens": 200000, "input_per_mtok": 1.25, "output_per_mtok": 10.0}
 		]
-	}`), &pricing); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v, want nil", err)
-	}
-	if len(pricing.Tiers) != 1 {
-		t.Fatalf("len(Tiers) = %d, want 1", len(pricing.Tiers))
-	}
-	if pricing.Tiers[0].UpToTokens == nil || *pricing.Tiers[0].UpToTokens != 200000 {
-		t.Fatalf("UpToTokens = %#v, want 200000", pricing.Tiers[0].UpToTokens)
-	}
+	}`), &pricing)
+	require.NoError(t, err)
+	require.Len(t, pricing.Tiers, 1)
+	require.NotNil(t, pricing.Tiers[0].UpToTokens)
+	require.Equal(t, float64(200000), *pricing.Tiers[0].UpToTokens)
 
 	cloned := pricing.Clone()
-	if cloned == nil {
-		t.Fatal("Clone() = nil, want pricing copy")
-	}
-	if len(cloned.Tiers) != 1 {
-		t.Fatalf("len(cloned.Tiers) = %d, want 1", len(cloned.Tiers))
-	}
-	if cloned.Tiers[0].UpToTokens == nil || *cloned.Tiers[0].UpToTokens != 200000 {
-		t.Fatalf("cloned UpToTokens = %#v, want 200000", cloned.Tiers[0].UpToTokens)
-	}
-	if cloned.Tiers[0].UpToTokens == pricing.Tiers[0].UpToTokens {
-		t.Fatal("Clone() reused UpToTokens pointer, want deep copy")
-	}
+	require.NotNil(t, cloned)
+	require.Len(t, cloned.Tiers, 1)
+	require.NotNil(t, cloned.Tiers[0].UpToTokens)
+	require.Equal(t, float64(200000), *cloned.Tiers[0].UpToTokens)
+	require.NotSame(t, pricing.Tiers[0].UpToTokens, cloned.Tiers[0].UpToTokens)
+
 	*pricing.Tiers[0].UpToTokens = 123
-	if *cloned.Tiers[0].UpToTokens != 200000 {
-		t.Fatalf("cloned UpToTokens after source mutation = %v, want 200000", *cloned.Tiers[0].UpToTokens)
-	}
+	require.Equal(t, float64(200000), *cloned.Tiers[0].UpToTokens)
 }
 
 func TestMessageUnmarshalJSON_AllowsNullContent(t *testing.T) {
@@ -55,38 +46,22 @@ func TestMessageUnmarshalJSON_AllowsNullContent(t *testing.T) {
 	}`)
 
 	var msg Message
-	if err := json.Unmarshal(payload, &msg); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v, want nil", err)
-	}
-
-	if msg.Content != nil {
-		t.Fatalf("Content = %#v, want nil", msg.Content)
-	}
-	if !msg.ContentNull {
-		t.Fatal("ContentNull = false, want true")
-	}
-	if len(msg.ToolCalls) != 1 {
-		t.Fatalf("len(ToolCalls) = %d, want 1", len(msg.ToolCalls))
-	}
-	if msg.ToolCalls[0].ID != "call_123" {
-		t.Fatalf("ToolCalls[0].ID = %q, want call_123", msg.ToolCalls[0].ID)
-	}
+	err := json.Unmarshal(payload, &msg)
+	require.NoError(t, err)
+	require.Nil(t, msg.Content)
+	require.True(t, msg.ContentNull)
+	require.Len(t, msg.ToolCalls, 1)
+	require.Equal(t, "call_123", msg.ToolCalls[0].ID)
 }
 
 func TestMessageUnmarshalJSON_PreservesStringContent(t *testing.T) {
 	payload := []byte(`{"role":"assistant","content":"hello"}`)
 
 	var msg Message
-	if err := json.Unmarshal(payload, &msg); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v, want nil", err)
-	}
-
-	if msg.Content != "hello" {
-		t.Fatalf("Content = %q, want hello", msg.Content)
-	}
-	if msg.ContentNull {
-		t.Fatal("ContentNull = true, want false")
-	}
+	err := json.Unmarshal(payload, &msg)
+	require.NoError(t, err)
+	require.Equal(t, "hello", msg.Content)
+	require.False(t, msg.ContentNull)
 }
 
 func TestMessageMarshalJSON_PreservesNullContent(t *testing.T) {
@@ -104,13 +79,8 @@ func TestMessageMarshalJSON_PreservesNullContent(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v, want nil", err)
-	}
-
-	if string(payload) != `{"role":"assistant","content":null,"tool_calls":[{"id":"call_123","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]}` {
-		t.Fatalf("json.Marshal() = %s", payload)
-	}
+	require.NoError(t, err)
+	require.JSONEq(t, `{"role":"assistant","content":null,"tool_calls":[{"id":"call_123","type":"function","function":{"name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"}}]}`, string(payload))
 }
 
 func TestMessageMarshalJSON_ContentWinsOverContentNull(t *testing.T) {
@@ -119,17 +89,12 @@ func TestMessageMarshalJSON_ContentWinsOverContentNull(t *testing.T) {
 		Content:     "hello",
 		ContentNull: true,
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
 
 	var raw map[string]any
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if raw["content"] != "hello" {
-		t.Fatalf("content = %v, want \"hello\"", raw["content"])
-	}
+	err = json.Unmarshal(payload, &raw)
+	require.NoError(t, err)
+	require.Equal(t, "hello", raw["content"])
 }
 
 func TestChatResponseJSON_PreservesSystemFingerprint(t *testing.T) {
@@ -151,27 +116,17 @@ func TestChatResponseJSON_PreservesSystemFingerprint(t *testing.T) {
 	}`)
 
 	var resp ChatResponse
-	if err := json.Unmarshal(payload, &resp); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if resp.SystemFingerprint != "fp_abc123" {
-		t.Fatalf("SystemFingerprint = %q, want fp_abc123", resp.SystemFingerprint)
-	}
+	err := json.Unmarshal(payload, &resp)
+	require.NoError(t, err)
+	require.Equal(t, "fp_abc123", resp.SystemFingerprint)
 
 	body, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if decoded["system_fingerprint"] != "fp_abc123" {
-		t.Fatalf("decoded system_fingerprint = %#v, want fp_abc123", decoded["system_fingerprint"])
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "fp_abc123", decoded["system_fingerprint"])
 }
 
 func TestChatResponseJSON_PreservesChoiceLogprobs(t *testing.T) {
@@ -201,46 +156,31 @@ func TestChatResponseJSON_PreservesChoiceLogprobs(t *testing.T) {
 	}`)
 
 	var resp ChatResponse
-	if err := json.Unmarshal(payload, &resp); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if len(resp.Choices) != 1 {
-		t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))
-	}
-	if string(resp.Choices[0].Logprobs) == "" {
-		t.Fatal("Choices[0].Logprobs = empty, want preserved payload")
-	}
+	err := json.Unmarshal(payload, &resp)
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	require.NotEmpty(t, string(resp.Choices[0].Logprobs))
 
 	body, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
 
 	choices, ok := decoded["choices"].([]any)
-	if !ok || len(choices) != 1 {
-		t.Fatalf("decoded choices = %#v, want len=1", decoded["choices"])
-	}
+	require.True(t, ok)
+	require.Len(t, choices, 1)
 
 	choice, ok := choices[0].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded choice = %#v, want object", choices[0])
-	}
+	require.True(t, ok, "decoded choice = %#v, want object", choices[0])
 
 	logprobs, ok := choice["logprobs"].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded logprobs = %#v, want object", choice["logprobs"])
-	}
+	require.True(t, ok, "decoded logprobs = %#v, want object", choice["logprobs"])
 
 	content, ok := logprobs["content"].([]any)
-	if !ok || len(content) != 1 {
-		t.Fatalf("decoded logprobs.content = %#v, want len=1", logprobs["content"])
-	}
+	require.True(t, ok)
+	require.Len(t, content, 1)
 }
 
 func TestChatRequestWithStreaming_PreservesToolFields(t *testing.T) {
@@ -277,27 +217,15 @@ func TestChatRequestWithStreaming_PreservesToolFields(t *testing.T) {
 
 	streamReq := req.WithStreaming()
 
-	if !streamReq.Stream {
-		t.Fatal("Stream should be true")
-	}
-	if len(streamReq.Tools) != 1 {
-		t.Fatalf("len(Tools) = %d, want 1", len(streamReq.Tools))
-	}
-	if streamReq.ToolChoice == nil {
-		t.Fatal("ToolChoice should not be nil")
-	}
-	if streamReq.ParallelToolCalls == nil || *streamReq.ParallelToolCalls {
-		t.Fatal("ParallelToolCalls should be false")
-	}
-	if len(streamReq.Messages) != 2 {
-		t.Fatalf("len(Messages) = %d, want 2", len(streamReq.Messages))
-	}
-	if len(streamReq.Messages[0].ToolCalls) != 1 || streamReq.Messages[0].ToolCalls[0].ID != "call_123" {
-		t.Fatalf("assistant tool_calls = %+v, want call_123", streamReq.Messages[0].ToolCalls)
-	}
-	if streamReq.Messages[1].ToolCallID != "call_123" {
-		t.Fatalf("tool message ToolCallID = %q, want call_123", streamReq.Messages[1].ToolCallID)
-	}
+	require.True(t, streamReq.Stream)
+	require.Len(t, streamReq.Tools, 1)
+	require.NotNil(t, streamReq.ToolChoice)
+	require.NotNil(t, streamReq.ParallelToolCalls)
+	require.False(t, *streamReq.ParallelToolCalls)
+	require.Len(t, streamReq.Messages, 2)
+	require.Len(t, streamReq.Messages[0].ToolCalls, 1)
+	require.Equal(t, "call_123", streamReq.Messages[0].ToolCalls[0].ID)
+	require.Equal(t, "call_123", streamReq.Messages[1].ToolCallID)
 }
 
 func TestChatRequestJSON_PreservesUnknownFields(t *testing.T) {
@@ -314,31 +242,20 @@ func TestChatRequestJSON_PreservesUnknownFields(t *testing.T) {
 	}`)
 
 	var req ChatRequest
-	if err := json.Unmarshal(payload, &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if req.ExtraFields.Lookup("response_format") == nil {
-		t.Fatalf("response_format missing from ExtraFields")
-	}
+	err := json.Unmarshal(payload, &req)
+	require.NoError(t, err)
+	require.NotNil(t, req.ExtraFields.Lookup("response_format"))
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
 
 	responseFormat, ok := decoded["response_format"].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded response_format = %#v, want object", decoded["response_format"])
-	}
-	if responseFormat["type"] != "json_schema" {
-		t.Fatalf("decoded response_format.type = %#v, want json_schema", responseFormat["type"])
-	}
+	require.True(t, ok, "decoded response_format = %#v, want object", decoded["response_format"])
+	require.Equal(t, "json_schema", responseFormat["type"])
 }
 
 func TestChatRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
@@ -376,86 +293,58 @@ func TestChatRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
 	}`)
 
 	var req ChatRequest
-	if err := json.Unmarshal(payload, &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if len(req.Messages) != 2 {
-		t.Fatalf("len(Messages) = %d, want 2", len(req.Messages))
-	}
-	if req.Messages[0].ExtraFields.Lookup("name") == nil {
-		t.Fatalf("message[0].name missing from ExtraFields")
-	}
+	err := json.Unmarshal(payload, &req)
+	require.NoError(t, err)
+	require.Len(t, req.Messages, 2)
+	require.NotNil(t, req.Messages[0].ExtraFields.Lookup("name"))
+
 	parts, ok := req.Messages[0].Content.([]ContentPart)
-	if !ok || len(parts) != 1 {
-		t.Fatalf("message[0].content = %#v, want []ContentPart len=1", req.Messages[0].Content)
-	}
-	if parts[0].ExtraFields.Lookup("cache_control") == nil {
-		t.Fatalf("content part cache_control missing from ExtraFields")
-	}
-	if len(req.Messages[1].ToolCalls) != 1 {
-		t.Fatalf("len(message[1].ToolCalls) = %d, want 1", len(req.Messages[1].ToolCalls))
-	}
-	if req.Messages[1].ToolCalls[0].ExtraFields.Lookup("vendor_data") == nil {
-		t.Fatalf("tool_call vendor_data missing from ExtraFields")
-	}
-	if req.Messages[1].ToolCalls[0].Function.ExtraFields.Lookup("strict") == nil {
-		t.Fatalf("function strict missing from ExtraFields")
-	}
+	require.True(t, ok)
+	require.Len(t, parts, 1, "message[0].content = %#v, want []ContentPart len=1", req.Messages[0].Content)
+	require.NotNil(t, parts[0].ExtraFields.Lookup("cache_control"))
+	require.Len(t, req.Messages[1].ToolCalls, 1)
+	require.NotNil(t, req.Messages[1].ToolCalls[0].ExtraFields.Lookup("vendor_data"))
+	require.NotNil(t, req.Messages[1].ToolCalls[0].Function.ExtraFields.Lookup("strict"))
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	messages, ok := decoded["messages"].([]any)
-	if !ok || len(messages) != 2 {
-		t.Fatalf("decoded messages = %#v, want []any len=2", decoded["messages"])
-	}
+	require.True(t, ok)
+	require.Len(t, messages, 2)
+
 	firstMsg, ok := messages[0].(map[string]any)
-	if !ok {
-		t.Fatalf("messages[0] = %#v, want object", messages[0])
-	}
-	if firstMsg["name"] != "alice" {
-		t.Fatalf("messages[0].name = %#v, want alice", firstMsg["name"])
-	}
+	require.True(t, ok, "messages[0] = %#v, want object", messages[0])
+	require.Equal(t, "alice", firstMsg["name"])
+
 	firstContent, ok := firstMsg["content"].([]any)
-	if !ok || len(firstContent) != 1 {
-		t.Fatalf("messages[0].content = %#v, want []any len=1", firstMsg["content"])
-	}
+	require.True(t, ok)
+	require.Len(t, firstContent, 1, "messages[0].content = %#v, want []any len=1", firstMsg["content"])
+
 	firstPart, ok := firstContent[0].(map[string]any)
-	if !ok {
-		t.Fatalf("messages[0].content[0] = %#v, want object", firstContent[0])
-	}
-	if _, ok := firstPart["cache_control"].(map[string]any); !ok {
-		t.Fatalf("messages[0].content[0].cache_control = %#v, want object", firstPart["cache_control"])
-	}
+	require.True(t, ok, "messages[0].content[0] = %#v, want object", firstContent[0])
+	_, ok = firstPart["cache_control"].(map[string]any)
+	require.True(t, ok, "messages[0].content[0].cache_control = %#v, want object", firstPart["cache_control"])
 
 	secondMsg, ok := messages[1].(map[string]any)
-	if !ok {
-		t.Fatalf("messages[1] = %#v, want object", messages[1])
-	}
+	require.True(t, ok, "messages[1] = %#v, want object", messages[1])
+
 	toolCalls, ok := secondMsg["tool_calls"].([]any)
-	if !ok || len(toolCalls) != 1 {
-		t.Fatalf("messages[1].tool_calls = %#v, want []any len=1", secondMsg["tool_calls"])
-	}
+	require.True(t, ok)
+	require.Len(t, toolCalls, 1, "messages[1].tool_calls = %#v, want []any len=1", secondMsg["tool_calls"])
+
 	toolCall, ok := toolCalls[0].(map[string]any)
-	if !ok {
-		t.Fatalf("tool_calls[0] = %#v, want object", toolCalls[0])
-	}
-	if _, ok := toolCall["vendor_data"].(map[string]any); !ok {
-		t.Fatalf("tool_calls[0].vendor_data = %#v, want object", toolCall["vendor_data"])
-	}
+	require.True(t, ok, "tool_calls[0] = %#v, want object", toolCalls[0])
+	_, ok = toolCall["vendor_data"].(map[string]any)
+	require.True(t, ok, "tool_calls[0].vendor_data = %#v, want object", toolCall["vendor_data"])
+
 	function, ok := toolCall["function"].(map[string]any)
-	if !ok {
-		t.Fatalf("tool_calls[0].function = %#v, want object", toolCall["function"])
-	}
-	if function["strict"] != true {
-		t.Fatalf("tool_calls[0].function.strict = %#v, want true", function["strict"])
-	}
+	require.True(t, ok, "tool_calls[0].function = %#v, want object", toolCall["function"])
+	require.Equal(t, true, function["strict"])
 }
 
 func TestEmbeddingRequestJSON_PreservesUnknownFields(t *testing.T) {
@@ -466,26 +355,17 @@ func TestEmbeddingRequestJSON_PreservesUnknownFields(t *testing.T) {
 	}`)
 
 	var req EmbeddingRequest
-	if err := json.Unmarshal(payload, &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if req.ExtraFields.Lookup("user") == nil {
-		t.Fatalf("user missing from ExtraFields: %+v", req.ExtraFields)
-	}
+	err := json.Unmarshal(payload, &req)
+	require.NoError(t, err)
+	require.NotNil(t, req.ExtraFields.Lookup("user"), "user missing from ExtraFields: %+v", req.ExtraFields)
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if decoded["user"] != "tenant-123" {
-		t.Fatalf("decoded user = %#v, want tenant-123", decoded["user"])
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "tenant-123", decoded["user"])
 }
 
 func TestResponsesRequestWithStreaming_PreservesToolFields(t *testing.T) {
@@ -500,18 +380,11 @@ func TestResponsesRequestWithStreaming_PreservesToolFields(t *testing.T) {
 
 	streamReq := req.WithStreaming()
 
-	if !streamReq.Stream {
-		t.Fatal("Stream should be true")
-	}
-	if len(streamReq.Tools) != 1 {
-		t.Fatalf("len(Tools) = %d, want 1", len(streamReq.Tools))
-	}
-	if streamReq.ToolChoice == nil {
-		t.Fatal("ToolChoice should not be nil")
-	}
-	if streamReq.ParallelToolCalls == nil || *streamReq.ParallelToolCalls {
-		t.Fatal("ParallelToolCalls should be false")
-	}
+	require.True(t, streamReq.Stream)
+	require.Len(t, streamReq.Tools, 1)
+	require.NotNil(t, streamReq.ToolChoice)
+	require.NotNil(t, streamReq.ParallelToolCalls)
+	require.False(t, *streamReq.ParallelToolCalls)
 }
 
 func TestCategoriesForModes_KnownModes(t *testing.T) {
@@ -536,59 +409,34 @@ func TestCategoriesForModes_KnownModes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.modes[0], func(t *testing.T) {
-			got := CategoriesForModes(tt.modes)
-			if len(got) != len(tt.want) {
-				t.Fatalf("CategoriesForModes(%v) returned %d categories, want %d", tt.modes, len(got), len(tt.want))
-			}
-			for i, c := range got {
-				if c != tt.want[i] {
-					t.Errorf("CategoriesForModes(%v)[%d] = %q, want %q", tt.modes, i, c, tt.want[i])
-				}
-			}
+			assert.Equal(t, tt.want, CategoriesForModes(tt.modes), "CategoriesForModes(%v)", tt.modes)
 		})
 	}
 }
 
 func TestCategoriesForModes_MultiMode(t *testing.T) {
 	cats := CategoriesForModes([]string{"chat", "image_generation", "audio_speech"})
-	want := []ModelCategory{CategoryTextGeneration, CategoryImage, CategoryAudio}
-	if len(cats) != len(want) {
-		t.Fatalf("got %d categories, want %d", len(cats), len(want))
-	}
-	for i, c := range cats {
-		if c != want[i] {
-			t.Errorf("[%d] = %q, want %q", i, c, want[i])
-		}
-	}
+	require.Equal(t, []ModelCategory{CategoryTextGeneration, CategoryImage, CategoryAudio}, cats)
 }
 
 func TestCategoriesForModes_Dedup(t *testing.T) {
 	// "chat" and "completion" both map to text_generation — should deduplicate
 	cats := CategoriesForModes([]string{"chat", "completion"})
-	if len(cats) != 1 {
-		t.Fatalf("got %d categories, want 1 (deduped)", len(cats))
-	}
-	if cats[0] != CategoryTextGeneration {
-		t.Errorf("got %q, want %q", cats[0], CategoryTextGeneration)
-	}
+	require.Len(t, cats, 1)
+	assert.Equal(t, CategoryTextGeneration, cats[0])
 }
 
 func TestCategoriesForModes_UnknownMode(t *testing.T) {
 	cats := CategoriesForModes([]string{"unknown_mode"})
-	if len(cats) != 0 {
-		t.Errorf("CategoriesForModes([\"unknown_mode\"]) = %v, want empty", cats)
-	}
+	assert.Empty(t, cats)
 }
 
 func TestCategoriesForModes_Empty(t *testing.T) {
 	cats := CategoriesForModes(nil)
-	if len(cats) != 0 {
-		t.Errorf("CategoriesForModes(nil) = %v, want empty", cats)
-	}
+	assert.Empty(t, cats)
+
 	cats = CategoriesForModes([]string{})
-	if len(cats) != 0 {
-		t.Errorf("CategoriesForModes([]) = %v, want empty", cats)
-	}
+	assert.Empty(t, cats)
 }
 
 func TestAllCategories_Order(t *testing.T) {
@@ -604,15 +452,7 @@ func TestAllCategories_Order(t *testing.T) {
 		CategoryUtility,
 	}
 
-	if len(cats) != len(expected) {
-		t.Fatalf("AllCategories() returned %d categories, want %d", len(cats), len(expected))
-	}
-
-	for i, cat := range cats {
-		if cat != expected[i] {
-			t.Errorf("AllCategories()[%d] = %q, want %q", i, cat, expected[i])
-		}
-	}
+	require.Equal(t, expected, cats)
 }
 
 func TestModelMetadataClone_DeepClonesRankingPointers(t *testing.T) {
@@ -630,10 +470,6 @@ func TestModelMetadataClone_DeepClonesRankingPointers(t *testing.T) {
 	*clone.Rankings["bench"].Elo = 0
 	*clone.Rankings["bench"].Rank = 0
 
-	if *m.Rankings["bench"].Elo != 1800.0 {
-		t.Errorf("original Elo mutated: %v", *m.Rankings["bench"].Elo)
-	}
-	if *m.Rankings["bench"].Rank != 5 {
-		t.Errorf("original Rank mutated: %v", *m.Rankings["bench"].Rank)
-	}
+	assert.Equal(t, 1800.0, *m.Rankings["bench"].Elo)
+	assert.Equal(t, 5, *m.Rankings["bench"].Rank)
 }

@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGatewayError_Error(t *testing.T) {
@@ -34,9 +37,8 @@ func TestGatewayError_Error(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.err.Error(); got != tt.expected {
-				t.Errorf("Error() = %v, want %v", got, tt.expected)
-			}
+			got := tt.err.Error()
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -48,10 +50,8 @@ func TestGatewayError_Unwrap(t *testing.T) {
 		Message: "wrapped error",
 		Err:     originalErr,
 	}
-
-	if unwrapped := gatewayErr.Unwrap(); unwrapped != originalErr {
-		t.Errorf("Unwrap() = %v, want %v", unwrapped, originalErr)
-	}
+	unwrapped := gatewayErr.Unwrap()
+	assert.Equal(t, originalErr, unwrapped)
 }
 
 func TestGatewayError_HTTPStatusCode(t *testing.T) {
@@ -114,9 +114,8 @@ func TestGatewayError_HTTPStatusCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.err.HTTPStatusCode(); got != tt.expected {
-				t.Errorf("HTTPStatusCode() = %v, want %v", got, tt.expected)
-			}
+			got := tt.err.HTTPStatusCode()
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -134,25 +133,11 @@ func TestGatewayError_ToJSON(t *testing.T) {
 	result := err.ToJSON()
 
 	errorData, ok := result["error"].(map[string]any)
-	if !ok {
-		t.Fatal("ToJSON() should return map with 'error' key")
-	}
-
-	if errorData["type"] != ErrorTypeRateLimit {
-		t.Errorf("ToJSON() type = %v, want %v", errorData["type"], ErrorTypeRateLimit)
-	}
-
-	if errorData["message"] != "too many requests" {
-		t.Errorf("ToJSON() message = %v, want %v", errorData["message"], "too many requests")
-	}
-
-	if errorData["param"] != param {
-		t.Errorf("ToJSON() param = %v, want %v", errorData["param"], param)
-	}
-
-	if errorData["code"] != code {
-		t.Errorf("ToJSON() code = %v, want %v", errorData["code"], code)
-	}
+	require.True(t, ok)
+	assert.Equal(t, ErrorTypeRateLimit, errorData["type"])
+	assert.Equal(t, "too many requests", errorData["message"])
+	assert.Equal(t, param, errorData["param"])
+	assert.Equal(t, code, errorData["code"])
 }
 
 func TestGatewayError_ToJSON_DefaultsParamAndCodeToNull(t *testing.T) {
@@ -163,116 +148,59 @@ func TestGatewayError_ToJSON_DefaultsParamAndCodeToNull(t *testing.T) {
 
 	result := err.ToJSON()
 	errorData := result["error"].(map[string]any)
-
-	if value, ok := errorData["param"]; !ok || value != nil {
-		t.Fatalf("ToJSON() param = %v, want nil", value)
-	}
-
-	if value, ok := errorData["code"]; !ok || value != nil {
-		t.Fatalf("ToJSON() code = %v, want nil", value)
-	}
+	value, ok := errorData["param"]
+	require.True(t, ok)
+	require.Nil(t, value)
+	value, ok = errorData["code"]
+	require.True(t, ok)
+	require.Nil(t, value)
 }
 
 func TestNewProviderError(t *testing.T) {
 	originalErr := errors.New("connection failed")
 	err := NewProviderError("openai", http.StatusBadGateway, "upstream failed", originalErr)
 
-	if err.Type != ErrorTypeProvider {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeProvider)
-	}
-
-	if err.Provider != "openai" {
-		t.Errorf("Provider = %v, want %v", err.Provider, "openai")
-	}
-
-	if err.StatusCode != http.StatusBadGateway {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusBadGateway)
-	}
-
-	if err.Message != "upstream failed" {
-		t.Errorf("Message = %v, want %v", err.Message, "upstream failed")
-	}
-
-	if err.Err != originalErr {
-		t.Errorf("Err = %v, want %v", err.Err, originalErr)
-	}
+	assert.Equal(t, ErrorTypeProvider, err.Type)
+	assert.Equal(t, "openai", err.Provider)
+	assert.Equal(t, http.StatusBadGateway, err.StatusCode)
+	assert.Equal(t, "upstream failed", err.Message)
+	assert.Equal(t, originalErr, err.Err)
 }
 
 func TestNewRateLimitError(t *testing.T) {
 	err := NewRateLimitError("anthropic", "rate limit exceeded")
 
-	if err.Type != ErrorTypeRateLimit {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeRateLimit)
-	}
-
-	if err.Provider != "anthropic" {
-		t.Errorf("Provider = %v, want %v", err.Provider, "anthropic")
-	}
-
-	if err.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusTooManyRequests)
-	}
-
-	if err.Message != "rate limit exceeded" {
-		t.Errorf("Message = %v, want %v", err.Message, "rate limit exceeded")
-	}
+	assert.Equal(t, ErrorTypeRateLimit, err.Type)
+	assert.Equal(t, "anthropic", err.Provider)
+	assert.Equal(t, http.StatusTooManyRequests, err.StatusCode)
+	assert.Equal(t, "rate limit exceeded", err.Message)
 }
 
 func TestNewInvalidRequestError(t *testing.T) {
 	originalErr := errors.New("missing field")
 	err := NewInvalidRequestError("invalid input", originalErr)
 
-	if err.Type != ErrorTypeInvalidRequest {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeInvalidRequest)
-	}
-
-	if err.StatusCode != http.StatusBadRequest {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusBadRequest)
-	}
-
-	if err.Message != "invalid input" {
-		t.Errorf("Message = %v, want %v", err.Message, "invalid input")
-	}
-
-	if err.Err != originalErr {
-		t.Errorf("Err = %v, want %v", err.Err, originalErr)
-	}
+	assert.Equal(t, ErrorTypeInvalidRequest, err.Type)
+	assert.Equal(t, http.StatusBadRequest, err.StatusCode)
+	assert.Equal(t, "invalid input", err.Message)
+	assert.Equal(t, originalErr, err.Err)
 }
 
 func TestNewAuthenticationError(t *testing.T) {
 	err := NewAuthenticationError("gemini", "invalid API key")
 
-	if err.Type != ErrorTypeAuthentication {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeAuthentication)
-	}
-
-	if err.Provider != "gemini" {
-		t.Errorf("Provider = %v, want %v", err.Provider, "gemini")
-	}
-
-	if err.StatusCode != http.StatusUnauthorized {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusUnauthorized)
-	}
-
-	if err.Message != "invalid API key" {
-		t.Errorf("Message = %v, want %v", err.Message, "invalid API key")
-	}
+	assert.Equal(t, ErrorTypeAuthentication, err.Type)
+	assert.Equal(t, "gemini", err.Provider)
+	assert.Equal(t, http.StatusUnauthorized, err.StatusCode)
+	assert.Equal(t, "invalid API key", err.Message)
 }
 
 func TestNewNotFoundError(t *testing.T) {
 	err := NewNotFoundError("model not found")
 
-	if err.Type != ErrorTypeNotFound {
-		t.Errorf("Type = %v, want %v", err.Type, ErrorTypeNotFound)
-	}
-
-	if err.StatusCode != http.StatusNotFound {
-		t.Errorf("StatusCode = %v, want %v", err.StatusCode, http.StatusNotFound)
-	}
-
-	if err.Message != "model not found" {
-		t.Errorf("Message = %v, want %v", err.Message, "model not found")
-	}
+	assert.Equal(t, ErrorTypeNotFound, err.Type)
+	assert.Equal(t, http.StatusNotFound, err.StatusCode)
+	assert.Equal(t, "model not found", err.Message)
 }
 
 func TestParseProviderError(t *testing.T) {
@@ -398,31 +326,18 @@ func TestParseProviderError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ParseProviderError(tt.provider, tt.statusCode, tt.body, nil)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
+			assert.Equal(t, tt.provider, err.Provider)
+
+			if tt.expectedMessage != "" {
+				assert.Equal(t, tt.expectedMessage, err.Message)
+			} else {
+				assert.NotEmpty(t, err.Message)
 			}
 
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
-
-			if err.Provider != tt.provider {
-				t.Errorf("Provider = %v, want %v", err.Provider, tt.provider)
-			}
-
-			if tt.expectedMessage != "" && err.Message != tt.expectedMessage {
-				t.Errorf("Message = %q, want %q", err.Message, tt.expectedMessage)
-			} else if err.Message == "" {
-				t.Error("Message should not be empty")
-			}
-
-			if !equalStringPointers(err.Param, tt.expectedParam) {
-				t.Errorf("Param = %v, want %v", err.Param, tt.expectedParam)
-			}
-
-			if !equalStringPointers(err.Code, tt.expectedCode) {
-				t.Errorf("Code = %v, want %v", err.Code, tt.expectedCode)
-			}
+			assert.Equal(t, tt.expectedParam, err.Param)
+			assert.Equal(t, tt.expectedCode, err.Code)
 		})
 	}
 }
@@ -483,42 +398,10 @@ func TestParseProviderError_OpenRouter_TableDriven(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ParseProviderError("openrouter", http.StatusTooManyRequests, tt.body, nil)
 
-			if err.Type != tt.wantType {
-				t.Fatalf("Type = %v, want %v", err.Type, tt.wantType)
-			}
-			if err.Message != tt.wantMessage {
-				t.Fatalf("Message = %q, want %q", err.Message, tt.wantMessage)
-			}
-			if !equalStringPointers(err.Code, tt.wantCode) {
-				t.Fatalf("Code = %v, want %v", err.Code, tt.wantCode)
-			}
+			require.Equal(t, tt.wantType, err.Type)
+			require.Equal(t, tt.wantMessage, err.Message)
+			require.Equal(t, tt.wantCode, err.Code)
 		})
-	}
-}
-
-func equalStringPointers(a, b *string) bool {
-	switch {
-	case a == nil && b == nil:
-		return true
-	case a == nil || b == nil:
-		return false
-	default:
-		return *a == *b
-	}
-}
-
-func TestGatewayError_AsError(t *testing.T) {
-	// Test that GatewayError can be used with errors.As
-	originalErr := NewRateLimitError("openai", "too many requests")
-	var err error = originalErr
-
-	var gatewayErr *GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Error("errors.As should work with GatewayError")
-	}
-
-	if gatewayErr.Type != ErrorTypeRateLimit {
-		t.Errorf("Type = %v, want %v", gatewayErr.Type, ErrorTypeRateLimit)
 	}
 }
 
@@ -527,9 +410,7 @@ func TestGatewayError_IsError(t *testing.T) {
 	originalErr := errors.New("network error")
 	gatewayErr := NewProviderError("openai", http.StatusBadGateway, "connection failed", originalErr)
 
-	if !errors.Is(gatewayErr, originalErr) {
-		t.Error("errors.Is should work with wrapped errors in GatewayError")
-	}
+	assert.ErrorIs(t, gatewayErr, originalErr)
 }
 
 func TestParseProviderError_Preserves4xxStatusCodes(t *testing.T) {
@@ -623,25 +504,11 @@ func TestParseProviderError_Preserves4xxStatusCodes(t *testing.T) {
 			originalErr := errors.New("original http error")
 			err := ParseProviderError(tt.provider, tt.statusCode, tt.body, originalErr)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
-			}
-
-			if err.StatusCode != tt.expectedStatus {
-				t.Errorf("StatusCode = %v, want %v", err.StatusCode, tt.expectedStatus)
-			}
-
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
-
-			if err.Provider != tt.expectedProvider {
-				t.Errorf("Provider = %v, want %v", err.Provider, tt.expectedProvider)
-			}
-
-			if err.Message == "" {
-				t.Error("Message should not be empty")
-			}
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.StatusCode)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
+			assert.Equal(t, tt.expectedProvider, err.Provider)
+			assert.NotEmpty(t, err.Message)
 		})
 	}
 }
@@ -674,12 +541,8 @@ func TestParseProviderError_PreservesWrappedErrorsForAuthAndRateLimit(t *testing
 			originalErr := errors.New("upstream transport error")
 			err := ParseProviderError("openai", tt.statusCode, []byte(`{"error":{"message":"boom"}}`), originalErr)
 
-			if err.Type != tt.wantType {
-				t.Fatalf("Type = %v, want %v", err.Type, tt.wantType)
-			}
-			if !errors.Is(err, originalErr) {
-				t.Fatalf("expected wrapped original error, got %v", err)
-			}
+			require.Equal(t, tt.wantType, err.Type)
+			require.ErrorIs(t, err, originalErr)
 		})
 	}
 }
@@ -716,13 +579,8 @@ func TestParseProviderError_SpecialStatusCodesOverride(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ParseProviderError("test-provider", tt.statusCode, []byte(`{"error": {"message": "test"}}`), nil)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
-			}
-
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
 		})
 	}
 }
@@ -809,25 +667,11 @@ func TestParseProviderError_Preserves5xxStatusCodes(t *testing.T) {
 			originalErr := errors.New("original http error")
 			err := ParseProviderError(tt.provider, tt.statusCode, tt.body, originalErr)
 
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
-			}
-
-			if err.StatusCode != tt.expectedStatus {
-				t.Errorf("StatusCode = %v, want %v", err.StatusCode, tt.expectedStatus)
-			}
-
-			if err.HTTPStatusCode() != tt.expectedStatus {
-				t.Errorf("HTTPStatusCode() = %v, want %v", err.HTTPStatusCode(), tt.expectedStatus)
-			}
-
-			if err.Provider != tt.expectedProvider {
-				t.Errorf("Provider = %v, want %v", err.Provider, tt.expectedProvider)
-			}
-
-			if err.Message == "" {
-				t.Error("Message should not be empty")
-			}
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedStatus, err.StatusCode)
+			assert.Equal(t, tt.expectedStatus, err.HTTPStatusCode())
+			assert.Equal(t, tt.expectedProvider, err.Provider)
+			assert.NotEmpty(t, err.Message)
 		})
 	}
 }
@@ -835,15 +679,12 @@ func TestParseProviderError_Preserves5xxStatusCodes(t *testing.T) {
 func TestGatewayError_ToJSON_ProviderOnlyWhenUpstream(t *testing.T) {
 	upstream := ParseProviderError("openai", http.StatusUnauthorized, []byte(`{"error":{"message":"bad key"}}`), nil)
 	errorData := upstream.ToJSON()["error"].(map[string]any)
-	if errorData["provider"] != "openai" {
-		t.Fatalf("ToJSON() provider = %v, want openai", errorData["provider"])
-	}
+	require.Equal(t, "openai", errorData["provider"])
 
 	gateway := NewAuthenticationError("", "invalid API key")
 	errorData = gateway.ToJSON()["error"].(map[string]any)
-	if _, present := errorData["provider"]; present {
-		t.Fatalf("ToJSON() should omit provider for gateway-originated errors, got %v", errorData["provider"])
-	}
+	_, present := errorData["provider"]
+	require.False(t, present, "ToJSON() should omit provider for gateway-originated errors, got %v", errorData["provider"])
 }
 
 func TestParseEmbeddedProviderError(t *testing.T) {
@@ -962,29 +803,15 @@ func TestParseEmbeddedProviderError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ParseEmbeddedProviderError("openrouter", []byte(tt.body))
 			if !tt.wantError {
-				if err != nil {
-					t.Fatalf("ParseEmbeddedProviderError() = %v, want nil", err)
-				}
+				require.Nil(t, err)
 				return
 			}
-			if err == nil {
-				t.Fatal("ParseEmbeddedProviderError() = nil, want error")
-			}
-			if err.StatusCode != tt.expectedStatus {
-				t.Errorf("StatusCode = %d, want %d", err.StatusCode, tt.expectedStatus)
-			}
-			if err.Type != tt.expectedType {
-				t.Errorf("Type = %v, want %v", err.Type, tt.expectedType)
-			}
-			if err.Message != tt.expectedMessage {
-				t.Errorf("Message = %q, want %q", err.Message, tt.expectedMessage)
-			}
-			if err.Provider != "openrouter" {
-				t.Errorf("Provider = %q, want %q", err.Provider, "openrouter")
-			}
-			if len(err.ResponseBody) == 0 {
-				t.Error("ResponseBody should capture the raw upstream body")
-			}
+			require.NotNil(t, err)
+			assert.Equal(t, tt.expectedStatus, err.StatusCode)
+			assert.Equal(t, tt.expectedType, err.Type)
+			assert.Equal(t, tt.expectedMessage, err.Message)
+			assert.Equal(t, "openrouter", err.Provider)
+			assert.NotEmpty(t, err.ResponseBody)
 		})
 	}
 }

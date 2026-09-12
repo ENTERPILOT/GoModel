@@ -1,8 +1,10 @@
 package core
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func validImageEditRequest() *ImageEditRequest {
@@ -52,31 +54,27 @@ func TestValidateImageEditRequest(t *testing.T) {
 			}
 			err := ValidateImageEditRequest(req)
 			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
+				require.NoError(t, err)
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("error = %v, want %q", err, tt.wantErr)
-			}
-			if gw, ok := err.(*GatewayError); !ok || gw.StatusCode != 400 {
-				t.Fatalf("error should be a 400 gateway error, got %T %v", err, err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
+			gw, ok := err.(*GatewayError)
+			require.True(t, ok)
+			require.Equal(t, 400, gw.StatusCode)
 		})
 	}
 }
 
 func TestImageEditRequestField(t *testing.T) {
 	req := &ImageEditRequest{Fields: []FormField{{Name: "size", Value: "256x256"}, {Name: "size", Value: "512x512"}}}
-	if v, ok := req.Field("size"); !ok || v != "256x256" {
-		t.Errorf("Field(size) = %q, %v; want first value", v, ok)
-	}
-	if _, ok := req.Field("quality"); ok {
-		t.Error("Field(quality) should report absent")
-	}
+	v, ok := req.Field("size")
+	assert.True(t, ok)
+	assert.Equal(t, "256x256", v)
+	_, ok = req.Field("quality")
+	assert.False(t, ok)
+
 	var nilReq *ImageEditRequest
-	if _, ok := nilReq.Field("size"); ok {
-		t.Error("nil request should report absent")
-	}
+	_, ok = nilReq.Field("size")
+	assert.False(t, ok)
 }

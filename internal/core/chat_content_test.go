@@ -4,55 +4,39 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMessageUnmarshalJSON_StringContent(t *testing.T) {
 	var msg Message
-	if err := json.Unmarshal([]byte(`{"role":"user","content":"hello"}`), &msg); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if msg.Role != "user" {
-		t.Fatalf("Role = %q, want user", msg.Role)
-	}
-	if msg.Content != "hello" {
-		t.Fatalf("Content = %#v, want hello", msg.Content)
-	}
+	err := json.Unmarshal([]byte(`{"role":"user","content":"hello"}`), &msg)
+	require.NoError(t, err)
+	require.Equal(t, "user", msg.Role)
+	require.Equal(t, "hello", msg.Content)
 }
 
 func TestMessageUnmarshalJSON_MultimodalContent(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"text","text":"Describe this image"},{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"high","media_type":"image/png"}}]}`), &msg)
-	if err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	parts, ok := msg.Content.([]ContentPart)
-	if !ok {
-		t.Fatalf("Content type = %T, want []ContentPart", msg.Content)
-	}
-	if len(parts) != 2 {
-		t.Fatalf("len(parts) = %d, want 2", len(parts))
-	}
-	if parts[0].Type != "text" || parts[0].Text != "Describe this image" {
-		t.Fatalf("unexpected first part: %+v", parts[0])
-	}
-	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/image.png" {
-		t.Fatalf("unexpected second part: %+v", parts[1])
-	}
-	if parts[1].ImageURL.MediaType != "image/png" {
-		t.Fatalf("second part media type = %q, want image/png", parts[1].ImageURL.MediaType)
-	}
+	require.True(t, ok, "Content type = %T, want []ContentPart", msg.Content)
+	require.Len(t, parts, 2)
+	require.Equal(t, "text", parts[0].Type)
+	require.Equal(t, "Describe this image", parts[0].Text, "unexpected first part: %+v", parts[0])
+	require.Equal(t, "image_url", parts[1].Type)
+	require.NotNil(t, parts[1].ImageURL)
+	require.Equal(t, "https://example.com/image.png", parts[1].ImageURL.URL, "unexpected second part: %+v", parts[1])
+	require.Equal(t, "image/png", parts[1].ImageURL.MediaType)
 }
 
 func TestMessageUnmarshalJSON_NullContentPreservedAsNil(t *testing.T) {
 	var msg Message
-	if err := json.Unmarshal([]byte(`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}`), &msg); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if msg.Content != nil {
-		t.Fatalf("Content = %#v, want nil", msg.Content)
-	}
+	err := json.Unmarshal([]byte(`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}`), &msg)
+	require.NoError(t, err)
+	require.Nil(t, msg.Content)
 }
 
 func TestMessageUnmarshalJSON_RejectsUnsupportedContentTypes(t *testing.T) {
@@ -66,24 +50,16 @@ func TestMessageUnmarshalJSON_RejectsUnsupportedContentTypes(t *testing.T) {
 		t.Run(payload, func(t *testing.T) {
 			var msg Message
 			err := json.Unmarshal([]byte(payload), &msg)
-			if err == nil {
-				t.Fatal("json.Unmarshal() succeeded, want error")
-			}
-			if !strings.Contains(err.Error(), "content") && !strings.Contains(err.Error(), "must be a string or array of content parts") {
-				t.Fatalf("error = %v, want content validation error", err)
-			}
+			require.Error(t, err)
+			require.True(t, strings.Contains(err.Error(), "content") || strings.Contains(err.Error(), "must be a string or array of content parts"), "error = %v, want content validation error", err)
 		})
 	}
 }
 
 func TestMessageMarshalJSON_RejectsUnsupportedContentType(t *testing.T) {
 	_, err := json.Marshal(Message{Role: "user", Content: 123})
-	if err == nil {
-		t.Fatal("json.Marshal() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "must be a string or array of content parts") {
-		t.Fatalf("error = %v, want content validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be a string or array of content parts")
 }
 
 func TestMessageMarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
@@ -101,12 +77,8 @@ func TestMessageMarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if !strings.Contains(string(body), `"content":null`) {
-		t.Fatalf("expected content:null, got %s", string(body))
-	}
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"content":null`)
 }
 
 func TestMessageMarshalJSON_PreservesNullContentForToolCallsWhenContentIsEmptyString(t *testing.T) {
@@ -124,12 +96,8 @@ func TestMessageMarshalJSON_PreservesNullContentForToolCallsWhenContentIsEmptySt
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if !strings.Contains(string(body), `"content":null`) {
-		t.Fatalf("expected content:null, got %s", string(body))
-	}
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"content":null`)
 }
 
 func TestResponseMessageMarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
@@ -147,43 +115,28 @@ func TestResponseMessageMarshalJSON_PreservesNullContentForToolCalls(t *testing.
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if !strings.Contains(string(body), `"content":null`) {
-		t.Fatalf("expected content:null, got %s", string(body))
-	}
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"content":null`)
 }
 
 func TestResponseMessageUnmarshalJSON_PreservesNullContentForToolCalls(t *testing.T) {
 	var msg ResponseMessage
-	if err := json.Unmarshal([]byte(`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}`), &msg); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if msg.Content != nil {
-		t.Fatalf("Content = %#v, want nil", msg.Content)
-	}
+	err := json.Unmarshal([]byte(`{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]}`), &msg)
+	require.NoError(t, err)
+	require.Nil(t, msg.Content)
 }
 
 func TestNormalizeMessageContent_RejectsEmptyTypedTextPart(t *testing.T) {
 	_, err := NormalizeMessageContent([]ContentPart{{Type: "text", Text: ""}})
-	if err == nil {
-		t.Fatal("NormalizeMessageContent() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "text part is missing text") {
-		t.Fatalf("error = %v, want text validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "text part is missing text")
 }
 
 func TestMessageUnmarshalJSON_RejectsEmptyJSONTextPart(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"text","text":""}]}`), &msg)
-	if err == nil {
-		t.Fatal("json.Unmarshal() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "text part is missing text") {
-		t.Fatalf("error = %v, want text validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "text part is missing text")
 }
 
 func TestNormalizeMessageContent_RejectsEmptyMapTextPart(t *testing.T) {
@@ -193,87 +146,54 @@ func TestNormalizeMessageContent_RejectsEmptyMapTextPart(t *testing.T) {
 			"text": "",
 		},
 	})
-	if err == nil {
-		t.Fatal("NormalizeMessageContent() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "text part is missing text") {
-		t.Fatalf("error = %v, want text validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "text part is missing text")
 }
 
 func TestMessageUnmarshalJSON_InputAudioContent(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"base64data","format":"wav"}}]}`), &msg)
-	if err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	parts, ok := msg.Content.([]ContentPart)
-	if !ok {
-		t.Fatalf("Content type = %T, want []ContentPart", msg.Content)
-	}
-	if len(parts) != 1 {
-		t.Fatalf("len(parts) = %d, want 1", len(parts))
-	}
-	if parts[0].Type != "input_audio" {
-		t.Fatalf("Type = %q, want input_audio", parts[0].Type)
-	}
-	if parts[0].InputAudio == nil {
-		t.Fatal("InputAudio is nil")
-	}
-	if parts[0].InputAudio.Data != "base64data" {
-		t.Fatalf("Data = %q, want base64data", parts[0].InputAudio.Data)
-	}
-	if parts[0].InputAudio.Format != "wav" {
-		t.Fatalf("Format = %q, want wav", parts[0].InputAudio.Format)
-	}
+	require.True(t, ok, "Content type = %T, want []ContentPart", msg.Content)
+	require.Len(t, parts, 1)
+	require.Equal(t, "input_audio", parts[0].Type)
+	require.NotNil(t, parts[0].InputAudio)
+	require.Equal(t, "base64data", parts[0].InputAudio.Data)
+	require.Equal(t, "wav", parts[0].InputAudio.Format)
 }
 
 func TestMessageUnmarshalJSON_RejectsInputAudioMissingData(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"","format":"wav"}}]}`), &msg)
-	if err == nil {
-		t.Fatal("json.Unmarshal() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "input_audio part is missing data or format") {
-		t.Fatalf("error = %v, want input_audio validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input_audio part is missing data or format")
 }
 
 func TestMessageUnmarshalJSON_RejectsInputAudioMissingFormat(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"abc","format":""}}]}`), &msg)
-	if err == nil {
-		t.Fatal("json.Unmarshal() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "input_audio part is missing data or format") {
-		t.Fatalf("error = %v, want input_audio validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input_audio part is missing data or format")
 }
 
 func TestMessageUnmarshalJSON_AcceptsInputAudioDataURIWithoutFormat(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"data:audio/wav;base64,UklGRg=="}}]}`), &msg)
-	if err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	parts, ok := msg.Content.([]ContentPart)
-	if !ok || len(parts) != 1 || parts[0].InputAudio == nil {
-		t.Fatalf("unexpected content: %+v", msg.Content)
-	}
-	if parts[0].InputAudio.Data != "data:audio/wav;base64,UklGRg==" || parts[0].InputAudio.Format != "" {
-		t.Fatalf("InputAudio = %+v, want data URI with empty format", parts[0].InputAudio)
-	}
+	require.True(t, ok)
+	require.Len(t, parts, 1)
+	require.NotNil(t, parts[0].InputAudio, "unexpected content: %+v", msg.Content)
+	require.Equal(t, "data:audio/wav;base64,UklGRg==", parts[0].InputAudio.Data)
+	require.Empty(t, parts[0].InputAudio.Format, "InputAudio = %+v, want data URI with empty format", parts[0].InputAudio)
 
 	// Re-marshaling must preserve the wire shape: no synthesized format field.
 	out, err := json.Marshal(msg)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if strings.Contains(string(out), `"format"`) {
-		t.Fatalf("marshaled message should not contain format, got: %s", out)
-	}
+	require.NoError(t, err)
+	require.False(t, strings.Contains(string(out), `"format"`), "marshaled message should not contain format, got: %s", out)
 }
 
 func TestMessageUnmarshalJSON_RejectsInputAudioDataURIWithoutMediaType(t *testing.T) {
@@ -281,34 +201,24 @@ func TestMessageUnmarshalJSON_RejectsInputAudioDataURIWithoutMediaType(t *testin
 	for _, data := range []string{"data:", "data:,UklGRg==", "data:base64,UklGRg==", "notdata:audio/wav,UklGRg=="} {
 		body := `{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"` + data + `"}}]}`
 		var msg Message
-		if err := json.Unmarshal([]byte(body), &msg); err == nil {
-			t.Fatalf("json.Unmarshal(%q) succeeded, want error", data)
-		} else if !strings.Contains(err.Error(), "input_audio part is missing data or format") {
-			t.Fatalf("data %q: error = %v, want input_audio validation error", data, err)
-		}
+		err := json.Unmarshal([]byte(body), &msg)
+		require.Error(t, err, "data %q", data)
+		require.Contains(t, err.Error(), "input_audio part is missing data or format", "data %q", data)
 	}
 }
 
 func TestMessageUnmarshalJSON_RejectsInputAudioNull(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"input_audio","input_audio":null}]}`), &msg)
-	if err == nil {
-		t.Fatal("json.Unmarshal() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "input_audio part is missing data or format") {
-		t.Fatalf("error = %v, want input_audio validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input_audio part is missing data or format")
 }
 
 func TestMessageUnmarshalJSON_RejectsInputAudioNotObject(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"input_audio","input_audio":"string"}]}`), &msg)
-	if err == nil {
-		t.Fatal("json.Unmarshal() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "input_audio must be an object") {
-		t.Fatalf("error = %v, want input_audio type error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input_audio must be an object")
 }
 
 func TestNormalizeMessageContent_InputAudioTypedPart(t *testing.T) {
@@ -316,33 +226,21 @@ func TestNormalizeMessageContent_InputAudioTypedPart(t *testing.T) {
 		Type:       "input_audio",
 		InputAudio: &InputAudioContent{Data: "abc", Format: "wav"},
 	}})
-	if err != nil {
-		t.Fatalf("NormalizeMessageContent() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	parts, ok := result.([]ContentPart)
-	if !ok {
-		t.Fatalf("result type = %T, want []ContentPart", result)
-	}
-	if len(parts) != 1 {
-		t.Fatalf("len(parts) = %d, want 1", len(parts))
-	}
-	if parts[0].Type != "input_audio" || parts[0].InputAudio == nil {
-		t.Fatalf("unexpected part: %+v", parts[0])
-	}
-	if parts[0].InputAudio.Data != "abc" || parts[0].InputAudio.Format != "wav" {
-		t.Fatalf("InputAudio = %+v, want {abc wav}", parts[0].InputAudio)
-	}
+	require.True(t, ok, "result type = %T, want []ContentPart", result)
+	require.Len(t, parts, 1)
+	require.Equal(t, "input_audio", parts[0].Type)
+	require.NotNil(t, parts[0].InputAudio, "unexpected part: %+v", parts[0])
+	require.Equal(t, "abc", parts[0].InputAudio.Data)
+	require.Equal(t, "wav", parts[0].InputAudio.Format, "InputAudio = %+v, want {abc wav}", parts[0].InputAudio)
 }
 
 func TestNormalizeMessageContent_RejectsNilInputAudio(t *testing.T) {
 	_, err := NormalizeMessageContent([]ContentPart{{Type: "input_audio", InputAudio: nil}})
-	if err == nil {
-		t.Fatal("NormalizeMessageContent() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "input_audio part is missing data or format") {
-		t.Fatalf("error = %v, want input_audio validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input_audio part is missing data or format")
 }
 
 func TestNormalizeMessageContent_InputAudioFromMap(t *testing.T) {
@@ -352,23 +250,15 @@ func TestNormalizeMessageContent_InputAudioFromMap(t *testing.T) {
 			"input_audio": map[string]any{"data": "abc", "format": "wav"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("NormalizeMessageContent() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	parts, ok := result.([]ContentPart)
-	if !ok {
-		t.Fatalf("result type = %T, want []ContentPart", result)
-	}
-	if len(parts) != 1 {
-		t.Fatalf("len(parts) = %d, want 1", len(parts))
-	}
-	if parts[0].Type != "input_audio" || parts[0].InputAudio == nil {
-		t.Fatalf("unexpected part: %+v", parts[0])
-	}
-	if parts[0].InputAudio.Data != "abc" || parts[0].InputAudio.Format != "wav" {
-		t.Fatalf("InputAudio = %+v, want {abc wav}", parts[0].InputAudio)
-	}
+	require.True(t, ok, "result type = %T, want []ContentPart", result)
+	require.Len(t, parts, 1)
+	require.Equal(t, "input_audio", parts[0].Type)
+	require.NotNil(t, parts[0].InputAudio, "unexpected part: %+v", parts[0])
+	require.Equal(t, "abc", parts[0].InputAudio.Data)
+	require.Equal(t, "wav", parts[0].InputAudio.Format, "InputAudio = %+v, want {abc wav}", parts[0].InputAudio)
 }
 
 func TestNormalizeMessageContent_RejectsInputAudioFromMapMissingFields(t *testing.T) {
@@ -378,35 +268,25 @@ func TestNormalizeMessageContent_RejectsInputAudioFromMapMissingFields(t *testin
 			"input_audio": map[string]any{"data": "", "format": "wav"},
 		},
 	})
-	if err == nil {
-		t.Fatal("NormalizeMessageContent() succeeded, want error")
-	}
-	if !strings.Contains(err.Error(), "input_audio part is missing data or format") {
-		t.Fatalf("error = %v, want input_audio validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input_audio part is missing data or format")
 }
 
 func TestMessageUnmarshalJSON_MixedTextImageAudio(t *testing.T) {
 	var msg Message
 	err := json.Unmarshal([]byte(`{"role":"user","content":[{"type":"text","text":"Describe"},{"type":"image_url","image_url":{"url":"https://example.com/img.png"}},{"type":"input_audio","input_audio":{"data":"abc","format":"mp3"}}]}`), &msg)
-	if err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	parts, ok := msg.Content.([]ContentPart)
-	if !ok {
-		t.Fatalf("Content type = %T, want []ContentPart", msg.Content)
-	}
-	if len(parts) != 3 {
-		t.Fatalf("len(parts) = %d, want 3", len(parts))
-	}
-	if parts[0].Type != "text" || parts[0].Text != "Describe" {
-		t.Fatalf("unexpected part 0: %+v", parts[0])
-	}
-	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/img.png" {
-		t.Fatalf("unexpected part 1: %+v", parts[1])
-	}
-	if parts[2].Type != "input_audio" || parts[2].InputAudio == nil || parts[2].InputAudio.Data != "abc" || parts[2].InputAudio.Format != "mp3" {
-		t.Fatalf("unexpected part 2: %+v", parts[2])
-	}
+	require.True(t, ok, "Content type = %T, want []ContentPart", msg.Content)
+	require.Len(t, parts, 3)
+	require.Equal(t, "text", parts[0].Type)
+	require.Equal(t, "Describe", parts[0].Text, "unexpected part 0: %+v", parts[0])
+	require.Equal(t, "image_url", parts[1].Type)
+	require.NotNil(t, parts[1].ImageURL)
+	require.Equal(t, "https://example.com/img.png", parts[1].ImageURL.URL, "unexpected part 1: %+v", parts[1])
+	require.Equal(t, "input_audio", parts[2].Type)
+	require.NotNil(t, parts[2].InputAudio)
+	require.Equal(t, "abc", parts[2].InputAudio.Data)
+	require.Equal(t, "mp3", parts[2].InputAudio.Format, "unexpected part 2: %+v", parts[2])
 }

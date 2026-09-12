@@ -1,8 +1,9 @@
 package config
 
 import (
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestOpenTelemetryConfigEnvironment(t *testing.T) {
@@ -49,9 +50,8 @@ func TestOpenTelemetryConfigEnvironment(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.cfg.Environment(); !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("Environment() = %v, want %v", got, tt.want)
-			}
+			got := tt.cfg.Environment()
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

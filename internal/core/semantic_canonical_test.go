@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 type testFileMultipartReader struct {
 	values    map[string]string
@@ -21,31 +25,16 @@ func TestDecodeChatRequest_CachesOnSemanticEnvelope(t *testing.T) {
 
 	env := &WhiteBoxPrompt{OperationType: "chat_completions"}
 	first, err := DecodeChatRequest([]byte(`{"model":"gpt-4o-mini","provider":"openai","stream":true,"messages":[{"role":"user","content":"hi"}]}`), env)
-	if err != nil {
-		t.Fatalf("DecodeChatRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	second, err := DecodeChatRequest([]byte(`{"model":"other","messages":[{"role":"user","content":"ignored"}]}`), env)
-	if err != nil {
-		t.Fatalf("DecodeChatRequest() second error = %v", err)
-	}
-	if first != second {
-		t.Fatal("DecodeChatRequest() did not reuse cached request")
-	}
-	if env.CachedChatRequest() != first {
-		t.Fatal("WhiteBoxPrompt cached chat request was not reused")
-	}
-	if !env.JSONBodyParsed {
-		t.Fatal("JSONBodyParsed = false, want true")
-	}
-	if env.RouteHints.Model != "gpt-4o-mini" {
-		t.Fatalf("RouteHints.Model = %q, want gpt-4o-mini", env.RouteHints.Model)
-	}
-	if env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
-	}
-	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want true")
-	}
+	require.NoError(t, err)
+	require.Equal(t, second, first)
+	require.Equal(t, first, env.CachedChatRequest())
+	require.True(t, env.JSONBodyParsed)
+	require.Equal(t, "gpt-4o-mini", env.RouteHints.Model)
+	require.Equal(t, "openai", env.RouteHints.Provider)
+	require.True(t, env.StreamRequested)
 }
 
 func TestBatchRouteMetadata_ValidatesAndCachesLimit(t *testing.T) {
@@ -55,26 +44,17 @@ func TestBatchRouteMetadata_ValidatesAndCachesLimit(t *testing.T) {
 	_, err := BatchRouteMetadata(env, "GET", "/v1/batches", nil, map[string][]string{
 		"limit": {"bad"},
 	})
-	if err == nil {
-		t.Fatal("BatchRouteMetadata() error = nil, want invalid limit error")
-	}
+	require.Error(t, err)
 
 	req, err := BatchRouteMetadata(env, "GET", "/v1/batches", nil, map[string][]string{
 		"after": {"batch_prev"},
 		"limit": {"5"},
 	})
-	if err != nil {
-		t.Fatalf("BatchRouteMetadata() valid error = %v", err)
-	}
-	if req != env.CachedBatchRouteInfo() {
-		t.Fatal("BatchRouteMetadata() did not cache metadata on envelope")
-	}
-	if req.Action != BatchActionList {
-		t.Fatalf("Action = %q, want %q", req.Action, BatchActionList)
-	}
-	if !req.HasLimit || req.Limit != 5 {
-		t.Fatalf("limit = %d/%v, want 5/true", req.Limit, req.HasLimit)
-	}
+	require.NoError(t, err)
+	require.Equal(t, env.CachedBatchRouteInfo(), req)
+	require.Equal(t, BatchActionList, req.Action)
+	require.True(t, req.HasLimit)
+	require.Equal(t, 5, req.Limit)
 }
 
 func TestFileRouteMetadata_CachesProviderHint(t *testing.T) {
@@ -84,15 +64,9 @@ func TestFileRouteMetadata_CachesProviderHint(t *testing.T) {
 	req, err := FileRouteMetadata(env, "GET", "/v1/files", nil, map[string][]string{
 		"provider": {"openai"},
 	})
-	if err != nil {
-		t.Fatalf("FileRouteMetadata() error = %v", err)
-	}
-	if req != env.CachedFileRouteInfo() {
-		t.Fatal("FileRouteMetadata() did not cache metadata on envelope")
-	}
-	if env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
-	}
+	require.NoError(t, err)
+	require.Equal(t, env.CachedFileRouteInfo(), req)
+	require.Equal(t, "openai", env.RouteHints.Provider)
 }
 
 func TestDecodeCanonicalSelector_UsesOperationCodec(t *testing.T) {
@@ -100,21 +74,11 @@ func TestDecodeCanonicalSelector_UsesOperationCodec(t *testing.T) {
 
 	env := &WhiteBoxPrompt{OperationType: "responses"}
 	model, provider, ok := DecodeCanonicalSelector([]byte(`{"model":"gpt-5-mini","provider":"openai","stream":true,"input":"hi"}`), env)
-	if !ok {
-		t.Fatal("DecodeCanonicalSelector() ok = false, want true")
-	}
-	if model != "gpt-5-mini" {
-		t.Fatalf("model = %q, want gpt-5-mini", model)
-	}
-	if provider != "openai" {
-		t.Fatalf("provider = %q, want openai", provider)
-	}
-	if env.CachedResponsesRequest() == nil {
-		t.Fatal("ResponsesRequest was not cached on semantic envelope")
-	}
-	if !env.StreamRequested {
-		t.Fatal("StreamRequested = false, want true")
-	}
+	require.True(t, ok)
+	require.Equal(t, "gpt-5-mini", model)
+	require.Equal(t, "openai", provider)
+	require.NotNil(t, env.CachedResponsesRequest())
+	require.True(t, env.StreamRequested)
 }
 
 func TestEnrichFileCreateRouteInfo_FillsMultipartMetadata(t *testing.T) {
@@ -131,13 +95,7 @@ func TestEnrichFileCreateRouteInfo_FillsMultipartMetadata(t *testing.T) {
 		},
 	})
 
-	if req.Provider != "openai" {
-		t.Fatalf("Provider = %q, want openai", req.Provider)
-	}
-	if req.Purpose != "batch" {
-		t.Fatalf("Purpose = %q, want batch", req.Purpose)
-	}
-	if req.Filename != "requests.jsonl" {
-		t.Fatalf("Filename = %q, want requests.jsonl", req.Filename)
-	}
+	require.Equal(t, "openai", req.Provider)
+	require.Equal(t, "batch", req.Purpose)
+	require.Equal(t, "requests.jsonl", req.Filename)
 }

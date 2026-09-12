@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestResolveMetricsEndpoint(t *testing.T) {
 	tests := map[string]string{
@@ -14,9 +18,8 @@ func TestResolveMetricsEndpoint(t *testing.T) {
 		"/p/internal":            "/metrics",
 	}
 	for input, want := range tests {
-		if got := ResolveMetricsEndpoint(input); got != want {
-			t.Errorf("ResolveMetricsEndpoint(%q) = %q, want %q", input, got, want)
-		}
+		got := ResolveMetricsEndpoint(input)
+		assert.Equal(t, want, got)
 	}
 }
 
@@ -35,9 +38,8 @@ func TestResolveMetricsEndpointWithPprof(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := ResolveMetricsEndpointWithPprof(test.endpoint, test.pprofEnabled); got != test.want {
-				t.Errorf("ResolveMetricsEndpointWithPprof(%q, %v) = %q, want %q", test.endpoint, test.pprofEnabled, got, test.want)
-			}
+			got := ResolveMetricsEndpointWithPprof(test.endpoint, test.pprofEnabled)
+			assert.Equal(t, test.want, got, "ResolveMetricsEndpointWithPprof(%q, %v)", test.endpoint, test.pprofEnabled)
 		})
 	}
 }

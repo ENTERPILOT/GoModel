@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,37 +24,34 @@ func TestResiliencePolicyLoading(t *testing.T) {
 			t.Chdir(dir)
 			_, err := Load()
 			if tc.wantError == "" {
-				if err != nil {
-					t.Fatal(err)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("error=%v, want %s", err, tc.wantError)
+				require.NoError(t, err)
+				return
 			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantError)
 		})
 	}
 }
 
 func TestResilienceEmptyListsAndEnvironment(t *testing.T) {
 	cfg := &Config{Resilience: ResilienceConfig{Retry: DefaultRetryConfig(), CircuitBreaker: DefaultCircuitBreakerConfig()}}
-	if err := yaml.Unmarshal([]byte("resilience:\n  retry:\n    retry_on_statuses: []\n  circuit_breaker:\n    failure_on_statuses: []\n"), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Resilience.Retry.RetryOnStatuses == nil || cfg.Resilience.CircuitBreaker.FailureOnStatuses == nil {
-		t.Fatal("explicit empty lists must remain non-nil")
-	}
+	err := yaml.Unmarshal([]byte("resilience:\n  retry:\n    retry_on_statuses: []\n  circuit_breaker:\n    failure_on_statuses: []\n"), cfg)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Resilience.Retry.RetryOnStatuses)
+	require.NotNil(t, cfg.Resilience.CircuitBreaker.FailureOnStatuses)
+
 	t.Setenv("RETRY_ON_STATUSES", "429,524")
 	t.Setenv("CIRCUIT_BREAKER_FAILURE_ON_STATUSES", "429,5xx")
 	t.Setenv("CIRCUIT_BREAKER_SCOPE", "model")
-	if err := applyEnvOverrides(cfg); err != nil {
-		t.Fatal(err)
-	}
+	err = applyEnvOverrides(cfg)
+	require.NoError(t, err)
+
 	statuses, err := ParseResilienceStatuses(cfg.Resilience.CircuitBreaker.FailureOnStatuses, nil)
-	if err != nil || !statuses[429] || !statuses[524] || cfg.Resilience.CircuitBreaker.Scope != "model" {
-		t.Fatalf("config=%+v err=%v", cfg.Resilience, err)
-	}
-	if strings.Join(cfg.Resilience.Retry.RetryOnStatuses, ",") != "429,524" {
-		t.Fatal("retry environment override missing")
-	}
+	require.NoError(t, err)
+	require.True(t, statuses[429])
+	require.True(t, statuses[524])
+	require.Equal(t, "model", cfg.Resilience.CircuitBreaker.Scope)
+	require.Equal(t, "429,524", strings.Join(cfg.Resilience.Retry.RetryOnStatuses, ","))
 }
 
 func TestParseResilienceStatusTokens(t *testing.T) {
@@ -83,21 +81,14 @@ func TestParseResilienceStatusTokens(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			statuses, err := ParseResilienceStatuses([]string{tc.token}, nil)
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("statuses=%v, want an error for %q", statuses, tc.token)
-				}
-				if !strings.Contains(err.Error(), "HTTP status code or class") {
-					t.Fatalf("error=%v must explain the accepted forms", err)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "HTTP status code or class")
 				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			for _, code := range tc.want {
-				if !statuses[code] {
-					t.Fatalf("%q did not expand to %d: %v", tc.token, code, statuses)
-				}
+				require.True(t, statuses[code], "%q did not expand to %d: %v", tc.token, code, statuses)
 			}
 		})
 	}
@@ -105,44 +96,29 @@ func TestParseResilienceStatusTokens(t *testing.T) {
 
 func TestParseResilienceStatusClassBoundaries(t *testing.T) {
 	statuses, err := ParseResilienceStatuses([]string{"5xx"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(statuses) != 100 || statuses[499] || statuses[600] {
-		t.Fatalf("5xx must cover exactly 500-599, got %d entries", len(statuses))
-	}
+	require.NoError(t, err)
+	require.Len(t, statuses, 100, "5xx must cover exactly 500-599")
+	require.False(t, statuses[499])
+	require.False(t, statuses[600])
 }
 
 func TestParseResilienceStatusesDefaultsAndOverrides(t *testing.T) {
 	defaults := DefaultCircuitBreakerConfig().FailureOnStatuses
 
 	inherited, err := ParseResilienceStatuses(nil, defaults)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !inherited[429] || !inherited[500] {
-		t.Fatalf("nil must inherit the defaults, got %v", inherited)
-	}
+	require.NoError(t, err)
+	require.True(t, inherited[429])
+	require.True(t, inherited[500], "nil must inherit the defaults, got %v", inherited)
 
 	disabled, err := ParseResilienceStatuses([]string{}, defaults)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(disabled) != 0 {
-		t.Fatalf("an explicit empty list must disable status matches, got %v", disabled)
-	}
+	require.NoError(t, err)
+	require.Empty(t, disabled)
 
 	deduped, err := ParseResilienceStatuses([]string{"503", "5xx", "503"}, defaults)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(deduped) != 100 {
-		t.Fatalf("overlapping entries must merge, got %d entries", len(deduped))
-	}
-
-	if _, err := ParseResilienceStatuses(nil, []string{"oops"}); err == nil {
-		t.Fatal("invalid defaults must be rejected too")
-	}
+	require.NoError(t, err)
+	require.Len(t, deduped, 100)
+	_, err = ParseResilienceStatuses(nil, []string{"oops"})
+	require.Error(t, err)
 }
 
 func TestValidateResilienceScope(t *testing.T) {
@@ -161,18 +137,15 @@ func TestValidateResilienceScope(t *testing.T) {
 			r := ResilienceConfig{Retry: DefaultRetryConfig(), CircuitBreaker: DefaultCircuitBreakerConfig()}
 			r.CircuitBreaker.Scope = tc.scope
 			err := ValidateResilience(r)
-			if tc.wantErr != (err != nil) {
-				t.Fatalf("scope %q: error=%v", tc.scope, err)
-			}
+			require.Equal(t, tc.wantErr, err != nil, "scope %q: error=%v", tc.scope, err)
 		})
 	}
 }
 
 func TestNormalizeBreakerScope(t *testing.T) {
 	for scope, want := range map[string]string{"": "provider", "provider": "provider", "model": "model"} {
-		if got := NormalizeBreakerScope(scope); got != want {
-			t.Fatalf("NormalizeBreakerScope(%q)=%q, want %q", scope, got, want)
-		}
+		got := NormalizeBreakerScope(scope)
+		require.Equal(t, want, got)
 	}
 }
 
@@ -206,14 +179,11 @@ func TestProviderPolicyOverrideValidation(t *testing.T) {
 			t.Chdir(dir)
 			_, err := Load()
 			if tc.wantError == "" {
-				if err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, err)
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("error=%v, want %s", err, tc.wantError)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantError)
 		})
 	}
 }

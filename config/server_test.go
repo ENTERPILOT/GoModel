@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/platformdir"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The pid file follows the database instead of scattering GoModel's state
@@ -14,9 +16,7 @@ import (
 // directory keeps both in the per-user data directory.
 func TestDefaultPIDFilePath(t *testing.T) {
 	platformDataDir, err := platformdir.DataDir()
-	if err != nil {
-		t.Fatalf("platformdir.DataDir() error: %v", err)
-	}
+	require.NoError(t, err)
 
 	tests := []struct {
 		name  string
@@ -26,9 +26,8 @@ func TestDefaultPIDFilePath(t *testing.T) {
 		{
 			name: "data directory exists keeps the project-local path",
 			setup: func(t *testing.T, dir string) {
-				if err := os.Mkdir(filepath.Join(dir, "data"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				err := os.Mkdir(filepath.Join(dir, "data"), 0o755)
+				require.NoError(t, err)
 			},
 			want: LegacyPIDFilePath,
 		},
@@ -44,10 +43,8 @@ func TestDefaultPIDFilePath(t *testing.T) {
 			dir := t.TempDir()
 			tt.setup(t, dir)
 			t.Chdir(dir)
-
-			if got := DefaultPIDFilePath(); got != tt.want {
-				t.Errorf("DefaultPIDFilePath() = %q, want %q", got, tt.want)
-			}
+			got := DefaultPIDFilePath()
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -85,18 +82,14 @@ func TestPIDFilePathResolution(t *testing.T) {
 			t.Chdir(dir)
 			t.Setenv("PID_FILE", tt.env)
 			if tt.configYAML != "" {
-				if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.configYAML), 0o600); err != nil {
-					t.Fatal(err)
-				}
+				err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.configYAML), 0o600)
+				require.NoError(t, err)
 			}
 
 			result, err := Load()
-			if err != nil {
-				t.Fatalf("Load() error = %v", err)
-			}
-			if got := result.Config.Server.PIDFile; got != tt.want {
-				t.Errorf("Server.PIDFile = %q, want %q", got, tt.want)
-			}
+			require.NoError(t, err)
+			got := result.Config.Server.PIDFile
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
