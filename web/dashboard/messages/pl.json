@@ -1085,7 +1085,18 @@
   "api_keys_effective_models_help": "Co Request z tym kluczem może faktycznie wywołać: polityki jego User Path, jego własne dozwolone modele i polityki po stronie modeli razem.",
   "api_keys_effective_all": "Wszystkie modele",
   "api_keys_effective_none": "Brak",
-  "api_keys_effective_count": "{count} modeli",
+  "api_keys_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=few": "{count} modele",
+        "count_plural=many": "{count} modeli",
+        "count_plural=*": "{count} modelu"
+      }
+    }
+  ],
   "api_keys_allowed_models_all": "Wszystkie",
   "api_keys_edit_allowed_models": "Edytuj dozwolone modele",
   "api_keys_allowed_models_editor": "Edytor dozwolonych modeli klucza API",
@@ -1114,7 +1125,18 @@
   "users_column_effective": "Efektywne modele",
   "users_effective_all": "Wszystkie modele",
   "users_effective_none": "Brak",
-  "users_effective_count": "{count} modeli",
+  "users_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} model",
+        "count_plural=few": "{count} modele",
+        "count_plural=many": "{count} modeli",
+        "count_plural=*": "{count} modelu"
+      }
+    }
+  ],
   "users_effective_via": "przez {path}",
   "users_no_models_warning": "Żaden model nie pozostałby dostępny: nic z tej listy nie jest dozwolone przez grupy nadrzędne.",
   "users_column_keys": "Klucze API",

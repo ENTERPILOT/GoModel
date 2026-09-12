@@ -41,6 +41,17 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
   assert.equal(m.date_picker_last_days({ count: 1 }), "Last 1 day");
   assert.equal(m.date_picker_last_days({ count: 14 }), "Last 14 days");
   assert.equal(m.date_picker_days({ count: 1 }), "1 day");
+  assert.equal(m.workflows_active_scopes({ count: 1 }), "1 active scope");
+  assert.equal(m.workflows_active_scopes({ count: 2 }), "2 active scopes");
+  assert.equal(m.api_keys_effective_count({ count: 1 }), "1 model");
+  assert.equal(m.api_keys_effective_count({ count: 3 }), "3 models");
+  assert.equal(m.users_effective_count({ count: 1 }), "1 model");
+  assert.equal(m.api_keys_hidden({ count: 1 }), "1 inactive key is hidden.");
+  assert.equal(m.api_keys_hidden({ count: 2 }), "2 inactive keys are hidden.");
+  assert.equal(m.overview_mcp_attention({ count: 1 }), "1 server needs attention");
+  assert.equal(m.overview_mcp_attention({ count: 2 }), "2 servers need attention");
+  assert.equal(m.playground_meta_events({ count: 1 }), "1 stream event");
+  assert.equal(m.playground_meta_events({ count: 7 }), "7 stream events");
   assert.equal(
     m.pagination_summary(
       { start: 1, end: 25, total: 80 },
@@ -125,6 +136,18 @@ test("Paraglide compiles interpolation and locale-aware plurals", () => {
   );
   assert.equal(
     m.providers_models_count({ count: 5 }, { locale: "pl" }),
+    "5 modeli",
+  );
+  assert.equal(
+    m.api_keys_effective_count({ count: 1 }, { locale: "pl" }),
+    "1 model",
+  );
+  assert.equal(
+    m.api_keys_effective_count({ count: 2 }, { locale: "pl" }),
+    "2 modele",
+  );
+  assert.equal(
+    m.users_effective_count({ count: 5 }, { locale: "pl" }),
     "5 modeli",
   );
   assert.equal(
@@ -216,6 +239,22 @@ test("Paraglide compiles German interpolation and locale-aware plurals", () => {
     "5 Modelle",
   );
   assert.equal(m.models_count({ count: 5 }, { locale: "de" }), "5 Modelle");
+  assert.equal(
+    m.workflows_active_scopes({ count: 1 }, { locale: "de" }),
+    "1 aktiver Geltungsbereich",
+  );
+  assert.equal(
+    m.workflows_active_scopes({ count: 2 }, { locale: "de" }),
+    "2 aktive Geltungsbereiche",
+  );
+  assert.equal(
+    m.api_keys_hidden({ count: 1 }, { locale: "de" }),
+    "1 inaktiver Schlüssel ist ausgeblendet.",
+  );
+  assert.equal(
+    m.overview_mcp_attention({ count: 1 }, { locale: "de" }),
+    "1 Server braucht Aufmerksamkeit",
+  );
   assert.equal(
     m.models_alias_count({ count: 5 }, { locale: "de" }),
     "5 Aliase",

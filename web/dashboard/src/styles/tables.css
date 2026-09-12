@@ -17,7 +17,7 @@
   justify-content: flex-end;
 }
 
-input:is([type="text"], [type="date"], [type="number"]) {
+input:is([type="text"], [type="password"], [type="date"], [type="number"]) {
   width: 100%;
   padding: 8px 12px;
   background: var(--bg-surface);
@@ -29,7 +29,7 @@ input:is([type="text"], [type="date"], [type="number"]) {
   outline: none;
 }
 
-input:is([type="text"], [type="date"], [type="number"]):focus {
+input:is([type="text"], [type="password"], [type="date"], [type="number"]):focus {
   border-color: var(--accent);
 }
 
@@ -37,7 +37,7 @@ input:is([type="text"], [type="date"], [type="number"]):focus {
    field (e.g. an immutable name, or a value owned by config.yaml/env) reads
    as disabled consistently everywhere instead of looking identical to an
    editable one. */
-input:is([type="text"], [type="date"], [type="number"]):disabled,
+input:is([type="text"], [type="password"], [type="date"], [type="number"]):disabled,
 textarea:disabled,
 .form-input:disabled {
   opacity: 0.6;

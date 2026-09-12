@@ -53,7 +53,16 @@
   "playground_meta_status": "HTTP {status}",
   "playground_meta_duration": "{seconds}s",
   "playground_meta_tokens": "Eingabe {input} / Ausgabe {output}",
-  "playground_meta_events": "{count} Stream-Events",
+  "playground_meta_events": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Stream-Event",
+        "count_plural=*": "{count} Stream-Events"
+      }
+    }
+  ],
   "navigation_audit_logs": "Audit-Logs",
   "navigation_usage": "Nutzung",
   "navigation_budgets": "Budgets",
@@ -444,7 +453,16 @@
       }
     }
   ],
-  "overview_mcp_attention": "{count} Server brauchen Aufmerksamkeit",
+  "overview_mcp_attention": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Server braucht Aufmerksamkeit",
+        "count_plural=*": "{count} Server brauchen Aufmerksamkeit"
+      }
+    }
+  ],
   "overview_mcp_connected": "{connected} von {total} Servern verbunden",
   "overview_calendar_cost_year": "${total} im letzten Jahr",
   "overview_calendar_tokens_year": "{total} Tokens im letzten Jahr",
@@ -660,7 +678,16 @@
   "api_keys_show_inactive": "Inaktive anzeigen",
   "api_keys_path_filter_clear": "Nutzerpfad-Filter entfernen",
   "api_keys_no_match": "Keine API-Schlüssel entsprechen dem aktuellen Filter.",
-  "api_keys_hidden": "{count} inaktive Schlüssel sind ausgeblendet.",
+  "api_keys_hidden": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} inaktiver Schlüssel ist ausgeblendet.",
+        "count_plural=*": "{count} inaktive Schlüssel sind ausgeblendet."
+      }
+    }
+  ],
   "api_keys_empty": "Noch keine API-Schlüssel. Lege einen Schlüssel an, um loszulegen.",
   "api_keys_editor": "API-Schlüssel-Editor",
   "api_keys_done": "Erledigt, ich habe ihn gespeichert",
@@ -747,7 +774,16 @@
   "workflows_filter_label": "Workflows filtern",
   "workflows_empty": "Keine aktiven Workflows gefunden.",
   "workflows_no_match": "Keine Workflows entsprechen deinem Filter.",
-  "workflows_active_scopes": "{count} aktive Geltungsbereiche",
+  "workflows_active_scopes": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} aktiver Geltungsbereich",
+        "count_plural=*": "{count} aktive Geltungsbereiche"
+      }
+    }
+  ],
   "workflows_copy_id": "Workflow-ID kopieren",
   "workflows_id_copied": "Workflow-ID kopiert",
   "workflows_copy_id_failed": "Workflow-ID konnte nicht kopiert werden",
@@ -1065,7 +1101,16 @@
   "api_keys_effective_models_help": "Was eine Anfrage mit diesem Schlüssel tatsächlich aufrufen kann: die Richtlinien seines Nutzerpfads, seine eigenen erlaubten Modelle und modellseitige Richtlinien, kombiniert.",
   "api_keys_effective_all": "Alle Modelle",
   "api_keys_effective_none": "Keine",
-  "api_keys_effective_count": "{count} Modelle",
+  "api_keys_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Modell",
+        "count_plural=*": "{count} Modelle"
+      }
+    }
+  ],
   "api_keys_allowed_models_all": "Alle",
   "api_keys_edit_allowed_models": "Erlaubte Modelle bearbeiten",
   "api_keys_allowed_models_editor": "Editor für erlaubte Modelle",
@@ -1094,7 +1139,16 @@
   "users_column_effective": "Effektive Modelle",
   "users_effective_all": "Alle Modelle",
   "users_effective_none": "Keine",
-  "users_effective_count": "{count} Modelle",
+  "users_effective_count": [
+    {
+      "declarations": ["input count", "local count_plural = count: plural"],
+      "selectors": ["count_plural"],
+      "match": {
+        "count_plural=one": "{count} Modell",
+        "count_plural=*": "{count} Modelle"
+      }
+    }
+  ],
   "users_effective_via": "über {path}",
   "users_no_models_warning": "Es blieben keine Modelle verfügbar: nichts in dieser Liste wird von den übergeordneten Gruppen erlaubt.",
   "users_column_keys": "API-Schlüssel",
