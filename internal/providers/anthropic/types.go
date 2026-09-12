@@ -11,9 +11,11 @@ type anthropicThinking struct {
 }
 
 // anthropicOutputConfig controls the effort level for adaptive-thinking models
-// (Opus 4.6+). Effort is one of "low", "medium", "high", "xhigh", or "max".
+// (Opus 4.6+) and the native structured output format. Effort is one of "low",
+// "medium", "high", "xhigh", or "max".
 type anthropicOutputConfig struct {
-	Effort string `json:"effort,omitempty"`
+	Effort string                 `json:"effort,omitempty"`
+	Format *anthropicOutputFormat `json:"format,omitempty"`
 }
 
 // anthropicRequest represents the Anthropic API request format

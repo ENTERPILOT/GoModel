@@ -393,9 +393,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	if req == nil {
 		return nil, core.NewInvalidRequestError("anthropic chat request is required", nil)
 	}
-	if err := validateAnthropicUnsupportedChatExtras(req.ExtraFields); err != nil {
-		return nil, err
-	}
+	dropUnsupportedVerbosity(req.ExtraFields)
 
 	anthropicReq := &anthropicRequest{
 		Model:         req.Model,
@@ -488,6 +486,10 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 		anthropicReq.System = appendAnthropicSystemContent(anthropicReq.System, forcedToolInstruction)
 	}
 
+	if err := applyAnthropicResponseFormat(anthropicReq, req.ExtraFields); err != nil {
+		return nil, err
+	}
+
 	return anthropicReq, nil
 }
 
@@ -552,31 +554,6 @@ func relaxForcedToolChoice(choice *anthropicToolChoice, model string) (*anthropi
 	relaxed.Type = "auto"
 	relaxed.Name = ""
 	return &relaxed, instruction
-}
-
-func validateAnthropicUnsupportedChatExtras(extra core.UnknownJSONFields) error {
-	for _, field := range []string{"response_format", "verbosity"} {
-		raw := bytes.TrimSpace(extra.Lookup(field))
-		if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-			continue
-		}
-		if field == "response_format" && isNoopResponseFormat(raw) {
-			continue
-		}
-		return core.NewInvalidRequestError("chat field "+field+" is not supported by Anthropic translation", nil)
-	}
-	return nil
-}
-
-func isNoopResponseFormat(raw json.RawMessage) bool {
-	var responseFormat struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(raw, &responseFormat); err != nil {
-		return false
-	}
-	responseFormatType := strings.TrimSpace(responseFormat.Type)
-	return responseFormatType == "" || responseFormatType == "text"
 }
 
 // convertResponsesRequestToAnthropic converts a canonical Responses request by
