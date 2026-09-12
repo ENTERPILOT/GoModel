@@ -53,7 +53,7 @@ func TestTransformedSSEStream_ToolCallArgumentsAcrossChunks(t *testing.T) {
 	require.NoError(t, err)
 
 	calls := resp.Choices[0].Message.ToolCalls
-	assert.Len(t, calls, 1)
+	require.Len(t, calls, 1)
 	assert.Equal(t, "call_1", calls[0].ID)
 	assert.Equal(t, "send", calls[0].Function.Name)
 	assert.Equal(t, `{"to":"a@b.c"}`, calls[0].Function.Arguments)
@@ -79,7 +79,7 @@ func TestTransformedSSEStream_ToolCallsAreSeparateWindows(t *testing.T) {
 	require.NoError(t, err)
 
 	calls := resp.Choices[0].Message.ToolCalls
-	assert.Len(t, calls, 2)
+	require.Len(t, calls, 2)
 	assert.Equal(t, `{"a":"<EMA`, calls[0].Function.Arguments)
 	assert.Equal(t, `{"b":"a@b.c"}`, calls[1].Function.Arguments)
 	assert.Equal(t, "c1", calls[1].ID)
@@ -116,7 +116,7 @@ func TestTransformedSSEStream_ResponsesToolCallArgumentsRestated(t *testing.T) {
 
 	resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, got))
 	require.NoError(t, err)
-	assert.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output, 1)
 	assert.Equal(t, `{"to":"a@b.c"}`, resp.Output[0].Arguments)
 	assert.Equal(t, "call_1", resp.Output[0].CallID)
 }
@@ -179,7 +179,7 @@ func TestTransformedSSEStream_ParallelToolCallsInOneDelta(t *testing.T) {
 	require.NoError(t, err)
 
 	tc := resp.Choices[0].Message.ToolCalls
-	assert.Len(t, tc, 2)
+	require.Len(t, tc, 2)
 	assert.Equal(t, "c0", tc[0].ID)
 	assert.Equal(t, `{"a":"a@b.c"}`, tc[0].Function.Arguments)
 	assert.Equal(t, "c1", tc[1].ID)
@@ -241,7 +241,7 @@ func TestTransformedSSEStream_TextAlongsideToolCalls(t *testing.T) {
 
 	msg := resp.Choices[0].Message
 	assert.Equal(t, "hi a@b.c", msg.Content)
-	assert.Len(t, msg.ToolCalls, 2)
+	require.Len(t, msg.ToolCalls, 2)
 	assert.Equal(t, `{"a":"a@b.c"}`, msg.ToolCalls[0].Function.Arguments)
 	assert.Equal(t, `{"b":"a@b.c"}`, msg.ToolCalls[1].Function.Arguments)
 	assert.Equal(t, "c1", msg.ToolCalls[1].ID, "assembled = %+v", msg)

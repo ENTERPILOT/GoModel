@@ -45,7 +45,7 @@ func TestTransformedSSEStream_ResponsesRestatesDoneEventsAfterReplace(t *testing
 	resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, got))
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
-	assert.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output, 1)
 	assert.Equal(t, "key [x] ok", resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 }
 
@@ -85,7 +85,7 @@ func TestTransformedSSEStream_ChatSplitsMultiChoiceChunks(t *testing.T) {
 
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
 	require.NoError(t, err)
-	assert.Len(t, resp.Choices, 2)
+	require.Len(t, resp.Choices, 2)
 	assert.Equal(t, "a [x]", resp.Choices[0].Message.Content)
 	assert.Equal(t, "b [x]", resp.Choices[1].Message.Content)
 }
@@ -131,7 +131,7 @@ func TestTransformedSSEStream_ResponsesRestatesDoneEventsAfterFullDrop(t *testin
 			resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, got))
 			require.NoError(t, err)
 			assert.Equal(t, "completed", resp.Status)
-			assert.Len(t, resp.Output, 1)
+			require.Len(t, resp.Output, 1)
 			assert.Empty(t, resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 		})
 	}

@@ -211,7 +211,7 @@ func TestAssembleResponsesResponse_FromDeltasOnly(t *testing.T) {
 			resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, []byte(tt.stream)))
 			require.NoError(t, err)
 			assert.Equal(t, tt.status, resp.Status)
-			assert.Len(t, resp.Output, 1)
+			require.Len(t, resp.Output, 1)
 			assert.Equal(t, tt.text, resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 		})
 	}

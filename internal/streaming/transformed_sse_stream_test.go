@@ -168,7 +168,7 @@ func TestTransformedSSEStream_ReplaceAndDrop(t *testing.T) {
 	assert.Contains(t, out, `"finish_reason":"stop"`)
 	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
 	assert.Contains(t, out, ": keep-alive\n\n")
-	assert.Len(t, reported, 1)
+	require.Len(t, reported, 1)
 	assert.ErrorIs(t, reported[0], ErrNotTextEvent)
 
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
@@ -247,7 +247,7 @@ func TestTransformedSSEStream_TransformerErrorFailsClosed(t *testing.T) {
 			assert.Contains(t, out, `"code":"plugin_failure"`)
 			assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
 			assert.Equal(t, 1, strings.Count(out, "[DONE]"), "exactly one [DONE] expected:\n%s", out)
-			assert.Len(t, reported, 1)
+			require.Len(t, reported, 1)
 			assert.ErrorIs(t, reported[0], boom)
 			assert.True(t, upstream.closed)
 		})
@@ -464,7 +464,7 @@ func TestTransformedSSEStream_ResponsesDialect(t *testing.T) {
 	resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, got))
 	require.NoError(t, err)
 	assert.Equal(t, "incomplete", resp.Status)
-	assert.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output, 1)
 	assert.Equal(t, "my key [redacted]", resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 }
 

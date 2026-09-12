@@ -176,7 +176,7 @@ func TestFromChatResponseStopSequence(t *testing.T) {
 	}
 	out := FromChatResponse(resp)
 	assert.Equal(t, "stop_sequence", out.StopReason)
-	assert.NotNil(t, out.StopSequence)
+	require.NotNil(t, out.StopSequence)
 	assert.Equal(t, "7", *out.StopSequence)
 }
 
