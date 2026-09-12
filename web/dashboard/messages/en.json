@@ -1516,6 +1516,7 @@
   "models_price_batch_output": "Batch output $/MTok",
   "models_price_audio_input": "Audio input $/MTok",
   "models_price_audio_output": "Audio output $/MTok",
+  "models_price_output_image_per_mtok": "Image output $/MTok",
   "models_price_per_image": "$/Image",
   "models_price_input_image": "Input $/Image",
   "models_price_input_second": "Input $/Second",

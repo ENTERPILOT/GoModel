@@ -286,7 +286,7 @@ func TestCanForwardMessagesNatively_DisabledByPostResponsePlugins(t *testing.T) 
 	chains := phaseChains(t, map[string]string{"response": "warn"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1})
 	svc := &translatedInferenceService{provider: &capturingProvider{}, pluginChains: staticChainsResolver{chains: chains}}
 	workflow := &core.Workflow{ProviderType: anthropicProviderType}
-	if svc.canForwardMessagesNatively(context.Background(), workflow) {
+	if svc.canForwardMessagesNatively(context.Background(), workflow, false) {
 		t.Fatal("native fast path allowed with a response chain")
 	}
 	svc.pluginChains = staticChainsResolver{chains: &plugins.Chains{}}

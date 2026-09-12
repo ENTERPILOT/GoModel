@@ -27,6 +27,11 @@ answer it with a safe message, or let it through with a warning.
   streams too; a plugin whose stream policy buffers has the same effect.
 </Warning>
 
+On `/v1/responses`, a stream-phase guardrail may drop, merge, or split events,
+so GoModel renumbers what it delivers: `sequence_number` still runs from `0`
+without gaps, up to the terminal `response.completed` (or `response.incomplete`
+/ `response.failed` on a cut stream).
+
 Guardrails work across all text-based endpoints:
 
 - `/v1/chat/completions`
@@ -725,6 +730,30 @@ For `/v1/messages`, a request that runs any guardrail takes the translated
 path (the native passthrough is skipped). A response cut by a guardrail is
 reported with `finish_reason: "content_filter"` on OpenAI-compatible
 endpoints and `stop_reason: "end_turn"` on `/v1/messages`.
+
+## Guardrails and the Response Cache
+
+The [response cache](/features/cache) stores the reply the response and stream
+chains already produced, and a cache hit replays it without running those
+chains again. Both cache layers therefore key on the guardrail chain the
+request resolves to, across all three phases:
+
+- Editing, adding or removing a step makes every entry stored under the old
+  chain unreachable; the next request runs the full pipeline and stores its own
+  entry.
+- Two workflows with different chains never share entries, so a tenant whose
+  workflow redacts on the way out is never served another tenant's unredacted
+  reply.
+- A blocked response is not a cacheable response, so a blocking guardrail can
+  never be skipped by a hit.
+
+Prompt-phase guardrails run before the cache is consulted, so a prompt-phase
+block or answer applies to a request that would otherwise have been a hit. A
+response a guardrail restores request-specific data into is never cached at all
+(see `restore` under [`presidio`](#presidio)).
+
+Because the response chain does not run on a hit, the audit entry for a hit
+records the prompt-phase outcomes only, plus the cache type.
 
 ## Decisions, Errors, and Rejection
 

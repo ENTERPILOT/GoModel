@@ -20,6 +20,9 @@ func TestJoinHooksChainsCallbacks(t *testing.T) {
 		OnStreamFirstChunk: func(_ context.Context, _ ResponseInfo) {
 			order = append(order, "chunk-1")
 		},
+		OnEmptyResponse: func(_ context.Context, _ EmptyResponseInfo) {
+			order = append(order, "empty-1")
+		},
 	}
 	second := Hooks{
 		OnRequestStart: func(ctx context.Context, _ RequestInfo) context.Context {
@@ -35,14 +38,18 @@ func TestJoinHooksChainsCallbacks(t *testing.T) {
 		OnStreamFirstChunk: func(_ context.Context, _ ResponseInfo) {
 			order = append(order, "chunk-2")
 		},
+		OnEmptyResponse: func(_ context.Context, _ EmptyResponseInfo) {
+			order = append(order, "empty-2")
+		},
 	}
 
 	joined := JoinHooks(first, Hooks{}, second)
 	ctx := joined.OnRequestStart(t.Context(), RequestInfo{})
 	joined.OnRequestEnd(ctx, ResponseInfo{})
 	joined.OnStreamFirstChunk(ctx, ResponseInfo{})
+	joined.OnEmptyResponse(ctx, EmptyResponseInfo{})
 
-	want := []string{"start-1", "start-2", "end-1", "end-2", "chunk-1", "chunk-2"}
+	want := []string{"start-1", "start-2", "end-1", "end-2", "chunk-1", "chunk-2", "empty-1", "empty-2"}
 	if len(order) != len(want) {
 		t.Fatalf("callback order = %v, want %v", order, want)
 	}
@@ -55,7 +62,7 @@ func TestJoinHooksChainsCallbacks(t *testing.T) {
 
 func TestJoinHooksEmpty(t *testing.T) {
 	joined := JoinHooks(Hooks{}, Hooks{})
-	if joined.OnRequestStart != nil || joined.OnRequestEnd != nil || joined.OnStreamFirstChunk != nil {
+	if joined.OnRequestStart != nil || joined.OnRequestEnd != nil || joined.OnStreamFirstChunk != nil || joined.OnEmptyResponse != nil {
 		t.Fatalf("JoinHooks of empty hooks should have nil callbacks")
 	}
 }
