@@ -4,6 +4,7 @@
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import InactiveToggle from "$lib/components/molecules/InactiveToggle.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
   import { authKeysStore as store } from "./authKeys.svelte.js";
@@ -88,13 +89,11 @@
             </button>
           </span>
         {/if}
-        <label class="auth-keys-inactive-toggle">
-          <input type="checkbox" bind:checked={store.showInactive} />
-          <span>
-            {m.api_keys_show_inactive()}
-            {#if store.inactiveCount > 0}({store.inactiveCount}){/if}
-          </span>
-        </label>
+        <InactiveToggle
+          bind:checked={store.showInactive}
+          label={m.api_keys_show_inactive()}
+          count={store.inactiveCount}
+        />
       </div>
     </div>
   {/if}
@@ -122,17 +121,6 @@
   margin-bottom: 20px;
 }
 
-.auth-keys-inactive-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-
 .auth-keys-path-chip {
   display: inline-flex;
   align-items: center;
@@ -155,12 +143,5 @@
 
 .auth-keys-path-chip-clear:hover {
   color: var(--text);
-}
-
-.auth-keys-inactive-toggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 </style>

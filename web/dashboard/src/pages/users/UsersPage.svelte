@@ -4,6 +4,7 @@
   import LoadingState from "$lib/components/molecules/LoadingState.svelte";
   import Icon from "$lib/components/atoms/Icon.svelte";
   import FilterInput from "$lib/components/molecules/FilterInput.svelte";
+  import InactiveToggle from "$lib/components/molecules/InactiveToggle.svelte";
   import InlineHelpSection from "$lib/components/molecules/InlineHelpSection.svelte";
   import { router } from "$lib/stores/router.svelte.js";
   import { auth } from "$lib/stores/auth.svelte.js";
@@ -69,6 +70,13 @@
           bind:value={store.filter}
         />
       </div>
+      <div class="table-toolbar-actions">
+        <InactiveToggle
+          bind:checked={store.showInactive}
+          label={m.users_show_inactive()}
+          count={store.inactiveCount}
+        />
+      </div>
     </div>
   {/if}
 
@@ -77,7 +85,15 @@
   {/if}
 
   {#if store.nodes.length > 0 && store.visibleNodes.length === 0 && store.available}
-    <p class="empty-state">{m.users_no_match()}</p>
+    <p class="empty-state">
+      {#if store.filter.trim()}
+        {m.users_no_match()}{store.inactiveCount > 0 && !store.showInactive
+          ? " " + m.users_hidden({ count: store.inactiveCount })
+          : ""}
+      {:else}
+        {m.users_hidden({ count: store.inactiveCount })}
+      {/if}
+    </p>
   {/if}
 
   {#if store.nodes.length === 0 && !store.loading && !auth.authError && !store.error && store.available}

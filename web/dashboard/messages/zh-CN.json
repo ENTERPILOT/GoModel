@@ -998,6 +998,8 @@
   "users_filter_placeholder": "按路径、描述或模型筛选...",
   "users_filter_label": "按路径、描述或模型筛选用户",
   "users_no_match": "没有用户匹配当前筛选条件。",
+  "users_show_inactive": "显示不活跃用户",
+  "users_hidden": "{count} 个不活跃用户被隐藏。",
   "users_empty": "暂无用户。将用户路径绑定到 API 密钥，或添加一个组以开始使用。",
   "users_column_path": "组 / 用户",
   "users_column_allowed_models": "允许模型",
