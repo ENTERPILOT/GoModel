@@ -32,6 +32,14 @@ can reuse a stored response:
 X-Cache: HIT (semantic)
 ```
 
+<Note>
+  `/v1/embeddings` participates in the exact cache only. An embedding has to
+  represent the exact text it was requested for, so replaying the vector of a
+  merely similar input would be a wrong answer rather than an equivalent one.
+  Embeddings requests are also never streamed, so only the JSON response is
+  cached.
+</Note>
+
 ## Enable the exact cache
 
 Point response caching at Redis:

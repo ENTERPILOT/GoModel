@@ -582,20 +582,24 @@ func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	}
 	attachPreparedWorkflow(c, prepared.Context, prepared.Workflow)
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(prepared.Workflow))
+	return handleWithCache(s, c, prepared.Request, prepared.Workflow, s.dispatchEmbeddings)
+}
+
+func (s *translatedInferenceService) dispatchEmbeddings(c *echo.Context, req *core.EmbeddingRequest, workflow *core.Workflow) error {
+	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
 	defer adm.release()
 
 	requestID := requestIDFromContextOrHeader(c.Request())
-	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), prepared.Workflow, prepared.Request, requestID, "/v1/embeddings")
+	result, err := s.inference().ExecuteEmbeddings(c.Request().Context(), workflow, req, requestID, "/v1/embeddings")
 	if err != nil {
 		return handleError(c, err)
 	}
 	auditlog.EnrichEntryWithResolvedRoute(
 		c,
-		qualifyExecutedModel(prepared.Workflow, result.Response.Model, result.Meta.ProviderName),
+		qualifyExecutedModel(workflow, result.Response.Model, result.Meta.ProviderName),
 		result.Meta.ProviderType,
 		result.Meta.ProviderName,
 	)

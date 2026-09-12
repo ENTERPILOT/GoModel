@@ -520,6 +520,140 @@ func TestHandleRequest_ExactHitWritesSyntheticUsageEntry(t *testing.T) {
 	}
 }
 
+// TestHandleRequest_EmbeddingsExactHitWritesUsageEntry covers /v1/embeddings on
+// the exact layer: the hit replays the stored vector and records the usage row
+// a cached chat hit records, with the embeddings token shape.
+func TestHandleRequest_EmbeddingsExactHitWritesUsageEntry(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	logger := &recordingUsageLogger{}
+	m := &ResponseCacheMiddleware{
+		simple: newSimpleCacheMiddleware(store, time.Hour, newUsageHitRecorder(logger, nil)),
+	}
+
+	body := []byte(`{"model":"text-embedding-3-small","input":"cache-embeddings-hit"}`)
+	e := echo.New()
+
+	providerCalls := 0
+	run := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		plan := &core.Workflow{
+			Mode:         core.ExecutionModeTranslated,
+			ProviderType: "openai",
+			Resolution: &core.RequestModelResolution{
+				ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "text-embedding-3-small"},
+			},
+		}
+		c.SetRequest(req.WithContext(core.WithWorkflow(req.Context(), plan)))
+		if err := m.HandleRequest(c, body, func() error {
+			providerCalls++
+			return c.JSON(http.StatusOK, &core.EmbeddingResponse{
+				Object: "list",
+				Model:  "text-embedding-3-small",
+				Data: []core.EmbeddingData{
+					{Object: "embedding", Embedding: []byte(`[0.5,0.25]`), Index: 0},
+				},
+				Usage: core.EmbeddingUsage{PromptTokens: 7, TotalTokens: 7},
+			})
+		}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		return rec
+	}
+
+	rec1 := run()
+	if rec1.Header().Get("X-Cache") != "" {
+		t.Fatalf("first request should miss exact cache, got X-Cache=%q", rec1.Header().Get("X-Cache"))
+	}
+
+	m.simple.wg.Wait()
+
+	rec2 := run()
+	if rec2.Header().Get("X-Cache") != "HIT (exact)" {
+		t.Fatalf("second request should be exact hit, got X-Cache=%q", rec2.Header().Get("X-Cache"))
+	}
+	if providerCalls != 1 {
+		t.Fatalf("provider calls = %d, want 1", providerCalls)
+	}
+	if rec2.Body.String() != rec1.Body.String() {
+		t.Fatalf("cached body = %s, want %s", rec2.Body.String(), rec1.Body.String())
+	}
+	if len(logger.entries) != 1 {
+		t.Fatalf("expected 1 synthetic usage entry, got %d", len(logger.entries))
+	}
+	entry := logger.entries[0]
+	if entry.CacheType != usage.CacheTypeExact {
+		t.Fatalf("CacheType = %q, want %q", entry.CacheType, usage.CacheTypeExact)
+	}
+	if entry.Endpoint != "/v1/embeddings" {
+		t.Fatalf("Endpoint = %q, want /v1/embeddings", entry.Endpoint)
+	}
+	if entry.InputTokens != 7 || entry.OutputTokens != 0 || entry.TotalTokens != 7 {
+		t.Fatalf("unexpected tokens: %+v", entry)
+	}
+}
+
+// TestHandleRequest_EmbeddingsSkipSemanticLayer pins that embeddings never take
+// part in semantic caching: a near-match must not answer with another input's
+// vector, and the lookup must not spend an embedder call.
+func TestHandleRequest_EmbeddingsSkipSemanticLayer(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+
+	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
+	vecStore := NewMapVecStore()
+	semCfg := config.SemanticCacheConfig{
+		SimilarityThreshold:     0.50,
+		TTL:                     new(3600),
+		MaxConversationMessages: new(10),
+	}
+	m := &ResponseCacheMiddleware{
+		simple:   newSimpleCacheMiddleware(store, time.Hour, nil),
+		semantic: newSemanticCacheMiddleware(emb, vecStore, semCfg, nil),
+	}
+
+	e := echo.New()
+	providerCalls := 0
+	run := func(input string) *httptest.ResponseRecorder {
+		t.Helper()
+		body := []byte(`{"model":"text-embedding-3-small","input":"` + input + `"}`)
+		req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		if err := m.HandleRequest(c, body, func() error {
+			providerCalls++
+			return c.JSON(http.StatusOK, map[string]string{"input": input})
+		}); err != nil {
+			t.Fatalf("HandleRequest: %v", err)
+		}
+		return rec
+	}
+
+	run("the cat sat on the mat")
+	m.simple.wg.Wait()
+	m.semantic.wg.Wait()
+
+	rec := run("a cat sat upon the mat")
+	if got := rec.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("similar embeddings input X-Cache = %q, want a miss", got)
+	}
+	if providerCalls != 2 {
+		t.Fatalf("provider calls = %d, want 2", providerCalls)
+	}
+	if emb.calls != 0 {
+		t.Fatalf("embedder calls = %d, want 0 for /v1/embeddings", emb.calls)
+	}
+	if vecStore.Len() != 0 {
+		t.Fatalf("semantic store entries = %d, want 0 for /v1/embeddings", vecStore.Len())
+	}
+}
+
 func TestHandleRequest_AuditMiddlewarePreservesCommittedErrorStatus(t *testing.T) {
 	store := cache.NewMapStore()
 	defer store.Close()
