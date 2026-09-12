@@ -7212,11 +7212,18 @@ func TestIsNativeBatchResultsPending(t *testing.T) {
 // staticChainsResolver returns fixed plugin chains regardless of context,
 // letting tests drive the production WorkflowRequestPatcher /
 // WorkflowBatchPreparer and the response/stream phases with explicit chains.
-type staticChainsResolver struct{ chains *plugins.Chains }
+// configured additionally stands in for a gateway that has guardrails
+// somewhere in its configuration without this request matching them.
+type staticChainsResolver struct {
+	chains     *plugins.Chains
+	configured bool
+}
 
 func (s staticChainsResolver) ChainsForContext(context.Context) *plugins.Chains {
 	return s.chains
 }
+
+func (s staticChainsResolver) HasGuardrailChains() bool { return s.configured || s.chains != nil }
 
 // A caller that carries only the user-path header (no managed key) must get
 // the same policy-filtered model list that inference enforces for that path.

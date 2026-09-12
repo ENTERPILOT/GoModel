@@ -48,6 +48,7 @@ type Handler struct {
 	conversationStore            conversationstore.Store
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
+	allowUnguardedPassthrough    bool
 	realtimeEnabled              bool
 	mcpEnabled                   bool
 	mcpGateway                   *mcpgateway.Service
@@ -312,5 +313,7 @@ func (h *Handler) passthrough() *passthroughService {
 		pricingResolver:              h.pricingResolver,
 		normalizePassthroughV1Prefix: h.normalizePassthroughV1Prefix,
 		enabledPassthroughProviders:  h.enabledPassthroughProviders,
+		pluginChains:                 h.pluginChains,
+		allowUnguardedPassthrough:    h.allowUnguardedPassthrough,
 	}
 }

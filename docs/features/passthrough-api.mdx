@@ -74,6 +74,55 @@ are recorded: token counts are read from SSE usage events on streaming
 responses and from the `usage` member of JSON responses, so costs and budgets
 account for passthrough traffic like any other route.
 
+## Guardrails do not run on passthrough
+
+Passthrough forwards the caller's provider-native body and relays the
+provider's answer untouched, so no [guardrail](/advanced/guardrails) chain can
+read or edit either one. Rate limits, budgets, model access, and usage
+accounting still apply; guardrails do not.
+
+To keep that from silently dropping a policy, GoModel refuses a passthrough
+request whenever a guardrail workflow applies to the caller:
+
+```json
+{
+  "error": {
+    "type": "permission_error",
+    "code": "passthrough_guardrails_unsupported",
+    "message": "provider passthrough cannot run guardrails, and a guardrail workflow applies to this request; ..."
+  }
+}
+```
+
+The request is answered with `403`. A passthrough workflow is matched on the
+model read from the provider-native body, and that read is best effort, so an
+inference call whose model GoModel cannot read is refused whenever *any*
+guardrail is configured — an unreadable body must not be a way around a policy.
+
+Only text-generating routes are refused: chat completions, responses, Anthropic
+messages, the legacy completion endpoints, and any provider-native path of the
+same shape. Model lists, token counts, embeddings, files, batches, images, and
+audio run no guardrail chain on `/v1` either, so passthrough serves them
+unchanged.
+
+Route that traffic through the
+OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/responses`,
+`/v1/messages`), which do run the chains, or choose one of:
+
+```env
+# Accept unguarded passthrough for every caller (default: false)
+ALLOW_UNGUARDED_PASSTHROUGH=true
+```
+
+```yaml
+server:
+  allow_unguarded_passthrough: true
+```
+
+Alternatively, scope the guardrail [workflow](/advanced/workflows) so it does
+not match the callers that use passthrough. With no guardrail workflow
+matching a request, passthrough serves it as before.
+
 ## Anthropic SDK example
 
 Set the Anthropic SDK base URL to GoModel's Anthropic passthrough route. Use the
@@ -142,7 +191,8 @@ Passthrough is intentionally narrow while the API is in beta.
   passthrough can forward provider-native routes that do not identify a model.
   Add `chutes` to `ENABLED_PASSTHROUGH_PROVIDERS` only when you intend to expose
   that surface.
-- GoModel does not translate passthrough request bodies or response bodies.
+- GoModel does not translate passthrough request bodies or response bodies, so
+  guardrails cannot run on them (see above).
 - Provider-native error bodies and status codes are proxied instead of converted
   into OpenAI-compatible responses.
 - Features that depend on OpenAI-compatible request or response shapes may not
@@ -155,7 +205,8 @@ Passthrough routes are enabled by default:
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,hetzner
+ALLOW_UNGUARDED_PASSTHROUGH=false
 ```
 
 Set `ENABLED_PASSTHROUGH_PROVIDERS` to the provider types you want to expose.
