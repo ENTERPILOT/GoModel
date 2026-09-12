@@ -31,8 +31,8 @@ func TestModelBreakerStorageBounded(t *testing.T) {
 		client.releaseModelBreaker(model, breaker)
 	}
 	require.LessOrEqual(t, len(client.modelBreakers), maxModelBreakers)
-	require.Equal(t, client.breakerForModel("busy"), busy)
-	require.Equal(t, client.breakerForModel("open"), open)
+	require.Same(t, busy, client.breakerForModel("busy"))
+	require.Same(t, open, client.breakerForModel("open"))
 
 	// Expired idle state is removed on the next new model lookup.
 	key := sha256.Sum256([]byte(fmt.Sprintf("caller-model-%d", maxModelBreakers*2-1)))
@@ -68,7 +68,7 @@ func TestUnknownModelUsesProviderBreaker(t *testing.T) {
 	client := New(cfg, nil)
 	scope, err := client.beginRequest(t.Context(), Request{}, false)
 	require.NoError(t, err)
-	require.Equal(t, client.circuitBreaker, scope.breaker)
+	require.Same(t, client.circuitBreaker, scope.breaker)
 	require.Empty(t, client.modelBreakers)
 
 	client.finishRequest(scope, 200, nil)
@@ -160,7 +160,7 @@ func TestModelBreakerKeyedByRequestBodyModel(t *testing.T) {
 
 	repeat, err := client.beginRequest(t.Context(), Request{Body: &core.ChatRequest{Model: "body-model"}}, false)
 	require.NoError(t, err)
-	require.Equal(t, first.breaker, repeat.breaker)
+	require.Same(t, first.breaker, repeat.breaker)
 
 	client.finishRequest(repeat, http.StatusOK, nil)
 	require.Len(t, client.modelBreakers, 2)
@@ -171,7 +171,7 @@ func TestProviderScopeKeepsASingleBreaker(t *testing.T) {
 	client := New(cfg, nil)
 	for _, model := range []string{"model1", "model2"} {
 		got := client.breakerForModel(model)
-		require.Equal(t, client.circuitBreaker, got, "%s must share the provider breaker under the default scope", model)
+		require.Same(t, client.circuitBreaker, got, "%s must share the provider breaker under the default scope", model)
 
 		// Releasing the provider breaker is a no-op, not a bad bookkeeping entry.
 		client.releaseModelBreaker(model, client.circuitBreaker)

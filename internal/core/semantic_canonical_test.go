@@ -29,8 +29,8 @@ func TestDecodeChatRequest_CachesOnSemanticEnvelope(t *testing.T) {
 
 	second, err := DecodeChatRequest([]byte(`{"model":"other","messages":[{"role":"user","content":"ignored"}]}`), env)
 	require.NoError(t, err)
-	require.Equal(t, second, first)
-	require.Equal(t, first, env.CachedChatRequest())
+	require.Same(t, first, second)
+	require.Same(t, first, env.CachedChatRequest())
 	require.True(t, env.JSONBodyParsed)
 	require.Equal(t, "gpt-4o-mini", env.RouteHints.Model)
 	require.Equal(t, "openai", env.RouteHints.Provider)
@@ -51,7 +51,7 @@ func TestBatchRouteMetadata_ValidatesAndCachesLimit(t *testing.T) {
 		"limit": {"5"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, env.CachedBatchRouteInfo(), req)
+	require.Same(t, env.CachedBatchRouteInfo(), req)
 	require.Equal(t, BatchActionList, req.Action)
 	require.True(t, req.HasLimit)
 	require.Equal(t, 5, req.Limit)
@@ -65,7 +65,7 @@ func TestFileRouteMetadata_CachesProviderHint(t *testing.T) {
 		"provider": {"openai"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, env.CachedFileRouteInfo(), req)
+	require.Same(t, env.CachedFileRouteInfo(), req)
 	require.Equal(t, "openai", env.RouteHints.Provider)
 }
 

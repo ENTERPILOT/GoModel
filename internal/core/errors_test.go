@@ -51,7 +51,7 @@ func TestGatewayError_Unwrap(t *testing.T) {
 		Err:     originalErr,
 	}
 	unwrapped := gatewayErr.Unwrap()
-	assert.Equal(t, originalErr, unwrapped)
+	assert.Same(t, originalErr, unwrapped)
 }
 
 func TestGatewayError_HTTPStatusCode(t *testing.T) {

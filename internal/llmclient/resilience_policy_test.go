@@ -90,11 +90,11 @@ func TestModelBreakerConcurrentLookup(t *testing.T) {
 	for range 30 {
 		wg.Go(func() {
 			got := client.breakerForModel("model1")
-			assert.Equal(t, want, got)
+			assert.Same(t, want, got)
 		})
 	}
 	wg.Wait()
-	require.Equal(t, client.breakerForModel(""), client.circuitBreaker)
+	require.Same(t, client.circuitBreaker, client.breakerForModel(""))
 }
 
 func TestBreakerCountsRetrySequenceOnce(t *testing.T) {

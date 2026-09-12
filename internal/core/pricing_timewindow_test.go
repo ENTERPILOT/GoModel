@@ -103,10 +103,10 @@ func TestModelPricingAtTime_ReturnsReceiverWithoutWindowsOrTime(t *testing.T) {
 	require.Nil(t, nilPricing.AtTime(time.Now()))
 
 	plain := &ModelPricing{InputPerMtok: new(1.0)}
-	require.Equal(t, plain, plain.AtTime(time.Now()))
+	require.Same(t, plain, plain.AtTime(time.Now()))
 
 	windowed := deepSeekPricing()
-	require.Equal(t, windowed, windowed.AtTime(time.Time{}))
+	require.Same(t, windowed, windowed.AtTime(time.Time{}))
 }
 
 func TestModelPricingAtTime_FirstMatchingWindowWins(t *testing.T) {
