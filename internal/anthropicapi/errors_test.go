@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestErrorFromGateway(t *testing.T) {
@@ -66,40 +68,24 @@ func TestErrorFromGateway(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			status, body := ErrorFromGateway(tc.err)
-			if status != tc.wantStatus {
-				t.Errorf("status = %d, want %d", status, tc.wantStatus)
-			}
-			if body.Type != "error" {
-				t.Errorf("envelope type = %q, want error", body.Type)
-			}
-			if body.Error.Type != tc.wantType {
-				t.Errorf("error type = %q, want %q", body.Error.Type, tc.wantType)
-			}
-			if body.Error.Message != tc.err.Message {
-				t.Errorf("message = %q, want %q", body.Error.Message, tc.err.Message)
-			}
+			assert.Equal(t, tc.wantStatus, status)
+			assert.Equal(t, "error", body.Type)
+			assert.Equal(t, tc.wantType, body.Error.Type)
+			assert.Equal(t, tc.err.Message, body.Error.Message)
 		})
 	}
 }
 
 func TestErrorFromGatewayNil(t *testing.T) {
 	status, body := ErrorFromGateway(nil)
-	if status != http.StatusInternalServerError {
-		t.Errorf("status = %d", status)
-	}
-	if body.Error.Type != "api_error" {
-		t.Errorf("error type = %q", body.Error.Type)
-	}
+	assert.Equal(t, http.StatusInternalServerError, status)
+	assert.Equal(t, "api_error", body.Error.Type)
 }
 
 func TestErrorFromGateway_ProviderOnlyWhenUpstream(t *testing.T) {
 	_, upstream := ErrorFromGateway(core.ParseProviderError("anthropic", http.StatusUnauthorized, []byte("bad key"), nil))
-	if upstream.Error.Provider != "anthropic" {
-		t.Fatalf("Error.Provider = %q, want anthropic", upstream.Error.Provider)
-	}
+	require.Equal(t, "anthropic", upstream.Error.Provider)
 
 	_, gateway := ErrorFromGateway(core.NewAuthenticationError("", "invalid API key"))
-	if gateway.Error.Provider != "" {
-		t.Fatalf("Error.Provider = %q, want empty for gateway-originated errors", gateway.Error.Provider)
-	}
+	require.Empty(t, gateway.Error.Provider)
 }

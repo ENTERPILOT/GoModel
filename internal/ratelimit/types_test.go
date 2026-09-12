@@ -1,8 +1,9 @@
 package ratelimit
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeRule(t *testing.T) {
@@ -16,21 +17,16 @@ func TestNormalizeRule(t *testing.T) {
 			name: "normalizes path and keeps limits",
 			rule: Rule{Subject: "team/alpha/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10))},
 			check: func(t *testing.T, rule Rule) {
-				if rule.Subject != "/team/alpha" {
-					t.Fatalf("user path = %q, want /team/alpha", rule.Subject)
-				}
-				if rule.CreatedAt.IsZero() || rule.UpdatedAt.IsZero() {
-					t.Fatal("timestamps not set")
-				}
+				require.Equal(t, "/team/alpha", rule.Subject)
+				require.False(t, rule.CreatedAt.IsZero())
+				require.False(t, rule.UpdatedAt.IsZero())
 			},
 		},
 		{
 			name: "empty path becomes root",
 			rule: Rule{Subject: "", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(100))},
 			check: func(t *testing.T, rule Rule) {
-				if rule.Subject != "/" {
-					t.Fatalf("user path = %q, want /", rule.Subject)
-				}
+				require.Equal(t, "/", rule.Subject)
 			},
 		},
 		{
@@ -67,9 +63,7 @@ func TestNormalizeRule(t *testing.T) {
 			name: "model subject lowercased to match case-insensitive matching",
 			rule: Rule{Scope: ScopeModel, Subject: "OpenAI/GPT-4o", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
 			check: func(t *testing.T, rule Rule) {
-				if rule.Subject != "openai/gpt-4o" {
-					t.Fatalf("subject = %q, want openai/gpt-4o", rule.Subject)
-				}
+				require.Equal(t, "openai/gpt-4o", rule.Subject)
 			},
 		},
 		{
@@ -82,14 +76,11 @@ func TestNormalizeRule(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rule, err := NormalizeRule(tt.rule)
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
-				}
+				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("NormalizeRule() failed: %v", err)
-			}
+			require.NoError(t, err)
+
 			if tt.check != nil {
 				tt.check(t, rule)
 			}
@@ -111,8 +102,9 @@ func TestPeriodHelpers(t *testing.T) {
 	}
 	for _, tt := range tests {
 		seconds, ok := PeriodSecondsFromName(tt.name)
-		if ok != tt.ok || (ok && seconds != tt.seconds) {
-			t.Fatalf("PeriodSecondsFromName(%q) = %d/%v, want %d/%v", tt.name, seconds, ok, tt.seconds, tt.ok)
+		require.Equal(t, tt.ok, ok, "PeriodSecondsFromName(%q)", tt.name)
+		if ok {
+			require.Equal(t, tt.seconds, seconds, "PeriodSecondsFromName(%q)", tt.name)
 		}
 	}
 	labels := map[int64]string{
@@ -123,9 +115,8 @@ func TestPeriodHelpers(t *testing.T) {
 		7200:                "7200s",
 	}
 	for seconds, want := range labels {
-		if got := PeriodLabel(seconds); got != want {
-			t.Fatalf("PeriodLabel(%d) = %q, want %q", seconds, got, want)
-		}
+		got := PeriodLabel(seconds)
+		require.Equal(t, want, got)
 	}
 }
 
@@ -141,12 +132,8 @@ func TestExceededErrorMessages(t *testing.T) {
 	}
 	for _, tt := range tests {
 		err := &ExceededError{Rule: rule, Scope: tt.scope, Limit: 5}
-		if !strings.Contains(err.Error(), tt.want) {
-			t.Fatalf("error %q does not contain %q", err.Error(), tt.want)
-		}
-		if !strings.Contains(err.Error(), "/team") {
-			t.Fatalf("error %q does not name the user path", err.Error())
-		}
+		require.ErrorContains(t, err, tt.want)
+		require.ErrorContains(t, err, "/team")
 	}
 }
 
@@ -163,8 +150,7 @@ func TestRuleAppliesToPath(t *testing.T) {
 		{"/team", "/other", false},
 	}
 	for _, tt := range tests {
-		if got := ruleAppliesToPath(tt.rulePath, tt.requestPath); got != tt.want {
-			t.Fatalf("ruleAppliesToPath(%q, %q) = %v, want %v", tt.rulePath, tt.requestPath, got, tt.want)
-		}
+		got := ruleAppliesToPath(tt.rulePath, tt.requestPath)
+		require.Equal(t, tt.want, got, "ruleAppliesToPath(%q, %q)", tt.rulePath, tt.requestPath)
 	}
 }

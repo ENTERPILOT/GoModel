@@ -2,10 +2,10 @@ package virtualmodels
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type chatExecMock struct {
@@ -25,13 +25,12 @@ func TestChatExecutor_RewritesRedirectModel(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
 	ctx := context.Background()
-	if err := svc.Upsert(ctx, VirtualModel{
+	err := svc.Upsert(ctx, VirtualModel{
 		Source:  "fast",
 		Targets: []Target{{Provider: "openai", Model: "gpt-4o"}},
 		Enabled: true,
-	}); err != nil {
-		t.Fatalf("Upsert(redirect) error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 
 	inner := &chatExecMock{
 		supported: map[string]bool{"openai/gpt-4o": true},
@@ -40,18 +39,12 @@ func TestChatExecutor_RewritesRedirectModel(t *testing.T) {
 	executor := NewChatExecutor(inner, svc)
 
 	resp, err := executor.ChatCompletion(ctx, &core.ChatRequest{Model: "fast"})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if resp == nil || resp.ID != "chatcmpl_1" {
-		t.Fatalf("response = %+v, want passthrough of inner response", resp)
-	}
-	if inner.captured == nil {
-		t.Fatal("inner provider was not called")
-	}
-	if inner.captured.Model != "gpt-4o" || inner.captured.Provider != "openai" {
-		t.Fatalf("forwarded selector = %s/%s, want openai/gpt-4o", inner.captured.Provider, inner.captured.Model)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "chatcmpl_1", resp.ID)
+	require.NotNil(t, inner.captured)
+	require.Equal(t, "gpt-4o", inner.captured.Model)
+	require.Equal(t, "openai", inner.captured.Provider)
 }
 
 func TestChatExecutor_PassesThroughConcreteModel(t *testing.T) {
@@ -63,13 +56,11 @@ func TestChatExecutor_PassesThroughConcreteModel(t *testing.T) {
 		resp:      &core.ChatResponse{ID: "chatcmpl_2"},
 	}
 	executor := NewChatExecutor(inner, svc)
-
-	if _, err := executor.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-4o", Provider: "openai"}); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if inner.captured == nil || inner.captured.Model != "gpt-4o" || inner.captured.Provider != "openai" {
-		t.Fatalf("forwarded request = %+v, want unchanged selector", inner.captured)
-	}
+	_, err := executor.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-4o", Provider: "openai"})
+	require.NoError(t, err)
+	require.NotNil(t, inner.captured)
+	require.Equal(t, "gpt-4o", inner.captured.Model)
+	require.Equal(t, "openai", inner.captured.Provider)
 }
 
 func TestChatExecutor_UnknownModelReturnsNotFound(t *testing.T) {
@@ -80,16 +71,13 @@ func TestChatExecutor_UnknownModelReturnsNotFound(t *testing.T) {
 	executor := NewChatExecutor(inner, svc)
 
 	_, err := executor.ChatCompletion(context.Background(), &core.ChatRequest{Model: "missing"})
-	if err == nil {
-		t.Fatal("ChatCompletion() error = nil, want model_not_found")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.Code == nil || *gatewayErr.Code != "model_not_found" {
-		t.Fatalf("error = %v, want model_not_found gateway error", err)
-	}
-	if inner.captured != nil {
-		t.Fatal("inner provider must not be called for unsupported models")
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.NotNil(t, gatewayErr.Code)
+	require.Equal(t, "model_not_found", *gatewayErr.Code)
+	require.Nil(t, inner.captured)
 }
 
 // Translated request rewriting keeps the resolved provider because downstream
@@ -99,18 +87,14 @@ func TestRewriteChatRequest_PreservesResolvedProvider(t *testing.T) {
 	ctx := context.Background()
 	svc := newRedirectService(t)
 	checker := testCatalog()
+	chat, err := rewriteChatRequest(ctx, svc, checker, nil)
+	require.NoError(t, err)
+	require.Nil(t, chat)
 
-	if chat, err := rewriteChatRequest(ctx, svc, checker, nil); err != nil || chat != nil {
-		t.Fatalf("rewriteChatRequest(nil) = (%v, %v), want nil, nil", chat, err)
-	}
-	chat, err := rewriteChatRequest(ctx, svc, checker, &core.ChatRequest{Model: "fast"})
-	if err != nil {
-		t.Fatalf("rewriteChatRequest() error = %v", err)
-	}
-	if chat.Provider != "openai" || chat.Model != "gpt-4o" {
-		t.Fatalf("rewriteChatRequest() selector = %q/%q, want openai/gpt-4o", chat.Provider, chat.Model)
-	}
-	if _, err := rewriteChatRequest(ctx, svc, checker, &core.ChatRequest{}); err == nil {
-		t.Fatal("rewriteChatRequest(missing model) error = nil, want error")
-	}
+	chat, err = rewriteChatRequest(ctx, svc, checker, &core.ChatRequest{Model: "fast"})
+	require.NoError(t, err)
+	require.Equal(t, "openai", chat.Provider)
+	require.Equal(t, "gpt-4o", chat.Model)
+	_, err = rewriteChatRequest(ctx, svc, checker, &core.ChatRequest{})
+	require.Error(t, err)
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
@@ -18,17 +19,15 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		store, err := NewMongoDBStore(db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
@@ -39,9 +38,8 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 func newSQLVMStore(t *testing.T) *SQLStore {
 	t.Helper()
 	store, err := NewSQLStore(context.Background(), sqlxtest.NewSQLite(t))
-	if err != nil {
-		t.Fatalf("NewSQLStore: %v", err)
-	}
+	require.NoError(t, err)
+
 	return store
 }
 

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/require"
 )
 
 type recordingLogger struct {
@@ -31,18 +32,12 @@ func TestUsageTapFeedsTokenWindowsAndDelegates(t *testing.T) {
 	tap.Write(nil)
 
 	status := service.Statuses(time.Now().UTC())[0]
-	if status.TokensUsed != 40 {
-		t.Fatalf("tokens used = %d, want 40 (cache hits and unmatched paths skipped)", status.TokensUsed)
-	}
-	if len(inner.entries) != 4 {
-		t.Fatalf("inner writes = %d, want 4 (tap must always delegate)", len(inner.entries))
-	}
-	if !tap.Config().Enabled {
-		t.Fatal("Config() not delegated")
-	}
-	if err := tap.Close(); err != nil || !inner.closed {
-		t.Fatalf("Close() not delegated: err=%v closed=%v", err, inner.closed)
-	}
+	require.Equal(t, int64(40), status.TokensUsed)
+	require.Len(t, inner.entries, 4)
+	require.True(t, tap.Config().Enabled)
+	err := tap.Close()
+	require.NoError(t, err)
+	require.True(t, inner.closed)
 }
 
 func TestUsageTapChargesExecutedProviderAndModel(t *testing.T) {
@@ -60,20 +55,14 @@ func TestUsageTapChargesExecutedProviderAndModel(t *testing.T) {
 	for _, status := range service.Statuses(time.Now().UTC()) {
 		byScope[status.Rule.Scope] = status
 	}
-	if byScope[ScopeProvider].TokensUsed != 50 {
-		t.Fatalf("provider tokens used = %d, want 50", byScope[ScopeProvider].TokensUsed)
-	}
-	if byScope[ScopeModel].TokensUsed != 30 {
-		t.Fatalf("model tokens used = %d, want 30", byScope[ScopeModel].TokensUsed)
-	}
+	require.Equal(t, int64(50), byScope[ScopeProvider].TokensUsed)
+	require.Equal(t, int64(30), byScope[ScopeModel].TokensUsed)
 }
 
 func TestNewUsageTapWithoutServiceReturnsInner(t *testing.T) {
 	inner := &recordingLogger{}
-	if got := NewUsageTap(inner, nil); got != usage.LoggerInterface(inner) {
-		t.Fatal("NewUsageTap(inner, nil) should return inner unchanged")
-	}
-	if got := NewUsageTap(nil, nil); got != nil {
-		t.Fatal("NewUsageTap(nil, nil) should return nil")
-	}
+	got := NewUsageTap(inner, nil)
+	require.Equal(t, usage.LoggerInterface(inner), got)
+	got = NewUsageTap(nil, nil)
+	require.Nil(t, got)
 }

@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSnapshotRoundTripPreservesEstimate(t *testing.T) {
@@ -17,29 +19,23 @@ func TestSnapshotRoundTripPreservesEstimate(t *testing.T) {
 	}
 
 	src := newLimiter()
-	if _, _, err := src.admit([]Rule{rule}, now); err != nil {
-		t.Fatalf("admit: %v", err)
-	}
+	_, _, err := src.admit([]Rule{rule}, now)
+	require.Nil(t, err)
+
 	src.recordTokens([]Rule{rule}, 40, now)
 	wantReq := src.status(rule, now).RequestsUsed
 	wantTok := src.status(rule, now).TokensUsed
 
 	snaps := src.snapshot([]Rule{rule})
-	if len(snaps) != 1 {
-		t.Fatalf("snapshots = %d, want 1", len(snaps))
-	}
-	if snaps[0].Partition != "" {
-		t.Fatalf("partition = %q, want empty", snaps[0].Partition)
-	}
+	require.Len(t, snaps, 1)
+	require.Empty(t, snaps[0].Partition)
 
 	dst := newLimiter()
 	dst.restore(snaps, []Rule{rule}, now)
-	if got := dst.status(rule, now).RequestsUsed; got != wantReq {
-		t.Fatalf("requests used = %d, want %d", got, wantReq)
-	}
-	if got := dst.status(rule, now).TokensUsed; got != wantTok {
-		t.Fatalf("tokens used = %d, want %d", got, wantTok)
-	}
+	got := dst.status(rule, now).RequestsUsed
+	require.Equal(t, wantReq, got)
+	got = dst.status(rule, now).TokensUsed
+	require.Equal(t, wantTok, got)
 }
 
 func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
@@ -53,14 +49,12 @@ func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
 		PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(10)),
 	}
 	child, ok := template.resolve(Subjects{UserPath: "/customers/alice"})
-	if !ok {
-		t.Fatal("resolve child")
-	}
+	require.True(t, ok)
 
 	src := newLimiter()
-	if _, _, err := src.admit([]Rule{shared, child}, now); err != nil {
-		t.Fatalf("admit: %v", err)
-	}
+	_, _, err := src.admit([]Rule{shared, child}, now)
+	require.Nil(t, err)
+
 	// Force the child window into the distant past so restore drops it.
 	src.mu.Lock()
 	for _, counter := range src.requests {
@@ -72,16 +66,13 @@ func TestSnapshotSkipsConcurrentAndExpiredChild(t *testing.T) {
 
 	snaps := src.snapshot([]Rule{shared, template})
 	for _, snap := range snaps {
-		if snap.PeriodSeconds == PeriodConcurrent {
-			t.Fatal("concurrent snapshot written")
-		}
+		require.NotEqual(t, PeriodConcurrent, snap.PeriodSeconds)
 	}
 
 	dst := newLimiter()
 	dst.restore(snaps, []Rule{template}, now)
-	if got := dst.status(child, now).RequestsUsed; got != 0 {
-		t.Fatalf("expired child restored used = %d, want 0", got)
-	}
+	got := dst.status(child, now).RequestsUsed
+	require.Equal(t, int64(0), got)
 }
 
 func TestSnapshotIsolatesPerChildPartitions(t *testing.T) {
@@ -94,26 +85,20 @@ func TestSnapshotIsolatesPerChildPartitions(t *testing.T) {
 	bob, _ := template.resolve(Subjects{UserPath: "/customers/bob"})
 
 	src := newLimiter()
-	if _, _, err := src.admit([]Rule{alice}, now); err != nil {
-		t.Fatalf("alice admit: %v", err)
-	}
-	if _, _, err := src.admit([]Rule{bob}, now); err != nil {
-		t.Fatalf("bob admit: %v", err)
-	}
+	_, _, err := src.admit([]Rule{alice}, now)
+	require.Nil(t, err)
+	_, _, err = src.admit([]Rule{bob}, now)
+	require.Nil(t, err)
 
 	snaps := src.snapshot([]Rule{template})
-	if len(snaps) != 2 {
-		t.Fatalf("snapshots = %d, want 2", len(snaps))
-	}
+	require.Len(t, snaps, 2)
 
 	dst := newLimiter()
 	dst.restore(snaps, []Rule{template}, now)
-	if _, _, err := dst.admit([]Rule{alice}, now); err == nil {
-		t.Fatal("alice should be exhausted after restore")
-	}
-	if _, _, err := dst.admit([]Rule{bob}, now); err == nil {
-		t.Fatal("bob should be exhausted after restore")
-	}
+	_, _, err = dst.admit([]Rule{alice}, now)
+	require.NotNil(t, err)
+	_, _, err = dst.admit([]Rule{bob}, now)
+	require.NotNil(t, err)
 }
 
 func TestStartLoadsAndCloseFlushes(t *testing.T) {
@@ -123,35 +108,26 @@ func TestStartLoadsAndCloseFlushes(t *testing.T) {
 		MaxRequests: new(int64(1)), Source: SourceManual,
 	}
 	store := &memStore{}
-	if err := store.UpsertRules(context.Background(), []Rule{rule}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	err := store.UpsertRules(context.Background(), []Rule{rule})
+	require.NoError(t, err)
 
 	first, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	if _, err := first.Acquire(onPath("/team"), now); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
-	if len(store.counters) != 0 {
-		t.Fatal("New without Start wrote counters")
-	}
+	require.NoError(t, err)
+	_, err = first.Acquire(onPath("/team"), now)
+	require.NoError(t, err)
+	require.Empty(t, store.counters)
+
 	first.Start(context.Background())
 	first.Close()
-	if len(store.counters) != 1 {
-		t.Fatalf("counters after Close = %d, want 1", len(store.counters))
-	}
+	require.Len(t, store.counters, 1)
 
 	second, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("second NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(second.Close)
 	second.Start(context.Background())
-	if _, err := second.Acquire(onPath("/team"), now); err == nil {
-		t.Fatal("restored window admitted a second request")
-	}
+	_, err = second.Acquire(onPath("/team"), now)
+	require.Error(t, err)
 }
 
 // TestServiceWithoutStartNeverWrites covers both halves of the "not this
@@ -160,25 +136,19 @@ func TestStartLoadsAndCloseFlushes(t *testing.T) {
 // reload replacement must not flush its empty windows over the live ones.
 func TestServiceWithoutStartNeverWrites(t *testing.T) {
 	store := &recordingStore{}
-	if err := store.UpsertRules(context.Background(), []Rule{{
+	err := store.UpsertRules(context.Background(), []Rule{{
 		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(5)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	if _, err := service.Acquire(onPath("/"), time.Now().UTC()); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
-	if store.saves.Load() != 0 {
-		t.Fatalf("Acquire saved %d times, want 0", store.saves.Load())
-	}
+	require.NoError(t, err)
+	_, err = service.Acquire(onPath("/"), time.Now().UTC())
+	require.NoError(t, err)
+	require.Equal(t, int64(0), store.saves.Load())
+
 	service.Close()
-	if store.saves.Load() != 0 {
-		t.Fatalf("Close without Start saved %d times, want 0", store.saves.Load())
-	}
+	require.Equal(t, int64(0), store.saves.Load())
 }
 
 func TestResetClearsPersistedWindow(t *testing.T) {
@@ -188,31 +158,27 @@ func TestResetClearsPersistedWindow(t *testing.T) {
 		MaxRequests: new(int64(1)), Source: SourceManual,
 	}
 	store := &memStore{}
-	if err := store.UpsertRules(context.Background(), []Rule{rule}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	err := store.UpsertRules(context.Background(), []Rule{rule})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	service.Start(context.Background())
-	if _, err := service.Acquire(onPath("/team"), now); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
-	if err := service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds); err != nil {
-		t.Fatalf("ResetRule: %v", err)
-	}
+	_, err = service.Acquire(onPath("/team"), now)
+	require.NoError(t, err)
+	err = service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds)
+	require.NoError(t, err)
+
 	service.Close()
 
 	next, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("second NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(next.Close)
 	next.Start(context.Background())
-	if _, err := next.Acquire(onPath("/team"), now); err != nil {
-		t.Fatalf("Acquire after reset restore: %v", err)
-	}
+	_, err = next.Acquire(onPath("/team"), now)
+	require.NoError(t, err)
 }
 
 func TestRestoreIgnoresSharedRowOnPerChildRule(t *testing.T) {
@@ -227,9 +193,8 @@ func TestRestoreIgnoresSharedRowOnPerChildRule(t *testing.T) {
 		PeriodSeconds: PeriodHourSeconds, RequestsWindowStart: now.Unix(), RequestsCurrent: 1,
 	}}, []Rule{template}, now)
 	child, _ := template.resolve(Subjects{UserPath: "/customers/alice"})
-	if _, _, err := dst.admit([]Rule{child}, now); err != nil {
-		t.Fatalf("shared row applied to per-child rule: %v", err)
-	}
+	_, _, err := dst.admit([]Rule{child}, now)
+	require.Nil(t, err)
 }
 
 func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
@@ -239,96 +204,84 @@ func TestFailedLoadDoesNotReplacePersistedWindows(t *testing.T) {
 		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 		RequestsWindowStart: now, RequestsCurrent: 9,
 	}}
-	if err := store.UpsertRules(context.Background(), []Rule{{
+	err := store.UpsertRules(context.Background(), []Rule{{
 		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 		MaxRequests: new(int64(10)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store, WithFlushInterval(10*time.Millisecond))
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	service.Start(context.Background())
-	if _, err := service.Acquire(onPath("/team"), time.Now().UTC()); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
+	_, err = service.Acquire(onPath("/team"), time.Now().UTC())
+	require.NoError(t, err)
+
 	service.Close()
 	time.Sleep(30 * time.Millisecond)
-	if len(store.counters) != 1 || store.counters[0].RequestsCurrent != 9 {
-		t.Fatalf("persisted windows = %+v, want the pre-failure snapshot", store.counters)
-	}
+	require.Len(t, store.counters, 1)
+	require.Equal(t, int64(9), store.counters[0].RequestsCurrent)
 }
 
 func TestStartIsIdempotentAndCloseStopsTheLoop(t *testing.T) {
 	store := &recordingStore{}
-	if err := store.UpsertRules(context.Background(), []Rule{{
+	err := store.UpsertRules(context.Background(), []Rule{{
 		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(50)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	service.Start(context.Background())
 	service.Start(context.Background())
 	service.Close()
 	afterClose := store.saves.Load()
 	time.Sleep(50 * time.Millisecond)
-	if got := store.saves.Load(); got != afterClose {
-		t.Fatalf("saves after Close grew from %d to %d; an extra flush loop is still running", afterClose, got)
-	}
+	got := store.saves.Load()
+	require.Equal(t, afterClose, got)
 }
 
 func TestFlushIntervalWritesBeforeClose(t *testing.T) {
 	store := &recordingStore{}
-	if err := store.UpsertRules(context.Background(), []Rule{{
+	err := store.UpsertRules(context.Background(), []Rule{{
 		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(50)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store, WithFlushInterval(15*time.Millisecond))
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(service.Close)
-	if _, err := service.Acquire(onPath("/"), time.Now().UTC()); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
+	_, err = service.Acquire(onPath("/"), time.Now().UTC())
+	require.NoError(t, err)
+
 	service.Start(context.Background())
 	deadline := time.Now().Add(200 * time.Millisecond)
 	for store.saves.Load() == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if store.saves.Load() == 0 {
-		t.Fatal("positive flush interval never wrote before Close")
-	}
+	require.NotEqual(t, int64(0), store.saves.Load())
 }
 
 func TestFlushIntervalZeroOnlyWritesOnClose(t *testing.T) {
 	store := &recordingStore{}
-	if err := store.UpsertRules(context.Background(), []Rule{{
+	err := store.UpsertRules(context.Background(), []Rule{{
 		Subject: "/", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(50)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store, WithFlushInterval(0))
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	if _, err := service.Acquire(onPath("/"), time.Now().UTC()); err != nil {
-		t.Fatalf("Acquire: %v", err)
-	}
+	require.NoError(t, err)
+	_, err = service.Acquire(onPath("/"), time.Now().UTC())
+	require.NoError(t, err)
+
 	service.Start(context.Background())
 	time.Sleep(30 * time.Millisecond)
-	if store.saves.Load() != 0 {
-		t.Fatalf("interval 0 wrote %d times before Close", store.saves.Load())
-	}
+	require.Equal(t, int64(0), store.saves.Load())
+
 	service.Close()
-	if store.saves.Load() != 1 {
-		t.Fatalf("saves after Close = %d, want 1", store.saves.Load())
-	}
+	require.Equal(t, int64(1), store.saves.Load())
 }
 
 func TestCloseDuringLoadDoesNotRestore(t *testing.T) {
@@ -341,16 +294,14 @@ func TestCloseDuringLoadDoesNotRestore(t *testing.T) {
 		Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 		RequestsWindowStart: now, RequestsCurrent: 1,
 	}}
-	if err := store.UpsertRules(context.Background(), []Rule{{
+	err := store.UpsertRules(context.Background(), []Rule{{
 		Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 		MaxRequests: new(int64(1)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
 
 	done := make(chan struct{})
 	go func() {
@@ -361,27 +312,22 @@ func TestCloseDuringLoadDoesNotRestore(t *testing.T) {
 	service.Close()
 	close(store.release)
 	<-done
-
-	if _, err := service.Acquire(onPath("/team"), time.Now().UTC()); err != nil {
-		t.Fatalf("Acquire after Close-during-load: %v (window must not have been restored)", err)
-	}
+	_, err = service.Acquire(onPath("/team"), time.Now().UTC())
+	require.NoError(t, err)
 }
 
 func TestResetRuleReturnsPersistError(t *testing.T) {
 	store := &failDeleteStore{err: errors.New("delete failed")}
-	if err := store.UpsertRules(context.Background(), []Rule{{
+	err := store.UpsertRules(context.Background(), []Rule{{
 		Subject: "/team", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(service.Close)
-	if err := service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds); err == nil {
-		t.Fatal("ResetRule() error = nil, want persist error")
-	}
+	require.Error(t, service.ResetRule(ScopeUserPath, "/team", PeriodHourSeconds))
 }
 
 type recordingStore struct {
@@ -430,27 +376,23 @@ func (s *blockingLoadStore) LoadCounters(context.Context) ([]WindowSnapshot, err
 func TestDeleteRuleStopsEnforcingWhenSnapshotDeleteFails(t *testing.T) {
 	ctx := context.Background()
 	store := &failDeleteStore{err: errors.New("delete failed")}
-	if err := store.UpsertRules(ctx, []Rule{{
+	err := store.UpsertRules(ctx, []Rule{{
 		Subject: "/team", PeriodSeconds: PeriodHourSeconds, MaxRequests: new(int64(1)), Source: SourceManual,
-	}}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	}})
+	require.NoError(t, err)
+
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(service.Close)
 
-	if err := service.DeleteRule(ctx, ScopeUserPath, "/team", PeriodHourSeconds); err == nil {
-		t.Fatal("DeleteRule() error = nil, want the snapshot-row error")
-	}
-	if rules := service.Rules(); len(rules) != 0 {
-		t.Fatalf("rules = %+v, want the deleted rule gone from memory", rules)
-	}
+	require.Error(t, service.DeleteRule(ctx, ScopeUserPath, "/team", PeriodHourSeconds))
+	rules := service.Rules()
+	require.Empty(t, rules)
+
 	// Two admissions: the deleted one-per-hour rule is no longer enforced.
 	for i := range 2 {
-		if _, err := service.Acquire(onPath("/team"), time.Now().UTC()); err != nil {
-			t.Fatalf("Acquire %d after delete: %v", i, err)
-		}
+		_, err := service.Acquire(onPath("/team"), time.Now().UTC())
+		require.NoError(t, err, "Acquire %d after delete: %v", i, err)
 	}
 }
