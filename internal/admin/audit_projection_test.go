@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
+	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fullAuditEntry builds an entry carrying every heavy payload the list
@@ -70,14 +73,9 @@ func TestAuditLogSlimsListEntries(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?days=7")
-
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
+	require.NoError(t, h.AuditLog(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	var result struct {
 		Entries []struct {
@@ -86,57 +84,38 @@ func TestAuditLogSlimsListEntries(t *testing.T) {
 			ConversationPayload bool `json:"conversation_payload"`
 		} `json:"entries"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	require.Len(t, result.Entries, 1)
+
 	entry := result.Entries[0]
 	d := entry.Data
-	if d == nil {
-		t.Fatal("entry data must survive slimming")
-		return
-	}
-	if d.RequestBody != nil || d.ResponseBody != nil {
-		t.Error("list entry bodies must be stripped")
-	}
-	if len(d.Attempts) != 2 {
-		t.Fatalf("attempt metadata must survive, got %d attempts", len(d.Attempts))
-	}
-	if d.Attempts[0].ResponseBody != nil || d.Attempts[0].ResponseHeaders != nil {
-		t.Error("attempt error payloads must be stripped")
-	}
-	if d.Attempts[0].ErrorMessage != "upstream error" || d.Attempts[0].StatusCode != 500 {
-		t.Error("attempt scalar fields must survive (they drive the pips)")
-	}
-	if len(d.RequestRevisions) != 1 {
-		t.Fatalf("revision metadata must survive, got %d revisions", len(d.RequestRevisions))
-	}
+	require.NotNil(t, d, "entry data must survive slimming")
+	assert.Nil(t, d.RequestBody)
+	assert.Nil(t, d.ResponseBody)
+	require.Len(t, d.Attempts, 2)
+	assert.Nil(t, d.Attempts[0].ResponseBody)
+	assert.Nil(t, d.Attempts[0].ResponseHeaders)
+	assert.Equal(t, "upstream error", d.Attempts[0].ErrorMessage)
+	assert.Equal(t, 500, d.Attempts[0].StatusCode)
+	require.Len(t, d.RequestRevisions, 1)
+
 	rev := d.RequestRevisions[0]
-	if rev.Body != nil {
-		t.Error("revision body must be stripped")
-	}
-	if rev.TokensSaved != 250 || rev.BytesBefore != 2000 || rev.Detail == nil {
-		t.Errorf("revision metadata must survive, got %+v", rev)
-	}
-	if len(d.Guardrails) != 1 || d.Guardrails[0].Action != "warn" || d.Guardrails[0].Code != "pii" {
-		t.Fatalf("guardrail outcomes must survive, got %+v", d.Guardrails)
-	}
-	if d.Guardrails[0].Detail != nil {
-		t.Error("guardrail outcome detail must be stripped")
-	}
-	if d.ErrorMessage != "boom" || d.RequestHeaders == nil || d.ResponseHeaders == nil {
-		t.Error("small fields must survive slimming")
-	}
-	if !entry.BodiesOmitted {
-		t.Error("bodies_omitted must mark the slim entry")
-	}
+	assert.Nil(t, rev.Body)
+	assert.Equal(t, 250, rev.TokensSaved)
+	assert.Equal(t, 2000, rev.BytesBefore)
+	assert.NotNil(t, rev.Detail, "revision metadata must survive")
+	require.Len(t, d.Guardrails, 1)
+	require.Equal(t, "warn", d.Guardrails[0].Action)
+	require.Equal(t, "pii", d.Guardrails[0].Code)
+	assert.Nil(t, d.Guardrails[0].Detail)
+	assert.Equal(t, "boom", d.ErrorMessage)
+	assert.NotNil(t, d.RequestHeaders)
+	assert.NotNil(t, d.ResponseHeaders)
+	assert.True(t, entry.BodiesOmitted)
+
 	// Path is /v1/messages: the dashboard cannot sniff drawer eligibility
 	// from the (removed) bodies, so the server-computed flag must carry it.
-	if !entry.ConversationPayload {
-		t.Error("conversation_payload must be set for a conversation-shaped body")
-	}
+	assert.True(t, entry.ConversationPayload)
 }
 
 // A body-less entry (LOGGING_LOG_BODIES=false) has nothing to strip; it must
@@ -148,22 +127,16 @@ func TestAuditLogLeavesBodylessEntriesUnmarked(t *testing.T) {
 		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{entry}, Total: 1, Limit: 25},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?days=7")
+	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
+	require.NoError(t, h.AuditLog(c))
 
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	var result struct {
 		Entries []struct {
 			BodiesOmitted bool `json:"bodies_omitted"`
 		} `json:"entries"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if result.Entries[0].BodiesOmitted {
-		t.Error("an entry with no captured payload must not be marked bodies_omitted")
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.False(t, result.Entries[0].BodiesOmitted)
 }
 
 // The detail endpoint is the designated source of full payloads and must not
@@ -172,35 +145,23 @@ func TestAuditLogDetailKeepsFullPayload(t *testing.T) {
 	entry := fullAuditEntry("log-1")
 	reader := &mockAuditReader{logByID: &entry}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/detail?log_id=log-1")
-
-	if err := h.AuditLogDetail(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=log-1")
+	require.NoError(t, h.AuditLogDetail(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	var got struct {
 		auditlog.LogEntry
 		BodiesOmitted bool `json:"bodies_omitted"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+
 	d := got.Data
-	if d == nil || d.RequestBody == nil || d.ResponseBody == nil {
-		t.Fatal("detail must keep request/response bodies")
-	}
-	if d.Attempts[0].ResponseBody == nil {
-		t.Error("detail must keep attempt error payloads")
-	}
-	if d.RequestRevisions[0].Body == nil {
-		t.Error("detail must keep revision bodies")
-	}
-	if got.BodiesOmitted {
-		t.Error("detail entries must not be marked bodies_omitted")
-	}
+	require.NotNil(t, d)
+	require.NotNil(t, d.RequestBody)
+	require.NotNil(t, d.ResponseBody)
+	assert.NotNil(t, d.Attempts[0].ResponseBody)
+	assert.NotNil(t, d.RequestRevisions[0].Body)
+	assert.False(t, got.BodiesOmitted)
 }
 
 func TestAuditConversationSlimsEntries(t *testing.T) {
@@ -211,46 +172,30 @@ func TestAuditConversationSlimsEntries(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-1")
+	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-1")
+	require.NoError(t, h.AuditConversation(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
+	result := echotest.Decode[auditlog.ConversationResult](t, rec)
 
-	var result auditlog.ConversationResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
 	d := result.Entries[0].Data
-	if d == nil {
-		t.Fatal("entry data must survive")
-		return
-	}
-	if d.RequestBody == nil || d.ResponseBody == nil {
-		t.Error("the transcript is built from the bodies; they must survive")
-	}
-	if d.ErrorMessage != "boom" {
-		t.Error("error_message feeds the drawer's error rendering; it must survive")
-	}
-	if d.Attempts != nil || d.ResponseHeaders != nil || d.Guardrails != nil {
-		t.Errorf("attempts/response headers/guardrail outcomes must be stripped from conversation entries, got %+v", d)
-	}
-	if len(d.RequestRevisions) != 1 {
-		t.Fatalf("revision metadata feeds the drawer's request-step picker; it must survive, got %+v", d.RequestRevisions)
-	}
+	require.NotNil(t, d, "entry data must survive slimming")
+	assert.NotNil(t, d.RequestBody)
+	assert.NotNil(t, d.ResponseBody)
+	assert.Equal(t, "boom", d.ErrorMessage)
+	assert.Nil(t, d.Attempts)
+	assert.Nil(t, d.ResponseHeaders)
+	assert.Nil(t, d.Guardrails, "attempts/response headers/guardrail outcomes must be stripped from conversation entries")
+	require.Len(t, d.RequestRevisions, 1)
+
 	rev := d.RequestRevisions[0]
-	if rev.Body != nil || rev.Detail != nil {
-		t.Errorf("revision bodies/details must be stripped from conversation entries, got %+v", rev)
-	}
-	if rev.Rewriter != "pro-token-compression" || rev.Seq != 1 || rev.BytesBefore != 2000 || rev.BytesAfter != 1000 {
-		t.Errorf("revision metadata must survive, got %+v", rev)
-	}
-	if d.RequestHeaders["content-type"] != "application/json" {
-		t.Errorf("redacted request headers are required for follow-ups, got %+v", d.RequestHeaders)
-	}
+	assert.Nil(t, rev.Body)
+	assert.Nil(t, rev.Detail, "revision bodies/details must be stripped from conversation entries")
+	assert.Equal(t, "pro-token-compression", rev.Rewriter)
+	assert.Equal(t, 1, rev.Seq)
+	assert.Equal(t, 2000, rev.BytesBefore)
+	assert.Equal(t, 1000, rev.BytesAfter, "revision metadata must survive")
+	assert.Equal(t, "application/json", d.RequestHeaders["content-type"], "redacted request headers are required for follow-ups")
 }
 
 func TestHasConversationPayload(t *testing.T) {
@@ -272,9 +217,8 @@ func TestHasConversationPayload(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasConversationPayload(tt.request, tt.response); got != tt.want {
-				t.Errorf("hasConversationPayload() = %v, want %v", got, tt.want)
-			}
+			got := hasConversationPayload(tt.request, tt.response)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

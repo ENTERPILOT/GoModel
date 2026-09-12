@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +17,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/streaming"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/andybalholm/brotli"
 	"github.com/labstack/echo/v5"
@@ -39,18 +41,12 @@ func TestTruncateAttemptErrorMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := truncateAttemptErrorMessage(tt.in)
-			if len(got) > maxAttemptErrorMessageLength {
-				t.Fatalf("len(got) = %d, want <= %d", len(got), maxAttemptErrorMessageLength)
+			require.LessOrEqual(t, len(got), maxAttemptErrorMessageLength)
+			require.True(t, utf8.ValidString(got), "result is not valid UTF-8: %q", got)
+			if len(tt.in) <= maxAttemptErrorMessageLength {
+				require.Equal(t, tt.in, got, "short input mutated")
 			}
-			if !utf8.ValidString(got) {
-				t.Fatalf("result is not valid UTF-8: %q", got)
-			}
-			if len(tt.in) <= maxAttemptErrorMessageLength && got != tt.in {
-				t.Fatalf("short input mutated: got %q, want %q", got, tt.in)
-			}
-			if !strings.HasPrefix(tt.in, got) {
-				t.Fatalf("result is not a prefix of the input")
-			}
+			require.True(t, strings.HasPrefix(tt.in, got))
 		})
 	}
 }
@@ -154,20 +150,15 @@ func TestRedactHeaders(t *testing.T) {
 			result := RedactHeaders(tt.input)
 
 			if tt.expected == nil {
-				if result != nil {
-					t.Errorf("expected nil, got %v", result)
-				}
+				assert.Nil(t, result)
+
 				return
 			}
 
-			if len(result) != len(tt.expected) {
-				t.Errorf("expected %d headers, got %d", len(tt.expected), len(result))
-			}
+			assert.Len(t, result, len(tt.expected))
 
 			for k, v := range tt.expected {
-				if result[k] != v {
-					t.Errorf("header %q: expected %q, got %q", k, v, result[k])
-				}
+				assert.Equal(t, v, result[k], "header %q", k)
 			}
 		})
 	}
@@ -199,47 +190,25 @@ func TestLogEntryJSON(t *testing.T) {
 
 	// Test JSON marshaling
 	data, err := json.Marshal(entry)
-	if err != nil {
-		t.Fatalf("failed to marshal entry: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Test JSON unmarshaling
 	var decoded LogEntry
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("failed to unmarshal entry: %v", err)
-	}
+	err = json.Unmarshal(data, &decoded)
+	require.NoError(t, err)
 
 	// Verify fields
-	if decoded.ID != entry.ID {
-		t.Errorf("ID mismatch: expected %q, got %q", entry.ID, decoded.ID)
-	}
-	if decoded.RequestedModel != entry.RequestedModel {
-		t.Errorf("RequestedModel mismatch: expected %q, got %q", entry.RequestedModel, decoded.RequestedModel)
-	}
-	if decoded.Provider != entry.Provider {
-		t.Errorf("Provider mismatch: expected %q, got %q", entry.Provider, decoded.Provider)
-	}
-	if decoded.ResolvedModel != entry.ResolvedModel {
-		t.Errorf("ResolvedModel mismatch: expected %q, got %q", entry.ResolvedModel, decoded.ResolvedModel)
-	}
-	if decoded.AliasUsed != entry.AliasUsed {
-		t.Errorf("AliasUsed mismatch: expected %v, got %v", entry.AliasUsed, decoded.AliasUsed)
-	}
-	if decoded.CacheType != entry.CacheType {
-		t.Errorf("CacheType mismatch: expected %q, got %q", entry.CacheType, decoded.CacheType)
-	}
-	if decoded.StatusCode != entry.StatusCode {
-		t.Errorf("StatusCode mismatch: expected %d, got %d", entry.StatusCode, decoded.StatusCode)
-	}
-	if decoded.RequestID != entry.RequestID {
-		t.Errorf("RequestID mismatch: expected %q, got %q", entry.RequestID, decoded.RequestID)
-	}
-	if decoded.Data == nil || decoded.Data.Failover == nil {
-		t.Fatal("expected Failover snapshot to survive JSON round-trip")
-	}
-	if decoded.Data.Failover.TargetModel != "azure/gpt-4o" {
-		t.Errorf("Failover.TargetModel mismatch: got %q, want %q", decoded.Data.Failover.TargetModel, "azure/gpt-4o")
-	}
+	assert.Equal(t, entry.ID, decoded.ID)
+	assert.Equal(t, entry.RequestedModel, decoded.RequestedModel)
+	assert.Equal(t, entry.Provider, decoded.Provider)
+	assert.Equal(t, entry.ResolvedModel, decoded.ResolvedModel)
+	assert.Equal(t, entry.AliasUsed, decoded.AliasUsed)
+	assert.Equal(t, entry.CacheType, decoded.CacheType)
+	assert.Equal(t, entry.StatusCode, decoded.StatusCode)
+	assert.Equal(t, entry.RequestID, decoded.RequestID)
+	require.NotNil(t, decoded.Data)
+	require.NotNil(t, decoded.Data.Failover)
+	assert.Equal(t, "azure/gpt-4o", decoded.Data.Failover.TargetModel)
 }
 
 func TestLogDataWithBodies(t *testing.T) {
@@ -261,31 +230,20 @@ func TestLogDataWithBodies(t *testing.T) {
 
 	// Marshal and unmarshal
 	jsonBytes, err := json.Marshal(data)
-	if err != nil {
-		t.Fatalf("failed to marshal: %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded LogData
-	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
+	err = json.Unmarshal(jsonBytes, &decoded)
+	require.NoError(t, err)
 
 	// Verify bodies are preserved (decoded as map[string]interface{})
 	decodedReqBody, ok := decoded.RequestBody.(map[string]any)
-	if !ok {
-		t.Fatalf("RequestBody is not a map, got %T", decoded.RequestBody)
-	}
-	if decodedReqBody["model"] != "gpt-4" {
-		t.Errorf("RequestBody model mismatch: expected gpt-4, got %v", decodedReqBody["model"])
-	}
+	require.True(t, ok, "RequestBody is not a map, got %T", decoded.RequestBody)
+	assert.Equal(t, "gpt-4", decodedReqBody["model"])
 
 	decodedRespBody, ok := decoded.ResponseBody.(map[string]any)
-	if !ok {
-		t.Fatalf("ResponseBody is not a map, got %T", decoded.ResponseBody)
-	}
-	if decodedRespBody["id"] != "resp-123" {
-		t.Errorf("ResponseBody id mismatch: expected resp-123, got %v", decodedRespBody["id"])
-	}
+	require.True(t, ok, "ResponseBody is not a map, got %T", decoded.ResponseBody)
+	assert.Equal(t, "resp-123", decodedRespBody["id"])
 }
 
 // mockStore implements LogStore for testing
@@ -423,9 +381,7 @@ func TestLogger(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify entries were written
-	if len(store.getEntries()) != 5 {
-		t.Errorf("expected 5 entries, got %d", len(store.getEntries()))
-	}
+	assert.Len(t, store.getEntries(), 5)
 }
 
 func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
@@ -437,27 +393,20 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	logger.flushBatch([]*LogEntry{entry})
 
 	events := publisher.snapshot()
-	if len(events) != 1 {
-		t.Fatalf("live events len = %d, want 1", len(events))
-	}
-	if events[0].eventType != LiveEventAuditFailed {
-		t.Fatalf("event type = %q, want %q", events[0].eventType, LiveEventAuditFailed)
-	}
-	if events[0].entry != entry {
-		t.Fatal("failed event entry does not match flushed entry")
-	}
+	require.Len(t, events, 1)
+	require.Equal(t, LiveEventAuditFailed, events[0].eventType)
+	require.Same(t, entry, events[0].entry)
 }
 
 func TestMiddleware_UsesIngressFrameRequestBodyWithoutReadingStream(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true, LogBodies: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
 	trackedBody := &readCountCloser{reader: strings.NewReader(`{"model":"from-body"}`)}
-	req.Body = trackedBody
-	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+	c.Request().Body = trackedBody
+	c.SetRequest(c.Request().WithContext(core.WithRequestSnapshot(c.Request().Context(), core.NewRequestSnapshot(
 		http.MethodPost,
 		"/v1/chat/completions",
 		nil,
@@ -468,44 +417,30 @@ func TestMiddleware_UsesIngressFrameRequestBodyWithoutReadingStream(t *testing.T
 		false,
 		"",
 		nil,
-	)))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	))))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if trackedBody.readCalls != 0 {
-		t.Fatalf("request body was read %d times, want 0", trackedBody.readCalls)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, 0, trackedBody.readCalls)
+	require.Len(t, logger.entries, 1)
 
 	requestBody, ok := BodyDocument(logger.entries[0].Data.RequestBody).(map[string]any)
-	if !ok {
-		t.Fatalf("RequestBody = %T, want JSON object", logger.entries[0].Data.RequestBody)
-	}
-	if requestBody["model"] != "from-ingress" {
-		t.Fatalf("RequestBody.model = %#v, want from-ingress", requestBody["model"])
-	}
+	require.True(t, ok, "RequestBody = %T, want JSON object", logger.entries[0].Data.RequestBody)
+	require.Equal(t, "from-ingress", requestBody["model"])
 }
 
 func TestMiddleware_UsesIngressTooLargeFlagWithoutReadingStream(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true, LogBodies: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
 	trackedBody := &readCountCloser{reader: strings.NewReader(strings.Repeat("x", 16))}
-	req.Body = trackedBody
-	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+	c.Request().Body = trackedBody
+	c.SetRequest(c.Request().WithContext(core.WithRequestSnapshot(c.Request().Context(), core.NewRequestSnapshot(
 		http.MethodPost,
 		"/v1/chat/completions",
 		nil,
@@ -516,49 +451,31 @@ func TestMiddleware_UsesIngressTooLargeFlagWithoutReadingStream(t *testing.T) {
 		true,
 		"",
 		nil,
-	)))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	))))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if trackedBody.readCalls != 0 {
-		t.Fatalf("request body was read %d times, want 0", trackedBody.readCalls)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
-	if !logger.entries[0].Data.RequestBodyTooBigToHandle {
-		t.Fatal("RequestBodyTooBigToHandle = false, want true")
-	}
-	if logger.entries[0].Data.RequestBody != nil {
-		t.Fatalf("RequestBody = %#v, want nil", logger.entries[0].Data.RequestBody)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, 0, trackedBody.readCalls)
+	require.Len(t, logger.entries, 1)
+	require.True(t, logger.entries[0].Data.RequestBodyTooBigToHandle)
+	require.Nil(t, logger.entries[0].Data.RequestBody)
 }
 
 func TestMiddleware_SkipsStreamingResponseWriterCapture(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true, LogBodies: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4","stream":true}`))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4","stream":true}`)
 
 	var capture *responseBodyCapture
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		var ok bool
 		capture, ok = c.Response().(*responseBodyCapture)
-		if !ok {
-			t.Fatalf("Response = %T, want *responseBodyCapture", c.Response())
-		}
+		require.True(t, ok, "Response = %T, want *responseBodyCapture", c.Response())
 
 		MarkEntryAsStreaming(c, true)
 		EnrichEntryWithStream(c, true)
@@ -572,22 +489,12 @@ func TestMiddleware_SkipsStreamingResponseWriterCapture(t *testing.T) {
 		}
 		return nil
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if capture == nil {
-		t.Fatal("capture = nil, want non-nil")
-	}
-	if capture.body.Len() != 0 {
-		t.Fatalf("captured body len = %d, want 0 for streaming response", capture.body.Len())
-	}
-	if capture.truncated {
-		t.Fatal("truncated = true, want false")
-	}
-	if len(logger.entries) != 0 {
-		t.Fatalf("len(entries) = %d, want 0 because streaming wrapper should own logging", len(logger.entries))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.NotNil(t, capture)
+	require.Equal(t, 0, capture.body.Len())
+	require.False(t, capture.truncated)
+	require.Empty(t, logger.entries)
 }
 
 // TestMiddleware_AudioResponseNotMarkedTruncated verifies that an oversized audio
@@ -596,12 +503,9 @@ func TestMiddleware_SkipsStreamingResponseWriterCapture(t *testing.T) {
 // body losslessly via its own path, so a truncation flag here would produce
 // conflicting metadata (a fully-stored body alongside a "too big" marker).
 func TestMiddleware_AudioResponseNotMarkedTruncated(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{cfg: Config{Enabled: true, LogBodies: true}}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(`{"model":"gpt-4o-mini-tts","input":"hi","voice":"alloy"}`))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/audio/speech", `{"model":"gpt-4o-mini-tts","input":"hi","voice":"alloy"}`)
 
 	oversized := bytes.Repeat([]byte{0xff}, int(MaxBodyCapture)+16)
 	var capture *responseBodyCapture
@@ -612,33 +516,25 @@ func TestMiddleware_AudioResponseNotMarkedTruncated(t *testing.T) {
 		_, err := c.Response().Write(oversized)
 		return err
 	})
+	err := handler(c)
+	require.NoError(t, err)
+	require.NotNil(t, capture)
+	require.True(t, capture.truncated)
+	require.Len(t, logger.entries, 1)
 
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if capture == nil || !capture.truncated {
-		t.Fatal("expected the response writer to mark the oversized body as truncated")
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
 	entry := logger.entries[0]
-	if entry.Data != nil && entry.Data.ResponseBodyTooBigToHandle {
-		t.Error("audio response must not set ResponseBodyTooBigToHandle; the handler owns audio body capture")
-	}
-	if entry.Data != nil && entry.Data.ResponseBody != nil {
-		t.Errorf("middleware must not store the audio response body, got %T", entry.Data.ResponseBody)
-	}
+	require.NotNil(t, entry.Data)
+	assert.False(t, entry.Data.ResponseBodyTooBigToHandle, "the handler owns audio body capture")
+	assert.Nil(t, entry.Data.ResponseBody, "middleware must not store the audio response body")
 }
 
 func TestMiddleware_PrefersWorkflowOverLegacyResolution(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"anthropic/claude-opus-4-6"}`))
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"anthropic/claude-opus-4-6"}`)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
 			Requested:        core.NewRequestedModelSelector("anthropic/claude-opus-4-6", ""),
@@ -646,47 +542,30 @@ func TestMiddleware_PrefersWorkflowOverLegacyResolution(t *testing.T) {
 			ProviderType:     "openai",
 			AliasApplied:     true,
 		},
-	}))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	})))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		EnrichEntry(c, "placeholder", "placeholder")
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
 
 	entry := logger.entries[0]
-	if entry.RequestedModel != "anthropic/claude-opus-4-6" {
-		t.Fatalf("RequestedModel = %q, want requested alias", entry.RequestedModel)
-	}
-	if entry.ResolvedModel != "openai/gpt-5-nano" {
-		t.Fatalf("ResolvedModel = %q, want openai/gpt-5-nano", entry.ResolvedModel)
-	}
-	if entry.Provider != "openai" {
-		t.Fatalf("Provider = %q, want openai", entry.Provider)
-	}
-	if !entry.AliasUsed {
-		t.Fatal("AliasUsed = false, want true")
-	}
+	require.Equal(t, "anthropic/claude-opus-4-6", entry.RequestedModel)
+	require.Equal(t, "openai/gpt-5-nano", entry.ResolvedModel)
+	require.Equal(t, "openai", entry.Provider)
+	require.True(t, entry.AliasUsed)
 }
 
 func TestMiddleware_UsesWorkflowRequestID(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
-	req.Header.Set("X-Request-ID", "header-req-id")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-nano"}`, echotest.WithHeader("X-Request-ID", "header-req-id"))
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		RequestID:    "workflow-req-id",
 		ProviderType: "openai",
 		Resolution: &core.RequestModelResolution{
@@ -694,116 +573,76 @@ func TestMiddleware_UsesWorkflowRequestID(t *testing.T) {
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 			ProviderType:     "openai",
 		},
-	}))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	})))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
 
 	entry := logger.entries[0]
-	if entry.RequestID != "workflow-req-id" {
-		t.Fatalf("RequestID = %q, want workflow-req-id", entry.RequestID)
-	}
+	require.Equal(t, "workflow-req-id", entry.RequestID)
 }
 
 func TestMiddleware_DoesNotApplyModelMetadataWithoutWorkflow(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"legacy-only"}`))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"legacy-only"}`)
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
 
 	entry := logger.entries[0]
-	if entry.RequestedModel != "" {
-		t.Fatalf("RequestedModel = %q, want empty", entry.RequestedModel)
-	}
-	if entry.ResolvedModel != "" {
-		t.Fatalf("ResolvedModel = %q, want empty", entry.ResolvedModel)
-	}
-	if entry.Provider != "" {
-		t.Fatalf("Provider = %q, want empty", entry.Provider)
-	}
-	if entry.AliasUsed {
-		t.Fatal("AliasUsed = true, want false")
-	}
+	require.Empty(t, entry.RequestedModel)
+	require.Empty(t, entry.ResolvedModel)
+	require.Empty(t, entry.Provider)
+	require.False(t, entry.AliasUsed)
 }
 
 func TestMiddleware_PassthroughWorkflowUsesPassthroughModel(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", strings.NewReader(`{"model":"gpt-4.1-nano"}`))
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, _ := echotest.Post(t, "/p/openai/v1/chat/completions", `{"model":"gpt-4.1-nano"}`)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
 			Provider: "openai",
 			Model:    "gpt-4.1-nano",
 		},
-	}))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	})))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		EnrichEntry(c, "placeholder", "placeholder")
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
 
 	entry := logger.entries[0]
-	if entry.RequestedModel != "gpt-4.1-nano" {
-		t.Fatalf("RequestedModel = %q, want gpt-4.1-nano", entry.RequestedModel)
-	}
-	if entry.Provider != "openai" {
-		t.Fatalf("Provider = %q, want openai", entry.Provider)
-	}
-	if entry.ResolvedModel != "" {
-		t.Fatalf("ResolvedModel = %q, want empty", entry.ResolvedModel)
-	}
+	require.Equal(t, "gpt-4.1-nano", entry.RequestedModel)
+	require.Equal(t, "openai", entry.Provider)
+	require.Empty(t, entry.ResolvedModel)
 }
 
 func TestMiddleware_StoresWorkflowVersionID(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-nano"}`)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		ProviderType: "openai",
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-version-123",
@@ -819,113 +658,73 @@ func TestMiddleware_StoresWorkflowVersionID(t *testing.T) {
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 			ProviderType:     "openai",
 		},
-	}))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	})))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
-	if got := logger.entries[0].WorkflowVersionID; got != "workflow-version-123" {
-		t.Fatalf("WorkflowVersionID = %q, want workflow-version-123", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
+	require.Equal(t, "workflow-version-123", logger.entries[0].WorkflowVersionID)
 }
 
 func TestMiddleware_StoresAuthKeyIDFromContext(t *testing.T) {
 	logger := &capturingLogger{cfg: Config{Enabled: true}}
 	middleware := Middleware(logger)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithAuthKeyID(req.Context(), "key-123"))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini"}`)
+	c.SetRequest(c.Request().WithContext(core.WithAuthKeyID(c.Request().Context(), "key-123")))
 
 	handler := middleware(func(c *echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler() error = %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
-	}
-	if got := logger.entries[0].AuthKeyID; got != "key-123" {
-		t.Fatalf("AuthKeyID = %q, want key-123", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
+	require.Equal(t, "key-123", logger.entries[0].AuthKeyID)
 }
 
 func TestMiddleware_StoresEffectiveUserPathFromContext(t *testing.T) {
 	logger := &capturingLogger{cfg: Config{Enabled: true}}
 	middleware := Middleware(logger)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	ctx := core.WithRequestSnapshot(req.Context(), &core.RequestSnapshot{UserPath: "/team/from-header"})
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini"}`)
+	ctx := core.WithRequestSnapshot(c.Request().Context(), &core.RequestSnapshot{UserPath: "/team/from-header"})
 	ctx = core.WithEffectiveUserPath(ctx, "/team/from-auth-key")
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(c.Request().WithContext(ctx))
 
 	handler := middleware(func(c *echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler() error = %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
-	}
-	if got := logger.entries[0].UserPath; got != "/team/from-auth-key" {
-		t.Fatalf("UserPath = %q, want /team/from-auth-key", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
+	require.Equal(t, "/team/from-auth-key", logger.entries[0].UserPath)
 }
 
 func TestMiddleware_DefaultsMissingUserPathToRoot(t *testing.T) {
 	logger := &capturingLogger{cfg: Config{Enabled: true}}
 	middleware := Middleware(logger)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini"}`)
 
 	handler := middleware(func(c *echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler() error = %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("logger.entries len = %d, want 1", len(logger.entries))
-	}
-	if got := logger.entries[0].UserPath; got != "/" {
-		t.Fatalf("UserPath = %q, want /", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
+	require.Equal(t, "/", logger.entries[0].UserPath)
 }
 
 func TestMiddleware_SkipsWriteWhenWorkflowDisablesAudit(t *testing.T) {
-	e := echo.New()
 	logger := &capturingLogger{
 		cfg: Config{Enabled: true, LogBodies: true, LogHeaders: true},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-nano"}`))
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-nano"}`)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-version-123",
 			Features: core.WorkflowFeatures{
@@ -935,24 +734,17 @@ func TestMiddleware_SkipsWriteWhenWorkflowDisablesAudit(t *testing.T) {
 				Guardrails: true,
 			},
 		},
-	}))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	})))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
-		if entry := c.Get(string(LogEntryKey)); entry != nil {
-			t.Fatalf("LogEntryKey = %T, want nil", entry)
-		}
+		entry := c.Get(string(LogEntryKey))
+		require.Nil(t, entry)
+
 		return c.NoContent(http.StatusNoContent)
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if len(logger.entries) != 0 {
-		t.Fatalf("len(entries) = %d, want 0", len(logger.entries))
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Empty(t, logger.entries)
 }
 
 func TestLoggerClose(t *testing.T) {
@@ -975,27 +767,10 @@ func TestLoggerClose(t *testing.T) {
 	logger.Close()
 
 	// Verify entry was flushed
-	if len(store.getEntries()) != 1 {
-		t.Errorf("expected 1 entry after close, got %d", len(store.getEntries()))
-	}
+	assert.Len(t, store.getEntries(), 1)
 
 	// Verify store was closed
-	if !store.isClosed() {
-		t.Error("store was not closed")
-	}
-}
-
-func TestNoopLogger(t *testing.T) {
-	logger := &NoopLogger{}
-
-	// Should not panic
-	logger.Write(&LogEntry{ID: "test"})
-	logger.Close()
-
-	cfg := logger.Config()
-	if cfg.Enabled {
-		t.Error("noop logger should report as disabled")
-	}
+	assert.True(t, store.isClosed())
 }
 
 func TestIsModelInteractionPath(t *testing.T) {
@@ -1031,9 +806,7 @@ func TestIsModelInteractionPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := core.IsModelInteractionPath(tt.path)
-			if result != tt.expected {
-				t.Errorf("core.IsModelInteractionPath(%q) = %v, want %v", tt.path, result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result, "core.IsModelInteractionPath(%q) = %v, want %v", tt.path, result, tt.expected)
 		})
 	}
 }
@@ -1073,22 +846,14 @@ data: [DONE]
 	// Read all content
 	var buf bytes.Buffer
 	_, err := io.Copy(&buf, observedStream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-
+	require.NoError(t, err)
 	// Close stream to trigger logging
-	if err := observedStream.Close(); err != nil {
-		t.Fatalf("failed to close stream: %v", err)
-	}
-	if err := logger.Close(); err != nil {
-		t.Fatalf("failed to close logger: %v", err)
-	}
+	require.NoError(t, observedStream.Close())
+	err = logger.Close()
+	require.NoError(t, err)
 
 	// Verify entry was logged
-	if len(store.getEntries()) != 1 {
-		t.Errorf("expected 1 entry, got %d", len(store.getEntries()))
-	}
+	assert.Len(t, store.getEntries(), 1)
 }
 
 func TestStreamLogObserverDefaultsMissingChatRoleToAssistant(t *testing.T) {
@@ -1111,31 +876,21 @@ data: [DONE]
 		NewStreamLogObserver(logger, entry, "/v1/chat/completions"),
 	)
 	_, err := io.Copy(io.Discard, observedStream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-	if err := observedStream.Close(); err != nil {
-		t.Fatalf("failed to close stream: %v", err)
-	}
+	require.NoError(t, err)
+	err = observedStream.Close()
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
 
-	if len(logger.entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(logger.entries))
-	}
 	response, ok := logger.entries[0].Data.ResponseBody.(map[string]any)
-	if !ok {
-		t.Fatalf("response body type = %T, want map[string]any", logger.entries[0].Data.ResponseBody)
-	}
+	require.True(t, ok, "response body type = %T, want map[string]any", logger.entries[0].Data.ResponseBody)
+
 	choices, ok := response["choices"].([]map[string]any)
-	if !ok || len(choices) != 1 {
-		t.Fatalf("choices = %#v, want one choice", response["choices"])
-	}
+	require.True(t, ok)
+	require.Len(t, choices, 1)
+
 	message, ok := choices[0]["message"].(map[string]any)
-	if !ok {
-		t.Fatalf("message = %#v, want map[string]any", choices[0]["message"])
-	}
-	if got := message["role"]; got != "assistant" {
-		t.Fatalf("message role = %#v, want assistant", got)
-	}
+	require.True(t, ok, "message = %#v, want map[string]any", choices[0]["message"])
+	require.Equal(t, "assistant", message["role"])
 }
 
 func TestStreamResponseBuilderChatTextOnly(t *testing.T) {
@@ -1146,15 +901,10 @@ func TestStreamResponseBuilderChatTextOnly(t *testing.T) {
 
 	choice := firstChatStreamChoiceForTest(t, response)
 	message := chatStreamMessageForTest(t, choice)
-	if got := message["content"]; got != "Hello world" {
-		t.Fatalf("message.content = %#v, want Hello world", got)
-	}
-	if _, ok := message["tool_calls"]; ok {
-		t.Fatalf("message.tool_calls present for text-only stream: %#v", message["tool_calls"])
-	}
-	if got := choice["finish_reason"]; got != "stop" {
-		t.Fatalf("finish_reason = %#v, want stop", got)
-	}
+	require.Equal(t, "Hello world", message["content"])
+	_, ok := message["tool_calls"]
+	require.False(t, ok, "message.tool_calls present for text-only stream: %#v", message["tool_calls"])
+	require.Equal(t, "stop", choice["finish_reason"])
 }
 
 func TestStreamResponseBuilderChatToolCallOnly(t *testing.T) {
@@ -1166,26 +916,18 @@ func TestStreamResponseBuilderChatToolCallOnly(t *testing.T) {
 
 	choice := firstChatStreamChoiceForTest(t, response)
 	message := chatStreamMessageForTest(t, choice)
-	if got := message["content"]; got != nil {
-		t.Fatalf("message.content = %#v, want nil", got)
-	}
+	got := message["content"]
+	require.Nil(t, got)
+
 	toolCall := firstChatStreamToolCallForTest(t, message)
-	if _, ok := toolCall["index"]; ok {
-		t.Fatalf("final message tool_call contains streaming index: %#v", toolCall)
-	}
-	if got := toolCall["id"]; got != "call_1" {
-		t.Fatalf("tool_call.id = %#v, want call_1", got)
-	}
+	_, ok := toolCall["index"]
+	require.False(t, ok, "final message tool_call contains streaming index: %#v", toolCall)
+	require.Equal(t, "call_1", toolCall["id"])
+
 	function := chatStreamFunctionForTest(t, toolCall)
-	if got := function["name"]; got != "get_weather" {
-		t.Fatalf("function.name = %#v, want get_weather", got)
-	}
-	if got := function["arguments"]; got != `{"city":"Paris"}` {
-		t.Fatalf("function.arguments = %#v, want Paris JSON", got)
-	}
-	if got := choice["finish_reason"]; got != "tool_calls" {
-		t.Fatalf("finish_reason = %#v, want tool_calls", got)
-	}
+	require.Equal(t, "get_weather", function["name"])
+	require.Equal(t, `{"city":"Paris"}`, function["arguments"])
+	require.Equal(t, "tool_calls", choice["finish_reason"])
 }
 
 func TestStreamResponseBuilderChatInterleavesTextAndToolCall(t *testing.T) {
@@ -1197,13 +939,10 @@ func TestStreamResponseBuilderChatInterleavesTextAndToolCall(t *testing.T) {
 
 	choice := firstChatStreamChoiceForTest(t, response)
 	message := chatStreamMessageForTest(t, choice)
-	if got := message["content"]; got != "Checking weather.\nCalling tool." {
-		t.Fatalf("message.content = %#v, want interleaved text", got)
-	}
+	require.Equal(t, "Checking weather.\nCalling tool.", message["content"])
+
 	function := chatStreamFunctionForTest(t, firstChatStreamToolCallForTest(t, message))
-	if got := function["arguments"]; got != `{"city":"Paris"}` {
-		t.Fatalf("function.arguments = %#v, want Paris JSON", got)
-	}
+	require.Equal(t, `{"city":"Paris"}`, function["arguments"])
 }
 
 func TestStreamResponseBuilderChatParallelToolCalls(t *testing.T) {
@@ -1214,21 +953,12 @@ func TestStreamResponseBuilderChatParallelToolCalls(t *testing.T) {
 
 	message := chatStreamMessageForTest(t, firstChatStreamChoiceForTest(t, response))
 	toolCalls, ok := message["tool_calls"].([]map[string]any)
-	if !ok || len(toolCalls) != 2 {
-		t.Fatalf("tool_calls = %#v, want two tool calls", message["tool_calls"])
-	}
-	if got := toolCalls[0]["id"]; got != "call_a" {
-		t.Fatalf("tool_calls[0].id = %#v, want call_a", got)
-	}
-	if got := toolCalls[1]["id"]; got != "call_b" {
-		t.Fatalf("tool_calls[1].id = %#v, want call_b", got)
-	}
-	if got := chatStreamFunctionForTest(t, toolCalls[0])["arguments"]; got != `{"city":"Paris"}` {
-		t.Fatalf("tool_calls[0].arguments = %#v, want Paris JSON", got)
-	}
-	if got := chatStreamFunctionForTest(t, toolCalls[1])["arguments"]; got != `{"city":"Warsaw"}` {
-		t.Fatalf("tool_calls[1].arguments = %#v, want Warsaw JSON", got)
-	}
+	require.True(t, ok)
+	require.Len(t, toolCalls, 2, "tool_calls = %#v, want two tool calls", message["tool_calls"])
+	require.Equal(t, "call_a", toolCalls[0]["id"])
+	require.Equal(t, "call_b", toolCalls[1]["id"])
+	require.Equal(t, `{"city":"Paris"}`, chatStreamFunctionForTest(t, toolCalls[0])["arguments"])
+	require.Equal(t, `{"city":"Warsaw"}`, chatStreamFunctionForTest(t, toolCalls[1])["arguments"])
 }
 
 func TestStreamResponseBuilderChatSparseChoiceFallbackDoesNotCollide(t *testing.T) {
@@ -1238,20 +968,13 @@ func TestStreamResponseBuilderChatSparseChoiceFallbackDoesNotCollide(t *testing.
 	)
 
 	choices := chatStreamChoicesForTest(t, response)
-	if len(choices) != 3 {
-		t.Fatalf("len(choices) = %d, want 3", len(choices))
-	}
+	require.Len(t, choices, 3)
+
 	for i, want := range []int{0, 2, 3} {
-		if got := choices[i]["index"]; got != want {
-			t.Fatalf("choices[%d].index = %#v, want %d", i, got, want)
-		}
+		require.Equal(t, want, choices[i]["index"])
 	}
-	if got := chatStreamMessageForTest(t, choices[1])["content"]; got != "two" {
-		t.Fatalf("choices[1].message.content = %#v, want two", got)
-	}
-	if got := chatStreamMessageForTest(t, choices[2])["content"]; got != "synthetic" {
-		t.Fatalf("choices[2].message.content = %#v, want synthetic", got)
-	}
+	require.Equal(t, "two", chatStreamMessageForTest(t, choices[1])["content"])
+	require.Equal(t, "synthetic", chatStreamMessageForTest(t, choices[2])["content"])
 }
 
 func TestStreamResponseBuilderChatSparseToolCallFallbackDoesNotCollide(t *testing.T) {
@@ -1262,20 +985,14 @@ func TestStreamResponseBuilderChatSparseToolCallFallbackDoesNotCollide(t *testin
 
 	message := chatStreamMessageForTest(t, firstChatStreamChoiceForTest(t, response))
 	toolCalls, ok := message["tool_calls"].([]map[string]any)
-	if !ok || len(toolCalls) != 3 {
-		t.Fatalf("tool_calls = %#v, want three tool calls", message["tool_calls"])
-	}
+	require.True(t, ok)
+	require.Len(t, toolCalls, 3, "tool_calls = %#v, want three tool calls", message["tool_calls"])
+
 	for i, want := range []string{"call_a", "call_c", "call_synthetic"} {
-		if got := toolCalls[i]["id"]; got != want {
-			t.Fatalf("tool_calls[%d].id = %#v, want %s", i, got, want)
-		}
+		require.Equal(t, want, toolCalls[i]["id"])
 	}
-	if got := chatStreamFunctionForTest(t, toolCalls[1])["arguments"]; got != `{"city":"Warsaw"}` {
-		t.Fatalf("tool_calls[1].arguments = %#v, want Warsaw JSON", got)
-	}
-	if got := chatStreamFunctionForTest(t, toolCalls[2])["arguments"]; got != `{"city":"Berlin"}` {
-		t.Fatalf("tool_calls[2].arguments = %#v, want Berlin JSON", got)
-	}
+	require.Equal(t, `{"city":"Warsaw"}`, chatStreamFunctionForTest(t, toolCalls[1])["arguments"])
+	require.Equal(t, `{"city":"Berlin"}`, chatStreamFunctionForTest(t, toolCalls[2])["arguments"])
 }
 
 func TestStreamResponseBuilderChatSkipsToolCallWithoutFunctionDelta(t *testing.T) {
@@ -1286,16 +1003,11 @@ func TestStreamResponseBuilderChatSkipsToolCallWithoutFunctionDelta(t *testing.T
 
 	message := chatStreamMessageForTest(t, firstChatStreamChoiceForTest(t, response))
 	toolCall := firstChatStreamToolCallForTest(t, message)
-	if got := toolCall["id"]; got != "call_keep" {
-		t.Fatalf("tool_call.id = %#v, want call_keep", got)
-	}
+	require.Equal(t, "call_keep", toolCall["id"])
+
 	function := chatStreamFunctionForTest(t, toolCall)
-	if got := function["name"]; got != "get_weather" {
-		t.Fatalf("function.name = %#v, want get_weather", got)
-	}
-	if got := function["arguments"]; got != `{"city":"Paris"}` {
-		t.Fatalf("function.arguments = %#v, want Paris JSON", got)
-	}
+	require.Equal(t, "get_weather", function["name"])
+	require.Equal(t, `{"city":"Paris"}`, function["arguments"])
 }
 
 func TestStreamResponseBuilderChatCapturesTrailingUsageChunk(t *testing.T) {
@@ -1305,18 +1017,10 @@ func TestStreamResponseBuilderChatCapturesTrailingUsageChunk(t *testing.T) {
 	)
 
 	usage, ok := response["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("usage = %#v, want object", response["usage"])
-	}
-	if got := usage["prompt_tokens"]; got != float64(7) {
-		t.Fatalf("usage.prompt_tokens = %#v, want 7", got)
-	}
-	if got := usage["completion_tokens"]; got != float64(2) {
-		t.Fatalf("usage.completion_tokens = %#v, want 2", got)
-	}
-	if got := usage["total_tokens"]; got != float64(9) {
-		t.Fatalf("usage.total_tokens = %#v, want 9", got)
-	}
+	require.True(t, ok, "usage = %#v, want object", response["usage"])
+	require.Equal(t, float64(7), usage["prompt_tokens"])
+	require.Equal(t, float64(2), usage["completion_tokens"])
+	require.Equal(t, float64(9), usage["total_tokens"])
 }
 
 func TestAppendLimitedStreamTextMarksTruncatedWhenBudgetAlreadyFull(t *testing.T) {
@@ -1325,15 +1029,9 @@ func TestAppendLimitedStreamTextMarksTruncatedWhenBudgetAlreadyFull(t *testing.T
 
 	appendLimitedStreamText(builder, &dst, "x")
 
-	if !builder.truncated {
-		t.Fatal("truncated = false, want true when a non-empty chunk arrives after the capture budget is full")
-	}
-	if got := dst.String(); got != "" {
-		t.Fatalf("captured text = %q, want empty", got)
-	}
-	if got := builder.contentLen; got != MaxContentCapture {
-		t.Fatalf("contentLen = %d, want %d", got, MaxContentCapture)
-	}
+	require.True(t, builder.truncated)
+	require.Empty(t, dst.String())
+	require.Equal(t, MaxContentCapture, builder.contentLen)
 }
 
 func buildChatStreamResponseForTest(t *testing.T, events ...string) map[string]any {
@@ -1342,9 +1040,9 @@ func buildChatStreamResponseForTest(t *testing.T, events ...string) map[string]a
 	builder := &streamResponseBuilder{}
 	for _, raw := range events {
 		var event map[string]any
-		if err := json.Unmarshal([]byte(raw), &event); err != nil {
-			t.Fatalf("failed to unmarshal event %q: %v", raw, err)
-		}
+		err := json.Unmarshal([]byte(raw), &event)
+		require.NoError(t, err, "failed to unmarshal event %q: %v", raw, err)
+
 		parseChatCompletionEvent(builder, event)
 	}
 	return builder.buildChatCompletionResponse()
@@ -1354,9 +1052,8 @@ func chatStreamChoicesForTest(t *testing.T, response map[string]any) []map[strin
 	t.Helper()
 
 	choices, ok := response["choices"].([]map[string]any)
-	if !ok {
-		t.Fatalf("choices = %#v, want choice slice", response["choices"])
-	}
+	require.True(t, ok, "choices = %#v, want choice slice", response["choices"])
+
 	return choices
 }
 
@@ -1364,9 +1061,8 @@ func firstChatStreamChoiceForTest(t *testing.T, response map[string]any) map[str
 	t.Helper()
 
 	choices := chatStreamChoicesForTest(t, response)
-	if len(choices) != 1 {
-		t.Fatalf("choices = %#v, want one choice", response["choices"])
-	}
+	require.Len(t, choices, 1)
+
 	return choices[0]
 }
 
@@ -1374,9 +1070,8 @@ func chatStreamMessageForTest(t *testing.T, choice map[string]any) map[string]an
 	t.Helper()
 
 	message, ok := choice["message"].(map[string]any)
-	if !ok {
-		t.Fatalf("message = %#v, want object", choice["message"])
-	}
+	require.True(t, ok, "message = %#v, want object", choice["message"])
+
 	return message
 }
 
@@ -1384,9 +1079,9 @@ func firstChatStreamToolCallForTest(t *testing.T, message map[string]any) map[st
 	t.Helper()
 
 	toolCalls, ok := message["tool_calls"].([]map[string]any)
-	if !ok || len(toolCalls) != 1 {
-		t.Fatalf("tool_calls = %#v, want one tool call", message["tool_calls"])
-	}
+	require.True(t, ok)
+	require.Len(t, toolCalls, 1, "tool_calls = %#v, want one tool call", message["tool_calls"])
+
 	return toolCalls[0]
 }
 
@@ -1394,27 +1089,22 @@ func chatStreamFunctionForTest(t *testing.T, toolCall map[string]any) map[string
 	t.Helper()
 
 	function, ok := toolCall["function"].(map[string]any)
-	if !ok {
-		t.Fatalf("tool_call.function = %#v, want object", toolCall["function"])
-	}
+	require.True(t, ok, "tool_call.function = %#v, want object", toolCall["function"])
+
 	return function
 }
 
 func TestNewStreamLogObserverNilInputs(t *testing.T) {
-	if observer := NewStreamLogObserver(nil, &LogEntry{}, "/v1/chat/completions"); observer != nil {
-		t.Error("expected nil observer with nil logger")
-	}
-	if observer := NewStreamLogObserver(&NoopLogger{}, nil, "/v1/chat/completions"); observer != nil {
-		t.Error("expected nil observer with nil entry")
-	}
+	observer := NewStreamLogObserver(nil, &LogEntry{}, "/v1/chat/completions")
+	assert.Nil(t, observer)
+	observer = NewStreamLogObserver(&NoopLogger{}, nil, "/v1/chat/completions")
+	assert.Nil(t, observer)
 }
 
 func TestCreateStreamEntry(t *testing.T) {
 	// Test nil input
 	result := CreateStreamEntry(context.Background(), nil)
-	if result != nil {
-		t.Error("expected nil for nil input")
-	}
+	assert.Nil(t, result)
 
 	// Test with valid entry
 	baseEntry := &LogEntry{
@@ -1456,107 +1146,43 @@ func TestCreateStreamEntry(t *testing.T) {
 	}
 
 	streamEntry := CreateStreamEntry(context.Background(), baseEntry)
-	if streamEntry == nil {
-		t.Fatal("expected non-nil stream entry")
-		return
-	}
+	require.NotNil(t, streamEntry)
 
 	// Verify fields are copied
-	if streamEntry.ID != baseEntry.ID {
-		t.Errorf("ID mismatch")
-	}
-	if streamEntry.RequestedModel != baseEntry.RequestedModel {
-		t.Errorf("RequestedModel mismatch")
-	}
-	if streamEntry.ResolvedModel != baseEntry.ResolvedModel {
-		t.Errorf("ResolvedModel mismatch")
-	}
-	if streamEntry.ProviderName != baseEntry.ProviderName {
-		t.Errorf("ProviderName mismatch")
-	}
-	if streamEntry.AliasUsed != baseEntry.AliasUsed {
-		t.Errorf("AliasUsed mismatch")
-	}
-	if streamEntry.CacheType != baseEntry.CacheType {
-		t.Errorf("CacheType mismatch")
-	}
-	if streamEntry.WorkflowVersionID != baseEntry.WorkflowVersionID {
-		t.Errorf("WorkflowVersionID mismatch")
-	}
-	if !streamEntry.Stream {
-		t.Error("Stream should be true")
-	}
-	if streamEntry.RequestID != baseEntry.RequestID {
-		t.Error("RequestID not copied")
-	}
-	if streamEntry.AuthKeyID != baseEntry.AuthKeyID {
-		t.Error("AuthKeyID not copied")
-	}
-	if streamEntry.AuthMethod != baseEntry.AuthMethod {
-		t.Error("AuthMethod not copied")
-	}
-	if streamEntry.Data == nil || streamEntry.Data.Failover == nil {
-		t.Fatal("Failover snapshot not copied")
-	}
-	if streamEntry.Data.Failover.TargetModel != "azure/gpt-4o" {
-		t.Errorf("Failover.TargetModel = %q, want %q", streamEntry.Data.Failover.TargetModel, "azure/gpt-4o")
-	}
-	if streamEntry.ClientIP != baseEntry.ClientIP {
-		t.Error("ClientIP not copied")
-	}
-	if streamEntry.Method != baseEntry.Method {
-		t.Error("Method not copied")
-	}
-	if streamEntry.Path != baseEntry.Path {
-		t.Error("Path not copied")
-	}
-	if streamEntry.UserPath != baseEntry.UserPath {
-		t.Error("UserPath not copied")
-	}
-
-	// Verify Data fields are copied
-	if streamEntry.Data == nil {
-		t.Fatal("Data is nil")
-		return
-	}
+	assert.Equal(t, baseEntry.ID, streamEntry.ID)
+	assert.Equal(t, baseEntry.RequestedModel, streamEntry.RequestedModel)
+	assert.Equal(t, baseEntry.ResolvedModel, streamEntry.ResolvedModel)
+	assert.Equal(t, baseEntry.ProviderName, streamEntry.ProviderName)
+	assert.Equal(t, baseEntry.AliasUsed, streamEntry.AliasUsed)
+	assert.Equal(t, baseEntry.CacheType, streamEntry.CacheType)
+	assert.Equal(t, baseEntry.WorkflowVersionID, streamEntry.WorkflowVersionID)
+	assert.True(t, streamEntry.Stream)
+	assert.Equal(t, baseEntry.RequestID, streamEntry.RequestID)
+	assert.Equal(t, baseEntry.AuthKeyID, streamEntry.AuthKeyID)
+	assert.Equal(t, baseEntry.AuthMethod, streamEntry.AuthMethod)
+	require.NotNil(t, streamEntry.Data)
+	require.NotNil(t, streamEntry.Data.Failover)
+	assert.Equal(t, "azure/gpt-4o", streamEntry.Data.Failover.TargetModel)
+	assert.Equal(t, baseEntry.ClientIP, streamEntry.ClientIP)
+	assert.Equal(t, baseEntry.Method, streamEntry.Method)
+	assert.Equal(t, baseEntry.Path, streamEntry.Path)
+	assert.Equal(t, baseEntry.UserPath, streamEntry.UserPath)
 
 	// Verify headers are copied (not same reference)
-	if streamEntry.Data.RequestHeaders == nil {
-		t.Fatal("RequestHeaders is nil")
-		return
-	}
+	require.NotNil(t, streamEntry.Data.RequestHeaders)
 	baseEntry.Data.RequestHeaders["New"] = "value"
-	if streamEntry.Data.RequestHeaders["New"] == "value" {
-		t.Error("Headers should be a copy, not same reference")
-	}
-	if streamEntry.Data.WorkflowFeatures == nil {
-		t.Fatal("WorkflowFeatures is nil")
-	}
-	if streamEntry.Data.WorkflowFeatures == baseEntry.Data.WorkflowFeatures {
-		t.Fatal("WorkflowFeatures should be copied, not shared")
-	}
-	if streamEntry.Data.WorkflowFeatures.Cache != baseEntry.Data.WorkflowFeatures.Cache {
-		t.Error("WorkflowFeatures.Cache mismatch")
-	}
-	if streamEntry.Data.WorkflowFeatures.Audit != baseEntry.Data.WorkflowFeatures.Audit {
-		t.Error("WorkflowFeatures.Audit mismatch")
-	}
-	if streamEntry.Data.WorkflowFeatures.Usage != baseEntry.Data.WorkflowFeatures.Usage {
-		t.Error("WorkflowFeatures.Usage mismatch")
-	}
-	if streamEntry.Data.WorkflowFeatures.Guardrails != baseEntry.Data.WorkflowFeatures.Guardrails {
-		t.Error("WorkflowFeatures.Guardrails mismatch")
-	}
-	if streamEntry.Data.WorkflowFeatures.Failover != baseEntry.Data.WorkflowFeatures.Failover {
-		t.Error("WorkflowFeatures.Failover mismatch")
-	}
+	assert.NotEqual(t, "value", streamEntry.Data.RequestHeaders["New"])
+	require.NotNil(t, streamEntry.Data.WorkflowFeatures)
+	require.NotSame(t, baseEntry.Data.WorkflowFeatures, streamEntry.Data.WorkflowFeatures)
+	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Cache, streamEntry.Data.WorkflowFeatures.Cache)
+	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Audit, streamEntry.Data.WorkflowFeatures.Audit)
+	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Usage, streamEntry.Data.WorkflowFeatures.Usage)
+	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Guardrails, streamEntry.Data.WorkflowFeatures.Guardrails)
+	assert.Equal(t, baseEntry.Data.WorkflowFeatures.Failover, streamEntry.Data.WorkflowFeatures.Failover)
 }
 
 func TestEnrichEntryWithWorkflowStoresWorkflowFeatures(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/")
 
 	entry := &LogEntry{ID: "workflow-audit-entry"}
 	c.Set(string(LogEntryKey), entry)
@@ -1574,27 +1200,14 @@ func TestEnrichEntryWithWorkflowStoresWorkflowFeatures(t *testing.T) {
 		},
 	})
 
-	if entry.WorkflowVersionID != "workflow-v3" {
-		t.Fatalf("WorkflowVersionID = %q, want workflow-v3", entry.WorkflowVersionID)
-	}
-	if entry.Data == nil || entry.Data.WorkflowFeatures == nil {
-		t.Fatal("expected workflow feature snapshot to be stored in audit data")
-	}
-	if entry.Data.WorkflowFeatures.Cache {
-		t.Fatal("WorkflowFeatures.Cache = true, want false")
-	}
-	if !entry.Data.WorkflowFeatures.Audit {
-		t.Fatal("WorkflowFeatures.Audit = false, want true")
-	}
-	if entry.Data.WorkflowFeatures.Usage {
-		t.Fatal("WorkflowFeatures.Usage = true, want false")
-	}
-	if !entry.Data.WorkflowFeatures.Guardrails {
-		t.Fatal("WorkflowFeatures.Guardrails = false, want true")
-	}
-	if entry.Data.WorkflowFeatures.Failover {
-		t.Fatal("WorkflowFeatures.Failover = true, want false")
-	}
+	require.Equal(t, "workflow-v3", entry.WorkflowVersionID)
+	require.NotNil(t, entry.Data)
+	require.NotNil(t, entry.Data.WorkflowFeatures)
+	require.False(t, entry.Data.WorkflowFeatures.Cache)
+	require.True(t, entry.Data.WorkflowFeatures.Audit)
+	require.False(t, entry.Data.WorkflowFeatures.Usage)
+	require.True(t, entry.Data.WorkflowFeatures.Guardrails)
+	require.False(t, entry.Data.WorkflowFeatures.Failover)
 }
 
 func TestHashAPIKey(t *testing.T) {
@@ -1629,16 +1242,11 @@ func TestHashAPIKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := hashAPIKey(tt.authHeader)
 			if tt.wantEmpty {
-				if result != "" {
-					t.Errorf("expected empty string, got %q", result)
-				}
+				assert.Empty(t, result)
+
 			} else {
-				if result == "" {
-					t.Error("expected non-empty hash")
-				}
-				if len(result) != 16 {
-					t.Errorf("expected 16 character hash, got %d characters", len(result))
-				}
+				assert.NotEmpty(t, result)
+				assert.Len(t, result, 16)
 			}
 		})
 	}
@@ -1646,15 +1254,11 @@ func TestHashAPIKey(t *testing.T) {
 	// Test consistency - same input should produce same hash
 	hash1 := hashAPIKey("Bearer test-key")
 	hash2 := hashAPIKey("Bearer test-key")
-	if hash1 != hash2 {
-		t.Error("same input should produce same hash")
-	}
+	assert.Equal(t, hash2, hash1)
 
 	// Test different inputs produce different hashes
 	hash3 := hashAPIKey("Bearer different-key")
-	if hash1 == hash3 {
-		t.Error("different inputs should produce different hashes")
-	}
+	assert.NotEqual(t, hash3, hash1)
 }
 
 // Helper compression functions for tests
@@ -1752,14 +1356,10 @@ func TestDecompressBody(t *testing.T) {
 			compressed := tt.compressFunc(originalData)
 			result, decompressed := decompressBody(compressed, tt.encoding)
 
-			if decompressed != tt.shouldDecompress {
-				t.Errorf("decompressed = %v, want %v", decompressed, tt.shouldDecompress)
-			}
+			assert.Equal(t, tt.shouldDecompress, decompressed)
 
 			if tt.shouldDecompress {
-				if !bytes.Equal(result, originalData) {
-					t.Errorf("decompressed data mismatch: got %s, want %s", result, originalData)
-				}
+				assert.Equal(t, originalData, result)
 			}
 		})
 	}
@@ -1770,12 +1370,8 @@ func TestDecompressBodyInvalidData(t *testing.T) {
 	invalidData := []byte("not valid compressed data")
 
 	result, decompressed := decompressBody(invalidData, "gzip")
-	if decompressed {
-		t.Error("expected decompression to fail for invalid gzip data")
-	}
-	if !bytes.Equal(result, invalidData) {
-		t.Error("expected original data to be returned on failure")
-	}
+	assert.False(t, decompressed)
+	assert.Equal(t, invalidData, result)
 }
 
 func TestResponseBodyCapture_Write_SingleLargeChunk(t *testing.T) {
@@ -1788,20 +1384,12 @@ func TestResponseBodyCapture_Write_SingleLargeChunk(t *testing.T) {
 	// Write a chunk larger than MaxBodyCapture in one call
 	largeData := bytes.Repeat([]byte("x"), int(MaxBodyCapture)+1024)
 	n, err := capture.Write(largeData)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if n != len(largeData) {
-		t.Errorf("expected %d bytes written to underlying writer, got %d", len(largeData), n)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, len(largeData), n)
 
 	// Buffer should be capped at exactly MaxBodyCapture
-	if capture.body.Len() != int(MaxBodyCapture) {
-		t.Errorf("expected buffer size %d, got %d", MaxBodyCapture, capture.body.Len())
-	}
-	if !capture.truncated {
-		t.Error("expected truncated flag to be set")
-	}
+	assert.Equal(t, int(MaxBodyCapture), capture.body.Len())
+	assert.True(t, capture.truncated)
 }
 
 func TestResponseBodyCapture_Write_MultipleChunksOverflow(t *testing.T) {
@@ -1816,30 +1404,18 @@ func TestResponseBodyCapture_Write_MultipleChunksOverflow(t *testing.T) {
 
 	// First chunk: should fit entirely
 	_, _ = capture.Write(chunk)
-	if capture.truncated {
-		t.Error("should not be truncated after first chunk")
-	}
-	if capture.body.Len() != chunkSize {
-		t.Errorf("expected buffer size %d, got %d", chunkSize, capture.body.Len())
-	}
+	assert.False(t, capture.truncated)
+	assert.Equal(t, chunkSize, capture.body.Len())
 
 	// Second chunk: fits exactly (no data lost, so truncated remains false)
 	_, _ = capture.Write(chunk)
-	if capture.truncated {
-		t.Error("should not be truncated when buffer is exactly at limit")
-	}
-	if capture.body.Len() != int(MaxBodyCapture) {
-		t.Errorf("expected buffer at %d, got %d", MaxBodyCapture, capture.body.Len())
-	}
+	assert.False(t, capture.truncated)
+	assert.Equal(t, int(MaxBodyCapture), capture.body.Len())
 
 	// Third chunk: entirely skipped, truncated flag set
 	_, _ = capture.Write(chunk)
-	if !capture.truncated {
-		t.Error("should be truncated after third chunk is rejected")
-	}
-	if capture.body.Len() != int(MaxBodyCapture) {
-		t.Errorf("expected buffer still at %d after third chunk, got %d", MaxBodyCapture, capture.body.Len())
-	}
+	assert.True(t, capture.truncated)
+	assert.Equal(t, int(MaxBodyCapture), capture.body.Len(), "buffer must stay capped after third chunk")
 }
 
 func TestResponseBodyCapture_Write_SkipsWhenDisabled(t *testing.T) {
@@ -1853,18 +1429,10 @@ func TestResponseBodyCapture_Write_SkipsWhenDisabled(t *testing.T) {
 
 	payload := []byte(`data: {"chunk":1}` + "\n\n")
 	n, err := capture.Write(payload)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if n != len(payload) {
-		t.Fatalf("written = %d, want %d", n, len(payload))
-	}
-	if capture.body.Len() != 0 {
-		t.Fatalf("captured body len = %d, want 0", capture.body.Len())
-	}
-	if capture.truncated {
-		t.Fatal("truncated = true, want false")
-	}
+	require.NoError(t, err)
+	require.Equal(t, len(payload), n)
+	require.Equal(t, 0, capture.body.Len())
+	require.False(t, capture.truncated)
 }
 
 func TestHasResponseBodyCaptureHandlesWrappedAndCyclicWriters(t *testing.T) {
@@ -1873,21 +1441,15 @@ func TestHasResponseBodyCaptureHandlesWrappedAndCyclicWriters(t *testing.T) {
 		body:           &bytes.Buffer{},
 	}
 	wrapped := &unwrapTestWriter{ResponseWriter: &discardWriter{}, next: capture}
-	if !hasResponseBodyCapture(wrapped) {
-		t.Fatal("expected wrapped responseBodyCapture to be detected")
-	}
+	require.True(t, hasResponseBodyCapture(wrapped))
 
 	self := &selfUnwrapTestWriter{ResponseWriter: &discardWriter{}}
-	if hasResponseBodyCapture(self) {
-		t.Fatal("expected self-unwrapping writer not to report responseBodyCapture")
-	}
+	require.False(t, hasResponseBodyCapture(self))
 
 	first := &unwrapTestWriter{ResponseWriter: &discardWriter{}}
 	second := &unwrapTestWriter{ResponseWriter: &discardWriter{}, next: first}
 	first.next = second
-	if hasResponseBodyCapture(first) {
-		t.Fatal("expected cyclic wrapper chain not to report responseBodyCapture")
-	}
+	require.False(t, hasResponseBodyCapture(first))
 }
 
 // trackingReadCloser wraps an io.Reader and tracks whether Close was called.
@@ -1947,25 +1509,16 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 		// Simulate the middleware body capture logic
 		limitedReader := io.LimitReader(req.Body, MaxBodyCapture+1)
 		bodyBytes, err := io.ReadAll(limitedReader)
-		if err != nil {
-			t.Fatalf("unexpected read error: %v", err)
-		}
-
-		if int64(len(bodyBytes)) > MaxBodyCapture {
-			t.Fatal("body should be under limit")
-		}
+		require.NoError(t, err)
+		require.LessOrEqual(t, int64(len(bodyBytes)), int64(MaxBodyCapture))
 
 		var parsed any
 		if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
 			entry.Data.RequestBody = parsed
 		}
 
-		if entry.Data.RequestBody == nil {
-			t.Error("expected request body to be captured for chunked request")
-		}
-		if entry.Data.RequestBodyTooBigToHandle {
-			t.Error("should not be marked as too big")
-		}
+		assert.NotNil(t, entry.Data.RequestBody)
+		assert.False(t, entry.Data.RequestBodyTooBigToHandle)
 	})
 
 	t.Run("chunked request body over limit sets flag and preserves downstream body", func(t *testing.T) {
@@ -1978,13 +1531,8 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 
 		limitedReader := io.LimitReader(req.Body, MaxBodyCapture+1)
 		bodyBytes, err := io.ReadAll(limitedReader)
-		if err != nil {
-			t.Fatalf("unexpected read error: %v", err)
-		}
-
-		if int64(len(bodyBytes)) <= MaxBodyCapture {
-			t.Fatal("body should exceed limit")
-		}
+		require.NoError(t, err)
+		require.Greater(t, int64(len(bodyBytes)), int64(MaxBodyCapture))
 
 		entry.Data.RequestBodyTooBigToHandle = true
 		// Reconstruct body for downstream
@@ -1992,18 +1540,10 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 
 		// Verify downstream can read the full body
 		downstream, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("downstream read error: %v", err)
-		}
-		if len(downstream) != len(largeBody) {
-			t.Errorf("downstream body length mismatch: expected %d, got %d", len(largeBody), len(downstream))
-		}
-		if !entry.Data.RequestBodyTooBigToHandle {
-			t.Error("expected RequestBodyTooBigToHandle flag to be set")
-		}
-		if entry.Data.RequestBody != nil {
-			t.Error("body content should not be logged when over limit")
-		}
+		require.NoError(t, err)
+		assert.Len(t, downstream, len(largeBody))
+		assert.True(t, entry.Data.RequestBodyTooBigToHandle)
+		assert.Nil(t, entry.Data.RequestBody)
 	})
 
 	t.Run("overflow path propagates Close to original body", func(t *testing.T) {
@@ -2015,12 +1555,8 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 		// Drive the overflow reconstruction path
 		limitedReader := io.LimitReader(req.Body, MaxBodyCapture+1)
 		bodyBytes, err := io.ReadAll(limitedReader)
-		if err != nil {
-			t.Fatalf("unexpected read error: %v", err)
-		}
-		if int64(len(bodyBytes)) <= MaxBodyCapture {
-			t.Fatal("body should exceed limit")
-		}
+		require.NoError(t, err)
+		require.Greater(t, int64(len(bodyBytes)), int64(MaxBodyCapture))
 
 		origBody := req.Body
 		req.Body = &chainReadCloser{
@@ -2030,20 +1566,11 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 
 		// Read full body from reconstructed reader
 		downstream, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("downstream read error: %v", err)
-		}
-		if len(downstream) != len(largeBody) {
-			t.Errorf("downstream body length mismatch: expected %d, got %d", len(largeBody), len(downstream))
-		}
-
+		require.NoError(t, err)
+		assert.Len(t, downstream, len(largeBody))
 		// Close and verify propagation
-		if err := req.Body.Close(); err != nil {
-			t.Fatalf("unexpected close error: %v", err)
-		}
-		if !tracker.closed {
-			t.Error("expected Close to propagate to original body")
-		}
+		require.NoError(t, req.Body.Close())
+		assert.True(t, tracker.closed)
 	})
 
 	t.Run("io.LimitReader caps memory allocation", func(t *testing.T) {
@@ -2051,31 +1578,19 @@ func TestLimitedReaderRequestBodyCapture(t *testing.T) {
 		largeBody := strings.Repeat("z", int(MaxBodyCapture)*3)
 		reader := io.LimitReader(strings.NewReader(largeBody), MaxBodyCapture+1)
 		data, err := io.ReadAll(reader)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if int64(len(data)) != MaxBodyCapture+1 {
-			t.Errorf("expected exactly %d bytes, got %d", MaxBodyCapture+1, len(data))
-		}
+		require.NoError(t, err)
+		assert.Len(t, data, int(MaxBodyCapture)+1)
 	})
 }
 
 func TestDecompressBodyEmptyInput(t *testing.T) {
 	// Empty body should return unchanged
 	result, decompressed := decompressBody([]byte{}, "gzip")
-	if decompressed {
-		t.Error("expected no decompression for empty body")
-	}
-	if len(result) != 0 {
-		t.Error("expected empty result for empty input")
-	}
+	assert.False(t, decompressed)
+	assert.Empty(t, result)
 
 	// Nil body should return unchanged
 	result, decompressed = decompressBody(nil, "gzip")
-	if decompressed {
-		t.Error("expected no decompression for nil body")
-	}
-	if result != nil {
-		t.Error("expected nil result for nil input")
-	}
+	assert.False(t, decompressed)
+	assert.Nil(t, result)
 }

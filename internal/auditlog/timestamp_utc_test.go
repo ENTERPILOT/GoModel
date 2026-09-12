@@ -8,6 +8,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestStoreWritesTimestampsInUTC pins the invariant the audit schema rests on:
@@ -26,9 +28,7 @@ import (
 // column as a string.
 func TestStoreWritesTimestampsInUTC(t *testing.T) {
 	warsaw, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("load location: %v", err)
-	}
+	require.NoError(t, err)
 
 	tests := []struct {
 		name string
@@ -61,49 +61,44 @@ func TestStoreWritesTimestampsInUTC(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 				store, err := NewSQLStore(context.Background(), db, 0)
-				if err != nil {
-					t.Fatalf("NewSQLStore: %v", err)
-				}
+				require.NoError(t, err)
+
 				defer store.Close()
 
 				ctx := context.Background()
-				if err := store.WriteBatch(ctx, []*LogEntry{{
+				err = store.WriteBatch(ctx, []*LogEntry{{
 					ID: "utc-entry", Timestamp: tc.written, Provider: "openai", StatusCode: 200,
 					Data: &LogData{Attempts: []AttemptSnapshot{
 						{Seq: 1, Kind: "primary", StartedAt: tc.written},
 					}},
-				}}); err != nil {
-					t.Fatalf("WriteBatch: %v", err)
-				}
+				}})
+				require.NoError(t, err)
 
 				// Both columns, read as stored rather than as the reader
 				// interprets them.
 				var entryStored, attemptStored string
-				if err := db.QueryRow(ctx,
+				err = db.QueryRow(ctx,
 					"SELECT "+utcProjection(db, "timestamp")+" FROM audit_logs WHERE id = ?",
-					"utc-entry").Scan(&entryStored); err != nil {
-					t.Fatalf("read stored timestamp: %v", err)
-				}
-				if err := db.QueryRow(ctx,
+					"utc-entry").Scan(&entryStored)
+				require.NoError(t, err)
+				err = db.QueryRow(ctx,
 					"SELECT "+utcProjection(db, "started_at")+" FROM audit_log_attempts WHERE audit_log_id = ?",
-					"utc-entry").Scan(&attemptStored); err != nil {
-					t.Fatalf("read stored started_at: %v", err)
-				}
+					"utc-entry").Scan(&attemptStored)
+				require.NoError(t, err)
 
 				for column, stored := range map[string]string{
 					"audit_logs.timestamp":          entryStored,
 					"audit_log_attempts.started_at": attemptStored,
 				} {
-					if !strings.Contains(stored, tc.wantUTCClock) {
-						t.Errorf("%s = %q, want the %s UTC wall clock", column, stored, tc.wantUTCClock)
-					}
-					if tc.notLocalT != "" && strings.Contains(stored, tc.notLocalT) {
-						t.Errorf("%s = %q, holds the caller's local wall clock %s", column, stored, tc.notLocalT)
+					assert.Contains(t, stored, tc.wantUTCClock, "%s = %q, want the %s UTC wall clock", column, stored, tc.wantUTCClock)
+
+					if tc.notLocalT != "" {
+						assert.NotContains(t, stored, tc.notLocalT, "%s holds the caller's local wall clock", column)
 					}
 					// SQLite's text form must also carry the zone marker, or it
 					// sorts wrongly against rows written in another zone.
-					if db.Dialect() == sqlx.SQLite && !strings.HasSuffix(stored, "Z") {
-						t.Errorf("%s = %q, want RFC3339 UTC text ending in Z", column, stored)
+					if db.Dialect() == sqlx.SQLite {
+						assert.True(t, strings.HasSuffix(stored, "Z"), "%s = %q, want RFC3339 UTC text ending in Z", column, stored)
 					}
 				}
 
@@ -111,24 +106,14 @@ func TestStoreWritesTimestampsInUTC(t *testing.T) {
 				// TIMESTAMPTZ holds microseconds, so the fixture stays inside
 				// that precision.
 				reader, err := NewSQLReader(db)
-				if err != nil {
-					t.Fatalf("NewSQLReader: %v", err)
-				}
+				require.NoError(t, err)
+
 				entry, err := reader.GetLogByID(ctx, "utc-entry")
-				if err != nil {
-					t.Fatalf("GetLogByID: %v", err)
-				}
-				if !entry.Timestamp.Equal(tc.written) {
-					t.Errorf("round-tripped timestamp = %s, want the same instant as %s",
-						entry.Timestamp, tc.written)
-				}
-				if entry.Data == nil || len(entry.Data.Attempts) != 1 {
-					t.Fatalf("attempts = %+v, want one hydrated attempt", entry.Data)
-				}
-				if !entry.Data.Attempts[0].StartedAt.Equal(tc.written) {
-					t.Errorf("attempt started_at = %s, want the same instant as %s",
-						entry.Data.Attempts[0].StartedAt, tc.written)
-				}
+				require.NoError(t, err)
+				assert.True(t, entry.Timestamp.Equal(tc.written), "round-tripped timestamp = %s, want the same instant as %s", entry.Timestamp, tc.written)
+				require.NotNil(t, entry.Data)
+				require.Len(t, entry.Data.Attempts, 1)
+				assert.True(t, entry.Data.Attempts[0].StartedAt.Equal(tc.written), "attempt started_at = %s, want the same instant as %s", entry.Data.Attempts[0].StartedAt, tc.written)
 			})
 		})
 	}

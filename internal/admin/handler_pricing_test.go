@@ -1,19 +1,17 @@
 package admin
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/usage"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
@@ -37,9 +35,7 @@ func (m *mockPricingRecalculator) RecalculatePricing(_ context.Context, params u
 
 func TestNewHandlerDoesNotWrapNilRegistryAsPricingResolver(t *testing.T) {
 	h := NewHandler(nil, nil)
-	if h.pricingResolver != nil {
-		t.Fatal("pricingResolver is non-nil for nil registry")
-	}
+	require.Nil(t, h.pricingResolver)
 }
 
 func TestRecalculateUsagePricingResolvesAliasAndFilters(t *testing.T) {
@@ -64,88 +60,47 @@ func TestRecalculateUsagePricingResolvesAliasAndFilters(t *testing.T) {
 		WithUsagePricingRecalculator(recalculator),
 	)
 
-	body := bytes.NewBufferString(`{
+	c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", `{
 		"start_date":"2026-04-01",
 		"end_date":"2026-04-02",
 		"user_path":"team/alpha",
 		"selector":"smart",
 		"confirmation":"recalculate"
-	}`)
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", body)
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(dashboardTimeZoneHeader, "Europe/Warsaw")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.RecalculateUsagePricing(c); err != nil {
-		t.Fatalf("RecalculateUsagePricing() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if recalculator.calls != 1 {
-		t.Fatalf("recalculator calls = %d, want 1", recalculator.calls)
-	}
+	}`, echotest.WithHeader(dashboardTimeZoneHeader, "Europe/Warsaw"))
+	err := h.RecalculateUsagePricing(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, recalculator.calls)
 
 	params := recalculator.params
-	if params.Provider != "openai" || params.Model != "gpt-4o" {
-		t.Fatalf("selector params = %q/%q, want openai/gpt-4o", params.Provider, params.Model)
-	}
-	if params.UserPath != "/team/alpha" {
-		t.Fatalf("UserPath = %q, want /team/alpha", params.UserPath)
-	}
-	if params.CacheMode != usage.CacheModeAll {
-		t.Fatalf("CacheMode = %q, want %q", params.CacheMode, usage.CacheModeAll)
-	}
+	assert.Equal(t, "openai", params.Provider)
+	assert.Equal(t, "gpt-4o", params.Model)
+	assert.Equal(t, "/team/alpha", params.UserPath)
+	assert.Equal(t, usage.CacheModeAll, params.CacheMode)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("LoadLocation() error = %v", err)
-	}
-	wantStart := time.Date(2026, 4, 1, 0, 0, 0, 0, location)
-	wantEnd := time.Date(2026, 4, 2, 0, 0, 0, 0, location)
-	if !params.StartDate.Equal(wantStart) || !params.EndDate.Equal(wantEnd) {
-		t.Fatalf("date range = %s to %s, want %s to %s", params.StartDate, params.EndDate, wantStart, wantEnd)
-	}
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Date(2026, 4, 1, 0, 0, 0, 0, location), params.StartDate, 0)
+	assert.WithinDuration(t, time.Date(2026, 4, 2, 0, 0, 0, 0, location), params.EndDate, 0)
 
-	var result usage.RecalculatePricingResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if result.Recalculated != 2 || result.WithPricing != 2 {
-		t.Fatalf("result = %+v, want recalculated=2 with_pricing=2", result)
-	}
+	result := echotest.Decode[usage.RecalculatePricingResult](t, rec)
+	assert.Equal(t, int64(2), result.Recalculated)
+	assert.Equal(t, int64(2), result.WithPricing)
 }
 
-func TestRecalculateUsagePricingRequiresConfirmation(t *testing.T) {
-	recalculator := &mockPricingRecalculator{}
-	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"nope"}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.RecalculateUsagePricing(c); err != nil {
-		t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
-	}
-	if recalculator.calls != 0 {
-		t.Fatalf("recalculator calls = %d, want 0", recalculator.calls)
-	}
-}
-
-func TestRecalculateUsagePricingAcceptsConfirmAlias(t *testing.T) {
+func TestRecalculateUsagePricingConfirmation(t *testing.T) {
 	tests := []struct {
 		name      string
 		body      string
 		wantCode  int
 		wantCalls int
 	}{
+		{
+			name:      "confirmation rejected",
+			body:      `{"confirmation":"nope"}`,
+			wantCode:  http.StatusBadRequest,
+			wantCalls: 0,
+		},
 		{
 			name:      "confirm alias accepted",
 			body:      `{"confirm":"recalculate"}`,
@@ -167,21 +122,11 @@ func TestRecalculateUsagePricingAcceptsConfirmAlias(t *testing.T) {
 			}
 			h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(test.body))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-
-			if err := h.RecalculateUsagePricing(c); err != nil {
-				t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-			}
-			if rec.Code != test.wantCode {
-				t.Fatalf("status = %d, want %d body=%s", rec.Code, test.wantCode, rec.Body.String())
-			}
-			if recalculator.calls != test.wantCalls {
-				t.Fatalf("recalculator calls = %d, want %d", recalculator.calls, test.wantCalls)
-			}
+			c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", test.body)
+			err := h.RecalculateUsagePricing(c)
+			require.NoError(t, err)
+			require.Equal(t, test.wantCode, rec.Code, rec.Body.String())
+			assert.Equal(t, test.wantCalls, recalculator.calls)
 		})
 	}
 }
@@ -213,24 +158,12 @@ func TestRecalculateUsagePricingFeatureUnavailable(t *testing.T) {
 			recalculator := &mockPricingRecalculator{}
 			h := test.handler(recalculator)
 
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-
-			if err := h.RecalculateUsagePricing(c); err != nil {
-				t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-			}
-			if rec.Code != http.StatusServiceUnavailable {
-				t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), test.wantError) {
-				t.Fatalf("response body = %s, want %q", rec.Body.String(), test.wantError)
-			}
-			if recalculator.calls != 0 {
-				t.Fatalf("recalculator calls = %d, want 0", recalculator.calls)
-			}
+			c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", `{"confirmation":"recalculate"}`)
+			err := h.RecalculateUsagePricing(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), test.wantError)
+			assert.Equal(t, 0, recalculator.calls)
 		})
 	}
 }
@@ -239,24 +172,12 @@ func TestRecalculateUsagePricingInvalidSelector(t *testing.T) {
 	recalculator := &mockPricingRecalculator{}
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate","selector":"invalid"}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.RecalculateUsagePricing(c); err != nil {
-		t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "invalid selector") {
-		t.Fatalf("response body = %s, want invalid selector message", rec.Body.String())
-	}
-	if recalculator.calls != 0 {
-		t.Fatalf("recalculator calls = %d, want 0", recalculator.calls)
-	}
+	c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", `{"confirmation":"recalculate","selector":"invalid"}`)
+	err := h.RecalculateUsagePricing(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "invalid selector")
+	assert.Equal(t, 0, recalculator.calls)
 }
 
 func TestRecalculateUsagePricingRejectsInvalidDateAndUserPath(t *testing.T) {
@@ -292,24 +213,12 @@ func TestRecalculateUsagePricingRejectsInvalidDateAndUserPath(t *testing.T) {
 			recalculator := &mockPricingRecalculator{}
 			h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(test.body))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-
-			if err := h.RecalculateUsagePricing(c); err != nil {
-				t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), test.wantError) {
-				t.Fatalf("response body = %s, want %q", rec.Body.String(), test.wantError)
-			}
-			if recalculator.calls != 0 {
-				t.Fatalf("recalculator calls = %d, want 0", recalculator.calls)
-			}
+			c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", test.body)
+			err := h.RecalculateUsagePricing(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), test.wantError)
+			assert.Equal(t, 0, recalculator.calls)
 		})
 	}
 }
@@ -328,28 +237,15 @@ func TestRecalculateUsagePricingDefaultsDateRange(t *testing.T) {
 	}
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.RecalculateUsagePricing(c); err != nil {
-		t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if recalculator.calls != 1 {
-		t.Fatalf("recalculator calls = %d, want 1", recalculator.calls)
-	}
+	c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", `{"confirmation":"recalculate"}`)
+	err := h.RecalculateUsagePricing(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, recalculator.calls)
 
 	expectedEnd := time.Date(2026, 4, 28, 0, 0, 0, 0, time.UTC)
-	expectedStart := expectedEnd.AddDate(0, 0, -(defaultDateRangeDays - 1))
-	if !recalculator.params.EndDate.Equal(expectedEnd) || !recalculator.params.StartDate.Equal(expectedStart) {
-		t.Fatalf("date range = %s to %s, want %s to %s",
-			recalculator.params.StartDate, recalculator.params.EndDate, expectedStart, expectedEnd)
-	}
+	assert.WithinDuration(t, expectedEnd, recalculator.params.EndDate, 0)
+	assert.WithinDuration(t, expectedEnd.AddDate(0, 0, -(defaultDateRangeDays-1)), recalculator.params.StartDate, 0)
 }
 
 func TestRecalculateUsagePricingClampsRequestedDays(t *testing.T) {
@@ -366,52 +262,27 @@ func TestRecalculateUsagePricingClampsRequestedDays(t *testing.T) {
 	}
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate","days":9999}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.RecalculateUsagePricing(c); err != nil {
-		t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if recalculator.calls != 1 {
-		t.Fatalf("recalculator calls = %d, want 1", recalculator.calls)
-	}
+	c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", `{"confirmation":"recalculate","days":9999}`)
+	err := h.RecalculateUsagePricing(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, recalculator.calls)
 
 	expectedEnd := time.Date(2026, 4, 28, 0, 0, 0, 0, time.UTC)
-	expectedStart := expectedEnd.AddDate(0, 0, -(maxDateRangeDays - 1))
-	if !recalculator.params.EndDate.Equal(expectedEnd) || !recalculator.params.StartDate.Equal(expectedStart) {
-		t.Fatalf("date range = %s to %s, want %s to %s",
-			recalculator.params.StartDate, recalculator.params.EndDate, expectedStart, expectedEnd)
-	}
+	assert.WithinDuration(t, expectedEnd, recalculator.params.EndDate, 0)
+	assert.WithinDuration(t, expectedEnd.AddDate(0, 0, -(maxDateRangeDays-1)), recalculator.params.StartDate, 0)
 }
 
 func TestRecalculateUsagePricingReturnsInternalErrorOnRecalculatorFailure(t *testing.T) {
 	recalculator := &mockPricingRecalculator{err: errors.New("storage write failed")}
 	h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.RecalculateUsagePricing(c); err != nil {
-		t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "failed to recalculate usage pricing") {
-		t.Fatalf("response body = %s, want recalculation failure message", rec.Body.String())
-	}
-	if recalculator.calls != 1 {
-		t.Fatalf("recalculator calls = %d, want 1", recalculator.calls)
-	}
+	c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", `{"confirmation":"recalculate"}`)
+	err := h.RecalculateUsagePricing(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "failed to recalculate usage pricing")
+	assert.Equal(t, 1, recalculator.calls)
 }
 
 func TestRecalculateUsagePricingPreservesExpectedRecalculatorErrors(t *testing.T) {
@@ -446,24 +317,12 @@ func TestRecalculateUsagePricingPreservesExpectedRecalculatorErrors(t *testing.T
 			recalculator := &mockPricingRecalculator{err: test.err}
 			h := NewHandler(nil, providers.NewModelRegistry(), WithUsagePricingRecalculator(recalculator))
 
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/admin/usage/recalculate-pricing", bytes.NewBufferString(`{"confirmation":"recalculate"}`))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-
-			if err := h.RecalculateUsagePricing(c); err != nil {
-				t.Fatalf("RecalculateUsagePricing() returned handler error: %v", err)
-			}
-			if rec.Code != test.wantStatus {
-				t.Fatalf("status = %d, want %d body=%s", rec.Code, test.wantStatus, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), test.wantBodyString) {
-				t.Fatalf("response body = %s, want %q", rec.Body.String(), test.wantBodyString)
-			}
-			if recalculator.calls != 1 {
-				t.Fatalf("recalculator calls = %d, want 1", recalculator.calls)
-			}
+			c, rec := echotest.Post(t, "/admin/usage/recalculate-pricing", `{"confirmation":"recalculate"}`)
+			err := h.RecalculateUsagePricing(c)
+			require.NoError(t, err)
+			require.Equal(t, test.wantStatus, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), test.wantBodyString)
+			assert.Equal(t, 1, recalculator.calls)
 		})
 	}
 }

@@ -1,7 +1,6 @@
 package responsecache
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 )
 
 // vetoState stands in for the plugin request state the runtime attaches to
@@ -37,53 +36,40 @@ func TestHandleRequest_PluginNoStoreSkipsCacheWrites(t *testing.T) {
 	}
 
 	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"plugin-no-store"}]}`)
-	e := echo.New()
 	handlerCalls := 0
 
 	run := func(veto bool) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
 		workflow := &core.Workflow{}
-		req = req.WithContext(core.WithWorkflow(req.Context(), workflow))
-		rec := httptest.NewRecorder()
-		c := e.NewContext(req, rec)
-		if err := m.HandleRequest(c, body, func() error {
+		c, rec := postWithWorkflow(t, "/v1/chat/completions", body, workflow)
+		err := m.HandleRequest(c, body, func() error {
 			handlerCalls++
 			// A plugin phase runs inside the handler and vetoes on the
 			// workflow the cache middleware already holds.
 			workflow.PluginState = &vetoState{noStore: veto}
 			return c.JSON(http.StatusOK, map[string]string{"n": "1"})
-		}); err != nil {
-			t.Fatalf("HandleRequest: %v", err)
-		}
+		})
+		require.NoError(t, err)
+
 		return rec
 	}
 
 	rec1 := run(true)
-	if rec1.Header().Get("X-Cache") != "" {
-		t.Fatalf("vetoed response should not be a hit, got X-Cache=%q", rec1.Header().Get("X-Cache"))
-	}
+	require.Empty(t, rec1.Header().Get("X-Cache"))
+
 	m.simple.wg.Wait()
 	m.semantic.wg.Wait()
 
 	rec2 := run(false)
-	if rec2.Header().Get("X-Cache") != "" {
-		t.Fatalf("vetoed response must not populate either cache, got X-Cache=%q", rec2.Header().Get("X-Cache"))
-	}
-	if handlerCalls != 2 {
-		t.Fatalf("expected the second request to run the handler, got %d calls", handlerCalls)
-	}
+	require.Empty(t, rec2.Header().Get("X-Cache"))
+	require.Equal(t, 2, handlerCalls)
+
 	m.simple.wg.Wait()
 	m.semantic.wg.Wait()
 
 	rec3 := run(false)
-	if rec3.Header().Get("X-Cache") == "" {
-		t.Fatal("a response without a veto must be stored and served on the next request")
-	}
-	if handlerCalls != 2 {
-		t.Fatalf("expected a cache hit on the third request, got %d handler calls", handlerCalls)
-	}
+	require.NotEmpty(t, rec3.Header().Get("X-Cache"))
+	require.Equal(t, 2, handlerCalls)
 }
 
 func TestHandleInternalRequest_PluginNoStoreSkipsCacheWrites(t *testing.T) {
@@ -102,21 +88,20 @@ func TestHandleInternalRequest_PluginNoStoreSkipsCacheWrites(t *testing.T) {
 			workflow.PluginState = &vetoState{noStore: veto}
 			return &InternalResponse{StatusCode: http.StatusOK, ContentType: "application/json", Body: []byte(`{"n":1}`)}, nil
 		})
-		if err != nil {
-			t.Fatalf("HandleInternalRequest: %v", err)
-		}
+		require.NoError(t, err)
+
 		return result
 	}
+	r := run(true)
+	require.Empty(t, r.CacheType)
 
-	if r := run(true); r.CacheType != "" {
-		t.Fatalf("first call must miss, got cache type %q", r.CacheType)
-	}
 	m.simple.wg.Wait()
-	if r := run(false); r.CacheType != "" || calls != 2 {
-		t.Fatalf("vetoed response must not be stored: cache type %q, calls %d", r.CacheType, calls)
-	}
+	r = run(false)
+	require.Empty(t, r.CacheType)
+	require.Equal(t, 2, calls)
+
 	m.simple.wg.Wait()
-	if r := run(false); r.CacheType != CacheTypeExact || calls != 2 {
-		t.Fatalf("un-vetoed response must be stored: cache type %q, calls %d", r.CacheType, calls)
-	}
+	r = run(false)
+	require.Equal(t, CacheTypeExact, r.CacheType)
+	require.Equal(t, 2, calls)
 }

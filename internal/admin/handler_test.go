@@ -9,14 +9,15 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -236,32 +237,28 @@ func (m *handlerMockProvider) Embeddings(_ context.Context, _ *core.EmbeddingReq
 	return nil, core.NewInvalidRequestError("not supported", nil)
 }
 
-func newHandlerContext(path string) (*echo.Context, *httptest.ResponseRecorder) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	rec := httptest.NewRecorder()
-	return e.NewContext(req, rec), rec
+// decodeErrorObject returns the "error" object of an OpenAI-style error body.
+func decodeErrorObject(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	body := echotest.Decode[map[string]any](t, rec)
+	errorBody, ok := body["error"].(map[string]any)
+	require.True(t, ok, "expected error payload, got %v", body)
+	return errorBody
 }
 
 // --- UsageSummary handler tests ---
 
 func TestUsageSummary_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/summary")
+	c, rec := echotest.Get(t, "/admin/usage/summary")
+	require.NoError(t, h.UsageSummary(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var summary usage.UsageSummary
-	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if summary.TotalRequests != 0 || summary.TotalInput != 0 || summary.TotalOutput != 0 || summary.TotalTokens != 0 {
-		t.Errorf("expected zeroed summary, got %+v", summary)
-	}
+	summary := echotest.Decode[usage.UsageSummary](t, rec)
+	assert.Equal(t, 0, summary.TotalRequests)
+	assert.Equal(t, int64(0), summary.TotalInput)
+	assert.Equal(t, int64(0), summary.TotalOutput)
+	assert.Equal(t, int64(0), summary.TotalTokens)
 }
 
 func TestUsageSummary_Success(t *testing.T) {
@@ -274,24 +271,13 @@ func TestUsageSummary_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/summary?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/summary?days=30")
+	require.NoError(t, h.UsageSummary(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var summary usage.UsageSummary
-	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if summary.TotalRequests != 42 {
-		t.Errorf("expected 42 requests, got %d", summary.TotalRequests)
-	}
-	if summary.TotalTokens != 1500 {
-		t.Errorf("expected 1500 total tokens, got %d", summary.TotalTokens)
-	}
+	summary := echotest.Decode[usage.UsageSummary](t, rec)
+	assert.Equal(t, 42, summary.TotalRequests)
+	assert.Equal(t, int64(1500), summary.TotalTokens)
 }
 
 func TestUsageSummary_IncludesCacheSplitFields(t *testing.T) {
@@ -305,61 +291,37 @@ func TestUsageSummary_IncludesCacheSplitFields(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/summary?days=30")
-
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/summary?days=30")
+	require.NoError(t, h.UsageSummary(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
 	for _, key := range []string{"uncached_input_tokens", "cached_input_tokens", "cache_write_input_tokens"} {
-		if !containsString(body, key) {
-			t.Errorf("expected %q in response body, got: %s", key, body)
-		}
+		assert.Contains(t, body, key)
 	}
 
-	var summary usage.UsageSummary
-	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if summary.UncachedInputTokens != 600 {
-		t.Errorf("expected 600 uncached input tokens, got %d", summary.UncachedInputTokens)
-	}
-	if summary.CachedInputTokens != 350 {
-		t.Errorf("expected 350 cached input tokens, got %d", summary.CachedInputTokens)
-	}
-	if summary.CacheWriteInputTokens != 50 {
-		t.Errorf("expected 50 cache-write input tokens, got %d", summary.CacheWriteInputTokens)
-	}
+	summary := echotest.Decode[usage.UsageSummary](t, rec)
+	assert.Equal(t, int64(600), summary.UncachedInputTokens)
+	assert.Equal(t, int64(350), summary.CachedInputTokens)
+	assert.Equal(t, int64(50), summary.CacheWriteInputTokens)
 }
 
 func TestUsageSummary_NilReaderZeroesCacheSplit(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/summary?days=30")
-
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/summary?days=30")
+	require.NoError(t, h.UsageSummary(c))
 
 	// Assert the keys are present (not just absent-as-zero) so a dropped field
 	// can't masquerade as a zero value after unmarshalling.
 	body := rec.Body.String()
 	for _, key := range []string{"uncached_input_tokens", "cached_input_tokens", "cache_write_input_tokens"} {
-		if !containsString(body, key) {
-			t.Errorf("expected %q in nil-reader response body, got: %s", key, body)
-		}
+		assert.Contains(t, body, key)
 	}
 
-	var summary usage.UsageSummary
-	if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if summary.UncachedInputTokens != 0 || summary.CachedInputTokens != 0 || summary.CacheWriteInputTokens != 0 {
-		t.Errorf("expected zero cache split for nil reader, got %+v", summary)
-	}
+	summary := echotest.Decode[usage.UsageSummary](t, rec)
+	assert.Equal(t, int64(0), summary.UncachedInputTokens)
+	assert.Equal(t, int64(0), summary.CachedInputTokens)
+	assert.Equal(t, int64(0), summary.CacheWriteInputTokens)
 }
 
 func TestUsageSummary_GatewayError(t *testing.T) {
@@ -367,18 +329,12 @@ func TestUsageSummary_GatewayError(t *testing.T) {
 		summaryErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/summary")
+	c, rec := echotest.Get(t, "/admin/usage/summary")
+	require.NoError(t, h.UsageSummary(c))
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
 
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("expected 502, got %d", rec.Code)
-	}
 	body := rec.Body.String()
-	if !containsString(body, "provider_error") {
-		t.Errorf("expected provider_error in body, got: %s", body)
-	}
+	assert.Contains(t, body, "provider_error")
 }
 
 func TestUsageSummary_GenericError(t *testing.T) {
@@ -386,24 +342,14 @@ func TestUsageSummary_GenericError(t *testing.T) {
 		summaryErr: errors.New("database connection lost"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/summary")
+	c, rec := echotest.Get(t, "/admin/usage/summary")
+	require.NoError(t, h.UsageSummary(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
-	}
 	body := rec.Body.String()
-	if !containsString(body, "internal_error") {
-		t.Errorf("expected internal_error in body, got: %s", body)
-	}
-	if containsString(body, "database connection lost") {
-		t.Errorf("original error message should be hidden, got: %s", body)
-	}
-	if !containsString(body, "an unexpected error occurred") {
-		t.Errorf("expected generic message, got: %s", body)
-	}
+	assert.Contains(t, body, "internal_error")
+	assert.NotContains(t, body, "database connection lost")
+	assert.Contains(t, body, "an unexpected error occurred")
 }
 
 func TestUsageSummary_WithPersistedCosts(t *testing.T) {
@@ -424,29 +370,20 @@ func TestUsageSummary_WithPersistedCosts(t *testing.T) {
 	}
 
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/summary?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/summary?days=30")
+	require.NoError(t, h.UsageSummary(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-
-	if cost, ok := result["total_input_cost"].(float64); !ok || cost != 3.0 {
-		t.Errorf("expected total_input_cost 3.0, got %v", result["total_input_cost"])
-	}
-	if cost, ok := result["total_output_cost"].(float64); !ok || cost != 7.5 {
-		t.Errorf("expected total_output_cost 7.5, got %v", result["total_output_cost"])
-	}
-	if cost, ok := result["total_cost"].(float64); !ok || cost != 10.5 {
-		t.Errorf("expected total_cost 10.5, got %v", result["total_cost"])
-	}
+	result := echotest.Decode[map[string]any](t, rec)
+	cost, ok := result["total_input_cost"].(float64)
+	assert.True(t, ok)
+	assert.Equal(t, 3.0, cost)
+	cost, ok = result["total_output_cost"].(float64)
+	assert.True(t, ok)
+	assert.Equal(t, 7.5, cost)
+	cost, ok = result["total_cost"].(float64)
+	assert.True(t, ok)
+	assert.Equal(t, 10.5, cost)
 }
 
 func TestUsageSummary_NilCosts(t *testing.T) {
@@ -460,45 +397,27 @@ func TestUsageSummary_NilCosts(t *testing.T) {
 	}
 
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/summary?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/summary?days=30")
+	require.NoError(t, h.UsageSummary(c))
 
-	if err := h.UsageSummary(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
+	result := echotest.Decode[map[string]any](t, rec)
 
 	// Cost fields should be null when reader returns nil costs
-	if result["total_cost"] != nil {
-		t.Errorf("expected total_cost to be null, got %v", result["total_cost"])
-	}
-	if result["total_input_cost"] != nil {
-		t.Errorf("expected total_input_cost to be null, got %v", result["total_input_cost"])
-	}
-	if result["total_output_cost"] != nil {
-		t.Errorf("expected total_output_cost to be null, got %v", result["total_output_cost"])
-	}
+	assert.Nil(t, result["total_cost"])
+	assert.Nil(t, result["total_input_cost"])
+	assert.Nil(t, result["total_output_cost"])
 }
 
 // --- DailyUsage handler tests ---
 
 func TestDailyUsage_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/daily")
+	c, rec := echotest.Get(t, "/admin/usage/daily")
+	require.NoError(t, h.DailyUsage(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.DailyUsage(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
 	// Should be [] not null
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 func TestDailyUsage_Success(t *testing.T) {
@@ -509,21 +428,12 @@ func TestDailyUsage_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/daily?days=7")
+	c, rec := echotest.Get(t, "/admin/usage/daily?days=7")
+	require.NoError(t, h.DailyUsage(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.DailyUsage(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var daily []usage.DailyUsage
-	if err := json.Unmarshal(rec.Body.Bytes(), &daily); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(daily) != 2 {
-		t.Errorf("expected 2 entries, got %d", len(daily))
-	}
+	daily := echotest.Decode[[]usage.DailyUsage](t, rec)
+	assert.Len(t, daily, 2)
 }
 
 func TestDailyUsage_NilResult(t *testing.T) {
@@ -531,18 +441,12 @@ func TestDailyUsage_NilResult(t *testing.T) {
 		daily: nil, // reader returns nil slice
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/daily")
+	c, rec := echotest.Get(t, "/admin/usage/daily")
+	require.NoError(t, h.DailyUsage(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.DailyUsage(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
 	// Should be [] not null
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 func TestDailyUsage_Error(t *testing.T) {
@@ -550,35 +454,22 @@ func TestDailyUsage_Error(t *testing.T) {
 		dailyErr: core.NewRateLimitError("test", "too many requests"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/daily")
+	c, rec := echotest.Get(t, "/admin/usage/daily")
+	require.NoError(t, h.DailyUsage(c))
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 
-	if err := h.DailyUsage(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("expected 429, got %d", rec.Code)
-	}
 	body := rec.Body.String()
-	if !containsString(body, "rate_limit_error") {
-		t.Errorf("expected rate_limit_error in body, got: %s", body)
-	}
+	assert.Contains(t, body, "rate_limit_error")
 }
 
 // --- UsageByModel handler tests ---
 
 func TestUsageByModel_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/models")
-
-	if err := h.UsageByModel(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/usage/models")
+	require.NoError(t, h.UsageByModel(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 func TestUsageByModel_Success(t *testing.T) {
@@ -589,27 +480,15 @@ func TestUsageByModel_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/models?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/models?days=30")
+	require.NoError(t, h.UsageByModel(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageByModel(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var models []usage.ModelUsage
-	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(models) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(models))
-	}
-	if models[0].Model != "gpt-4" {
-		t.Errorf("expected model gpt-4, got %s", models[0].Model)
-	}
-	if models[0].TotalCost == nil || *models[0].TotalCost != 1.5 {
-		t.Errorf("expected total_cost 1.5, got %v", models[0].TotalCost)
-	}
+	models := echotest.Decode[[]usage.ModelUsage](t, rec)
+	require.Len(t, models, 1)
+	assert.Equal(t, "gpt-4", models[0].Model)
+	require.NotNil(t, models[0].TotalCost)
+	assert.Equal(t, 1.5, *models[0].TotalCost)
 }
 
 func TestUsageByModel_PreservesProviderName(t *testing.T) {
@@ -619,28 +498,14 @@ func TestUsageByModel_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/models?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/models?days=30")
+	require.NoError(t, h.UsageByModel(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageByModel(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var models []usage.ModelUsage
-	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(models) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(models))
-	}
-	if models[0].ProviderName != "primary-openai" {
-		t.Fatalf("ProviderName = %q, want %q", models[0].ProviderName, "primary-openai")
-	}
-	if models[0].Provider != "openai" {
-		t.Fatalf("Provider = %q, want %q", models[0].Provider, "openai")
-	}
+	models := echotest.Decode[[]usage.ModelUsage](t, rec)
+	require.Len(t, models, 1)
+	require.Equal(t, "primary-openai", models[0].ProviderName)
+	require.Equal(t, "openai", models[0].Provider)
 }
 
 func TestUsageByModel_Error(t *testing.T) {
@@ -648,31 +513,19 @@ func TestUsageByModel_Error(t *testing.T) {
 		modelUsageErr: errors.New("db failure"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/models")
-
-	if err := h.UsageByModel(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/models")
+	require.NoError(t, h.UsageByModel(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 // --- UsageByUserPath handler tests ---
 
 func TestUsageByUserPath_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/user-paths")
-
-	if err := h.UsageByUserPath(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/usage/user-paths")
+	require.NoError(t, h.UsageByUserPath(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 func TestUsageByUserPath_Success(t *testing.T) {
@@ -683,30 +536,16 @@ func TestUsageByUserPath_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/user-paths?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/user-paths?days=30")
+	require.NoError(t, h.UsageByUserPath(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageByUserPath(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var userPaths []usage.UserPathUsage
-	if err := json.Unmarshal(rec.Body.Bytes(), &userPaths); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(userPaths) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(userPaths))
-	}
-	if userPaths[0].UserPath != "/team/alpha" {
-		t.Errorf("expected user_path /team/alpha, got %s", userPaths[0].UserPath)
-	}
-	if userPaths[0].TotalTokens != 150 {
-		t.Errorf("expected total_tokens 150, got %d", userPaths[0].TotalTokens)
-	}
-	if userPaths[0].TotalCost == nil || *userPaths[0].TotalCost != 0.75 {
-		t.Errorf("expected total_cost 0.75, got %v", userPaths[0].TotalCost)
-	}
+	userPaths := echotest.Decode[[]usage.UserPathUsage](t, rec)
+	require.Len(t, userPaths, 1)
+	assert.Equal(t, "/team/alpha", userPaths[0].UserPath)
+	assert.Equal(t, int64(150), userPaths[0].TotalTokens)
+	require.NotNil(t, userPaths[0].TotalCost)
+	assert.Equal(t, 0.75, *userPaths[0].TotalCost)
 }
 
 func TestUsageByUserPath_Error(t *testing.T) {
@@ -714,31 +553,19 @@ func TestUsageByUserPath_Error(t *testing.T) {
 		userPathUsageErr: errors.New("db failure"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/user-paths")
-
-	if err := h.UsageByUserPath(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/user-paths")
+	require.NoError(t, h.UsageByUserPath(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 // --- UsageByLabel handler tests ---
 
 func TestUsageByLabel_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/labels")
-
-	if err := h.UsageByLabel(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/usage/labels")
+	require.NoError(t, h.UsageByLabel(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 func TestUsageByLabel_Success(t *testing.T) {
@@ -749,30 +576,16 @@ func TestUsageByLabel_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/labels?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/labels?days=30")
+	require.NoError(t, h.UsageByLabel(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageByLabel(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var labels []usage.LabelUsage
-	if err := json.Unmarshal(rec.Body.Bytes(), &labels); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(labels) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(labels))
-	}
-	if labels[0].Label != "team-alpha" {
-		t.Errorf("expected label team-alpha, got %s", labels[0].Label)
-	}
-	if labels[0].Requests != 4 {
-		t.Errorf("expected requests 4, got %d", labels[0].Requests)
-	}
-	if labels[0].TotalCost == nil || *labels[0].TotalCost != 1.25 {
-		t.Errorf("expected total_cost 1.25, got %v", labels[0].TotalCost)
-	}
+	labels := echotest.Decode[[]usage.LabelUsage](t, rec)
+	require.Len(t, labels, 1)
+	assert.Equal(t, "team-alpha", labels[0].Label)
+	assert.Equal(t, 4, labels[0].Requests)
+	require.NotNil(t, labels[0].TotalCost)
+	assert.Equal(t, 1.25, *labels[0].TotalCost)
 }
 
 func TestUsageByLabel_Error(t *testing.T) {
@@ -780,14 +593,9 @@ func TestUsageByLabel_Error(t *testing.T) {
 		labelUsageErr: errors.New("db failure"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/labels")
-
-	if err := h.UsageByLabel(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/labels")
+	require.NoError(t, h.UsageByLabel(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 // --- UsageLog handler tests ---
@@ -797,28 +605,14 @@ func TestUsageLog_NilReader(t *testing.T) {
 	// Omit limit, as a paging client's first request may. The disabled-reader
 	// path must report the default page size (not 0) so the client never resends
 	// limit=0 (which 400s).
-	c, rec := newHandlerContext("/admin/usage/log")
+	c, rec := echotest.Get(t, "/admin/usage/log")
+	require.NoError(t, h.UsageLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-
-	var result usage.UsageLogResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 0 {
-		t.Errorf("expected 0 entries, got %d", len(result.Entries))
-	}
-	if result.Offset != 0 {
-		t.Errorf("expected echoed offset 0, got %d", result.Offset)
-	}
-	if result.Limit != 50 {
-		t.Errorf("expected default echoed limit 50, got %d", result.Limit)
-	}
+	result := echotest.Decode[usage.UsageLogResult](t, rec)
+	assert.Empty(t, result.Entries)
+	assert.Equal(t, 0, result.Offset)
+	assert.Equal(t, 50, result.Limit)
 }
 
 func TestUsageLog_Success(t *testing.T) {
@@ -835,37 +629,19 @@ func TestUsageLog_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/log?days=30&limit=50&offset=0")
+	c, rec := echotest.Get(t, "/admin/usage/log?days=30&limit=50&offset=0")
+	require.NoError(t, h.UsageLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-
-	var result usage.UsageLogResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(result.Entries))
-	}
-	if result.Total != 2 {
-		t.Errorf("expected total 2, got %d", result.Total)
-	}
-	if result.Entries[0].Model != "gpt-4" {
-		t.Errorf("expected first entry model gpt-4, got %s", result.Entries[0].Model)
-	}
-	if result.Entries[0].RawData == nil {
-		t.Fatal("expected raw_data on first entry, got nil")
-	}
-	if ct, ok := result.Entries[0].RawData["cached_tokens"].(float64); !ok || ct != 50 {
-		t.Errorf("expected cached_tokens 50, got %v", result.Entries[0].RawData["cached_tokens"])
-	}
-	if result.Entries[1].RawData != nil {
-		t.Errorf("expected nil raw_data on second entry, got %v", result.Entries[1].RawData)
-	}
+	result := echotest.Decode[usage.UsageLogResult](t, rec)
+	require.Len(t, result.Entries, 2)
+	assert.Equal(t, 2, result.Total)
+	assert.Equal(t, "gpt-4", result.Entries[0].Model)
+	require.NotNil(t, result.Entries[0].RawData)
+	ct, ok := result.Entries[0].RawData["cached_tokens"].(float64)
+	assert.True(t, ok)
+	assert.Equal(t, float64(50), ct)
+	assert.Nil(t, result.Entries[1].RawData)
 }
 
 func TestUsageLog_PreservesProviderName(t *testing.T) {
@@ -889,28 +665,14 @@ func TestUsageLog_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/log?days=30")
+	c, rec := echotest.Get(t, "/admin/usage/log?days=30")
+	require.NoError(t, h.UsageLog(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var result usage.UsageLogResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
-	}
-	if result.Entries[0].ProviderName != "primary-openai" {
-		t.Fatalf("ProviderName = %q, want %q", result.Entries[0].ProviderName, "primary-openai")
-	}
-	if result.Entries[0].Provider != "openai" {
-		t.Fatalf("Provider = %q, want %q", result.Entries[0].Provider, "openai")
-	}
+	result := echotest.Decode[usage.UsageLogResult](t, rec)
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, "primary-openai", result.Entries[0].ProviderName)
+	require.Equal(t, "openai", result.Entries[0].Provider)
 }
 
 func TestUsageLog_Error(t *testing.T) {
@@ -918,14 +680,9 @@ func TestUsageLog_Error(t *testing.T) {
 		usageLogErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/log")
-
-	if err := h.UsageLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("expected 502, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/log")
+	require.NoError(t, h.UsageLog(c))
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
 func TestUsageLog_WithFilters(t *testing.T) {
@@ -938,23 +695,12 @@ func TestUsageLog_WithFilters(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&search=test&limit=10&offset=5")
-
-	if err := h.UsageLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if reader.lastUsageLog.UserPath != "/team" {
-		t.Errorf("expected user_path /team, got %q", reader.lastUsageLog.UserPath)
-	}
-	if reader.lastUsageLog.Label != "team-alpha" {
-		t.Errorf("expected label team-alpha, got %q", reader.lastUsageLog.Label)
-	}
-	if reader.lastUsageLog.SessionID != "scoped-session" {
-		t.Errorf("expected session_id scoped-session, got %q", reader.lastUsageLog.SessionID)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/log?model=gpt-4&provider=openai&user_path=/team&label=team-alpha&session_id=scoped-session&search=test&limit=10&offset=5")
+	require.NoError(t, h.UsageLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/team", reader.lastUsageLog.UserPath)
+	assert.Equal(t, "team-alpha", reader.lastUsageLog.Label)
+	assert.Equal(t, "scoped-session", reader.lastUsageLog.SessionID)
 }
 
 func TestUsageBySession_Success(t *testing.T) {
@@ -965,24 +711,20 @@ func TestUsageBySession_Success(t *testing.T) {
 		Total: 1, Limit: 25, Offset: 10,
 	}}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/sessions?limit=25&offset=10&session_id=scoped-session")
+	c, rec := echotest.Get(t, "/admin/usage/sessions?limit=25&offset=10&session_id=scoped-session")
+	require.NoError(t, h.UsageBySession(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.UsageBySession(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var result usage.SessionUsageResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if result.Total != 1 || result.Limit != 25 || result.Offset != 10 || len(result.Entries) != 1 || result.Entries[0].SessionID != "scoped-session" || result.Entries[0].Requests != 2 {
-		t.Fatalf("result = %+v", result)
-	}
-	if reader.lastSessionUsage.Limit != 25 || reader.lastSessionUsage.Offset != 10 || reader.lastSessionUsage.SessionID != "scoped-session" {
-		t.Fatalf("params = %+v", reader.lastSessionUsage)
-	}
+	result := echotest.Decode[usage.SessionUsageResult](t, rec)
+	require.Equal(t, 1, result.Total)
+	require.Equal(t, 25, result.Limit)
+	require.Equal(t, 10, result.Offset)
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, "scoped-session", result.Entries[0].SessionID)
+	require.Equal(t, 2, result.Entries[0].Requests)
+	require.Equal(t, 25, reader.lastSessionUsage.Limit)
+	require.Equal(t, 10, reader.lastSessionUsage.Offset)
+	require.Equal(t, "scoped-session", reader.lastSessionUsage.SessionID)
 }
 
 func TestUsageBySessionRejectsInvalidPagination(t *testing.T) {
@@ -992,37 +734,22 @@ func TestUsageBySessionRejectsInvalidPagination(t *testing.T) {
 		"/admin/usage/sessions?offset=-1",
 	} {
 		h := NewHandler(&mockUsageReader{}, nil)
-		c, rec := newHandlerContext(path)
-		if err := h.UsageBySession(c); err != nil {
-			t.Fatalf("%s: unexpected handler error: %v", path, err)
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("%s: status = %d, want 400", path, rec.Code)
-		}
+		c, rec := echotest.Get(t, path)
+		require.NoError(t, h.UsageBySession(c))
+		require.Equal(t, http.StatusBadRequest, rec.Code, path)
 	}
 }
 
 func TestUsageBySessionUsesDefaultLimit(t *testing.T) {
 	reader := &mockUsageReader{sessionUsage: &usage.SessionUsageResult{Entries: []usage.SessionUsage{}}}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/sessions")
+	c, rec := echotest.Get(t, "/admin/usage/sessions")
+	require.NoError(t, h.UsageBySession(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, defaultSessionUsageLimit, reader.lastSessionUsage.Limit)
 
-	if err := h.UsageBySession(c); err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if reader.lastSessionUsage.Limit != defaultSessionUsageLimit {
-		t.Fatalf("reader limit = %d, want %d", reader.lastSessionUsage.Limit, defaultSessionUsageLimit)
-	}
-	var result usage.SessionUsageResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if result.Limit != defaultSessionUsageLimit {
-		t.Fatalf("response limit = %d, want %d", result.Limit, defaultSessionUsageLimit)
-	}
+	result := echotest.Decode[usage.SessionUsageResult](t, rec)
+	require.Equal(t, defaultSessionUsageLimit, result.Limit)
 }
 
 func TestUsageBySessionPropagatesReaderError(t *testing.T) {
@@ -1030,14 +757,9 @@ func TestUsageBySessionPropagatesReaderError(t *testing.T) {
 		sessionUsageErr: core.NewProviderError("usage", http.StatusBadGateway, "reader unavailable", nil),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/sessions")
-
-	if err := h.UsageBySession(c); err != nil {
-		t.Fatalf("unexpected handler error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/sessions")
+	require.NoError(t, h.UsageBySession(c))
+	require.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
 // --- AuditLog handler tests ---
@@ -1047,28 +769,14 @@ func TestAuditLog_NilReader(t *testing.T) {
 	// Omit limit, as a paging client's first request may. The disabled-reader
 	// path must report the default page size (not 0) so the client never resends
 	// limit=0 (which 400s).
-	c, rec := newHandlerContext("/admin/audit/log")
+	c, rec := echotest.Get(t, "/admin/audit/log")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-
-	var result auditlog.LogListResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 0 {
-		t.Errorf("expected 0 entries, got %d", len(result.Entries))
-	}
-	if result.Offset != 0 {
-		t.Errorf("expected echoed offset 0, got %d", result.Offset)
-	}
-	if result.Limit != 25 {
-		t.Errorf("expected default echoed limit 25, got %d", result.Limit)
-	}
+	result := echotest.Decode[auditlog.LogListResult](t, rec)
+	assert.Empty(t, result.Entries)
+	assert.Equal(t, 0, result.Offset)
+	assert.Equal(t, 25, result.Limit)
 }
 
 func TestAuditLog_Success(t *testing.T) {
@@ -1103,35 +811,19 @@ func TestAuditLog_Success(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?days=7")
+	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
+	result := echotest.Decode[auditlog.LogListResult](t, rec)
+	require.Len(t, result.Entries, 1)
+	assert.Equal(t, 1, result.Total)
+	assert.Equal(t, "log-1", result.Entries[0].ID)
 
-	var result auditlog.LogListResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
-	}
-	if result.Total != 1 {
-		t.Errorf("expected total 1, got %d", result.Total)
-	}
-	if result.Entries[0].ID != "log-1" {
-		t.Errorf("expected entry id log-1, got %s", result.Entries[0].ID)
-	}
 	// List entries are slim: bodies live behind /admin/audit/detail.
-	if result.Entries[0].Data == nil {
-		t.Fatal("expected entry data to be present")
-	}
-	if result.Entries[0].Data.RequestBody != nil || result.Entries[0].Data.ResponseBody != nil {
-		t.Errorf("expected list entry bodies to be stripped, got %+v", result.Entries[0].Data)
-	}
+	require.NotNil(t, result.Entries[0].Data)
+	assert.Nil(t, result.Entries[0].Data.RequestBody)
+	assert.Nil(t, result.Entries[0].Data.ResponseBody)
 }
 
 func TestAuditLog_EmitsRequestedModel(t *testing.T) {
@@ -1157,29 +849,18 @@ func TestAuditLog_EmitsRequestedModel(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?search=req-1")
-
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/log?search=req-1")
+	require.NoError(t, h.AuditLog(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	var result struct {
 		Entries []struct {
 			RequestedModel string `json:"requested_model"`
 		} `json:"entries"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
-	}
-	if result.Entries[0].RequestedModel != "does-not-exist-model" {
-		t.Fatalf("requested_model = %q, want does-not-exist-model", result.Entries[0].RequestedModel)
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, "does-not-exist-model", result.Entries[0].RequestedModel)
 }
 
 func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
@@ -1220,99 +901,52 @@ func TestAuditLog_EnrichesEntriesWithUsageSummary(t *testing.T) {
 	}
 
 	h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
-	c, rec := newHandlerContext("/admin/audit/log?days=7")
+	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
+	require.NoError(t, h.AuditLog(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var result auditLogListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
-	}
-	if len(usageReader.lastRequestIDs) != 1 || usageReader.lastRequestIDs[0] != "req-1" {
-		t.Fatalf("lastRequestIDs = %#v, want [req-1]", usageReader.lastRequestIDs)
-	}
-	if result.Entries[0].Usage == nil {
-		t.Fatal("expected usage summary to be attached")
-	}
-	if result.Entries[0].Usage.CachedInputTokens != 150 {
-		t.Fatalf("CachedInputTokens = %d, want 150", result.Entries[0].Usage.CachedInputTokens)
-	}
-	if result.Entries[0].Usage.InputTokens != 200 {
-		t.Fatalf("InputTokens = %d, want 200", result.Entries[0].Usage.InputTokens)
-	}
-	if result.Entries[0].Usage.TotalTokens != 240 {
-		t.Fatalf("TotalTokens = %d, want 240", result.Entries[0].Usage.TotalTokens)
-	}
+	result := echotest.Decode[auditLogListResponse](t, rec)
+	require.Len(t, result.Entries, 1)
+	require.Len(t, usageReader.lastRequestIDs, 1)
+	require.Equal(t, "req-1", usageReader.lastRequestIDs[0])
+	require.NotNil(t, result.Entries[0].Usage)
+	require.Equal(t, int64(150), result.Entries[0].Usage.CachedInputTokens)
+	require.Equal(t, int64(200), result.Entries[0].Usage.InputTokens)
+	require.Equal(t, int64(240), result.Entries[0].Usage.TotalTokens)
 }
 
 func TestAuditLogDetail_MissingLogID(t *testing.T) {
 	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{}))
-	c, rec := newHandlerContext("/admin/audit/detail")
-
-	if err := h.AuditLogDetail(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if !strings.Contains(rec.Body.String(), "log_id is required") {
-		t.Fatalf("body = %q, want log_id error", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/audit/detail")
+	require.NoError(t, h.AuditLogDetail(c))
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "log_id is required")
 }
 
 func TestAuditLogDetail_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/audit/detail?log_id=log-1")
-
-	if err := h.AuditLogDetail(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
-	}
-	if !strings.Contains(rec.Body.String(), "audit log detail is unavailable") {
-		t.Fatalf("body = %q, want unavailable error", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=log-1")
+	require.NoError(t, h.AuditLogDetail(c))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "audit log detail is unavailable")
 }
 
 func TestAuditLogDetail_NotFound(t *testing.T) {
 	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{}))
-	c, rec := newHandlerContext("/admin/audit/detail?log_id=missing")
-
-	if err := h.AuditLogDetail(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
-	}
-	if !strings.Contains(rec.Body.String(), "audit log not found: missing") {
-		t.Fatalf("body = %q, want not found error", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=missing")
+	require.NoError(t, h.AuditLogDetail(c))
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Contains(t, rec.Body.String(), "audit log not found: missing")
 }
 
 func TestAuditLogDetail_PropagatesReaderError(t *testing.T) {
 	h := NewHandler(nil, nil, WithAuditReader(&mockAuditReader{
 		logByIDErr: core.NewProviderError("audit", http.StatusServiceUnavailable, "audit reader unavailable", nil),
 	}))
-	c, rec := newHandlerContext("/admin/audit/detail?log_id=log-1")
-
-	if err := h.AuditLogDetail(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
-	}
-	if !strings.Contains(rec.Body.String(), "audit reader unavailable") {
-		t.Fatalf("body = %q, want propagated reader error", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=log-1")
+	require.NoError(t, h.AuditLogDetail(c))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.Contains(t, rec.Body.String(), "audit reader unavailable")
 }
 
 func TestAuditLogDetail_SuccessEnrichesUsage(t *testing.T) {
@@ -1345,34 +979,17 @@ func TestAuditLogDetail_SuccessEnrichesUsage(t *testing.T) {
 		},
 	}
 	h := NewHandler(usageReader, nil, WithAuditReader(auditReader))
-	c, rec := newHandlerContext("/admin/audit/detail?log_id=log-1")
+	c, rec := echotest.Get(t, "/admin/audit/detail?log_id=log-1")
+	require.NoError(t, h.AuditLogDetail(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditLogDetail(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	var result auditLogEntryResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
-	}
-	if result.ID != "log-1" {
-		t.Fatalf("ID = %q, want log-1", result.ID)
-	}
-	if len(usageReader.lastRequestIDs) != 1 || usageReader.lastRequestIDs[0] != "req-1" {
-		t.Fatalf("lastRequestIDs = %#v, want [req-1]", usageReader.lastRequestIDs)
-	}
-	if result.Usage == nil {
-		t.Fatal("expected usage summary")
-	}
-	if result.Usage.CachedInputTokens != 150 {
-		t.Fatalf("CachedInputTokens = %d, want 150", result.Usage.CachedInputTokens)
-	}
-	if result.Usage.TotalTokens != 240 {
-		t.Fatalf("TotalTokens = %d, want 240", result.Usage.TotalTokens)
-	}
+	result := echotest.Decode[auditLogEntryResponse](t, rec)
+	require.Equal(t, "log-1", result.ID)
+	require.Len(t, usageReader.lastRequestIDs, 1)
+	require.Equal(t, "req-1", usageReader.lastRequestIDs[0])
+	require.NotNil(t, result.Usage)
+	require.Equal(t, int64(150), result.Usage.CachedInputTokens)
+	require.Equal(t, int64(240), result.Usage.TotalTokens)
 }
 
 func TestAuditLog_PreservesProviderName(t *testing.T) {
@@ -1395,28 +1012,14 @@ func TestAuditLog_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?days=7")
+	c, rec := echotest.Get(t, "/admin/audit/log?days=7")
+	require.NoError(t, h.AuditLog(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var result auditlog.LogListResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(result.Entries))
-	}
-	if result.Entries[0].ProviderName != "primary-openai" {
-		t.Fatalf("ProviderName = %q, want %q", result.Entries[0].ProviderName, "primary-openai")
-	}
-	if result.Entries[0].Provider != "openai" {
-		t.Fatalf("Provider = %q, want %q", result.Entries[0].Provider, "openai")
-	}
+	result := echotest.Decode[auditlog.LogListResult](t, rec)
+	require.Len(t, result.Entries, 1)
+	require.Equal(t, "primary-openai", result.Entries[0].ProviderName)
+	require.Equal(t, "openai", result.Entries[0].Provider)
 }
 
 func TestAuditLog_WithFilters(t *testing.T) {
@@ -1430,45 +1033,22 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	}
 
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
-
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-
-	if reader.lastQuery.RequestedModel != "gpt-4" {
-		t.Errorf("expected requested model filter gpt-4, got %q", reader.lastQuery.RequestedModel)
-	}
-	if reader.lastQuery.Provider != "openai" {
-		t.Errorf("expected provider filter openai, got %q", reader.lastQuery.Provider)
-	}
-	if reader.lastQuery.Method != http.MethodPost {
-		t.Errorf("expected method POST, got %q", reader.lastQuery.Method)
-	}
-	if reader.lastQuery.Path != "/v1/chat/completions" {
-		t.Errorf("expected path filter to match, got %q", reader.lastQuery.Path)
-	}
-	if reader.lastQuery.UserPath != "/team" {
-		t.Errorf("expected user_path filter to match, got %q", reader.lastQuery.UserPath)
-	}
-	if reader.lastQuery.ErrorType != "provider_error" {
-		t.Errorf("expected error_type provider_error, got %q", reader.lastQuery.ErrorType)
-	}
-	if reader.lastQuery.StatusCode == nil || *reader.lastQuery.StatusCode != 502 {
-		t.Errorf("expected status_code 502, got %+v", reader.lastQuery.StatusCode)
-	}
-	if reader.lastQuery.Stream == nil || !*reader.lastQuery.Stream {
-		t.Errorf("expected stream filter true, got %+v", reader.lastQuery.Stream)
-	}
-	if reader.lastQuery.Search != "timeout" {
-		t.Errorf("expected search timeout, got %q", reader.lastQuery.Search)
-	}
-	if reader.lastQuery.Limit != 10 || reader.lastQuery.Offset != 5 {
-		t.Errorf("expected limit/offset 10/5, got %d/%d", reader.lastQuery.Limit, reader.lastQuery.Offset)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/log?model=gpt-4&provider=openai&method=post&path=/v1/chat/completions&user_path=/team&error_type=provider_error&status_code=502&stream=true&search=timeout&limit=10&offset=5")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "gpt-4", reader.lastQuery.RequestedModel)
+	assert.Equal(t, "openai", reader.lastQuery.Provider)
+	assert.Equal(t, http.MethodPost, reader.lastQuery.Method)
+	assert.Equal(t, "/v1/chat/completions", reader.lastQuery.Path)
+	assert.Equal(t, "/team", reader.lastQuery.UserPath)
+	assert.Equal(t, "provider_error", reader.lastQuery.ErrorType)
+	require.NotNil(t, reader.lastQuery.StatusCode)
+	assert.Equal(t, 502, *reader.lastQuery.StatusCode)
+	require.NotNil(t, reader.lastQuery.Stream)
+	assert.True(t, *reader.lastQuery.Stream)
+	assert.Equal(t, "timeout", reader.lastQuery.Search)
+	assert.Equal(t, 10, reader.lastQuery.Limit)
+	assert.Equal(t, 5, reader.lastQuery.Offset)
 }
 
 func TestAuditLog_InvalidStatusCode(t *testing.T) {
@@ -1476,17 +1056,10 @@ func TestAuditLog_InvalidStatusCode(t *testing.T) {
 		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?status_code=foo")
-
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
-	if !containsString(rec.Body.String(), "invalid_request_error") {
-		t.Errorf("expected invalid_request_error in body, got: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/audit/log?status_code=foo")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
 func TestAuditLog_InvalidStream(t *testing.T) {
@@ -1494,17 +1067,10 @@ func TestAuditLog_InvalidStream(t *testing.T) {
 		logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log?stream=maybe")
-
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
-	if !containsString(rec.Body.String(), "invalid_request_error") {
-		t.Errorf("expected invalid_request_error in body, got: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/audit/log?stream=maybe")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
 func TestAuditLog_InvalidLimit(t *testing.T) {
@@ -1515,17 +1081,10 @@ func TestAuditLog_InvalidLimit(t *testing.T) {
 				logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 			}
 			h := NewHandler(nil, nil, WithAuditReader(reader))
-			c, rec := newHandlerContext("/admin/audit/log?limit=" + q)
-
-			if err := h.AuditLog(c); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("expected 400 for limit=%q, got %d", q, rec.Code)
-			}
-			if !containsString(rec.Body.String(), "invalid_request_error") {
-				t.Errorf("expected invalid_request_error in body for limit=%q, got: %s", q, rec.Body.String())
-			}
+			c, rec := echotest.Get(t, "/admin/audit/log?limit="+q)
+			require.NoError(t, h.AuditLog(c))
+			assert.Equal(t, http.StatusBadRequest, rec.Code, q)
+			assert.Contains(t, rec.Body.String(), "invalid_request_error")
 		})
 	}
 }
@@ -1538,17 +1097,10 @@ func TestAuditLog_InvalidOffset(t *testing.T) {
 				logResult: &auditlog.LogListResult{Entries: []auditlog.LogEntry{}},
 			}
 			h := NewHandler(nil, nil, WithAuditReader(reader))
-			c, rec := newHandlerContext("/admin/audit/log?offset=" + q)
-
-			if err := h.AuditLog(c); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("expected 400 for offset=%q, got %d", q, rec.Code)
-			}
-			if !containsString(rec.Body.String(), "invalid_request_error") {
-				t.Errorf("expected invalid_request_error in body for offset=%q, got: %s", q, rec.Body.String())
-			}
+			c, rec := echotest.Get(t, "/admin/audit/log?offset="+q)
+			require.NoError(t, h.AuditLog(c))
+			assert.Equal(t, http.StatusBadRequest, rec.Code, q)
+			assert.Contains(t, rec.Body.String(), "invalid_request_error")
 		})
 	}
 }
@@ -1558,37 +1110,20 @@ func TestAuditLog_Error(t *testing.T) {
 		logErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/log")
-
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("expected 502, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/log")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
 func TestAuditConversation_NilReader(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-1")
+	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-1")
+	require.NoError(t, h.AuditConversation(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-
-	var result auditlog.ConversationResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if result.AnchorID != "log-1" {
-		t.Errorf("expected anchor log-1, got %q", result.AnchorID)
-	}
-	if len(result.Entries) != 0 {
-		t.Errorf("expected empty entries, got %d", len(result.Entries))
-	}
+	result := echotest.Decode[auditlog.ConversationResult](t, rec)
+	assert.Equal(t, "log-1", result.AnchorID)
+	assert.Empty(t, result.Entries)
 }
 
 func TestAuditConversation_Success(t *testing.T) {
@@ -1603,17 +1138,11 @@ func TestAuditConversation_Success(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-2&limit=80")
-
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if reader.lastConversationID != "log-2" || reader.lastConversationLim != 80 {
-		t.Errorf("expected call with log-2/80, got %q/%d", reader.lastConversationID, reader.lastConversationLim)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-2&limit=80")
+	require.NoError(t, h.AuditConversation(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "log-2", reader.lastConversationID)
+	assert.Equal(t, 80, reader.lastConversationLim)
 }
 
 func TestAuditConversation_EnrichesEntriesWithPromptCacheUsage(t *testing.T) {
@@ -1640,28 +1169,15 @@ func TestAuditConversation_EnrichesEntriesWithPromptCacheUsage(t *testing.T) {
 		},
 	}
 	h := NewHandler(usageReader, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-cached")
+	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-cached")
+	require.NoError(t, h.AuditConversation(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var result auditConversationResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 1 || result.Entries[0].Usage == nil {
-		t.Fatalf("expected one usage-enriched entry, got %+v", result.Entries)
-	}
-	if result.Entries[0].Usage.CachedInputTokens != 25 {
-		t.Fatalf("CachedInputTokens = %d, want 25", result.Entries[0].Usage.CachedInputTokens)
-	}
-	if result.Entries[0].Usage.EstimatedCachedCharacters != 100 {
-		t.Fatalf("EstimatedCachedCharacters = %d, want 100", result.Entries[0].Usage.EstimatedCachedCharacters)
-	}
+	result := echotest.Decode[auditConversationResponse](t, rec)
+	require.Len(t, result.Entries, 1)
+	require.NotNil(t, result.Entries[0].Usage)
+	require.Equal(t, int64(25), result.Entries[0].Usage.CachedInputTokens)
+	require.Equal(t, int64(100), result.Entries[0].Usage.EstimatedCachedCharacters)
 }
 
 func TestAuditConversation_PreservesProviderName(t *testing.T) {
@@ -1676,54 +1192,30 @@ func TestAuditConversation_PreservesProviderName(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-2")
+	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-2")
+	require.NoError(t, h.AuditConversation(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var result auditlog.ConversationResult
-	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(result.Entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(result.Entries))
-	}
-	if result.Entries[0].ProviderName != "primary-openai" {
-		t.Fatalf("ProviderName = %q, want %q", result.Entries[0].ProviderName, "primary-openai")
-	}
-	if result.Entries[0].Provider != "openai" {
-		t.Fatalf("Provider = %q, want %q", result.Entries[0].Provider, "openai")
-	}
+	result := echotest.Decode[auditlog.ConversationResult](t, rec)
+	require.Len(t, result.Entries, 2)
+	require.Equal(t, "primary-openai", result.Entries[0].ProviderName)
+	require.Equal(t, "openai", result.Entries[0].Provider)
 }
 
 func TestAuditConversation_MissingLogID(t *testing.T) {
 	reader := &mockAuditReader{}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/conversation")
-
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/conversation")
+	require.NoError(t, h.AuditConversation(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestAuditConversation_InvalidLimit(t *testing.T) {
 	reader := &mockAuditReader{}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-1&limit=bad")
-
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-1&limit=bad")
+	require.NoError(t, h.AuditConversation(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestAuditConversation_Error(t *testing.T) {
@@ -1731,14 +1223,9 @@ func TestAuditConversation_Error(t *testing.T) {
 		conversationErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(nil, nil, WithAuditReader(reader))
-	c, rec := newHandlerContext("/admin/audit/conversation?log_id=log-1")
-
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("expected 502, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/audit/conversation?log_id=log-1")
+	require.NoError(t, h.AuditConversation(c))
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
 // --- Validation-before-fast-path tests ---
@@ -1751,64 +1238,36 @@ func TestAuditConversation_Error(t *testing.T) {
 
 func TestAuditLog_NilReaderStillValidatesParams(t *testing.T) {
 	h := NewHandler(nil, nil) // no audit reader configured
-	c, rec := newHandlerContext("/admin/audit/log?status_code=not-an-int")
-
-	if err := h.AuditLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
-	if !containsString(rec.Body.String(), "invalid_request_error") {
-		t.Errorf("expected invalid_request_error, got: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/audit/log?status_code=not-an-int")
+	require.NoError(t, h.AuditLog(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
 func TestAuditConversation_NilReaderStillValidatesParams(t *testing.T) {
-	h := NewHandler(nil, nil)                                // no audit reader configured
-	c, rec := newHandlerContext("/admin/audit/conversation") // missing required log_id
-
-	if err := h.AuditConversation(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
-	if !containsString(rec.Body.String(), "log_id is required") {
-		t.Errorf("expected log_id-is-required, got: %s", rec.Body.String())
-	}
+	h := NewHandler(nil, nil) // no audit reader configured
+	c, rec := echotest.Get(t, "/admin/audit/conversation")
+	require.NoError(t, h.AuditConversation(c)) // missing required log_id
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "log_id is required")
 }
 
 func TestUsageLog_NilReaderStillValidatesParams(t *testing.T) {
 	h := NewHandler(nil, nil) // no usage reader configured
-	c, rec := newHandlerContext("/admin/usage/log?start_date=not-a-date")
-
-	if err := h.UsageLog(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
-	if !containsString(rec.Body.String(), "invalid_request_error") {
-		t.Errorf("expected invalid_request_error, got: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/usage/log?start_date=not-a-date")
+	require.NoError(t, h.UsageLog(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
 // --- ListModels handler tests ---
 
 func TestListModels_NilRegistry(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/models")
-
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 func TestListModels_WithModels(t *testing.T) {
@@ -1823,37 +1282,21 @@ func TestListModels_WithModels(t *testing.T) {
 		},
 	}
 	registry.RegisterProviderWithType(mock, "test")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("failed to initialize registry: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/models")
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
+	models := echotest.Decode[[]providers.ModelWithProvider](t, rec)
+	require.Len(t, models, 2)
 
-	var models []providers.ModelWithProvider
-	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(models) != 2 {
-		t.Fatalf("expected 2 models, got %d", len(models))
-	}
 	// Should be sorted by model ID
-	if models[0].Model.ID != "claude-3" {
-		t.Errorf("expected first model to be claude-3, got %s", models[0].Model.ID)
-	}
-	if models[1].Model.ID != "gpt-4" {
-		t.Errorf("expected second model to be gpt-4, got %s", models[1].Model.ID)
-	}
-	if models[0].ProviderType != "test" {
-		t.Errorf("expected provider type 'test', got %s", models[0].ProviderType)
-	}
+	assert.Equal(t, "claude-3", models[0].Model.ID)
+	assert.Equal(t, "gpt-4", models[1].Model.ID)
+	assert.Equal(t, "test", models[0].ProviderType)
 }
 
 func TestListModels_EmptyRegistry(t *testing.T) {
@@ -1861,17 +1304,10 @@ func TestListModels_EmptyRegistry(t *testing.T) {
 	registry := providers.NewModelRegistry()
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/models")
-
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 // --- ListModels with category filter tests ---
@@ -1907,58 +1343,35 @@ func TestListModels_WithCategoryFilter(t *testing.T) {
 		},
 	}
 	registry.RegisterProviderWithType(mock, "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("failed to initialize registry: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, registry)
 
 	t.Run("FilterTextGeneration", func(t *testing.T) {
-		c, rec := newHandlerContext("/admin/models?category=text_generation")
-		if err := h.ListModels(c); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", rec.Code)
-		}
-		var models []providers.ModelWithProvider
-		if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
-			t.Fatalf("failed to unmarshal: %v", err)
-		}
-		if len(models) != 1 {
-			t.Fatalf("expected 1 model, got %d", len(models))
-		}
-		if models[0].Model.ID != "gpt-4o" {
-			t.Errorf("expected gpt-4o, got %s", models[0].Model.ID)
-		}
+		c, rec := echotest.Get(t, "/admin/models?category=text_generation")
+		require.NoError(t, h.ListModels(c))
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		models := echotest.Decode[[]providers.ModelWithProvider](t, rec)
+		require.Len(t, models, 1)
+		assert.Equal(t, "gpt-4o", models[0].Model.ID)
 	})
 
 	t.Run("FilterAll", func(t *testing.T) {
-		c, rec := newHandlerContext("/admin/models?category=all")
-		if err := h.ListModels(c); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		var models []providers.ModelWithProvider
-		if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
-			t.Fatalf("failed to unmarshal: %v", err)
-		}
-		if len(models) != 3 {
-			t.Errorf("expected 3 models for 'all', got %d", len(models))
-		}
+		c, rec := echotest.Get(t, "/admin/models?category=all")
+		require.NoError(t, h.ListModels(c))
+
+		models := echotest.Decode[[]providers.ModelWithProvider](t, rec)
+		assert.Len(t, models, 3)
 	})
 
 	t.Run("NoFilter", func(t *testing.T) {
-		c, rec := newHandlerContext("/admin/models")
-		if err := h.ListModels(c); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		var models []providers.ModelWithProvider
-		if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
-			t.Fatalf("failed to unmarshal: %v", err)
-		}
-		if len(models) != 3 {
-			t.Errorf("expected 3 models without filter, got %d", len(models))
-		}
+		c, rec := echotest.Get(t, "/admin/models")
+		require.NoError(t, h.ListModels(c))
+
+		models := echotest.Decode[[]providers.ModelWithProvider](t, rec)
+		assert.Len(t, models, 3)
 	})
 }
 
@@ -1973,26 +1386,17 @@ func TestListModels_InvalidCategory(t *testing.T) {
 		},
 	}
 	registry.RegisterProviderWithType(mock, "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("failed to initialize registry: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/models?category=bogus_category")
+	c, rec := echotest.Get(t, "/admin/models?category=bogus_category")
+	require.NoError(t, h.ListModels(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
 	body := rec.Body.String()
-	if !containsString(body, "invalid_request_error") {
-		t.Errorf("expected invalid_request_error in body, got: %s", body)
-	}
-	if !containsString(body, "invalid category") {
-		t.Errorf("expected 'invalid category' in body, got: %s", body)
-	}
+	assert.Contains(t, body, "invalid_request_error")
+	assert.Contains(t, body, "invalid category")
 }
 
 func TestListModels_IncludesSelectorAndProviderName(t *testing.T) {
@@ -2015,57 +1419,30 @@ func TestListModels_IncludesSelectorAndProviderName(t *testing.T) {
 	}
 	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
 	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("failed to initialize registry: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/models")
+	c, rec := echotest.Get(t, "/admin/models")
+	require.NoError(t, h.ListModels(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListModels(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var models []providers.ModelWithProvider
-	if err := json.Unmarshal(rec.Body.Bytes(), &models); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(models) != 2 {
-		t.Fatalf("expected 2 models, got %d", len(models))
-	}
-
-	if models[0].Selector != "openai/gpt-3.5-turbo" {
-		t.Fatalf("models[0].Selector = %q, want %q", models[0].Selector, "openai/gpt-3.5-turbo")
-	}
-	if models[0].ProviderName != "openai" {
-		t.Fatalf("models[0].ProviderName = %q, want %q", models[0].ProviderName, "openai")
-	}
-	if models[1].Selector != "openrouter/openai/gpt-3.5-turbo" {
-		t.Fatalf("models[1].Selector = %q, want %q", models[1].Selector, "openrouter/openai/gpt-3.5-turbo")
-	}
-	if models[1].ProviderName != "openrouter" {
-		t.Fatalf("models[1].ProviderName = %q, want %q", models[1].ProviderName, "openrouter")
-	}
+	models := echotest.Decode[[]providers.ModelWithProvider](t, rec)
+	require.Len(t, models, 2)
+	require.Equal(t, "openai/gpt-3.5-turbo", models[0].Selector)
+	require.Equal(t, "openai", models[0].ProviderName)
+	require.Equal(t, "openrouter/openai/gpt-3.5-turbo", models[1].Selector)
+	require.Equal(t, "openrouter", models[1].ProviderName)
 }
 
 // --- ListCategories handler tests ---
 
 func TestListCategories_NilRegistry(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/models/categories")
-
-	if err := h.ListCategories(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if rec.Body.String() != "[]\n" {
-		t.Errorf("expected empty JSON array, got: %q", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/models/categories")
+	require.NoError(t, h.ListCategories(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "[]\n", rec.Body.String())
 }
 
 func TestListCategories_WithModels(t *testing.T) {
@@ -2086,34 +1463,21 @@ func TestListCategories_WithModels(t *testing.T) {
 		},
 	}
 	registry.RegisterProviderWithType(mock, "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("failed to initialize registry: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	h := NewHandler(nil, registry)
-	c, rec := newHandlerContext("/admin/models/categories")
+	c, rec := echotest.Get(t, "/admin/models/categories")
+	require.NoError(t, h.ListCategories(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListCategories(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-
-	var cats []providers.CategoryCount
-	if err := json.Unmarshal(rec.Body.Bytes(), &cats); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(cats) != 7 {
-		t.Fatalf("expected 7 categories, got %d", len(cats))
-	}
+	cats := echotest.Decode[[]providers.CategoryCount](t, rec)
+	require.Len(t, cats, 7)
 
 	// Find "all" count
 	for _, cat := range cats {
 		if cat.Category == core.CategoryAll {
-			if cat.Count != 2 {
-				t.Errorf("All count = %d, want 2", cat.Count)
-			}
+			assert.Equal(t, 2, cat.Count)
 		}
 	}
 }
@@ -2131,10 +1495,9 @@ func TestProviderStatus_DistinguishesProvidersWithSameTypeByName(t *testing.T) {
 	registry.RegisterProviderWithNameAndType(&handlerMockProvider{
 		err: errors.New("upstream unavailable"),
 	}, "openai_backup", "openai")
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
 	registry.RecordAvailabilityCheck("openai_primary", nil)
 	registry.RecordAvailabilityCheck("openai_backup", errors.New("dial tcp timeout"))
 
@@ -2178,73 +1541,34 @@ func TestProviderStatus_DistinguishesProvidersWithSameTypeByName(t *testing.T) {
 			},
 		},
 	}))
-	c, rec := newHandlerContext("/admin/providers/status")
+	c, rec := echotest.Get(t, "/admin/providers/status")
+	require.NoError(t, h.ProviderStatus(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ProviderStatus(c); err != nil {
-		t.Fatalf("ProviderStatus() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var body providerStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if body.Summary.Total != 2 {
-		t.Fatalf("summary.total = %d, want 2", body.Summary.Total)
-	}
-	if body.Summary.Healthy != 1 {
-		t.Fatalf("summary.healthy = %d, want 1", body.Summary.Healthy)
-	}
-	if body.Summary.Unhealthy != 1 {
-		t.Fatalf("summary.unhealthy = %d, want 1", body.Summary.Unhealthy)
-	}
-	if body.Summary.OverallStatus != "degraded" {
-		t.Fatalf("summary.overall_status = %q, want degraded", body.Summary.OverallStatus)
-	}
+	body := echotest.Decode[providerStatusResponse](t, rec)
+	require.Equal(t, 2, body.Summary.Total)
+	require.Equal(t, 1, body.Summary.Healthy)
+	require.Equal(t, 1, body.Summary.Unhealthy)
+	require.Equal(t, "degraded", body.Summary.OverallStatus)
 
 	byName := make(map[string]providerStatusItemResponse, len(body.Providers))
 	for _, provider := range body.Providers {
 		byName[provider.Name] = provider
 	}
 
-	primary, ok := byName["openai_primary"]
-	if !ok {
-		t.Fatalf("missing openai_primary in %#v", body.Providers)
-	}
-	if primary.Type != "openai" {
-		t.Fatalf("primary.Type = %q, want openai", primary.Type)
-	}
-	if primary.Status != "healthy" {
-		t.Fatalf("primary.Status = %q, want healthy", primary.Status)
-	}
-	if primary.Runtime.DiscoveredModelCount != 1 {
-		t.Fatalf("primary discovered models = %d, want 1", primary.Runtime.DiscoveredModelCount)
-	}
-	if primary.Config.BaseURL != "https://primary.example.com/v1" {
-		t.Fatalf("primary base_url = %q, want primary endpoint", primary.Config.BaseURL)
-	}
-
-	backup, ok := byName["openai_backup"]
-	if !ok {
-		t.Fatalf("missing openai_backup in %#v", body.Providers)
-	}
-	if backup.Type != "openai" {
-		t.Fatalf("backup.Type = %q, want openai", backup.Type)
-	}
-	if backup.Status != "unhealthy" {
-		t.Fatalf("backup.Status = %q, want unhealthy", backup.Status)
-	}
-	if backup.Runtime.DiscoveredModelCount != 0 {
-		t.Fatalf("backup discovered models = %d, want 0", backup.Runtime.DiscoveredModelCount)
-	}
-	if backup.Config.BaseURL != "https://backup.example.com/v1" {
-		t.Fatalf("backup base_url = %q, want backup endpoint", backup.Config.BaseURL)
-	}
-	if !strings.Contains(backup.LastError, "upstream unavailable") {
-		t.Fatalf("backup last_error = %q, want model fetch failure", backup.LastError)
-	}
+	require.Contains(t, byName, "openai_primary")
+	primary := byName["openai_primary"]
+	require.Equal(t, "openai", primary.Type)
+	require.Equal(t, "healthy", primary.Status)
+	require.Equal(t, 1, primary.Runtime.DiscoveredModelCount)
+	require.Equal(t, "https://primary.example.com/v1", primary.Config.BaseURL)
+	require.Contains(t, byName, "openai_backup")
+	backup := byName["openai_backup"]
+	require.Equal(t, "openai", backup.Type)
+	require.Equal(t, "unhealthy", backup.Status)
+	require.Equal(t, 0, backup.Runtime.DiscoveredModelCount)
+	require.Equal(t, "https://backup.example.com/v1", backup.Config.BaseURL)
+	require.Contains(t, backup.LastError, "upstream unavailable")
 }
 
 func TestClassifyProviderStatus_RegisteredZeroModelProviderIsConfigured(t *testing.T) {
@@ -2256,15 +1580,9 @@ func TestClassifyProviderStatus_RegisteredZeroModelProviderIsConfigured(t *testi
 		},
 	)
 
-	if status != "degraded" {
-		t.Fatalf("status = %q, want degraded", status)
-	}
-	if label != "Configured" {
-		t.Fatalf("label = %q, want Configured", label)
-	}
-	if reason != "provider is configured but has not exposed models yet" {
-		t.Fatalf("reason = %q, want configured zero-model reason", reason)
-	}
+	require.Equal(t, "degraded", status)
+	require.Equal(t, "Configured", label)
+	require.Equal(t, "provider is configured but has not exposed models yet", reason)
 }
 
 func TestClassifyProviderStatus_DerivesCachedModelInventory(t *testing.T) {
@@ -2277,15 +1595,9 @@ func TestClassifyProviderStatus_DerivesCachedModelInventory(t *testing.T) {
 		},
 	)
 
-	if status != "degraded" {
-		t.Fatalf("status = %q, want degraded", status)
-	}
-	if label != "Starting" {
-		t.Fatalf("label = %q, want Starting", label)
-	}
-	if reason != "serving cached model inventory while live refresh finishes" {
-		t.Fatalf("reason = %q, want cached inventory reason", reason)
-	}
+	require.Equal(t, "degraded", status)
+	require.Equal(t, "Starting", label)
+	require.Equal(t, "serving cached model inventory while live refresh finishes", reason)
 }
 
 // TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks covers the contract
@@ -2389,36 +1701,20 @@ func TestBuildProviderStatusItem_ClassifyAndDisplayFallbacks(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			item := buildProviderStatusItem(tc.key, tc.cfg, tc.runtime, nil)
 
-			if item.Name != tc.key {
-				t.Errorf("Name = %q, want %q", item.Name, tc.key)
-			}
-			if item.Status != tc.wantStatus {
-				t.Errorf("Status = %q, want %q", item.Status, tc.wantStatus)
-			}
-			if item.StatusLabel != tc.wantLabel {
-				t.Errorf("StatusLabel = %q, want %q", item.StatusLabel, tc.wantLabel)
-			}
-			if item.Config.Name != tc.wantCfgName {
-				t.Errorf("Config.Name = %q, want %q", item.Config.Name, tc.wantCfgName)
-			}
-			if item.Config.Type != tc.wantCfgType {
-				t.Errorf("Config.Type = %q, want %q", item.Config.Type, tc.wantCfgType)
-			}
-			if item.Runtime.Name != tc.wantRunName {
-				t.Errorf("Runtime.Name = %q, want %q", item.Runtime.Name, tc.wantRunName)
-			}
-			if item.Runtime.Type != tc.wantRunTyp {
-				t.Errorf("Runtime.Type = %q, want %q", item.Runtime.Type, tc.wantRunTyp)
-			}
-			if item.Type != tc.wantCfgType {
-				t.Errorf("Type = %q, want %q", item.Type, tc.wantCfgType)
-			}
+			assert.Equal(t, tc.key, item.Name)
+			assert.Equal(t, tc.wantStatus, item.Status)
+			assert.Equal(t, tc.wantLabel, item.StatusLabel)
+			assert.Equal(t, tc.wantCfgName, item.Config.Name)
+			assert.Equal(t, tc.wantCfgType, item.Config.Type)
+			assert.Equal(t, tc.wantRunName, item.Runtime.Name)
+			assert.Equal(t, tc.wantRunTyp, item.Runtime.Type)
+			assert.Equal(t, tc.wantCfgType, item.Type)
 		})
 	}
 }
 
 func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
-	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
+	cfg := DashboardConfigResponse{
 		DemoMode:               "on",
 		FailoverEnabled:        "on",
 		LoggingEnabled:         "on",
@@ -2437,77 +1733,15 @@ func TestDashboardConfig_ReturnsAllowlistedRuntimeFlags(t *testing.T) {
 		MCPEnabled:             "off",
 		VirtualModelStrategies: "round_robin,cost,adaptive",
 		UserPathHeader:         " X-Tenant-Path ",
-	}))
-	c, rec := newHandlerContext("/admin/runtime/config")
+	}
+	h := NewHandler(nil, nil, WithDashboardRuntimeConfig(cfg))
+	c, rec := echotest.Get(t, "/admin/runtime/config")
+	require.NoError(t, h.DashboardConfig(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.DashboardConfig(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var body DashboardConfigResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if got := body.DemoMode; got != "on" {
-		t.Fatalf("DEMO_MODE = %q, want on", got)
-	}
-	if got := body.FailoverEnabled; got != "on" {
-		t.Fatalf("FAILOVER_ENABLED = %q, want on", got)
-	}
-	if got := body.LoggingEnabled; got != "on" {
-		t.Fatalf("LOGGING_ENABLED = %q, want on", got)
-	}
-	if got := body.LoggingRetentionDays; got != "14" {
-		t.Fatalf("LOGGING_RETENTION_DAYS = %q, want 14", got)
-	}
-	if got := body.UsageEnabled; got != "off" {
-		t.Fatalf("USAGE_ENABLED = %q, want off", got)
-	}
-	if got := body.BudgetsEnabled; got != "on" {
-		t.Fatalf("BUDGETS_ENABLED = %q, want on", got)
-	}
-	if got := body.RateLimitsEnabled; got != "off" {
-		t.Fatalf("RATE_LIMITS_ENABLED = %q, want off", got)
-	}
-	if got := body.QuotaTemplatesEnabled; got != "on" {
-		t.Fatalf("PER_CHILD_QUOTAS_ENABLED = %q, want on", got)
-	}
-	if got := body.GuardrailsEnabled; got != "on" {
-		t.Fatalf("GUARDRAILS_ENABLED = %q, want on", got)
-	}
-	if got := body.PluginsEnabled; got != "on" {
-		t.Fatalf("PLUGINS_ENABLED = %q, want on", got)
-	}
-	if got := body.CacheEnabled; got != "on" {
-		t.Fatalf("CACHE_ENABLED = %q, want on", got)
-	}
-	if got := body.RedisURL; got != "on" {
-		t.Fatalf("REDIS_URL = %q, want on", got)
-	}
-	if got := body.SemanticCacheEnabled; got != "off" {
-		t.Fatalf("SEMANTIC_CACHE_ENABLED = %q, want off", got)
-	}
-	if got := body.PricingRecalculation; got != "on" {
-		t.Fatalf("USAGE_PRICING_RECALCULATION_ENABLED = %q, want on", got)
-	}
-	if got := body.LiveLogsEnabled; got != "on" {
-		t.Fatalf("DASHBOARD_LIVE_LOGS_ENABLED = %q, want on", got)
-	}
-	if got := body.MCPEnabled; got != "off" {
-		t.Fatalf("MCP_ENABLED = %q, want off", got)
-	}
-	if got := body.VirtualModelStrategies; got != "round_robin,cost,adaptive" {
-		t.Fatalf("VIRTUAL_MODEL_STRATEGIES = %q, want round_robin,cost,adaptive", got)
-	}
-	if got := body.UserPathHeader; got != "X-Tenant-Path" {
-		t.Fatalf("USER_PATH_HEADER = %q, want X-Tenant-Path", got)
-	}
-	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "UNRELATED_FLAG") {
-		t.Fatal("UNRELATED_FLAG should not be exposed")
-	}
+	want := cfg
+	want.UserPathHeader = "X-Tenant-Path"
+	assert.Equal(t, want, echotest.Decode[DashboardConfigResponse](t, rec))
 }
 
 func TestRefreshRuntime_ReturnsReport(t *testing.T) {
@@ -2526,71 +1760,30 @@ func TestRefreshRuntime_ReturnsReport(t *testing.T) {
 		},
 	}
 	h := NewHandler(nil, nil, WithRuntimeRefresher(refresher))
-	c, rec := newHandlerContext("/admin/runtime/refresh")
-	c.Request().Method = http.MethodPost
+	c, rec := echotest.Post(t, "/admin/runtime/refresh", nil)
+	require.NoError(t, h.RefreshRuntime(c))
+	require.Equal(t, 1, refresher.calls)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.RefreshRuntime(c); err != nil {
-		t.Fatalf("RefreshRuntime() error = %v", err)
-	}
-	if refresher.calls != 1 {
-		t.Fatalf("RefreshRuntime calls = %d, want 1", refresher.calls)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-
-	var body RuntimeRefreshReport
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Status != RuntimeRefreshStatusPartial {
-		t.Fatalf("status = %q, want partial", body.Status)
-	}
-	if body.ModelCount != 7 || body.ProviderCount != 2 {
-		t.Fatalf("counts = %d/%d, want 7/2", body.ModelCount, body.ProviderCount)
-	}
-	if len(body.Steps) != 1 || body.Steps[0].Error != "one provider failed" {
-		t.Fatalf("steps = %+v, want provider warning", body.Steps)
-	}
+	body := echotest.Decode[RuntimeRefreshReport](t, rec)
+	require.Equal(t, RuntimeRefreshStatusPartial, body.Status)
+	require.Equal(t, 7, body.ModelCount)
+	require.Equal(t, 2, body.ProviderCount)
+	require.Len(t, body.Steps, 1)
+	require.Equal(t, "one provider failed", body.Steps[0].Error)
 }
 
 func TestRefreshRuntime_FeatureUnavailableWhenNotConfigured(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/runtime/refresh")
-	c.Request().Method = http.MethodPost
-
-	if err := h.RefreshRuntime(c); err != nil {
-		t.Fatalf("RefreshRuntime() error = %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", rec.Code)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	rawError, ok := body["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error object missing or invalid: %#v", body["error"])
-	}
-	for _, key := range []string{"type", "message", "param", "code"} {
-		if _, ok := rawError[key]; !ok {
-			t.Fatalf("error.%s missing from response: %#v", key, rawError)
-		}
-	}
-	if rawError["type"] != string(core.ErrorTypeInvalidRequest) {
-		t.Fatalf("error.type = %#v, want %q", rawError["type"], core.ErrorTypeInvalidRequest)
-	}
-	if rawError["message"] != "runtime refresh is unavailable" {
-		t.Fatalf("error.message = %#v, want runtime refresh is unavailable", rawError["message"])
-	}
-	if rawError["param"] != nil {
-		t.Fatalf("error.param = %#v, want null", rawError["param"])
-	}
-	if rawError["code"] != "feature_unavailable" {
-		t.Fatalf("error.code = %#v, want feature_unavailable", rawError["code"])
-	}
+	c, rec := echotest.Post(t, "/admin/runtime/refresh", nil)
+	require.NoError(t, h.RefreshRuntime(c))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	assert.Equal(t, map[string]any{
+		"type":    string(core.ErrorTypeInvalidRequest),
+		"message": "runtime refresh is unavailable",
+		"param":   nil,
+		"code":    "feature_unavailable",
+	}, decodeErrorObject(t, rec))
 }
 
 func TestRefreshRuntime_PreservesGatewayError(t *testing.T) {
@@ -2599,55 +1792,24 @@ func TestRefreshRuntime_PreservesGatewayError(t *testing.T) {
 			WithCode("request_canceled"),
 	}
 	h := NewHandler(nil, nil, WithRuntimeRefresher(refresher))
-	c, rec := newHandlerContext("/admin/runtime/refresh")
-	c.Request().Method = http.MethodPost
-
-	if err := h.RefreshRuntime(c); err != nil {
-		t.Fatalf("RefreshRuntime() error = %v", err)
-	}
-	if rec.Code != http.StatusRequestTimeout {
-		t.Fatalf("status = %d, want 408", rec.Code)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	rawError, ok := body["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error object missing or invalid: %#v", body["error"])
-	}
-	for _, key := range []string{"type", "message", "param", "code"} {
-		if _, ok := rawError[key]; !ok {
-			t.Fatalf("error.%s missing from response: %#v", key, rawError)
-		}
-	}
-	if rawError["type"] != string(core.ErrorTypeInvalidRequest) {
-		t.Fatalf("error.type = %#v, want %q", rawError["type"], core.ErrorTypeInvalidRequest)
-	}
-	if rawError["message"] != "runtime refresh canceled before start" {
-		t.Fatalf("error.message = %#v, want preserved message", rawError["message"])
-	}
-	if rawError["param"] != nil {
-		t.Fatalf("error.param = %#v, want null", rawError["param"])
-	}
-	if rawError["code"] != "request_canceled" {
-		t.Fatalf("error.code = %#v, want request_canceled", rawError["code"])
-	}
+	c, rec := echotest.Post(t, "/admin/runtime/refresh", nil)
+	require.NoError(t, h.RefreshRuntime(c))
+	require.Equal(t, http.StatusRequestTimeout, rec.Code)
+	assert.Equal(t, map[string]any{
+		"type":    string(core.ErrorTypeInvalidRequest),
+		"message": "runtime refresh canceled before start",
+		"param":   nil,
+		"code":    "request_canceled",
+	}, decodeErrorObject(t, rec))
 }
 
 func TestCacheOverview_FeatureUnavailableWhenCacheDisabled(t *testing.T) {
 	h := NewHandler(&mockUsageReader{}, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "off",
 	}))
-	c, rec := newHandlerContext("/admin/cache/overview")
-
-	if err := h.CacheOverview(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/cache/overview")
+	require.NoError(t, h.CacheOverview(c))
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
 func TestCacheOverview_ReturnsPayloadWhenEnabled(t *testing.T) {
@@ -2669,28 +1831,15 @@ func TestCacheOverview_ReturnsPayloadWhenEnabled(t *testing.T) {
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/cache/overview?days=30&user_path=/team")
+	c, rec := echotest.Get(t, "/admin/cache/overview?days=30&user_path=/team")
+	require.NoError(t, h.CacheOverview(c))
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.CacheOverview(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-
-	var body usage.CacheOverview
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if body.Summary.TotalHits != 4 {
-		t.Fatalf("total_hits = %d, want 4", body.Summary.TotalHits)
-	}
-	if len(body.Daily) != 1 || body.Daily[0].ExactHits != 3 {
-		t.Fatalf("unexpected daily payload: %+v", body.Daily)
-	}
-	if reader.lastCacheOverview.UserPath != "/team" {
-		t.Fatalf("UserPath = %q, want %q", reader.lastCacheOverview.UserPath, "/team")
-	}
+	body := echotest.Decode[usage.CacheOverview](t, rec)
+	require.Equal(t, 4, body.Summary.TotalHits)
+	require.Len(t, body.Daily, 1)
+	require.Equal(t, 3, body.Daily[0].ExactHits)
+	require.Equal(t, "/team", reader.lastCacheOverview.UserPath)
 }
 
 func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {
@@ -2698,37 +1847,15 @@ func TestCacheOverview_ReturnsErrorWhenReaderFails(t *testing.T) {
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/cache/overview?days=30")
+	c, rec := echotest.Get(t, "/admin/cache/overview?days=30")
+	require.NoError(t, h.CacheOverview(c))
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	if err := h.CacheOverview(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", rec.Code)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	errorBody, ok := body["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error payload, got %v", body)
-	}
-	if got, ok := errorBody["type"].(string); !ok || got != "internal_error" {
-		t.Fatalf("error.type = %#v, want %q", errorBody["type"], "internal_error")
-	}
-	if got, ok := errorBody["message"].(string); !ok || got != "an unexpected error occurred" {
-		t.Fatalf("error.message = %#v, want %q", errorBody["message"], "an unexpected error occurred")
-	} else if strings.Contains(got, "boom") {
-		t.Fatalf("error.message leaked reader error: %q", got)
-	}
-	if _, ok := errorBody["param"]; !ok {
-		t.Fatalf("error.param missing from payload: %v", errorBody)
-	}
-	if _, ok := errorBody["code"]; !ok {
-		t.Fatalf("error.code missing from payload: %v", errorBody)
-	}
+	errorBody := decodeErrorObject(t, rec)
+	assert.Equal(t, "internal_error", errorBody["type"])
+	assert.Equal(t, "an unexpected error occurred", errorBody["message"], "reader error must not leak")
+	assert.Contains(t, errorBody, "param")
+	assert.Contains(t, errorBody, "code")
 }
 
 func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
@@ -2736,32 +1863,14 @@ func TestCacheOverview_ReturnsClientClosedWhenRequestIsCanceled(t *testing.T) {
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/cache/overview?days=30")
+	c, rec := echotest.Get(t, "/admin/cache/overview?days=30")
+	require.NoError(t, h.CacheOverview(c))
+	require.Equal(t, statusClientClosedRequest, rec.Code)
 
-	if err := h.CacheOverview(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != statusClientClosedRequest {
-		t.Fatalf("expected %d, got %d", statusClientClosedRequest, rec.Code)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	errorBody, ok := body["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error payload, got %v", body)
-	}
-	if got, ok := errorBody["type"].(string); !ok || got != string(core.ErrorTypeInvalidRequest) {
-		t.Fatalf("error.type = %#v, want %q", errorBody["type"], core.ErrorTypeInvalidRequest)
-	}
-	if got, ok := errorBody["message"].(string); !ok || got != "request canceled" {
-		t.Fatalf("error.message = %#v, want request canceled", errorBody["message"])
-	}
-	if got, ok := errorBody["code"].(string); !ok || got != "request_canceled" {
-		t.Fatalf("error.code = %#v, want request_canceled", errorBody["code"])
-	}
+	errorBody := decodeErrorObject(t, rec)
+	assert.Equal(t, string(core.ErrorTypeInvalidRequest), errorBody["type"])
+	assert.Equal(t, "request canceled", errorBody["message"])
+	assert.Equal(t, "request_canceled", errorBody["code"])
 }
 
 func TestCacheOverview_ReturnsGatewayTimeoutWhenRequestDeadlineExceeded(t *testing.T) {
@@ -2769,32 +1878,14 @@ func TestCacheOverview_ReturnsGatewayTimeoutWhenRequestDeadlineExceeded(t *testi
 	h := NewHandler(reader, nil, WithDashboardRuntimeConfig(DashboardConfigResponse{
 		CacheEnabled: "on",
 	}))
-	c, rec := newHandlerContext("/admin/cache/overview?days=30")
+	c, rec := echotest.Get(t, "/admin/cache/overview?days=30")
+	require.NoError(t, h.CacheOverview(c))
+	require.Equal(t, http.StatusGatewayTimeout, rec.Code)
 
-	if err := h.CacheOverview(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusGatewayTimeout {
-		t.Fatalf("expected %d, got %d", http.StatusGatewayTimeout, rec.Code)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	errorBody, ok := body["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error payload, got %v", body)
-	}
-	if got, ok := errorBody["type"].(string); !ok || got != string(core.ErrorTypeInvalidRequest) {
-		t.Fatalf("error.type = %#v, want %q", errorBody["type"], core.ErrorTypeInvalidRequest)
-	}
-	if got, ok := errorBody["message"].(string); !ok || got != "request timed out" {
-		t.Fatalf("error.message = %#v, want request timed out", errorBody["message"])
-	}
-	if got, ok := errorBody["code"].(string); !ok || got != "request_timeout" {
-		t.Fatalf("error.code = %#v, want request_timeout", errorBody["code"])
-	}
+	errorBody := decodeErrorObject(t, rec)
+	assert.Equal(t, string(core.ErrorTypeInvalidRequest), errorBody["type"])
+	assert.Equal(t, "request timed out", errorBody["message"])
+	assert.Equal(t, "request_timeout", errorBody["code"])
 }
 
 // --- handleError tests ---
@@ -2840,38 +1931,26 @@ func TestHandleError_GatewayErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, rec := newHandlerContext("/test")
+			c, rec := echotest.Get(t, "/test")
+			err := handleError(c, tt.err)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedStatus, rec.Code)
 
-			if err := handleError(c, tt.err); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if rec.Code != tt.expectedStatus {
-				t.Errorf("expected status %d, got %d", tt.expectedStatus, rec.Code)
-			}
 			body := rec.Body.String()
-			if !containsString(body, tt.expectedType) {
-				t.Errorf("expected %s in body, got: %s", tt.expectedType, body)
-			}
+			assert.Contains(t, body, tt.expectedType)
 		})
 	}
 }
 
 func TestHandleError_UnexpectedError(t *testing.T) {
-	c, rec := newHandlerContext("/test")
+	c, rec := echotest.Get(t, "/test")
+	err := handleError(c, errors.New("something broke"))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	if err := handleError(c, errors.New("something broke")); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
-	}
 	body := rec.Body.String()
-	if !containsString(body, "an unexpected error occurred") {
-		t.Errorf("expected generic message, got: %s", body)
-	}
-	if containsString(body, "something broke") {
-		t.Errorf("original error should be hidden, got: %s", body)
-	}
+	assert.Contains(t, body, "an unexpected error occurred")
+	assert.NotContains(t, body, "something broke")
 }
 
 func TestHandleError_DoesNotLogCanceledRequestsAtDefaultLevel(t *testing.T) {
@@ -2882,22 +1961,13 @@ func TestHandleError_DoesNotLogCanceledRequestsAtDefaultLevel(t *testing.T) {
 		slog.SetDefault(original)
 	})
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/cache/overview", nil)
-	req = req.WithContext(core.WithRequestID(req.Context(), "admin-canceled-req-789"))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handleError(c, errors.Join(errors.New("failed to query cache overview summary"), context.Canceled)); err != nil {
-		t.Fatalf("handleError() error = %v", err)
-	}
-
-	if rec.Code != statusClientClosedRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, statusClientClosedRequest)
-	}
-	if logOutput := buf.String(); logOutput != "" {
-		t.Fatalf("expected canceled request to be hidden at info level, got %q", logOutput)
-	}
+	c, rec := echotest.Request(t, http.MethodGet, "/admin/cache/overview", nil)
+	c.SetRequest(c.Request().WithContext(core.WithRequestID(c.Request().Context(), "admin-canceled-req-789")))
+	err := handleError(c, errors.Join(errors.New("failed to query cache overview summary"), context.Canceled))
+	require.NoError(t, err)
+	require.Equal(t, statusClientClosedRequest, rec.Code)
+	logOutput := buf.String()
+	require.Empty(t, logOutput)
 }
 
 func TestHandleError_LogsClientErrorsAtWarnLevel(t *testing.T) {
@@ -2908,33 +1978,17 @@ func TestHandleError_LogsClientErrorsAtWarnLevel(t *testing.T) {
 		slog.SetDefault(original)
 	})
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/admin/workflows", nil)
-	req = req.WithContext(core.WithRequestID(req.Context(), "admin-warn-req-123"))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handleError(c, core.NewInvalidRequestError("unknown provider name: missing", nil)); err != nil {
-		t.Fatalf("handleError() error = %v", err)
-	}
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
+	c, rec := echotest.Request(t, http.MethodPost, "/admin/workflows", nil)
+	c.SetRequest(c.Request().WithContext(core.WithRequestID(c.Request().Context(), "admin-warn-req-123")))
+	err := handleError(c, core.NewInvalidRequestError("unknown provider name: missing", nil))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 
 	logOutput := buf.String()
-	if !strings.Contains(logOutput, `"level":"WARN"`) {
-		t.Fatalf("expected WARN log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"msg":"admin request failed"`) {
-		t.Fatalf("expected admin request failed log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"path":"/admin/workflows"`) {
-		t.Fatalf("expected admin path in log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"request_id":"admin-warn-req-123"`) {
-		t.Fatalf("expected request_id in log, got %q", logOutput)
-	}
+	require.Contains(t, logOutput, `"level":"WARN"`)
+	require.Contains(t, logOutput, `"msg":"admin request failed"`)
+	require.Contains(t, logOutput, `"path":"/admin/workflows"`)
+	require.Contains(t, logOutput, `"request_id":"admin-warn-req-123"`)
 }
 
 func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
@@ -2945,81 +1999,34 @@ func TestHandleError_LogsServerErrorsAtErrorLevel(t *testing.T) {
 		slog.SetDefault(original)
 	})
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPut, "/admin/guardrails", nil)
-	req = req.WithContext(core.WithRequestID(req.Context(), "admin-error-req-456"))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/guardrails", nil)
+	c.SetRequest(c.Request().WithContext(core.WithRequestID(c.Request().Context(), "admin-error-req-456")))
 
 	upstreamErr := errors.New("storage unavailable")
-	if err := handleError(c, core.NewProviderError("guardrails", http.StatusInternalServerError, "failed to refresh guardrails", upstreamErr)); err != nil {
-		t.Fatalf("handleError() error = %v", err)
-	}
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
+	err := handleError(c, core.NewProviderError("guardrails", http.StatusInternalServerError, "failed to refresh guardrails", upstreamErr))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 
 	logOutput := buf.String()
-	if !strings.Contains(logOutput, `"level":"ERROR"`) {
-		t.Fatalf("expected ERROR log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"msg":"admin request failed"`) {
-		t.Fatalf("expected admin request failed log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"provider":"guardrails"`) {
-		t.Fatalf("expected provider in log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"request_id":"admin-error-req-456"`) {
-		t.Fatalf("expected request_id in log, got %q", logOutput)
-	}
-	if !strings.Contains(logOutput, `"message":"failed to refresh guardrails"`) {
-		t.Fatalf("expected error message in log, got %q", logOutput)
-	}
-}
-
-// containsString is a small helper to check substring presence.
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && stringContains(s, substr))
-}
-
-func stringContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func newContext(query string) *echo.Context {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/test?"+query, nil)
-	rec := httptest.NewRecorder()
-	return e.NewContext(req, rec)
+	require.Contains(t, logOutput, `"level":"ERROR"`)
+	require.Contains(t, logOutput, `"msg":"admin request failed"`)
+	require.Contains(t, logOutput, `"provider":"guardrails"`)
+	require.Contains(t, logOutput, `"request_id":"admin-error-req-456"`)
+	require.Contains(t, logOutput, `"message":"failed to refresh guardrails"`)
 }
 
 func TestParseUsageParams_DaysDefault(t *testing.T) {
-	c := newContext("")
+	c, _ := echotest.Get(t, "/test")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if params.Interval != "daily" {
-		t.Errorf("expected interval 'daily', got %q", params.Interval)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "daily", params.Interval)
 
 	today := time.Now().UTC()
 	expectedEnd := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 	expectedStart := expectedEnd.AddDate(0, 0, -29)
 
-	if !params.EndDate.Equal(expectedEnd) {
-		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
-	}
-	if !params.StartDate.Equal(expectedStart) {
-		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
-	}
+	assert.WithinDuration(t, expectedEnd, params.EndDate, 0)
+	assert.WithinDuration(t, expectedStart, params.StartDate, 0)
 }
 
 func TestParseUsageParams_UsesTimezoneHeaderForDefaultRange(t *testing.T) {
@@ -3031,50 +2038,33 @@ func TestParseUsageParams_UsesTimezoneHeaderForDefaultRange(t *testing.T) {
 		timeNow = originalTimeNow
 	}()
 
-	c := newContext("")
-	c.Request().Header.Set(dashboardTimeZoneHeader, "Europe/Warsaw")
+	c, _ := echotest.Get(t, "/test", echotest.WithHeader(dashboardTimeZoneHeader, "Europe/Warsaw"))
 
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("failed to load location: %v", err)
-	}
+	require.NoError(t, err)
 
 	expectedEnd := time.Date(2026, 1, 16, 0, 0, 0, 0, location)
 	expectedStart := expectedEnd.AddDate(0, 0, -29)
 
-	if params.TimeZone != "Europe/Warsaw" {
-		t.Errorf("expected timezone %q, got %q", "Europe/Warsaw", params.TimeZone)
-	}
-	if !params.EndDate.Equal(expectedEnd) {
-		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
-	}
-	if !params.StartDate.Equal(expectedStart) {
-		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
-	}
+	assert.Equal(t, "Europe/Warsaw", params.TimeZone)
+	assert.WithinDuration(t, expectedEnd, params.EndDate, 0)
+	assert.WithinDuration(t, expectedStart, params.StartDate, 0)
 }
 
 func TestParseUsageParams_DaysExplicit(t *testing.T) {
-	c := newContext("days=7")
+	c, _ := echotest.Get(t, "/test?"+"days=7")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	today := time.Now().UTC()
 	expectedEnd := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 	expectedStart := expectedEnd.AddDate(0, 0, -6)
 
-	if !params.StartDate.Equal(expectedStart) {
-		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
-	}
-	if !params.EndDate.Equal(expectedEnd) {
-		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
-	}
+	assert.WithinDuration(t, expectedStart, params.StartDate, 0)
+	assert.WithinDuration(t, expectedEnd, params.EndDate, 0)
 }
 
 func TestParseUsageParams_DaysClamped(t *testing.T) {
@@ -3086,236 +2076,136 @@ func TestParseUsageParams_DaysClamped(t *testing.T) {
 		timeNow = originalTimeNow
 	}()
 
-	c := newContext("days=9999")
+	c, _ := echotest.Get(t, "/test?"+"days=9999")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	expectedEnd := time.Date(2026, 4, 28, 0, 0, 0, 0, time.UTC)
 	expectedStart := expectedEnd.AddDate(0, 0, -(maxDateRangeDays - 1))
 
-	if !params.StartDate.Equal(expectedStart) {
-		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
-	}
-	if !params.EndDate.Equal(expectedEnd) {
-		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
-	}
+	assert.WithinDuration(t, expectedStart, params.StartDate, 0)
+	assert.WithinDuration(t, expectedEnd, params.EndDate, 0)
 }
 
 func TestParseUsageParams_StartAndEndDate(t *testing.T) {
-	c := newContext("start_date=2026-01-01&end_date=2026-01-31")
+	c, _ := echotest.Get(t, "/test?"+"start_date=2026-01-01&end_date=2026-01-31")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	expectedStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	expectedEnd := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
 
-	if !params.StartDate.Equal(expectedStart) {
-		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
-	}
-	if !params.EndDate.Equal(expectedEnd) {
-		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
-	}
+	assert.WithinDuration(t, expectedStart, params.StartDate, 0)
+	assert.WithinDuration(t, expectedEnd, params.EndDate, 0)
 }
 
 func TestParseUsageParams_OnlyStartDate(t *testing.T) {
-	c := newContext("start_date=2026-01-15")
+	c, _ := echotest.Get(t, "/test?"+"start_date=2026-01-15")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	expectedStart := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
 	today := time.Now().UTC()
 	expectedEnd := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)
 
-	if !params.StartDate.Equal(expectedStart) {
-		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
-	}
-	if !params.EndDate.Equal(expectedEnd) {
-		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
-	}
+	assert.WithinDuration(t, expectedStart, params.StartDate, 0)
+	assert.WithinDuration(t, expectedEnd, params.EndDate, 0)
 }
 
 func TestParseUsageParams_OnlyEndDate(t *testing.T) {
-	c := newContext("end_date=2026-02-10")
+	c, _ := echotest.Get(t, "/test?"+"end_date=2026-02-10")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	expectedEnd := time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC)
 	expectedStart := expectedEnd.AddDate(0, 0, -29)
 
-	if !params.StartDate.Equal(expectedStart) {
-		t.Errorf("expected start date %v, got %v", expectedStart, params.StartDate)
-	}
-	if !params.EndDate.Equal(expectedEnd) {
-		t.Errorf("expected end date %v, got %v", expectedEnd, params.EndDate)
-	}
+	assert.WithinDuration(t, expectedStart, params.StartDate, 0)
+	assert.WithinDuration(t, expectedEnd, params.EndDate, 0)
 }
 
 func TestParseUsageParams_InvalidStartDate(t *testing.T) {
-	c := newContext("start_date=invalid")
+	c, _ := echotest.Get(t, "/test?"+"start_date=invalid")
 	_, err := parseUsageParams(c)
-	if err == nil {
-		t.Fatal("expected error for invalid start_date, got nil")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", gatewayErr.HTTPStatusCode())
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestParseUsageParams_InvalidEndDate(t *testing.T) {
-	c := newContext("start_date=2026-01-01&end_date=also-invalid")
+	c, _ := echotest.Get(t, "/test?"+"start_date=2026-01-01&end_date=also-invalid")
 	_, err := parseUsageParams(c)
-	if err == nil {
-		t.Fatal("expected error for invalid end_date, got nil")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", gatewayErr.HTTPStatusCode())
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestParseUsageParams_InvalidUserPath(t *testing.T) {
-	c := newContext("user_path=/team/../alpha")
+	c, _ := echotest.Get(t, "/test?"+"user_path=/team/../alpha")
 	_, err := parseUsageParams(c)
-	if err == nil {
-		t.Fatal("expected error for invalid user_path, got nil")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.Message != `invalid user_path: user path cannot contain '.' or '..' segments` {
-		t.Fatalf("message = %q, want invalid user_path message", gatewayErr.Message)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", gatewayErr.HTTPStatusCode())
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, `invalid user_path: user path cannot contain '.' or '..' segments`, gatewayErr.Message)
+	assert.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestParseUsageParams_IntervalWeekly(t *testing.T) {
-	c := newContext("interval=weekly")
+	c, _ := echotest.Get(t, "/test?"+"interval=weekly")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if params.Interval != "weekly" {
-		t.Errorf("expected interval 'weekly', got %q", params.Interval)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "weekly", params.Interval)
 }
 
 func TestParseUsageParams_IntervalMonthly(t *testing.T) {
-	c := newContext("interval=monthly")
+	c, _ := echotest.Get(t, "/test?"+"interval=monthly")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if params.Interval != "monthly" {
-		t.Errorf("expected interval 'monthly', got %q", params.Interval)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "monthly", params.Interval)
 }
 
 func TestParseUsageParams_IntervalInvalid(t *testing.T) {
-	c := newContext("interval=hourly")
+	c, _ := echotest.Get(t, "/test?"+"interval=hourly")
 	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if params.Interval != "daily" {
-		t.Errorf("expected default interval 'daily', got %q", params.Interval)
-	}
-}
-
-func TestParseUsageParams_IntervalEmpty(t *testing.T) {
-	c := newContext("")
-	params, err := parseUsageParams(c)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if params.Interval != "daily" {
-		t.Errorf("expected default interval 'daily', got %q", params.Interval)
-	}
-}
-
-// Ensure usage.UsageQueryParams is the type used (compile check)
-var _ = func() usage.UsageQueryParams {
-	return usage.UsageQueryParams{
-		StartDate: time.Time{},
-		EndDate:   time.Time{},
-		Interval:  "daily",
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "daily", params.Interval)
 }
 
 // --- TokenThroughput handler tests ---
 
 func TestTokenThroughput_InvalidGranularity(t *testing.T) {
 	h := NewHandler(&mockUsageReader{}, nil)
-	c, rec := newHandlerContext("/admin/usage/throughput?granularity=weekly")
-	if err := h.TokenThroughput(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
-	if !containsString(rec.Body.String(), "granularity") {
-		t.Errorf("expected granularity message, got: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/usage/throughput?granularity=weekly")
+	require.NoError(t, h.TokenThroughput(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "granularity")
 }
 
 func TestTokenThroughput_MissingGranularity(t *testing.T) {
 	h := NewHandler(&mockUsageReader{}, nil)
-	c, rec := newHandlerContext("/admin/usage/throughput")
-	if err := h.TokenThroughput(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/throughput")
+	require.NoError(t, h.TokenThroughput(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestTokenThroughput_NilReaderReturnsEmptyWindow(t *testing.T) {
 	h := NewHandler(nil, nil)
-	c, rec := newHandlerContext("/admin/usage/throughput?granularity=minute")
-	if err := h.TokenThroughput(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var tp usage.TokenThroughput
-	if err := json.Unmarshal(rec.Body.Bytes(), &tp); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if tp.Granularity != "minute" || tp.BucketSeconds != 60 {
-		t.Errorf("got granularity=%q bucket_seconds=%d, want minute/60", tp.Granularity, tp.BucketSeconds)
-	}
-	if len(tp.Buckets) != 60 {
-		t.Errorf("got %d buckets, want 60 (zero-filled window)", len(tp.Buckets))
-	}
+	c, rec := echotest.Get(t, "/admin/usage/throughput?granularity=minute")
+	require.NoError(t, h.TokenThroughput(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	tp := echotest.Decode[usage.TokenThroughput](t, rec)
+	assert.Equal(t, "minute", tp.Granularity)
+	assert.Equal(t, 60, tp.BucketSeconds)
+	assert.Len(t, tp.Buckets, 60)
+
 	for i, b := range tp.Buckets {
-		if b.InputTokens+b.OutputTokens+b.PromptCachedTokens+b.LocallyCachedTokens != 0 {
-			t.Errorf("bucket %d should be zero, got %+v", i, b)
-		}
+		assert.Zero(t, b.InputTokens+b.OutputTokens+b.PromptCachedTokens+b.LocallyCachedTokens, "bucket %d", i)
 	}
 }
 
@@ -3330,52 +2220,30 @@ func TestTokenThroughput_SuccessForwardsArgs(t *testing.T) {
 		},
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/throughput?granularity=minute")
+	c, rec := echotest.Get(t, "/admin/usage/throughput?granularity=minute")
 	before := time.Now().UTC()
-	if err := h.TokenThroughput(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	var tp usage.TokenThroughput
-	if err := json.Unmarshal(rec.Body.Bytes(), &tp); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
-	if len(tp.Buckets) != 1 || tp.Buckets[0].PromptCachedTokens != 30 {
-		t.Errorf("unexpected throughput body: %+v", tp)
-	}
+	require.NoError(t, h.TokenThroughput(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	tp := echotest.Decode[usage.TokenThroughput](t, rec)
+	require.Len(t, tp.Buckets, 1)
+	assert.Equal(t, int64(30), tp.Buckets[0].PromptCachedTokens)
+
 	// The handler forwards the parsed granularity, ~now, and a UTC offset by default.
-	if reader.lastThroughputGran.Name != "minute" {
-		t.Errorf("forwarded granularity = %q, want minute", reader.lastThroughputGran.Name)
-	}
-	if reader.lastThroughputOffset != 0 {
-		t.Errorf("forwarded offset = %d, want 0 (default UTC)", reader.lastThroughputOffset)
-	}
-	if reader.lastThroughputEnd.Before(before) || reader.lastThroughputEnd.After(time.Now().UTC().Add(time.Second)) {
-		t.Errorf("forwarded end = %v, want ~now", reader.lastThroughputEnd)
-	}
+	assert.Equal(t, "minute", reader.lastThroughputGran.Name)
+	assert.Equal(t, int64(0), reader.lastThroughputOffset)
+	assert.False(t, reader.lastThroughputEnd.Before(before))
+	assert.False(t, reader.lastThroughputEnd.After(time.Now().UTC().Add(time.Second)), "forwarded end = %v, want ~now", reader.lastThroughputEnd)
 }
 
 func TestTokenThroughput_ForwardsTimezoneOffset(t *testing.T) {
 	reader := &mockUsageReader{throughput: &usage.TokenThroughput{Granularity: "day", BucketSeconds: 86400}}
 	h := NewHandler(reader, nil)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/usage/throughput?granularity=day", nil)
-	req.Header.Set("X-GoModel-Timezone", "Asia/Kolkata") // UTC+5:30, no DST
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.TokenThroughput(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	if reader.lastThroughputOffset != int64(5*3600+30*60) {
-		t.Errorf("forwarded offset = %d, want 19800 (Asia/Kolkata)", reader.lastThroughputOffset)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/throughput?granularity=day", echotest.WithHeader("X-GoModel-Timezone", "Asia/Kolkata")) // UTC+5:30, no DST
+	require.NoError(t, h.TokenThroughput(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, int64(5*3600+30*60), reader.lastThroughputOffset)
 }
 
 func TestTokenThroughput_GatewayError(t *testing.T) {
@@ -3383,13 +2251,9 @@ func TestTokenThroughput_GatewayError(t *testing.T) {
 		throughputErr: core.NewProviderError("test", http.StatusBadGateway, "upstream failed", nil),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/throughput?granularity=hour")
-	if err := h.TokenThroughput(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("expected 502, got %d", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/usage/throughput?granularity=hour")
+	require.NoError(t, h.TokenThroughput(c))
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
 }
 
 func TestTokenThroughput_GenericError(t *testing.T) {
@@ -3397,14 +2261,8 @@ func TestTokenThroughput_GenericError(t *testing.T) {
 		throughputErr: errors.New("database connection lost"),
 	}
 	h := NewHandler(reader, nil)
-	c, rec := newHandlerContext("/admin/usage/throughput?granularity=day")
-	if err := h.TokenThroughput(c); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
-	}
-	if containsString(rec.Body.String(), "database connection lost") {
-		t.Errorf("original error message should be hidden, got: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/usage/throughput?granularity=day")
+	require.NoError(t, h.TokenThroughput(c))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "database connection lost")
 }

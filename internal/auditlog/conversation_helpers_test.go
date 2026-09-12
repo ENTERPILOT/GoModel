@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -65,9 +66,7 @@ func TestExtractStringField(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := extractStringField(tc.v, tc.key); got != tc.want {
-				t.Fatalf("extractStringField() = %q, want %q", got, tc.want)
-			}
+			require.Equal(t, tc.want, extractStringField(tc.v, tc.key))
 		})
 	}
 }
@@ -85,13 +84,8 @@ func TestExtractConversationIDsFromBSONBodies(t *testing.T) {
 			},
 		},
 	}
-
-	if got := extractPreviousResponseID(entry); got != "resp_prev" {
-		t.Fatalf("extractPreviousResponseID() = %q, want %q", got, "resp_prev")
-	}
-	if got := extractResponseID(entry); got != "resp_cur" {
-		t.Fatalf("extractResponseID() = %q, want %q", got, "resp_cur")
-	}
+	require.Equal(t, "resp_prev", extractPreviousResponseID(entry))
+	require.Equal(t, "resp_cur", extractResponseID(entry))
 }
 
 // chainEntry builds a log entry linked into a response chain: it replays
@@ -127,19 +121,12 @@ func TestBuildConversationThreadWalksBothDirections(t *testing.T) {
 		func(_ context.Context, id string) (*LogEntry, error) { return byRespID[id], nil },
 		func(_ context.Context, id string) (*LogEntry, error) { return byPrevRespID[id], nil },
 	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Truncated {
-		t.Error("complete walk must not be marked truncated")
-	}
-	if len(result.Entries) != 3 {
-		t.Fatalf("expected 3 entries, got %d", len(result.Entries))
-	}
+	require.NoError(t, err)
+	assert.False(t, result.Truncated)
+	require.Len(t, result.Entries, 3)
+
 	for i, want := range []string{"log-1", "log-2", "log-3"} {
-		if result.Entries[i].ID != want {
-			t.Errorf("entry %d = %s, want %s", i, result.Entries[i].ID, want)
-		}
+		assert.Equal(t, want, result.Entries[i].ID)
 	}
 }
 
@@ -156,40 +143,23 @@ func TestBuildSessionConversationKeepsAnchorAndClosestEntries(t *testing.T) {
 
 	result, err := buildSessionConversation(context.Background(), anchor, 3,
 		func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
-			if params.SessionID != "session-1" {
-				t.Fatalf("session id = %q, want session-1", params.SessionID)
-			}
-			if params.UserPath != "/team/a" {
-				t.Fatalf("user path = %q, want /team/a", params.UserPath)
-			}
-			if !params.ExactUserPath {
-				t.Fatal("session conversation must use an exact user-path filter")
-			}
-			if !params.OmitAttempts {
-				t.Fatal("session conversation must omit attempt hydration")
-			}
+			require.Equal(t, "session-1", params.SessionID)
+			require.Equal(t, "/team/a", params.UserPath)
+			require.True(t, params.ExactUserPath)
+			require.True(t, params.OmitAttempts)
+
 			end := min(params.Offset+params.Limit, len(newestFirst))
 			return &LogListResult{
 				Entries: newestFirst[params.Offset:end],
 				Total:   len(newestFirst),
 			}, nil
 		})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Truncated {
-		t.Fatal("limited session must be marked truncated")
-	}
-	if result.AnchorID != "log-1" {
-		t.Fatalf("anchor id = %q, want log-1", result.AnchorID)
-	}
-	got := []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID}
-	want := []string{"log-1", "log-2", "log-3"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("entry ids = %v, want %v", got, want)
-		}
-	}
+	require.NoError(t, err)
+	require.True(t, result.Truncated)
+	require.Equal(t, "log-1", result.AnchorID)
+
+	require.Len(t, result.Entries, 3)
+	require.Equal(t, []string{"log-1", "log-2", "log-3"}, []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID})
 }
 
 func TestBuildSessionConversationDeduplicatesOverlappingPages(t *testing.T) {
@@ -216,13 +186,11 @@ func TestBuildSessionConversationDeduplicatesOverlappingPages(t *testing.T) {
 				return nil, nil
 			}
 		})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	got := []string{result.Entries[0].ID, result.Entries[1].ID, result.Entries[2].ID, result.Entries[3].ID}
-	if want := []string{"log-old", "log-a", "log-b", "log-c"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("entry ids = %v, want %v", got, want)
-	}
+	want := []string{"log-old", "log-a", "log-b", "log-c"}
+	require.Equal(t, want, got)
 }
 
 func TestBuildSessionConversationOrdersEqualTimestampsByID(t *testing.T) {
@@ -236,12 +204,9 @@ func TestBuildSessionConversationOrdersEqualTimestampsByID(t *testing.T) {
 				*anchor,
 			}, Total: 2}, nil
 		})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Entries[0].ID != "log-a" || result.Entries[1].ID != "log-b" {
-		t.Fatalf("equal-timestamp entries = %+v, want log-a then log-b", result.Entries)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "log-a", result.Entries[0].ID)
+	require.Equal(t, "log-b", result.Entries[1].ID, "equal-timestamp entries = %+v, want log-a then log-b", result.Entries)
 }
 
 func TestBuildSessionConversationPagesPastAuditListCap(t *testing.T) {
@@ -271,20 +236,16 @@ func TestBuildSessionConversationPagesPastAuditListCap(t *testing.T) {
 			}
 			return &LogListResult{Entries: eligible[:min(params.Limit, len(eligible))], Total: len(all)}, nil
 		})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if calls != 2 || len(result.Entries) != 120 {
-		t.Fatalf("calls/entries = %d/%d, want 2/120", calls, len(result.Entries))
-	}
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+	require.Len(t, result.Entries, 120)
+
 	seen := make(map[string]struct{}, len(result.Entries))
 	for _, entry := range result.Entries {
-		if entry.ID == "live-new" {
-			t.Fatal("entry inserted after the first page crossed the keyset cursor")
-		}
-		if _, duplicate := seen[entry.ID]; duplicate {
-			t.Fatalf("duplicate entry %q", entry.ID)
-		}
+		require.NotEqual(t, "live-new", entry.ID)
+		_, duplicate := seen[entry.ID]
+		require.False(t, duplicate)
+
 		seen[entry.ID] = struct{}{}
 	}
 }
@@ -338,32 +299,31 @@ func TestBuildSessionConversationBoundaries(t *testing.T) {
 			result, err := buildSessionConversation(context.Background(), tc.anchor, 40,
 				func(_ context.Context, params LogQueryParams) (*LogListResult, error) {
 					called = true
-					if params.UserPath != tc.wantPath || !params.ExactUserPath || !params.OmitAttempts {
-						t.Fatalf("lookup params = %+v", params)
-					}
+					require.Equal(t, tc.wantPath, params.UserPath)
+					require.True(t, params.ExactUserPath)
+					require.True(t, params.OmitAttempts, "lookup params = %+v", params)
+
 					return tc.page, tc.lookupErr
 				})
-			if !errors.Is(err, lookupErr) && tc.wantError {
-				t.Fatalf("error = %v, want %v", err, lookupErr)
+			if tc.wantError {
+				require.ErrorIs(t, err, lookupErr)
+			} else {
+				require.NoError(t, err)
 			}
-			if !tc.wantError && err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if called != tc.wantCalled {
-				t.Fatalf("lookup called = %v, want %v", called, tc.wantCalled)
-			}
+			require.Equal(t, tc.wantCalled, called)
+
 			if tc.wantError {
 				return
 			}
 			if tc.anchor == nil {
-				if result == nil || len(result.Entries) != 0 {
-					t.Fatalf("nil-anchor result = %+v", result)
-				}
+				require.NotNil(t, result)
+				require.Empty(t, result.Entries)
+
 				return
 			}
-			if result.AnchorID != tc.anchor.ID || len(result.Entries) != 1 || result.Entries[0].ID != tc.anchor.ID {
-				t.Fatalf("result = %+v, want anchor-only conversation", result)
-			}
+			require.Equal(t, tc.anchor.ID, result.AnchorID)
+			require.Len(t, result.Entries, 1)
+			require.Equal(t, tc.anchor.ID, result.Entries[0].ID)
 		})
 	}
 }
@@ -385,15 +345,10 @@ func TestBuildConversationThreadReturnsPartialOnDeadline(t *testing.T) {
 				return nil, nil
 			},
 		)
-		if err != nil {
-			t.Fatalf("deadline mid-walk must not fail the build: %v", err)
-		}
-		if !result.Truncated {
-			t.Error("partial thread must be marked truncated")
-		}
-		if len(result.Entries) != 1 || result.Entries[0].ID != "log-2" {
-			t.Errorf("expected the anchor alone, got %+v", result.Entries)
-		}
+		require.NoError(t, err)
+		assert.True(t, result.Truncated)
+		require.Len(t, result.Entries, 1)
+		assert.Equal(t, "log-2", result.Entries[0].ID)
 	})
 
 	t.Run("forward hop times out", func(t *testing.T) {
@@ -403,15 +358,9 @@ func TestBuildConversationThreadReturnsPartialOnDeadline(t *testing.T) {
 			func(_ context.Context, _ string) (*LogEntry, error) { return parent, nil },
 			func(ctx context.Context, _ string) (*LogEntry, error) { return nil, context.Canceled },
 		)
-		if err != nil {
-			t.Fatalf("deadline mid-walk must not fail the build: %v", err)
-		}
-		if !result.Truncated {
-			t.Error("partial thread must be marked truncated")
-		}
-		if len(result.Entries) != 2 {
-			t.Errorf("expected anchor plus backward entry, got %+v", result.Entries)
-		}
+		require.NoError(t, err)
+		assert.True(t, result.Truncated)
+		assert.Len(t, result.Entries, 2)
 	})
 
 	t.Run("anchor lookup failure still errors", func(t *testing.T) {
@@ -420,8 +369,6 @@ func TestBuildConversationThreadReturnsPartialOnDeadline(t *testing.T) {
 			func(_ context.Context, _ string) (*LogEntry, error) { return nil, nil },
 			func(_ context.Context, _ string) (*LogEntry, error) { return nil, nil },
 		)
-		if err == nil {
-			t.Fatal("a thread without its anchor is not partial, it is missing — must error")
-		}
+		require.Error(t, err)
 	})
 }
