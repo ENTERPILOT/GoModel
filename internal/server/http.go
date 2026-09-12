@@ -435,6 +435,10 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 		e.OPTIONS("/p/:provider/*", handler.ProviderPassthrough)
 	}
 	e.GET("/v1/models", handler.ListModels)
+	// Model IDs carry the provider prefix and may contain several slashes, so
+	// retrieve is a wildcard route; it only matches under /v1/models/ and
+	// therefore shadows no other /v1 route.
+	e.GET("/v1/models/*", handler.RetrieveModel)
 	e.GET("/v1/usage", handler.UsageStatus)
 	// Opt-in: the route answers questions about credentials, so it is only
 	// mounted where an operator asked for it.

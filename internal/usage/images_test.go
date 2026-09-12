@@ -94,7 +94,10 @@ func TestExtractFromImageEditResponse(t *testing.T) {
 			InputTokensDetails: &core.ImageTokenDetails{TextTokens: 10, ImageTokens: 40},
 		},
 	}
-	pricing := &core.ModelPricing{PerImage: new(0.04)}
+	// gpt-image-1 prices generated image tokens at $40/Mtok and publishes
+	// per_image as the flat equivalent of one high-quality image; the reported
+	// tokens decide, so the edit costs 1000 * 40 / 1e6.
+	pricing := &core.ModelPricing{OutputImagePerMtok: new(40.0), PerImage: new(0.167)}
 
 	entry := ExtractFromImageEditResponse(resp, "req-2", "gpt-image-1", "openai", pricing)
 
@@ -111,7 +114,137 @@ func TestExtractFromImageEditResponse(t *testing.T) {
 		t.Errorf("raw data = %v", entry.RawData)
 	}
 	if entry.OutputCost == nil || !costsNearlyEqual(*entry.OutputCost, 0.04) {
-		t.Errorf("output cost = %v, want 0.04 per-image", entry.OutputCost)
+		t.Errorf("output cost = %v, want 0.04 from image output tokens", entry.OutputCost)
+	}
+}
+
+// TestImageBillingUnit pins the rule that decides how an image call is priced:
+// a response that reports generated tokens is billed by those tokens at the
+// image output rate, and only a response that reports none is billed per
+// image. The catalog carries both rates for the same model (Gemini image
+// models, gpt-image-1), where per_image is just the token price of one typical
+// image, so applying both double-bills.
+func TestImageBillingUnit(t *testing.T) {
+	// gemini-2.5-flash-image: $0.30/Mtok in, $30/Mtok image out, and a
+	// per_image of $0.039 — the price of one 1290-token image.
+	gemini := &core.ModelPricing{
+		InputPerMtok:       new(0.3),
+		OutputPerMtok:      new(30.0),
+		OutputImagePerMtok: new(30.0),
+		PerImage:           new(0.039),
+	}
+	// gpt-image-1 has no text output rate at all: image tokens cost $40/Mtok,
+	// and per_image is the flat price of a high-quality 1024x1024.
+	gptImage1 := &core.ModelPricing{
+		InputPerMtok:       new(5.0),
+		OutputImagePerMtok: new(40.0),
+		PerImage:           new(0.167),
+	}
+	// gpt-image-1-mini publishes only an image output rate.
+	gptImage1Mini := &core.ModelPricing{InputPerMtok: new(2.0), OutputImagePerMtok: new(8.0)}
+	// dall-e-3 reports no usage at all and is billed per image.
+	dalle := &core.ModelPricing{PerImage: new(0.04)}
+
+	tests := []struct {
+		name       string
+		pricing    *core.ModelPricing
+		usage      *core.ImageUsage
+		images     int
+		wantCost   *float64
+		wantCaveat string
+	}{
+		{
+			name:     "gemini token-billed image is not also billed per image",
+			pricing:  gemini,
+			usage:    &core.ImageUsage{InputTokens: 5, OutputTokens: 1290, TotalTokens: 1295},
+			images:   1,
+			wantCost: new(5*0.3/1e6 + 1290*30/1e6),
+		},
+		{
+			name:     "gpt-image-1 low quality is billed by its image tokens",
+			pricing:  gptImage1,
+			usage:    &core.ImageUsage{InputTokens: 9, OutputTokens: 272},
+			images:   1,
+			wantCost: new(9*5/1e6 + 272*40/1e6),
+		},
+		{
+			name:     "gpt-image-1-mini prices its image output tokens",
+			pricing:  gptImage1Mini,
+			usage:    &core.ImageUsage{InputTokens: 9, OutputTokens: 272},
+			images:   1,
+			wantCost: new(9*2/1e6 + 272*8/1e6),
+		},
+		{
+			name:     "a response without usage is billed per image",
+			pricing:  dalle,
+			images:   2,
+			wantCost: new(0.08),
+		},
+		{
+			name:       "reported tokens with no rate are flagged, not silently free",
+			pricing:    &core.ModelPricing{InputPerMtok: new(2.0)},
+			usage:      &core.ImageUsage{InputTokens: 9, OutputTokens: 272},
+			images:     1,
+			wantCost:   new(9 * 2 / 1e6),
+			wantCaveat: caveatImageUnpricedOutput,
+		},
+		{
+			name:       "no usage and no per-image rate stays flagged",
+			pricing:    &core.ModelPricing{InputPerMtok: new(0.3), OutputPerMtok: new(30.0)},
+			images:     1,
+			wantCost:   new(0.0), // zero-token math, which is exactly why it is flagged
+			wantCaveat: caveatImageMissingUsage,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &core.ImageGenerationResponse{Usage: tt.usage}
+			for range tt.images {
+				resp.Data = append(resp.Data, core.ImageData{B64JSON: "aGk="})
+			}
+
+			entry := ExtractFromImageResponse(resp, "req", "m", "openai", tt.pricing)
+
+			switch {
+			case tt.wantCost == nil && entry.TotalCost != nil:
+				t.Errorf("total cost = %v, want nil", *entry.TotalCost)
+			case tt.wantCost != nil && entry.TotalCost == nil:
+				t.Errorf("total cost = nil, want %v", *tt.wantCost)
+			case tt.wantCost != nil && !costsNearlyEqual(*entry.TotalCost, *tt.wantCost):
+				t.Errorf("total cost = %v, want %v", *entry.TotalCost, *tt.wantCost)
+			}
+			if entry.CostsCalculationCaveat != tt.wantCaveat {
+				t.Errorf("caveat = %q, want %q", entry.CostsCalculationCaveat, tt.wantCaveat)
+			}
+		})
+	}
+}
+
+// TestImageCostCaveat_TimeWindowRate guards the caveat against disagreeing with
+// the cost: when a time window supplies the output rate, the row is priced and
+// must not also be flagged as unpriceable.
+func TestImageCostCaveat_TimeWindowRate(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok: new(5.0),
+		TimeWindows: []core.ModelPricingTimeWindow{{
+			Label:     "always",
+			UTCRanges: []core.ModelPricingUTCRange{{Start: "00:00", End: "00:00"}},
+			Pricing:   core.ModelPricingTimeWindowRates{OutputPerMtok: new(40.0)},
+		}},
+	}
+	resp := &core.ImageGenerationResponse{
+		Data:  []core.ImageData{{B64JSON: "aGk="}},
+		Usage: &core.ImageUsage{InputTokens: 9, OutputTokens: 272},
+	}
+
+	entry := ExtractFromImageResponse(resp, "req", "m", "openai", pricing)
+
+	if entry.TotalCost == nil || !costsNearlyEqual(*entry.TotalCost, 9*5/1e6+272*40/1e6) {
+		t.Errorf("total cost = %v, want the time-window rate applied", entry.TotalCost)
+	}
+	if entry.CostsCalculationCaveat != "" {
+		t.Errorf("caveat = %q, want none when the window priced the row", entry.CostsCalculationCaveat)
 	}
 }
 

@@ -61,8 +61,9 @@ flowchart LR
 - **Modes and categories** drive dashboard grouping only — routing never
   blocks on them, so `/v1/embeddings` reaches any model
   the provider serves.
-- **Context window and capabilities** are advertised on `GET /v1/models` for
-  clients that pick models dynamically.
+- **Context window and capabilities** are advertised on `GET /v1/models` (and
+  on `GET /v1/models/{model}` for a single model) for clients that pick models
+  dynamically.
 
 ## Offline behavior
 
