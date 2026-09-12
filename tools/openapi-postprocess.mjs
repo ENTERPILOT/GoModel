@@ -309,6 +309,48 @@ function applyAnthropicMessagesStreamSchema() {
   };
 }
 
+// applyRetrieveModelDialects documents the second wire dialect of
+// GET /v1/models/{model}: a request carrying anthropic-version is answered with
+// Anthropic's model envelope, and its failures with Anthropic's error envelope.
+// swag models one schema per status code, so the alternatives are spelled here.
+function applyRetrieveModelDialects() {
+  const schemas = spec.components?.schemas;
+  if (!schemas) {
+    throw new Error("missing OpenAPI components.schemas");
+  }
+  schemas["anthropicapi.ModelInfo"] = {
+    description: "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+    type: "object",
+    required: ["created_at", "display_name", "id", "type"],
+    properties: {
+      type: constStringSchema("model"),
+      id: { type: "string" },
+      display_name: { type: "string" },
+      created_at: { type: "string", format: "date-time" },
+    },
+  };
+  const dialects = {
+    200: ["core.Model", "anthropicapi.ModelInfo"],
+    401: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
+    404: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
+    502: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
+  };
+  const responses = spec.paths?.["/v1/models/{model}"]?.get?.responses;
+  if (!responses) {
+    throw new Error("missing OpenAPI operation: GET /v1/models/{model}");
+  }
+  for (const [status, names] of Object.entries(dialects)) {
+    const body = responses[status]?.content?.["application/json"];
+    if (!body) {
+      throw new Error(`missing JSON response ${status} on GET /v1/models/{model}`);
+    }
+    body.schema = {
+      description: "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+      oneOf: names.map((name) => ({ $ref: `#/components/schemas/${name}` })),
+    };
+  }
+}
+
 function applyAudioTranscriptionTextSchema() {
   // swag emits one schema across every produced content type, so the text/plain
   // transcription body is generated as a JSON object. For text/srt/vtt the
@@ -523,6 +565,7 @@ applyAnthropicMessageSchemas();
 applyResponsesReplayStateSchema();
 applyAnthropicMessagesStreamSchema();
 applyAudioTranscriptionTextSchema();
+applyRetrieveModelDialects();
 applyImageEditMultiImageSchema();
 ensureBearerAuthSecurityScheme();
 ensureRequiredProperty("core.AudioSpeechRequest", "model");

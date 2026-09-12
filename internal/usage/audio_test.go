@@ -276,11 +276,22 @@ func TestTranscriptionBillableDuration(t *testing.T) {
 		{
 			// A token-billed response with an empty transcript states a zero
 			// charge; measuring the upload instead would invent one.
-			name:       "zero-count token usage is not re-priced by duration",
-			body:       []byte(`{"text":"","usage":{"type":"tokens","input_tokens":0,"output_tokens":0}}`),
-			audio:      wav,
-			pricing:    &core.ModelPricing{InputPerMtok: new(2.5), PerSecondInput: new(0.0001)},
-			wantCost:   new(0.0),
+			// The provider did report its usage, so the row is an
+			// authoritative $0 rather than an unrecorded one.
+			name:     "zero-count token usage is not re-priced by duration",
+			body:     []byte(`{"text":"","usage":{"type":"tokens","input_tokens":0,"output_tokens":0}}`),
+			audio:    wav,
+			pricing:  &core.ModelPricing{InputPerMtok: new(2.5), PerSecondInput: new(0.0001)},
+			wantCost: new(0.0),
+		},
+		{
+			// A usage object naming duration as the billable unit but
+			// reporting none is a genuine gap when the upload cannot be
+			// measured either.
+			name:       "zero-second duration usage with an unmeasurable upload is flagged",
+			body:       []byte(`{"text":"","usage":{"type":"duration","seconds":0}}`),
+			audio:      []byte("OggS not really measurable"),
+			pricing:    pricing,
 			wantCaveat: caveatAudioMissingUsage,
 		},
 		{

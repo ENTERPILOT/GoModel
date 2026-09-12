@@ -85,7 +85,8 @@ func (h *Handler) visibleModels(c *echo.Context) (*core.ModelsResponse, error) {
 // @Tags         models
 // @Produce      json
 // @Security     BearerAuth
-// @Param        model  path      string  true  "Model ID, e.g. openai/gpt-4.1-mini"
+// @Param        model             path    string  true   "Model ID, e.g. openai/gpt-4.1-mini"
+// @Param        anthropic-version header  string  false  "Anthropic API version, e.g. 2023-06-01. When present, the model and error bodies use the Anthropic envelopes instead of the OpenAI ones."
 // @Success      200    {object}  core.Model
 // @Failure      401    {object}  core.OpenAIErrorEnvelope
 // @Failure      404    {object}  core.OpenAIErrorEnvelope
