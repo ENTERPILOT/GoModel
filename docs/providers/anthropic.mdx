@@ -183,8 +183,10 @@ schema before sending it:
   each `allOf` branch too — Anthropic requires it and merges the branches itself
 - validation-only keywords Anthropic does not honor (`minimum`, `maximum`,
   `multipleOf`, `maxItems`, `uniqueItems`, `minLength`, `maxLength`,
-  `propertyNames`, `not`, `if`/`then`/`else`, …) are dropped; `pattern` is kept,
-  because Anthropic does enforce it
+  `propertyNames`, `not`, `if`/`then`/`else`, …) are dropped
+- `pattern` is kept, because Anthropic does enforce it — except for the regex
+  features its engine rejects (lookarounds, backreferences, `\b`/`\B`), which
+  would 400 the request; those patterns are dropped and the loss is logged
 - `minItems` is kept when it is `0` or `1`, the only values Anthropic accepts,
   and dropped otherwise
 - `oneOf` is relaxed to `anyOf`, and unknown string `format` values are dropped.
@@ -195,7 +197,11 @@ schema before sending it:
   a property you left out of `required` stays optional
 
 Nested objects, arrays, `enum`, `const`, `anyOf`, `allOf`, and `$ref`/`$defs`
-are passed through unchanged.
+are passed through unchanged. `$ref` has limits GoModel cannot paper over, and
+Anthropic returns a 400 naming each one: references must be local (`#/$defs/…`
+— an external URL is refused), non-recursive (a definition that refers to
+itself, directly or in a cycle, is refused), and outside `allOf` (resolve the
+reference yourself before composing with `allOf`).
 
 <Note>
   `strict` is not forwarded — Anthropic always enforces the schema it is given.

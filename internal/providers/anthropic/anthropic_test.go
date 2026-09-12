@@ -1614,6 +1614,11 @@ func TestSanitizeAnthropicSchema(t *testing.T) {
 			want:  `{"allOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false},{"type":"object","properties":{"b":{"type":"string"}},"required":["b"],"additionalProperties":false}]}`,
 		},
 		{
+			name:  "drops patterns Anthropic's regex engine rejects",
+			input: `{"type":"object","properties":{"a":{"type":"string","pattern":"^(?=.*P).*$"},"b":{"type":"string","pattern":"^(a)\\1$"},"c":{"type":"string","pattern":"\\bParis\\b"},"d":{"type":"string","pattern":"^P[a-z]+$"}}}`,
+			want:  `{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"},"c":{"type":"string"},"d":{"type":"string","pattern":"^P[a-z]+$"}},"additionalProperties":false}`,
+		},
+		{
 			name:  "leaves optional properties out of required",
 			input: `{"type":"object","properties":{"city":{"type":"string"},"nickname":{"type":"string"}},"required":["city"]}`,
 			want:  `{"type":"object","properties":{"city":{"type":"string"},"nickname":{"type":"string"}},"required":["city"],"additionalProperties":false}`,

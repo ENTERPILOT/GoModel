@@ -3,6 +3,8 @@ package anthropic
 import (
 	"bytes"
 	"log/slog"
+	"regexp/syntax"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-json"
@@ -191,6 +193,12 @@ func sanitizeAnthropicSchema(schema map[string]any) map[string]any {
 				}
 			}
 			out[key] = value
+		case "pattern":
+			if expr, ok := value.(string); ok && !anthropicSupportsPattern(expr) {
+				slog.Warn("dropping response_format pattern; Anthropic's regex engine rejects it")
+				continue
+			}
+			out[key] = value
 		case "items", "additionalItems":
 			out[key] = sanitizeSchemaValue(value)
 		default:
@@ -217,6 +225,28 @@ func sanitizeAnthropicSchema(schema map[string]any) map[string]any {
 		out["additionalProperties"] = false
 	}
 	return out
+}
+
+// anthropicSupportsPattern reports whether Anthropic's regex engine can compile
+// a "pattern". It rejects backreferences and lookarounds — exactly what RE2
+// refuses to parse — and word boundaries, which RE2 does accept, so those are
+// checked separately. A pattern it would reject is a 400 before the model is
+// even called, so the sanitizer drops it like the other validation-only
+// constraints rather than failing the request.
+func anthropicSupportsPattern(expr string) bool {
+	parsed, err := syntax.Parse(expr, syntax.Perl)
+	if err != nil {
+		return false
+	}
+	return !usesWordBoundary(parsed)
+}
+
+// usesWordBoundary reports whether the parsed expression asserts \b or \B.
+func usesWordBoundary(re *syntax.Regexp) bool {
+	if re.Op == syntax.OpWordBoundary || re.Op == syntax.OpNoWordBoundary {
+		return true
+	}
+	return slices.ContainsFunc(re.Sub, usesWordBoundary)
 }
 
 // schemaNumber reads a JSON Schema numeric keyword, whichever numeric type the
