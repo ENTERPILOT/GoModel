@@ -20,7 +20,7 @@ func mustJSON(t *testing.T, v any) []byte {
 func assertJSONEqual(t *testing.T, want, got any) {
 	t.Helper()
 	w, g := mustJSON(t, want), mustJSON(t, got)
-	require.Equal(t, g, w)
+	require.Equal(t, w, g)
 }
 
 func decodeChat(t *testing.T, body string) *core.ChatRequest {
