@@ -94,8 +94,8 @@ func TestMessages_Streaming(t *testing.T) {
 		assert.Contains(t, body, want)
 	}
 	// include_usage must be set so the converter sees the final usage chunk.
-	assert.NotNil(t, provider.capturedChatReq)
-	assert.NotNil(t, provider.capturedChatReq.StreamOptions)
+	require.NotNil(t, provider.capturedChatReq)
+	require.NotNil(t, provider.capturedChatReq.StreamOptions)
 	assert.True(t, provider.capturedChatReq.StreamOptions.IncludeUsage)
 }
 

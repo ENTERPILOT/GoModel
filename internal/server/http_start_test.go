@@ -17,7 +17,13 @@ func TestNewGatewayStartConfig_AppliesTimeoutOverrides(t *testing.T) {
 	cfg := newGatewayStartConfig(":0")
 	require.NotNil(t, cfg.BeforeServeFunc)
 
-	server := &http.Server{}
+	// Seed every timeout so the callback is shown to replace existing values,
+	// not merely fill in unset ones.
+	server := &http.Server{
+		ReadTimeout:       time.Hour,
+		ReadHeaderTimeout: time.Hour,
+		WriteTimeout:      time.Hour,
+	}
 	err := cfg.BeforeServeFunc(server)
 	require.NoError(t, err)
 	require.Equal(t, inboundServerReadTimeout, server.ReadTimeout)

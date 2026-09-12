@@ -82,7 +82,7 @@ func TestRealtimeClientSecrets_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	err := handler.RealtimeClientSecrets(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
-	assert.NotNil(t, mock.capturedSecret)
+	require.NotNil(t, mock.capturedSecret)
 	assert.Equal(t, "gpt-realtime-2", mock.capturedSecret.Model)
 	assert.Equal(t, "gpt-realtime-2", upstreamModel)
 }
@@ -111,7 +111,7 @@ func TestRealtimeCalls_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	err := handler.RealtimeCalls(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
-	assert.NotNil(t, mock.capturedCall)
+	require.NotNil(t, mock.capturedCall)
 	assert.Equal(t, "gpt-realtime-2", mock.capturedCall.Model)
 	assert.Equal(t, "gpt-realtime-2", upstreamModelQuery)
 	// The call is registered under the resolved model so a later sideband attach
@@ -137,7 +137,7 @@ func TestRealtimeWebsocket_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	_ = handler.Realtime(c)
 
 	require.NotEqual(t, http.StatusNotFound, rec.Code, "status = 404, alias failed to resolve (body: %s)", rec.Body.String())
-	assert.NotNil(t, mock.capturedRealtime)
+	require.NotNil(t, mock.capturedRealtime)
 	assert.Equal(t, "gpt-realtime-2", mock.capturedRealtime.Model)
 }
 
@@ -155,7 +155,7 @@ func TestAudioSpeech_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
 
 	// The provider must be dispatched on the resolved model, not the alias.
-	assert.NotNil(t, mock.capturedSpeech)
+	require.NotNil(t, mock.capturedSpeech)
 	assert.Equal(t, "gpt-4o-mini-tts", mock.capturedSpeech.Model)
 }
 
@@ -181,6 +181,6 @@ func TestAudioTranscription_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	err = handler.AudioTranscriptions(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
-	assert.NotNil(t, mock.capturedTranscription)
+	require.NotNil(t, mock.capturedTranscription)
 	assert.Equal(t, "gpt-4o-transcribe", mock.capturedTranscription.Model)
 }
