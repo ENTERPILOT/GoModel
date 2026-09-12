@@ -114,15 +114,3 @@ func (p *Provider) Embeddings(ctx context.Context, req *core.EmbeddingRequest) (
 func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechRequest) (*core.AudioResponse, error) {
 	return p.compat.CreateSpeech(ctx, req)
 }
-
-// CreateTranscription transcribes audio through Groq's OpenAI-compatible
-// /audio/transcriptions API (whisper models).
-func (p *Provider) CreateTranscription(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-	return p.compat.CreateTranscription(ctx, req)
-}
-
-// CreateTranslation translates audio through Groq's OpenAI-compatible
-// /audio/translations API (whisper models).
-func (p *Provider) CreateTranslation(ctx context.Context, req *core.AudioTranscriptionRequest) (*core.AudioResponse, error) {
-	return p.compat.CreateTranslation(ctx, req)
-}

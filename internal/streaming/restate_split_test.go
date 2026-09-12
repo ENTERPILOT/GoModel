@@ -53,11 +53,13 @@ func TestTransformedSSEStream_ResponsesRestatesDoneEventsAfterReplace(t *testing
 	}
 }
 
+// A stream nothing edits is relayed byte for byte, renumbering included: its
+// sequence numbers are already the ones the client must see.
 func TestTransformedSSEStream_ResponsesPassThroughStaysByteIdenticalWithoutEdits(t *testing.T) {
-	input := "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"id\":\"msg\",\"type\":\"message\",\"content\":[]}}\n\n" +
-		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":3,\"output_index\":0,\"content_index\":0,\"delta\":\"hi\"}\n\n" +
-		"event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"sequence_number\":5,\"output_index\":0,\"content_index\":0,\"text\":\"hi\"}\n\n" +
-		"event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":8,\"response\":{\"id\":\"r1\",\"output\":[{\"id\":\"msg\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}]}}\n\n"
+	input := "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":0,\"output_index\":0,\"item\":{\"id\":\"msg\",\"type\":\"message\",\"content\":[]}}\n\n" +
+		"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"output_index\":0,\"content_index\":0,\"delta\":\"hi\"}\n\n" +
+		"event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"sequence_number\":2,\"output_index\":0,\"content_index\":0,\"text\":\"hi\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":3,\"response\":{\"id\":\"r1\",\"output\":[{\"id\":\"msg\",\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}]}}\n\n"
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ResponsesCodec(), &funcTransformer{}, TransformOptions{})
 	got, err := io.ReadAll(stream)
 	if err != nil {

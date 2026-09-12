@@ -176,10 +176,14 @@ func NewEmptyProviderResponseError(provider string) *GatewayError {
 	return NewProviderError(provider, http.StatusBadGateway, "provider returned empty response", nil)
 }
 
+// ErrNoChoices is wrapped by NewNoChoicesProviderError so observers can tell
+// an empty 200 response apart from other 502s.
+var ErrNoChoices = errors.New("provider returned no choices")
+
 // NewNoChoicesProviderError reports a chat completion that succeeded upstream
 // but carried no choices (502), so failover treats it as a failed attempt.
 func NewNoChoicesProviderError(provider string) *GatewayError {
-	return NewProviderError(provider, http.StatusBadGateway, "provider returned no choices", nil)
+	return NewProviderError(provider, http.StatusBadGateway, ErrNoChoices.Error(), ErrNoChoices)
 }
 
 // NewInternalErrorWithStatus creates an error raised by the gateway itself
