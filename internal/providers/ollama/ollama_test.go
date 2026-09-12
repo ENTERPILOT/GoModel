@@ -3,51 +3,69 @@ package ollama
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestNew(t *testing.T) {
-	apiKey := "test-api-key"
-	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
-
-	if got := provider.keys.Primary(); got != apiKey {
-		t.Errorf("primary key = %q, want %q", got, apiKey)
+const chatCompletionJSON = `{
+	"id": "chatcmpl-123",
+	"object": "chat.completion",
+	"created": 1677652288,
+	"model": "llama3.2",
+	"choices": [{
+		"index": 0,
+		"message": {
+			"role": "assistant",
+			"content": "Hello! How can I help you today?"
+		},
+		"finish_reason": "stop"
+	}],
+	"usage": {
+		"prompt_tokens": 10,
+		"completion_tokens": 20,
+		"total_tokens": 30
 	}
-	if provider.compat == nil {
-		t.Error("compat should not be nil")
-	}
-	if provider.nativeClient == nil {
-		t.Error("nativeClient should not be nil")
-	}
-}
+}`
 
-func TestNew_ReturnsProvider(t *testing.T) {
-	provider := New(providers.ProviderConfig{APIKey: "test-api-key"}, providers.ProviderOptions{})
+const chatChunkSSE = `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"llama3.2","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
-	if provider == nil {
-		t.Error("provider should not be nil")
-	}
-}
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"llama3.2","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
 
-func TestNew_WithoutAPIKey(t *testing.T) {
-	// Ollama doesn't require an API key
+data: [DONE]
+`
+
+// newTestProvider builds a keyless provider pointed at baseURL.
+func newTestProvider(baseURL string) *Provider {
 	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
+	provider.SetBaseURL(baseURL)
+	return provider
+}
 
-	if got := provider.keys.Primary(); got != "" {
-		t.Errorf("primary key = %q, want empty", got)
+func TestNew(t *testing.T) {
+	tests := []struct {
+		name   string
+		apiKey string
+	}{
+		{name: "with api key", apiKey: "test-api-key"},
+		// Ollama doesn't require an API key
+		{name: "without api key"},
 	}
-	if provider.compat == nil {
-		t.Error("compat should not be nil")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := NewWithHTTPClient(tt.apiKey, nil, llmclient.Hooks{})
+			assert.Equal(t, tt.apiKey, provider.keys.Primary())
+			assert.NotNil(t, provider.compat)
+			assert.NotNil(t, provider.nativeClient)
+		})
 	}
 }
 
@@ -60,50 +78,17 @@ func TestChatCompletion(t *testing.T) {
 		checkResponse func(*testing.T, *core.ChatResponse)
 	}{
 		{
-			name:       "successful request",
-			statusCode: http.StatusOK,
-			responseBody: `{
-				"id": "chatcmpl-123",
-				"object": "chat.completion",
-				"created": 1677652288,
-				"model": "llama3.2",
-				"choices": [{
-					"index": 0,
-					"message": {
-						"role": "assistant",
-						"content": "Hello! How can I help you today?"
-					},
-					"finish_reason": "stop"
-				}],
-				"usage": {
-					"prompt_tokens": 10,
-					"completion_tokens": 20,
-					"total_tokens": 30
-				}
-			}`,
-			expectedError: false,
+			name:         "successful request",
+			statusCode:   http.StatusOK,
+			responseBody: chatCompletionJSON,
 			checkResponse: func(t *testing.T, resp *core.ChatResponse) {
-				if resp.ID != "chatcmpl-123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "chatcmpl-123")
-				}
-				if resp.Model != "llama3.2" {
-					t.Errorf("Model = %q, want %q", resp.Model, "llama3.2")
-				}
-				if len(resp.Choices) != 1 {
-					t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))
-				}
-				if resp.Choices[0].Message.Content != "Hello! How can I help you today?" {
-					t.Errorf("Message content = %q, want %q", resp.Choices[0].Message.Content, "Hello! How can I help you today?")
-				}
-				if resp.Usage.PromptTokens != 10 {
-					t.Errorf("PromptTokens = %d, want 10", resp.Usage.PromptTokens)
-				}
-				if resp.Usage.CompletionTokens != 20 {
-					t.Errorf("CompletionTokens = %d, want 20", resp.Usage.CompletionTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "chatcmpl-123", resp.ID)
+				assert.Equal(t, "llama3.2", resp.Model)
+				require.Len(t, resp.Choices, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Choices[0].Message.Content)
+				assert.Equal(t, 10, resp.Usage.PromptTokens)
+				assert.Equal(t, 20, resp.Usage.CompletionTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -116,123 +101,50 @@ func TestChatCompletion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
+			provider := newTestProvider(server.URL)
 
-				// Verify request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
+			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "llama3.2",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
+			})
 
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
-
-			req := &core.ChatRequest{
-				Model: "llama3.2",
-				Messages: []core.Message{
-					{Role: "user", Content: "Hello"},
-				},
-			}
-
-			resp, err := provider.ChatCompletion(context.Background(), req)
+			req := capture.Last(t)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "llama3.2", req.JSON(t)["model"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				require.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
 
-func TestChatCompletion_WithAPIKey(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify authorization header is set when API key is provided
-		authHeader := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authHeader, "Bearer ") {
-			t.Errorf("Authorization header should start with 'Bearer '")
-		}
-		if authHeader != "Bearer test-api-key" {
-			t.Errorf("Authorization = %q, want %q", authHeader, "Bearer test-api-key")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "llama3.2",
-			"choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
-			"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	req := &core.ChatRequest{
-		Model:    "llama3.2",
-		Messages: []core.Message{{Role: "user", Content: "Hello"}},
+func TestChatCompletion_AuthorizationHeader(t *testing.T) {
+	tests := []struct {
+		name     string
+		apiKey   string
+		wantAuth string
+	}{
+		{name: "with api key", apiKey: "test-api-key", wantAuth: "Bearer test-api-key"},
+		{name: "without api key"},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
+			provider := NewWithHTTPClient(tt.apiKey, nil, llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
 
-	_, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestChatCompletion_WithoutAPIKey(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify no authorization header when API key is not provided
-		authHeader := r.Header.Get("Authorization")
-		if authHeader != "" {
-			t.Errorf("Authorization header should be empty, got %q", authHeader)
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "llama3.2",
-			"choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
-			"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	req := &core.ChatRequest{
-		Model:    "llama3.2",
-		Messages: []core.Message{{Role: "user", Content: "Hello"}},
-	}
-
-	_, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "llama3.2",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantAuth, capture.Last(t).Header.Get("Authorization"))
+		})
 	}
 }
 
@@ -244,15 +156,9 @@ func TestStreamChatCompletion(t *testing.T) {
 		expectedError bool
 	}{
 		{
-			name:       "successful streaming request",
-			statusCode: http.StatusOK,
-			responseBody: `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"llama3.2","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"llama3.2","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
-
-data: [DONE]
-`,
-			expectedError: false,
+			name:         "successful streaming request",
+			statusCode:   http.StatusOK,
+			responseBody: chatChunkSSE,
 		},
 		{
 			name:          "server error",
@@ -264,64 +170,32 @@ data: [DONE]
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-
-				// Verify stream is set in request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
-
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+			})
+			provider := newTestProvider(server.URL)
 
-			provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "llama3.2",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
+			})
 
-			req := &core.ChatRequest{
-				Model: "llama3.2",
-				Messages: []core.Message{
-					{Role: "user", Content: "Hello"},
-				},
-			}
-
-			body, err := provider.StreamChatCompletion(context.Background(), req)
+			req := capture.Last(t)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, true, req.JSON(t)["stream"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
-				defer func() { _ = body.Close() }()
-
-				// Read and verify the streaming response
-				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
-				if string(respBody) != tt.responseBody {
-					t.Errorf("response body = %q, want %q", string(respBody), tt.responseBody)
-				}
+				require.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			require.NotNil(t, body)
+			defer func() { _ = body.Close() }()
+
+			respBody, err := io.ReadAll(body)
+			require.NoError(t, err)
+			assert.Equal(t, tt.responseBody, string(respBody))
 		})
 	}
 }
@@ -354,20 +228,11 @@ func TestListModels(t *testing.T) {
 					}
 				]
 			}`,
-			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ModelsResponse) {
-				if resp.Object != "list" {
-					t.Errorf("Object = %q, want %q", resp.Object, "list")
-				}
-				if len(resp.Data) != 2 {
-					t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
-				}
-				if resp.Data[0].ID != "llama3.2" {
-					t.Errorf("Data[0].ID = %q, want %q", resp.Data[0].ID, "llama3.2")
-				}
-				if resp.Data[0].OwnedBy != "library" {
-					t.Errorf("Data[0].OwnedBy = %q, want %q", resp.Data[0].OwnedBy, "library")
-				}
+				assert.Equal(t, "list", resp.Object)
+				require.Len(t, resp.Data, 2)
+				assert.Equal(t, "llama3.2", resp.Data[0].ID)
+				assert.Equal(t, "library", resp.Data[0].OwnedBy)
 			},
 		},
 		{
@@ -380,43 +245,30 @@ func TestListModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+				"/models": func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(tt.statusCode)
+					_, _ = w.Write([]byte(tt.responseBody))
+				},
 				// Best-effort capability probe issued per listed model.
-				if r.URL.Path == "/api/show" && r.Method == http.MethodPost {
-					w.WriteHeader(http.StatusOK)
+				"/api/show": func(w http.ResponseWriter, _ *http.Request) {
 					_, _ = w.Write([]byte(`{"capabilities":["completion"]}`))
-					return
-				}
-				// Verify request method and path
-				if r.Method != http.MethodGet {
-					t.Errorf("Method = %q, want %q", r.Method, http.MethodGet)
-				}
-				if r.URL.Path != "/models" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/models")
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+				},
+			})
+			provider := newTestProvider(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
 
+			listing := capture.All()[0]
+			assert.Equal(t, http.MethodGet, listing.Method)
+			assert.Equal(t, "/models", listing.Path)
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				require.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
@@ -426,14 +278,19 @@ func TestListModels(t *testing.T) {
 // repeat listings don't re-probe, and leave models unstamped when the probe
 // fails so the ID heuristic can still apply.
 func TestListModels_StampsShowCapabilities(t *testing.T) {
-	showCalls := map[string]int{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/show" {
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/models": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"object":"list","data":[
+				{"id":"llama3.2","object":"model","owned_by":"library"},
+				{"id":"nomic-embed-text","object":"model","owned_by":"library"},
+				{"id":"mystery-model","object":"model","owned_by":"library"}
+			]}`))
+		},
+		"/api/show": func(w http.ResponseWriter, r *http.Request) {
 			var req struct {
 				Model string `json:"model"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&req)
-			showCalls[req.Model]++
 			switch req.Model {
 			case "nomic-embed-text":
 				_, _ = w.Write([]byte(`{"capabilities":["embedding"]}`))
@@ -442,313 +299,141 @@ func TestListModels_StampsShowCapabilities(t *testing.T) {
 			default:
 				w.WriteHeader(http.StatusInternalServerError)
 			}
-			return
-		}
-		_, _ = w.Write([]byte(`{"object":"list","data":[
-			{"id":"llama3.2","object":"model","owned_by":"library"},
-			{"id":"nomic-embed-text","object":"model","owned_by":"library"},
-			{"id":"mystery-model","object":"model","owned_by":"library"}
-		]}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+		},
+	})
+	provider := newTestProvider(server.URL)
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	byID := map[string]core.Model{}
 	for _, m := range resp.Data {
 		byID[m.ID] = m
 	}
 
 	embed := byID["nomic-embed-text"]
-	if embed.Metadata == nil || len(embed.Metadata.Modes) != 1 || embed.Metadata.Modes[0] != "embedding" {
-		t.Errorf("nomic-embed-text metadata = %+v, want embedding modes", embed.Metadata)
-	}
-	if embed.Metadata == nil || len(embed.Metadata.Categories) != 1 || embed.Metadata.Categories[0] != core.CategoryEmbedding {
-		t.Errorf("nomic-embed-text categories = %+v, want [embedding]", embed.Metadata)
-	}
+	require.NotNil(t, embed.Metadata)
+	assert.Equal(t, []string{"embedding"}, embed.Metadata.Modes)
+	assert.Equal(t, []core.ModelCategory{core.CategoryEmbedding}, embed.Metadata.Categories)
+
 	chat := byID["llama3.2"]
-	if chat.Metadata == nil || len(chat.Metadata.Modes) != 1 || chat.Metadata.Modes[0] != "chat" {
-		t.Errorf("llama3.2 metadata = %+v, want chat modes (tools capability skipped)", chat.Metadata)
-	}
-	if byID["mystery-model"].Metadata != nil {
-		t.Errorf("mystery-model metadata = %+v, want nil after failed probe", byID["mystery-model"].Metadata)
-	}
+	require.NotNil(t, chat.Metadata)
+	assert.Equal(t, []string{"chat"}, chat.Metadata.Modes)
+	assert.Nil(t, byID["mystery-model"].Metadata)
 
 	// Second listing: successes served from cache, the failure re-probed.
-	if _, err := provider.ListModels(context.Background()); err != nil {
-		t.Fatalf("unexpected error on second listing: %v", err)
+	_, err = provider.ListModels(context.Background())
+	require.NoError(t, err)
+
+	showCalls := map[string]int{}
+	for _, req := range capture.All() {
+		if req.Path == "/api/show" {
+			showCalls[req.JSON(t)["model"].(string)]++
+		}
 	}
-	if showCalls["nomic-embed-text"] != 1 || showCalls["llama3.2"] != 1 {
-		t.Errorf("show calls = %v, want cached results for successful probes", showCalls)
-	}
-	if showCalls["mystery-model"] != 2 {
-		t.Errorf("mystery-model show calls = %d, want re-probe after failure", showCalls["mystery-model"])
-	}
+	assert.Equal(t, map[string]int{"nomic-embed-text": 1, "llama3.2": 1, "mystery-model": 2}, showCalls, "successful probes must be cached")
 }
 
 func TestChatCompletionWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		// Simulate a slow response
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	})
+	provider := newTestProvider(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	req := &core.ChatRequest{
-		Model: "llama3.2",
-		Messages: []core.Message{
-			{Role: "user", Content: "Hello"},
-		},
-	}
-
-	_, err := provider.ChatCompletion(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	_, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "llama3.2",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
+	})
+	require.Error(t, err)
 }
 
 func TestResponses(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request path for chat completions (Ollama converts Responses to chat)
-		if r.URL.Path != "/chat/completions" {
-			t.Errorf("Path = %q, want %q", r.URL.Path, "/chat/completions")
-		}
+	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
+	provider := newTestProvider(server.URL)
 
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "llama3.2",
-			"choices": [{
-				"index": 0,
-				"message": {
-					"role": "assistant",
-					"content": "Hello! How can I help you today?"
-				},
-				"finish_reason": "stop"
-			}],
-			"usage": {
-				"prompt_tokens": 10,
-				"completion_tokens": 20,
-				"total_tokens": 30
-			}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	req := &core.ResponsesRequest{
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: "llama3.2",
 		Input: "Hello",
-	}
-
-	resp, err := provider.Responses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if resp.ID != "chatcmpl-123" {
-		t.Errorf("ID = %q, want %q", resp.ID, "chatcmpl-123")
-	}
-	if resp.Object != "response" {
-		t.Errorf("Object = %q, want %q", resp.Object, "response")
-	}
-	if resp.Model != "llama3.2" {
-		t.Errorf("Model = %q, want %q", resp.Model, "llama3.2")
-	}
-	if resp.Status != "completed" {
-		t.Errorf("Status = %q, want %q", resp.Status, "completed")
-	}
-	if len(resp.Output) != 1 {
-		t.Fatalf("len(Output) = %d, want 1", len(resp.Output))
-	}
-	if len(resp.Output[0].Content) != 1 {
-		t.Fatalf("len(Output[0].Content) = %d, want 1", len(resp.Output[0].Content))
-	}
-	if resp.Output[0].Content[0].Text != "Hello! How can I help you today?" {
-		t.Errorf("Output text = %q, want %q", resp.Output[0].Content[0].Text, "Hello! How can I help you today?")
-	}
-	if resp.Usage == nil {
-		t.Fatal("Usage should not be nil")
-	}
-	if resp.Usage.InputTokens != 10 {
-		t.Errorf("InputTokens = %d, want 10", resp.Usage.InputTokens)
-	}
-	if resp.Usage.OutputTokens != 20 {
-		t.Errorf("OutputTokens = %d, want 20", resp.Usage.OutputTokens)
-	}
+	})
+	require.NoError(t, err)
+	// Ollama converts Responses to chat completions.
+	assert.Equal(t, "/chat/completions", capture.Last(t).Path)
+	assert.Equal(t, "chatcmpl-123", resp.ID)
+	assert.Equal(t, "response", resp.Object)
+	assert.Equal(t, "llama3.2", resp.Model)
+	assert.Equal(t, "completed", resp.Status)
+	require.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output[0].Content, 1)
+	assert.Equal(t, "Hello! How can I help you today?", resp.Output[0].Content[0].Text)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 10, resp.Usage.InputTokens)
+	assert.Equal(t, 20, resp.Usage.OutputTokens)
 }
 
 func TestResponsesWithArrayInput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request body is converted to chat format
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
+	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
+	provider := newTestProvider(server.URL)
 
-		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		// Verify messages array exists (converted from input)
-		messages, ok := req["messages"].([]any)
-		if !ok {
-			t.Fatal("messages should be an array")
-		}
-		// Should have system message + 2 input messages
-		if len(messages) != 3 {
-			t.Errorf("len(messages) = %d, want 3", len(messages))
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "llama3.2",
-			"choices": [{
-				"index": 0,
-				"message": {
-					"role": "assistant",
-					"content": "Hello!"
-				},
-				"finish_reason": "stop"
-			}],
-			"usage": {
-				"prompt_tokens": 10,
-				"completion_tokens": 5,
-				"total_tokens": 15
-			}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	req := &core.ResponsesRequest{
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: "llama3.2",
 		Input: []any{
-			map[string]any{
-				"role":    "user",
-				"content": "Hello",
-			},
-			map[string]any{
-				"role":    "assistant",
-				"content": "Hi there!",
-			},
+			map[string]any{"role": "user", "content": "Hello"},
+			map[string]any{"role": "assistant", "content": "Hi there!"},
 		},
 		Instructions: "Be helpful",
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "chatcmpl-123", resp.ID)
 
-	resp, err := provider.Responses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if resp.ID != "chatcmpl-123" {
-		t.Errorf("ID = %q, want %q", resp.ID, "chatcmpl-123")
-	}
+	// Input is converted to messages: system message + 2 input messages.
+	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
+	require.True(t, ok)
+	assert.Len(t, messages, 3)
 }
 
 func TestStreamResponses(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify stream is set in request body
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var req core.ChatRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		if !req.Stream {
-			t.Error("Stream should be true in request")
-		}
+	server, capture := providertest.SSEServer(t, chatChunkSSE)
+	provider := newTestProvider(server.URL)
 
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"llama3.2","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"llama3.2","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
-
-data: [DONE]
-`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	req := &core.ResponsesRequest{
+	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "llama3.2",
 		Input: "Hello",
-	}
-
-	body, err := provider.StreamResponses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if body == nil {
-		t.Fatal("body should not be nil")
-	}
+	})
+	require.NoError(t, err)
+	require.NotNil(t, body)
 	defer func() { _ = body.Close() }()
 
 	respBody, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, true, capture.Last(t).JSON(t)["stream"])
 
 	responseStr := string(respBody)
-	if !strings.Contains(responseStr, "response.created") {
-		t.Error("response should contain response.created event")
-	}
-	if !strings.Contains(responseStr, "response.output_text.delta") {
-		t.Error("response should contain response.output_text.delta event")
-	}
-	if !strings.Contains(responseStr, "[DONE]") {
-		t.Error("response should end with [DONE]")
-	}
+	assert.Contains(t, responseStr, "response.created")
+	assert.Contains(t, responseStr, "response.output_text.delta")
+	assert.Contains(t, responseStr, "[DONE]")
 }
 
 func TestResponsesWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		// Simulate a slow response
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	})
+	provider := newTestProvider(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	req := &core.ResponsesRequest{
+	_, err := provider.Responses(ctx, &core.ResponsesRequest{
 		Model: "llama3.2",
 		Input: "Hello",
-	}
-
-	_, err := provider.Responses(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	})
+	require.Error(t, err)
 }
 
 func TestOllamaResponsesStreamConverter(t *testing.T) {
@@ -763,192 +448,78 @@ data: [DONE]
 	reader := io.NopCloser(strings.NewReader(mockStream))
 	converter := providers.NewOpenAIResponsesStreamConverter(reader, "llama3.2", "ollama")
 
-	// Read all data from converter
 	data, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	result := string(data)
-
-	// Check that the stream contains expected events
-	if !strings.Contains(result, "response.created") {
-		t.Error("stream should contain response.created event")
-	}
-	if !strings.Contains(result, "response.output_text.delta") {
-		t.Error("stream should contain response.output_text.delta event")
-	}
-	if !strings.Contains(result, "Hello") {
-		t.Error("stream should contain 'Hello' content")
-	}
-	if !strings.Contains(result, " world") {
-		t.Error("stream should contain ' world' content")
-	}
-	if !strings.Contains(result, "response.completed") {
-		t.Error("stream should contain response.completed event")
-	}
-	if !strings.Contains(result, "[DONE]") {
-		t.Error("stream should contain [DONE] marker")
-	}
-}
-
-func TestNewWithHTTPClient(t *testing.T) {
-	customClient := &http.Client{}
-	apiKey := "test-api-key"
-
-	provider := NewWithHTTPClient(apiKey, customClient, llmclient.Hooks{})
-
-	if got := provider.keys.Primary(); got != apiKey {
-		t.Errorf("primary key = %q, want %q", got, apiKey)
-	}
-	if provider.compat == nil {
-		t.Error("compat should not be nil")
-	}
-	if provider.nativeClient == nil {
-		t.Error("nativeClient should not be nil")
-	}
-}
-
-func TestSetBaseURL(t *testing.T) {
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	customURL := "http://custom.ollama.server:11434/v1"
-
-	provider.SetBaseURL(customURL)
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
-	}))
-	defer server.Close()
-
-	provider.SetBaseURL(server.URL)
-	_, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Errorf("SetBaseURL should allow using custom URL: %v", err)
-	}
+	assert.Contains(t, result, "response.created")
+	assert.Contains(t, result, "response.output_text.delta")
+	assert.Contains(t, result, "Hello")
+	assert.Contains(t, result, " world")
+	assert.Contains(t, result, "response.completed")
+	assert.Contains(t, result, "[DONE]")
 }
 
 func TestSetBaseURL_TrailingSlash(t *testing.T) {
-	var nativePath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		nativePath = r.URL.Path
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"model":"nomic-embed-text","embeddings":[[0.1,0.2]]}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL + "/v1/")
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"model":"nomic-embed-text","embeddings":[[0.1,0.2]]}`)
+	provider := newTestProvider(server.URL + "/v1/")
 
 	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "nomic-embed-text",
 		Input: "hello",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if nativePath != "/api/embed" {
-		t.Errorf("native client path = %q, want /api/embed (trailing slash not normalized)", nativePath)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "/api/embed", capture.Last(t).Path)
 }
 
 func TestEmbeddings(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/embed" {
-			t.Errorf("Path = %q, want %q", r.URL.Path, "/api/embed")
-		}
-		if r.Method != http.MethodPost {
-			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var req ollamaEmbedRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		if req.Model != "nomic-embed-text" {
-			t.Errorf("Model = %q, want %q", req.Model, "nomic-embed-text")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"model": "nomic-embed-text",
-			"embeddings": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
-			"prompt_eval_count": 8
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL + "/v1")
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"model": "nomic-embed-text",
+		"embeddings": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+		"prompt_eval_count": 8
+	}`)
+	provider := newTestProvider(server.URL + "/v1")
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "nomic-embed-text",
 		Input: []string{"hello", "world"},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
-	if resp.Object != "list" {
-		t.Errorf("Object = %q, want %q", resp.Object, "list")
-	}
-	if resp.Model != "nomic-embed-text" {
-		t.Errorf("Model = %q, want %q", resp.Model, "nomic-embed-text")
-	}
-	if len(resp.Data) != 2 {
-		t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
-	}
-	if resp.Data[0].Object != "embedding" {
-		t.Errorf("Data[0].Object = %q, want %q", resp.Data[0].Object, "embedding")
-	}
+	req := capture.Last(t)
+	assert.Equal(t, "/api/embed", req.Path)
+	assert.Equal(t, http.MethodPost, req.Method)
+	var sent ollamaEmbedRequest
+	require.NoError(t, json.Unmarshal(req.Body, &sent))
+	assert.Equal(t, "nomic-embed-text", sent.Model)
+
+	assert.Equal(t, "list", resp.Object)
+	assert.Equal(t, "nomic-embed-text", resp.Model)
+	require.Len(t, resp.Data, 2)
+	assert.Equal(t, "embedding", resp.Data[0].Object)
+
 	var floats []float64
-	if err := json.Unmarshal(resp.Data[0].Embedding, &floats); err != nil {
-		t.Fatalf("failed to unmarshal embedding: %v", err)
-	}
-	if len(floats) != 3 {
-		t.Errorf("len(embedding floats) = %d, want 3", len(floats))
-	}
-	if resp.Data[1].Index != 1 {
-		t.Errorf("Data[1].Index = %d, want 1", resp.Data[1].Index)
-	}
-	if resp.Usage.PromptTokens != 8 {
-		t.Errorf("PromptTokens = %d, want 8", resp.Usage.PromptTokens)
-	}
-	if resp.Usage.TotalTokens != 8 {
-		t.Errorf("TotalTokens = %d, want 8", resp.Usage.TotalTokens)
-	}
+	require.NoError(t, json.Unmarshal(resp.Data[0].Embedding, &floats))
+	assert.Len(t, floats, 3)
+	assert.Equal(t, 1, resp.Data[1].Index)
+	assert.Equal(t, 8, resp.Usage.PromptTokens)
+	assert.Equal(t, 8, resp.Usage.TotalTokens)
 }
 
 func TestEmbeddings_ModelFallback(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"model": "",
-			"embeddings": [[0.1]],
-			"prompt_eval_count": 1
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL + "/v1")
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"model": "",
+		"embeddings": [[0.1]],
+		"prompt_eval_count": 1
+	}`)
+	provider := newTestProvider(server.URL + "/v1")
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "nomic-embed-text",
 		Input: "hello",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if resp.Model != "nomic-embed-text" {
-		t.Errorf("Model = %q, want %q (should fall back to request model)", resp.Model, "nomic-embed-text")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "nomic-embed-text", resp.Model)
 }
 
 // TestEmbeddings_NoVectorsErrors guards the common misconfiguration where an
@@ -957,36 +528,20 @@ func TestEmbeddings_ModelFallback(t *testing.T) {
 // error body, which unmarshals into zero embeddings. The adapter must surface
 // an error instead of returning an empty, OpenAI-shaped list.
 func TestEmbeddings_NoVectorsErrors(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"error":"Unexpected endpoint or method. (POST /api/embed)"}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL + "/v1")
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"error":"Unexpected endpoint or method. (POST /api/embed)"}`)
+	provider := newTestProvider(server.URL + "/v1")
 
 	resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "text-embedding-nomic-embed-text-v1.5",
 		Input: "hello world",
 	})
-	if err == nil {
-		t.Fatal("expected provider error for empty embeddings, got nil")
-	}
-	if resp != nil {
-		t.Fatalf("expected nil response on error, got %d data entries", len(resp.Data))
-	}
+	require.Error(t, err)
+	require.Nil(t, resp)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected *core.GatewayError, got %T", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
-		t.Fatalf("status = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadGateway)
-	}
-	if !strings.Contains(gatewayErr.Message, `"openai" or "vllm" provider`) {
-		t.Fatalf("unexpected error message: %q", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
+	assert.Contains(t, gatewayErr.Message, `"openai" or "vllm" provider`)
 }
 
 // TestEmbeddings_EmptyInputNoError ensures an empty input batch (an empty
@@ -994,37 +549,27 @@ func TestEmbeddings_NoVectorsErrors(t *testing.T) {
 // LM-Studio-as-ollama misconfiguration: zero vectors for an empty batch is a
 // legitimate result, not a provider error.
 func TestEmbeddings_EmptyInputNoError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"model":"nomic-embed-text","embeddings":[],"prompt_eval_count":0}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL + "/v1")
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"model":"nomic-embed-text","embeddings":[],"prompt_eval_count":0}`)
+	provider := newTestProvider(server.URL + "/v1")
 
 	for _, empty := range []any{[]any{}, []string{}} {
 		resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 			Model: "nomic-embed-text",
 			Input: empty,
 		})
-		if err != nil {
-			t.Fatalf("unexpected error for empty batch %#v: %v", empty, err)
-		}
-		if resp == nil || len(resp.Data) != 0 {
-			t.Fatalf("input %#v: expected empty data response, got %+v", empty, resp)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		assert.Empty(t, resp.Data)
 	}
 
 	// Scalar/nil inputs are NOT empty batches: zero vectors must stay on the
 	// loud-error path so a misconfigured OpenAI-compatible endpoint returning a
 	// 200 error body for "" / null isn't silently swallowed as an empty list.
 	for _, scalar := range []any{"", nil} {
-		if _, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
+		_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{
 			Model: "nomic-embed-text",
 			Input: scalar,
-		}); err == nil {
-			t.Fatalf("input %#v: expected provider error for zero vectors, got nil", scalar)
-		}
+		})
+		assert.Error(t, err, "input %#v", scalar)
 	}
 }

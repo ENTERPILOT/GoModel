@@ -3,118 +3,97 @@ package chutes
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestListModels_PreservesChutesMetadata(t *testing.T) {
-	var gotMethod, gotPath, gotAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"object":"chutes-model-catalog",
-			"data":[{
-				"id":"Qwen/Qwen3.5-397B-A17B-TEE",
-				"owned_by":"sglang",
-				"created":1677652288,
-				"context_length":262144,
-				"max_output_length":65536,
-				"input_modalities":["text","image"],
-				"supported_features":["json_mode","tools","structured_outputs","reasoning"],
-				"confidential_compute":true,
-				"pricing":{"prompt":0.45,"completion":3.0,"input_cache_read":0.045}
-			}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"object":"chutes-model-catalog",
+		"data":[{
+			"id":"Qwen/Qwen3.5-397B-A17B-TEE",
+			"owned_by":"sglang",
+			"created":1677652288,
+			"context_length":262144,
+			"max_output_length":65536,
+			"input_modalities":["text","image"],
+			"supported_features":["json_mode","tools","structured_outputs","reasoning"],
+			"confidential_compute":true,
+			"pricing":{"prompt":0.45,"completion":3.0,"input_cache_read":0.045}
+		}]
+	}`)
 
 	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if gotMethod != http.MethodGet || gotPath != "/models" || gotAuth != "Bearer cpk_test" {
-		t.Fatalf("request method/path/auth = %q/%q/%q, want GET /models/Bearer cpk_test", gotMethod, gotPath, gotAuth)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("len(resp.Data) = %d, want 1", len(resp.Data))
-	}
-	if resp.Object != "list" {
-		t.Fatalf("resp.Object = %q, want list", resp.Object)
-	}
+	require.NoError(t, err)
+
+	req := capture.Last(t)
+	assert.Equal(t, http.MethodGet, req.Method)
+	assert.Equal(t, "/models", req.Path)
+	assert.Equal(t, "Bearer cpk_test", req.Header.Get("Authorization"))
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, "list", resp.Object)
+
 	model := resp.Data[0]
-	if model.Object != "model" {
-		t.Fatalf("model.Object = %q, want model", model.Object)
-	}
-	if model.Metadata == nil || model.Metadata.ContextWindow == nil || *model.Metadata.ContextWindow != 262144 {
-		t.Fatalf("model context metadata = %+v, want 262144", model.Metadata)
-	}
-	if model.Metadata.MaxOutputTokens == nil || *model.Metadata.MaxOutputTokens != 65536 {
-		t.Fatalf("max output tokens = %+v, want 65536", model.Metadata.MaxOutputTokens)
-	}
-	if !model.Metadata.Capabilities["tools"] || !model.Metadata.Capabilities["vision"] || !model.Metadata.Capabilities["confidential_compute"] {
-		t.Fatalf("capabilities = %v, want tools, vision, and confidential_compute", model.Metadata.Capabilities)
-	}
+	assert.Equal(t, "model", model.Object)
+	require.NotNil(t, model.Metadata)
+	require.NotNil(t, model.Metadata.ContextWindow)
+	assert.Equal(t, 262144, *model.Metadata.ContextWindow)
+	require.NotNil(t, model.Metadata.MaxOutputTokens)
+	assert.Equal(t, 65536, *model.Metadata.MaxOutputTokens)
+	assert.True(t, model.Metadata.Capabilities["tools"])
+	assert.True(t, model.Metadata.Capabilities["vision"])
+	assert.True(t, model.Metadata.Capabilities["confidential_compute"])
+
 	pricing := model.Metadata.Pricing
-	if pricing == nil || pricing.Currency != "USD" || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 0.45 ||
-		pricing.OutputPerMtok == nil || *pricing.OutputPerMtok != 3.0 ||
-		pricing.CachedInputPerMtok == nil || *pricing.CachedInputPerMtok != 0.045 {
-		t.Fatalf("pricing = %+v, want Chutes per-MTok USD pricing", pricing)
-	}
+	require.NotNil(t, pricing)
+	assert.Equal(t, "USD", pricing.Currency)
+	require.NotNil(t, pricing.InputPerMtok)
+	assert.Equal(t, 0.45, *pricing.InputPerMtok)
+	require.NotNil(t, pricing.OutputPerMtok)
+	assert.Equal(t, 3.0, *pricing.OutputPerMtok)
+	require.NotNil(t, pricing.CachedInputPerMtok)
+	assert.Equal(t, 0.045, *pricing.CachedInputPerMtok)
 }
 
 func TestListModels_FiltersBlankIDsAndKeepsMinimalModels(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"data":[
-				{"id":"   "},
-				{"id":" minimal-model ","object":"model","owned_by":" chutes ","pricing":{}}
-			]
-		}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"data":[
+			{"id":"   "},
+			{"id":" minimal-model ","object":"model","owned_by":" chutes ","pricing":{}}
+		]
+	}`)
 
 	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("models = %+v, want one non-blank model", resp.Data)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
+
 	model := resp.Data[0]
-	if model.ID != "minimal-model" || model.Object != "model" || model.OwnedBy != "chutes" {
-		t.Fatalf("model identity = %+v, want trimmed minimal model", model)
-	}
-	if model.Metadata.ContextWindow != nil || model.Metadata.MaxOutputTokens != nil ||
-		model.Metadata.Capabilities != nil || model.Metadata.Pricing != nil {
-		t.Fatalf("optional metadata = %+v, want omitted zero values", model.Metadata)
-	}
+	assert.Equal(t, "minimal-model", model.ID)
+	assert.Equal(t, "model", model.Object)
+	assert.Equal(t, "chutes", model.OwnedBy)
+	assert.Nil(t, model.Metadata.ContextWindow)
+	assert.Nil(t, model.Metadata.MaxOutputTokens)
+	assert.Nil(t, model.Metadata.Capabilities)
+	assert.Nil(t, model.Metadata.Pricing)
 }
 
 func TestListModels_ReturnsUpstreamError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"error":{"message":"catalog unavailable"}}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusServiceUnavailable, `{"error":{"message":"catalog unavailable"}}`)
 
 	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.ListModels(context.Background())
-	if err == nil {
-		t.Fatal("ListModels() error = nil, want upstream error")
-	}
-	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok || gatewayErr.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("error = %#v, want 503 *core.GatewayError", err)
-	}
+	require.Error(t, err)
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode)
 }
 
 func TestModelCapabilities_MapsOptionalModalities(t *testing.T) {
@@ -122,23 +101,20 @@ func TestModelCapabilities_MapsOptionalModalities(t *testing.T) {
 		SupportedFeatures: []string{" JSON_Mode ", "   "},
 		InputModalities:   []string{"audio", "video", "unknown"},
 	})
-	if !capabilities["json_mode"] || !capabilities["audio"] || !capabilities["video"] {
-		t.Fatalf("capabilities = %v, want normalized json_mode, audio, and video", capabilities)
-	}
+	assert.True(t, capabilities["json_mode"])
+	assert.True(t, capabilities["audio"])
+	assert.True(t, capabilities["video"])
 }
 
 func TestModelPricing_HandlesNilAndPartialPrices(t *testing.T) {
 	var absent *modelPricing
-	if got := absent.toCore(); got != nil {
-		t.Fatalf("nil pricing = %+v, want nil", got)
-	}
+	assert.Nil(t, absent.toCore())
 
 	prompt := 0.25
 	got := (&modelPricing{Prompt: &prompt}).toCore()
-	if got == nil || got.InputPerMtok == nil || *got.InputPerMtok != prompt {
-		t.Fatalf("partial pricing = %+v, want input price", got)
-	}
-	if got.OutputPerMtok != nil || got.CachedInputPerMtok != nil {
-		t.Fatalf("partial pricing = %+v, want absent optional prices", got)
-	}
+	require.NotNil(t, got)
+	require.NotNil(t, got.InputPerMtok)
+	assert.Equal(t, prompt, *got.InputPerMtok)
+	assert.Nil(t, got.OutputPerMtok)
+	assert.Nil(t, got.CachedInputPerMtok)
 }

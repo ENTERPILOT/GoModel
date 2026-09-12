@@ -2,75 +2,30 @@ package minimax
 
 import (
 	"context"
-	"io"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
-	var gotPath string
-	var gotAuth string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-minimax",
-			"created":1677652288,
-			"model":"MiniMax-M3",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
-
-	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "MiniMax-M3",
-		Messages: []core.Message{
-			{Role: "user", Content: "hi"},
+func TestChatCompatibleContract(t *testing.T) {
+	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
+		Registration:   Registration,
+		Type:           "minimax",
+		DefaultBaseURL: "https://api.minimax.io/v1",
+		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
+			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
 		},
+		Embeddings: true,
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if resp.Model != "MiniMax-M3" {
-		t.Fatalf("resp.Model = %q, want MiniMax-M3", resp.Model)
-	}
-	if gotPath != "/chat/completions" {
-		t.Fatalf("path = %q, want /chat/completions", gotPath)
-	}
-	if gotAuth != "Bearer minimax-key" {
-		t.Fatalf("authorization = %q, want Bearer minimax-key", gotAuth)
-	}
 }
 
 func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
-	var gotBody []byte
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		gotBody, err = io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "read error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-minimax",
-			"created":1677652288,
-			"model":"MiniMax-M3",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
-
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 	provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	temp := 0.0
@@ -79,77 +34,44 @@ func TestChatCompletion_ClampsZeroTemperature(t *testing.T) {
 		Messages:    []core.Message{{Role: "user", Content: "hi"}},
 		Temperature: &temp,
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-
-	// Verify the body sent to the server does not contain temperature=0
-	bodyStr := string(gotBody)
-	if strings.Contains(bodyStr, `"temperature":0`) {
-		t.Fatalf("request body should not contain temperature=0, got: %s", bodyStr)
-	}
-	if !strings.Contains(bodyStr, `"temperature":1`) {
-		t.Fatalf("request body should contain temperature=1, got: %s", bodyStr)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), capture.Last(t).JSON(t)["temperature"])
 }
 
-func TestProvider_DefaultBaseURL(t *testing.T) {
-	provider := NewWithHTTPClient("key", "", nil, llmclient.Hooks{})
-	if provider == nil {
-		t.Fatal("expected non-nil provider")
-	}
-}
-
-func TestProvider_DoesNotExposeOptionalOpenAICompatibleInterfaces(t *testing.T) {
+// MiniMax serves speech natively (see audio.go), so only the batch and file
+// surfaces must stay hidden.
+func TestProvider_DoesNotExposeBatchOrFileInterfaces(t *testing.T) {
 	provider := NewWithHTTPClient("minimax-key", "", nil, llmclient.Hooks{})
-
-	if _, ok := any(provider).(core.NativeBatchProvider); ok {
-		t.Fatal("minimax provider should not implement native batch provider")
-	}
-	if _, ok := any(provider).(core.NativeFileProvider); ok {
-		t.Fatal("minimax provider should not implement native file provider")
-	}
+	_, ok := any(provider).(core.NativeBatchProvider)
+	require.False(t, ok)
+	_, ok = any(provider).(core.NativeFileProvider)
+	require.False(t, ok)
 }
 
 func TestClampTemperature_NilRequest(t *testing.T) {
-	result := clampTemperature(nil)
-	if result != nil {
-		t.Fatal("expected nil for nil input")
-	}
+	require.Nil(t, clampTemperature(nil))
 }
 
 func TestClampTemperature_NilTemperature(t *testing.T) {
 	req := &core.ChatRequest{Model: "MiniMax-M3"}
-	result := clampTemperature(req)
-	if result.Temperature != nil {
-		t.Fatal("expected nil temperature to remain nil")
-	}
+	require.Nil(t, clampTemperature(req).Temperature)
 }
 
 func TestClampTemperature_ZeroTemperature(t *testing.T) {
 	temp := 0.0
 	req := &core.ChatRequest{Model: "MiniMax-M3", Temperature: &temp}
 	result := clampTemperature(req)
-	if result.Temperature == nil {
-		t.Fatal("expected non-nil temperature after clamping")
-	}
-	if *result.Temperature != defaultTemperature {
-		t.Fatalf("expected temperature=%v after clamping zero, got %v", defaultTemperature, *result.Temperature)
-	}
+	require.NotNil(t, result.Temperature)
+	assert.Equal(t, defaultTemperature, *result.Temperature)
+
 	// Original request should not be mutated
-	if *req.Temperature != 0.0 {
-		t.Fatal("original request should not be mutated")
-	}
+	assert.Equal(t, 0.0, *req.Temperature)
 }
 
 func TestClampTemperature_PositiveTemperature(t *testing.T) {
 	temp := 0.7
 	req := &core.ChatRequest{Model: "MiniMax-M3", Temperature: &temp}
 	result := clampTemperature(req)
-	if result != req {
-		t.Fatal("expected same pointer for valid temperature")
-	}
-	if *result.Temperature != 0.7 {
-		t.Fatalf("expected temperature=0.7, got %v", *result.Temperature)
-	}
+	require.Equal(t, req, result)
+	assert.Equal(t, 0.7, *result.Temperature)
 }

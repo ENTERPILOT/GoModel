@@ -4,59 +4,48 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
+// sseBody joins SSE lines the way Cohere's stream emits them.
+func sseBody(lines ...string) string {
+	return strings.Join(lines, "\n")
+}
+
 func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
-	var captured map[string]any
 	var operation string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/chat" {
-			t.Errorf("path = %q, want /v2/chat", r.URL.Path)
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"id":"cohere-id",
+		"finish_reason":"TOOL_CALL",
+		"message":{
+			"role":"assistant",
+			"content":[
+				{"type":"thinking","thinking":"check the weather"},
+				{"type":"text","text":"I will check."}
+			],
+			"tool_plan":"Use the weather tool.",
+			"tool_calls":[
+				{"id":"call-2","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Warsaw\"}"}}
+			],
+			"citations":[{"start":0,"end":1,"text":"I"}]
+		},
+		"usage":{
+			"billed_units":{"input_tokens":10,"output_tokens":3},
+			"tokens":{"input_tokens":12,"image_tokens":5,"output_tokens":4},
+			"cached_tokens":2
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
-			t.Errorf("Authorization = %q", got)
-		}
-		if got := r.Header.Get("X-Client-Name"); got != "GoModel" {
-			t.Errorf("X-Client-Name = %q", got)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{
-			"id":"cohere-id",
-			"finish_reason":"TOOL_CALL",
-			"message":{
-				"role":"assistant",
-				"content":[
-					{"type":"thinking","thinking":"check the weather"},
-					{"type":"text","text":"I will check."}
-				],
-				"tool_plan":"Use the weather tool.",
-				"tool_calls":[
-					{"id":"call-2","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Warsaw\"}"}}
-				],
-				"citations":[{"start":0,"end":1,"text":"I"}]
-			},
-			"usage":{
-				"billed_units":{"input_tokens":10,"output_tokens":3},
-				"tokens":{"input_tokens":12,"image_tokens":5,"output_tokens":4},
-				"cached_tokens":2
-			}
-		}`)
-	}))
-	defer server.Close()
+	}`)
 
 	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{
 		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
@@ -115,80 +104,57 @@ func TestChatCompletionTranslatesRequestAndResponse(t *testing.T) {
 	}
 
 	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	if captured["model"] != req.Model || captured["stream"] != false {
-		t.Fatalf("request model/stream = %#v/%#v", captured["model"], captured["stream"])
-	}
+	sent := capture.Last(t)
+	assert.Equal(t, "/v2/chat", sent.Path)
+	assert.Equal(t, "Bearer test-key", sent.Header.Get("Authorization"))
+	assert.Equal(t, "GoModel", sent.Header.Get("X-Client-Name"))
+	assert.Equal(t, llmclient.OperationChat, operation)
+
+	captured := sent.JSON(t)
+	assert.Equal(t, req.Model, captured["model"])
+	require.Contains(t, captured, "stream")
+	streamed, _ := captured["stream"].(bool)
+	assert.False(t, streamed)
+
 	messages := captured["messages"].([]any)
-	if messages[0].(map[string]any)["role"] != "system" {
-		t.Fatalf("developer role = %#v, want system", messages[0])
-	}
-	if messages[0].(map[string]any)["content"] != "Be brief." {
-		t.Fatalf("developer content = %#v, want a Cohere system string", messages[0])
-	}
+	assert.Equal(t, "system", messages[0].(map[string]any)["role"], "developer role maps to system")
+	assert.Equal(t, "Be brief.", messages[0].(map[string]any)["content"], "developer content becomes a Cohere system string")
+
 	userContent := messages[1].(map[string]any)["content"].([]any)
 	image := userContent[1].(map[string]any)
-	if image["type"] != "image_url" {
-		t.Fatalf("image content = %#v", image)
-	}
-	toolResult := messages[3].(map[string]any)["content"].(string)
-	if toolResult != `{"result":"sunny"}` {
-		t.Fatalf("tool result = %q", toolResult)
-	}
-	if captured["tool_choice"] != "REQUIRED" {
-		t.Fatalf("tool_choice = %#v", captured["tool_choice"])
-	}
-	if captured["max_tokens"] != float64(250) {
-		t.Fatalf("max_tokens = %#v", captured["max_tokens"])
-	}
-	if got := captured["stop_sequences"].([]any)[0]; got != "END" {
-		t.Fatalf("stop_sequences = %#v", captured["stop_sequences"])
-	}
-	if captured["k"] != float64(20) {
-		t.Fatalf("k = %#v", captured["k"])
-	}
-	if operation != llmclient.OperationChat {
-		t.Fatalf("operation = %q, want chat", operation)
-	}
-	responseFormat := captured["response_format"].(map[string]any)
-	if responseFormat["type"] != "json_object" {
-		t.Fatalf("response_format.type = %#v, want json_object", responseFormat["type"])
-	}
-	jsonSchema, ok := responseFormat["json_schema"].(map[string]any)
-	if !ok || jsonSchema["type"] != "object" {
-		t.Fatalf("response_format.json_schema = %#v, want translated schema", responseFormat["json_schema"])
-	}
-	if _, leaked := responseFormat["name"]; leaked {
-		t.Fatalf("response_format leaked OpenAI wrapper fields: %#v", responseFormat)
-	}
+	assert.Equal(t, "image_url", image["type"])
 
-	if resp.ID != "cohere-id" || resp.Model != req.Model || resp.Provider != "cohere" {
-		t.Fatalf("response identity = %#v", resp)
-	}
-	if resp.Choices[0].FinishReason != "tool_calls" {
-		t.Fatalf("finish_reason = %q", resp.Choices[0].FinishReason)
-	}
-	if resp.Choices[0].Message.Content != "I will check." {
-		t.Fatalf("content = %#v", resp.Choices[0].Message.Content)
-	}
-	if got := rawString(resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content")); got != "check the weather" {
-		t.Fatalf("reasoning_content = %q", got)
-	}
-	if len(resp.Choices[0].Message.ToolCalls) != 1 ||
-		resp.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Warsaw"}` {
-		t.Fatalf("tool calls = %#v", resp.Choices[0].Message.ToolCalls)
-	}
-	if resp.Usage.PromptTokens != 17 || resp.Usage.CompletionTokens != 4 || resp.Usage.TotalTokens != 21 {
-		t.Fatalf("usage = %#v", resp.Usage)
-	}
-	if resp.Usage.PromptTokensDetails == nil ||
-		resp.Usage.PromptTokensDetails.CachedTokens != 2 ||
-		resp.Usage.PromptTokensDetails.ImageTokens != 5 {
-		t.Fatalf("prompt token details = %#v", resp.Usage.PromptTokensDetails)
-	}
+	toolResult := messages[3].(map[string]any)["content"].(string)
+	assert.Equal(t, `{"result":"sunny"}`, toolResult)
+	assert.Equal(t, "REQUIRED", captured["tool_choice"])
+	assert.Equal(t, float64(250), captured["max_tokens"])
+	assert.Equal(t, []any{"END"}, captured["stop_sequences"])
+	assert.Equal(t, float64(20), captured["k"])
+
+	responseFormat := captured["response_format"].(map[string]any)
+	assert.Equal(t, "json_object", responseFormat["type"])
+	jsonSchema, ok := responseFormat["json_schema"].(map[string]any)
+	require.True(t, ok, "response_format.json_schema = %#v, want translated schema", responseFormat["json_schema"])
+	assert.Equal(t, "object", jsonSchema["type"])
+	assert.NotContains(t, responseFormat, "name")
+
+	assert.Equal(t, "cohere-id", resp.ID)
+	assert.Equal(t, req.Model, resp.Model)
+	assert.Equal(t, "cohere", resp.Provider)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "tool_calls", resp.Choices[0].FinishReason)
+	assert.Equal(t, "I will check.", resp.Choices[0].Message.Content)
+	assert.Equal(t, "check the weather", rawString(resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content")))
+	require.Len(t, resp.Choices[0].Message.ToolCalls, 1)
+	assert.Equal(t, `{"city":"Warsaw"}`, resp.Choices[0].Message.ToolCalls[0].Function.Arguments)
+	assert.Equal(t, 17, resp.Usage.PromptTokens)
+	assert.Equal(t, 4, resp.Usage.CompletionTokens)
+	assert.Equal(t, 21, resp.Usage.TotalTokens)
+	require.NotNil(t, resp.Usage.PromptTokensDetails)
+	assert.Equal(t, 2, resp.Usage.PromptTokensDetails.CachedTokens)
+	assert.Equal(t, 5, resp.Usage.PromptTokensDetails.ImageTokens)
 }
 
 func TestChatCompletionReturnsCohereGenerationFailures(t *testing.T) {
@@ -203,76 +169,59 @@ func TestChatCompletionReturnsCohereGenerationFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.finishReason, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = io.WriteString(w, `{
-					"id":"failed-generation",
-					"finish_reason":"`+tt.finishReason+`",
-					"message":{"role":"assistant","content":[]},
-					"usage":{}
-				}`)
-			}))
-			defer server.Close()
+			server, _ := providertest.JSONServer(t, http.StatusOK, `{
+				"id":"failed-generation",
+				"finish_reason":"`+tt.finishReason+`",
+				"message":{"role":"assistant","content":[]},
+				"usage":{}
+			}`)
 
 			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:    "command-a",
 				Messages: []core.Message{{Role: "user", Content: "hello"}},
 			})
-			if resp != nil {
-				t.Fatalf("ChatCompletion() response = %#v, want nil", resp)
-			}
-			gatewayErr, ok := err.(*core.GatewayError)
-			if !ok {
-				t.Fatalf("ChatCompletion() error = %#v, want GatewayError", err)
-			}
-			if gatewayErr.Type != core.ErrorTypeProvider || gatewayErr.StatusCode != tt.wantStatus {
-				t.Fatalf("ChatCompletion() error = %#v, want provider status %d", gatewayErr, tt.wantStatus)
-			}
-			if !strings.Contains(strings.ToLower(gatewayErr.Message), tt.wantMessage) {
-				t.Fatalf("ChatCompletion() message = %q, want %q", gatewayErr.Message, tt.wantMessage)
-			}
+			require.Nil(t, resp)
+
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+			assert.Equal(t, tt.wantStatus, gatewayErr.StatusCode)
+			assert.Contains(t, strings.ToLower(gatewayErr.Message), tt.wantMessage)
 		})
 	}
 }
 
 func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
-	var streamValue any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		streamValue = body["stream"]
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, strings.Join([]string{
-			`event: message-start`,
-			`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant","content":[],"tool_calls":[],"citations":[]}}}`,
-			``,
-			`event: content-delta`,
-			`data: {"type":"content-delta","index":0,"delta":{"message":{"content":{"thinking":"consider"}}}}`,
-			``,
-			`event: content-delta`,
-			`data: {"type":"content-delta","index":0,"delta":{"message":{"content":{"text":"Hello"}}}}`,
-			``,
-			`event: tool-plan-delta`,
-			`data: {"type":"tool-plan-delta","delta":{"message":{"tool_plan":"Use lookup."}}}`,
-			``,
-			`event: tool-call-start`,
-			`data: {"type":"tool-call-start","index":0,"delta":{"message":{"tool_calls":{"id":"call-1","type":"function","function":{"name":"lookup","arguments":""}}}}}`,
-			``,
-			`event: tool-call-delta`,
-			`data: {"type":"tool-call-delta","index":0,"delta":{"message":{"tool_calls":{"function":{"arguments":"{\"q\":\"x\"}"}}}}}`,
-			``,
-			`event: citation-start`,
-			`data: {"type":"citation-start","index":0,"delta":{"message":{"citations":{"start":0,"end":5,"text":"Hello","sources":[{"type":"document","id":"doc-1"}]}}}}`,
-			``,
-			`event: citation-end`,
-			`data: {"type":"citation-end","index":0}`,
-			``,
-			`event: message-end`,
-			`data: {"type":"message-end","delta":{"finish_reason":"TOOL_CALL","usage":{"tokens":{"input_tokens":8,"output_tokens":3},"cached_tokens":1}}}`,
-			``,
-		}, "\n"))
-	}))
-	defer server.Close()
+	server, capture := providertest.SSEServer(t, sseBody(
+		`event: message-start`,
+		`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant","content":[],"tool_calls":[],"citations":[]}}}`,
+		``,
+		`event: content-delta`,
+		`data: {"type":"content-delta","index":0,"delta":{"message":{"content":{"thinking":"consider"}}}}`,
+		``,
+		`event: content-delta`,
+		`data: {"type":"content-delta","index":0,"delta":{"message":{"content":{"text":"Hello"}}}}`,
+		``,
+		`event: tool-plan-delta`,
+		`data: {"type":"tool-plan-delta","delta":{"message":{"tool_plan":"Use lookup."}}}`,
+		``,
+		`event: tool-call-start`,
+		`data: {"type":"tool-call-start","index":0,"delta":{"message":{"tool_calls":{"id":"call-1","type":"function","function":{"name":"lookup","arguments":""}}}}}`,
+		``,
+		`event: tool-call-delta`,
+		`data: {"type":"tool-call-delta","index":0,"delta":{"message":{"tool_calls":{"function":{"arguments":"{\"q\":\"x\"}"}}}}}`,
+		``,
+		`event: citation-start`,
+		`data: {"type":"citation-start","index":0,"delta":{"message":{"citations":{"start":0,"end":5,"text":"Hello","sources":[{"type":"document","id":"doc-1"}]}}}}`,
+		``,
+		`event: citation-end`,
+		`data: {"type":"citation-end","index":0}`,
+		``,
+		`event: message-end`,
+		`data: {"type":"message-end","delta":{"finish_reason":"TOOL_CALL","usage":{"tokens":{"input_tokens":8,"output_tokens":3},"cached_tokens":1}}}`,
+		``,
+	))
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -280,19 +229,16 @@ func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
 		Messages:      []core.Message{{Role: "user", Content: "hello"}},
 		StreamOptions: &core.StreamOptions{IncludeUsage: true},
 	})
-	if err != nil {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer stream.Close()
-	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
-	output := string(body)
 
-	if streamValue != true {
-		t.Fatalf("upstream stream = %#v", streamValue)
-	}
+	body, err := io.ReadAll(stream)
+	require.NoError(t, err)
+
+	streamed, _ := capture.Last(t).JSON(t)["stream"].(bool)
+	assert.True(t, streamed)
+
+	output := string(body)
 	for _, want := range []string{
 		`"id":"stream-id"`,
 		`"role":"assistant"`,
@@ -307,83 +253,59 @@ func TestStreamChatCompletionConvertsCohereEvents(t *testing.T) {
 		`"cached_tokens":1`,
 		"data: [DONE]",
 	} {
-		if !strings.Contains(output, want) {
-			t.Errorf("stream missing %q:\n%s", want, output)
-		}
+		assert.Contains(t, output, want)
 	}
 }
 
 func TestStreamChatCompletionReturnsGenerationFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, strings.Join([]string{
-			`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
-			``,
-			`data: {"type":"message-end","delta":{"finish_reason":"TIMEOUT"}}`,
-			``,
-		}, "\n"))
-	}))
-	defer server.Close()
+	server, _ := providertest.SSEServer(t, sseBody(
+		`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
+		``,
+		`data: {"type":"message-end","delta":{"finish_reason":"TIMEOUT"}}`,
+		``,
+	))
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "command-a",
 		Messages: []core.Message{{Role: "user", Content: "hello"}},
 	})
-	if err != nil {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer stream.Close()
 
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	output := string(body)
-	if !strings.Contains(output, `"type":"provider_error"`) ||
-		!strings.Contains(output, `"message":"Cohere generation timed out"`) {
-		t.Fatalf("stream = %s, want provider timeout error", output)
-	}
-	if strings.Contains(output, `"finish_reason":"stop"`) {
-		t.Fatalf("stream fabricated a successful stop finish:\n%s", output)
-	}
+	assert.Contains(t, output, `"type":"provider_error"`)
+	assert.Contains(t, output, `"message":"Cohere generation timed out"`)
+	assert.NotContains(t, output, `"finish_reason":"stop"`, "stream fabricated a successful stop finish")
 }
 
 func TestStreamResponsesPropagatesGenerationFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, strings.Join([]string{
-			`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
-			``,
-			`data: {"type":"message-end","delta":{"finish_reason":"ERROR","error":"capacity exhausted"}}`,
-			``,
-		}, "\n"))
-	}))
-	defer server.Close()
+	server, _ := providertest.SSEServer(t, sseBody(
+		`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
+		``,
+		`data: {"type":"message-end","delta":{"finish_reason":"ERROR","error":"capacity exhausted"}}`,
+		``,
+	))
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "command-a",
 		Input: "hello",
 	})
-	if err != nil {
-		t.Fatalf("StreamResponses() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer stream.Close()
 
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	output := string(body)
-	if !strings.Contains(output, "event: response.failed") ||
-		!strings.Contains(output, `"status":"failed"`) ||
-		!strings.Contains(output, `"message":"capacity exhausted"`) {
-		t.Fatalf("Responses stream = %s, want response.failed", output)
-	}
-	if strings.Contains(output, "event: response.completed") {
-		t.Fatalf("Responses stream fabricated response.completed:\n%s", output)
-	}
+	assert.Contains(t, output, "event: response.failed")
+	assert.Contains(t, output, `"status":"failed"`)
+	assert.Contains(t, output, `"message":"capacity exhausted"`)
+	assert.NotContains(t, output, "event: response.completed", "Responses stream fabricated response.completed")
 }
 
 func TestStreamResponsesPropagatesAdapterFailures(t *testing.T) {
@@ -395,22 +317,22 @@ func TestStreamResponsesPropagatesAdapterFailures(t *testing.T) {
 	}{
 		{
 			name: "malformed event",
-			body: strings.Join([]string{
+			body: sseBody(
 				`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
 				``,
 				`data: {not-json}`,
 				``,
-			}, "\n"),
+			),
 			wantMessage: "failed to parse Cohere stream event",
 		},
 		{
 			name: "upstream read failure",
-			body: strings.Join([]string{
+			body: sseBody(
 				`data: {"type":"message-start","id":"stream-id","delta":{"message":{"role":"assistant"}}}`,
 				``,
 				`data: {"type":"content-delta","delta":{"message":{"content":{"text":"partial"}}}}`,
 				``,
-			}, "\n"),
+			),
 			contentLengthExtra: 100,
 			wantMessage:        "failed to read Cohere stream",
 		},
@@ -418,90 +340,64 @@ func TestStreamResponsesPropagatesAdapterFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			// An overstated Content-Length makes the client's read fail
+			// partway, which must surface as a terminal failure event.
+			server, _ := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				if tt.contentLengthExtra > 0 {
 					w.Header().Set("Content-Length", strconv.Itoa(len(tt.body)+tt.contentLengthExtra))
 				}
 				_, _ = io.WriteString(w, tt.body)
-			}))
-			defer server.Close()
+			})
 
 			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 			stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 				Model: "command-a",
 				Input: "hello",
 			})
-			if err != nil {
-				t.Fatalf("StreamResponses() error = %v", err)
-			}
+			require.NoError(t, err)
 			defer stream.Close()
 
 			body, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatalf("read stream: %v", err)
-			}
+			require.NoError(t, err)
+
 			output := string(body)
-			if !strings.Contains(output, "event: response.failed") ||
-				!strings.Contains(output, `"status":"failed"`) ||
-				!strings.Contains(output, `"message":"`+tt.wantMessage+`"`) ||
-				!strings.Contains(output, "data: [DONE]") {
-				t.Fatalf("Responses stream = %s, want terminal failure %q", output, tt.wantMessage)
-			}
-			if strings.Contains(output, "event: response.completed") {
-				t.Fatalf("Responses stream fabricated response.completed:\n%s", output)
-			}
+			assert.Contains(t, output, "event: response.failed")
+			assert.Contains(t, output, `"status":"failed"`)
+			assert.Contains(t, output, `"message":"`+tt.wantMessage+`"`)
+			assert.Contains(t, output, "data: [DONE]")
+			assert.NotContains(t, output, "event: response.completed", "Responses stream fabricated response.completed")
 		})
 	}
 }
 
 func TestStreamChatCompletionDoesNotTurnIncompleteStreamIntoSuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"type\":\"content-delta\",\"delta\":{\"message\":{\"content\":{\"text\":\"partial\"}}}}\n\n")
-	}))
-	defer server.Close()
+	server, _ := providertest.SSEServer(t, "data: {\"type\":\"content-delta\",\"delta\":{\"message\":{\"content\":{\"text\":\"partial\"}}}}\n\n")
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "command-a",
 		Messages: []core.Message{{Role: "user", Content: "hello"}},
 	})
-	if err != nil {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer stream.Close()
+
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	output := string(body)
-	if !strings.Contains(output, `"message":"Cohere stream ended before message-end"`) {
-		t.Fatalf("stream = %s, want incomplete-stream error", output)
-	}
-	if strings.Contains(output, `"finish_reason":"stop"`) {
-		t.Fatalf("stream fabricated a successful stop finish:\n%s", output)
-	}
-	if !strings.Contains(output, "data: [DONE]") {
-		t.Fatalf("stream missing DONE marker:\n%s", output)
-	}
+	assert.Contains(t, output, `"message":"Cohere stream ended before message-end"`)
+	assert.NotContains(t, output, `"finish_reason":"stop"`, "stream fabricated a successful stop finish")
+	assert.Contains(t, output, "data: [DONE]")
 }
 
 func TestEmbeddingsTranslatesOpenAIShape(t *testing.T) {
-	var captured map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/embed" {
-			t.Errorf("path = %q, want /v2/embed", r.URL.Path)
-		}
-		_ = json.NewDecoder(r.Body).Decode(&captured)
-		_, _ = io.WriteString(w, `{
-			"id":"embed-id",
-			"response_type":"embeddings_by_type",
-			"embeddings":{"float":[[0.1,0.2],[0.3,0.4]]},
-			"meta":{"billed_units":{"input_tokens":7}}
-		}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"id":"embed-id",
+		"response_type":"embeddings_by_type",
+		"embeddings":{"float":[[0.1,0.2],[0.3,0.4]]},
+		"meta":{"billed_units":{"input_tokens":7}}
+	}`)
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	dimensions := 2
@@ -513,78 +409,51 @@ func TestEmbeddingsTranslatesOpenAIShape(t *testing.T) {
 			"truncate": json.RawMessage(`"END"`),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	if captured["input_type"] != "search_document" {
-		t.Fatalf("input_type = %#v", captured["input_type"])
-	}
-	if captured["output_dimension"] != float64(2) {
-		t.Fatalf("output_dimension = %#v", captured["output_dimension"])
-	}
-	if captured["embedding_types"].([]any)[0] != "float" {
-		t.Fatalf("embedding_types = %#v", captured["embedding_types"])
-	}
-	if captured["truncate"] != "END" {
-		t.Fatalf("truncate = %#v", captured["truncate"])
-	}
-	if resp.Object != "list" || resp.Model != "embed-v4.0" || resp.Provider != "cohere" {
-		t.Fatalf("response = %#v", resp)
-	}
-	if len(resp.Data) != 2 || string(resp.Data[1].Embedding) != `[0.3,0.4]` {
-		t.Fatalf("embedding data = %#v", resp.Data)
-	}
-	if resp.Usage.PromptTokens != 7 || resp.Usage.TotalTokens != 7 {
-		t.Fatalf("usage = %#v", resp.Usage)
-	}
+	sent := capture.Last(t)
+	assert.Equal(t, "/v2/embed", sent.Path)
+	captured := sent.JSON(t)
+	assert.Equal(t, "search_document", captured["input_type"])
+	assert.Equal(t, float64(2), captured["output_dimension"])
+	assert.Equal(t, []any{"float"}, captured["embedding_types"])
+	assert.Equal(t, "END", captured["truncate"])
+
+	assert.Equal(t, "list", resp.Object)
+	assert.Equal(t, "embed-v4.0", resp.Model)
+	assert.Equal(t, "cohere", resp.Provider)
+	require.Len(t, resp.Data, 2)
+	assert.Equal(t, `[0.3,0.4]`, string(resp.Data[1].Embedding))
+	assert.Equal(t, 7, resp.Usage.PromptTokens)
+	assert.Equal(t, 7, resp.Usage.TotalTokens)
 }
 
 func TestEmbeddingsSupportsBase64(t *testing.T) {
 	resp := fromCohereEmbedResponse(&embedResponse{
 		Embeddings: embedVectors{Base64: []string{"AAAA", "BBBB"}},
 	}, &core.EmbeddingRequest{Model: "embed-v4.0", EncodingFormat: "base64"})
-	if got := string(resp.Data[1].Embedding); got != `"BBBB"` {
-		t.Fatalf("base64 embedding = %s", got)
-	}
+	assert.Equal(t, `"BBBB"`, string(resp.Data[1].Embedding))
 }
 
 func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
-	var (
-		mu      sync.Mutex
-		headers []string
-	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" || r.URL.Query().Get("page_size") != "1000" {
-			t.Errorf("models URL = %s", r.URL.String())
-		}
-		mu.Lock()
-		headers = append(headers, r.Header.Get("Authorization"))
-		mu.Unlock()
-		_, _ = io.WriteString(w, `{"models":[
-			{"name":"command-a","endpoints":["chat"],"context_length":128000},
-			{"name":"embed-v4.0","endpoints":["embed"]},
-			{"name":"cohere-transcribe-03-2026","endpoints":["transcriptions"]},
-			{"name":"rerank-v3.5","endpoints":["rerank"]},
-			{"name":"legacy-unknown"}
-		]}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"models":[
+		{"name":"command-a","endpoints":["chat"],"context_length":128000},
+		{"name":"embed-v4.0","endpoints":["embed"]},
+		{"name":"cohere-transcribe-03-2026","endpoints":["transcriptions"]},
+		{"name":"rerank-v3.5","endpoints":["rerank"]},
+		{"name":"legacy-unknown"}
+	]}`)
 
 	provider := NewWithHTTPClient("first", server.URL, server.Client(), llmclient.Hooks{})
 	provider.keys = providers.NewKeyring("first", "second")
 	for range 2 {
 		resp, err := provider.ListModels(context.Background())
-		if err != nil {
-			t.Fatalf("ListModels() error = %v", err)
-		}
-		if len(resp.Data) != 4 {
-			t.Fatalf("models = %#v", resp.Data)
-		}
-		if resp.Data[0].Metadata == nil || resp.Data[0].Metadata.ContextWindow == nil ||
-			*resp.Data[0].Metadata.ContextWindow != 128000 {
-			t.Fatalf("model metadata = %#v", resp.Data[0].Metadata)
-		}
+		require.NoError(t, err)
+		require.Len(t, resp.Data, 4)
+		require.NotNil(t, resp.Data[0].Metadata)
+		require.NotNil(t, resp.Data[0].Metadata.ContextWindow)
+		assert.Equal(t, 128000, *resp.Data[0].Metadata.ContextWindow)
+
 		wantModes := map[string][]string{
 			"command-a":                 {"chat"},
 			"embed-v4.0":                {"embedding"},
@@ -593,24 +462,26 @@ func TestListModelsFiltersUnsupportedEndpointsAndRotatesKeys(t *testing.T) {
 		}
 		for _, model := range resp.Data {
 			want := wantModes[model.ID]
-			var got []string
-			if model.Metadata != nil {
-				got = model.Metadata.Modes
-			}
-			if len(got) != len(want) || (len(want) > 0 && got[0] != want[0]) {
-				t.Errorf("%s Modes = %v, want %v", model.ID, got, want)
-			}
-			if len(want) > 0 {
-				cats := core.CategoriesForModes(want)
-				if model.Metadata == nil || len(model.Metadata.Categories) != len(cats) || model.Metadata.Categories[0] != cats[0] {
-					t.Errorf("%s Categories = %+v, want %v", model.ID, model.Metadata, cats)
+			if len(want) == 0 {
+				if model.Metadata != nil {
+					assert.Empty(t, model.Metadata.Modes, "%s Modes", model.ID)
 				}
+				continue
 			}
+			require.NotNil(t, model.Metadata, "%s Metadata", model.ID)
+			assert.Equal(t, want, model.Metadata.Modes, "%s Modes", model.ID)
+			assert.Equal(t, core.CategoriesForModes(want), model.Metadata.Categories, "%s Categories", model.ID)
 		}
 	}
-	if len(headers) != 2 || headers[0] != "Bearer first" || headers[1] != "Bearer second" {
-		t.Fatalf("Authorization headers = %#v", headers)
+
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	for i, sent := range requests {
+		assert.Equal(t, "/v1/models", sent.Path, "request %d", i)
+		assert.Equal(t, "1000", sent.Query.Get("page_size"), "request %d", i)
 	}
+	assert.Equal(t, "Bearer first", requests[0].Header.Get("Authorization"))
+	assert.Equal(t, "Bearer second", requests[1].Header.Get("Authorization"))
 }
 
 func TestInvalidCohereRequestsReturnClientErrors(t *testing.T) {
@@ -637,26 +508,13 @@ func TestInvalidCohereRequestsReturnClientErrors(t *testing.T) {
 	assertInvalidRequest(t, err)
 }
 
-func TestProviderImplementsNativePassthrough(t *testing.T) {
-	provider := NewWithHTTPClient("key", "https://example.com", nil, llmclient.Hooks{})
-	var _ core.PassthroughProvider = provider
-}
-
 func TestPassthroughForwardsNativeCohereRequest(t *testing.T) {
 	const upstreamBody = `{"message":"rate limited"}`
-	var gotPath, gotAuth, gotHeader string
-	var gotBody []byte
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.RequestURI()
-		gotAuth = r.Header.Get("Authorization")
-		gotHeader = r.Header.Get("X-Client-Trace")
-		gotBody, _ = io.ReadAll(r.Body)
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Upstream-Request-ID", "cohere-request-1")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, upstreamBody)
-	}))
-	defer server.Close()
+	})
 
 	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
@@ -665,45 +523,27 @@ func TestPassthroughForwardsNativeCohereRequest(t *testing.T) {
 		Body:     io.NopCloser(strings.NewReader(`{"model":"rerank-v3.5","query":"gateway"}`)),
 		Headers:  http.Header{"X-Client-Trace": {"trace-123"}},
 	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	if gotPath != "/v2/rerank?priority=high" {
-		t.Fatalf("path = %q, want native endpoint and query", gotPath)
-	}
-	if gotAuth != "Bearer test-key" {
-		t.Fatalf("authorization = %q, want Cohere bearer token", gotAuth)
-	}
-	if gotHeader != "trace-123" {
-		t.Fatalf("X-Client-Trace = %q, want forwarded header", gotHeader)
-	}
-	if !strings.Contains(string(gotBody), `"rerank-v3.5"`) {
-		t.Fatalf("body = %q, want native request body", gotBody)
-	}
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429", resp.StatusCode)
-	}
-	if got := resp.Headers["X-Upstream-Request-Id"]; len(got) != 1 || got[0] != "cohere-request-1" {
-		t.Fatalf("upstream response header = %#v", got)
-	}
+	sent := capture.Last(t)
+	assert.Equal(t, "/v2/rerank", sent.Path)
+	assert.Equal(t, "high", sent.Query.Get("priority"))
+	assert.Equal(t, "Bearer test-key", sent.Header.Get("Authorization"))
+	assert.Equal(t, "trace-123", sent.Header.Get("X-Client-Trace"))
+	assert.Contains(t, string(sent.Body), `"rerank-v3.5"`)
+
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	assert.Equal(t, []string{"cohere-request-1"}, resp.Headers["X-Upstream-Request-Id"])
+
 	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-	if string(body) != upstreamBody {
-		t.Fatalf("body = %q, want upstream error body", body)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, upstreamBody, string(body))
 }
 
 func assertInvalidRequest(t *testing.T, err error) {
 	t.Helper()
-	if err == nil {
-		t.Fatal("error = nil, want invalid request")
-	}
-	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error = %#v, want invalid request", err)
-	}
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 }

@@ -7,59 +7,58 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestCreateTranscriptionTranslatesMultipartRequest(t *testing.T) {
-	var (
-		partNames []string
-		fields    = map[string]string{}
-		filename  string
-		audio     []byte
-	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/audio/transcriptions" {
-			t.Errorf("path = %q, want /v2/audio/transcriptions", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
-			t.Errorf("Authorization = %q", got)
-		}
+// multipartParts is what the upstream saw in a transcription request: the
+// form part names in wire order, the non-file fields, and the file part.
+type multipartParts struct {
+	names    []string
+	fields   map[string]string
+	filename string
+	audio    []byte
+}
 
-		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+func parseMultipart(contentType string, body []byte) (multipartParts, error) {
+	parts := multipartParts{fields: map[string]string{}}
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return parts, err
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			return parts, nil
+		}
 		if err != nil {
-			t.Fatalf("parse Content-Type: %v", err)
+			return parts, err
 		}
-		reader := multipart.NewReader(r.Body, params["boundary"])
-		for {
-			part, nextErr := reader.NextPart()
-			if nextErr == io.EOF {
-				break
-			}
-			if nextErr != nil {
-				t.Fatalf("read multipart: %v", nextErr)
-			}
-			partNames = append(partNames, part.FormName())
-			data, readErr := io.ReadAll(part)
-			if readErr != nil {
-				t.Fatalf("read part %q: %v", part.FormName(), readErr)
-			}
-			if part.FormName() == "file" {
-				filename = part.FileName()
-				audio = data
-			} else {
-				fields[part.FormName()] = string(data)
-			}
+		data, err := io.ReadAll(part)
+		if err != nil {
+			return parts, err
 		}
+		parts.names = append(parts.names, part.FormName())
+		if part.FormName() == "file" {
+			parts.filename = part.FileName()
+			parts.audio = data
+			continue
+		}
+		parts.fields[part.FormName()] = string(data)
+	}
+}
 
+func TestCreateTranscriptionTranslatesMultipartRequest(t *testing.T) {
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = io.WriteString(w, `{"text":"GoModel routes requests reliably."}`)
-	}))
-	defer server.Close()
+	})
 
 	provider := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
@@ -70,31 +69,25 @@ func TestCreateTranscriptionTranslatesMultipartRequest(t *testing.T) {
 		ResponseFormat: "json",
 		Temperature:    "0.2",
 	})
-	if err != nil {
-		t.Fatalf("CreateTranscription() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	wantPartNames := []string{"model", "language", "temperature", "file"}
-	if !reflect.DeepEqual(partNames, wantPartNames) {
-		t.Fatalf("multipart fields = %#v, want %#v", partNames, wantPartNames)
-	}
-	wantFields := map[string]string{
+	sent := capture.Last(t)
+	assert.Equal(t, "/v2/audio/transcriptions", sent.Path)
+	assert.Equal(t, "Bearer test-key", sent.Header.Get("Authorization"))
+
+	parts, err := parseMultipart(sent.Header.Get("Content-Type"), sent.Body)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"model", "language", "temperature", "file"}, parts.names)
+	assert.Equal(t, map[string]string{
 		"model":       "cohere-transcribe-03-2026",
 		"language":    "en",
 		"temperature": "0.2",
-	}
-	if !reflect.DeepEqual(fields, wantFields) {
-		t.Fatalf("multipart values = %#v, want %#v", fields, wantFields)
-	}
-	if filename != "sample.wav" || string(audio) != "wave-bytes" {
-		t.Fatalf("file = %q/%q", filename, audio)
-	}
-	if resp.ContentType != "application/json; charset=utf-8" {
-		t.Fatalf("ContentType = %q", resp.ContentType)
-	}
-	if string(resp.Data) != `{"text":"GoModel routes requests reliably."}` {
-		t.Fatalf("Data = %s", resp.Data)
-	}
+	}, parts.fields)
+	assert.Equal(t, "sample.wav", parts.filename)
+	assert.Equal(t, "wave-bytes", string(parts.audio))
+
+	assert.Equal(t, "application/json; charset=utf-8", resp.ContentType)
+	assert.Equal(t, `{"text":"GoModel routes requests reliably."}`, string(resp.Data))
 }
 
 func TestCreateTranscriptionValidation(t *testing.T) {

@@ -8,6 +8,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRealtimeTarget(t *testing.T) {
@@ -15,49 +17,33 @@ func TestRealtimeTarget(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{}).(*Provider)
 
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "grok-voice-latest"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasPrefix(target.URL, "wss://api.x.ai/v1/realtime?") {
-		t.Errorf("url = %q, want xAI realtime endpoint", target.URL)
-	}
-	parsed, err := url.Parse(target.URL)
-	if err != nil {
-		t.Fatalf("parse target url: %v", err)
-	}
-	if got := parsed.Query().Get("model"); got != "grok-voice-latest" {
-		t.Errorf("model query = %q, want %q", got, "grok-voice-latest")
-	}
-	if got := target.Headers.Get("Authorization"); got != "Bearer "+apiKey {
-		t.Errorf("Authorization = %q, want bearer with key", got)
-	}
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(target.URL, "wss://api.x.ai/v1/realtime?"), "url = %q, want xAI realtime endpoint", target.URL)
 
-	if _, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: " "}); err == nil {
-		t.Fatal("expected error for missing model")
-	}
+	parsed, err := url.Parse(target.URL)
+	require.NoError(t, err)
+	got := parsed.Query().Get("model")
+	assert.Equal(t, "grok-voice-latest", got)
+	got = target.Headers.Get("Authorization")
+	assert.Equal(t, "Bearer "+apiKey, got)
+	_, err = p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: " "})
+	require.Error(t, err)
 }
 
 func TestRealtimeTargetOmitsAuthWhenNoKey(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{}).(*Provider)
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, present := target.Headers["Authorization"]; present {
-		t.Error("Authorization header should be absent when no API key is configured")
-	}
+	require.NoError(t, err)
+	_, present := target.Headers["Authorization"]
+	assert.False(t, present)
 }
 
 func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
 	p.SetBaseURL("https://custom.x.example/v1")
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasPrefix(target.URL, "wss://custom.x.example/v1/realtime") {
-		t.Errorf("url = %q, want the SetBaseURL host", target.URL)
-	}
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(target.URL, "wss://custom.x.example/v1/realtime"), "url = %q, want the SetBaseURL host", target.URL)
 }
 
 func TestRealtimeCallTarget(t *testing.T) {
@@ -65,44 +51,27 @@ func TestRealtimeCallTarget(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{}).(*Provider)
 
 	target, err := p.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "grok-voice-latest"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if target.URL != "https://api.x.ai/v1/realtime/calls" {
-		t.Errorf("url = %q, want the xAI realtime calls endpoint", target.URL)
-	}
-	if got := target.Headers.Get("Authorization"); got != "Bearer "+apiKey {
-		t.Errorf("Authorization = %q, want bearer with key", got)
-	}
-
-	if _, err := p.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: " "}); err == nil {
-		t.Fatal("expected error for missing model")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.x.ai/v1/realtime/calls", target.URL)
+	got := target.Headers.Get("Authorization")
+	assert.Equal(t, "Bearer "+apiKey, got)
+	_, err = p.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: " "})
+	require.Error(t, err)
 }
 
 func TestRealtimeClientSecretTarget(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
 
 	target, err := p.RealtimeClientSecretTarget(context.Background(), &core.RealtimeRequest{Model: "grok-voice-latest"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if target.URL != "https://api.x.ai/v1/realtime/client_secrets" {
-		t.Errorf("url = %q, want the xAI client secrets endpoint", target.URL)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.x.ai/v1/realtime/client_secrets", target.URL)
 }
 
 func TestRealtimeTargetAttachesByCallID(t *testing.T) {
 	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
 
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "grok-voice-latest", CallID: "rtc_9"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(target.URL, "call_id=rtc_9") {
-		t.Errorf("url = %q, want call_id attach query", target.URL)
-	}
-	if strings.Contains(target.URL, "model=") {
-		t.Errorf("url = %q, want no model query on sideband attach", target.URL)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, target.URL, "call_id=rtc_9")
+	assert.NotContains(t, target.URL, "model=", "sideband attach must not carry a model query")
 }

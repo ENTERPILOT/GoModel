@@ -1,6 +1,11 @@
 package bedrockmantle
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestResolveEndpoint(t *testing.T) {
 	tests := []struct {
@@ -42,12 +47,10 @@ func TestResolveEndpoint(t *testing.T) {
 			t.Setenv("AWS_REGION", "")
 			t.Setenv("AWS_DEFAULT_REGION", "")
 			got, err := resolveEndpoint(tt.baseURL, tt.apiMode)
-			if err != nil {
-				t.Fatalf("resolveEndpoint() error = %v", err)
-			}
-			if got.baseURL != tt.wantURL || got.region != tt.wantRegion || got.mode != tt.wantMode {
-				t.Errorf("resolveEndpoint() = %+v, want URL %q, region %q, mode %q", got, tt.wantURL, tt.wantRegion, tt.wantMode)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURL, got.baseURL)
+			assert.Equal(t, tt.wantRegion, got.region)
+			assert.Equal(t, tt.wantMode, got.mode)
 		})
 	}
 }
@@ -62,17 +65,15 @@ func TestResolveEndpointRejectsInvalidConfiguration(t *testing.T) {
 		{baseURL: "us-east-1", apiMode: "legacy"},
 	}
 	for _, tt := range tests {
-		if _, err := resolveEndpoint(tt.baseURL, tt.apiMode); err == nil {
-			t.Errorf("resolveEndpoint(%q, %q) error = nil", tt.baseURL, tt.apiMode)
-		}
+		_, err := resolveEndpoint(tt.baseURL, tt.apiMode)
+		assert.Error(t, err, "resolveEndpoint(%q, %q)", tt.baseURL, tt.apiMode)
 	}
 }
 
 func TestResolveEndpointRejectsInvalidEnvironmentRegion(t *testing.T) {
 	t.Setenv("BEDROCK_MANTLE_REGION", "not-a-region")
-	if _, err := resolveEndpoint("", ""); err == nil {
-		t.Fatal("resolveEndpoint() error = nil")
-	}
+	_, err := resolveEndpoint("", "")
+	require.Error(t, err)
 }
 
 func TestUsesOpenAIPath(t *testing.T) {
@@ -89,8 +90,6 @@ func TestUsesOpenAIPath(t *testing.T) {
 		{model: "amazon.nova-2-lite-v1:0", want: false},
 	}
 	for _, tt := range tests {
-		if got := usesOpenAIPath(tt.model); got != tt.want {
-			t.Errorf("usesOpenAIPath(%q) = %v, want %v", tt.model, got, tt.want)
-		}
+		assert.Equal(t, tt.want, usesOpenAIPath(tt.model), "usesOpenAIPath(%q)", tt.model)
 	}
 }
