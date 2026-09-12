@@ -8,7 +8,11 @@ import (
 )
 
 // AudioSpeechRequest is an OpenAI-compatible POST /v1/audio/speech
-// (text-to-speech) request.
+// (text-to-speech) request. Only the fields the gateway needs to route,
+// validate, and audit are typed; every other member (stream_format,
+// model-specific extras, ...) is preserved verbatim in ExtraFields and
+// forwarded upstream so new provider parameters work without a gateway change
+// (ADR-0011 rule 1).
 type AudioSpeechRequest struct {
 	Model          string  `json:"model"`
 	Input          string  `json:"input"`
@@ -19,6 +23,34 @@ type AudioSpeechRequest struct {
 
 	// Provider is gateway routing metadata, stripped before dispatching upstream.
 	Provider string `json:"provider,omitempty"`
+
+	ExtraFields UnknownJSONFields `json:"-" swaggerignore:"true"`
+}
+
+// audioSpeechRequestFields are the typed members of AudioSpeechRequest, derived
+// from the struct so the unknown-field list cannot drift.
+var audioSpeechRequestFields = jsonFieldSetOf(AudioSpeechRequest{})
+
+func (r *AudioSpeechRequest) UnmarshalJSON(data []byte) error {
+	// alias drops UnmarshalJSON so json.Unmarshal does not recurse; ExtraFields
+	// is json:"-" and captured separately.
+	type alias AudioSpeechRequest
+	var raw alias
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	extraFields, err := extractUnknownJSONFieldsSet(data, audioSpeechRequestFields)
+	if err != nil {
+		return err
+	}
+	*r = AudioSpeechRequest(raw)
+	r.ExtraFields = extraFields
+	return nil
+}
+
+func (r AudioSpeechRequest) MarshalJSON() ([]byte, error) {
+	type alias AudioSpeechRequest
+	return marshalWithUnknownJSONFields(alias(r), r.ExtraFields)
 }
 
 // AudioTranscriptionRequest is an OpenAI-compatible POST /v1/audio/transcriptions
@@ -35,9 +67,31 @@ type AudioTranscriptionRequest struct {
 	ResponseFormat         string
 	Temperature            string
 	TimestampGranularities []string
+	// Fields carries the form values the gateway does not consume itself
+	// (include[], chunking_strategy, stream, provider-native extras, ...). They
+	// are forwarded upstream verbatim (ADR-0011 rule 1). Repeated names keep
+	// their relative order; ordering across different names is not preserved
+	// (multipart forms have no cross-field order semantics).
+	Fields []FormField
 
 	// Provider is gateway routing metadata, stripped before dispatching upstream.
 	Provider string
+}
+
+// ReservedAudioTranscriptionFormFields are the multipart fields the gateway
+// consumes and re-emits itself. They never travel in Fields, so a client
+// cannot overwrite a gateway-controlled part (model, file, routing metadata)
+// through the passthrough path.
+var ReservedAudioTranscriptionFormFields = map[string]bool{
+	"model":                     true,
+	"file":                      true,
+	"provider":                  true,
+	"language":                  true,
+	"prompt":                    true,
+	"response_format":           true,
+	"temperature":               true,
+	"timestamp_granularities":   true,
+	"timestamp_granularities[]": true,
 }
 
 // AudioResponse wraps an opaque audio or transcription payload with its content

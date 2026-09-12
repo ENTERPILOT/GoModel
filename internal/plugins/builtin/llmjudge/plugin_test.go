@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
@@ -265,17 +266,103 @@ func TestNoJudgeReplyChoices(t *testing.T) {
 }
 
 // A judge reply cut off by max_tokens is unclear even when its visible part
-// parses as a verdict.
-func TestTruncatedJudgeReplyIsUnclear(t *testing.T) {
-	host := &plugintest.Host{Replies: []string{`{"verdict":"allow","reason":"fine"}`}, Finish: "length"}
-	p := newPlugin(t, `{"model": "a/b", "on_unclear": "block"}`, host)
-	d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
-	if err != nil || d.Action != pluginapi.ActionBlock || d.Code != CodeUnclear {
-		t.Fatalf("decision = %+v, %v", d, err)
+// parses as a verdict, and so is a completion spent on reasoning. Both are
+// recorded as no verdict, apart from an unparseable reply.
+func TestNoVerdictReplies(t *testing.T) {
+	reasoningChoice := func(text, finish string) *pluginapi.Completion {
+		return &pluginapi.Completion{Choices: []pluginapi.Choice{{
+			Message: pluginapi.Message{Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
+				{Kind: pluginapi.PartReasoning, Text: "let me think about this at length"},
+				{Kind: pluginapi.PartText, Text: text},
+			}},
+			FinishReason: finish,
+		}}}
 	}
-	detail, _ := d.Detail.(map[string]any)
-	if detail["verdict"] != VerdictUnclear || detail["reason"] != "judge reply was cut off (finish_reason length)" {
-		t.Errorf("detail = %v", d.Detail)
+	tests := []struct {
+		name       string
+		reply      func(pluginapi.InferenceRequest) (*pluginapi.Completion, error)
+		code       string
+		reason     string
+		wantLogged bool
+	}{
+		{
+			name:       "cut off",
+			reply:      func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return reasoningChoice("", "length"), nil },
+			code:       CodeNoVerdict,
+			reason:     "judge spent the completion on reasoning and was cut off before the verdict (finish_reason length); raise max_tokens",
+			wantLogged: true,
+		},
+		{
+			name: "cut off without reasoning",
+			reply: func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) {
+				return &pluginapi.Completion{Choices: []pluginapi.Choice{{
+					Message: pluginapi.TextMessage(pluginapi.RoleAssistant, `{"verdict":"allow","reason":"fine"}`), FinishReason: "length",
+				}}}, nil
+			},
+			code:       CodeNoVerdict,
+			reason:     "judge reply was cut off (finish_reason length)",
+			wantLogged: true,
+		},
+		{
+			name:       "reasoning only",
+			reply:      func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return reasoningChoice("  ", "stop"), nil },
+			code:       CodeNoVerdict,
+			reason:     "judge returned reasoning only, with no verdict; raise max_tokens",
+			wantLogged: true,
+		},
+		{
+			name:   "unparseable reply is plain unclear",
+			reply:  func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return reasoningChoice("???", "stop"), nil },
+			code:   CodeUnclear,
+			reason: "judge reply could not be parsed",
+		},
+		{
+			name:   "reasoning before a verdict is a verdict",
+			reply:  func(pluginapi.InferenceRequest) (*pluginapi.Completion, error) { return reasoningChoice(`{"verdict":"allow"}`, "stop"), nil },
+			code:   "",
+			reason: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs strings.Builder
+			host := &plugintest.Host{Reply: tt.reply, Log: slog.New(slog.NewTextHandler(&logs, nil))}
+			p := newPlugin(t, `{"model": "a/b", "on_unclear": "block"}`, host)
+			d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Code != tt.code {
+				t.Errorf("code = %q, want %q", d.Code, tt.code)
+			}
+			if tt.code == "" {
+				if d.Action != pluginapi.ActionAllow {
+					t.Errorf("decision = %+v", d)
+				}
+				return
+			}
+			if d.Action != pluginapi.ActionBlock {
+				t.Errorf("decision = %+v", d)
+			}
+			detail, _ := d.Detail.(map[string]any)
+			if detail["verdict"] != VerdictUnclear || detail["reason"] != tt.reason {
+				t.Errorf("detail = %v", d.Detail)
+			}
+			if logged := strings.Contains(logs.String(), "judge returned no verdict"); logged != tt.wantLogged {
+				t.Errorf("logged = %v, want %v (%s)", logged, tt.wantLogged, logs.String())
+			}
+		})
+	}
+}
+
+// Under the defaults a judge that never reaches a verdict warns with the
+// no-verdict code, not the generic unclear one.
+func TestNoVerdictWarnsByDefault(t *testing.T) {
+	host := &plugintest.Host{Replies: []string{"Let me consider"}, Finish: "length"}
+	p := newPlugin(t, `{"model": "a/b"}`, host)
+	d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
+	if err != nil || d.Action != pluginapi.ActionWarn || d.Code != CodeNoVerdict || d.Message != "judge returned no verdict" {
+		t.Fatalf("decision = %+v, %v", d, err)
 	}
 }
 
