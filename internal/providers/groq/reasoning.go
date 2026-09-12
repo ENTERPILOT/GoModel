@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/goccy/go-json"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
@@ -13,23 +15,66 @@ import (
 const maxStopSequences = 4
 
 // adaptChatRequest fits the canonical chat request to Groq: it truncates an
-// over-long "stop" list and maps GoModel's nested reasoning shape (set by the
+// over-long "stop" list, maps GoModel's nested reasoning shape (set by the
 // Messages API's thinking and by clients sending reasoning.effort) onto Groq's
-// flat reasoning_effort. Groq rejects "reasoning" outright and accepts
-// reasoning_effort only on reasoning models, with per-family values.
+// flat reasoning_effort, and asks Groq to parse chain of thought out of the
+// answer. Groq rejects "reasoning" outright and accepts reasoning_effort only
+// on reasoning models, with per-family values.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req == nil {
+		return req, nil
+	}
 	adapted, err := providers.CapStopSequences(req, maxStopSequences)
 	if err != nil {
 		return nil, err
 	}
-	if adapted == nil || adapted.Reasoning == nil {
-		return adapted, nil
+	adapted, err = adaptReasoningEffort(adapted)
+	if err != nil {
+		return nil, err
 	}
-	effort := reasoningEffort(adapted.Model, adapted.Reasoning.Effort)
+	return adaptReasoningFormat(adapted)
+}
+
+func adaptReasoningEffort(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if req.Reasoning == nil {
+		return req, nil
+	}
+	effort := reasoningEffort(req.Model, req.Reasoning.Effort)
 	if effort == "" {
-		return providers.DropReasoning(adapted), nil
+		return providers.DropReasoning(req), nil
 	}
-	return providers.AdaptReasoningEffortRequest(adapted, effort)
+	return providers.AdaptReasoningEffortRequest(req, effort)
+}
+
+// adaptReasoningFormat defaults Groq's reasoning_format to "parsed" on the
+// model families that accept it. Without it the Qwen models return their
+// chain of thought as inline <think>...</think> text inside the answer, which
+// an OpenAI-compatible client renders as the answer itself; "parsed" moves it
+// to the separate reasoning field the gateway normalizes into
+// reasoning_content (and into Messages API thinking blocks). A caller that
+// sets reasoning_format explicitly keeps its own value.
+func adaptReasoningFormat(req *core.ChatRequest) (*core.ChatRequest, error) {
+	if !supportsReasoningFormat(req.Model) || req.ExtraFields.Lookup("reasoning_format") != nil {
+		return req, nil
+	}
+	extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
+		"reasoning_format": json.RawMessage(`"parsed"`),
+	})
+	if err != nil {
+		return nil, core.NewInvalidRequestError("failed to adapt reasoning request: "+err.Error(), err)
+	}
+	adapted := *req
+	adapted.ExtraFields = extra
+	return &adapted, nil
+}
+
+// supportsReasoningFormat reports whether the model accepts Groq's
+// reasoning_format parameter. Only the reasoning families do: the compound
+// systems and the plain chat models reject it with 400
+// "`reasoning_format` is not supported with this model".
+func supportsReasoningFormat(model string) bool {
+	m := strings.ToLower(model)
+	return strings.Contains(m, "gpt-oss") || strings.Contains(m, "qwen3")
 }
 
 // reasoningEffort returns the reasoning_effort value the model accepts, or ""

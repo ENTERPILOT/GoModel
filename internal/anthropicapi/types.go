@@ -122,8 +122,11 @@ type ResponseContentBlock struct {
 	Text     string `json:"text,omitempty"`
 	Thinking string `json:"thinking,omitempty"`
 	// Signature authenticates a thinking block. Anthropic requires it back
-	// verbatim when the conversation continues, so clients must echo it.
-	Signature string `json:"signature,omitempty"`
+	// verbatim when the conversation continues, so clients must echo it. Every
+	// thinking block carries the member, as the Anthropic schema requires;
+	// reasoning from a provider that does not sign its output is rendered with
+	// an empty signature. Hence the pointer: only a thinking block has one.
+	Signature *string `json:"signature,omitempty"`
 	// Data is the opaque payload of a redacted_thinking block.
 	Data  string          `json:"data,omitempty"`
 	ID    string          `json:"id,omitempty"`

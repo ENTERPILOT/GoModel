@@ -103,3 +103,58 @@ func TestChatCompletion_CapsStopSequences(t *testing.T) {
 		t.Errorf("stop = %v, want the first four sequences", stop)
 	}
 }
+
+func TestChatCompletion_DefaultsReasoningFormatPerModelFamily(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		caller     string // caller-supplied reasoning_format, "" for none
+		wantFormat any    // nil means the field must be absent
+	}{
+		{name: "qwen3 gets parsed so <think> is not the answer", model: "qwen/qwen3.6-27b", wantFormat: "parsed"},
+		{name: "gpt-oss gets parsed", model: "openai/gpt-oss-20b", wantFormat: "parsed"},
+		{name: "caller choice wins", model: "qwen/qwen3.6-27b", caller: "raw", wantFormat: "raw"},
+		{name: "compound rejects the field", model: "groq/compound-mini"},
+		{name: "plain chat models are left alone", model: "llama-3.3-70b-versatile"},
+		{name: "whisper is left alone", model: "whisper-large-v3-turbo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var raw map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+					t.Errorf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+			}))
+			defer server.Close()
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
+
+			req := &core.ChatRequest{Model: tt.model, Messages: []core.Message{{Role: "user", Content: "hi"}}}
+			if tt.caller != "" {
+				extra, err := core.MergeUnknownJSONFields(req.ExtraFields, map[string]json.RawMessage{
+					"reasoning_format": json.RawMessage(`"` + tt.caller + `"`),
+				})
+				if err != nil {
+					t.Fatalf("MergeUnknownJSONFields() error = %v", err)
+				}
+				req.ExtraFields = extra
+			}
+			if _, err := provider.ChatCompletion(context.Background(), req); err != nil {
+				t.Fatalf("ChatCompletion() error = %v", err)
+			}
+			got, ok := raw["reasoning_format"]
+			if tt.wantFormat == nil {
+				if ok {
+					t.Errorf("reasoning_format = %v, want absent", got)
+				}
+				return
+			}
+			if got != tt.wantFormat {
+				t.Errorf("reasoning_format = %v, want %v", got, tt.wantFormat)
+			}
+		})
+	}
+}

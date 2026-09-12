@@ -1592,3 +1592,74 @@ func TestConvertResponsesRequestToChat_DropsResponsesOnlyTextMembers(t *testing.
 		})
 	}
 }
+
+// Replayed Responses output items always carry an "id". Chat providers such as
+// Groq and Fireworks reject an unknown "id" member on a message, so it must not
+// survive the translation.
+func TestConvertResponsesRequestToChat_DropsReplayedItemIDs(t *testing.T) {
+	const replay = `[
+		{"type":"message","id":"msg_1","status":"completed","role":"assistant",
+		 "content":[{"type":"output_text","text":"Let me check.","annotations":[]}],
+		 "cache_control":{"type":"ephemeral"}},
+		{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather","arguments":"{}","status":"completed"},
+		{"type":"function_call_output","id":"fco_1","call_id":"call_1","output":"18C","status":"completed",
+		 "cache_control":{"type":"ephemeral"}}
+	]`
+
+	var typed []core.ResponsesInputElement
+	if err := json.Unmarshal([]byte(replay), &typed); err != nil {
+		t.Fatalf("unmarshal typed input: %v", err)
+	}
+	var maps []any
+	if err := json.Unmarshal([]byte(replay), &maps); err != nil {
+		t.Fatalf("unmarshal map input: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		input any
+	}{
+		{name: "typed", input: typed},
+		{name: "map", input: maps},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{Model: "test-model", Input: tt.input})
+			if err != nil {
+				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
+			}
+			if len(chatReq.Messages) != 2 {
+				t.Fatalf("messages = %d, want 2: %+v", len(chatReq.Messages), chatReq.Messages)
+			}
+
+			assistant, tool := chatReq.Messages[0], chatReq.Messages[1]
+			if assistant.Role != "assistant" || tool.Role != "tool" {
+				t.Fatalf("roles = %q, %q; want assistant, tool", assistant.Role, tool.Role)
+			}
+			if assistant.ExtraFields.Lookup("id") != nil {
+				t.Errorf("assistant message kept id: %s", assistant.ExtraFields.Lookup("id"))
+			}
+			if tool.ExtraFields.Lookup("id") != nil {
+				t.Errorf("tool message kept id: %s", tool.ExtraFields.Lookup("id"))
+			}
+			if len(assistant.ToolCalls) != 1 || assistant.ToolCalls[0].ExtraFields.Lookup("id") != nil {
+				t.Errorf("tool call kept id: %+v", assistant.ToolCalls)
+			}
+
+			// Only the Responses-only members go; call ids and other unknown
+			// members still reach the provider.
+			if got := assistant.ToolCalls[0].ID; got != "call_1" {
+				t.Errorf("tool call id = %q, want call_1", got)
+			}
+			if got := tool.ToolCallID; got != "call_1" {
+				t.Errorf("tool_call_id = %q, want call_1", got)
+			}
+			if assistant.ExtraFields.Lookup("cache_control") == nil {
+				t.Error("cache_control dropped from the assistant message")
+			}
+			if tool.ExtraFields.Lookup("cache_control") == nil {
+				t.Error("cache_control dropped from the tool message")
+			}
+		})
+	}
+}
