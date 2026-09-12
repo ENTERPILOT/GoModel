@@ -91,12 +91,12 @@ func TestToChatRequestBasic(t *testing.T) {
 	}`))
 	require.NoError(t, err)
 	assert.Equal(t, "claude-test", chat.Model)
-	assert.NotNil(t, chat.MaxTokens)
+	require.NotNil(t, chat.MaxTokens)
 	assert.Equal(t, 256, *chat.MaxTokens)
-	assert.NotNil(t, chat.Temperature)
+	require.NotNil(t, chat.Temperature)
 	assert.Equal(t, 0.5, *chat.Temperature)
 	assert.True(t, chat.Stream)
-	assert.NotNil(t, chat.StreamOptions)
+	require.NotNil(t, chat.StreamOptions)
 	assert.True(t, chat.StreamOptions.IncludeUsage)
 	require.Len(t, chat.Messages, 2)
 	assert.Equal(t, "system", chat.Messages[0].Role)
@@ -309,7 +309,7 @@ func TestToChatRequestThinking(t *testing.T) {
 				"messages":[{"role":"user","content":"hi"}],
 				"thinking":`+tc.input+`}`))
 			require.NoError(t, err)
-			assert.NotNil(t, chat.Reasoning)
+			require.NotNil(t, chat.Reasoning)
 			assert.Equal(t, tc.effort, chat.Reasoning.Effort)
 		})
 	}
@@ -329,7 +329,7 @@ func TestToChatRequestExtraFields(t *testing.T) {
 	// top_p and user have typed ChatRequest fields; they must land there so
 	// internal consumers of the typed fields (Responses lowering, provider
 	// adapters) see them, and must not also ride in ExtraFields.
-	assert.NotNil(t, chat.TopP)
+	require.NotNil(t, chat.TopP)
 	assert.Equal(t, 0.9, *chat.TopP)
 	assert.Equal(t, "u-123", chat.User)
 
@@ -369,7 +369,7 @@ func TestToChatRequestToolResultWithImage(t *testing.T) {
 	assert.Equal(t, "text", parts[0].Type)
 	assert.Equal(t, "captured", parts[0].Text, "parts[0] = %+v, want text part", parts[0])
 	assert.Equal(t, "image_url", parts[1].Type)
-	assert.NotNil(t, parts[1].ImageURL)
+	require.NotNil(t, parts[1].ImageURL)
 	assert.Equal(t, "data:image/png;base64,aGVsbG8=", parts[1].ImageURL.URL, "parts[1] = %+v, want image_url data URL", parts[1])
 	// The image inside the tool result is priced too. Its payload here is not
 	// a real image, so it is charged the upper bound rather than ignored.
