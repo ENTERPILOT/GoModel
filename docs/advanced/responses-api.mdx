@@ -137,6 +137,21 @@ OpenAI-compatible error with:
 }
 ```
 
+A create request that carries no `input` (missing or `null`, and without a
+`prompt` template to supply one) is answered by the gateway, with OpenAI's own
+error, before any provider is called:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "message": "Missing required parameter: 'input'.",
+    "param": "input",
+    "code": "missing_required_parameter"
+  }
+}
+```
+
 GoModel uses OpenAI's `invalid_request_error` type for unsupported operations
 so the public error type set stays closed. The `unsupported_response_operation`
 code identifies the unsupported operation, returned with HTTP `501 Not Implemented`.

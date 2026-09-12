@@ -99,7 +99,9 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 		return nil, err
 	}
 
-	return convertAnthropicResponseToResponses(&anthropicResp, req.Model), nil
+	resp := convertAnthropicResponseToResponses(&anthropicResp, req.Model)
+	providers.ApplyResponsesRequestEcho(resp, req)
+	return resp, nil
 }
 
 // StreamResponses returns a raw response body for streaming Responses API (caller must close)
@@ -122,7 +124,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	}
 
 	// Return a reader that converts Anthropic SSE format to Responses API format
-	return newResponsesStreamConverter(stream, req.Model), nil
+	return newResponsesStreamConverter(stream, req.Model).withRequestEcho(req), nil
 }
 
 // responsesStreamConverter wraps an Anthropic stream and converts it to Responses API format
@@ -146,6 +148,28 @@ type responsesStreamConverter struct {
 	pendingErr           error // upstream read error deferred until terminal events are drained
 	usage                anthropicUsage
 	hasUsage             bool
+	// requestEcho carries the request members OpenAI repeats on the response
+	// object; an Anthropic stream cannot carry them, so they are echoed onto
+	// every lifecycle event, matching the non-streamed answer.
+	requestEcho map[string]json.RawMessage
+}
+
+// withRequestEcho records the request members to repeat on every lifecycle
+// event of this stream.
+func (sc *responsesStreamConverter) withRequestEcho(req *core.ResponsesRequest) *responsesStreamConverter {
+	sc.requestEcho = providers.ResponsesRequestEcho(req)
+	return sc
+}
+
+// echoed adds the request members to one lifecycle response object, never
+// overwriting a member the converter itself produced.
+func (sc *responsesStreamConverter) echoed(response map[string]any) map[string]any {
+	for name, value := range sc.requestEcho {
+		if _, exists := response[name]; !exists {
+			response[name] = value
+		}
+	}
+	return response
 }
 
 func newResponsesStreamConverter(body io.ReadCloser, model string) *responsesStreamConverter {
@@ -305,7 +329,7 @@ func (sc *responsesStreamConverter) appendTerminalEvents() {
 		responseData["usage"] = anthropicResponsesUsagePayload(&sc.usage)
 	}
 	sc.buffer.AppendString(prefix)
-	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
+	sc.buffer.AppendString(sc.output.FinishResponse(eventName, sc.echoed(responseData)))
 }
 
 // startResponse opens the stream with response.created and
@@ -315,14 +339,14 @@ func (sc *responsesStreamConverter) startResponse() string {
 		return ""
 	}
 	sc.sentCreate = true
-	return sc.output.StartResponse(map[string]any{
+	return sc.output.StartResponse(sc.echoed(map[string]any{
 		"id":         sc.responseID,
 		"object":     "response",
 		"status":     "in_progress",
 		"model":      sc.model,
 		"provider":   "anthropic",
 		"created_at": sc.createdAt,
-	})
+	}))
 }
 
 // completePendingToolCalls emits the done events for tool calls the upstream

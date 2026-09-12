@@ -38,6 +38,10 @@ type OpenAIResponsesStreamConverter struct {
 	sawFinish            bool            // upstream signalled completion (finish_reason or [DONE])
 	pendingErr           error           // upstream read error deferred until terminal events are drained
 	cachedUsage          json.RawMessage // Stores usage from final chunk for inclusion in response.completed
+	// requestEcho carries the request members OpenAI repeats on the response
+	// object. A chat stream cannot carry them, so the converter echoes them
+	// onto every lifecycle event.
+	requestEcho map[string]json.RawMessage
 }
 
 // NewOpenAIResponsesStreamConverter creates a new converter that transforms
@@ -56,6 +60,25 @@ func NewOpenAIResponsesStreamConverter(reader io.ReadCloser, model, provider str
 		lineBuffer: streaming.NewStreamBuffer(1024),
 		readBuf:    make([]byte, 1024),
 	}
+}
+
+// WithRequestEcho makes the stream repeat the request members OpenAI echoes on
+// the response object (instructions, metadata, tools, temperature, …), so a
+// streamed answer and a non-streamed one carry the same fields.
+func (sc *OpenAIResponsesStreamConverter) WithRequestEcho(req *core.ResponsesRequest) *OpenAIResponsesStreamConverter {
+	sc.requestEcho = ResponsesRequestEcho(req)
+	return sc
+}
+
+// withRequestEcho adds the echoed request members to one lifecycle response
+// object, never overwriting a member the converter itself produced.
+func (sc *OpenAIResponsesStreamConverter) withRequestEcho(response map[string]any) map[string]any {
+	for name, value := range sc.requestEcho {
+		if _, exists := response[name]; !exists {
+			response[name] = value
+		}
+	}
+	return response
 }
 
 // openAIStreamChunk is the subset of an OpenAI chat.completion.chunk the
@@ -468,7 +491,7 @@ func (sc *OpenAIResponsesStreamConverter) appendTerminalEvents() {
 			responseData["usage"] = usage
 		}
 	}
-	sc.buffer.AppendString(sc.output.FinishResponse(eventName, responseData))
+	sc.buffer.AppendString(sc.output.FinishResponse(eventName, sc.withRequestEcho(responseData)))
 }
 
 func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage) {
@@ -510,7 +533,7 @@ func (sc *OpenAIResponsesStreamConverter) appendFailedEvents(raw json.RawMessage
 			"message": upstream.Message,
 		},
 	}
-	sc.buffer.AppendString(sc.output.FinishResponse("response.failed", responseData))
+	sc.buffer.AppendString(sc.output.FinishResponse("response.failed", sc.withRequestEcho(responseData)))
 }
 
 // chatUsageToResponsesUsage renames a valid Chat Completions usage object into
@@ -568,14 +591,14 @@ func (sc *OpenAIResponsesStreamConverter) Read(p []byte) (n int, err error) {
 	// Open the stream with response.created and response.in_progress first
 	if !sc.sentCreate {
 		sc.sentCreate = true
-		sc.buffer.AppendString(sc.output.StartResponse(map[string]any{
+		sc.buffer.AppendString(sc.output.StartResponse(sc.withRequestEcho(map[string]any{
 			"id":         sc.responseID,
 			"object":     "response",
 			"status":     "in_progress",
 			"model":      sc.model,
 			"provider":   sc.provider,
 			"created_at": sc.createdAt,
-		}))
+		})))
 		return sc.buffer.Read(p), nil
 	}
 

@@ -40,6 +40,7 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
 | `previous_response_id` | Forwarded | Resolved by GoModel: the stored previous response's input items and output are prepended to the input. The previous response must be stored (`store` left on), or the request returns 404 (see [Stored responses](/advanced/responses-api#stored-responses)) |
 | `conversation` | Resolved by GoModel from the gateway-managed conversation | Resolved by GoModel from the gateway-managed conversation |
 | `include` annotations | Forwarded | Accepted and ignored, except `message.output_text.logprobs` |
+| `truncation` | Forwarded | `"disabled"` (OpenAI's default) accepted as the no-op it is; `"auto"` rejected |
 | Unknown Responses input item types | Preserved | Rejected |
 | Responses websocket transport | Not implemented by GoModel | Not implemented by GoModel |
 
@@ -48,6 +49,18 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
   `text.verbosity` settings through GoModel's chat translation path. GoModel
   rejects those fields instead of dropping them.
 </Note>
+
+## The response object
+
+The response object carries the same members whether or not the request
+streamed. A native Responses provider's object is relayed with every member it
+returned, including ones GoModel does not model itself, so `metadata`,
+`instructions`, `tools`, `tool_choice`, `temperature`, `text`, `reasoning` and
+`truncation` can be read back from the create call and from
+`GET /v1/responses/{id}`. A chat-translated provider has no response object
+upstream, so GoModel echoes the members the caller supplied — and only those: a
+default invented by the gateway would describe OpenAI's behavior rather than the
+provider's.
 
 ## The `include` field
 

@@ -136,6 +136,19 @@ func (r *ResponsesRequest) CompactRequest() *ResponseCompactRequest {
 	return &compact
 }
 
+// ValidateInput rejects a Responses request that carries no input, with the
+// error OpenAI returns for it. A missing or null input would otherwise reach
+// the provider as an empty object and come back as a confusing upstream error,
+// billed or not. A prompt template supplies its own input, so it is exempt.
+func (r *ResponsesRequest) ValidateInput() error {
+	if r == nil || r.Input != nil || r.Prompt != nil {
+		return nil
+	}
+	return NewInvalidRequestError("Missing required parameter: 'input'.", nil).
+		WithParam("input").
+		WithCode("missing_required_parameter")
+}
+
 func (r *ResponsesRequest) semanticSelector() (string, string) {
 	if r == nil {
 		return "", ""
@@ -183,6 +196,11 @@ type ResponsesInputElement struct {
 }
 
 // ResponsesResponse represents the response from the Responses API.
+// Unknown JSON members encountered during unmarshaling are preserved in
+// ExtraFields (UnknownJSONFields) and marshaled back out unchanged, so the
+// request-echo members OpenAI returns (instructions, metadata, tools,
+// tool_choice, temperature, text, reasoning, …) survive the gateway instead of
+// being stripped. Swagger ignores ExtraFields; typed fields take precedence.
 type ResponsesResponse struct {
 	ID        string                `json:"id"`
 	Object    string                `json:"object"` // "response"
@@ -195,7 +213,8 @@ type ResponsesResponse struct {
 	Error     *ResponsesError       `json:"error,omitempty"`
 	// PreviousResponseID names the response this one was chained from, as
 	// OpenAI echoes it; stored snapshots follow it to rebuild the history.
-	PreviousResponseID string `json:"previous_response_id,omitempty"`
+	PreviousResponseID string            `json:"previous_response_id,omitempty"`
+	ExtraFields        UnknownJSONFields `json:"-" swaggerignore:"true"`
 }
 
 // ResponsesOutputItem represents an item in the output array.
