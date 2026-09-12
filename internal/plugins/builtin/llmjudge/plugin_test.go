@@ -170,9 +170,9 @@ func TestPromptTargets(t *testing.T) {
 			assert.Equal(t, "a/b", req.Model)
 			assert.Equal(t, "/judge", req.UserPath)
 			assert.Equal(t, 32, req.MaxTokens)
-			assert.NotNil(t, req.Temperature)
+			require.NotNil(t, req.Temperature)
 			assert.Equal(t, 0.25, *req.Temperature)
-			assert.Len(t, req.Messages, 2)
+			require.Len(t, req.Messages, 2)
 			assert.Equal(t, pluginapi.RoleSystem, req.Messages[0].Role)
 			assert.Equal(t, DefaultPrompt, req.Messages[0].Text())
 

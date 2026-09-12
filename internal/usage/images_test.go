@@ -25,9 +25,9 @@ func TestExtractFromImageResponse_PerImagePricing(t *testing.T) {
 	assert.Equal(t, "req-1", entry.RequestID)
 	assert.Equal(t, 0, entry.TotalTokens)
 	assert.Equal(t, 2, entry.RawData[rawKeyImages])
-	assert.NotNil(t, entry.OutputCost)
+	require.NotNil(t, entry.OutputCost)
 	assert.True(t, costsNearlyEqual(*entry.OutputCost, 0.08))
-	assert.NotNil(t, entry.TotalCost)
+	require.NotNil(t, entry.TotalCost)
 	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.08))
 	assert.Empty(t, entry.CostsCalculationCaveat)
 }
@@ -52,7 +52,7 @@ func TestExtractFromImageResponse_TokenPricing(t *testing.T) {
 	assert.Equal(t, 1, entry.RawData[rawKeyImages])
 
 	// 100 * 5 / 1e6 + 1000 * 40 / 1e6 = 0.0005 + 0.04
-	assert.NotNil(t, entry.TotalCost)
+	require.NotNil(t, entry.TotalCost)
 	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.0405))
 	assert.Empty(t, entry.CostsCalculationCaveat)
 }
@@ -91,7 +91,7 @@ func TestExtractFromImageEditResponse(t *testing.T) {
 	assert.Equal(t, 1, entry.RawData[rawKeyImages])
 	assert.Equal(t, 40, entry.RawData["prompt_image_tokens"])
 	assert.Equal(t, 10, entry.RawData["prompt_text_tokens"], "raw data = %v", entry.RawData)
-	assert.NotNil(t, entry.OutputCost)
+	require.NotNil(t, entry.OutputCost)
 	assert.True(t, costsNearlyEqual(*entry.OutputCost, 0.04))
 }
 
@@ -213,7 +213,7 @@ func TestImageCostCaveat_TimeWindowRate(t *testing.T) {
 
 	entry := ExtractFromImageResponse(resp, "req", "m", "openai", pricing)
 
-	assert.NotNil(t, entry.TotalCost)
+	require.NotNil(t, entry.TotalCost)
 	assert.True(t, costsNearlyEqual(*entry.TotalCost, 9*5/1e6+272*40/1e6))
 	assert.Empty(t, entry.CostsCalculationCaveat)
 }

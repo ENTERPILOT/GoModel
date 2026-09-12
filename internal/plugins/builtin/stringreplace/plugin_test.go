@@ -275,7 +275,7 @@ func TestOnPromptDecisions(t *testing.T) {
 				assert.Equal(t, Code, d.Code)
 			}
 			if tt.action == pluginapi.ActionRespond {
-				assert.NotNil(t, d.Response)
+				require.NotNil(t, d.Response)
 				assert.Equal(t, "I cannot discuss that.", d.Response.Text(0))
 			}
 			if tt.detail == nil {

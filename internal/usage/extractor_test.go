@@ -432,7 +432,7 @@ func TestExtractFromSSEUsage(t *testing.T) {
 	assert.Equal(t, 100, entry.InputTokens)
 	assert.Equal(t, 50, entry.OutputTokens)
 	assert.Equal(t, 150, entry.TotalTokens)
-	assert.NotNil(t, entry.RawData)
+	require.NotNil(t, entry.RawData)
 	assert.Equal(t, 25, entry.RawData["cached_tokens"])
 }
 
