@@ -94,10 +94,19 @@ The exact cache hashes:
 - the request path
 - the resolved workflow context used for execution
   specifically execution mode, provider type, and resolved model
+- the guardrail chain the request resolves to, across the prompt, response and
+  stream phases
 - the final request body
 
 This means guardrails and workflows affect cache keys when they change the
 resolved workflow or the final body sent through execution.
+
+A cache hit replays the stored response without re-running the response and
+stream guardrail chains, so an entry is only ever served to a request whose
+chain matches the one that produced it. Editing, adding or removing a guardrail
+step — or a second workflow with a different chain — yields a miss instead of a
+reply those guardrails never saw. Changing guardrail configuration therefore
+invalidates the entries stored under the old chain.
 
 JSON object member order and insignificant whitespace are canonicalized before
 hashing. Requests that differ only in formatting therefore share one exact

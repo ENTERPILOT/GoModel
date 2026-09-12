@@ -78,7 +78,7 @@ func recalculateEntryCosts(entry recalculationEntry, resolver PricingResolver) r
 	effectivePricing := pricingForEndpoint(pricing.AtTime(entry.Timestamp), entry.Endpoint)
 	result := CalculateUsageCost(entry.InputTokens, entry.OutputTokens, entry.RawData, entry.Provider, effectivePricing)
 	caveat := result.Caveat
-	if retained := retainedMissingUsageCaveat(entry.Caveat, entry.RawData, effectivePricing); retained != "" {
+	if retained := retainedMissingUsageCaveat(entry.Caveat, entry.OutputTokens, entry.RawData, effectivePricing); retained != "" {
 		if caveat == "" {
 			caveat = retained
 		} else {

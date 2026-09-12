@@ -203,7 +203,7 @@ func ExtractFromEmbeddingResponse(resp *core.EmbeddingResponse, requestID, provi
 	// per-request price, or an explicit zero rate), where the recorded cost is
 	// correct and calling it uncalculated would be false.
 	if resp.Usage.PromptTokens == 0 && resp.Usage.TotalTokens == 0 &&
-		tokenRatesAffectCost(effectiveEndpointPricing(endpoint, pricing...)) &&
+		tokenRatesAffectCost(effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...)) &&
 		entry.CostsCalculationCaveat == "" {
 		entry.CostsCalculationCaveat = caveatEmbeddingMissingUsage
 	}
@@ -362,18 +362,23 @@ func normalizeCachedResponseEndpoint(endpoint string) string {
 	return cleaned
 }
 
-// effectiveEndpointPricing resolves the pricing that applies to endpoint, or
-// nil when the caller supplied none.
-func effectiveEndpointPricing(endpoint string, pricing ...*core.ModelPricing) *core.ModelPricing {
+// effectiveEndpointPricing resolves the pricing that applies to endpoint at the
+// entry's timestamp, or nil when the caller supplied none. It matches what
+// applyUsageCosts priced the entry with, so caveat checks read the same rates
+// the cost came from (time-of-day windows included).
+func effectiveEndpointPricing(endpoint string, at time.Time, pricing ...*core.ModelPricing) *core.ModelPricing {
 	if len(pricing) == 0 {
 		return nil
 	}
-	return pricingForEndpoint(pricing[0], endpoint)
+	return pricingForEndpoint(pricing[0].AtTime(at), endpoint)
 }
 
 func pricingForEndpoint(pricing *core.ModelPricing, endpoint string) *core.ModelPricing {
 	if pricing == nil {
 		return nil
+	}
+	if isImageEndpoint(endpoint) {
+		return pricingForImageEndpoint(pricing)
 	}
 	if endpoint != "/v1/batches" && !strings.HasPrefix(endpoint, "/v1/batches/") {
 		return pricing
