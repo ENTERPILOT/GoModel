@@ -4,14 +4,16 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // clearProviderEnvVars unsets all known provider-related environment variables.
@@ -110,12 +112,10 @@ func withTempDir(t *testing.T, fn func(dir string)) {
 	t.Helper()
 	tempDir := t.TempDir()
 	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatalf("Failed to change to temp directory: %v", err)
-	}
+	require.NoError(t, err)
+	err = os.Chdir(tempDir)
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = os.Chdir(originalDir) })
 	fn(tempDir)
 }
@@ -123,170 +123,68 @@ func withTempDir(t *testing.T, fn func(dir string)) {
 func TestBuildDefaultConfig(t *testing.T) {
 	cfg := buildDefaultConfig()
 
-	if cfg.Server.Port != "8080" {
-		t.Errorf("expected Server.Port=8080, got %s", cfg.Server.Port)
-	}
-	if cfg.Server.BasePath != "/" {
-		t.Errorf("expected Server.BasePath=/, got %s", cfg.Server.BasePath)
-	}
-	if cfg.Server.UserPathHeader != "X-GoModel-User-Path" {
-		t.Errorf("expected Server.UserPathHeader=X-GoModel-User-Path, got %s", cfg.Server.UserPathHeader)
-	}
-	if cfg.Server.PprofEnabled {
-		t.Error("expected Server.PprofEnabled=false")
-	}
-	if cfg.Server.SwaggerEnabled {
-		t.Error("expected Server.SwaggerEnabled=false")
-	}
-	if cfg.Server.StreamStallTimeout != DefaultStreamStallTimeoutSeconds {
-		t.Errorf("expected Server.StreamStallTimeout=%d, got %d", DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
-	}
-	if !cfg.Server.EnablePassthroughRoutes {
-		t.Error("expected Server.EnablePassthroughRoutes=true")
-	}
-	if !cfg.Server.AllowPassthroughV1Alias {
-		t.Error("expected Server.AllowPassthroughV1Alias=true")
-	}
-	if got, want := cfg.Server.EnabledPassthroughProviders, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("expected Server.EnabledPassthroughProviders=%v, got %v", want, got)
-	}
-	if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeFallback {
-		t.Errorf("expected Models.ConfiguredProviderModelsMode=fallback, got %q", cfg.Models.ConfiguredProviderModelsMode)
-	}
-	if cfg.Cache.Model.Local != nil {
-		t.Error("expected Cache.Model.Local to be nil in raw defaults")
-	}
-	if cfg.Cache.Model.RefreshInterval != 3600 {
-		t.Errorf("expected Cache.Model.RefreshInterval=3600, got %d", cfg.Cache.Model.RefreshInterval)
-	}
-	if cfg.Storage.Type != "sqlite" {
-		t.Errorf("expected Storage.Type=sqlite, got %s", cfg.Storage.Type)
-	}
-	if cfg.Storage.SQLite.Path != storage.DefaultSQLitePath() {
-		t.Errorf("expected Storage.SQLite.Path=%s, got %s", storage.DefaultSQLitePath(), cfg.Storage.SQLite.Path)
-	}
-	if cfg.Storage.PostgreSQL.MaxConns != 10 {
-		t.Errorf("expected Storage.PostgreSQL.MaxConns=10, got %d", cfg.Storage.PostgreSQL.MaxConns)
-	}
-	if cfg.Storage.MongoDB.Database != "" {
-		t.Errorf("expected Storage.MongoDB.Database to default empty (resolved by storage layer), got %s", cfg.Storage.MongoDB.Database)
-	}
-	if !cfg.Logging.LogBodies {
-		t.Error("expected Logging.LogBodies=true")
-	}
-	if !cfg.Logging.LogHeaders {
-		t.Error("expected Logging.LogHeaders=true")
-	}
-	if cfg.Logging.BufferSize != 1000 {
-		t.Errorf("expected Logging.BufferSize=1000, got %d", cfg.Logging.BufferSize)
-	}
-	if cfg.Logging.FlushInterval != 5 {
-		t.Errorf("expected Logging.FlushInterval=5, got %d", cfg.Logging.FlushInterval)
-	}
-	if cfg.Logging.RetentionDays != 30 {
-		t.Errorf("expected Logging.RetentionDays=30, got %d", cfg.Logging.RetentionDays)
-	}
-	if !cfg.Logging.OnlyModelInteractions {
-		t.Error("expected Logging.OnlyModelInteractions=true")
-	}
-	if !cfg.Logging.Enabled {
-		t.Error("expected Logging.Enabled=true")
-	}
-	if !cfg.Usage.Enabled {
-		t.Error("expected Usage.Enabled=true")
-	}
-	if !cfg.Usage.EnforceReturningUsageData {
-		t.Error("expected Usage.EnforceReturningUsageData=true")
-	}
-	if !cfg.Usage.PricingRecalculationEnabled {
-		t.Error("expected Usage.PricingRecalculationEnabled=true")
-	}
-	if cfg.Usage.BufferSize != 1000 {
-		t.Errorf("expected Usage.BufferSize=1000, got %d", cfg.Usage.BufferSize)
-	}
-	if cfg.Usage.FlushInterval != 5 {
-		t.Errorf("expected Usage.FlushInterval=5, got %d", cfg.Usage.FlushInterval)
-	}
-	if cfg.Usage.RetentionDays != 90 {
-		t.Errorf("expected Usage.RetentionDays=90, got %d", cfg.Usage.RetentionDays)
-	}
-	if !cfg.Budgets.Enabled {
-		t.Error("expected Budgets.Enabled=true")
-	}
-	if cfg.Metrics.Endpoint != "/metrics" {
-		t.Errorf("expected Metrics.Endpoint=/metrics, got %s", cfg.Metrics.Endpoint)
-	}
-	if cfg.Metrics.Enabled {
-		t.Error("expected Metrics.Enabled=false")
-	}
-	if cfg.HTTP.Timeout != 600 {
-		t.Errorf("expected HTTP.Timeout=600, got %d", cfg.HTTP.Timeout)
-	}
-	if cfg.HTTP.ResponseHeaderTimeout != 600 {
-		t.Errorf("expected HTTP.ResponseHeaderTimeout=600, got %d", cfg.HTTP.ResponseHeaderTimeout)
-	}
-	if cfg.Workflows.RefreshInterval != time.Minute {
-		t.Errorf("expected Workflows.RefreshInterval=%s, got %s", time.Minute, cfg.Workflows.RefreshInterval)
-	}
-	if !cfg.Admin.EndpointsEnabled {
-		t.Error("expected Admin.EndpointsEnabled=true")
-	}
-	if !cfg.Admin.UIEnabled {
-		t.Error("expected Admin.UIEnabled=true")
-	}
-	if !cfg.Admin.LiveLogsEnabled {
-		t.Error("expected Admin.LiveLogsEnabled=true")
-	}
-	if cfg.Admin.LiveLogsBufferSize != 10000 {
-		t.Errorf("expected Admin.LiveLogsBufferSize=10000, got %d", cfg.Admin.LiveLogsBufferSize)
-	}
-	if cfg.Admin.LiveLogsReplayLimit != 1000 {
-		t.Errorf("expected Admin.LiveLogsReplayLimit=1000, got %d", cfg.Admin.LiveLogsReplayLimit)
-	}
-	if cfg.Admin.LiveLogsHeartbeatSeconds != 15 {
-		t.Errorf("expected Admin.LiveLogsHeartbeatSeconds=15, got %d", cfg.Admin.LiveLogsHeartbeatSeconds)
-	}
-	if !cfg.Models.EnabledByDefault {
-		t.Error("expected Models.EnabledByDefault=true")
-	}
-	if cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
-		t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=false")
-	}
-	if cfg.Models.UnqualifiedModelIDsAtModelsEndpoint {
-		t.Error("expected Models.UnqualifiedModelIDsAtModelsEndpoint=false")
-	}
-	if cfg.Guardrails.EnableForBatchProcessing {
-		t.Error("expected Guardrails.EnableForBatchProcessing=false")
-	}
-	if cfg.Failover.DefaultMode != FailoverModeManual {
-		t.Errorf("expected Failover.DefaultMode=manual, got %q", cfg.Failover.DefaultMode)
-	}
-	if !cfg.Failover.Enabled {
-		t.Error("expected Failover.Enabled=true")
-	}
-	if cfg.Cache.Response.Simple != nil {
-		t.Errorf("expected Cache.Response.Simple=nil in defaults, got %+v", cfg.Cache.Response.Simple)
-	}
-	if cfg.Cache.Response.Semantic != nil {
-		t.Errorf("expected Cache.Response.Semantic=nil in defaults, got %+v", cfg.Cache.Response.Semantic)
-	}
+	assert.Equal(t, "8080", cfg.Server.Port)
+	assert.Equal(t, "/", cfg.Server.BasePath)
+	assert.Equal(t, "X-GoModel-User-Path", cfg.Server.UserPathHeader)
+	assert.False(t, cfg.Server.PprofEnabled)
+	assert.False(t, cfg.Server.SwaggerEnabled)
+	assert.Equal(t, DefaultStreamStallTimeoutSeconds, cfg.Server.StreamStallTimeout)
+	assert.True(t, cfg.Server.EnablePassthroughRoutes)
+	assert.True(t, cfg.Server.AllowPassthroughV1Alias)
+	assert.Equal(t, []string{"openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llamacpp", "llmd", "deepseek"}, cfg.Server.EnabledPassthroughProviders)
+	assert.Equal(t, ConfiguredProviderModelsModeFallback, cfg.Models.ConfiguredProviderModelsMode)
+	assert.Nil(t, cfg.Cache.Model.Local)
+	assert.Equal(t, 3600, cfg.Cache.Model.RefreshInterval)
+	assert.Equal(t, "sqlite", cfg.Storage.Type)
+	assert.Equal(t, storage.DefaultSQLitePath(), cfg.Storage.SQLite.Path)
+	assert.Equal(t, 10, cfg.Storage.PostgreSQL.MaxConns)
+	assert.Empty(t, cfg.Storage.MongoDB.Database)
+	assert.True(t, cfg.Logging.LogBodies)
+	assert.True(t, cfg.Logging.LogHeaders)
+	assert.Equal(t, 1000, cfg.Logging.BufferSize)
+	assert.Equal(t, 5, cfg.Logging.FlushInterval)
+	assert.Equal(t, 30, cfg.Logging.RetentionDays)
+	assert.True(t, cfg.Logging.OnlyModelInteractions)
+	assert.True(t, cfg.Logging.Enabled)
+	assert.True(t, cfg.Usage.Enabled)
+	assert.True(t, cfg.Usage.EnforceReturningUsageData)
+	assert.True(t, cfg.Usage.PricingRecalculationEnabled)
+	assert.Equal(t, 1000, cfg.Usage.BufferSize)
+	assert.Equal(t, 5, cfg.Usage.FlushInterval)
+	assert.Equal(t, 90, cfg.Usage.RetentionDays)
+	assert.True(t, cfg.Budgets.Enabled)
+	assert.Equal(t, "/metrics", cfg.Metrics.Endpoint)
+	assert.False(t, cfg.Metrics.Enabled)
+	assert.Equal(t, 600, cfg.HTTP.Timeout)
+	assert.Equal(t, 600, cfg.HTTP.ResponseHeaderTimeout)
+	assert.Equal(t, time.Minute, cfg.Workflows.RefreshInterval)
+	assert.True(t, cfg.Admin.EndpointsEnabled)
+	assert.True(t, cfg.Admin.UIEnabled)
+	assert.True(t, cfg.Admin.LiveLogsEnabled)
+	assert.Equal(t, 10000, cfg.Admin.LiveLogsBufferSize)
+	assert.Equal(t, 1000, cfg.Admin.LiveLogsReplayLimit)
+	assert.Equal(t, 15, cfg.Admin.LiveLogsHeartbeatSeconds)
+	assert.True(t, cfg.Models.EnabledByDefault)
+	assert.False(t, cfg.Models.KeepOnlyAliasesAtModelsEndpoint)
+	assert.False(t, cfg.Models.UnqualifiedModelIDsAtModelsEndpoint)
+	assert.False(t, cfg.Guardrails.EnableForBatchProcessing)
+	assert.Equal(t, FailoverModeManual, cfg.Failover.DefaultMode)
+	assert.True(t, cfg.Failover.Enabled)
+	assert.Nil(t, cfg.Cache.Response.Simple)
+	assert.Nil(t, cfg.Cache.Response.Semantic)
 
 	expectedRetry := DefaultRetryConfig()
-	if !reflect.DeepEqual(cfg.Resilience.Retry, expectedRetry) {
-		t.Errorf("expected Resilience.Retry=%+v, got %+v", expectedRetry, cfg.Resilience.Retry)
-	}
+	assert.Equal(t, expectedRetry, cfg.Resilience.Retry)
 
 	expectedCB := DefaultCircuitBreakerConfig()
-	if !reflect.DeepEqual(cfg.Resilience.CircuitBreaker, expectedCB) {
-		t.Errorf("expected Resilience.CircuitBreaker=%+v, got %+v", expectedCB, cfg.Resilience.CircuitBreaker)
-	}
+	assert.Equal(t, expectedCB, cfg.Resilience.CircuitBreaker)
 }
 
 func TestDecodeExtensionStrictlyDecodesOpaqueConfig(t *testing.T) {
 	var node yaml.Node
-	if err := yaml.Unmarshal([]byte("enabled: true\npkce_enabled: false\n"), &node); err != nil {
-		t.Fatal(err)
-	}
+	err := yaml.Unmarshal([]byte("enabled: true\npkce_enabled: false\n"), &node)
+	require.NoError(t, err)
+
 	type ssoConfig struct {
 		Enabled     bool `yaml:"enabled"`
 		PKCEEnabled bool `yaml:"pkce_enabled"`
@@ -294,60 +192,54 @@ func TestDecodeExtensionStrictlyDecodesOpaqueConfig(t *testing.T) {
 	result := &LoadResult{Config: &Config{Extensions: map[string]yaml.Node{"sso": node}}}
 	var got ssoConfig
 	found, err := result.DecodeExtension("sso", &got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !found || !got.Enabled || got.PKCEEnabled {
-		t.Fatalf("found=%v config=%+v", found, got)
-	}
+	require.NoError(t, err)
+	require.True(t, found)
+	require.True(t, got.Enabled)
+	require.False(t, got.PKCEEnabled)
 
 	var unknown yaml.Node
-	if err := yaml.Unmarshal([]byte("unknown: true\n"), &unknown); err != nil {
-		t.Fatal(err)
-	}
+	err = yaml.Unmarshal([]byte("unknown: true\n"), &unknown)
+	require.NoError(t, err)
+
 	result.Config.Extensions["sso"] = unknown
-	if _, err := result.DecodeExtension("sso", &got); err == nil {
-		t.Fatal("expected extension-owned unknown key to be rejected")
-	}
+	_, err = result.DecodeExtension("sso", &got)
+	require.Error(t, err)
 }
 
 func TestDecodeExtensionHandlesAbsentConfiguration(t *testing.T) {
 	var nilResult *LoadResult
-	if found, err := nilResult.DecodeExtension("sso", &struct{}{}); err != nil || found {
-		t.Fatalf("nil result: found=%v err=%v", found, err)
-	}
+	found, err := nilResult.DecodeExtension("sso", &struct{}{})
+	require.NoError(t, err)
+	require.False(t, found)
+
 	result := &LoadResult{Config: &Config{}}
-	if found, err := result.DecodeExtension("sso", &struct{}{}); err != nil || found {
-		t.Fatalf("missing extension: found=%v err=%v", found, err)
-	}
-	if found, err := result.DecodeExtension("sso", nil); err != nil || found {
-		t.Fatalf("nil target: found=%v err=%v", found, err)
-	}
+	found, err = result.DecodeExtension("sso", &struct{}{})
+	require.NoError(t, err)
+	require.False(t, found)
+	found, err = result.DecodeExtension("sso", nil)
+	require.NoError(t, err)
+	require.False(t, found)
 }
 
 func TestLoadPreservesOpaqueExtensionConfiguration(t *testing.T) {
 	clearAllConfigEnvVars(t)
 	withTempDir(t, func(dir string) {
 		contents := []byte("extensions:\n  sso:\n    enabled: true\n    provider_specific_option: value\n")
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), contents, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		err := os.WriteFile(filepath.Join(dir, "config.yaml"), contents, 0o644)
+		require.NoError(t, err)
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() rejected extension-owned keys: %v", err)
-		}
+		require.NoError(t, err)
+
 		var decoded struct {
 			Enabled                bool   `yaml:"enabled"`
 			ProviderSpecificOption string `yaml:"provider_specific_option"`
 		}
 		found, err := result.DecodeExtension("sso", &decoded)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !found || !decoded.Enabled || decoded.ProviderSpecificOption != "value" {
-			t.Fatalf("found=%v config=%+v", found, decoded)
-		}
+		require.NoError(t, err)
+		require.True(t, found)
+		require.True(t, decoded.Enabled)
+		require.Equal(t, "value", decoded.ProviderSpecificOption)
 	})
 }
 
@@ -358,32 +250,16 @@ func TestLoadBudgetEnvUserPath(t *testing.T) {
 		t.Setenv("SET_BUDGET_USER__PATH__EXAMPLE", "daily=12.5,weekly=50")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		entries := result.Config.Budgets.UserPaths
-		if len(entries) != 1 {
-			t.Fatalf("expected 1 budget user path, got %d", len(entries))
-		}
-		if got, want := entries[0].Path, "/user/path/example"; got != want {
-			t.Fatalf("budget env path = %q, want %q", got, want)
-		}
-		if len(entries[0].Limits) != 2 {
-			t.Fatalf("expected 2 budget limits, got %d", len(entries[0].Limits))
-		}
-		if got, want := entries[0].Limits[0].PeriodSeconds, int64(86400); got != want {
-			t.Fatalf("daily period seconds = %d, want %d", got, want)
-		}
-		if got, want := entries[0].Limits[0].Amount, 12.5; got != want {
-			t.Fatalf("daily amount = %v, want %v", got, want)
-		}
-		if got, want := entries[0].Limits[1].PeriodSeconds, int64(604800); got != want {
-			t.Fatalf("weekly period seconds = %d, want %d", got, want)
-		}
-		if got, want := entries[0].Limits[1].Amount, 50.0; got != want {
-			t.Fatalf("weekly amount = %v, want %v", got, want)
-		}
+		require.Len(t, entries, 1)
+		require.Equal(t, "/user/path/example", entries[0].Path)
+		require.Len(t, entries[0].Limits, 2)
+		assert.Equal(t, int64(86400), entries[0].Limits[0].PeriodSeconds)
+		assert.Equal(t, 12.5, entries[0].Limits[0].Amount)
+		assert.Equal(t, int64(604800), entries[0].Limits[1].PeriodSeconds)
+		assert.Equal(t, 50.0, entries[0].Limits[1].Amount)
 	})
 }
 
@@ -401,9 +277,8 @@ func TestBudgetEnvPathUsesDoubleUnderscoreSeparator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := userPathEnvSuffixPath(tt.suffix); got != tt.want {
-				t.Fatalf("userPathEnvSuffixPath(%q) = %q, want %q", tt.suffix, got, tt.want)
-			}
+			got := userPathEnvSuffixPath(tt.suffix)
+			require.Equal(t, tt.want, got, "userPathEnvSuffixPath(%q)", tt.suffix)
 		})
 	}
 }
@@ -415,16 +290,12 @@ func TestLoadBudgetEnvJSONLimitsAreSorted(t *testing.T) {
 		t.Setenv("SET_BUDGET_TEAM__ALPHA", `{"weekly":50,"daily":10,"monthly":100}`)
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		limits := result.Config.Budgets.UserPaths[0].Limits
 		got := []string{limits[0].Period, limits[1].Period, limits[2].Period}
 		want := []string{"daily", "monthly", "weekly"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("period order = %v, want %v", got, want)
-		}
+		require.Equal(t, want, got)
 	})
 }
 
@@ -434,13 +305,12 @@ func TestLoadBudgetEnvJSONArraySupportsPerChild(t *testing.T) {
 	withTempDir(t, func(string) {
 		t.Setenv("SET_BUDGET_USERS", `[{"period":"daily","amount":10,"per_child":true}]`)
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		entry := result.Config.Budgets.UserPaths[0]
-		if entry.Path != "/users" || len(entry.Limits) != 1 || !entry.Limits[0].PerChild {
-			t.Fatalf("budget env entry = %+v, want per-child /users", entry)
-		}
+		require.Equal(t, "/users", entry.Path)
+		require.Len(t, entry.Limits, 1)
+		require.True(t, entry.Limits[0].PerChild, "budget env entry = %+v, want per-child /users", entry)
 	})
 }
 
@@ -457,17 +327,11 @@ budgets:
         - period: daily
           amount: 10
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
-			t.Fatalf("write config.yaml: %v", err)
-		}
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		result := loadConfigYAML(t, dir, yamlConfig)
+
 		entry := result.Config.Budgets.UserPaths[0]
-		if entry.Path != "/customers" || !entry.PerChild {
-			t.Fatalf("budget YAML entry = %+v, want per-child /customers", entry)
-		}
+		require.Equal(t, "/customers", entry.Path)
+		require.True(t, entry.PerChild, "budget YAML entry = %+v, want per-child /customers", entry)
 	})
 }
 
@@ -487,29 +351,21 @@ budgets:
         - period: daily
           amount: 2
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yamlConfig)
+
 		t.Setenv("SET_BUDGET_TEAM__ALPHA", "weekly=50")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		entries := result.Config.Budgets.UserPaths
-		if len(entries) != 2 {
-			t.Fatalf("expected 2 budget user paths, got %d: %+v", len(entries), entries)
-		}
-		if entries[0].Path != "/team/beta" || entries[0].Limits[0].Amount != 2 {
-			t.Fatalf("first budget entry = %+v, want untouched /team/beta YAML entry", entries[0])
-		}
-		if entries[1].Path != "/team/alpha" {
-			t.Fatalf("env replacement path = %q, want /team/alpha", entries[1].Path)
-		}
-		if len(entries[1].Limits) != 1 || entries[1].Limits[0].PeriodSeconds != 604800 || entries[1].Limits[0].Amount != 50 {
-			t.Fatalf("env replacement limits = %+v, want weekly=50", entries[1].Limits)
-		}
+		require.Len(t, entries, 2)
+		require.Equal(t, "/team/beta", entries[0].Path)
+		require.Equal(t, float64(2), entries[0].Limits[0].Amount, "first budget entry = %+v, want untouched /team/beta YAML entry", entries[0])
+		require.Equal(t, "/team/alpha", entries[1].Path)
+		require.Len(t, entries[1].Limits, 1)
+		require.Equal(t, int64(604800), entries[1].Limits[0].PeriodSeconds)
+		require.Equal(t, float64(50), entries[1].Limits[0].Amount)
 	})
 }
 
@@ -531,30 +387,22 @@ budgets:
         - period: daily
           amount: 2
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yamlConfig)
+
 		t.Setenv("SET_BUDGET_TEAM__ALPHA", "weekly=50")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		entries := result.Config.Budgets.UserPaths
-		if len(entries) != 2 {
-			t.Fatalf("expected 2 budget user paths, got %d: %+v", len(entries), entries)
-		}
+		require.Len(t, entries, 2)
+
 		// /team/beta/ stays (different canonical from env), /team/alpha is replaced.
-		if entries[0].Path != "/team/beta" || entries[0].Limits[0].Amount != 2 {
-			t.Fatalf("first budget entry = %+v, want /team/beta YAML entry (normalized)", entries[0])
-		}
-		if entries[1].Path != "/team/alpha" {
-			t.Fatalf("env replacement path = %q, want /team/alpha", entries[1].Path)
-		}
-		if len(entries[1].Limits) != 1 || entries[1].Limits[0].Amount != 50 {
-			t.Fatalf("env replacement limits = %+v, want weekly=50", entries[1].Limits)
-		}
+		require.Equal(t, "/team/beta", entries[0].Path)
+		require.Equal(t, float64(2), entries[0].Limits[0].Amount, "first budget entry = %+v, want /team/beta YAML entry (normalized)", entries[0])
+		require.Equal(t, "/team/alpha", entries[1].Path)
+		require.Len(t, entries[1].Limits, 1)
+		require.Equal(t, float64(50), entries[1].Limits[0].Amount)
 	})
 }
 
@@ -565,12 +413,8 @@ func TestLoadBudgetEnvRejectsNonFiniteAmount(t *testing.T) {
 		t.Setenv("SET_BUDGET_TEAM__ALPHA", "daily=NaN")
 
 		_, err := Load()
-		if err == nil {
-			t.Fatal("Load() error = nil, want non-finite budget amount error")
-		}
-		if !strings.Contains(err.Error(), "amount must be a finite number greater than 0") {
-			t.Fatalf("Load() error = %v, want finite amount validation", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "amount must be a finite number greater than 0")
 	})
 }
 
@@ -590,17 +434,11 @@ budgets:
         - period_seconds: 86400
           amount: 2
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yamlConfig)
 
 		_, err := Load()
-		if err == nil {
-			t.Fatal("Load() error = nil, want duplicate budget error")
-		}
-		if !strings.Contains(err.Error(), "duplicate budget for user_path /team/alpha period 86400") {
-			t.Fatalf("Load() error = %v, want duplicate budget validation", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "duplicate budget for user_path /team/alpha period 86400")
 	})
 }
 
@@ -612,15 +450,9 @@ func TestLoadBudgetEnvDisablesBudgetsWhenUsageTrackingDisabled(t *testing.T) {
 		t.Setenv("SET_BUDGET_USER__PATH__EXAMPLE", "daily=12.5")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Budgets.Enabled {
-			t.Fatal("expected budgets to be disabled when usage tracking is disabled")
-		}
-		if len(result.Config.Budgets.UserPaths) != 0 {
-			t.Fatalf("expected auto-disabled budgets to ignore env user paths, got %d", len(result.Config.Budgets.UserPaths))
-		}
+		require.NoError(t, err)
+		require.False(t, result.Config.Budgets.Enabled)
+		require.Empty(t, result.Config.Budgets.UserPaths)
 	})
 }
 
@@ -631,12 +463,8 @@ func TestLoadBudgetsEnabledDisablesBudgetsWhenUsageTrackingDisabledWithoutSeedBu
 		t.Setenv("USAGE_ENABLED", "false")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Budgets.Enabled {
-			t.Fatal("expected budgets to be disabled when usage tracking is disabled")
-		}
+		require.NoError(t, err)
+		require.False(t, result.Config.Budgets.Enabled)
 	})
 }
 
@@ -648,17 +476,8 @@ func TestLoadUsagePricingRecalculationFromYAML(t *testing.T) {
 usage:
   pricing_recalculation_enabled: false
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Usage.PricingRecalculationEnabled {
-			t.Fatal("expected usage pricing recalculation to be disabled from YAML")
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		require.False(t, result.Config.Usage.PricingRecalculationEnabled)
 	})
 }
 
@@ -670,15 +489,9 @@ func TestLoadDisabledBudgetsIgnoreMalformedBudgetEnv(t *testing.T) {
 		t.Setenv("SET_BUDGET_USER__PATH__EXAMPLE", "not-a-budget-limit")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Budgets.Enabled {
-			t.Fatal("expected budgets to be disabled")
-		}
-		if len(result.Config.Budgets.UserPaths) != 0 {
-			t.Fatalf("expected disabled budgets to ignore env user paths, got %d", len(result.Config.Budgets.UserPaths))
-		}
+		require.NoError(t, err)
+		require.False(t, result.Config.Budgets.Enabled)
+		require.Empty(t, result.Config.Budgets.UserPaths)
 	})
 }
 
@@ -687,16 +500,9 @@ func TestLoad_ZeroConfig(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		if result.Config.Server.Port != "8080" {
-			t.Errorf("expected default port 8080, got %s", result.Config.Server.Port)
-		}
-		if len(result.RawProviders) != 0 {
-			t.Errorf("expected no raw providers, got %d", len(result.RawProviders))
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "8080", result.Config.Server.Port)
+		assert.Empty(t, result.RawProviders)
 	})
 }
 
@@ -724,64 +530,26 @@ logging:
   log_bodies: false
   buffer_size: 500
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		result := loadConfigYAML(t, dir, yaml)
 
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
 		cfg := result.Config
 
-		if cfg.Server.Port != "3000" {
-			t.Errorf("expected port 3000, got %s", cfg.Server.Port)
-		}
-		if !cfg.Server.PprofEnabled {
-			t.Error("expected Server.PprofEnabled=true from YAML")
-		}
-		if cfg.Models.EnabledByDefault {
-			t.Error("expected Models.EnabledByDefault=false from YAML")
-		}
-		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
-			t.Error("expected Models.KeepOnlyAliasesAtModelsEndpoint=true from YAML")
-		}
-		if !cfg.Models.UnqualifiedModelIDsAtModelsEndpoint {
-			t.Error("expected Models.UnqualifiedModelIDsAtModelsEndpoint=true from YAML")
-		}
-		if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeAllowlist {
-			t.Errorf("expected Models.ConfiguredProviderModelsMode=allowlist from YAML, got %q", cfg.Models.ConfiguredProviderModelsMode)
-		}
-		if cfg.Cache.Model.Redis == nil {
-			t.Fatal("expected Cache.Model.Redis to be set")
-		}
-		if cfg.Cache.Model.Redis.URL != "redis://myhost:6379" {
-			t.Errorf("expected redis URL redis://myhost:6379, got %s", cfg.Cache.Model.Redis.URL)
-		}
-		if cfg.Cache.Model.Redis.Key != "custom:key" {
-			t.Errorf("expected redis key custom:key, got %s", cfg.Cache.Model.Redis.Key)
-		}
-		if cfg.Cache.Model.Redis.TTL != 3600 {
-			t.Errorf("expected redis TTL 3600, got %d", cfg.Cache.Model.Redis.TTL)
-		}
-		if cfg.Cache.Model.Local != nil {
-			t.Errorf("expected Cache.Model.Local to be nil when redis is configured, got %v", cfg.Cache.Model.Local)
-		}
-		if !cfg.Logging.Enabled {
-			t.Error("expected Logging.Enabled=true from YAML")
-		}
-		if cfg.Logging.LogBodies {
-			t.Error("expected Logging.LogBodies=false from YAML")
-		}
-		if cfg.Logging.BufferSize != 500 {
-			t.Errorf("expected Logging.BufferSize=500, got %d", cfg.Logging.BufferSize)
-		}
-		if cfg.Logging.FlushInterval != 5 {
-			t.Errorf("expected Logging.FlushInterval=5 (default), got %d", cfg.Logging.FlushInterval)
-		}
-		if cfg.Storage.Type != "sqlite" {
-			t.Errorf("expected Storage.Type=sqlite (default), got %s", cfg.Storage.Type)
-		}
+		assert.Equal(t, "3000", cfg.Server.Port)
+		assert.True(t, cfg.Server.PprofEnabled)
+		assert.False(t, cfg.Models.EnabledByDefault)
+		assert.True(t, cfg.Models.KeepOnlyAliasesAtModelsEndpoint)
+		assert.True(t, cfg.Models.UnqualifiedModelIDsAtModelsEndpoint)
+		assert.Equal(t, ConfiguredProviderModelsModeAllowlist, cfg.Models.ConfiguredProviderModelsMode)
+		require.NotNil(t, cfg.Cache.Model.Redis)
+		assert.Equal(t, "redis://myhost:6379", cfg.Cache.Model.Redis.URL)
+		assert.Equal(t, "custom:key", cfg.Cache.Model.Redis.Key)
+		assert.Equal(t, 3600, cfg.Cache.Model.Redis.TTL)
+		assert.Nil(t, cfg.Cache.Model.Local)
+		assert.True(t, cfg.Logging.Enabled)
+		assert.False(t, cfg.Logging.LogBodies)
+		assert.Equal(t, 500, cfg.Logging.BufferSize)
+		assert.Equal(t, 5, cfg.Logging.FlushInterval)
+		assert.Equal(t, "sqlite", cfg.Storage.Type)
 	})
 }
 
@@ -790,12 +558,11 @@ func TestLoad_FailoverManualRules(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		manualRulesPath := filepath.Join(dir, "failover.json")
-		if err := os.WriteFile(manualRulesPath, []byte(`{
+		err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": ["azure/gpt-4o", "gemini/gemini-2.5-pro"],
 			"claude-sonnet-4": ["openai/gpt-5-mini"]
-		}`), 0644); err != nil {
-			t.Fatalf("Failed to write failover rules: %v", err)
-		}
+		}`), 0644)
+		require.NoError(t, err)
 
 		type yamlConfig struct {
 			Failover struct {
@@ -816,30 +583,17 @@ func TestLoad_FailoverManualRules(t *testing.T) {
 		}
 
 		yamlData, err := yaml.Marshal(yamlCfg)
-		if err != nil {
-			t.Fatalf("Failed to marshal config.yaml: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		require.NoError(t, err)
+		err = os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644)
+		require.NoError(t, err)
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		cfg := result.Config
-		if cfg.Failover.DefaultMode != FailoverModeAuto {
-			t.Fatalf("Failover.DefaultMode = %q, want %q", cfg.Failover.DefaultMode, FailoverModeAuto)
-		}
-		if cfg.Failover.Disabled["gpt-4o"] {
-			t.Fatal("legacy failover.overrides mode:off must no longer disable failover")
-		}
-		got := cfg.Failover.Manual["gpt-4o"]
-		want := []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}
-		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-			t.Fatalf("Failover.Manual[gpt-4o] = %v, want %v", got, want)
-		}
+		require.Equal(t, FailoverModeAuto, cfg.Failover.DefaultMode)
+		require.False(t, cfg.Failover.Disabled["gpt-4o"], "legacy failover.overrides mode:off must no longer disable failover")
+		require.Equal(t, []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}, cfg.Failover.Manual["gpt-4o"])
 	})
 }
 
@@ -851,17 +605,8 @@ func TestLoad_DeprecatedFailoverDefaultModeIsAccepted(t *testing.T) {
 failover:
   default_mode: invalid
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Failover.DefaultMode != FailoverMode("invalid") {
-			t.Fatalf("Failover.DefaultMode = %q, want invalid compatibility value", result.Config.Failover.DefaultMode)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		require.Equal(t, FailoverMode("invalid"), result.Config.Failover.DefaultMode)
 	})
 }
 
@@ -873,17 +618,8 @@ func TestLoad_MergeConfiguredProviderModelsMode(t *testing.T) {
 models:
   configured_provider_models_mode: merge
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-		if result.Config.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeMerge {
-			t.Fatalf("mode = %q, want merge", result.Config.Models.ConfiguredProviderModelsMode)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		require.Equal(t, ConfiguredProviderModelsModeMerge, result.Config.Models.ConfiguredProviderModelsMode)
 	})
 }
 
@@ -895,17 +631,11 @@ func TestLoad_InvalidConfiguredProviderModelsMode(t *testing.T) {
 models:
   configured_provider_models_mode: strict
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yaml)
 
 		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail for invalid configured provider models mode")
-		}
-		if !strings.Contains(err.Error(), "models.configured_provider_models_mode must be one of") {
-			t.Fatalf("Load() error = %v, want configured provider models mode validation error", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "models.configured_provider_models_mode must be one of")
 	})
 }
 
@@ -918,13 +648,9 @@ failover:
   overrides:
     "gpt-4o": {}
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		if _, err := Load(); err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		writeConfigYAML(t, dir, yaml)
+		_, err := Load()
+		require.NoError(t, err)
 	})
 }
 
@@ -936,20 +662,9 @@ func TestLoad_ManualFailoverModeAllowsMissingManualRulesPath(t *testing.T) {
 failover:
   default_mode: manual
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Failover.DefaultMode != FailoverModeManual {
-			t.Fatalf("Failover.DefaultMode = %q, want %q", result.Config.Failover.DefaultMode, FailoverModeManual)
-		}
-		if result.Config.Failover.Manual != nil {
-			t.Fatalf("Failover.Manual = %v, want nil", result.Config.Failover.Manual)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		require.Equal(t, FailoverModeManual, result.Config.Failover.DefaultMode)
+		require.Nil(t, result.Config.Failover.Manual)
 	})
 }
 
@@ -966,20 +681,9 @@ failover:
     "gpt-4o":
       mode: "off"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlData), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Failover.Disabled["gpt-4o"] {
-			t.Fatal("legacy failover.overrides mode:off must no longer disable failover")
-		}
-		if result.Config.Failover.Manual != nil {
-			t.Fatalf("Failover.Manual = %v, want nil", result.Config.Failover.Manual)
-		}
+		result := loadConfigYAML(t, dir, yamlData)
+		require.False(t, result.Config.Failover.Disabled["gpt-4o"], "legacy failover.overrides mode:off must no longer disable failover")
+		require.Nil(t, result.Config.Failover.Manual)
 	})
 }
 
@@ -988,12 +692,11 @@ func TestLoad_FailoverManualRulesDuplicateKeyAfterTrim(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		manualRulesPath := filepath.Join(dir, "failover.json")
-		if err := os.WriteFile(manualRulesPath, []byte(`{
+		err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": ["azure/gpt-4o"],
 			" gpt-4o ": ["gemini/gemini-2.5-pro"]
-		}`), 0644); err != nil {
-			t.Fatalf("Failed to write failover rules: %v", err)
-		}
+		}`), 0644)
+		require.NoError(t, err)
 
 		type yamlConfig struct {
 			Failover struct {
@@ -1004,21 +707,13 @@ func TestLoad_FailoverManualRulesDuplicateKeyAfterTrim(t *testing.T) {
 		yamlCfg := yamlConfig{}
 		yamlCfg.Failover.ManualRulesPath = manualRulesPath
 		yamlData, err := yaml.Marshal(yamlCfg)
-		if err != nil {
-			t.Fatalf("Failed to marshal config.yaml: %v", err)
-		}
-
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		require.NoError(t, err)
+		err = os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644)
+		require.NoError(t, err)
 
 		_, err = Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail for duplicate failover manual rule keys after trimming")
-		}
-		if !strings.Contains(err.Error(), `failover.manual_rules_path: duplicate manual rule key after trimming: "gpt-4o"`) {
-			t.Fatalf("Load() error = %v, want duplicate trimmed manual rule key error", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `failover.manual_rules_path: duplicate manual rule key after trimming: "gpt-4o"`)
 	})
 }
 
@@ -1027,12 +722,11 @@ func TestLoad_FailoverManualRulesRejectsDuplicateRawJSONKeys(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		manualRulesPath := filepath.Join(dir, "failover.json")
-		if err := os.WriteFile(manualRulesPath, []byte(`{
+		err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": ["azure/gpt-4o"],
 			"gpt-4o": ["gemini/gemini-2.5-pro"]
-		}`), 0644); err != nil {
-			t.Fatalf("Failed to write failover rules: %v", err)
-		}
+		}`), 0644)
+		require.NoError(t, err)
 
 		type yamlConfig struct {
 			Failover struct {
@@ -1043,21 +737,13 @@ func TestLoad_FailoverManualRulesRejectsDuplicateRawJSONKeys(t *testing.T) {
 		yamlCfg := yamlConfig{}
 		yamlCfg.Failover.ManualRulesPath = manualRulesPath
 		yamlData, err := yaml.Marshal(yamlCfg)
-		if err != nil {
-			t.Fatalf("Failed to marshal config.yaml: %v", err)
-		}
-
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		require.NoError(t, err)
+		err = os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644)
+		require.NoError(t, err)
 
 		_, err = Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail for duplicate raw JSON keys in failover manual rules")
-		}
-		if !strings.Contains(err.Error(), `duplicate JSON key "gpt-4o"`) {
-			t.Fatalf("Load() error = %v, want duplicate raw JSON key error", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `duplicate JSON key "gpt-4o"`)
 	})
 }
 
@@ -1066,11 +752,10 @@ func TestLoad_FailoverManualRulesRejectsNullValues(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		manualRulesPath := filepath.Join(dir, "failover.json")
-		if err := os.WriteFile(manualRulesPath, []byte(`{
+		err := os.WriteFile(manualRulesPath, []byte(`{
 			"gpt-4o": null
-		}`), 0644); err != nil {
-			t.Fatalf("Failed to write failover rules: %v", err)
-		}
+		}`), 0644)
+		require.NoError(t, err)
 
 		type yamlConfig struct {
 			Failover struct {
@@ -1081,21 +766,13 @@ func TestLoad_FailoverManualRulesRejectsNullValues(t *testing.T) {
 		yamlCfg := yamlConfig{}
 		yamlCfg.Failover.ManualRulesPath = manualRulesPath
 		yamlData, err := yaml.Marshal(yamlCfg)
-		if err != nil {
-			t.Fatalf("Failed to marshal config.yaml: %v", err)
-		}
-
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		require.NoError(t, err)
+		err = os.WriteFile(filepath.Join(dir, "config.yaml"), yamlData, 0644)
+		require.NoError(t, err)
 
 		_, err = Load()
-		if err == nil {
-			t.Fatal("expected Load() to fail for null failover manual rule values")
-		}
-		if !strings.Contains(err.Error(), `null not allowed for "gpt-4o"`) {
-			t.Fatalf("Load() error = %v, want null manual rule value error", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), `null not allowed for "gpt-4o"`)
 	})
 }
 
@@ -1105,12 +782,8 @@ func TestLoad_FeatureFailoverModeEnvOverridesFailoverDefaultMode(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Failover.DefaultMode != FailoverModeAuto {
-			t.Fatalf("Failover.DefaultMode = %q, want %q", result.Config.Failover.DefaultMode, FailoverModeAuto)
-		}
+		require.NoError(t, err)
+		require.Equal(t, FailoverModeAuto, result.Config.Failover.DefaultMode)
 	})
 }
 
@@ -1121,17 +794,12 @@ func TestLoad_FailoverRulesJSONEnvOnly(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		got := result.Config.Failover.Manual["gpt-4o"]
 		want := []string{"azure/gpt-4o", "gemini/gemini-2.5-pro"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("Failover.Manual[gpt-4o] = %v, want %v", got, want)
-		}
-		if !result.Config.Failover.Disabled["claude-sonnet-4"] {
-			t.Fatal("Failover.Disabled[claude-sonnet-4] = false, want true")
-		}
+		require.Equal(t, want, got)
+		require.True(t, result.Config.Failover.Disabled["claude-sonnet-4"])
 	})
 }
 
@@ -1143,17 +811,8 @@ func TestLoad_BlankFailoverDefaultModeResolvesToManual(t *testing.T) {
 failover:
   default_mode: ""
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Failover.DefaultMode != FailoverModeManual {
-			t.Fatalf("Failover.DefaultMode = %q, want %q", result.Config.Failover.DefaultMode, FailoverModeManual)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		require.Equal(t, FailoverModeManual, result.Config.Failover.DefaultMode)
 	})
 }
 
@@ -1197,23 +856,15 @@ server:
   enable_passthrough_routes: ` + tt.yamlEnabled + `
   allow_passthrough_v1_alias: ` + tt.yamlNormalize + `
 `
-				if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-					t.Fatalf("Failed to write config.yaml: %v", err)
-				}
+				writeConfigYAML(t, dir, yaml)
 
 				t.Setenv("ENABLE_PASSTHROUGH_ROUTES", tt.envEnabled)
 				t.Setenv("ALLOW_PASSTHROUGH_V1_ALIAS", tt.envNormalize)
 
 				result, err := Load()
-				if err != nil {
-					t.Fatalf("Load() failed: %v", err)
-				}
-				if result.Config.Server.EnablePassthroughRoutes != tt.wantEnabled {
-					t.Fatalf("EnablePassthroughRoutes = %v, want %v", result.Config.Server.EnablePassthroughRoutes, tt.wantEnabled)
-				}
-				if result.Config.Server.AllowPassthroughV1Alias != tt.wantNormalize {
-					t.Fatalf("AllowPassthroughV1Alias = %v, want %v", result.Config.Server.AllowPassthroughV1Alias, tt.wantNormalize)
-				}
+				require.NoError(t, err)
+				require.Equal(t, tt.wantEnabled, result.Config.Server.EnablePassthroughRoutes)
+				require.Equal(t, tt.wantNormalize, result.Config.Server.AllowPassthroughV1Alias)
 			})
 		})
 	}
@@ -1230,20 +881,9 @@ server:
   enable_passthrough_routes: ${PASSTHROUGH_ENABLED_FROM_YAML}
   allow_passthrough_v1_alias: ${PASSTHROUGH_NORMALIZE_FROM_YAML:-false}
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Server.EnablePassthroughRoutes {
-			t.Fatal("expected YAML ${VAR} expansion to set EnablePassthroughRoutes=false")
-		}
-		if result.Config.Server.AllowPassthroughV1Alias {
-			t.Fatal("expected YAML ${VAR:-default} expansion to set AllowPassthroughV1Alias=false")
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		require.False(t, result.Config.Server.EnablePassthroughRoutes)
+		require.False(t, result.Config.Server.AllowPassthroughV1Alias)
 	})
 }
 
@@ -1251,44 +891,27 @@ func TestLoad_ConfigExample_UsesNestedModelCacheSettings(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	examplePath, err := filepath.Abs("config.example.yaml")
-	if err != nil {
-		t.Fatalf("Failed to resolve config.example.yaml path: %v", err)
-	}
+	require.NoError(t, err)
+
 	exampleData, err := os.ReadFile(examplePath)
-	if err != nil {
-		t.Fatalf("Failed to read config.example.yaml: %v", err)
-	}
+	require.NoError(t, err)
 
 	withTempDir(t, func(dir string) {
-		if err := os.MkdirAll(filepath.Join(dir, "config"), 0755); err != nil {
-			t.Fatalf("Failed to create config directory: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "config", "config.yaml"), exampleData, 0644); err != nil {
-			t.Fatalf("Failed to write config/config.yaml: %v", err)
-		}
+		err := os.MkdirAll(filepath.Join(dir, "config"), 0755)
+		require.NoError(t, err)
+		err = os.WriteFile(filepath.Join(dir, "config", "config.yaml"), exampleData, 0644)
+		require.NoError(t, err)
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 3600, result.Config.Cache.Model.RefreshInterval)
+		require.NotNil(t, result.Config.Cache.Model.Local)
+		require.Equal(t, ".cache", result.Config.Cache.Model.Local.CacheDir)
+		require.Nil(t, result.Config.Cache.Model.Redis)
 
-		if result.Config.Cache.Model.RefreshInterval != 3600 {
-			t.Fatalf("Cache.Model.RefreshInterval = %d, want 3600", result.Config.Cache.Model.RefreshInterval)
-		}
-		if result.Config.Cache.Model.Local == nil {
-			t.Fatal("expected Cache.Model.Local to be configured from example config")
-		}
-		if result.Config.Cache.Model.Local.CacheDir != ".cache" {
-			t.Fatalf("Cache.Model.Local.CacheDir = %q, want .cache", result.Config.Cache.Model.Local.CacheDir)
-		}
-		if result.Config.Cache.Model.Redis != nil {
-			t.Fatalf("expected Cache.Model.Redis to be nil in example config, got %+v", result.Config.Cache.Model.Redis)
-		}
 		gotProviders := result.Config.Server.EnabledPassthroughProviders
 		wantProviders := []string{"openai", "anthropic", "cohere", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek", "bailian"}
-		if !reflect.DeepEqual(gotProviders, wantProviders) {
-			t.Fatalf("Server.EnabledPassthroughProviders = %v, want %v", gotProviders, wantProviders)
-		}
+		require.Equal(t, wantProviders, gotProviders)
 	})
 }
 
@@ -1302,22 +925,14 @@ server:
     - openai
     - anthropic
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yaml)
 
 		t.Setenv("ENABLED_PASSTHROUGH_PROVIDERS", " groq , gemini ")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
-		got := result.Config.Server.EnabledPassthroughProviders
-		want := []string{"groq", "gemini"}
-		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-			t.Fatalf("EnabledPassthroughProviders = %v, want %v", got, want)
-		}
+		require.Equal(t, []string{"groq", "gemini"}, result.Config.Server.EnabledPassthroughProviders)
 	})
 }
 
@@ -1329,17 +944,9 @@ func TestLoad_UserPathHeaderConfig(t *testing.T) {
 server:
   user_path_header: "x-tenant-path"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if got := result.Config.Server.UserPathHeader; got != "X-Tenant-Path" {
-			t.Fatalf("Server.UserPathHeader = %q, want X-Tenant-Path", got)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		got := result.Config.Server.UserPathHeader
+		require.Equal(t, "X-Tenant-Path", got)
 	})
 
 	withTempDir(t, func(dir string) {
@@ -1347,19 +954,14 @@ server:
 server:
   user_path_header: "X-Yaml-Path"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yaml)
 
 		t.Setenv("USER_PATH_HEADER", "x-env-path")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if got := result.Config.Server.UserPathHeader; got != "X-Env-Path" {
-			t.Fatalf("Server.UserPathHeader = %q, want X-Env-Path", got)
-		}
+		require.NoError(t, err)
+		got := result.Config.Server.UserPathHeader
+		require.Equal(t, "X-Env-Path", got)
 	})
 }
 
@@ -1370,12 +972,8 @@ func TestLoad_UserPathHeaderRejectsInvalidName(t *testing.T) {
 		t.Setenv("USER_PATH_HEADER", "Bad Header")
 
 		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to reject invalid USER_PATH_HEADER")
-		}
-		if !strings.Contains(err.Error(), "invalid server.user_path_header") {
-			t.Fatalf("Load() error = %v, want invalid server.user_path_header", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid server.user_path_header")
 	})
 }
 
@@ -1395,9 +993,7 @@ cache:
 logging:
   enabled: true
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yaml)
 
 		t.Setenv("PORT", "9090")
 		t.Setenv("BASE_PATH", "g/")
@@ -1405,23 +1001,14 @@ logging:
 		t.Setenv("LOGGING_ENABLED", "false")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		cfg := result.Config
 
-		if cfg.Server.Port != "9090" {
-			t.Errorf("expected port 9090 (env override), got %s", cfg.Server.Port)
-		}
-		if cfg.Server.BasePath != "/g" {
-			t.Errorf("expected base path /g (env override), got %s", cfg.Server.BasePath)
-		}
-		if cfg.Cache.Model.RefreshInterval != 1800 {
-			t.Errorf("expected Cache.Model.RefreshInterval=1800 (env override), got %d", cfg.Cache.Model.RefreshInterval)
-		}
-		if cfg.Logging.Enabled {
-			t.Error("expected Logging.Enabled=false (env override)")
-		}
+		assert.Equal(t, "9090", cfg.Server.Port)
+		assert.Equal(t, "/g", cfg.Server.BasePath)
+		assert.Equal(t, 1800, cfg.Cache.Model.RefreshInterval)
+		assert.False(t, cfg.Logging.Enabled)
 	})
 }
 
@@ -1440,38 +1027,19 @@ func TestLoad_EnvOverridesDefaults(t *testing.T) {
 		t.Setenv("POSTGRES_MAX_CONNS", "20")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		cfg := result.Config
 
-		if cfg.Server.Port != "5555" {
-			t.Errorf("expected port 5555, got %s", cfg.Server.Port)
-		}
-		if cfg.Models.EnabledByDefault {
-			t.Error("expected models enabled-by-default to be disabled from env")
-		}
-		if !cfg.Models.KeepOnlyAliasesAtModelsEndpoint {
-			t.Error("expected aliases-only models endpoint from env")
-		}
-		if !cfg.Models.UnqualifiedModelIDsAtModelsEndpoint {
-			t.Error("expected unqualified model IDs at models endpoint from env")
-		}
-		if cfg.Models.ConfiguredProviderModelsMode != ConfiguredProviderModelsModeAllowlist {
-			t.Errorf("expected configured provider models mode allowlist from env, got %q", cfg.Models.ConfiguredProviderModelsMode)
-		}
-		if cfg.Usage.PricingRecalculationEnabled {
-			t.Error("expected usage pricing recalculation to be disabled from env")
-		}
-		if cfg.Storage.Type != "postgresql" {
-			t.Errorf("expected storage type postgresql, got %s", cfg.Storage.Type)
-		}
-		if cfg.Storage.PostgreSQL.URL != "postgres://localhost/test" {
-			t.Errorf("expected postgres URL, got %s", cfg.Storage.PostgreSQL.URL)
-		}
-		if cfg.Storage.PostgreSQL.MaxConns != 20 {
-			t.Errorf("expected max conns 20, got %d", cfg.Storage.PostgreSQL.MaxConns)
-		}
+		assert.Equal(t, "5555", cfg.Server.Port)
+		assert.False(t, cfg.Models.EnabledByDefault)
+		assert.True(t, cfg.Models.KeepOnlyAliasesAtModelsEndpoint)
+		assert.True(t, cfg.Models.UnqualifiedModelIDsAtModelsEndpoint)
+		assert.Equal(t, ConfiguredProviderModelsModeAllowlist, cfg.Models.ConfiguredProviderModelsMode)
+		assert.False(t, cfg.Usage.PricingRecalculationEnabled)
+		assert.Equal(t, "postgresql", cfg.Storage.Type)
+		assert.Equal(t, "postgres://localhost/test", cfg.Storage.PostgreSQL.URL)
+		assert.Equal(t, 20, cfg.Storage.PostgreSQL.MaxConns)
 	})
 }
 
@@ -1499,12 +1067,9 @@ func TestLoad_ModelListURLEnv(t *testing.T) {
 					t.Setenv("MODEL_LIST_URL", tt.value)
 				}
 				result, err := Load()
-				if err != nil {
-					t.Fatalf("Load() failed: %v", err)
-				}
-				if got := result.Config.Cache.Model.ModelList.URL; got != tt.want {
-					t.Errorf("Cache.Model.ModelList.URL = %q, want %q", got, tt.want)
-				}
+				require.NoError(t, err)
+				got := result.Config.Cache.Model.ModelList.URL
+				assert.Equal(t, tt.want, got)
 			})
 		})
 	}
@@ -1513,17 +1078,14 @@ func TestLoad_ModelListURLEnv(t *testing.T) {
 		clearAllConfigEnvVars(t)
 		withTempDir(t, func(dir string) {
 			yaml := "cache:\n  model:\n    model_list:\n      url: \"https://mirror.internal/models.min.json\"\n"
-			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
-				t.Fatalf("failed to write config.yaml: %v", err)
-			}
+			err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644)
+			require.NoError(t, err)
+
 			t.Setenv("MODEL_LIST_URL", "off")
 			result, err := Load()
-			if err != nil {
-				t.Fatalf("Load() failed: %v", err)
-			}
-			if got := result.Config.Cache.Model.ModelList.URL; got != "" {
-				t.Errorf("Cache.Model.ModelList.URL = %q, want empty (env off wins over config.yaml)", got)
-			}
+			require.NoError(t, err)
+			got := result.Config.Cache.Model.ModelList.URL
+			assert.Empty(t, got)
 		})
 	})
 
@@ -1531,16 +1093,13 @@ func TestLoad_ModelListURLEnv(t *testing.T) {
 		clearAllConfigEnvVars(t)
 		withTempDir(t, func(dir string) {
 			yaml := "cache:\n  model:\n    model_list:\n      url: \"off\"\n"
-			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
-				t.Fatalf("failed to write config.yaml: %v", err)
-			}
+			err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644)
+			require.NoError(t, err)
+
 			result, err := Load()
-			if err != nil {
-				t.Fatalf("Load() failed: %v", err)
-			}
-			if got := result.Config.Cache.Model.ModelList.URL; got != "" {
-				t.Errorf("Cache.Model.ModelList.URL = %q, want empty (yaml off disables)", got)
-			}
+			require.NoError(t, err)
+			got := result.Config.Cache.Model.ModelList.URL
+			assert.Empty(t, got)
 		})
 	})
 }
@@ -1556,25 +1115,12 @@ providers:
     api_key: "sk-yaml-key"
     base_url: "https://custom.openai.com"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		result := loadConfigYAML(t, dir, yaml)
 
 		provider, exists := result.RawProviders["openai"]
-		if !exists {
-			t.Fatal("expected 'openai' raw provider to exist")
-		}
-		if provider.APIKey != "sk-yaml-key" {
-			t.Errorf("expected API key sk-yaml-key, got %s", provider.APIKey)
-		}
-		if provider.BaseURL != "https://custom.openai.com" {
-			t.Errorf("expected base URL https://custom.openai.com, got %s", provider.BaseURL)
-		}
+		require.True(t, exists)
+		assert.Equal(t, "sk-yaml-key", provider.APIKey)
+		assert.Equal(t, "https://custom.openai.com", provider.BaseURL)
 	})
 }
 
@@ -1597,31 +1143,17 @@ providers:
     type: anthropic
     api_key: "sk-ant-key"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlContent), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		if result.Config.Resilience.Retry.MaxRetries != 5 {
-			t.Errorf("expected global MaxRetries=5, got %d", result.Config.Resilience.Retry.MaxRetries)
-		}
+		result := loadConfigYAML(t, dir, yamlContent)
+		assert.Equal(t, 5, result.Config.Resilience.Retry.MaxRetries)
 
 		openai, exists := result.RawProviders["openai"]
-		if !exists {
-			t.Fatal("expected openai in raw providers")
-		}
-		if openai.Resilience == nil || openai.Resilience.Retry == nil || *openai.Resilience.Retry.MaxRetries != 10 {
-			t.Error("expected openai raw provider to have MaxRetries override of 10")
-		}
+		require.True(t, exists)
+		assert.NotNil(t, openai.Resilience)
+		assert.NotNil(t, openai.Resilience.Retry)
+		assert.Equal(t, 10, *openai.Resilience.Retry.MaxRetries)
 
 		_, exists = result.RawProviders["anthropic"]
-		if !exists {
-			t.Fatal("expected anthropic in raw providers")
-		}
+		require.True(t, exists)
 	})
 }
 
@@ -1630,16 +1162,9 @@ func TestLoad_HTTPConfig(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		if result.Config.HTTP.Timeout != 600 {
-			t.Errorf("expected HTTP.Timeout=600, got %d", result.Config.HTTP.Timeout)
-		}
-		if result.Config.HTTP.ResponseHeaderTimeout != 600 {
-			t.Errorf("expected HTTP.ResponseHeaderTimeout=600, got %d", result.Config.HTTP.ResponseHeaderTimeout)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, 600, result.Config.HTTP.Timeout)
+		assert.Equal(t, 600, result.Config.HTTP.ResponseHeaderTimeout)
 	})
 
 	withTempDir(t, func(_ string) {
@@ -1647,16 +1172,9 @@ func TestLoad_HTTPConfig(t *testing.T) {
 		t.Setenv("HTTP_RESPONSE_HEADER_TIMEOUT", "60")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		if result.Config.HTTP.Timeout != 30 {
-			t.Errorf("expected HTTP.Timeout=30, got %d", result.Config.HTTP.Timeout)
-		}
-		if result.Config.HTTP.ResponseHeaderTimeout != 60 {
-			t.Errorf("expected HTTP.ResponseHeaderTimeout=60, got %d", result.Config.HTTP.ResponseHeaderTimeout)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, 30, result.Config.HTTP.Timeout)
+		assert.Equal(t, 60, result.Config.HTTP.ResponseHeaderTimeout)
 	})
 }
 
@@ -1665,12 +1183,8 @@ func TestLoad_WorkflowRefreshInterval(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Workflows.RefreshInterval != time.Minute {
-			t.Fatalf("Workflows.RefreshInterval = %s, want %s", result.Config.Workflows.RefreshInterval, time.Minute)
-		}
+		require.NoError(t, err)
+		require.Equal(t, time.Minute, result.Config.Workflows.RefreshInterval)
 	})
 
 	withTempDir(t, func(dir string) {
@@ -1678,29 +1192,16 @@ func TestLoad_WorkflowRefreshInterval(t *testing.T) {
 workflows:
   refresh_interval: 90s
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Workflows.RefreshInterval != 90*time.Second {
-			t.Fatalf("Workflows.RefreshInterval = %s, want %s", result.Config.Workflows.RefreshInterval, 90*time.Second)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		require.Equal(t, 90*time.Second, result.Config.Workflows.RefreshInterval)
 	})
 
 	withTempDir(t, func(_ string) {
 		t.Setenv("WORKFLOW_REFRESH_INTERVAL", "45s")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Workflows.RefreshInterval != 45*time.Second {
-			t.Fatalf("Workflows.RefreshInterval = %s, want %s", result.Config.Workflows.RefreshInterval, 45*time.Second)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 45*time.Second, result.Config.Workflows.RefreshInterval)
 	})
 }
 
@@ -1709,24 +1210,17 @@ func TestLoad_CacheDir(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Cache.Model.Local == nil {
-			t.Error("expected Cache.Model.Local to be set by default")
-		}
+		require.NoError(t, err)
+		assert.NotNil(t, result.Config.Cache.Model.Local)
 	})
 
 	withTempDir(t, func(_ string) {
 		t.Setenv("GOMODEL_CACHE_DIR", "/tmp/gomodel-cache")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Cache.Model.Local == nil || result.Config.Cache.Model.Local.CacheDir != "/tmp/gomodel-cache" {
-			t.Errorf("expected Cache.Model.Local.CacheDir=/tmp/gomodel-cache, got %v", result.Config.Cache.Model.Local)
-		}
+		require.NoError(t, err)
+		assert.NotNil(t, result.Config.Cache.Model.Local)
+		assert.Equal(t, "/tmp/gomodel-cache", result.Config.Cache.Model.Local.CacheDir)
 	})
 }
 
@@ -1735,13 +1229,8 @@ func TestLoad_LoggingOnlyModelInteractionsDefault(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		if !result.Config.Logging.OnlyModelInteractions {
-			t.Error("expected OnlyModelInteractions to default to true")
-		}
+		require.NoError(t, err)
+		assert.True(t, result.Config.Logging.OnlyModelInteractions)
 	})
 }
 
@@ -1769,14 +1258,8 @@ func TestLoad_LoggingOnlyModelInteractionsFromEnv(t *testing.T) {
 				t.Setenv("LOGGING_ONLY_MODEL_INTERACTIONS", tt.envValue)
 
 				result, err := Load()
-				if err != nil {
-					t.Fatalf("Load() failed: %v", err)
-				}
-
-				if result.Config.Logging.OnlyModelInteractions != tt.expected {
-					t.Errorf("expected OnlyModelInteractions=%v for env value %q, got %v",
-						tt.expected, tt.envValue, result.Config.Logging.OnlyModelInteractions)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.expected, result.Config.Logging.OnlyModelInteractions, "env value %q", tt.envValue)
 			})
 		})
 	}
@@ -1794,25 +1277,12 @@ providers:
     type: "openai"
     api_key: "${TEST_KEY_CFG:-default-key}"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		assert.Equal(t, "9999", result.Config.Server.Port)
 
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		if result.Config.Server.Port != "9999" {
-			t.Errorf("expected port 9999 (YAML default), got %s", result.Config.Server.Port)
-		}
 		provider, exists := result.RawProviders["openai"]
-		if !exists {
-			t.Fatal("expected openai in raw providers")
-		}
-		if provider.APIKey != "default-key" {
-			t.Errorf("expected API key 'default-key', got %s", provider.APIKey)
-		}
+		require.True(t, exists)
+		assert.Equal(t, "default-key", provider.APIKey)
 	})
 }
 
@@ -1828,28 +1298,18 @@ providers:
     type: "openai"
     api_key: "${TEST_KEY_CFG:-default-key}"
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yaml)
 
 		t.Setenv("TEST_PORT_CFG", "1111")
 		t.Setenv("TEST_KEY_CFG", "real-key")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "1111", result.Config.Server.Port)
 
-		if result.Config.Server.Port != "1111" {
-			t.Errorf("expected port 1111 (env override), got %s", result.Config.Server.Port)
-		}
 		provider, exists := result.RawProviders["openai"]
-		if !exists {
-			t.Fatal("expected openai in raw providers")
-		}
-		if provider.APIKey != "real-key" {
-			t.Errorf("expected API key 'real-key', got %s", provider.APIKey)
-		}
+		require.True(t, exists)
+		assert.Equal(t, "real-key", provider.APIKey)
 	})
 }
 
@@ -1858,26 +1318,19 @@ func TestLoad_YAMLInConfigSubdir(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		configDir := filepath.Join(dir, "config")
-		if err := os.MkdirAll(configDir, 0755); err != nil {
-			t.Fatalf("Failed to create config dir: %v", err)
-		}
+		err := os.MkdirAll(configDir, 0755)
+		require.NoError(t, err)
 
 		yaml := `
 server:
   port: "4444"
 `
-		if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config/config.yaml: %v", err)
-		}
+		err = os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(yaml), 0644)
+		require.NoError(t, err)
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-
-		if result.Config.Server.Port != "4444" {
-			t.Errorf("expected port 4444 from config/config.yaml, got %s", result.Config.Server.Port)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "4444", result.Config.Server.Port)
 	})
 }
 
@@ -1913,13 +1366,9 @@ func TestValidateBodySizeLimit(t *testing.T) {
 			err := ValidateBodySizeLimit(tt.input)
 
 			if tt.expectError {
-				if err == nil {
-					t.Errorf("expected error for input %q, got nil", tt.input)
-				}
+				assert.Error(t, err)
 			} else {
-				if err != nil {
-					t.Errorf("unexpected error for input %q: %v", tt.input, err)
-				}
+				assert.NoError(t, err)
 			}
 		})
 	}
@@ -1930,30 +1379,23 @@ func TestLoad_LocalYAMLAndRedisURLAreBothKept(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		cfgDir := filepath.Join(dir, "config")
-		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		err := os.MkdirAll(cfgDir, 0o755)
+		require.NoError(t, err)
+
 		yamlContent := "cache:\n  model:\n    local:\n      cache_dir: \".cache\"\n"
-		if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		err = os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644)
+		require.NoError(t, err)
 
 		t.Setenv("REDIS_URL", "redis://env-host:6379")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v, want nil", err)
-		}
+		require.NoError(t, err)
+
 		cfg := result.Config
-		if cfg.Cache.Model.Local == nil || cfg.Cache.Model.Local.CacheDir != ".cache" {
-			t.Fatalf("expected local cache kept as fallback, got %+v", cfg.Cache.Model.Local)
-		}
-		if cfg.Cache.Model.Redis == nil {
-			t.Fatal("expected Cache.Model.Redis from REDIS_URL")
-		}
-		if cfg.Cache.Model.Redis.URL != "redis://env-host:6379" {
-			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Model.Redis.URL)
-		}
+		require.NotNil(t, cfg.Cache.Model.Local)
+		require.Equal(t, ".cache", cfg.Cache.Model.Local.CacheDir)
+		require.NotNil(t, cfg.Cache.Model.Redis)
+		assert.Equal(t, "redis://env-host:6379", cfg.Cache.Model.Redis.URL)
 	})
 }
 
@@ -1966,26 +1408,15 @@ func TestLoad_EnvOnlyRedisModelCache(t *testing.T) {
 		t.Setenv("REDIS_TTL_MODELS", "7200")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		cfg := result.Config
 
-		if cfg.Cache.Model.Redis == nil {
-			t.Fatal("expected Cache.Model.Redis to be allocated from env vars")
-		}
-		if cfg.Cache.Model.Redis.URL != "redis://env-host:6379" {
-			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Model.Redis.URL)
-		}
-		if cfg.Cache.Model.Redis.Key != "env:models" {
-			t.Errorf("expected REDIS_KEY_MODELS=env:models, got %s", cfg.Cache.Model.Redis.Key)
-		}
-		if cfg.Cache.Model.Redis.TTL != 7200 {
-			t.Errorf("expected REDIS_TTL_MODELS=7200, got %d", cfg.Cache.Model.Redis.TTL)
-		}
-		if cfg.Cache.Model.Local != nil {
-			t.Errorf("expected Cache.Model.Local to be nil when Redis is configured via env, got %v", cfg.Cache.Model.Local)
-		}
+		require.NotNil(t, cfg.Cache.Model.Redis)
+		assert.Equal(t, "redis://env-host:6379", cfg.Cache.Model.Redis.URL)
+		assert.Equal(t, "env:models", cfg.Cache.Model.Redis.Key)
+		assert.Equal(t, 7200, cfg.Cache.Model.Redis.TTL)
+		assert.Nil(t, cfg.Cache.Model.Local)
 	})
 }
 
@@ -1994,36 +1425,27 @@ func TestLoad_EnvOnlyRedisResponseCache(t *testing.T) {
 
 	withTempDir(t, func(dir string) {
 		cfgDir := filepath.Join(dir, "config")
-		if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
+		err := os.MkdirAll(cfgDir, 0o755)
+		require.NoError(t, err)
+
 		yamlContent := "cache:\n  response:\n    simple: {}\n"
-		if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		err = os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(yamlContent), 0o644)
+		require.NoError(t, err)
 
 		t.Setenv("REDIS_URL", "redis://env-host:6379")
 		t.Setenv("REDIS_KEY_RESPONSES", "env:responses")
 		t.Setenv("REDIS_TTL_RESPONSES", "1800")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		cfg := result.Config
 
-		if cfg.Cache.Response.Simple == nil || cfg.Cache.Response.Simple.Redis == nil {
-			t.Fatal("expected Cache.Response.Simple.Redis from env vars with simple: {} in config.yaml")
-		}
-		if cfg.Cache.Response.Simple.Redis.URL != "redis://env-host:6379" {
-			t.Errorf("expected REDIS_URL=redis://env-host:6379, got %s", cfg.Cache.Response.Simple.Redis.URL)
-		}
-		if cfg.Cache.Response.Simple.Redis.Key != "env:responses" {
-			t.Errorf("expected REDIS_KEY_RESPONSES=env:responses, got %s", cfg.Cache.Response.Simple.Redis.Key)
-		}
-		if cfg.Cache.Response.Simple.Redis.TTL != 1800 {
-			t.Errorf("expected REDIS_TTL_RESPONSES=1800, got %d", cfg.Cache.Response.Simple.Redis.TTL)
-		}
+		require.NotNil(t, cfg.Cache.Response.Simple)
+		require.NotNil(t, cfg.Cache.Response.Simple.Redis)
+		assert.Equal(t, "redis://env-host:6379", cfg.Cache.Response.Simple.Redis.URL)
+		assert.Equal(t, "env:responses", cfg.Cache.Response.Simple.Redis.Key)
+		assert.Equal(t, 1800, cfg.Cache.Response.Simple.Redis.TTL)
 	})
 }
 
@@ -2035,12 +1457,8 @@ func TestLoad_RedisURLDoesNotAllocateResponseSimpleWithoutYAML(t *testing.T) {
 		t.Setenv("REDIS_KEY_RESPONSES", "env:responses")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Cache.Response.Simple != nil {
-			t.Fatalf("expected no response simple cache without cache.response.simple in YAML and without RESPONSE_CACHE_SIMPLE_ENABLED")
-		}
+		require.NoError(t, err)
+		require.Nil(t, result.Config.Cache.Response.Simple)
 	})
 }
 
@@ -2053,16 +1471,12 @@ func TestLoad_ResponseSimpleOptInViaEnvWithoutYAML(t *testing.T) {
 		t.Setenv("REDIS_KEY_RESPONSES", "env:responses")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		cfg := result.Config
-		if cfg.Cache.Response.Simple == nil || cfg.Cache.Response.Simple.Redis == nil {
-			t.Fatal("expected simple + redis from env opt-in")
-		}
-		if cfg.Cache.Response.Simple.Redis.URL != "redis://env-host:6379" {
-			t.Errorf("redis URL: got %q", cfg.Cache.Response.Simple.Redis.URL)
-		}
+		require.NotNil(t, cfg.Cache.Response.Simple)
+		require.NotNil(t, cfg.Cache.Response.Simple.Redis)
+		assert.Equal(t, "redis://env-host:6379", cfg.Cache.Response.Simple.Redis.URL)
 	})
 }
 
@@ -2087,17 +1501,11 @@ func TestParseBodySizeLimitBytes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseBodySizeLimitBytes(tt.input)
 			if tt.expectError {
-				if err == nil {
-					t.Fatalf("expected error for input %q, got nil", tt.input)
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error for input %q: %v", tt.input, err)
-			}
-			if got != tt.expected {
-				t.Fatalf("ParseBodySizeLimitBytes(%q) = %d, want %d", tt.input, got, tt.expected)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.expected, got, "ParseBodySizeLimitBytes(%q)", tt.input)
 		})
 	}
 }
@@ -2118,28 +1526,16 @@ providers:
         - "*-preview:free"
       max_price_per_mtok: 0
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		result := loadConfigYAML(t, dir, yaml)
 
 		filter := result.RawProviders["openrouter"].ModelFilter
-		if len(filter.Include) != 1 || filter.Include[0] != "*:free" {
-			t.Errorf("Include = %v, want [*:free]", filter.Include)
-		}
-		if len(filter.Exclude) != 1 || filter.Exclude[0] != "*-preview:free" {
-			t.Errorf("Exclude = %v, want [*-preview:free]", filter.Exclude)
-		}
-		if filter.MaxPricePerMtok == nil || *filter.MaxPricePerMtok != 0 {
-			t.Errorf("MaxPricePerMtok = %v, want 0", filter.MaxPricePerMtok)
-		}
-		if filter.Empty() {
-			t.Error("Empty() = true, want false for a declared filter")
-		}
+		assert.Len(t, filter.Include, 1)
+		assert.Equal(t, "*:free", filter.Include[0])
+		assert.Len(t, filter.Exclude, 1)
+		assert.Equal(t, "*-preview:free", filter.Exclude[0])
+		assert.NotNil(t, filter.MaxPricePerMtok)
+		assert.Equal(t, float64(0), *filter.MaxPricePerMtok)
+		assert.False(t, filter.Empty())
 	})
 }
 
@@ -2159,14 +1555,12 @@ func TestModelFilterEmptyAndNormalize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.filter.Empty(); got != tt.wantEmpty {
-				t.Errorf("Empty() = %v, want %v", got, tt.wantEmpty)
-			}
+			got := tt.filter.Empty()
+			assert.Equal(t, tt.wantEmpty, got)
+
 			normalized := tt.filter.Normalize()
 			for _, pattern := range append(normalized.Include, normalized.Exclude...) {
-				if strings.TrimSpace(pattern) == "" {
-					t.Errorf("Normalize() kept a blank pattern in %+v", normalized)
-				}
+				assert.NotEmpty(t, strings.TrimSpace(pattern), "Normalize() kept a blank pattern in %+v", normalized)
 			}
 		})
 	}
@@ -2192,12 +1586,12 @@ func TestModelFilterValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ModelFilter{MaxPricePerMtok: tt.cap}.Validate("providers.openrouter.model_filter")
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
 			}
-			if err != nil && !strings.Contains(err.Error(), "providers.openrouter.model_filter.max_price_per_mtok") {
-				t.Errorf("error = %q, want it to name the offending field", err)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "providers.openrouter.model_filter.max_price_per_mtok", "error should name the offending field")
 		})
 	}
 }
@@ -2223,18 +1617,11 @@ func TestOfflineModeDisablesEveryUnsolicitedOutboundCall(t *testing.T) {
 					t.Setenv("MODEL_LIST_URL", tt.modelList)
 				}
 				result, err := Load()
-				if err != nil {
-					t.Fatalf("Load() failed: %v", err)
-				}
-				if !result.Config.Offline {
-					t.Fatal("Offline should be true")
-				}
-				if got := result.Config.Cache.Model.ModelList.URL; got != tt.wantList {
-					t.Errorf("ModelList.URL = %q, want %q", got, tt.wantList)
-				}
-				if got := result.Config.VersionCheck.Enabled; got != tt.wantVersion {
-					t.Errorf("VersionCheck.Enabled = %v, want %v", got, tt.wantVersion)
-				}
+				require.NoError(t, err)
+				require.True(t, result.Config.Offline)
+				got := result.Config.Cache.Model.ModelList.URL
+				assert.Equal(t, tt.wantList, got)
+				assert.Equal(t, tt.wantVersion, result.Config.VersionCheck.Enabled)
 			})
 		})
 	}
@@ -2243,17 +1630,13 @@ func TestOfflineModeDisablesEveryUnsolicitedOutboundCall(t *testing.T) {
 		clearAllConfigEnvVars(t)
 		withTempDir(t, func(dir string) {
 			yaml := "offline: true\nversion_check:\n  enabled: true\n"
-			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0o644)
+			require.NoError(t, err)
+
 			t.Setenv("GOMODEL_VERSION_CHECK_ENABLED", "true")
 			result, err := Load()
-			if err != nil {
-				t.Fatalf("Load() failed: %v", err)
-			}
-			if result.Config.VersionCheck.Enabled {
-				t.Error("offline mode must win over an explicit version_check.enabled")
-			}
+			require.NoError(t, err)
+			assert.False(t, result.Config.VersionCheck.Enabled)
 		})
 	})
 
@@ -2261,15 +1644,10 @@ func TestOfflineModeDisablesEveryUnsolicitedOutboundCall(t *testing.T) {
 		clearAllConfigEnvVars(t)
 		withTempDir(t, func(_ string) {
 			result, err := Load()
-			if err != nil {
-				t.Fatalf("Load() failed: %v", err)
-			}
-			if result.Config.Offline {
-				t.Error("Offline should default to false")
-			}
-			if !result.Config.VersionCheck.Enabled || result.Config.Cache.Model.ModelList.URL == "" {
-				t.Error("online defaults should be untouched")
-			}
+			require.NoError(t, err)
+			assert.False(t, result.Config.Offline)
+			assert.True(t, result.Config.VersionCheck.Enabled)
+			assert.NotEmpty(t, result.Config.Cache.Model.ModelList.URL)
 		})
 	})
 }
@@ -2289,9 +1667,8 @@ func TestIsLocalModelListSource(t *testing.T) {
 		{"models.json", true},
 	}
 	for _, tt := range tests {
-		if got := IsLocalModelListSource(tt.in); got != tt.want {
-			t.Errorf("IsLocalModelListSource(%q) = %v, want %v", tt.in, got, tt.want)
-		}
+		got := IsLocalModelListSource(tt.in)
+		assert.Equal(t, tt.want, got, "IsLocalModelListSource(%q)", tt.in)
 	}
 }
 
@@ -2300,12 +1677,9 @@ func TestLoad_StreamStallTimeout(t *testing.T) {
 
 	withTempDir(t, func(_ string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if got := result.Config.Server.StreamStallTimeout; got != DefaultStreamStallTimeoutSeconds {
-			t.Fatalf("Server.StreamStallTimeout = %d, want %d", got, DefaultStreamStallTimeoutSeconds)
-		}
+		require.NoError(t, err)
+		got := result.Config.Server.StreamStallTimeout
+		require.Equal(t, DefaultStreamStallTimeoutSeconds, got)
 	})
 
 	withTempDir(t, func(dir string) {
@@ -2313,17 +1687,9 @@ func TestLoad_StreamStallTimeout(t *testing.T) {
 server:
   stream_stall_timeout: 0
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
-
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if got := result.Config.Server.StreamStallTimeout; got != 0 {
-			t.Fatalf("Server.StreamStallTimeout = %d, want 0 (disabled by YAML)", got)
-		}
+		result := loadConfigYAML(t, dir, yaml)
+		got := result.Config.Server.StreamStallTimeout
+		require.Equal(t, 0, got)
 	})
 
 	withTempDir(t, func(dir string) {
@@ -2331,29 +1697,21 @@ server:
 server:
   stream_stall_timeout: 120
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yaml)
+
 		t.Setenv("STREAM_STALL_TIMEOUT", "15")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if got := result.Config.Server.StreamStallTimeout; got != 15 {
-			t.Fatalf("Server.StreamStallTimeout = %d, want 15 (env over YAML)", got)
-		}
+		require.NoError(t, err)
+		got := result.Config.Server.StreamStallTimeout
+		require.Equal(t, 15, got)
 	})
 
 	withTempDir(t, func(_ string) {
 		t.Setenv("STREAM_STALL_TIMEOUT", "-1")
 
 		_, err := Load()
-		if err == nil {
-			t.Fatal("expected Load() to reject a negative STREAM_STALL_TIMEOUT")
-		}
-		if !strings.Contains(err.Error(), "server.stream_stall_timeout") {
-			t.Fatalf("Load() error = %v, want server.stream_stall_timeout", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "server.stream_stall_timeout")
 	})
 }
