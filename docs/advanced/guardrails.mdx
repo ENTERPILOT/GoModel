@@ -446,7 +446,9 @@ answered but could not be parsed:
 
 Check the gateway log for `judge returned no verdict` after configuring an
 instance, and set `on_unclear: block` for a policy that must hold even when the
-judge call fails.
+judge answers nothing usable. A judge call that fails outright — provider error,
+timeout — is not an unclear verdict: `fail_mode` decides it, like any other
+guardrail failure.
 
 #### Example
 

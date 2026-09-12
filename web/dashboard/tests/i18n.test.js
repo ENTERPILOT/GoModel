@@ -33,6 +33,23 @@ test("the English source catalog contains valid flat semantic keys", () => {
   }
 });
 
+// The placeholders a message interpolates, whether it is a plain string or a
+// plural message whose variants live under nested "match" objects. A locale
+// may pick a different shape than en.json (Chinese has no plural), so the
+// union over every string leaf is what must match.
+function placeholders(message) {
+  const found = new Set();
+  const walk = (value) => {
+    if (typeof value === "string") {
+      for (const [, name] of value.matchAll(/\{(\w+)\}/g)) found.add(name);
+      return;
+    }
+    if (value && typeof value === "object") Object.values(value).forEach(walk);
+  };
+  walk(message);
+  return [...found].sort();
+}
+
 test("every locale catalog translates every English key", () => {
   for (const locale of locales.filter((one) => one !== baseLocale)) {
     const path = fileURLToPath(
@@ -58,22 +75,11 @@ test("every locale catalog translates every English key", () => {
           (Array.isArray(message) && message.length > 0),
         `${locale}.json: ${key} must contain a translation`,
       );
-      const placeholders = (value) =>
-        [
-          ...new Set(
-            [...String(value).matchAll(/\{(\w+)\}/g)].map((one) => one[1]),
-          ),
-        ].sort();
-      if (
-        typeof message === "string" &&
-        typeof englishMessages[key] === "string"
-      ) {
-        assert.deepEqual(
-          placeholders(message),
-          placeholders(englishMessages[key]),
-          `${locale}.json: ${key} must use the same placeholders as en.json`,
-        );
-      }
+      assert.deepEqual(
+        placeholders(message),
+        placeholders(englishMessages[key]),
+        `${locale}.json: ${key} must use the same placeholders as en.json`,
+      );
     }
   }
 });
