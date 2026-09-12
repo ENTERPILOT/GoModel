@@ -175,9 +175,10 @@ function applyRetrieveModelDialects() {
       created_at: { type: "string" },
     },
   };
+  // A 401 is raised by the auth middleware before the handler runs, so it
+  // stays in the OpenAI envelope whatever the header says.
   const dialects = {
     200: ["core.Model", "anthropicapi.ModelInfo"],
-    401: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
     404: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
     502: ["core.OpenAIErrorEnvelope", "anthropicapi.ErrorResponse"],
   };

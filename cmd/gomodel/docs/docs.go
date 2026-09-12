@@ -6306,15 +6306,7 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
-                            "oneOf": [
-                                {
-                                    "$ref": "#/definitions/core.OpenAIErrorEnvelope"
-                                },
-                                {
-                                    "$ref": "#/definitions/anthropicapi.ErrorResponse"
-                                }
-                            ]
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
                         }
                     },
                     "404": {

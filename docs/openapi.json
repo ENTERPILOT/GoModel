@@ -9438,15 +9438,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
-                    },
-                    {
-                      "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
                 }
               }
             }

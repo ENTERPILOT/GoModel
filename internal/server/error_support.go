@@ -17,6 +17,21 @@ import (
 // dialect of the request path (Anthropic envelope for /v1/messages, otherwise
 // the OpenAI-compatible envelope).
 func handleError(c *echo.Context, err error) error {
+	return writeGatewayError(c, recordHandledError(c, err))
+}
+
+// handleErrorAsAnthropic renders err in the Anthropic error envelope whatever
+// the path's own dialect is, with the same logging and audit enrichment as
+// handleError. The models routes serve both dialects on one path, so their
+// Anthropic clients are identified by the anthropic-version header instead.
+func handleErrorAsAnthropic(c *echo.Context, err error) error {
+	status, body := anthropicapi.ErrorFromGateway(recordHandledError(c, err))
+	return c.JSON(status, body)
+}
+
+// recordHandledError normalizes err to a gateway error, logs it and enriches
+// the audit entry and response headers, returning the error left to render.
+func recordHandledError(c *echo.Context, err error) *core.GatewayError {
 	gatewayErr, ok := errors.AsType[*core.GatewayError](err)
 	if !ok {
 		gatewayErr = core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
@@ -25,7 +40,7 @@ func handleError(c *echo.Context, err error) error {
 	enrichAuditEntryWithProviderAttempts(c)
 	auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
 	applyErrorResponseHeaders(c, err)
-	return writeGatewayError(c, gatewayErr)
+	return gatewayErr
 }
 
 // writeGatewayError renders a gateway error in the request's wire dialect

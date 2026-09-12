@@ -108,7 +108,7 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 
 	resp, err := h.visibleModels(c)
 	if err != nil {
-		return handleError(c, err)
+		return respondModelError(c, err)
 	}
 
 	var models []core.Model
@@ -131,12 +131,20 @@ func (h *Handler) RetrieveModel(c *echo.Context) error {
 		return c.JSON(http.StatusOK, model)
 	}
 
-	notFound := core.NewModelNotFoundError(modelID)
+	return respondModelError(c, core.NewModelNotFoundError(modelID))
+}
+
+// respondModelError renders a retrieve failure in the caller's dialect, the
+// same way the success body is chosen: an Anthropic SDK client — identified by
+// the anthropic-version header it always sends — never has to parse an OpenAI
+// envelope, whether the model is unknown or the upstream call failed. A 401
+// is raised by the auth middleware before the handler runs and stays in the
+// OpenAI envelope.
+func respondModelError(c *echo.Context, err error) error {
 	if c.Request().Header.Get("anthropic-version") != "" {
-		status, body := anthropicapi.ErrorFromGateway(notFound)
-		return c.JSON(status, body)
+		return handleErrorAsAnthropic(c, err)
 	}
-	return handleError(c, notFound)
+	return handleError(c, err)
 }
 
 // retrieveModelID reads the model ID from the wildcard segment of
