@@ -132,7 +132,7 @@ func TestMetaFromContextAndRequestState(t *testing.T) {
 
 	ctx, state := WithRequestState(ctx)
 	ctx2, again := WithRequestState(ctx)
-	require.Equal(t, state, again)
+	require.Same(t, state, again)
 	require.Equal(t, ctx, ctx2)
 
 	x := state.NewExchange(ctx, meta)
@@ -169,9 +169,9 @@ func TestHostHTTPClient(t *testing.T) {
 	require.Equal(t, PluginHTTPTimeout, transport.ResponseHeaderTimeout)
 
 	other := NewHost(HostDeps{}, HostInfo{PluginName: "other", InstanceName: "b"})
-	require.Equal(t, client, other.HTTPClient())
+	require.Same(t, client, other.HTTPClient())
 
 	custom := &http.Client{Timeout: time.Second}
 	h = NewHost(HostDeps{HTTP: custom}, HostInfo{PluginName: "presidio", InstanceName: "pii"})
-	require.Equal(t, custom, h.HTTPClient())
+	require.Same(t, custom, h.HTTPClient())
 }
