@@ -81,6 +81,12 @@ support, not every individual model capability exposed by an upstream provider.
   provider injects trusted inference-objective and user-path fairness headers.
 - **Z.ai GLM Coding Plan** — set
   `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **Groq reasoning and transcriptions** — on the gpt-oss and qwen3 families
+  GoModel defaults Groq's `reasoning_format` to `parsed`, so chain of thought
+  arrives in `reasoning` instead of as inline `<think>…</think>` text inside
+  the answer. Send `reasoning_format` yourself (`raw` or `hidden`) to override
+  it. JSON transcription and translation responses have Groq's vendor `x_groq`
+  member removed so they match the OpenAI shape.
 - **MiniMax regions and current text models** — the default global endpoint is
   `https://api.minimax.io/v1`; accounts on the China platform should set
   `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`. The current text model IDs

@@ -29,6 +29,10 @@ doesn't support audio returns a clear error rather than mis-routing.
 | `POST /v1/audio/transcriptions` | Speech-to-text. Accepts a `multipart/form-data` upload and returns JSON or plain text per `response_format`. |
 | `POST /v1/audio/translations` | Speech-to-English-text. Same upload shape as transcriptions, without `language` and `timestamp_granularities[]`. |
 
+JSON transcription and translation bodies are normalized to the OpenAI shape:
+Groq's vendor `x_groq` member is removed from `json` and `verbose_json`
+responses, so a client written against OpenAI sees the same fields everywhere.
+
 ## Text-to-speech
 
 <CodeGroup>
@@ -171,8 +175,9 @@ back as that provider's own error rather than a silent 200.
 
 Two things never travel: the fields GoModel controls itself (`model`, `file`,
 and the routing hint `provider`, plus the transcription options it re-emits —
-`language`, `prompt`, `response_format`, `temperature`, and both spellings of
-`timestamp_granularities[]`), and extra **file** parts on a transcription
+`language`, `prompt`, `response_format`, `temperature`, and both
+`timestamp_granularities[]` and its unbracketed alias
+`timestamp_granularities`), and extra **file** parts on a transcription
 upload; only the audio in `file` is sent.
 
 Forwarded values are not stored in the [audit log](/advanced/admin-endpoints):
@@ -193,6 +198,32 @@ the entry records only the field **names** under `forwarded_fields`.
   audio API GoModel translates (Xiaomi MiMo, Cohere, MiniMax, ElevenLabs) build
   their own request shape and ignore extra parameters.
 </Note>
+## Cost tracking
+
+Every `/v1/audio/*` call is recorded in [usage tracking](/features/cost-tracking)
+under its own endpoint path. Audio models are priced by the unit the provider
+bills, not by tokens:
+
+- **Speech** (`/v1/audio/speech`) records the input character count
+  (`input_characters`, priced with `per_character_input`, as `tts-1` is billed)
+  and the duration of the synthesized audio (`audio_output_seconds`, priced with
+  `per_second_output`, as `gpt-4o-mini-tts` is billed). Duration is measured from
+  the returned `wav`, `pcm`, or `mp3`; other codecs (`opus`, `aac`, `flac`) cannot
+  be measured without decoding, and the row carries a cost caveat saying so.
+- **Transcriptions and translations** are priced by the duration of the uploaded
+  audio (`audio_seconds`, priced with `per_second_input`). GoModel takes the
+  duration the provider reports in `usage.seconds` or `verbose_json`'s
+  `duration`, and otherwise measures the upload itself — so the cost does not
+  depend on the `response_format` the client asked for, and providers that report
+  no usage at all (Groq, ElevenLabs) are still metered.
+- **Token-billed transcription models** (`gpt-4o-transcribe` and similar) report
+  token `usage` and are priced with `input_per_mtok` / `output_per_mtok` instead.
+  A model that publishes both a token rate and a per-second rate is billed by
+  whichever unit the provider reported, never both.
+
+When nothing billable is available — the provider reported no usage and the
+upload is in a container GoModel cannot measure (`m4a`, `ogg`, `flac`, `webm`) —
+the usage row is flagged with a cost-calculation caveat instead of a $0 cost.
 
 ## Limitations
 
@@ -200,8 +231,8 @@ The audio endpoints are a thin, model-routed pass to the provider and **do not r
 through the full inference orchestrator**. Compared with `/v1/chat/completions`:
 
 - **No failover, guardrails, or response cache** — these stages are skipped.
-- **No usage/cost metering** — audio is not token-priced, so it is not recorded in
-  usage tracking. Requests are still authorized, budget-checked, and written to the
+  Requests are still authorized, budget-checked, metered (see
+  [cost tracking](#cost-tracking)), and written to the
   [audit log](/advanced/admin-endpoints) under their `/v1/audio/*` path.
 - **OpenAI request shape in, provider dialect out** — clients always send OpenAI's
   audio format. OpenAI-compatible upstreams receive it unchanged; Xiaomi MiMo,
