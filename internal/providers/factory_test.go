@@ -9,6 +9,8 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var _ ProviderConstructor = func(_ ProviderConfig, _ ProviderOptions) core.Provider { return nil }
@@ -59,19 +61,15 @@ func TestProviderFactory_Register(t *testing.T) {
 	})
 
 	registered := factory.RegisteredTypes()
-	if len(registered) != 1 {
-		t.Errorf("expected 1 registered provider, got %d", len(registered))
-	}
-	if registered[0] != "test-provider" {
-		t.Errorf("expected 'test-provider', got %q", registered[0])
-	}
+	require.Len(t, registered, 1)
+	assert.Equal(t, "test-provider", registered[0])
 }
 
 func TestProviderFactory_Add_PanicsOnEmptyType(t *testing.T) {
 	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for empty Type, got none")
-		}
+		r := recover()
+		assert.NotNil(t, r)
+
 	}()
 	NewProviderFactory().Add(Registration{
 		Type: "",
@@ -81,9 +79,9 @@ func TestProviderFactory_Add_PanicsOnEmptyType(t *testing.T) {
 
 func TestProviderFactory_Add_PanicsOnNilConstructor(t *testing.T) {
 	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for nil New, got none")
-		}
+		r := recover()
+		assert.NotNil(t, r)
+
 	}()
 	NewProviderFactory().Add(Registration{Type: "test", New: nil})
 }
@@ -97,14 +95,7 @@ func TestProviderFactory_Create_UnknownType(t *testing.T) {
 	}
 
 	_, err := factory.Create(cfg)
-	if err == nil {
-		t.Error("expected error for unknown provider type, got nil")
-	}
-
-	expectedMsg := "unknown provider type: unknown-type"
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error message '%s', got '%s'", expectedMsg, err.Error())
-	}
+	require.EqualError(t, err, "unknown provider type: unknown-type")
 }
 
 func TestProviderFactory_Create_Success(t *testing.T) {
@@ -123,13 +114,8 @@ func TestProviderFactory_Create_Success(t *testing.T) {
 	}
 
 	provider, err := factory.Create(cfg)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-
-	if provider == nil {
-		t.Error("expected provider to be created, got nil")
-	}
+	assert.NoError(t, err)
+	assert.NotNil(t, provider)
 }
 
 func TestProviderFactory_RegisteredTypes(t *testing.T) {
@@ -146,9 +132,7 @@ func TestProviderFactory_RegisteredTypes(t *testing.T) {
 
 	registered := factory.RegisteredTypes()
 
-	if len(registered) != 3 {
-		t.Errorf("expected 3 registered providers, got %d", len(registered))
-	}
+	assert.Len(t, registered, 3)
 
 	found := make(map[string]bool)
 	for _, name := range registered {
@@ -156,9 +140,7 @@ func TestProviderFactory_RegisteredTypes(t *testing.T) {
 	}
 
 	for _, expected := range []string{"provider1", "provider2", "provider3"} {
-		if !found[expected] {
-			t.Errorf("expected '%s' to be in registered list", expected)
-		}
+		assert.True(t, found[expected], "expected '%s' to be in registered list", expected)
 	}
 }
 
@@ -177,15 +159,11 @@ func TestProviderFactory_PassthroughSemanticEnrichers(t *testing.T) {
 	})
 
 	enrichers := factory.PassthroughSemanticEnrichers()
-	if len(enrichers) != 2 {
-		t.Fatalf("expected 2 passthrough enrichers, got %d", len(enrichers))
-	}
-	if got := enrichers[0].ProviderType(); got != "provider-a" {
-		t.Fatalf("enrichers[0].ProviderType() = %q, want provider-a", got)
-	}
-	if got := enrichers[1].ProviderType(); got != "provider-b" {
-		t.Fatalf("enrichers[1].ProviderType() = %q, want provider-b", got)
-	}
+	require.Len(t, enrichers, 2)
+	got := enrichers[0].ProviderType()
+	require.Equal(t, "provider-a", got)
+	got = enrichers[1].ProviderType()
+	require.Equal(t, "provider-b", got)
 }
 
 type passthroughEnricherStub struct {
@@ -220,21 +198,11 @@ func TestProviderFactory_Create_PassesResolvedProviderConfig(t *testing.T) {
 	}
 
 	provider, err := factory.Create(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if provider == nil {
-		t.Fatal("expected provider to be created, got nil")
-	}
-	if receivedCfg.APIKey != "test-key" {
-		t.Fatalf("APIKey = %q, want test-key", receivedCfg.APIKey)
-	}
-	if receivedCfg.BaseURL != "https://custom.api.endpoint.com/v1" {
-		t.Fatalf("BaseURL = %q, want custom URL", receivedCfg.BaseURL)
-	}
-	if receivedCfg.APIVersion != "2025-04-01-preview" {
-		t.Fatalf("APIVersion = %q, want 2025-04-01-preview", receivedCfg.APIVersion)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, provider)
+	require.Equal(t, "test-key", receivedCfg.APIKey)
+	require.Equal(t, "https://custom.api.endpoint.com/v1", receivedCfg.BaseURL)
+	require.Equal(t, "2025-04-01-preview", receivedCfg.APIVersion)
 }
 
 func TestProviderFactory_SetHooks(t *testing.T) {
@@ -272,55 +240,18 @@ func TestProviderFactory_SetHooks(t *testing.T) {
 	}
 
 	_, err := factory.Create(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, receivedOpts.Hooks.OnRequestStart)
 
-	if receivedOpts.Hooks.OnRequestStart == nil {
-		t.Error("expected hooks to be passed to builder via ProviderOptions")
-	}
 	receivedOpts.Hooks.OnRequestStart(t.Context(), llmclient.RequestInfo{})
 	receivedOpts.Hooks.OnRequestEnd(t.Context(), llmclient.ResponseInfo{})
 	receivedOpts.Hooks.OnStreamFirstChunk(t.Context(), llmclient.ResponseInfo{})
-	if startName != "test-eu" || endName != "test-eu" || chunkName != "test-eu" ||
-		startType != "test" || endType != "test" || chunkType != "test" {
-		t.Fatalf("provider identities = %q/%q, %q/%q, %q/%q; want test-eu/test",
-			startName, startType, endName, endType, chunkName, chunkType)
-	}
-}
-
-func TestProviderFactory_HooksPassedToBuilder(t *testing.T) {
-	factory := NewProviderFactory()
-
-	mockHooks := llmclient.Hooks{
-		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
-			return ctx
-		},
-	}
-	factory.SetHooks(mockHooks)
-
-	var receivedOpts ProviderOptions
-	factory.Add(Registration{
-		Type: "test",
-		New: func(cfg ProviderConfig, opts ProviderOptions) core.Provider {
-			receivedOpts = opts
-			return &factoryMockProvider{}
-		},
-	})
-
-	cfg := ProviderConfig{
-		Type:   "test",
-		APIKey: "test-key",
-	}
-
-	_, err := factory.Create(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if receivedOpts.Hooks.OnRequestStart == nil {
-		t.Error("expected hooks to be passed to builder via ProviderOptions")
-	}
+	require.Equal(t, "test-eu", startName)
+	require.Equal(t, "test-eu", endName)
+	require.Equal(t, "test-eu", chunkName)
+	require.Equal(t, "test", startType)
+	require.Equal(t, "test", endType)
+	require.Equal(t, "test", chunkType)
 }
 
 func TestProviderFactory_ZeroHooks(t *testing.T) {
@@ -341,13 +272,10 @@ func TestProviderFactory_ZeroHooks(t *testing.T) {
 	}
 
 	_, err := factory.Create(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if receivedOpts.Hooks.OnRequestStart != nil || receivedOpts.Hooks.OnRequestEnd != nil || receivedOpts.Hooks.OnStreamFirstChunk != nil {
-		t.Error("expected zero hooks when SetHooks not called")
-	}
+	require.NoError(t, err)
+	assert.Nil(t, receivedOpts.Hooks.OnRequestStart)
+	assert.Nil(t, receivedOpts.Hooks.OnRequestEnd)
+	assert.Nil(t, receivedOpts.Hooks.OnStreamFirstChunk)
 }
 
 func TestProviderFactory_Create_PassesResilienceConfig(t *testing.T) {
@@ -379,26 +307,14 @@ func TestProviderFactory_Create_PassesResilienceConfig(t *testing.T) {
 	}
 
 	_, err := factory.Create(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	r := receivedOpts.Resilience.Retry
-	if r.MaxRetries != 7 {
-		t.Errorf("MaxRetries = %d, want 7", r.MaxRetries)
-	}
-	if r.InitialBackoff != 2*time.Second {
-		t.Errorf("InitialBackoff = %v, want 2s", r.InitialBackoff)
-	}
-	if r.MaxBackoff != 60*time.Second {
-		t.Errorf("MaxBackoff = %v, want 60s", r.MaxBackoff)
-	}
-	if r.BackoffFactor != 3.0 {
-		t.Errorf("BackoffFactor = %f, want 3.0", r.BackoffFactor)
-	}
-	if r.JitterFactor != 0.5 {
-		t.Errorf("JitterFactor = %f, want 0.5", r.JitterFactor)
-	}
+	assert.Equal(t, 7, r.MaxRetries)
+	assert.Equal(t, 2*time.Second, r.InitialBackoff)
+	assert.Equal(t, 60*time.Second, r.MaxBackoff)
+	assert.Equal(t, 3.0, r.BackoffFactor)
+	assert.Equal(t, 0.5, r.JitterFactor)
 }
 
 func TestProviderFactory_Create_PassesConfiguredModels(t *testing.T) {
@@ -420,16 +336,10 @@ func TestProviderFactory_Create_PassesConfiguredModels(t *testing.T) {
 	}
 
 	_, err := factory.Create(cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(receivedOpts.Models) != 2 {
-		t.Fatalf("len(receivedOpts.Models) = %d, want 2", len(receivedOpts.Models))
-	}
-	if receivedOpts.Models[0] != "model-a" || receivedOpts.Models[1] != "model-b" {
-		t.Fatalf("receivedOpts.Models = %v, want [model-a model-b]", receivedOpts.Models)
-	}
+	require.NoError(t, err)
+	require.Len(t, receivedOpts.Models, 2)
+	require.Equal(t, "model-a", receivedOpts.Models[0])
+	require.Equal(t, "model-b", receivedOpts.Models[1], "receivedOpts.Models = %v, want [model-a model-b]", receivedOpts.Models)
 }
 
 func TestProviderFactory_Create_PassesInstanceName(t *testing.T) {
@@ -443,23 +353,14 @@ func TestProviderFactory_Create_PassesInstanceName(t *testing.T) {
 			return &factoryMockProvider{}
 		},
 	})
-
-	if _, err := factory.Create(ProviderConfig{Name: "test-eu", Type: "test"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if receivedOpts.Name != "test-eu" {
-		t.Fatalf("receivedOpts.Name = %q, want test-eu", receivedOpts.Name)
-	}
-	if got := receivedOpts.ClientName("test"); got != "test-eu" {
-		t.Fatalf("ClientName() = %q, want test-eu", got)
-	}
-	if _, err := factory.Create(ProviderConfig{Name: "  test-us  ", Type: "test"}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if receivedOpts.Name != "test-us" {
-		t.Fatalf("receivedOpts.Name = %q, want the trimmed test-us", receivedOpts.Name)
-	}
-	if got := (ProviderOptions{}).ClientName("test"); got != "test" {
-		t.Fatalf("ClientName() without a name = %q, want the type", got)
-	}
+	_, err := factory.Create(ProviderConfig{Name: "test-eu", Type: "test"})
+	require.NoError(t, err)
+	require.Equal(t, "test-eu", receivedOpts.Name)
+	got := receivedOpts.ClientName("test")
+	require.Equal(t, "test-eu", got)
+	_, err = factory.Create(ProviderConfig{Name: "  test-us  ", Type: "test"})
+	require.NoError(t, err)
+	require.Equal(t, "test-us", receivedOpts.Name)
+	got = (ProviderOptions{}).ClientName("test")
+	require.Equal(t, "test", got)
 }

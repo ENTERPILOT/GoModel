@@ -4,23 +4,20 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestEnsureProviderBatchID(t *testing.T) {
 	t.Run("defaults to id when empty", func(t *testing.T) {
 		resp := &core.BatchResponse{ID: "batch_1"}
 		EnsureProviderBatchID(resp)
-		if resp.ProviderBatchID != "batch_1" {
-			t.Errorf("ProviderBatchID = %q, want %q", resp.ProviderBatchID, "batch_1")
-		}
+		assert.Equal(t, "batch_1", resp.ProviderBatchID)
 	})
 
 	t.Run("preserves existing provider id", func(t *testing.T) {
 		resp := &core.BatchResponse{ID: "batch_1", ProviderBatchID: "upstream_9"}
 		EnsureProviderBatchID(resp)
-		if resp.ProviderBatchID != "upstream_9" {
-			t.Errorf("ProviderBatchID = %q, want %q", resp.ProviderBatchID, "upstream_9")
-		}
+		assert.Equal(t, "upstream_9", resp.ProviderBatchID)
 	})
 
 	t.Run("nil is a no-op", func(t *testing.T) {
@@ -37,12 +34,8 @@ func TestEnsureProviderBatchIDs(t *testing.T) {
 	}
 	EnsureProviderBatchIDs(resp)
 
-	if resp.Data[0].ProviderBatchID != "batch_1" {
-		t.Errorf("Data[0].ProviderBatchID = %q, want %q", resp.Data[0].ProviderBatchID, "batch_1")
-	}
-	if resp.Data[1].ProviderBatchID != "upstream_2" {
-		t.Errorf("Data[1].ProviderBatchID = %q, want %q", resp.Data[1].ProviderBatchID, "upstream_2")
-	}
+	assert.Equal(t, "batch_1", resp.Data[0].ProviderBatchID)
+	assert.Equal(t, "upstream_2", resp.Data[1].ProviderBatchID)
 
 	EnsureProviderBatchIDs(nil) // must not panic
 }

@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockModelLookup implements core.ModelLookup for fast, isolated Router testing.
@@ -148,9 +150,8 @@ func readAndCloseBody(t *testing.T, body io.ReadCloser) string {
 		_ = body.Close()
 	}()
 	data, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read body: %v", err)
-	}
+	require.NoError(t, err)
+
 	return string(data)
 }
 
@@ -360,23 +361,15 @@ func (m *mockBatchProvider) GetFileContent(_ context.Context, id string) (*core.
 func TestNewRouter(t *testing.T) {
 	t.Run("nil lookup returns error", func(t *testing.T) {
 		router, err := NewRouter(nil)
-		if err == nil {
-			t.Error("expected error for nil lookup")
-		}
-		if router != nil {
-			t.Error("expected nil router")
-		}
+		assert.Error(t, err)
+		assert.Nil(t, router)
 	})
 
 	t.Run("valid lookup succeeds", func(t *testing.T) {
 		lookup := newMockLookup()
 		router, err := NewRouter(lookup)
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		if router == nil {
-			t.Error("expected non-nil router")
-		}
+		assert.NoError(t, err)
+		assert.NotNil(t, router)
 	})
 }
 
@@ -392,18 +385,11 @@ func TestRouterCreateTranslation(t *testing.T) {
 	resp, err := router.CreateTranslation(context.Background(), &core.AudioTranscriptionRequest{
 		Model: "whisper-1", Provider: "openai", File: []byte("audio"), Prompt: "names",
 	})
-	if err != nil {
-		t.Fatalf("CreateTranslation() error = %v", err)
-	}
-	if string(resp.Data) != `{"text":"hello"}` {
-		t.Errorf("response = %s", resp.Data)
-	}
-	if translator.lastTranslationReq == nil {
-		t.Fatal("translation provider was not called")
-	}
-	if translator.lastTranslationReq.Model != "whisper-1" || translator.lastTranslationReq.Provider != "" {
-		t.Errorf("forwarded selector = %q/%q, want provider metadata stripped", translator.lastTranslationReq.Provider, translator.lastTranslationReq.Model)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, `{"text":"hello"}`, string(resp.Data), "response = %s", resp.Data)
+	require.NotNil(t, translator.lastTranslationReq)
+	assert.Equal(t, "whisper-1", translator.lastTranslationReq.Model)
+	assert.Empty(t, translator.lastTranslationReq.Provider)
 }
 
 func TestRouterCreateTranslation_Errors(t *testing.T) {
@@ -446,20 +432,16 @@ func TestRouterCreateTranslation_Errors(t *testing.T) {
 				lookup.addModel(tt.model, tt.provider, tt.providerType)
 			}
 			router, err := NewRouter(lookup)
-			if err != nil {
-				t.Fatalf("NewRouter() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			_, err = router.CreateTranslation(context.Background(), tt.req)
 			if tt.wantIs != nil {
-				if !errors.Is(err, tt.wantIs) {
-					t.Fatalf("CreateTranslation() error = %v, want %v", err, tt.wantIs)
-				}
+				require.ErrorIs(t, err, tt.wantIs)
+
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("CreateTranslation() error = %v, want message containing %q", err, tt.wantError)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantError)
 		})
 	}
 }
@@ -469,79 +451,52 @@ func TestRouterEmptyLookup(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	t.Run("Supports returns false", func(t *testing.T) {
-		if router.Supports("any-model") {
-			t.Error("expected false for empty lookup")
-		}
+		assert.False(t, router.Supports("any-model"))
 	})
 
 	t.Run("ChatCompletion returns error", func(t *testing.T) {
 		_, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "any"})
-		if !errors.Is(err, ErrRegistryNotInitialized) {
-			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
-		}
+		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, http.StatusServiceUnavailable, gwErr.HTTPStatusCode())
 	})
 
 	t.Run("StreamChatCompletion returns error", func(t *testing.T) {
 		_, err := router.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "any"})
-		if !errors.Is(err, ErrRegistryNotInitialized) {
-			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
-		}
+		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, http.StatusServiceUnavailable, gwErr.HTTPStatusCode())
 	})
 
 	t.Run("ListModels returns error", func(t *testing.T) {
 		_, err := router.ListModels(context.Background())
-		if !errors.Is(err, ErrRegistryNotInitialized) {
-			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
-		}
+		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, http.StatusServiceUnavailable, gwErr.HTTPStatusCode())
 	})
 
 	t.Run("Responses returns error", func(t *testing.T) {
 		_, err := router.Responses(context.Background(), &core.ResponsesRequest{Model: "any"})
-		if !errors.Is(err, ErrRegistryNotInitialized) {
-			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
-		}
+		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, http.StatusServiceUnavailable, gwErr.HTTPStatusCode())
 	})
 
 	t.Run("StreamResponses returns error", func(t *testing.T) {
 		_, err := router.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "any"})
-		if !errors.Is(err, ErrRegistryNotInitialized) {
-			t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
-		}
+		assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, http.StatusServiceUnavailable, gwErr.HTTPStatusCode())
 	})
 }
 
@@ -566,9 +521,8 @@ func TestRouterSupports(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			if got := router.Supports(tt.model); got != tt.expected {
-				t.Errorf("Supports(%q) = %v, want %v", tt.model, got, tt.expected)
-			}
+			got := router.Supports(tt.model)
+			assert.Equal(t, tt.expected, got, "Supports(%q)", tt.model)
 		})
 	}
 }
@@ -604,28 +558,16 @@ func TestRouterChatCompletion(t *testing.T) {
 			resp, err := router.ChatCompletion(context.Background(), req)
 
 			if tt.wantError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
 				var gwErr *core.GatewayError
-				if !errors.As(err, &gwErr) {
-					t.Fatalf("expected GatewayError, got %T: %v", err, err)
-				}
-				if gwErr.HTTPStatusCode() != http.StatusNotFound {
-					t.Fatalf("expected 404 status, got %d", gwErr.HTTPStatusCode())
-				}
+				require.ErrorAs(t, err, &gwErr)
+				require.Equal(t, http.StatusNotFound, gwErr.HTTPStatusCode())
+
 				return
 			}
 
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if resp.ID != tt.wantResp.ID {
-				t.Errorf("got response ID %q, want %q", resp.ID, tt.wantResp.ID)
-			}
-			if resp.Provider != tt.wantProvider {
-				t.Errorf("Provider = %q, want %q", resp.Provider, tt.wantProvider)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantResp.ID, resp.ID)
+			assert.Equal(t, tt.wantProvider, resp.Provider)
 		})
 	}
 }
@@ -674,35 +616,23 @@ func TestRouterChatCompletion_ResolvedRouteDispatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := &mockProvider{name: "upstream", chatResponse: &core.ChatResponse{ID: "resp", Model: "gpt-4o"}}
 			lookup := tt.newLookup(provider)
-			if _, ok := lookup.(modelInfoLookup); ok != tt.wantInfoPath {
-				t.Fatalf("lookup implements modelInfoLookup = %v, want %v", ok, tt.wantInfoPath)
-			}
+			_, ok := lookup.(modelInfoLookup)
+			require.Equal(t, tt.wantInfoPath, ok)
+
 			router, err := NewRouter(lookup)
-			if err != nil {
-				t.Fatalf("NewRouter: %v", err)
-			}
+			require.NoError(t, err)
 
 			req := &core.ChatRequest{Model: tt.model, Provider: tt.providerHint}
 			resp, err := router.ChatCompletion(context.Background(), req)
-			if err != nil {
-				t.Fatalf("ChatCompletion: %v", err)
-			}
-
-			if provider.lastChatReq == nil {
-				t.Fatal("provider was not called")
-			}
-			if got := provider.lastChatReq.Model; got != "gpt-4o" {
-				t.Fatalf("forwarded model = %q, want concrete gpt-4o", got)
-			}
-			if got := provider.lastChatReq.Provider; got != "" {
-				t.Fatalf("forwarded provider hint = %q, want empty", got)
-			}
-			if resp.Provider != "openai" {
-				t.Fatalf("response provider = %q, want resolved provider type openai", resp.Provider)
-			}
-			if req.Model != tt.model || req.Provider != tt.providerHint {
-				t.Fatalf("caller request mutated: %+v", req)
-			}
+			require.NoError(t, err)
+			require.NotNil(t, provider.lastChatReq)
+			got := provider.lastChatReq.Model
+			require.Equal(t, "gpt-4o", got)
+			got = provider.lastChatReq.Provider
+			require.Empty(t, got)
+			require.Equal(t, "openai", resp.Provider)
+			require.Equal(t, tt.model, req.Model)
+			require.Equal(t, tt.providerHint, req.Provider, "caller request mutated: %+v", req)
 		})
 	}
 }
@@ -723,18 +653,11 @@ func TestRouterChatCompletion_ProviderSelector(t *testing.T) {
 		Model:    "gpt-4o",
 		Provider: "openai-west",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "west" {
-		t.Fatalf("expected west provider response, got %q", resp.ID)
-	}
-	if west.lastChatReq == nil || west.lastChatReq.Model != "gpt-4o" {
-		t.Fatalf("expected upstream model to be unqualified gpt-4o, got %#v", west.lastChatReq)
-	}
-	if west.lastChatReq.Provider != "" {
-		t.Fatalf("expected provider field to be stripped upstream, got %q", west.lastChatReq.Provider)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "west", resp.ID)
+	require.NotNil(t, west.lastChatReq)
+	require.Equal(t, "gpt-4o", west.lastChatReq.Model)
+	require.Empty(t, west.lastChatReq.Provider)
 }
 
 func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing.T) {
@@ -797,9 +720,7 @@ func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing
 				},
 			}
 			before, err := json.Marshal(request)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 
 			provider := &mockProvider{name: tt.providerType, chatResponse: &core.ChatResponse{ID: "ok"}}
 			lookup := newMockLookup()
@@ -809,14 +730,12 @@ func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing
 			if tt.messagesIngress {
 				ctx = core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages)
 			}
-			if _, err := router.ChatCompletion(ctx, request); err != nil {
-				t.Fatal(err)
-			}
+			_, err = router.ChatCompletion(ctx, request)
+			require.NoError(t, err)
 
 			forwarded := provider.lastChatReq
-			if forwarded == nil {
-				t.Fatal("provider did not receive a request")
-			}
+			require.NotNil(t, forwarded)
+
 			expectedCache := json.RawMessage(`{"type":"ephemeral"}`)
 			assertFields := func(label string, fields core.UnknownJSONFields, wantCache bool) {
 				t.Helper()
@@ -827,22 +746,18 @@ func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing
 				if !wantCache && len(gotCache) != 0 {
 					t.Errorf("%s cache_control = %s, want absent", label, gotCache)
 				}
-				if got := string(fields.Lookup("x_keep")); got != "true" {
-					t.Errorf("%s x_keep = %s, want preserved", label, got)
-				}
+				got := string(fields.Lookup("x_keep"))
+				assert.Equal(t, "true", got, "%s x_keep should be preserved", label)
 			}
 			assertFields("request", forwarded.ExtraFields, tt.wantCache)
 			toolCache, toolHasCache := forwarded.Tools[0]["cache_control"]
 			if tt.wantCache {
 				encoded, err := json.Marshal(toolCache)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !toolHasCache || !bytes.Equal(encoded, expectedCache) {
-					t.Errorf("tool cache_control = %s, want %s", encoded, expectedCache)
-				}
-			} else if toolHasCache {
-				t.Errorf("tool cache_control = %v, want absent", toolCache)
+				require.NoError(t, err)
+				assert.True(t, toolHasCache)
+				assert.JSONEq(t, string(expectedCache), string(encoded))
+			} else {
+				assert.False(t, toolHasCache, "tool cache_control = %v, want absent", toolCache)
 			}
 			assertFields("assistant message", forwarded.Messages[0].ExtraFields, tt.wantCache)
 			assertFields("assistant content", forwarded.Messages[0].Content.([]core.ContentPart)[0].ExtraFields, tt.wantCache)
@@ -862,12 +777,8 @@ func TestRouterChatCompletion_AdaptsAnthropicCacheControlAfterRouting(t *testing
 			assertFields("caller tool result content", request.Messages[1].Content.([]core.ContentPart)[0].ExtraFields, true)
 
 			after, err := json.Marshal(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(after, before) {
-				t.Fatalf("routing mutated caller request\nbefore: %s\n after: %s", before, after)
-			}
+			require.NoError(t, err)
+			require.Equal(t, before, after)
 		})
 	}
 }
@@ -921,58 +832,50 @@ func TestRouterCreateBatch_AdaptsAnthropicCacheControlAfterRouting(t *testing.T)
 				ctx = core.WithRequestDialect(ctx, core.RequestDialectAnthropicMessages)
 			}
 			if tt.withHints {
-				if _, _, err := router.CreateBatchWithHints(ctx, tt.providerType, request); err != nil {
-					t.Fatal(err)
-				}
-			} else if _, err := router.CreateBatch(ctx, tt.providerType, request); err != nil {
-				t.Fatal(err)
+				_, _, err := router.CreateBatchWithHints(ctx, tt.providerType, request)
+				require.NoError(t, err)
+			} else {
+				_, err := router.CreateBatch(ctx, tt.providerType, request)
+				require.NoError(t, err)
 			}
 
-			if provider.lastBatchReq == nil || len(provider.lastBatchReq.Requests) != 1 {
-				t.Fatalf("provider batch request = %#v, want one item", provider.lastBatchReq)
-			}
+			require.NotNil(t, provider.lastBatchReq)
+			require.Len(t, provider.lastBatchReq.Requests, 1)
+
 			decoded, err := core.DecodeKnownBatchItemRequest(provider.lastBatchReq.Endpoint, provider.lastBatchReq.Requests[0])
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			chat := decoded.Request.(*core.ChatRequest)
 			gotCache := chat.ExtraFields.Lookup("cache_control")
-			if tt.wantCache && !bytes.Equal(gotCache, expectedCache) {
-				t.Errorf("request cache_control = %s, want %s", gotCache, expectedCache)
+			if tt.wantCache {
+				assert.JSONEq(t, string(expectedCache), string(gotCache), "request cache_control")
+			} else {
+				assert.Empty(t, gotCache, "request cache_control should be absent")
 			}
-			if !tt.wantCache && len(gotCache) != 0 {
-				t.Errorf("request cache_control = %s, want absent", gotCache)
-			}
-			if got := string(chat.ExtraFields.Lookup("x_keep")); got != "true" {
-				t.Errorf("request x_keep = %s, want true", got)
-			}
+			got := string(chat.ExtraFields.Lookup("x_keep"))
+			assert.Equal(t, "true", got)
+
 			part := chat.Messages[0].Content.([]core.ContentPart)[0]
 			partCache := part.ExtraFields.Lookup("cache_control")
-			if tt.wantCache && !bytes.Equal(partCache, expectedCache) {
-				t.Errorf("content cache_control = %s, want %s", partCache, expectedCache)
+			if tt.wantCache {
+				assert.JSONEq(t, string(expectedCache), string(partCache), "content cache_control")
+			} else {
+				assert.Empty(t, partCache, "content cache_control should be absent")
 			}
-			if !tt.wantCache && len(partCache) != 0 {
-				t.Errorf("content cache_control = %s, want absent", partCache)
-			}
-			if got := string(part.ExtraFields.Lookup("x_keep")); got != "true" {
-				t.Errorf("content x_keep = %s, want true", got)
-			}
+			got = string(part.ExtraFields.Lookup("x_keep"))
+			assert.Equal(t, "true", got)
+
 			toolCache, toolHasCache := chat.Tools[0]["cache_control"]
 			if tt.wantCache {
 				encoded, err := json.Marshal(toolCache)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !toolHasCache || !bytes.Equal(encoded, expectedCache) {
-					t.Errorf("tool cache_control = %s, want %s", encoded, expectedCache)
-				}
-			} else if toolHasCache {
-				t.Errorf("tool cache_control = %v, want absent", toolCache)
+				require.NoError(t, err)
+				assert.True(t, toolHasCache)
+				assert.JSONEq(t, string(expectedCache), string(encoded))
+			} else {
+				assert.False(t, toolHasCache, "tool cache_control = %v, want absent", toolCache)
 			}
 
-			if !bytes.Equal(request.Requests[0].Body, before) {
-				t.Fatalf("routing mutated caller batch item\nbefore: %s\n after: %s", before, request.Requests[0].Body)
-			}
+			require.Equal(t, before, request.Requests[0].Body)
 		})
 	}
 }
@@ -982,9 +885,8 @@ func TestAdaptAnthropicCacheControl_PreservesSupportedProviders(t *testing.T) {
 		"cache_control": json.RawMessage(`{"type":"ephemeral"}`),
 	})}
 	for _, providerType := range []string{"anthropic", "openrouter"} {
-		if got := adaptAnthropicCacheControl(req, providerType); got != req {
-			t.Errorf("provider %q cloned or changed supported cache metadata", providerType)
-		}
+		got := adaptAnthropicCacheControl(req, providerType)
+		assert.Same(t, req, got, "provider %q cloned or changed supported cache metadata", providerType)
 	}
 }
 
@@ -1015,9 +917,8 @@ func TestAdaptExtraContent_KeepsOwnVendorOnly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.providerType, func(t *testing.T) {
 			got := adaptExtraContent(req, tt.providerType)
-			if got == req {
-				t.Fatal("request was not adapted")
-			}
+			require.NotSame(t, req, got)
+
 			call := got.Messages[0].ToolCalls[0]
 			for name, fields := range map[string]core.UnknownJSONFields{
 				"assistant": got.Messages[0].ExtraFields,
@@ -1025,18 +926,14 @@ func TestAdaptExtraContent_KeepsOwnVendorOnly(t *testing.T) {
 				"function":  call.Function.ExtraFields,
 				"tool":      got.Messages[1].ExtraFields,
 			} {
-				if raw := string(fields.Lookup(core.ExtraContentField)); raw != tt.want {
-					t.Errorf("%s extra_content = %s, want %s", name, raw, tt.want)
-				}
-				if raw := fields.Lookup("x_keep"); len(raw) == 0 {
-					t.Errorf("%s dropped unrelated extra", name)
-				}
+				raw := string(fields.Lookup(core.ExtraContentField))
+				assert.Equal(t, tt.want, raw, "%s extra_content", name)
+				assert.NotEmpty(t, fields.Lookup("x_keep"), "%s dropped unrelated extra", name)
 			}
 		})
 	}
-	if raw := req.Messages[0].ToolCalls[0].ExtraFields.ExtraContent(core.ExtraContentVendorAnthropic); len(raw) == 0 {
-		t.Error("adaptation mutated the caller's request")
-	}
+	raw := req.Messages[0].ToolCalls[0].ExtraFields.ExtraContent(core.ExtraContentVendorAnthropic)
+	assert.NotEmpty(t, raw)
 }
 
 func TestAdaptExtraContent_ReturnsRequestWithoutExtraContent(t *testing.T) {
@@ -1045,21 +942,19 @@ func TestAdaptExtraContent_ReturnsRequestWithoutExtraContent(t *testing.T) {
 			"x_keep": json.RawMessage("true"),
 		}), ToolCalls: []core.ToolCall{{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"}}}},
 	}}
-	if got := adaptExtraContent(req, "openai"); got != req {
-		t.Error("request without extra_content must be returned as-is")
-	}
+	got := adaptExtraContent(req, "openai")
+	assert.Same(t, req, got)
+
 	own := &core.ChatRequest{Messages: []core.Message{
 		{Role: "assistant", ContentNull: true, ToolCalls: []core.ToolCall{{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"},
 			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 				core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"}}`),
 			})}}},
 	}}
-	if got := adaptExtraContent(own, "gemini"); got != own {
-		t.Error("request carrying only the provider's own extra_content must be returned as-is")
-	}
-	if got := adaptExtraContent(nil, "openai"); got != nil {
-		t.Error("nil request must stay nil")
-	}
+	got = adaptExtraContent(own, "gemini")
+	assert.Same(t, own, got)
+	got = adaptExtraContent(nil, "openai")
+	assert.Nil(t, got)
 }
 
 func TestAdaptResponsesExtraContent_KeepsOwnVendorOnly(t *testing.T) {
@@ -1079,13 +974,12 @@ func TestAdaptResponsesExtraContent_KeepsOwnVendorOnly(t *testing.T) {
 	extraContentOf := func(t *testing.T, input any) string {
 		t.Helper()
 		encoded, err := json.Marshal(input)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		var items []any
-		if err := json.Unmarshal(encoded, &items); err != nil {
-			t.Fatal(err)
-		}
+		err = json.Unmarshal(encoded, &items)
+		require.NoError(t, err)
+
 		raw, _ := json.Marshal(items[len(items)-1].(map[string]any)["extra_content"])
 		return string(raw)
 	}
@@ -1098,15 +992,11 @@ func TestAdaptResponsesExtraContent_KeepsOwnVendorOnly(t *testing.T) {
 			t.Run(name+"/"+tt.providerType, func(t *testing.T) {
 				req := &core.ResponsesRequest{Model: "m", Input: input}
 				got := adaptResponsesExtraContent(req, tt.providerType)
-				if got == req {
-					t.Fatal("request was not adapted")
-				}
-				if raw := extraContentOf(t, got.Input); raw != tt.want {
-					t.Errorf("extra_content = %s, want %s", raw, tt.want)
-				}
-				if raw := extraContentOf(t, req.Input); raw == tt.want {
-					t.Error("adaptation mutated the caller's input")
-				}
+				require.NotSame(t, req, got)
+				raw := extraContentOf(t, got.Input)
+				assert.Equal(t, tt.want, raw)
+				raw = extraContentOf(t, req.Input)
+				assert.NotEqual(t, tt.want, raw)
 			})
 		}
 	}
@@ -1116,9 +1006,8 @@ func TestAdaptResponsesExtraContent_KeepsOwnVendorOnly(t *testing.T) {
 		"own":    []any{map[string]any{"type": "function_call", "extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig"}}}},
 	} {
 		req := &core.ResponsesRequest{Model: "m", Input: input}
-		if got := adaptResponsesExtraContent(req, "gemini"); got != req {
-			t.Errorf("%s input must be returned as-is", name)
-		}
+		got := adaptResponsesExtraContent(req, "gemini")
+		assert.Same(t, req, got, "%s input must be returned as-is", name)
 	}
 }
 
@@ -1127,12 +1016,10 @@ func TestForwardResponsesRequest_DropsForeignExtraContent(t *testing.T) {
 		map[string]any{"type": "function_call", "call_id": "c1", "name": "f", "arguments": "{}", "extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig"}}},
 	}}
 	got := forwardResponsesRequest(req, resolvedRoute{selector: core.ModelSelector{Model: "m"}, providerType: "openai"})
-	if item := got.Input.([]any)[0].(map[string]any); item["extra_content"] != nil {
-		t.Errorf("openai received foreign extra_content: %v", item["extra_content"])
-	}
-	if got.Provider != "" || got.Model != "m" {
-		t.Errorf("forwarded request = %+v", got)
-	}
+	item := got.Input.([]any)[0].(map[string]any)
+	assert.Nil(t, item["extra_content"])
+	assert.Empty(t, got.Provider)
+	assert.Equal(t, "m", got.Model, "forwarded request = %+v", got)
 }
 
 func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testing.T) {
@@ -1152,31 +1039,21 @@ func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testi
 		},
 	}
 	adapted, err := adaptBatchRequest(context.Background(), request, "openai")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if adapted == request {
-		t.Fatal("batch with foreign extra_content was not adapted")
-	}
+	require.NoError(t, err)
+	require.NotSame(t, request, adapted)
+
 	for _, i := range []int{0, 1, 2} {
-		if bytes.Contains(adapted.Requests[i].Body, []byte("extra_content")) || bytes.Contains(adapted.Requests[i].Body, []byte("is_error")) {
-			t.Errorf("requests[%d] kept foreign extra_content: %s", i, adapted.Requests[i].Body)
-		}
+		assert.False(t, bytes.Contains(adapted.Requests[i].Body, []byte("extra_content")))
+		assert.False(t, bytes.Contains(adapted.Requests[i].Body, []byte("is_error")), "requests[%d] kept foreign extra_content: %s", i, adapted.Requests[i].Body)
 	}
-	if string(adapted.Requests[3].Body) != opaqueBody {
-		t.Errorf("opaque item was rewritten: %s", adapted.Requests[3].Body)
-	}
-	if string(adapted.Requests[4].Body) != malformedBody {
-		t.Errorf("undecodable item was rewritten: %s", adapted.Requests[4].Body)
-	}
-	if !bytes.Contains(request.Requests[0].Body, []byte("thought_signature")) {
-		t.Error("adaptation mutated the caller's batch")
-	}
+	assert.Equal(t, opaqueBody, string(adapted.Requests[3].Body), "opaque item was rewritten: %s", adapted.Requests[3].Body)
+	assert.Equal(t, malformedBody, string(adapted.Requests[4].Body), "undecodable item was rewritten: %s", adapted.Requests[4].Body)
+	assert.Contains(t, string(request.Requests[0].Body), string([]byte("thought_signature")))
 
 	own := &core.BatchRequest{Endpoint: request.Endpoint, Requests: []core.BatchRequestItem{request.Requests[0], request.Requests[1], request.Requests[3], request.Requests[4]}}
-	if got, err := adaptBatchRequest(context.Background(), own, "gemini"); err != nil || got != own {
-		t.Errorf("gemini batch = %v, %v; want the request untouched", got != own, err)
-	}
+	got, err := adaptBatchRequest(context.Background(), own, "gemini")
+	assert.NoError(t, err)
+	assert.Same(t, own, got)
 }
 
 func TestForwardChatRequest_DropsForeignExtraContentForEveryDialect(t *testing.T) {
@@ -1194,18 +1071,14 @@ func TestForwardChatRequest_DropsForeignExtraContentForEveryDialect(t *testing.T
 		core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages),
 	} {
 		got := forwardChatRequest(ctx, req, route)
-		if raw := got.Messages[0].ToolCalls[0].ExtraFields.Lookup(core.ExtraContentField); len(raw) != 0 {
-			t.Errorf("openai received foreign extra_content: %s", raw)
-		}
-		if got.Provider != "" {
-			t.Errorf("provider hint = %q, want cleared", got.Provider)
-		}
+		raw := got.Messages[0].ToolCalls[0].ExtraFields.Lookup(core.ExtraContentField)
+		assert.Empty(t, raw)
+		assert.Empty(t, got.Provider)
 	}
 	route.providerType = "gemini"
 	got := forwardChatRequest(context.Background(), req, route)
-	if raw := got.Messages[0].ToolCalls[0].ExtraFields.ExtraContent(core.ExtraContentVendorGoogle); len(raw) == 0 {
-		t.Error("gemini lost its own extra_content")
-	}
+	raw := got.Messages[0].ToolCalls[0].ExtraFields.ExtraContent(core.ExtraContentVendorGoogle)
+	assert.NotEmpty(t, raw)
 }
 
 func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
@@ -1218,15 +1091,10 @@ func TestRouterChatCompletion_PrefixedModelSelector(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openai-west/gpt-4o"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "west" {
-		t.Fatalf("expected west provider response, got %q", resp.ID)
-	}
-	if west.lastChatReq == nil || west.lastChatReq.Model != "gpt-4o" {
-		t.Fatalf("expected upstream model to be unqualified gpt-4o, got %#v", west.lastChatReq)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "west", resp.ID)
+	require.NotNil(t, west.lastChatReq)
+	require.Equal(t, "gpt-4o", west.lastChatReq.Model)
 }
 
 func TestRouterChatCompletion_RefreshesProviderModelsForQualifiedRequest(t *testing.T) {
@@ -1244,29 +1112,16 @@ func TestRouterChatCompletion_RefreshesProviderModelsForQualifiedRequest(t *test
 	registry.RegisterProviderWithNameAndType(provider, "ollama", "ollama")
 
 	router, err := NewRouter(registry)
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "ollama/later-model"})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v, want nil", err)
-	}
-	if resp.ID != "chatcmpl-later" {
-		t.Fatalf("response ID = %q, want chatcmpl-later", resp.ID)
-	}
-	if provider.availabilityCalls != 1 {
-		t.Fatalf("availability calls = %d, want 1", provider.availabilityCalls)
-	}
-	if provider.listModelsCalls != 1 {
-		t.Fatalf("ListModels calls = %d, want 1", provider.listModelsCalls)
-	}
-	if provider.lastChatReq == nil || provider.lastChatReq.Model != "later-model" {
-		t.Fatalf("expected upstream model later-model, got %#v", provider.lastChatReq)
-	}
-	if !registry.Supports("ollama/later-model") {
-		t.Fatal("expected request-time refresh to register ollama/later-model")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "chatcmpl-later", resp.ID)
+	require.Equal(t, 1, provider.availabilityCalls)
+	require.Equal(t, 1, provider.listModelsCalls)
+	require.NotNil(t, provider.lastChatReq)
+	require.Equal(t, "later-model", provider.lastChatReq.Model)
+	require.True(t, registry.Supports("ollama/later-model"))
 }
 
 func TestRouterChatCompletion_RefreshesMissingProviderWithoutDroppingExistingModels(t *testing.T) {
@@ -1293,23 +1148,13 @@ func TestRouterChatCompletion_RefreshesMissingProviderWithoutDroppingExistingMod
 	registry.RegisterProviderWithNameAndType(ollama, "ollama", "ollama")
 
 	router, err := NewRouter(registry)
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "ollama/local-model"})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v, want nil", err)
-	}
-	if resp.ID != "ollama" {
-		t.Fatalf("response ID = %q, want ollama", resp.ID)
-	}
-	if !registry.Supports("openai/gpt-4o") {
-		t.Fatal("expected existing openai model to remain after targeted refresh")
-	}
-	if !registry.Supports("ollama/local-model") {
-		t.Fatal("expected targeted refresh to add ollama/local-model")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "ollama", resp.ID)
+	require.True(t, registry.Supports("openai/gpt-4o"))
+	require.True(t, registry.Supports("ollama/local-model"))
 }
 
 func TestRouterChatCompletion_RequestTimeRefreshUnavailableProvider(t *testing.T) {
@@ -1328,30 +1173,17 @@ func TestRouterChatCompletion_RequestTimeRefreshUnavailableProvider(t *testing.T
 	registry.RegisterProviderWithNameAndType(provider, "ollama", "ollama")
 
 	router, err := NewRouter(registry)
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "ollama/later-model"})
-	if err == nil {
-		t.Fatal("ChatCompletion() error = nil, want provider unavailable")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want GatewayError", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusServiceUnavailable)
-	}
-	if provider.availabilityCalls != 1 {
-		t.Fatalf("availability calls = %d, want 1", provider.availabilityCalls)
-	}
-	if provider.listModelsCalls != 0 {
-		t.Fatalf("ListModels calls = %d, want 0 when availability fails", provider.listModelsCalls)
-	}
-	if provider.lastChatReq != nil {
-		t.Fatalf("provider call should not be attempted, got %#v", provider.lastChatReq)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.HTTPStatusCode())
+	require.Equal(t, 1, provider.availabilityCalls)
+	require.Equal(t, 0, provider.listModelsCalls)
+	require.Nil(t, provider.lastChatReq)
 }
 
 func TestRouterChatCompletion_PrefersProviderTypeSelectorOverRawSlashModel(t *testing.T) {
@@ -1378,27 +1210,16 @@ func TestRouterChatCompletion_PrefersProviderTypeSelectorOverRawSlashModel(t *te
 	router, _ := NewRouter(registry)
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openai/gpt-5-nano"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "openai-test" {
-		t.Fatalf("expected openai_test response, got %q", resp.ID)
-	}
-	if openAI.lastChatReq == nil || openAI.lastChatReq.Model != "gpt-5-nano" {
-		t.Fatalf("expected openai provider to receive raw model gpt-5-nano, got %#v", openAI.lastChatReq)
-	}
-	if openAI.lastChatReq.Provider != "" {
-		t.Fatalf("expected provider field to be stripped upstream, got %q", openAI.lastChatReq.Provider)
-	}
-	if openRouter.lastChatReq != nil {
-		t.Fatalf("expected openrouter provider to be bypassed, got %#v", openRouter.lastChatReq)
-	}
-	if got := router.GetProviderType("openai/gpt-5-nano"); got != "openai" {
-		t.Fatalf("GetProviderType() = %q, want %q", got, "openai")
-	}
-	if got := router.GetProviderName("openai/gpt-5-nano"); got != "openai_test" {
-		t.Fatalf("GetProviderName() = %q, want %q", got, "openai_test")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai-test", resp.ID)
+	require.NotNil(t, openAI.lastChatReq)
+	require.Equal(t, "gpt-5-nano", openAI.lastChatReq.Model)
+	require.Empty(t, openAI.lastChatReq.Provider)
+	require.Nil(t, openRouter.lastChatReq)
+	got := router.GetProviderType("openai/gpt-5-nano")
+	require.Equal(t, "openai", got)
+	got = router.GetProviderName("openai/gpt-5-nano")
+	require.Equal(t, "openai_test", got)
 }
 
 func TestRouterChatCompletion_ProviderQualifiedRawSlashModelStillWorks(t *testing.T) {
@@ -1425,18 +1246,11 @@ func TestRouterChatCompletion_ProviderQualifiedRawSlashModelStillWorks(t *testin
 	router, _ := NewRouter(registry)
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openrouter/openai/gpt-5-nano"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "openrouter" {
-		t.Fatalf("expected openrouter response, got %q", resp.ID)
-	}
-	if openRouter.lastChatReq == nil || openRouter.lastChatReq.Model != "openai/gpt-5-nano" {
-		t.Fatalf("expected openrouter provider to receive raw slash model, got %#v", openRouter.lastChatReq)
-	}
-	if openRouter.lastChatReq.Provider != "" {
-		t.Fatalf("expected provider field to be stripped upstream, got %q", openRouter.lastChatReq.Provider)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openrouter", resp.ID)
+	require.NotNil(t, openRouter.lastChatReq)
+	require.Equal(t, "openai/gpt-5-nano", openRouter.lastChatReq.Model)
+	require.Empty(t, openRouter.lastChatReq.Provider)
 }
 
 func TestRouterChatCompletion_ProviderOwnedRawSlashModelStillWorks(t *testing.T) {
@@ -1453,24 +1267,15 @@ func TestRouterChatCompletion_ProviderOwnedRawSlashModelStillWorks(t *testing.T)
 	router, _ := NewRouter(registry)
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openrouter/free"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "openrouter" {
-		t.Fatalf("expected openrouter response, got %q", resp.ID)
-	}
-	if openRouter.lastChatReq == nil || openRouter.lastChatReq.Model != "openrouter/free" {
-		t.Fatalf("expected openrouter provider to receive raw slash model, got %#v", openRouter.lastChatReq)
-	}
-	if openRouter.lastChatReq.Provider != "" {
-		t.Fatalf("expected provider field to be stripped upstream, got %q", openRouter.lastChatReq.Provider)
-	}
-	if got := router.GetProviderType("openrouter/free"); got != "openrouter" {
-		t.Fatalf("GetProviderType() = %q, want openrouter", got)
-	}
-	if got := router.GetProviderName("openrouter/free"); got != "openrouter" {
-		t.Fatalf("GetProviderName() = %q, want openrouter", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openrouter", resp.ID)
+	require.NotNil(t, openRouter.lastChatReq)
+	require.Equal(t, "openrouter/free", openRouter.lastChatReq.Model)
+	require.Empty(t, openRouter.lastChatReq.Provider)
+	got := router.GetProviderType("openrouter/free")
+	require.Equal(t, "openrouter", got)
+	got = router.GetProviderName("openrouter/free")
+	require.Equal(t, "openrouter", got)
 }
 
 func TestRouterChatCompletion_ProviderTypeOwnedRawSlashModelStillWorks(t *testing.T) {
@@ -1487,21 +1292,13 @@ func TestRouterChatCompletion_ProviderTypeOwnedRawSlashModelStillWorks(t *testin
 	router, _ := NewRouter(registry)
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "openrouter/auto"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "openrouter" {
-		t.Fatalf("expected openrouter response, got %q", resp.ID)
-	}
-	if openRouter.lastChatReq == nil || openRouter.lastChatReq.Model != "openrouter/auto" {
-		t.Fatalf("expected openrouter provider to receive raw slash model, got %#v", openRouter.lastChatReq)
-	}
-	if openRouter.lastChatReq.Provider != "" {
-		t.Fatalf("expected provider field to be stripped upstream, got %q", openRouter.lastChatReq.Provider)
-	}
-	if got := router.GetProviderName("openrouter/auto"); got != "openrouter-main" {
-		t.Fatalf("GetProviderName() = %q, want openrouter-main", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openrouter", resp.ID)
+	require.NotNil(t, openRouter.lastChatReq)
+	require.Equal(t, "openrouter/auto", openRouter.lastChatReq.Model)
+	require.Empty(t, openRouter.lastChatReq.Provider)
+	got := router.GetProviderName("openrouter/auto")
+	require.Equal(t, "openrouter-main", got)
 }
 
 func TestRouterChatCompletion_ExplicitProviderKeepsSlashModelRaw(t *testing.T) {
@@ -1517,18 +1314,11 @@ func TestRouterChatCompletion_ExplicitProviderKeepsSlashModelRaw(t *testing.T) {
 		Model:    "openai/gpt-oss-120b",
 		Provider: "groq",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "groq" {
-		t.Fatalf("expected groq provider response, got %q", resp.ID)
-	}
-	if groq.lastChatReq == nil || groq.lastChatReq.Model != "openai/gpt-oss-120b" {
-		t.Fatalf("expected upstream model to keep raw slash ID, got %#v", groq.lastChatReq)
-	}
-	if groq.lastChatReq.Provider != "" {
-		t.Fatalf("expected provider field to be stripped upstream, got %q", groq.lastChatReq.Provider)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "groq", resp.ID)
+	require.NotNil(t, groq.lastChatReq)
+	require.Equal(t, "openai/gpt-oss-120b", groq.lastChatReq.Model)
+	require.Empty(t, groq.lastChatReq.Provider)
 }
 
 func TestRouterResponses(t *testing.T) {
@@ -1546,40 +1336,25 @@ func TestRouterResponses(t *testing.T) {
 	t.Run("routes correctly and stamps provider", func(t *testing.T) {
 		req := &core.ResponsesRequest{Model: "gpt-4o"}
 		resp, err := router.Responses(context.Background(), req)
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		if resp.ID != expectedResp.ID {
-			t.Errorf("got ID %q, want %q", resp.ID, expectedResp.ID)
-		}
-		if resp.Provider != "openai" {
-			t.Errorf("Provider = %q, want %q", resp.Provider, "openai")
-		}
+		require.NoError(t, err)
+		assert.Equal(t, expectedResp.ID, resp.ID)
+		assert.Equal(t, "openai", resp.Provider)
 	})
 
 	t.Run("unknown model returns error", func(t *testing.T) {
 		req := &core.ResponsesRequest{Model: "unknown"}
 		_, err := router.Responses(context.Background(), req)
-		if err == nil {
-			t.Error("expected error for unknown model")
-		}
+		assert.Error(t, err)
 	})
 
 	t.Run("provider selector routes and strips provider before upstream", func(t *testing.T) {
 		req := &core.ResponsesRequest{Model: "gpt-4o", Provider: "openai-alt"}
 		resp, err := router.Responses(context.Background(), req)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.ID != altResp.ID {
-			t.Fatalf("got ID %q, want %q", resp.ID, altResp.ID)
-		}
-		if altProvider.lastResponsesReq == nil || altProvider.lastResponsesReq.Model != "gpt-4o" {
-			t.Fatalf("expected upstream model gpt-4o, got %#v", altProvider.lastResponsesReq)
-		}
-		if altProvider.lastResponsesReq.Provider != "" {
-			t.Fatalf("expected provider field stripped upstream, got %q", altProvider.lastResponsesReq.Provider)
-		}
+		require.NoError(t, err)
+		require.Equal(t, altResp.ID, resp.ID)
+		require.NotNil(t, altProvider.lastResponsesReq)
+		require.Equal(t, "gpt-4o", altProvider.lastResponsesReq.Model)
+		require.Empty(t, altProvider.lastResponsesReq.Provider)
 	})
 }
 
@@ -1599,29 +1374,15 @@ func TestRouterResponseUtilitiesStripProviderHint(t *testing.T) {
 		Input:    "hello",
 	}
 	_, err := router.CountResponseInputTokens(context.Background(), "openai", req)
-	if err != nil {
-		t.Fatalf("CountResponseInputTokens() error = %v", err)
-	}
-	if provider.lastInputTokensReq == nil {
-		t.Fatal("expected input token request to be captured")
-	}
-	if provider.lastInputTokensReq.Provider != "" {
-		t.Fatalf("upstream provider hint = %q, want empty", provider.lastInputTokensReq.Provider)
-	}
-	if req.Provider != "openai_primary" {
-		t.Fatalf("original request provider mutated to %q", req.Provider)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, provider.lastInputTokensReq)
+	require.Empty(t, provider.lastInputTokensReq.Provider)
+	require.Equal(t, "openai_primary", req.Provider)
 
 	_, err = router.CompactResponse(context.Background(), "openai", req)
-	if err != nil {
-		t.Fatalf("CompactResponse() error = %v", err)
-	}
-	if provider.lastCompactReq == nil {
-		t.Fatal("expected compact request to be captured")
-	}
-	if provider.lastCompactReq.Provider != "" {
-		t.Fatalf("upstream provider hint = %q, want empty", provider.lastCompactReq.Provider)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, provider.lastCompactReq)
+	require.Empty(t, provider.lastCompactReq.Provider)
 }
 
 func TestRouterResponseLifecycleRoutesByProviderName(t *testing.T) {
@@ -1644,18 +1405,10 @@ func TestRouterResponseLifecycleRoutesByProviderName(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	resp, err := router.CancelResponse(context.Background(), "openai_backup", "resp_1")
-	if err != nil {
-		t.Fatalf("CancelResponse() error = %v", err)
-	}
-	if backup.cancelledResponse != "resp_1" {
-		t.Fatalf("backup cancelled response = %q, want resp_1", backup.cancelledResponse)
-	}
-	if primary.cancelledResponse != "" {
-		t.Fatalf("primary cancelled response = %q, want empty", primary.cancelledResponse)
-	}
-	if resp.Provider != "openai" {
-		t.Fatalf("response provider = %q, want openai", resp.Provider)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "resp_1", backup.cancelledResponse)
+	require.Empty(t, primary.cancelledResponse)
+	require.Equal(t, "openai", resp.Provider)
 }
 
 func TestRouterListModels(t *testing.T) {
@@ -1670,34 +1423,20 @@ func TestRouterListModels(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	resp, err := router.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Len(t, resp.Data, 3)
+	assert.Equal(t, "list", resp.Object)
+	require.Equal(t, 0, lookup.listCalls)
+	require.Equal(t, 1, lookup.publicCalls)
 
-	if len(resp.Data) != 3 {
-		t.Errorf("expected 3 models, got %d", len(resp.Data))
-	}
-	if resp.Object != "list" {
-		t.Errorf("expected object 'list', got %q", resp.Object)
-	}
-	if lookup.listCalls != 0 {
-		t.Fatalf("ListModels() called %d times, want 0 when publicModelLister is available", lookup.listCalls)
-	}
-	if lookup.publicCalls != 1 {
-		t.Fatalf("ListPublicModels() called %d times, want 1", lookup.publicCalls)
-	}
 	want := []core.Model{
 		{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"},
 		{ID: "openrouter/gpt-4o", Object: "model", OwnedBy: "openrouter"},
 		{ID: "azure-openai/gpt-4o", Object: "model", OwnedBy: "azure-openai"},
 	}
 	for i, model := range want {
-		if resp.Data[i].ID != model.ID {
-			t.Fatalf("resp.Data[%d].ID = %q, want %q", i, resp.Data[i].ID, model.ID)
-		}
-		if resp.Data[i].OwnedBy != model.OwnedBy {
-			t.Fatalf("resp.Data[%d].OwnedBy = %q, want %q", i, resp.Data[i].OwnedBy, model.OwnedBy)
-		}
+		require.Equal(t, model.ID, resp.Data[i].ID, "resp.Data[%d].ID", i)
+		require.Equal(t, model.OwnedBy, resp.Data[i].OwnedBy, "resp.Data[%d].OwnedBy", i)
 	}
 }
 
@@ -1719,9 +1458,8 @@ func TestRouterGetProviderType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			if got := router.GetProviderType(tt.model); got != tt.expected {
-				t.Errorf("GetProviderType(%q) = %q, want %q", tt.model, got, tt.expected)
-			}
+			got := router.GetProviderType(tt.model)
+			assert.Equal(t, tt.expected, got, "GetProviderType(%q)", tt.model)
 		})
 	}
 }
@@ -1758,16 +1496,11 @@ func TestRouterBatchProviderTypeValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.call()
-			if err == nil {
-				t.Fatal("expected error")
-			}
+			require.Error(t, err)
+
 			var gwErr *core.GatewayError
-			if !errors.As(err, &gwErr) {
-				t.Fatalf("expected GatewayError, got %T: %v", err, err)
-			}
-			if gwErr.HTTPStatusCode() != http.StatusBadRequest {
-				t.Fatalf("expected status %d, got %d", http.StatusBadRequest, gwErr.HTTPStatusCode())
-			}
+			require.ErrorAs(t, err, &gwErr)
+			require.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
 		})
 	}
 }
@@ -1801,16 +1534,11 @@ func TestRouterFileProviderTypeValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.call()
-			if err == nil {
-				t.Fatal("expected error")
-			}
+			require.Error(t, err)
+
 			var gwErr *core.GatewayError
-			if !errors.As(err, &gwErr) {
-				t.Fatalf("expected GatewayError, got %T: %v", err, err)
-			}
-			if gwErr.HTTPStatusCode() != http.StatusBadRequest {
-				t.Fatalf("expected status 400, got %d", gwErr.HTTPStatusCode())
-			}
+			require.ErrorAs(t, err, &gwErr)
+			require.Equal(t, http.StatusBadRequest, gwErr.HTTPStatusCode())
 		})
 	}
 }
@@ -1829,18 +1557,10 @@ func TestRouterListBatchesSetsProviderOnItems(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	resp, err := router.ListBatches(context.Background(), "openai", 10, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("expected non-nil response")
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(resp.Data))
-	}
-	if resp.Data[0].Provider != "openai" {
-		t.Fatalf("expected provider=openai, got %q", resp.Data[0].Provider)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "openai", resp.Data[0].Provider)
 }
 
 func TestRouterGetBatchResultsWithHintsUsesHintAwareProvider(t *testing.T) {
@@ -1860,23 +1580,15 @@ func TestRouterGetBatchResultsWithHintsUsesHintAwareProvider(t *testing.T) {
 	resp, err := router.GetBatchResultsWithHints(context.Background(), "anthropic", "provider-batch-1", map[string]string{
 		"resp-1": "/v1/responses",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || len(resp.Data) != 1 {
-		t.Fatalf("unexpected response: %+v", resp)
-	}
-	if got := provider.capturedBatchHints["resp-1"]; got != "/v1/responses" {
-		t.Fatalf("capturedBatchHints[resp-1] = %q, want /v1/responses", got)
-	}
-	if provider.capturedBatchID != "provider-batch-1" {
-		t.Fatalf("capturedBatchID = %q, want provider-batch-1", provider.capturedBatchID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Data, 1)
+	got := provider.capturedBatchHints["resp-1"]
+	require.Equal(t, "/v1/responses", got)
+	require.Equal(t, "provider-batch-1", provider.capturedBatchID)
 
 	router.ClearBatchResultHints("anthropic", "provider-batch-1")
-	if provider.clearedBatchHintID != "provider-batch-1" {
-		t.Fatalf("clearedBatchHintID = %q, want provider-batch-1", provider.clearedBatchHintID)
-	}
+	require.Equal(t, "provider-batch-1", provider.clearedBatchHintID)
 }
 
 func TestRouterEmbeddings(t *testing.T) {
@@ -1900,23 +1612,15 @@ func TestRouterEmbeddings(t *testing.T) {
 	t.Run("routes correctly and stamps provider", func(t *testing.T) {
 		req := &core.EmbeddingRequest{Model: "text-embedding-3-small", Input: "hello"}
 		resp, err := router.Embeddings(context.Background(), req)
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		if resp.Model != expectedResp.Model {
-			t.Errorf("got Model %q, want %q", resp.Model, expectedResp.Model)
-		}
-		if resp.Provider != "openai" {
-			t.Errorf("Provider = %q, want %q", resp.Provider, "openai")
-		}
+		require.NoError(t, err)
+		assert.Equal(t, expectedResp.Model, resp.Model)
+		assert.Equal(t, "openai", resp.Provider)
 	})
 
 	t.Run("unknown model returns error", func(t *testing.T) {
 		req := &core.EmbeddingRequest{Model: "unknown"}
 		_, err := router.Embeddings(context.Background(), req)
-		if err == nil {
-			t.Error("expected error for unknown model")
-		}
+		assert.Error(t, err)
 	})
 
 	t.Run("provider selector routes and strips provider before upstream", func(t *testing.T) {
@@ -1926,15 +1630,10 @@ func TestRouterEmbeddings(t *testing.T) {
 			Input:    "hello",
 		}
 		_, err := router.Embeddings(context.Background(), req)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if altProvider.lastEmbeddingReq == nil || altProvider.lastEmbeddingReq.Model != "text-embedding-3-small" {
-			t.Fatalf("expected upstream model text-embedding-3-small, got %#v", altProvider.lastEmbeddingReq)
-		}
-		if altProvider.lastEmbeddingReq.Provider != "" {
-			t.Fatalf("expected provider field stripped upstream, got %q", altProvider.lastEmbeddingReq.Provider)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, altProvider.lastEmbeddingReq)
+		require.Equal(t, "text-embedding-3-small", altProvider.lastEmbeddingReq.Model)
+		require.Empty(t, altProvider.lastEmbeddingReq.Provider)
 	})
 }
 
@@ -1943,16 +1642,11 @@ func TestRouterEmbeddings_EmptyLookup(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "any"})
-	if !errors.Is(err, ErrRegistryNotInitialized) {
-		t.Errorf("expected ErrRegistryNotInitialized, got: %v", err)
-	}
+	assert.ErrorIs(t, err, ErrRegistryNotInitialized)
+
 	var gwErr *core.GatewayError
-	if !errors.As(err, &gwErr) {
-		t.Fatalf("expected GatewayError, got %T: %v", err, err)
-	}
-	if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
-	}
+	require.ErrorAs(t, err, &gwErr)
+	require.Equal(t, http.StatusServiceUnavailable, gwErr.HTTPStatusCode())
 }
 
 func TestRouterEmbeddings_ProviderError(t *testing.T) {
@@ -1966,12 +1660,9 @@ func TestRouterEmbeddings_ProviderError(t *testing.T) {
 
 	req := &core.EmbeddingRequest{Model: "claude-3-5-sonnet"}
 	_, err := router.Embeddings(context.Background(), req)
-	if err == nil {
-		t.Error("expected error from provider")
-	}
-	if _, ok := errors.AsType[*core.GatewayError](err); !ok {
-		t.Errorf("expected GatewayError, got %T: %v", err, err)
-	}
+	require.Error(t, err)
+	_, ok := errors.AsType[*core.GatewayError](err)
+	assert.True(t, ok)
 }
 
 func TestRouterProviderError(t *testing.T) {
@@ -1986,17 +1677,13 @@ func TestRouterProviderError(t *testing.T) {
 	t.Run("ChatCompletion propagates error", func(t *testing.T) {
 		req := &core.ChatRequest{Model: "failing-model"}
 		_, err := router.ChatCompletion(context.Background(), req)
-		if !errors.Is(err, providerErr) {
-			t.Errorf("expected provider error, got: %v", err)
-		}
+		assert.ErrorIs(t, err, providerErr)
 	})
 
 	t.Run("Responses propagates error", func(t *testing.T) {
 		req := &core.ResponsesRequest{Model: "failing-model"}
 		_, err := router.Responses(context.Background(), req)
-		if !errors.Is(err, providerErr) {
-			t.Errorf("expected provider error, got: %v", err)
-		}
+		assert.ErrorIs(t, err, providerErr)
 	})
 }
 
@@ -2013,28 +1700,17 @@ func TestRouterPassthrough(t *testing.T) {
 		Body:     io.NopCloser(strings.NewReader(`{"model":"gpt-5-mini"}`)),
 		Headers:  http.Header{"Content-Type": {"application/json"}},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if provider.lastPassthrough == nil {
-		t.Fatal("provider did not receive passthrough request")
-	}
-	if provider.lastPassthrough.Endpoint != "responses" {
-		t.Fatalf("endpoint = %q, want responses", provider.lastPassthrough.Endpoint)
-	}
-	if got := readAndCloseBody(t, provider.lastPassthrough.Body); got != `{"model":"gpt-5-mini"}` {
-		t.Fatalf("body = %q", got)
-	}
-	if got := provider.lastPassthrough.Headers.Get("Content-Type"); got != "application/json" {
-		t.Fatalf("content-type = %q", got)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, provider.lastPassthrough)
+	require.Equal(t, "responses", provider.lastPassthrough.Endpoint)
+	got := readAndCloseBody(t, provider.lastPassthrough.Body)
+	require.Equal(t, `{"model":"gpt-5-mini"}`, got)
+	got = provider.lastPassthrough.Headers.Get("Content-Type")
+	require.Equal(t, "application/json", got)
+
 	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read body: %v", err)
-	}
-	if string(body) != `{"ok":true}` {
-		t.Fatalf("body = %q", string(body))
-	}
+	require.NoError(t, err)
+	require.Equal(t, `{"ok":true}`, string(body))
 }
 
 func TestRouterPassthrough_ErrorCases(t *testing.T) {
@@ -2047,12 +1723,9 @@ func TestRouterPassthrough_ErrorCases(t *testing.T) {
 			Method:   http.MethodGet,
 			Endpoint: "responses",
 		})
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if _, ok := errors.AsType[*core.GatewayError](err); !ok {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
+		require.Error(t, err)
+		_, ok := errors.AsType[*core.GatewayError](err)
+		require.True(t, ok)
 	})
 
 	t.Run("provider error is propagated", func(t *testing.T) {
@@ -2066,9 +1739,7 @@ func TestRouterPassthrough_ErrorCases(t *testing.T) {
 			Method:   http.MethodGet,
 			Endpoint: "responses",
 		})
-		if !errors.Is(err, providerErr) {
-			t.Fatalf("expected provider error, got %v", err)
-		}
+		require.ErrorIs(t, err, providerErr)
 	})
 
 	t.Run("empty registry returns not initialized", func(t *testing.T) {
@@ -2078,16 +1749,11 @@ func TestRouterPassthrough_ErrorCases(t *testing.T) {
 			Method:   http.MethodGet,
 			Endpoint: "responses",
 		})
-		if !errors.Is(err, ErrRegistryNotInitialized) {
-			t.Fatalf("expected ErrRegistryNotInitialized, got %v", err)
-		}
+		require.ErrorIs(t, err, ErrRegistryNotInitialized)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-			t.Fatalf("expected 503 status, got %d", gwErr.HTTPStatusCode())
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, http.StatusServiceUnavailable, gwErr.HTTPStatusCode())
 	})
 }
 
@@ -2098,22 +1764,17 @@ func TestRouterPassthrough_UsesProviderRegistryWithoutModels(t *testing.T) {
 	registry.initialized = true
 
 	router, err := NewRouter(registry)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
 
 	resp, err := router.Passthrough(context.Background(), "openai", &core.PassthroughRequest{
 		Method:   http.MethodGet,
 		Endpoint: "models",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
-	if provider.lastPassthrough == nil {
-		t.Fatal("provider did not receive passthrough request")
-	}
+	require.NotNil(t, provider.lastPassthrough)
 }
 
 func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
@@ -2123,39 +1784,27 @@ func TestRouterListModelsUnqualifiedIDs(t *testing.T) {
 		registryModelEntry{provider: &mockProvider{}, providerName: "anthropic", providerType: "anthropic", modelID: "claude-sonnet-4-6"},
 	)
 	router, err := NewRouter(registry)
-	if err != nil {
-		t.Fatalf("NewRouter: %v", err)
-	}
+	require.NoError(t, err)
 
 	resp, err := router.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels: %v", err)
-	}
-	if len(resp.Data) != 3 {
-		t.Fatalf("expected 3 qualified models by default, got %d", len(resp.Data))
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 3)
 
 	router.SetUnqualifiedModelIDs(true)
 	resp, err = router.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels: %v", err)
-	}
-	if len(resp.Data) != 2 {
-		t.Fatalf("expected 2 deduplicated models, got %d: %+v", len(resp.Data), resp.Data)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 2)
+
 	for _, m := range resp.Data {
-		if strings.Contains(m.ID, "/") {
-			t.Errorf("expected bare model ID, got %q", m.ID)
-		}
+		assert.NotContains(t, m.ID, "/", "expected bare model ID")
 	}
-	if resp.Data[0].ID != "claude-sonnet-4-6" || resp.Data[0].OwnedBy != "anthropic" {
-		t.Errorf("unexpected first entry: %+v", resp.Data[0])
-	}
+	assert.Equal(t, "claude-sonnet-4-6", resp.Data[0].ID)
+	assert.Equal(t, "anthropic", resp.Data[0].OwnedBy, "unexpected first entry: %+v", resp.Data[0])
+
 	// The listed owner must be the provider an unqualified request routes to.
 	want := registry.GetProviderName("gpt-5")
-	if resp.Data[1].ID != "gpt-5" || resp.Data[1].OwnedBy != want {
-		t.Errorf("expected gpt-5 owned by routing winner %q, got %+v", want, resp.Data[1])
-	}
+	assert.Equal(t, "gpt-5", resp.Data[1].ID)
+	assert.Equal(t, want, resp.Data[1].OwnedBy, "gpt-5 should be owned by the routing winner: %+v", resp.Data[1])
 }
 
 func TestAdaptBatchRequest_RejectsNonChatItemsInAnthropicBatches(t *testing.T) {
@@ -2171,13 +1820,10 @@ func TestAdaptBatchRequest_RejectsNonChatItemsInAnthropicBatches(t *testing.T) {
 			}
 			for _, providerType := range []string{"anthropic", "openai"} {
 				_, err := adaptBatchRequest(ctx, request, providerType)
-				if err == nil || !strings.Contains(err.Error(), "not a chat completion") {
-					t.Errorf("%s batch error = %v; want non-chat item rejected", providerType, err)
-				}
+				assert.ErrorContains(t, err, "not a chat completion")
 			}
-			if _, err := adaptBatchRequest(context.Background(), request, "openai"); err != nil {
-				t.Errorf("ordinary batch error = %v; want opaque item accepted", err)
-			}
+			_, err := adaptBatchRequest(context.Background(), request, "openai")
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -2197,27 +1843,20 @@ func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpen
 		}},
 	}
 	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
-
-	if got, err := adaptBatchRequest(ctx, request, "anthropic"); err != nil || got != request {
-		t.Fatalf("anthropic batch = %#v, %v; want the request untouched", got, err)
-	}
+	got, err := adaptBatchRequest(ctx, request, "anthropic")
+	require.NoError(t, err)
+	require.Same(t, request, got)
 
 	adapted, err := adaptBatchRequest(ctx, request, "openrouter")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	decoded, err := core.DecodeKnownBatchItemRequest(adapted.Endpoint, adapted.Requests[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	chat := decoded.Request.(*core.ChatRequest)
-	if raw := chat.Messages[0].ExtraFields.Lookup(core.ExtraContentField); len(raw) != 0 {
-		t.Errorf("openrouter batch kept thinking_blocks: %s", raw)
-	}
-	if raw := chat.Messages[1].ExtraFields.Lookup(core.ExtraContentField); len(raw) != 0 {
-		t.Errorf("openrouter batch kept is_error: %s", raw)
-	}
-	if got := string(chat.Messages[0].ExtraFields.Lookup("cache_control")); got != `{"type":"ephemeral"}` {
-		t.Errorf("openrouter batch lost cache_control: %s", got)
-	}
+	raw := chat.Messages[0].ExtraFields.Lookup(core.ExtraContentField)
+	assert.Empty(t, raw)
+	raw = chat.Messages[1].ExtraFields.Lookup(core.ExtraContentField)
+	assert.Empty(t, raw)
+	assert.Equal(t, `{"type":"ephemeral"}`, string(chat.Messages[0].ExtraFields.Lookup("cache_control")), "openrouter batch lost cache_control")
 }

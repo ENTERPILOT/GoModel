@@ -10,6 +10,8 @@ import (
 	"github.com/enterpilot/gomodel/internal/cache/modelcache"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modeldata"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMatchesGlob(t *testing.T) {
@@ -40,9 +42,8 @@ func TestMatchesGlob(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := matchesGlob(tt.pattern, tt.value); got != tt.want {
-				t.Errorf("matchesGlob(%q, %q) = %v, want %v", tt.pattern, tt.value, got, tt.want)
-			}
+			got := matchesGlob(tt.pattern, tt.value)
+			assert.Equal(t, tt.want, got, "matchesGlob(%q, %q)", tt.pattern, tt.value)
 		})
 	}
 }
@@ -128,12 +129,9 @@ func TestModelFilterKeep(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			filter, ok := newModelFilter(tt.filter)
-			if !ok {
-				t.Fatalf("newModelFilter(%+v) reported an empty filter", tt.filter)
-			}
-			if got := filter.keep(tt.model); got != tt.want {
-				t.Errorf("keep(%q) = %v, want %v", tt.model.ID, got, tt.want)
-			}
+			require.True(t, ok, "newModelFilter(%+v) reported an empty filter", tt.filter)
+			got := filter.keep(tt.model)
+			assert.Equal(t, tt.want, got, "keep(%q)", tt.model.ID)
 		})
 	}
 }
@@ -152,9 +150,8 @@ func TestNewModelFilterEmpty(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, ok := newModelFilter(tt.filter); ok != tt.want {
-				t.Errorf("newModelFilter(%+v) ok = %v, want %v", tt.filter, ok, tt.want)
-			}
+			_, ok := newModelFilter(tt.filter)
+			assert.Equal(t, tt.want, ok)
 		})
 	}
 }
@@ -172,23 +169,16 @@ func TestPublishFilteredInventory(t *testing.T) {
 			"gpt-4o": {Model: core.Model{ID: "gpt-4o"}},
 		},
 	}
+	dropped := registry.publishFilteredInventoryLocked()
+	require.Equal(t, 1, dropped)
+	_, ok := registry.modelsByProvider["openrouter"]["deepseek/deepseek-r1:free"]
+	assert.True(t, ok)
+	_, ok = registry.modelsByProvider["openrouter"]["openai/gpt-4o"]
+	assert.False(t, ok)
+	assert.Len(t, registry.modelsByProvider["openai"], 1)
 
-	if dropped := registry.publishFilteredInventoryLocked(); dropped != 1 {
-		t.Fatalf("dropped = %d, want 1", dropped)
-	}
-	if _, ok := registry.modelsByProvider["openrouter"]["deepseek/deepseek-r1:free"]; !ok {
-		t.Error("free model was dropped, want published")
-	}
-	if _, ok := registry.modelsByProvider["openrouter"]["openai/gpt-4o"]; ok {
-		t.Error("paid model was published, want filtered out")
-	}
-	if len(registry.modelsByProvider["openai"]) != 1 {
-		t.Errorf("unfiltered provider models = %d, want 1", len(registry.modelsByProvider["openai"]))
-	}
 	// The inventory itself must not be edited: filtering is a view over it.
-	if len(registry.discoveredByProvider["openrouter"]) != 2 {
-		t.Errorf("inventory models = %d, want 2 retained", len(registry.discoveredByProvider["openrouter"]))
-	}
+	assert.Len(t, registry.discoveredByProvider["openrouter"], 2)
 }
 
 // A filter that matches nothing must leave the provider present with an empty
@@ -203,22 +193,16 @@ func TestPublishFilteredInventoryKeepsEmptiedProvider(t *testing.T) {
 	registry.publishFilteredInventoryLocked()
 
 	models, ok := registry.modelsByProvider["openrouter"]
-	if !ok {
-		t.Fatal("provider key was removed, want retained with an empty inventory")
-	}
-	if len(models) != 0 {
-		t.Errorf("models = %d, want 0", len(models))
-	}
+	require.True(t, ok)
+	assert.Empty(t, models)
 }
 
 func TestSetProviderModelFilterClears(t *testing.T) {
 	registry := NewModelRegistry()
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{Include: []string{"*:free"}})
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{})
-
-	if filters := registry.snapshotProviderModelFilters(); len(filters) != 0 {
-		t.Errorf("filters = %+v, want cleared", filters)
-	}
+	filters := registry.snapshotProviderModelFilters()
+	assert.Empty(t, filters)
 }
 
 // End-to-end through Initialize: the filter must narrow what the catalog
@@ -245,17 +229,12 @@ func TestInitialize_AppliesProviderModelFilter(t *testing.T) {
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "openrouter", "openrouter")
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{MaxPricePerMtok: &free})
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
-
-	if got := registry.GetProvider("deepseek/deepseek-r1:free"); got == nil {
-		t.Error("free model is not routable, want kept")
-	}
-	if got := registry.GetProvider("openai/gpt-4o"); got != nil {
-		t.Error("model above the price cap is routable, want dropped")
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	got := registry.GetProvider("deepseek/deepseek-r1:free")
+	assert.NotNil(t, got)
+	got = registry.GetProvider("openai/gpt-4o")
+	assert.Nil(t, got)
 }
 
 // Filtering is a view, not a deletion: once the model list prices a model back
@@ -272,40 +251,29 @@ func TestEnrichModels_ReadmitsModelThatPricesBackUnderCap(t *testing.T) {
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "openrouter", "openai")
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{MaxPricePerMtok: new(1.0)})
-
-	// Unpriced at fetch, so the cap rejects it.
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
-	if registry.GetModel("openrouter/vendor/volatile") != nil {
-		t.Fatal("unpriced model was admitted under a price cap, want dropped")
-	}
+	err := // Unpriced at fetch, so the cap rejects it.
+		registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, registry.GetModel("openrouter/vendor/volatile"))
 
 	enrich := func(outputPerMtok string) {
 		raw := []byte(`{"version":1,"updated_at":"2025-01-01T00:00:00Z","providers":{},"models":{` +
 			`"vendor/volatile":{"pricing":{"currency":"USD","input_per_mtok":0.1,"output_per_mtok":` + outputPerMtok + `}}` +
 			`},"provider_models":{}}`)
 		list, err := modeldata.Parse(raw)
-		if err != nil {
-			t.Fatalf("Parse: %v", err)
-		}
+		require.NoError(t, err)
+
 		registry.SetModelList(list, raw)
 		registry.EnrichModels()
 	}
 
 	enrich("9")
-	if registry.GetModel("openrouter/vendor/volatile") != nil {
-		t.Fatal("model priced above the cap is in the catalog, want dropped")
-	}
+	require.Nil(t, registry.GetModel("openrouter/vendor/volatile"))
 
 	// The inventory kept the model, so a price drop re-admits it.
 	enrich("0.4")
-	if registry.GetModel("openrouter/vendor/volatile") == nil {
-		t.Error("model priced back under the cap was not re-admitted")
-	}
-	if registry.GetProvider("vendor/volatile") == nil {
-		t.Error("re-admitted model is not routable by bare ID")
-	}
+	assert.NotNil(t, registry.GetModel("openrouter/vendor/volatile"))
+	assert.NotNil(t, registry.GetProvider("vendor/volatile"))
 }
 
 // Clearing a filter must restore the models it was hiding without a refetch.
@@ -324,21 +292,14 @@ func TestSetProviderModelFilter_RepublishesCatalog(t *testing.T) {
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "openrouter", "openai")
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{Include: []string{"*:free"}})
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
-	if registry.GetModel("openrouter/openai/gpt-4o") != nil {
-		t.Fatal("filtered model is in the catalog, want dropped")
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, registry.GetModel("openrouter/openai/gpt-4o"))
 
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{})
 
-	if registry.GetModel("openrouter/openai/gpt-4o") == nil {
-		t.Error("clearing the filter did not restore the model")
-	}
-	if registry.GetModel("openrouter/deepseek/deepseek-r1:free") == nil {
-		t.Error("clearing the filter dropped a model it had kept")
-	}
+	assert.NotNil(t, registry.GetModel("openrouter/openai/gpt-4o"))
+	assert.NotNil(t, registry.GetModel("openrouter/deepseek/deepseek-r1:free"))
 }
 
 // A model admitted while unpriced must leave the catalog once the remote model
@@ -358,12 +319,11 @@ func TestEnrichModels_ReappliesPriceCap(t *testing.T) {
 
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "openrouter", "openai")
+	err := // The cap is applied only after enrichment supplies prices, so both models
+		// must first enter the catalog with no pricing at all.
+		registry.Initialize(context.Background())
+	require.NoError(t, err)
 
-	// The cap is applied only after enrichment supplies prices, so both models
-	// must first enter the catalog with no pricing at all.
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{MaxPricePerMtok: new(1.0)})
 
 	raw := []byte(`{"version":1,"updated_at":"2025-01-01T00:00:00Z","providers":{},"models":{` +
@@ -371,21 +331,14 @@ func TestEnrichModels_ReappliesPriceCap(t *testing.T) {
 		`"vendor/pricey":{"pricing":{"currency":"USD","input_per_mtok":0.2,"output_per_mtok":9}}` +
 		`},"provider_models":{}}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 	registry.EnrichModels()
 
-	if registry.GetModel("openrouter/vendor/cheap") == nil {
-		t.Error("model under the cap was dropped, want kept")
-	}
-	if registry.GetModel("openrouter/vendor/pricey") != nil {
-		t.Error("model priced above the cap is still in the catalog, want dropped")
-	}
-	if registry.GetProvider("vendor/pricey") != nil {
-		t.Error("model priced above the cap is still routable by bare ID, want dropped")
-	}
+	assert.NotNil(t, registry.GetModel("openrouter/vendor/cheap"))
+	assert.Nil(t, registry.GetModel("openrouter/vendor/pricey"))
+	assert.Nil(t, registry.GetProvider("vendor/pricey"))
 }
 
 // The cache must hold what the provider actually served, not what the filter
@@ -408,12 +361,10 @@ func TestSaveToCache_PersistsUnfilteredInventory(t *testing.T) {
 	registry.SetCache(modelcache.NewLocalCache(cacheFile))
 	registry.RegisterProviderWithNameAndType(provider, "openrouter", "openai")
 	registry.SetProviderModelFilter("openrouter", config.ModelFilter{Include: []string{"*:free"}})
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() failed: %v", err)
-	}
-	if err := registry.SaveToCache(context.Background()); err != nil {
-		t.Fatalf("SaveToCache() failed: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	err = registry.SaveToCache(context.Background())
+	require.NoError(t, err)
 
 	// Restore into a registry whose filter has since been removed, with the
 	// provider unreachable so only the cache can supply the catalog.
@@ -422,13 +373,7 @@ func TestSaveToCache_PersistsUnfilteredInventory(t *testing.T) {
 	restored.SetCache(modelcache.NewLocalCache(cacheFile))
 	restored.RegisterProviderWithNameAndType(offline, "openrouter", "openai")
 	loaded, err := restored.LoadFromCache(context.Background())
-	if err != nil {
-		t.Fatalf("LoadFromCache() failed: %v", err)
-	}
-	if loaded != 2 {
-		t.Fatalf("loaded = %d, want 2 models restored from cache", loaded)
-	}
-	if restored.GetModel("openrouter/openai/gpt-4o") == nil {
-		t.Error("the filtered-out model was not persisted, want the cache to hold it")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 2, loaded)
+	assert.NotNil(t, restored.GetModel("openrouter/openai/gpt-4o"))
 }

@@ -1,30 +1,39 @@
 package openai
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func newSpeechTestProvider(t *testing.T, handler http.HandlerFunc) *CompatibleProvider {
+// newTestProvider starts a recording upstream served by handler and returns a
+// compatible provider pointed at it together with the recorded requests.
+func newTestProvider(t *testing.T, handler http.HandlerFunc) (*CompatibleProvider, *providertest.Capture) {
 	t.Helper()
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	return NewCompatibleProviderWithHTTPClient(
+	server, capture := providertest.Server(t, handler)
+	provider := NewCompatibleProviderWithHTTPClient(
 		"test-key",
 		server.Client(),
 		llmclient.Hooks{},
 		CompatibleProviderConfig{ProviderName: "openai", BaseURL: server.URL},
 	)
+	return provider, capture
+}
+
+// jsonHandler answers every request with body as application/json.
+func jsonHandler(body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}
 }
 
 // TestCreateSpeech_PreservesUpstreamContentType ensures the response is tagged
@@ -46,7 +55,7 @@ func TestCreateSpeech_PreservesUpstreamContentType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			provider := newSpeechTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+			provider, _ := newTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
 				if tt.upstreamType != "" {
 					w.Header().Set("Content-Type", tt.upstreamType)
 				} else {
@@ -58,51 +67,14 @@ func TestCreateSpeech_PreservesUpstreamContentType(t *testing.T) {
 			resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "gpt-4o-mini-tts", Input: "hello", Voice: "alloy", ResponseFormat: tt.responseFormat,
 			})
-			if err != nil {
-				t.Fatalf("CreateSpeech() error = %v", err)
-			}
-			if resp.ContentType != tt.wantType {
-				t.Errorf("ContentType = %q, want %q", resp.ContentType, tt.wantType)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantType, resp.ContentType)
 		})
 	}
 }
 
 func TestCreateTranslation_UsesTranslationMultipartShape(t *testing.T) {
-	provider := newSpeechTestProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/audio/translations" {
-			t.Errorf("path = %q, want /audio/translations", r.URL.Path)
-		}
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Fatalf("ParseMultipartForm: %v", err)
-		}
-		for field, want := range map[string]string{
-			"model": "whisper-1", "prompt": "Use product names", "response_format": "text", "temperature": "0.2",
-		} {
-			if got := r.FormValue(field); got != want {
-				t.Errorf("%s = %q, want %q", field, got, want)
-			}
-		}
-		if _, ok := r.MultipartForm.Value["language"]; ok {
-			t.Error("translation request must not forward language")
-		}
-		if _, ok := r.MultipartForm.Value["timestamp_granularities[]"]; ok {
-			t.Error("translation request must not forward timestamp granularities")
-		}
-
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			t.Fatalf("FormFile: %v", err)
-		}
-		defer func() { _ = file.Close() }()
-		data, err := io.ReadAll(file)
-		if err != nil {
-			t.Fatalf("ReadAll(file): %v", err)
-		}
-		if header.Filename != "speech.wav" || !bytes.Equal(data, []byte("wave-bytes")) {
-			t.Errorf("file = %q %q, want speech.wav wave-bytes", header.Filename, data)
-		}
-
+	provider, capture := newTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("Hello from GoModel."))
 	})
@@ -117,15 +89,26 @@ func TestCreateTranslation_UsesTranslationMultipartShape(t *testing.T) {
 		Temperature:            "0.2",
 		TimestampGranularities: []string{"word"},
 	})
-	if err != nil {
-		t.Fatalf("CreateTranslation() error = %v", err)
+	require.NoError(t, err)
+	assert.Equal(t, "text/plain; charset=utf-8", resp.ContentType)
+	assert.Equal(t, "Hello from GoModel.", string(resp.Data))
+
+	req := capture.Last(t)
+	assert.Equal(t, "/audio/translations", req.Path)
+	form := recordedMultipart(t, req)
+	for field, want := range map[string]string{
+		"model": "whisper-1", "prompt": "Use product names", "response_format": "text", "temperature": "0.2",
+	} {
+		assert.Equal(t, []string{want}, form.values[field], field)
 	}
-	if resp.ContentType != "text/plain; charset=utf-8" {
-		t.Errorf("ContentType = %q, want text/plain; charset=utf-8", resp.ContentType)
-	}
-	if string(resp.Data) != "Hello from GoModel." {
-		t.Errorf("Data = %q, want translated text", resp.Data)
-	}
+	// Translations have no language or timestamp granularity parameters.
+	assert.NotContains(t, form.values, "language")
+	assert.NotContains(t, form.values, "timestamp_granularities[]")
+
+	files := form.files["file"]
+	require.Len(t, files, 1)
+	assert.Equal(t, "speech.wav", files[0].filename)
+	assert.Equal(t, "wave-bytes", files[0].data)
 }
 
 func TestCreateTranslation_RejectsInvalidRequests(t *testing.T) {
@@ -143,50 +126,34 @@ func TestCreateTranslation_RejectsInvalidRequests(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := provider.CreateTranslation(context.Background(), tt.req)
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) {
-				t.Fatalf("CreateTranslation() error = %v, want GatewayError", err)
-			}
-			if gatewayErr.Message != tt.wantMessage {
-				t.Fatalf("CreateTranslation() message = %q, want %q", gatewayErr.Message, tt.wantMessage)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, tt.wantMessage, gatewayErr.Message)
 		})
 	}
 }
 
+// A model-scoped circuit breaker opened by one audio model must not block a
+// different model on the other multipart endpoint.
 func TestMultipartAudioModelBreakerIsolation(t *testing.T) {
-	var models []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(1024); err != nil {
-			t.Error(err)
-			return
-		}
-		defer func() {
-			if err := r.MultipartForm.RemoveAll(); err != nil {
-				t.Error(err)
-			}
-		}()
-		model := r.FormValue("model")
-		models = append(models, model)
-		if model == "transcribe" {
-			w.WriteHeader(503)
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.FormValue("model") == "transcribe" {
+			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
 		_, _ = w.Write([]byte(`{"text":"translated"}`))
-	}))
-	defer server.Close()
+	})
 	resilience := config.ResilienceConfig{Retry: config.DefaultRetryConfig(), CircuitBreaker: config.DefaultCircuitBreakerConfig()}
 	resilience.CircuitBreaker.Scope = "model"
 	resilience.CircuitBreaker.FailureThreshold = 1
 	provider := NewCompatibleProvider("test", providers.ProviderOptions{Resilience: resilience}, CompatibleProviderConfig{ProviderName: "test", BaseURL: server.URL})
+
 	_, err := provider.CreateTranscription(t.Context(), &core.AudioTranscriptionRequest{Model: "transcribe", File: []byte("audio")})
-	if err == nil {
-		t.Fatal("expected transcription failure")
-	}
+	require.Error(t, err)
 	_, err = provider.CreateTranslation(t.Context(), &core.AudioTranscriptionRequest{Model: "translate", File: []byte("audio")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(models) != 2 || models[0] != "transcribe" || models[1] != "translate" {
-		t.Fatalf("upstream models=%v", models)
-	}
+	require.NoError(t, err)
+
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	assert.Equal(t, []string{"transcribe"}, recordedMultipart(t, requests[0]).values["model"])
+	assert.Equal(t, []string{"translate"}, recordedMultipart(t, requests[1]).values["model"])
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 // The registry and router trim caller input at the boundary and store
@@ -16,13 +17,12 @@ func TestRegistryTrimsProviderRegistrationInput(t *testing.T) {
 	provider := &mockProvider{name: "west"}
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "  west  ", " openai ")
-
-	if got := registry.ProviderNames(); len(got) != 1 || got[0] != "west" {
-		t.Fatalf("ProviderNames() = %v, want [west]", got)
-	}
-	if got := registry.ProviderTypes(); len(got) != 1 || got[0] != "openai" {
-		t.Fatalf("ProviderTypes() = %v, want [openai]", got)
-	}
+	got := registry.ProviderNames()
+	require.Len(t, got, 1)
+	require.Equal(t, "west", got[0])
+	got = registry.ProviderTypes()
+	require.Len(t, got, 1)
+	require.Equal(t, "openai", got[0])
 
 	tests := []struct {
 		name     string
@@ -37,12 +37,13 @@ func TestRegistryTrimsProviderRegistrationInput(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run("name/"+tt.name, func(t *testing.T) {
-			if got := registry.GetProviderTypeForName(tt.input); got != tt.wantType {
-				t.Fatalf("GetProviderTypeForName(%q) = %q, want %q", tt.input, got, tt.wantType)
-			}
-			wantProvider := tt.wantType != ""
-			if got := registry.ProviderByName(tt.input) != nil; got != wantProvider {
-				t.Fatalf("ProviderByName(%q) found = %v, want %v", tt.input, got, wantProvider)
+			got := registry.GetProviderTypeForName(tt.input)
+			require.Equal(t, tt.wantType, got, "GetProviderTypeForName(%q)", tt.input)
+
+			if tt.wantType == "" {
+				require.Nil(t, registry.ProviderByName(tt.input))
+			} else {
+				require.NotNil(t, registry.ProviderByName(tt.input))
 			}
 		})
 	}
@@ -59,12 +60,13 @@ func TestRegistryTrimsProviderRegistrationInput(t *testing.T) {
 	}
 	for _, tt := range typeTests {
 		t.Run("type/"+tt.name, func(t *testing.T) {
-			if got := registry.GetProviderNameForType(tt.input); got != tt.wantName {
-				t.Fatalf("GetProviderNameForType(%q) = %q, want %q", tt.input, got, tt.wantName)
-			}
-			wantProvider := tt.wantName != ""
-			if got := registry.ProviderByType(tt.input) != nil; got != wantProvider {
-				t.Fatalf("ProviderByType(%q) found = %v, want %v", tt.input, got, wantProvider)
+			got := registry.GetProviderNameForType(tt.input)
+			require.Equal(t, tt.wantName, got, "GetProviderNameForType(%q)", tt.input)
+
+			if tt.wantName == "" {
+				require.Nil(t, registry.ProviderByType(tt.input))
+			} else {
+				require.NotNil(t, registry.ProviderByType(tt.input))
 			}
 		})
 	}
@@ -95,28 +97,21 @@ func TestRegistryLookupsTrimSelectorInput(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := registry.Supports(tt.selector); got != tt.wantFound {
-				t.Fatalf("Supports(%q) = %v, want %v", tt.selector, got, tt.wantFound)
-			}
-			if got := registry.GetProvider(tt.selector) != nil; got != tt.wantFound {
-				t.Fatalf("GetProvider(%q) found = %v, want %v", tt.selector, got, tt.wantFound)
-			}
+			got := registry.Supports(tt.selector)
+			require.Equal(t, tt.wantFound, got, "Supports(%q)", tt.selector)
+			got = registry.GetProvider(tt.selector) != nil
+			require.Equal(t, tt.wantFound, got, "GetProvider(%q) found", tt.selector)
+
 			wantType, wantName := "", ""
 			if tt.wantFound {
 				wantType, wantName = "openai", "west"
 			}
-			if got := registry.GetProviderType(tt.selector); got != wantType {
-				t.Fatalf("GetProviderType(%q) = %q, want %q", tt.selector, got, wantType)
-			}
-			if got := registry.GetProviderName(tt.selector); got != wantName {
-				t.Fatalf("GetProviderName(%q) = %q, want %q", tt.selector, got, wantName)
-			}
+			require.Equal(t, wantType, registry.GetProviderType(tt.selector))
+			require.Equal(t, wantName, registry.GetProviderName(tt.selector))
 			model, ok := registry.LookupModel(tt.selector)
-			if ok != tt.wantFound {
-				t.Fatalf("LookupModel(%q) ok = %v, want %v", tt.selector, ok, tt.wantFound)
-			}
-			if ok && model.ID != "gpt-4o" {
-				t.Fatalf("LookupModel(%q).ID = %q, want gpt-4o", tt.selector, model.ID)
+			require.Equal(t, tt.wantFound, ok)
+			if ok {
+				require.Equal(t, "gpt-4o", model.ID)
 			}
 		})
 	}
@@ -146,11 +141,10 @@ func TestRegistryResolveProviderSelectorTrimsInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sel, ok := registry.ResolveProviderSelector(tt.segment, tt.modelID)
-			if ok != tt.wantOK {
-				t.Fatalf("ResolveProviderSelector(%q, %q) ok = %v, want %v", tt.segment, tt.modelID, ok, tt.wantOK)
-			}
-			if ok && sel.QualifiedModel() != "west/gpt-4o" {
-				t.Fatalf("ResolveProviderSelector(%q, %q) = %q, want west/gpt-4o", tt.segment, tt.modelID, sel.QualifiedModel())
+			require.Equal(t, tt.wantOK, ok)
+
+			if ok {
+				require.Equal(t, "west/gpt-4o", sel.QualifiedModel())
 			}
 		})
 	}
@@ -168,9 +162,7 @@ func TestRouterTrimsSelectorInput(t *testing.T) {
 		modelID:      "gpt-4o",
 	})
 	router, err := NewRouter(registry)
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	tests := []struct {
 		name         string
@@ -192,34 +184,26 @@ func TestRouterTrimsSelectorInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			selector, _, err := router.ResolveModel(core.NewRequestedModelSelector(tt.model, tt.providerHint))
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("ResolveModel() error = %v, wantErr %v", err, tt.wantErr)
-			}
+			require.Equal(t, tt.wantErr, err != nil)
+
 			if err != nil {
 				return
 			}
-			if got := selector.QualifiedModel(); got != tt.wantResolved {
-				t.Fatalf("ResolveModel() = %q, want %q", got, tt.wantResolved)
-			}
-			if got := router.GetProviderType(tt.model); got != tt.wantType {
-				t.Fatalf("GetProviderType(%q) = %q, want %q", tt.model, got, tt.wantType)
-			}
+			got := selector.QualifiedModel()
+			require.Equal(t, tt.wantResolved, got)
+			got = router.GetProviderType(tt.model)
+			require.Equal(t, tt.wantType, got, "GetProviderType(%q)", tt.model)
 		})
 	}
 
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "  openai/gpt-4o  ", Provider: "  "})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if resp.ID != "chatcmpl-west" || resp.Provider != "openai" {
-		t.Fatalf("ChatCompletion() = %+v, want west response stamped openai", resp)
-	}
-	if provider.lastChatReq == nil || provider.lastChatReq.Model != "gpt-4o" {
-		t.Fatalf("forwarded model = %+v, want gpt-4o", provider.lastChatReq)
-	}
-	if router.GetProviderNameForType(" openai ") != "west" || router.GetProviderTypeForName(" west ") != "openai" {
-		t.Fatalf("router provider name/type lookups did not trim input")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "chatcmpl-west", resp.ID)
+	require.Equal(t, "openai", resp.Provider, "ChatCompletion() = %+v, want west response stamped openai", resp)
+	require.NotNil(t, provider.lastChatReq)
+	require.Equal(t, "gpt-4o", provider.lastChatReq.Model)
+	require.Equal(t, "west", router.GetProviderNameForType(" openai "))
+	require.Equal(t, "openai", router.GetProviderTypeForName(" west "))
 }
 
 // Discovered model IDs are trimmed when they enter the registry, so a
@@ -236,34 +220,28 @@ func TestRegistryNormalizesDiscoveredModelIDs(t *testing.T) {
 	}
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "west", "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	models := registry.ListModels()
-	if len(models) != 1 || models[0].ID != "gpt-4o" {
-		t.Fatalf("ListModels() = %+v, want one model with ID gpt-4o", models)
-	}
+	require.Len(t, models, 1)
+	require.Equal(t, "gpt-4o", models[0].ID)
+
 	for _, selector := range []string{"gpt-4o", "west/gpt-4o"} {
-		if !registry.Supports(selector) {
-			t.Fatalf("Supports(%q) = false, want true", selector)
-		}
+		require.True(t, registry.Supports(selector), "Supports(%q)", selector)
 	}
-	if sel, ok := registry.ResolveProviderSelector("openai", "gpt-4o"); !ok || sel.QualifiedModel() != "west/gpt-4o" {
-		t.Fatalf("ResolveProviderSelector(openai, gpt-4o) = %q, %v; want west/gpt-4o, true", sel.QualifiedModel(), ok)
-	}
+	sel, ok := registry.ResolveProviderSelector("openai", "gpt-4o")
+	require.True(t, ok)
+	require.Equal(t, "west/gpt-4o", sel.QualifiedModel())
 
 	router, err := NewRouter(registry)
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "gpt-4o"})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if resp.ID != "chatcmpl-west" || provider.lastChatReq == nil || provider.lastChatReq.Model != "gpt-4o" {
-		t.Fatalf("ChatCompletion() = %+v, forwarded %+v; want west response for gpt-4o", resp, provider.lastChatReq)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "chatcmpl-west", resp.ID)
+	require.NotNil(t, provider.lastChatReq)
+	require.Equal(t, "gpt-4o", provider.lastChatReq.Model, "ChatCompletion() = %+v, forwarded %+v; want west response for gpt-4o", resp, provider.lastChatReq)
 }
 
 // A provider that lists "foo" and " foo " produces one record after trimming.
@@ -281,24 +259,19 @@ func TestRegistryKeepsFirstDuplicateDiscoveredModel(t *testing.T) {
 	}
 	registry := NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "west", "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	got := registry.ListModels()
+	require.Len(t, got, 1)
+	require.Equal(t, "foo", got[0].ID)
 
-	if got := registry.ListModels(); len(got) != 1 || got[0].ID != "foo" {
-		t.Fatalf("ListModels() = %+v, want exactly one model foo", got)
-	}
 	qualified := registry.GetModel("west/foo")
 	bare := registry.GetModel("foo")
-	if qualified == nil || bare == nil {
-		t.Fatalf("GetModel(west/foo) = %v, GetModel(foo) = %v; want both found", qualified, bare)
-	}
-	if qualified != bare {
-		t.Fatalf("provider-scoped and bare-ID maps hold different records: %+v vs %+v", qualified.Model, bare.Model)
-	}
-	if qualified.Model.OwnedBy != "first" || qualified.Model.Created != 1 {
-		t.Fatalf("kept record = %+v, want the first listed (owned_by first, created 1)", qualified.Model)
-	}
+	require.NotNil(t, qualified)
+	require.NotNil(t, bare)
+	require.Same(t, bare, qualified)
+	require.Equal(t, "first", qualified.Model.OwnedBy)
+	require.Equal(t, int64(1), qualified.Model.Created, "kept record = %+v, want the first listed (owned_by first, created 1)", qualified.Model)
 }
 
 // selectorResolverOnlyLookup implements the O(1) qualified-selector fast path
@@ -324,32 +297,22 @@ func TestRouterUsesSelectorResolverWithoutCatalogLister(t *testing.T) {
 	}
 	lookup.addModel("west/gpt-4o", &mockProvider{name: "west"}, "openai")
 	router, err := NewRouter(lookup)
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
-	}
-	if router.caps.modelsWithProvider != nil {
-		t.Fatalf("test lookup unexpectedly implements the catalog lister")
-	}
+	require.NoError(t, err)
+	require.Nil(t, router.caps.modelsWithProvider)
 
 	selector, changed, err := router.ResolveModel(core.NewRequestedModelSelector("openai/gpt-4o", ""))
-	if err != nil {
-		t.Fatalf("ResolveModel() error = %v", err)
-	}
-	if got := selector.QualifiedModel(); got != "west/gpt-4o" || !changed {
-		t.Fatalf("ResolveModel() = %q (changed=%v), want west/gpt-4o via the resolver fast path", got, changed)
-	}
-	if lookup.calls != 1 {
-		t.Fatalf("resolver calls = %d, want 1", lookup.calls)
-	}
+	require.NoError(t, err)
+	got := selector.QualifiedModel()
+	require.Equal(t, "west/gpt-4o", got)
+	require.True(t, changed)
+	require.Equal(t, 1, lookup.calls)
 
 	// A miss on the fast path with no catalog lister leaves the selector as is.
 	selector, changed, err = router.ResolveModel(core.NewRequestedModelSelector("openai/other", ""))
-	if err != nil {
-		t.Fatalf("ResolveModel(miss) error = %v", err)
-	}
-	if got := selector.QualifiedModel(); got != "openai/other" || changed {
-		t.Fatalf("ResolveModel(miss) = %q (changed=%v), want openai/other unchanged", got, changed)
-	}
+	require.NoError(t, err)
+	got = selector.QualifiedModel()
+	require.Equal(t, "openai/other", got)
+	require.False(t, changed)
 }
 
 func TestRecordAvailabilityCheckKeepsFailureMarker(t *testing.T) {
@@ -368,17 +331,12 @@ func TestRecordAvailabilityCheckKeepsFailureMarker(t *testing.T) {
 			registry := NewModelRegistry()
 			registry.RegisterProviderWithNameAndType(&mockProvider{name: "west"}, "west", "openai")
 			registry.RecordAvailabilityCheck("west", tt.err)
-
-			if got := registry.providerRuntime["west"].lastAvailabilityError; got != tt.want {
-				t.Fatalf("lastAvailabilityError = %q, want %q", got, tt.want)
-			}
-			if got := registry.FailedProviderNames(); len(got) != 1 || got[0] != "west" {
-				t.Fatalf("FailedProviderNames() = %v, want [west]", got)
-			}
+			got := registry.providerRuntime["west"].lastAvailabilityError
+			require.Equal(t, tt.want, got)
+			require.Equal(t, []string{"west"}, registry.FailedProviderNames())
 			snapshots := registry.ProviderRuntimeSnapshots()
-			if len(snapshots) != 1 || snapshots[0].LastAvailabilityError != tt.want {
-				t.Fatalf("ProviderRuntimeSnapshots() = %+v, want LastAvailabilityError %q", snapshots, tt.want)
-			}
+			require.Len(t, snapshots, 1)
+			require.Equal(t, tt.want, snapshots[0].LastAvailabilityError)
 		})
 	}
 }

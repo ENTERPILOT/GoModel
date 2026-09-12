@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/require"
 )
 
 func newOpenAICompatibleTestClient(server *httptest.Server) *llmclient.Client {
@@ -25,16 +26,11 @@ func TestValidatedOpenAICompatibleFileID(t *testing.T) {
 
 	t.Run("nil client is provider error", func(t *testing.T) {
 		_, err := validatedOpenAICompatibleFileID(nil, "file_123")
-		if err == nil {
-			t.Fatal("expected error")
-		}
+		require.Error(t, err)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.Type != core.ErrorTypeProvider {
-			t.Fatalf("error type = %s, want %s", gwErr.Type, core.ErrorTypeProvider)
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, core.ErrorTypeProvider, gwErr.Type)
 	})
 
 	tests := []struct {
@@ -51,20 +47,14 @@ func TestValidatedOpenAICompatibleFileID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := validatedOpenAICompatibleFileID(client, tt.id)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-				if _, ok := errors.AsType[*core.GatewayError](err); !ok {
-					t.Fatalf("expected GatewayError, got %T: %v", err, err)
-				}
+				require.Error(t, err)
+				_, ok := errors.AsType[*core.GatewayError](err)
+				require.True(t, ok)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.wantID {
-				t.Fatalf("validated id = %q, want %q", got, tt.wantID)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantID, got)
 		})
 	}
 }
@@ -88,21 +78,12 @@ func TestDoOpenAICompatibleFileIDRequest(t *testing.T) {
 			defaultObject: "file",
 			check: func(t *testing.T, gotPath string, fileObj *core.FileObject, _ *core.FileDeleteResponse, err error) {
 				t.Helper()
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if gotPath != "/files/file_123" {
-					t.Fatalf("path = %q, want /files/file_123", gotPath)
-				}
-				if fileObj == nil {
-					t.Fatal("expected file object")
-				}
-				if fileObj.ID != "file_123" {
-					t.Fatalf("ID = %q, want file_123", fileObj.ID)
-				}
-				if fileObj.Object != "file" {
-					t.Fatalf("Object = %q, want file", fileObj.Object)
-				}
+				require.NoError(t, err)
+				require.Equal(t, "/files/file_123", gotPath)
+				require.NotNil(t, fileObj)
+				require.Equal(t, "file_123", fileObj.ID)
+				require.Equal(t, "file", fileObj.Object)
+
 			},
 		},
 		{
@@ -114,21 +95,12 @@ func TestDoOpenAICompatibleFileIDRequest(t *testing.T) {
 			defaultObject: "file.deleted",
 			check: func(t *testing.T, gotPath string, _ *core.FileObject, deleteResp *core.FileDeleteResponse, err error) {
 				t.Helper()
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if gotPath != "/files/file_456" {
-					t.Fatalf("path = %q, want /files/file_456", gotPath)
-				}
-				if deleteResp == nil {
-					t.Fatal("expected delete response")
-				}
-				if deleteResp.ID != "file_456" {
-					t.Fatalf("ID = %q, want file_456", deleteResp.ID)
-				}
-				if deleteResp.Object != "file.deleted" {
-					t.Fatalf("Object = %q, want file.deleted", deleteResp.Object)
-				}
+				require.NoError(t, err)
+				require.Equal(t, "/files/file_456", gotPath)
+				require.NotNil(t, deleteResp)
+				require.Equal(t, "file_456", deleteResp.ID)
+				require.Equal(t, "file.deleted", deleteResp.Object)
+
 			},
 		},
 		{
@@ -140,12 +112,9 @@ func TestDoOpenAICompatibleFileIDRequest(t *testing.T) {
 			defaultObject: "file",
 			check: func(t *testing.T, gotPath string, _ *core.FileObject, _ *core.FileDeleteResponse, err error) {
 				t.Helper()
-				if gotPath != "/files/file_789" {
-					t.Fatalf("path = %q, want /files/file_789", gotPath)
-				}
-				if err == nil {
-					t.Fatal("expected error")
-				}
+				require.Equal(t, "/files/file_789", gotPath)
+				require.Error(t, err)
+
 			},
 		},
 	}
@@ -173,9 +142,7 @@ func TestDoOpenAICompatibleFileIDRequest(t *testing.T) {
 				resp, err := doOpenAICompatibleFileIDRequestWithPreparer[core.FileObject](context.Background(), client, tt.method, tt.id, tt.defaultObject, nil)
 				tt.check(t, gotPath, resp, nil, err)
 			}
-			if gotMethod != tt.method {
-				t.Fatalf("method = %q, want %q", gotMethod, tt.method)
-			}
+			require.Equal(t, tt.method, gotMethod)
 		})
 	}
 }
@@ -206,32 +173,18 @@ func TestGetOpenAICompatibleFileContent(t *testing.T) {
 			client := newOpenAICompatibleTestClient(server)
 			resp, err := GetOpenAICompatibleFileContent(context.Background(), client, tt.id)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-				if _, ok := errors.AsType[*core.GatewayError](err); !ok {
-					t.Fatalf("expected GatewayError, got %T: %v", err, err)
-				}
+				require.Error(t, err)
+				_, ok := errors.AsType[*core.GatewayError](err)
+				require.True(t, ok)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if resp == nil {
-				t.Fatal("expected response")
-			}
-			if gotMethod != http.MethodGet {
-				t.Fatalf("method = %q, want GET", gotMethod)
-			}
-			if gotPath != tt.wantPath {
-				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
-			}
-			if resp.ID != "file_123" {
-				t.Fatalf("ID = %q, want file_123", resp.ID)
-			}
-			if string(resp.Data) != "file-bytes" {
-				t.Fatalf("body = %q, want file-bytes", string(resp.Data))
-			}
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			require.Equal(t, http.MethodGet, gotMethod)
+			require.Equal(t, tt.wantPath, gotPath)
+			require.Equal(t, "file_123", resp.ID)
+			require.Equal(t, "file-bytes", string(resp.Data))
 		})
 	}
 }

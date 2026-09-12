@@ -1,17 +1,22 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type capturedMultipart struct {
-	path   string
 	values map[string][]string
 	files  map[string][]capturedFile
 }
@@ -22,37 +27,33 @@ type capturedFile struct {
 	data        string
 }
 
-// captureMultipartHandler records the multipart request the adapter sends and
-// answers with body.
-func captureMultipartHandler(t *testing.T, got *capturedMultipart, body string) http.HandlerFunc {
+// recordedMultipart parses the multipart body of a recorded upstream request.
+func recordedMultipart(t *testing.T, req providertest.Recorded) capturedMultipart {
 	t.Helper()
-	return func(w http.ResponseWriter, r *http.Request) {
-		got.path = r.URL.Path
-		if err := r.ParseMultipartForm(1 << 20); err != nil {
-			t.Errorf("upstream could not parse multipart body: %v", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+	_, params, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	require.NoError(t, err, "upstream Content-Type")
+	form, err := multipart.NewReader(bytes.NewReader(req.Body), params["boundary"]).ReadForm(1 << 20)
+	require.NoError(t, err, "upstream could not parse multipart body")
+	t.Cleanup(func() { _ = form.RemoveAll() })
+
+	got := capturedMultipart{values: form.Value, files: map[string][]capturedFile{}}
+	for field, headers := range form.File {
+		for _, h := range headers {
+			f, err := h.Open()
+			require.NoError(t, err)
+			data, err := io.ReadAll(f)
+			_ = f.Close()
+			require.NoError(t, err)
+			got.files[field] = append(got.files[field], capturedFile{
+				filename: h.Filename, contentType: h.Header.Get("Content-Type"), data: string(data),
+			})
 		}
-		got.values = r.MultipartForm.Value
-		got.files = map[string][]capturedFile{}
-		for field, headers := range r.MultipartForm.File {
-			for _, h := range headers {
-				f, _ := h.Open()
-				data, _ := io.ReadAll(f)
-				_ = f.Close()
-				got.files[field] = append(got.files[field], capturedFile{
-					filename: h.Filename, contentType: h.Header.Get("Content-Type"), data: string(data),
-				})
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
 	}
+	return got
 }
 
 func TestCreateImageEdit_ForwardsMultipartAndDecodesResponse(t *testing.T) {
-	var got capturedMultipart
-	provider := newSpeechTestProvider(t, captureMultipartHandler(t, &got,
+	provider, capture := newTestProvider(t, jsonHandler(
 		`{"created":1713833628,"data":[{"b64_json":"aGk="}],"usage":{"input_tokens":50,"output_tokens":1000,"total_tokens":1050,"input_tokens_details":{"text_tokens":10,"image_tokens":40}}}`))
 
 	resp, err := provider.CreateImageEdit(context.Background(), &core.ImageEditRequest{
@@ -62,78 +63,64 @@ func TestCreateImageEdit_ForwardsMultipartAndDecodesResponse(t *testing.T) {
 		Mask:   &core.ImageFile{Filename: "mask.png", ContentType: "image/png", Data: []byte("mask-bytes")},
 		Fields: []core.FormField{{Name: "n", Value: "1"}, {Name: "size", Value: "1024x1024"}, {Name: "input_fidelity", Value: "high"}},
 	})
-	if err != nil {
-		t.Fatalf("CreateImageEdit() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	if got.path != "/images/edits" {
-		t.Errorf("path = %q, want /images/edits", got.path)
-	}
+	req := capture.Last(t)
+	assert.Equal(t, "/images/edits", req.Path)
+	got := recordedMultipart(t, req)
 	for field, want := range map[string]string{"model": "gpt-image-1", "prompt": "add a hat", "n": "1", "size": "1024x1024", "input_fidelity": "high"} {
-		if v := got.values[field]; len(v) != 1 || v[0] != want {
-			t.Errorf("form %s = %v, want %q", field, v, want)
-		}
+		assert.Equal(t, []string{want}, got.values[field], field)
 	}
-	if _, present := got.values["provider"]; present {
-		t.Errorf("forwarded form carries provider hint: %v", got.values)
-	}
-	image := got.files["image"]
-	if len(image) != 1 || image[0].filename != "cat.png" || image[0].contentType != "image/png" || image[0].data != "cat-bytes" {
-		t.Errorf("image part = %+v", image)
-	}
-	mask := got.files["mask"]
-	if len(mask) != 1 || mask[0].filename != "mask.png" || mask[0].data != "mask-bytes" {
-		t.Errorf("mask part = %+v", mask)
-	}
-	if _, present := got.files["image[]"]; present {
-		t.Error("single image must be sent as image, not image[]")
-	}
+	assert.NotContains(t, got.values, "provider", "forwarded form carries provider hint")
 
-	if resp.Created != 1713833628 || len(resp.Data) != 1 || resp.Data[0].B64JSON != "aGk=" {
-		t.Errorf("response = %+v", resp)
-	}
-	if resp.Usage == nil || resp.Usage.TotalTokens != 1050 || resp.Usage.InputTokensDetails == nil || resp.Usage.InputTokensDetails.ImageTokens != 40 {
-		t.Errorf("usage = %+v", resp.Usage)
-	}
+	image := got.files["image"]
+	require.Len(t, image, 1)
+	assert.Equal(t, "cat.png", image[0].filename)
+	assert.Equal(t, "image/png", image[0].contentType)
+	assert.Equal(t, "cat-bytes", image[0].data)
+
+	mask := got.files["mask"]
+	require.Len(t, mask, 1)
+	assert.Equal(t, "mask.png", mask[0].filename)
+	assert.Equal(t, "mask-bytes", mask[0].data)
+	assert.NotContains(t, got.files, "image[]", "single image must use the scalar field")
+
+	assert.Equal(t, int64(1713833628), resp.Created)
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, "aGk=", resp.Data[0].B64JSON)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 1050, resp.Usage.TotalTokens)
+	require.NotNil(t, resp.Usage.InputTokensDetails)
+	assert.Equal(t, 40, resp.Usage.InputTokensDetails.ImageTokens)
 }
 
 func TestCreateImageEdit_MultipleImagesUseArrayFieldAndDefaults(t *testing.T) {
-	var got capturedMultipart
-	provider := newSpeechTestProvider(t, captureMultipartHandler(t, &got, `{}`))
+	provider, capture := newTestProvider(t, jsonHandler(`{}`))
 
 	resp, err := provider.CreateImageEdit(context.Background(), &core.ImageEditRequest{
 		Model:  "gpt-image-1",
 		Prompt: "combine",
 		Images: []core.ImageFile{{Data: []byte("one")}, {Filename: "two.jpg", ContentType: "image/jpeg", Data: []byte("two")}},
 	})
-	if err != nil {
-		t.Fatalf("CreateImageEdit() error = %v", err)
-	}
+	require.NoError(t, err)
+
+	got := recordedMultipart(t, capture.Last(t))
 	images := got.files["image[]"]
-	if len(images) != 2 {
-		t.Fatalf("image[] parts = %+v, want 2", images)
-	}
-	if images[0].filename != "image.png" || images[0].contentType != "image/png" || images[0].data != "one" {
-		t.Errorf("defaulted part = %+v", images[0])
-	}
-	if images[1].filename != "two.jpg" || images[1].contentType != "image/jpeg" || images[1].data != "two" {
-		t.Errorf("second part = %+v", images[1])
-	}
-	if _, present := got.files["mask"]; present {
-		t.Error("mask part must be omitted when not supplied")
-	}
-	if resp.Created == 0 {
-		t.Error("Created should default to now when upstream omits it")
-	}
-	if resp.Data == nil {
-		t.Error("Data should be an empty array, not null")
-	}
+	require.Len(t, images, 2)
+	assert.Equal(t, "image.png", images[0].filename, "filename should default")
+	assert.Equal(t, "image/png", images[0].contentType, "content type should default")
+	assert.Equal(t, "one", images[0].data)
+	assert.Equal(t, "two.jpg", images[1].filename)
+	assert.Equal(t, "image/jpeg", images[1].contentType)
+	assert.Equal(t, "two", images[1].data)
+	assert.NotContains(t, got.files, "mask")
+
+	assert.NotZero(t, resp.Created)
+	assert.NotNil(t, resp.Data)
 }
 
 func TestCreateImageEdit_RejectsInvalidRequests(t *testing.T) {
-	provider := newSpeechTestProvider(t, func(_ http.ResponseWriter, _ *http.Request) {
-		t.Fatal("upstream must not be called for invalid requests")
-	})
+	provider, capture := newTestProvider(t, nil)
 
 	tests := []struct {
 		name    string
@@ -147,15 +134,15 @@ func TestCreateImageEdit_RejectsInvalidRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := provider.CreateImageEdit(context.Background(), tt.req)
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("error = %v, want %q", err, tt.wantErr)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
+	assert.Zero(t, capture.Count(), "upstream must not be called for invalid requests")
 }
 
 func TestCreateImageEdit_PropagatesUpstreamError(t *testing.T) {
-	provider := newSpeechTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+	provider, _ := newTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"Invalid image format","type":"invalid_request_error"}}`))
@@ -163,17 +150,15 @@ func TestCreateImageEdit_PropagatesUpstreamError(t *testing.T) {
 	_, err := provider.CreateImageEdit(context.Background(), &core.ImageEditRequest{
 		Model: "dall-e-2", Prompt: "x", Images: []core.ImageFile{{Data: []byte("a")}},
 	})
-	if err == nil || !strings.Contains(err.Error(), "Invalid image format") {
-		t.Fatalf("error = %v, want upstream message", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid image format")
 }
 
 // TestCreateImageEdit_SanitizesPartMetadata ensures client-declared filenames
 // and content types cannot smuggle CR/LF (header/part injection) or stray
 // quotes into the upstream multipart headers.
 func TestCreateImageEdit_SanitizesPartMetadata(t *testing.T) {
-	var got capturedMultipart
-	provider := newSpeechTestProvider(t, captureMultipartHandler(t, &got, `{}`))
+	provider, capture := newTestProvider(t, jsonHandler(`{}`))
 
 	_, err := provider.CreateImageEdit(context.Background(), &core.ImageEditRequest{
 		Model:  "gpt-image-1",
@@ -184,21 +169,16 @@ func TestCreateImageEdit_SanitizesPartMetadata(t *testing.T) {
 			Data:        []byte("bytes"),
 		}},
 	})
-	if err != nil {
-		t.Fatalf("CreateImageEdit() error = %v", err)
-	}
-	image := got.files["image"]
-	if len(image) != 1 {
-		t.Fatalf("image parts = %+v, want the upstream to parse exactly one", got.files)
-	}
-	if strings.ContainsAny(image[0].filename, "\r\n") || strings.ContainsAny(image[0].contentType, "\r\n") {
-		t.Errorf("CR/LF reached the upstream headers: %+v", image[0])
-	}
+	require.NoError(t, err)
+
+	image := recordedMultipart(t, capture.Last(t)).files["image"]
+	require.Len(t, image, 1)
+	assert.False(t, strings.ContainsAny(image[0].filename, "\r\n"), "CR/LF reached the upstream headers: %+v", image[0])
+	assert.False(t, strings.ContainsAny(image[0].contentType, "\r\n"), "CR/LF reached the upstream headers: %+v", image[0])
+
 	if image[0].contentType != "image/pngX-Smuggled: 1" && image[0].contentType != "image/png" {
 		// The exact folded remainder is unimportant; the header must stay one line.
 		t.Logf("content type folded to %q", image[0].contentType)
 	}
-	if image[0].data != "bytes" {
-		t.Errorf("image data = %q", image[0].data)
-	}
+	assert.Equal(t, "bytes", image[0].data)
 }

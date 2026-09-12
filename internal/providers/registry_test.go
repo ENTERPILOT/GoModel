@@ -16,6 +16,8 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modeldata"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // registryMockProvider is a mock implementation of core.Provider for Registry testing.
@@ -107,9 +109,7 @@ func TestModelRegistry(t *testing.T) {
 		}
 		registry.RegisterProvider(mock)
 
-		if registry.ProviderCount() != 1 {
-			t.Errorf("expected 1 provider, got %d", registry.ProviderCount())
-		}
+		assert.Equal(t, 1, registry.ProviderCount())
 	})
 
 	t.Run("Initialize", func(t *testing.T) {
@@ -127,13 +127,8 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProvider(mock)
 
 		err := registry.Initialize(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if registry.ModelCount() != 2 {
-			t.Errorf("expected 2 models, got %d", registry.ModelCount())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, 2, registry.ModelCount())
 	})
 
 	t.Run("ConfiguredModelsFallbackModeKeepsUpstreamWhenAvailable", func(t *testing.T) {
@@ -152,16 +147,9 @@ func TestModelRegistry(t *testing.T) {
 		registry.SetProviderConfiguredModels("test", []string{"configured-model"})
 
 		err := registry.Initialize(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if registry.ModelCount() != 2 {
-			t.Fatalf("ModelCount() = %d, want 2", registry.ModelCount())
-		}
-		if !registry.Supports("upstream-extra") {
-			t.Fatal("expected fallback mode to keep upstream-extra when upstream models are available")
-		}
+		require.NoError(t, err)
+		require.Equal(t, 2, registry.ModelCount())
+		require.True(t, registry.Supports("upstream-extra"))
 	})
 
 	t.Run("ConfiguredModelsFallbackModeUsesConfiguredWhenUpstreamFails", func(t *testing.T) {
@@ -174,39 +162,21 @@ func TestModelRegistry(t *testing.T) {
 		registry.SetProviderConfiguredModels("test", []string{" configured-model ", "configured-model", "fallback-only"})
 
 		err := registry.Initialize(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 2, registry.ModelCount())
+		require.True(t, registry.Supports("configured-model"))
+		require.True(t, registry.Supports("fallback-only"), "expected configured fallback models to be registered, got %+v", registry.ListModels())
 
-		if registry.ModelCount() != 2 {
-			t.Fatalf("ModelCount() = %d, want 2", registry.ModelCount())
-		}
-		if !registry.Supports("configured-model") || !registry.Supports("fallback-only") {
-			t.Fatalf("expected configured fallback models to be registered, got %+v", registry.ListModels())
-		}
 		model := registry.GetModel("configured-model")
-		if model == nil {
-			t.Fatal("expected configured-model to resolve")
-		}
-		if model.Model.Object != "model" {
-			t.Fatalf("Object = %q, want model", model.Model.Object)
-		}
-		if model.Model.OwnedBy != "test" {
-			t.Fatalf("OwnedBy = %q, want test", model.Model.OwnedBy)
-		}
-		if model.Model.Created <= 0 {
-			t.Fatalf("Created = %d, want non-zero configured fallback timestamp", model.Model.Created)
-		}
+		require.NotNil(t, model)
+		require.Equal(t, "model", model.Model.Object)
+		require.Equal(t, "test", model.Model.OwnedBy)
+		require.Greater(t, model.Model.Created, int64(0))
+
 		snapshots := registry.ProviderRuntimeSnapshots()
-		if len(snapshots) != 1 {
-			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
-		}
-		if !strings.Contains(snapshots[0].LastModelFetchError, "models unavailable") {
-			t.Fatalf("LastModelFetchError = %q, want upstream error preserved", snapshots[0].LastModelFetchError)
-		}
-		if snapshots[0].LastModelFetchSuccessAt != nil {
-			t.Fatalf("LastModelFetchSuccessAt = %v, want nil when configured fallback handles upstream failure", snapshots[0].LastModelFetchSuccessAt)
-		}
+		require.Len(t, snapshots, 1)
+		require.Contains(t, snapshots[0].LastModelFetchError, "models unavailable")
+		require.Nil(t, snapshots[0].LastModelFetchSuccessAt)
 	})
 
 	t.Run("SuccessfulLiveModelFetchClearsAvailabilityError", func(t *testing.T) {
@@ -222,21 +192,13 @@ func TestModelRegistry(t *testing.T) {
 		}
 		registry.RegisterProviderWithNameAndType(mock, "ollama", "ollama")
 		registry.RecordAvailabilityCheck("ollama", errors.New("connection refused"))
-
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("Initialize() error = %v, want nil", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		snapshots := registry.ProviderRuntimeSnapshots()
-		if len(snapshots) != 1 {
-			t.Fatalf("snapshots = %d, want 1", len(snapshots))
-		}
-		if snapshots[0].LastAvailabilityError != "" {
-			t.Fatalf("LastAvailabilityError = %q, want empty after live model fetch", snapshots[0].LastAvailabilityError)
-		}
-		if snapshots[0].LastAvailabilityOKAt == nil {
-			t.Fatal("LastAvailabilityOKAt = nil, want timestamp after live model fetch")
-		}
+		require.Len(t, snapshots, 1)
+		require.Empty(t, snapshots[0].LastAvailabilityError)
+		require.NotNil(t, snapshots[0].LastAvailabilityOKAt)
 	})
 
 	t.Run("TargetedRefreshWithEmptyInventoryClearsStaleProviderModels", func(t *testing.T) {
@@ -251,25 +213,16 @@ func TestModelRegistry(t *testing.T) {
 			},
 		}
 		registry.RegisterProviderWithNameAndType(mock, "ollama", "ollama")
-
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("Initialize() error = %v, want nil", err)
-		}
-		if !registry.Supports("ollama/qwen3:8b") {
-			t.Fatal("expected ollama/qwen3:8b to be supported before empty refresh")
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
+		require.True(t, registry.Supports("ollama/qwen3:8b"))
 
 		mock.modelsResponse = &core.ModelsResponse{Object: "list", Data: []core.Model{}}
-		_, err := registry.RefreshProviderModels(context.Background(), "ollama")
-		if err == nil || !strings.Contains(err.Error(), "provider returned no models") {
-			t.Fatalf("RefreshProviderModels() error = %v, want provider returned no models", err)
-		}
-		if registry.Supports("ollama/qwen3:8b") {
-			t.Fatal("expected stale ollama/qwen3:8b to be removed after empty refresh")
-		}
-		if registry.ModelCount() != 0 {
-			t.Fatalf("ModelCount() = %d, want 0", registry.ModelCount())
-		}
+		_, err = registry.RefreshProviderModels(context.Background(), "ollama")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "provider returned no models")
+		require.False(t, registry.Supports("ollama/qwen3:8b"))
+		require.Equal(t, 0, registry.ModelCount())
 	})
 
 	t.Run("ConfiguredModelsAllowlistModeSkipsUpstreamAndUsesConfiguredModels", func(t *testing.T) {
@@ -293,49 +246,25 @@ func TestModelRegistry(t *testing.T) {
 		registry.SetProviderConfiguredModels("test", []string{"missing-configured", "configured-model"})
 
 		err := registry.Initialize(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
+		require.Equal(t, int32(0), listCount.Load())
+		require.Equal(t, 2, registry.ModelCount())
+		require.False(t, registry.Supports("upstream-extra"))
 
-		if listCount.Load() != 0 {
-			t.Fatalf("ListModels calls = %d, want 0", listCount.Load())
-		}
-		if registry.ModelCount() != 2 {
-			t.Fatalf("ModelCount() = %d, want 2", registry.ModelCount())
-		}
-		if registry.Supports("upstream-extra") {
-			t.Fatal("expected allowlist mode to hide upstream-extra")
-		}
 		configured := registry.GetModel("configured-model")
-		if configured == nil {
-			t.Fatal("expected configured-model to resolve")
-		}
-		if configured.Model.Created <= 0 {
-			t.Fatalf("configured.Model.Created = %d in configured model %+v, want non-zero timestamp", configured.Model.Created, configured.Model)
-		}
-		if configured.Model.OwnedBy != "test-type" {
-			t.Fatalf("configured.Model.OwnedBy = %q in configured model %+v, want test-type", configured.Model.OwnedBy, configured.Model)
-		}
+		require.NotNil(t, configured)
+		require.Greater(t, configured.Model.Created, int64(0))
+		require.Equal(t, "test-type", configured.Model.OwnedBy)
+
 		snapshots := registry.ProviderRuntimeSnapshots()
-		if len(snapshots) != 1 {
-			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
-		}
-		if snapshots[0].LastModelFetchSuccessAt == nil {
-			t.Fatal("LastModelFetchSuccessAt = nil, want set when allowlist mode authoritatively populates inventory")
-		}
-		if snapshots[0].DiscoveredModelCount == 0 {
-			t.Fatalf("DiscoveredModelCount = 0, want allowlist models counted")
-		}
-		if snapshots[0].UsingCachedModels {
-			t.Fatal("UsingCachedModels = true, want false when inventory came from allowlist (not stale cache)")
-		}
+		require.Len(t, snapshots, 1)
+		require.NotNil(t, snapshots[0].LastModelFetchSuccessAt)
+		require.NotEqual(t, 0, snapshots[0].DiscoveredModelCount)
+		require.False(t, snapshots[0].UsingCachedModels)
+
 		missing := registry.GetModel("missing-configured")
-		if missing == nil {
-			t.Fatal("expected missing-configured to be added")
-		}
-		if missing.Model.OwnedBy != "test-type" {
-			t.Fatalf("OwnedBy = %q, want test-type", missing.Model.OwnedBy)
-		}
+		require.NotNil(t, missing)
+		require.Equal(t, "test-type", missing.Model.OwnedBy)
 	})
 
 	t.Run("ConfiguredModelsAllowlistModeUsesUpstreamWhenNoConfiguredModels", func(t *testing.T) {
@@ -357,23 +286,13 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProviderWithNameAndType(mock, "test", "test-type")
 
 		err := registry.Initialize(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
+		require.Equal(t, int32(1), listCount.Load())
+		require.True(t, registry.Supports("upstream-model"))
 
-		if listCount.Load() != 1 {
-			t.Fatalf("ListModels calls = %d, want 1", listCount.Load())
-		}
-		if !registry.Supports("upstream-model") {
-			t.Fatal("expected upstream-model to resolve when provider has no configured models")
-		}
 		snapshots := registry.ProviderRuntimeSnapshots()
-		if len(snapshots) != 1 {
-			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
-		}
-		if snapshots[0].LastModelFetchSuccessAt == nil {
-			t.Fatal("expected LastModelFetchSuccessAt when upstream ListModels succeeds")
-		}
+		require.Len(t, snapshots, 1)
+		require.NotNil(t, snapshots[0].LastModelFetchSuccessAt)
 	})
 
 	t.Run("GetProvider", func(t *testing.T) {
@@ -391,14 +310,10 @@ func TestModelRegistry(t *testing.T) {
 		_ = registry.Initialize(context.Background())
 
 		provider := registry.GetProvider("test-model")
-		if provider != mock {
-			t.Error("expected to get the registered provider")
-		}
+		assert.Equal(t, mock, provider)
 
 		provider = registry.GetProvider("unknown-model")
-		if provider != nil {
-			t.Error("expected nil for unknown model")
-		}
+		assert.Nil(t, provider)
 	})
 
 	t.Run("Supports", func(t *testing.T) {
@@ -415,13 +330,8 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProvider(mock)
 		_ = registry.Initialize(context.Background())
 
-		if !registry.Supports("test-model") {
-			t.Error("expected Supports to return true for registered model")
-		}
-
-		if registry.Supports("unknown-model") {
-			t.Error("expected Supports to return false for unknown model")
-		}
+		assert.True(t, registry.Supports("test-model"))
+		assert.False(t, registry.Supports("unknown-model"))
 	})
 
 	t.Run("ProviderOwnedRawSlashModel", func(t *testing.T) {
@@ -438,25 +348,18 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
 		_ = registry.Initialize(context.Background())
 
-		if !registry.Supports("openrouter/free") {
-			t.Fatal("expected provider-owned raw slash model to be supported")
-		}
-		if provider := registry.GetProvider("openrouter/free"); provider != openRouter {
-			t.Fatal("expected raw slash model to resolve to openrouter provider")
-		}
+		require.True(t, registry.Supports("openrouter/free"))
+		provider := registry.GetProvider("openrouter/free")
+		require.Equal(t, openRouter, provider)
+
 		model, ok := registry.LookupModel("openrouter/free")
-		if !ok || model == nil {
-			t.Fatal("expected raw slash model lookup to succeed")
-		}
-		if model.ID != "openrouter/free" {
-			t.Fatalf("model.ID = %q, want openrouter/free", model.ID)
-		}
-		if got := registry.GetProviderType("openrouter/free"); got != "openrouter" {
-			t.Fatalf("GetProviderType() = %q, want openrouter", got)
-		}
-		if got := registry.GetProviderName("openrouter/free"); got != "openrouter" {
-			t.Fatalf("GetProviderName() = %q, want openrouter", got)
-		}
+		require.True(t, ok)
+		require.NotNil(t, model)
+		require.Equal(t, "openrouter/free", model.ID)
+		got := registry.GetProviderType("openrouter/free")
+		require.Equal(t, "openrouter", got)
+		got = registry.GetProviderName("openrouter/free")
+		require.Equal(t, "openrouter", got)
 	})
 
 	t.Run("GetModel", func(t *testing.T) {
@@ -478,26 +381,14 @@ func TestModelRegistry(t *testing.T) {
 		_ = registry.Initialize(context.Background())
 
 		modelInfo := registry.GetModel("test-model")
-		if modelInfo == nil {
-			t.Fatal("expected ModelInfo for registered model, got nil")
-		}
-		if modelInfo.Model.ID != expectedModel.ID {
-			t.Errorf("expected model ID %q, got %q", expectedModel.ID, modelInfo.Model.ID)
-		}
-		if modelInfo.Model.OwnedBy != expectedModel.OwnedBy {
-			t.Errorf("expected model OwnedBy %q, got %q", expectedModel.OwnedBy, modelInfo.Model.OwnedBy)
-		}
-		if modelInfo.Model.Created != expectedModel.Created {
-			t.Errorf("expected model Created %d, got %d", expectedModel.Created, modelInfo.Model.Created)
-		}
-		if modelInfo.Provider != mock {
-			t.Error("expected Provider to be the registered mock provider")
-		}
+		require.NotNil(t, modelInfo)
+		assert.Equal(t, expectedModel.ID, modelInfo.Model.ID)
+		assert.Equal(t, expectedModel.OwnedBy, modelInfo.Model.OwnedBy)
+		assert.Equal(t, expectedModel.Created, modelInfo.Model.Created)
+		assert.Equal(t, mock, modelInfo.Provider)
 
 		unknownInfo := registry.GetModel("unknown-model")
-		if unknownInfo != nil {
-			t.Errorf("expected nil for unknown model, got %+v", unknownInfo)
-		}
+		assert.Nil(t, unknownInfo)
 	})
 
 	t.Run("EnrichModelsReplacesPublishedModelInfo", func(t *testing.T) {
@@ -520,12 +411,8 @@ func TestModelRegistry(t *testing.T) {
 		_ = registry.Initialize(context.Background())
 
 		before := registry.GetModel("test-model")
-		if before == nil {
-			t.Fatal("expected GetModel to return a published ModelInfo")
-		}
-		if before.Model.Metadata != nil {
-			t.Fatalf("expected initial metadata to be nil, got %#v", before.Model.Metadata)
-		}
+		require.NotNil(t, before)
+		require.Nil(t, before.Model.Metadata)
 
 		raw := []byte(`{
 			"version": 1,
@@ -546,40 +433,24 @@ func TestModelRegistry(t *testing.T) {
 			"provider_models": {}
 		}`)
 		list, err := modeldata.Parse(raw)
-		if err != nil {
-			t.Fatalf("Parse() error = %v", err)
-		}
+		require.NoError(t, err)
+
 		registry.SetModelList(list, raw)
 		registry.EnrichModels()
 
-		if before.Model.Metadata != nil {
-			t.Fatalf("expected previously published ModelInfo to remain unchanged, got %#v", before.Model.Metadata)
-		}
+		require.Nil(t, before.Model.Metadata)
 
 		after := registry.GetModel("test-model")
-		if after == nil {
-			t.Fatal("expected GetModel to return an enriched ModelInfo")
-		}
-		if after == before {
-			t.Fatal("expected EnrichModels to replace the published ModelInfo pointer")
-		}
-		if after.Model.Metadata == nil {
-			t.Fatal("expected enriched metadata to be present")
-		}
-		if after.Model.Metadata.DisplayName != "Test Model" {
-			t.Fatalf("registry display name = %q, want Test Model", after.Model.Metadata.DisplayName)
-		}
+		require.NotNil(t, after)
+		require.NotSame(t, before, after)
+		require.NotNil(t, after.Model.Metadata)
+		require.Equal(t, "Test Model", after.Model.Metadata.DisplayName)
 
 		lookup, ok := registry.LookupModel("test-model")
-		if !ok || lookup == nil {
-			t.Fatal("expected LookupModel to return the enriched model")
-		}
-		if lookup.Metadata == nil {
-			t.Fatal("expected LookupModel metadata to be present")
-		}
-		if lookup.Metadata.DisplayName != "Test Model" {
-			t.Fatalf("lookup display name = %q, want Test Model", lookup.Metadata.DisplayName)
-		}
+		require.True(t, ok)
+		require.NotNil(t, lookup)
+		require.NotNil(t, lookup.Metadata)
+		require.Equal(t, "Test Model", lookup.Metadata.DisplayName)
 	})
 
 	t.Run("EnrichModelsUsesAliasesWithoutAddingSyntheticModels", func(t *testing.T) {
@@ -599,9 +470,8 @@ func TestModelRegistry(t *testing.T) {
 			},
 		}
 		registry.RegisterProviderWithType(mock, "gemini")
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("Initialize() error = %v", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		raw := []byte(`{
 			"version": 1,
@@ -629,35 +499,22 @@ func TestModelRegistry(t *testing.T) {
 			}
 		}`)
 		list, err := modeldata.Parse(raw)
-		if err != nil {
-			t.Fatalf("Parse() error = %v", err)
-		}
+		require.NoError(t, err)
+
 		registry.SetModelList(list, raw)
 		registry.EnrichModels()
 
-		if registry.ModelCount() != 1 {
-			t.Fatalf("ModelCount() = %d, want 1", registry.ModelCount())
-		}
-		if synthetic := registry.GetModel("claude-4-opus"); synthetic != nil {
-			t.Fatalf("expected canonical alias target to NOT be materialized, got %+v", synthetic)
-		}
+		require.Equal(t, 1, registry.ModelCount())
+		synthetic := registry.GetModel("claude-4-opus")
+		require.Nil(t, synthetic)
 
 		info := registry.GetModel("claude-opus-4")
-		if info == nil {
-			t.Fatal("expected upstream model ID to remain registered")
-		}
-		if info.Model.ID != "claude-opus-4" {
-			t.Fatalf("Model.ID = %q, want claude-opus-4", info.Model.ID)
-		}
-		if info.Model.Metadata == nil {
-			t.Fatal("expected metadata to be enriched via alias")
-		}
-		if info.Model.Metadata.DisplayName != "Claude 4 Opus" {
-			t.Fatalf("DisplayName = %q, want Claude 4 Opus", info.Model.Metadata.DisplayName)
-		}
-		if info.Model.Metadata.ContextWindow == nil || *info.Model.Metadata.ContextWindow != 200000 {
-			t.Fatalf("ContextWindow = %v, want 200000", info.Model.Metadata.ContextWindow)
-		}
+		require.NotNil(t, info)
+		require.Equal(t, "claude-opus-4", info.Model.ID)
+		require.NotNil(t, info.Model.Metadata)
+		require.Equal(t, "Claude 4 Opus", info.Model.Metadata.DisplayName)
+		require.NotNil(t, info.Model.Metadata.ContextWindow)
+		require.Equal(t, 200000, *info.Model.Metadata.ContextWindow)
 	})
 
 	t.Run("RefreshModelListDownloadsAndEnrichesCurrentModels", func(t *testing.T) {
@@ -676,9 +533,8 @@ func TestModelRegistry(t *testing.T) {
 			},
 		}
 		registry.RegisterProviderWithType(mock, "openai")
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("Initialize() error = %v", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
@@ -705,23 +561,14 @@ func TestModelRegistry(t *testing.T) {
 		defer server.Close()
 
 		count, err := registry.RefreshModelList(context.Background(), server.URL)
-		if err != nil {
-			t.Fatalf("RefreshModelList() error = %v", err)
-		}
-		if count != 1 {
-			t.Fatalf("RefreshModelList() count = %d, want 1", count)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 1, count)
 
 		info := registry.GetModel("gpt-test")
-		if info == nil || info.Model.Metadata == nil {
-			t.Fatal("expected refreshed model metadata")
-		}
-		if info.Model.Metadata.DisplayName != "GPT Test" {
-			t.Fatalf("DisplayName = %q, want GPT Test", info.Model.Metadata.DisplayName)
-		}
-		if !info.Model.Metadata.Capabilities["tool_calling"] {
-			t.Fatal("expected tool_calling capability from refreshed model list")
-		}
+		require.NotNil(t, info)
+		require.NotNil(t, info.Model.Metadata)
+		require.Equal(t, "GPT Test", info.Model.Metadata.DisplayName)
+		require.True(t, info.Model.Metadata.Capabilities["tool_calling"])
 	})
 
 	t.Run("InitializeReturnsGatewayErrorWhenContextCanceledBeforeAcquire", func(t *testing.T) {
@@ -734,20 +581,12 @@ func TestModelRegistry(t *testing.T) {
 		cancel()
 
 		err := registry.Initialize(ctx)
-		if err == nil {
-			t.Fatal("Initialize() error = nil, want cancellation error")
-		}
+		require.Error(t, err)
 
 		var gatewayErr *core.GatewayError
-		if !errors.As(err, &gatewayErr) {
-			t.Fatalf("Initialize() error = %T, want *core.GatewayError", err)
-		}
-		if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
-			t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
-		}
-		if gatewayErr.Provider != "model_registry" {
-			t.Fatalf("provider = %q, want model_registry", gatewayErr.Provider)
-		}
+		require.ErrorAs(t, err, &gatewayErr)
+		require.Equal(t, http.StatusRequestTimeout, gatewayErr.HTTPStatusCode())
+		require.Equal(t, "model_registry", gatewayErr.Provider)
 	})
 
 	t.Run("RefreshModelListReturnsGatewayErrorWhenContextCanceledBeforeAcquire", func(t *testing.T) {
@@ -760,20 +599,12 @@ func TestModelRegistry(t *testing.T) {
 		cancel()
 
 		_, err := registry.RefreshModelList(ctx, "https://example.test/models.min.json")
-		if err == nil {
-			t.Fatal("RefreshModelList() error = nil, want cancellation error")
-		}
+		require.Error(t, err)
 
 		var gatewayErr *core.GatewayError
-		if !errors.As(err, &gatewayErr) {
-			t.Fatalf("RefreshModelList() error = %T, want *core.GatewayError", err)
-		}
-		if gatewayErr.HTTPStatusCode() != http.StatusRequestTimeout {
-			t.Fatalf("status = %d, want 408", gatewayErr.HTTPStatusCode())
-		}
-		if gatewayErr.Provider != "model_registry" {
-			t.Fatalf("provider = %q, want model_registry", gatewayErr.Provider)
-		}
+		require.ErrorAs(t, err, &gatewayErr)
+		require.Equal(t, http.StatusRequestTimeout, gatewayErr.HTTPStatusCode())
+		require.Equal(t, "model_registry", gatewayErr.Provider)
 	})
 
 	t.Run("DuplicateModels", func(t *testing.T) {
@@ -800,18 +631,12 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProviderWithNameAndType(mock2, "provider2", "openai")
 		_ = registry.Initialize(context.Background())
 
-		if registry.ModelCount() != 1 {
-			t.Errorf("expected 1 model (deduplicated), got %d", registry.ModelCount())
-		}
+		assert.Equal(t, 1, registry.ModelCount())
 
 		provider := registry.GetProvider("shared-model")
-		if provider != mock1 {
-			t.Error("expected first provider to win for duplicate model")
-		}
-
-		if provider := registry.GetProvider("provider2/shared-model"); provider != mock2 {
-			t.Error("expected qualified lookup to resolve second provider")
-		}
+		assert.Equal(t, mock1, provider)
+		provider = registry.GetProvider("provider2/shared-model")
+		assert.Equal(t, mock2, provider)
 	})
 
 	t.Run("SlashModelFallsBackToRawModelWhenPrefixIsNotConfiguredProvider", func(t *testing.T) {
@@ -827,22 +652,15 @@ func TestModelRegistry(t *testing.T) {
 			},
 		}
 		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		router, err := NewRouter(registry)
-		if err != nil {
-			t.Fatalf("unexpected router error: %v", err)
-		}
+		require.NoError(t, err)
 
 		resp, err := router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "google/gemini-xyz"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if resp.ID != "openrouter" {
-			t.Fatalf("resp.ID = %q, want openrouter", resp.ID)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "openrouter", resp.ID)
 	})
 
 	t.Run("SlashModelDoesNotFallBackToRawModelWhenPrefixIsConfiguredProvider", func(t *testing.T) {
@@ -869,26 +687,18 @@ func TestModelRegistry(t *testing.T) {
 		}
 		registry.RegisterProviderWithNameAndType(google, "google", "gemini")
 		registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		router, err := NewRouter(registry)
-		if err != nil {
-			t.Fatalf("unexpected router error: %v", err)
-		}
+		require.NoError(t, err)
 
 		_, err = router.ChatCompletion(context.Background(), &core.ChatRequest{Model: "google/gemini-xyz"})
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
+		require.Error(t, err)
+
 		var gwErr *core.GatewayError
-		if !errors.As(err, &gwErr) {
-			t.Fatalf("expected GatewayError, got %T: %v", err, err)
-		}
-		if gwErr.HTTPStatusCode() != http.StatusNotFound {
-			t.Fatalf("expected 404 status, got %d", gwErr.HTTPStatusCode())
-		}
+		require.ErrorAs(t, err, &gwErr)
+		require.Equal(t, http.StatusNotFound, gwErr.HTTPStatusCode())
 	})
 
 	t.Run("AllProvidersFail", func(t *testing.T) {
@@ -905,14 +715,7 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProvider(mock2)
 
 		err := registry.Initialize(context.Background())
-		if err == nil {
-			t.Error("expected error when all providers fail, got nil")
-		}
-
-		expectedMsg := "failed to fetch models from any provider"
-		if err.Error() != expectedMsg {
-			t.Errorf("expected error message '%s', got '%s'", expectedMsg, err.Error())
-		}
+		require.EqualError(t, err, "failed to fetch models from any provider")
 	})
 
 	t.Run("FailedRefreshRecordsRuntimeErrorAndKeepsInventory", func(t *testing.T) {
@@ -927,30 +730,20 @@ func TestModelRegistry(t *testing.T) {
 			},
 		}
 		registry.RegisterProviderWithNameAndType(mock, "test", "test")
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("initial Initialize() error = %v", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		mock.err = errors.New("refresh error")
-		err := registry.Initialize(context.Background())
-		if err == nil {
-			t.Fatal("expected failed refresh to return an error")
-		}
+		err = registry.Initialize(context.Background())
+		require.Error(t, err)
 
 		snapshots := registry.ProviderRuntimeSnapshots()
-		if len(snapshots) != 1 {
-			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
-		}
+		require.Len(t, snapshots, 1)
+
 		snapshot := snapshots[0]
-		if snapshot.DiscoveredModelCount != 1 {
-			t.Fatalf("expected previous model inventory to remain available, got %d models", snapshot.DiscoveredModelCount)
-		}
-		if !strings.Contains(snapshot.LastModelFetchError, "refresh error") {
-			t.Fatalf("LastModelFetchError = %q, want refresh error", snapshot.LastModelFetchError)
-		}
-		if snapshot.LastModelFetchAt == nil {
-			t.Fatal("expected LastModelFetchAt to be recorded")
-		}
+		require.Equal(t, 1, snapshot.DiscoveredModelCount)
+		require.Contains(t, snapshot.LastModelFetchError, "refresh error")
+		require.NotNil(t, snapshot.LastModelFetchAt)
 	})
 
 	t.Run("EmptyRefreshRecordsRuntimeErrorAndKeepsInventory", func(t *testing.T) {
@@ -965,30 +758,20 @@ func TestModelRegistry(t *testing.T) {
 			},
 		}
 		registry.RegisterProviderWithNameAndType(mock, "test", "test")
-		if err := registry.Initialize(context.Background()); err != nil {
-			t.Fatalf("initial Initialize() error = %v", err)
-		}
+		err := registry.Initialize(context.Background())
+		require.NoError(t, err)
 
 		mock.modelsResponse = &core.ModelsResponse{Object: "list"}
-		err := registry.Initialize(context.Background())
-		if err == nil {
-			t.Fatal("expected empty refresh to return an error")
-		}
+		err = registry.Initialize(context.Background())
+		require.Error(t, err)
 
 		snapshots := registry.ProviderRuntimeSnapshots()
-		if len(snapshots) != 1 {
-			t.Fatalf("expected 1 provider runtime snapshot, got %d", len(snapshots))
-		}
+		require.Len(t, snapshots, 1)
+
 		snapshot := snapshots[0]
-		if snapshot.DiscoveredModelCount != 1 {
-			t.Fatalf("expected previous model inventory to remain available, got %d models", snapshot.DiscoveredModelCount)
-		}
-		if !strings.Contains(snapshot.LastModelFetchError, "empty model list") {
-			t.Fatalf("LastModelFetchError = %q, want empty model list error", snapshot.LastModelFetchError)
-		}
-		if snapshot.LastModelFetchAt == nil {
-			t.Fatal("expected LastModelFetchAt to be recorded")
-		}
+		require.Equal(t, 1, snapshot.DiscoveredModelCount)
+		require.Contains(t, snapshot.LastModelFetchError, "empty model list")
+		require.NotNil(t, snapshot.LastModelFetchAt)
 	})
 
 	t.Run("ListModelsOrdering", func(t *testing.T) {
@@ -1009,19 +792,10 @@ func TestModelRegistry(t *testing.T) {
 
 		for range 5 {
 			models := registry.ListModels()
-			if len(models) != 3 {
-				t.Fatalf("expected 3 models, got %d", len(models))
-			}
-
-			if models[0].ID != "alpha-model" {
-				t.Errorf("expected first model to be 'alpha-model', got '%s'", models[0].ID)
-			}
-			if models[1].ID != "middle-model" {
-				t.Errorf("expected second model to be 'middle-model', got '%s'", models[1].ID)
-			}
-			if models[2].ID != "zebra-model" {
-				t.Errorf("expected third model to be 'zebra-model', got '%s'", models[2].ID)
-			}
+			require.Len(t, models, 3)
+			assert.Equal(t, "alpha-model", models[0].ID)
+			assert.Equal(t, "middle-model", models[1].ID)
+			assert.Equal(t, "zebra-model", models[2].ID)
 		}
 	})
 
@@ -1039,18 +813,11 @@ func TestModelRegistry(t *testing.T) {
 		registry.RegisterProvider(mock)
 		_ = registry.Initialize(context.Background())
 
-		if !registry.Supports("test-model") {
-			t.Fatal("expected model to be available before refresh")
-		}
+		require.True(t, registry.Supports("test-model"))
 
 		err := registry.Refresh(context.Background())
-		if err != nil {
-			t.Fatalf("unexpected refresh error: %v", err)
-		}
-
-		if !registry.Supports("test-model") {
-			t.Error("expected model to be available after refresh")
-		}
+		require.NoError(t, err)
+		assert.True(t, registry.Supports("test-model"))
 	})
 
 	t.Run("GetProviderType", func(t *testing.T) {
@@ -1068,14 +835,10 @@ func TestModelRegistry(t *testing.T) {
 		_ = registry.Initialize(context.Background())
 
 		pType := registry.GetProviderType("test-model")
-		if pType != "openai" {
-			t.Errorf("expected provider type 'openai', got '%s'", pType)
-		}
+		assert.Equal(t, "openai", pType)
 
 		pType = registry.GetProviderType("unknown-model")
-		if pType != "" {
-			t.Errorf("expected empty provider type for unknown model, got '%s'", pType)
-		}
+		assert.Empty(t, pType)
 	})
 }
 
@@ -1101,31 +864,17 @@ func TestInitialize_FailedRefreshKeepsPreviousInventoryAsStale(t *testing.T) {
 	}
 	registry.RegisterProviderWithNameAndType(flaky, "flaky", "flaky")
 	registry.RegisterProviderWithNameAndType(steady, "steady", "steady")
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("initial Initialize() error = %v", err)
-	}
-	if !registry.ModelAvailable("flaky/flaky-model") {
-		t.Fatal("ModelAvailable() = false after successful fetch, want true")
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.True(t, registry.ModelAvailable("flaky/flaky-model"))
 
 	flaky.err = errors.New("connection refused")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("refresh Initialize() error = %v", err)
-	}
-
-	if registry.GetProvider("flaky/flaky-model") != flaky {
-		t.Fatal("failed provider's models were wiped, want carried forward")
-	}
-	if !registry.Supports("flaky/flaky-model") {
-		t.Fatal("Supports() = false for carried-forward model, want true")
-	}
-	if registry.ModelAvailable("flaky/flaky-model") {
-		t.Fatal("ModelAvailable() = true for stale inventory, want false")
-	}
-	if !registry.ModelAvailable("steady/steady-model") {
-		t.Fatal("ModelAvailable() = false for healthy provider, want true")
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, registry.GetProvider("flaky/flaky-model"), flaky)
+	require.True(t, registry.Supports("flaky/flaky-model"))
+	require.False(t, registry.ModelAvailable("flaky/flaky-model"))
+	require.True(t, registry.ModelAvailable("steady/steady-model"))
 
 	var flakySnapshot ProviderRuntimeSnapshot
 	for _, snapshot := range registry.ProviderRuntimeSnapshots() {
@@ -1133,23 +882,14 @@ func TestInitialize_FailedRefreshKeepsPreviousInventoryAsStale(t *testing.T) {
 			flakySnapshot = snapshot
 		}
 	}
-	if !flakySnapshot.InventoryStale {
-		t.Fatal("InventoryStale = false, want true after failed refresh")
-	}
-	if flakySnapshot.DiscoveredModelCount == 0 {
-		t.Fatal("DiscoveredModelCount = 0, want carried-forward inventory counted")
-	}
-	if flakySnapshot.LastModelFetchError == "" {
-		t.Fatal("LastModelFetchError empty, want refresh failure recorded")
-	}
+	require.True(t, flakySnapshot.InventoryStale)
+	require.NotEqual(t, 0, flakySnapshot.DiscoveredModelCount)
+	require.NotEmpty(t, flakySnapshot.LastModelFetchError)
 
 	flaky.err = nil
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("recovery Initialize() error = %v", err)
-	}
-	if !registry.ModelAvailable("flaky/flaky-model") {
-		t.Fatal("ModelAvailable() = false after recovery, want true")
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.True(t, registry.ModelAvailable("flaky/flaky-model"))
 }
 
 // When several providers serve the same bare model ID, a stale provider loses
@@ -1167,28 +907,16 @@ func TestInitialize_StaleProviderLosesBareModelIDToHealthyDuplicate(t *testing.T
 	second := &registryMockProvider{name: "second", modelsResponse: sharedModels("second")}
 	registry.RegisterProviderWithNameAndType(first, "first", "first")
 	registry.RegisterProviderWithNameAndType(second, "second", "second")
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("initial Initialize() error = %v", err)
-	}
-	if registry.GetProvider("shared-model") != first {
-		t.Fatal("bare model ID not owned by first registered provider")
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, registry.GetProvider("shared-model"), first)
 
 	first.err = errors.New("connection refused")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("refresh Initialize() error = %v", err)
-	}
-
-	if registry.GetProvider("shared-model") != second {
-		t.Fatal("bare model ID still routed to stale provider, want healthy duplicate")
-	}
-	if registry.GetProvider("first/shared-model") != first {
-		t.Fatal("qualified model on stale provider not resolvable, want carried forward")
-	}
-	if !registry.ModelAvailable("shared-model") {
-		t.Fatal("ModelAvailable() = false for bare ID now owned by healthy provider, want true")
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, registry.GetProvider("shared-model"), second)
+	require.Equal(t, registry.GetProvider("first/shared-model"), first)
+	require.True(t, registry.ModelAvailable("shared-model"))
 }
 
 // A provider that goes offline must disappear from every model listing
@@ -1224,57 +952,41 @@ func TestStaleProviderModelsAreNotAdvertised(t *testing.T) {
 
 	before := listedIDs(t)
 	for _, key := range []string{"public:beta/beta-model", "provider:beta/beta-model", "bare:beta-model"} {
-		if !before[key] {
-			t.Fatalf("%s missing from listings while beta is healthy", key)
-		}
+		require.True(t, before[key], "%s missing from listings while beta is healthy", key)
 	}
-	if !categorySelectors(t)["beta/beta-model"] {
-		t.Fatal("beta/beta-model missing from embedding category while beta is healthy")
-	}
+	require.True(t, categorySelectors(t)["beta/beta-model"])
 
 	beta.err = errors.New("connection refused")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("refresh Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	after := listedIDs(t)
 	for _, key := range []string{"public:beta/beta-model", "provider:beta/beta-model", "bare:beta-model"} {
-		if after[key] {
-			t.Errorf("%s still advertised after beta went offline, want hidden", key)
-		}
+		assert.False(t, after[key], "%s still advertised after beta went offline", key)
 	}
 	for _, key := range []string{"public:alpha/alpha-model", "provider:alpha/alpha-model", "bare:alpha-model"} {
-		if !after[key] {
-			t.Errorf("%s missing from listings, want healthy provider unaffected", key)
-		}
+		assert.True(t, after[key], "%s missing from listings, want healthy provider unaffected", key)
 	}
 	for _, counts := range registry.GetCategoryCounts() {
-		if counts.Category == core.CategoryAll && counts.Count != 1 {
-			t.Errorf("GetCategoryCounts()[all] = %d with beta offline, want 1", counts.Count)
+		if counts.Category == core.CategoryAll {
+			assert.Equal(t, 1, counts.Count, "GetCategoryCounts()[all] with beta offline")
 		}
 	}
 	afterCategory := categorySelectors(t)
-	if afterCategory["beta/beta-model"] {
-		t.Error("beta/beta-model still in embedding category after beta went offline, want hidden")
-	}
-	if !afterCategory["alpha/alpha-model"] {
-		t.Error("alpha/alpha-model missing from embedding category, want healthy provider unaffected")
-	}
+	assert.False(t, afterCategory["beta/beta-model"], "beta/beta-model still in embedding category after beta went offline")
+	assert.True(t, afterCategory["alpha/alpha-model"])
+
 	// Direct requests must still resolve the carried inventory (honest 502 at
 	// the provider instead of "model not found").
-	if !registry.Supports("beta/beta-model") {
-		t.Error("Supports(beta/beta-model) = false, want carried inventory still resolvable")
-	}
+	assert.True(t, registry.Supports("beta/beta-model"))
 
 	beta.err = nil
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("recovery Initialize() error = %v", err)
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
+
 	recovered := listedIDs(t)
 	for _, key := range []string{"public:beta/beta-model", "provider:beta/beta-model", "bare:beta-model"} {
-		if !recovered[key] {
-			t.Errorf("%s missing from listings after recovery, want advertised again", key)
-		}
+		assert.True(t, recovered[key], "%s missing from listings after recovery, want advertised again", key)
 	}
 }
 
@@ -1294,12 +1006,10 @@ func TestStartBackgroundRefresh_RechecksFailedProviders(t *testing.T) {
 	registry.RegisterProviderWithNameAndType(flaky, "flaky", "flaky")
 
 	// Mark the provider failed while nothing runs concurrently.
-	if err := registry.Initialize(context.Background()); err == nil {
-		t.Fatal("Initialize() error = nil, want failure while provider is down")
-	}
-	if got := registry.FailedProviderNames(); len(got) != 1 || got[0] != "flaky" {
-		t.Fatalf("FailedProviderNames() = %v, want [flaky]", got)
-	}
+	require.Error(t, registry.Initialize(context.Background()))
+	got := registry.FailedProviderNames()
+	require.Len(t, got, 1)
+	require.Equal(t, "flaky", got[0])
 
 	// The provider recovers before the loop starts (avoids racing the mock).
 	flaky.err = nil
@@ -1316,12 +1026,9 @@ func TestStartBackgroundRefresh_RechecksFailedProviders(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !registry.ModelAvailable("flaky/flaky-model") {
-		t.Fatal("recovered provider not re-discovered by the recheck loop")
-	}
-	if got := registry.FailedProviderNames(); len(got) != 0 {
-		t.Fatalf("FailedProviderNames() = %v after recovery, want empty", got)
-	}
+	require.True(t, registry.ModelAvailable("flaky/flaky-model"))
+	got = registry.FailedProviderNames()
+	require.Empty(t, got)
 }
 
 // registerTwoProviderRegistry seeds a registry with two healthy providers and
@@ -1345,9 +1052,9 @@ func registerTwoProviderRegistry(t *testing.T) (*ModelRegistry, *registryMockPro
 	beta := &registryMockProvider{name: "beta", modelsResponse: singleModel("beta")}
 	registry.RegisterProviderWithNameAndType(alpha, "alpha", "alpha")
 	registry.RegisterProviderWithNameAndType(beta, "beta", "beta")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("initial Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+
 	return registry, alpha, beta
 }
 
@@ -1360,14 +1067,10 @@ func TestInitialize_TotalRefreshFailureKeepsRouting(t *testing.T) {
 
 	alpha.err = errors.New("connection refused")
 	beta.err = errors.New("connection refused")
-	if err := registry.Initialize(context.Background()); err == nil {
-		t.Fatal("Initialize() error = nil, want total-failure error")
-	}
+	require.Error(t, registry.Initialize(context.Background()))
 
 	for _, model := range []string{"alpha/alpha-model", "beta/beta-model"} {
-		if !registry.ModelAvailable(model) {
-			t.Fatalf("ModelAvailable(%q) = false after total refresh failure, want true (no healthy alternative to route to)", model)
-		}
+		require.True(t, registry.ModelAvailable(model), "ModelAvailable(%q) = false after total refresh failure, want true (no healthy alternative to route to)", model)
 	}
 }
 
@@ -1378,19 +1081,11 @@ func TestRefreshProviderModels_FailureMarksStaleWhenAlternativeHealthy(t *testin
 	registry, _, beta := registerTwoProviderRegistry(t)
 
 	beta.err = errors.New("connection refused")
-	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
-		t.Fatal("RefreshProviderModels() error = nil, want failure")
-	}
-
-	if registry.ModelAvailable("beta/beta-model") {
-		t.Fatal("ModelAvailable(beta) = true after failed probe with healthy alternative, want false")
-	}
-	if !registry.Supports("beta/beta-model") {
-		t.Fatal("Supports(beta) = false, want carried inventory still resolvable")
-	}
-	if !registry.ModelAvailable("alpha/alpha-model") {
-		t.Fatal("ModelAvailable(alpha) = false, want healthy provider unaffected")
-	}
+	_, err := registry.RefreshProviderModels(context.Background(), "beta")
+	require.Error(t, err)
+	require.False(t, registry.ModelAvailable("beta/beta-model"))
+	require.True(t, registry.Supports("beta/beta-model"))
+	require.True(t, registry.ModelAvailable("alpha/alpha-model"))
 }
 
 // After a total outage, a recovering provider must retire its still-down peer
@@ -1400,32 +1095,20 @@ func TestRefreshProviderModels_TotalOutageRecoveryRetiresStillDownPeer(t *testin
 
 	alpha.err = errors.New("connection refused")
 	beta.err = errors.New("connection refused")
-	if err := registry.Initialize(context.Background()); err == nil {
-		t.Fatal("Initialize() error = nil, want total-failure error")
-	}
-
-	// While nothing is healthy, a failed probe must not retire the provider.
-	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
-		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
-	}
-	if !registry.ModelAvailable("beta/beta-model") {
-		t.Fatal("ModelAvailable(beta) = false with no healthy alternative, want true")
-	}
+	require.Error(t, registry.Initialize(context.Background()))
+	_, err := // While nothing is healthy, a failed probe must not retire the provider.
+		registry.RefreshProviderModels(context.Background(), "beta")
+	require.Error(t, err)
+	require.True(t, registry.ModelAvailable("beta/beta-model"))
 
 	// Alpha recovers; the next failed probe of beta retires it.
 	alpha.err = nil
-	if _, err := registry.RefreshProviderModels(context.Background(), "alpha"); err != nil {
-		t.Fatalf("RefreshProviderModels(alpha) error = %v, want recovery", err)
-	}
-	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
-		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
-	}
-	if registry.ModelAvailable("beta/beta-model") {
-		t.Fatal("ModelAvailable(beta) = true after alpha recovered, want stale (healthy alternative exists)")
-	}
-	if !registry.ModelAvailable("alpha/alpha-model") {
-		t.Fatal("ModelAvailable(alpha) = false after recovery, want true")
-	}
+	_, err = registry.RefreshProviderModels(context.Background(), "alpha")
+	require.NoError(t, err)
+	_, err = registry.RefreshProviderModels(context.Background(), "beta")
+	require.Error(t, err)
+	require.False(t, registry.ModelAvailable("beta/beta-model"))
+	require.True(t, registry.ModelAvailable("alpha/alpha-model"))
 }
 
 // availabilityFailingProvider wraps the registry mock with a failing
@@ -1461,36 +1144,27 @@ func TestRefreshProviderModels_AvailabilityFailureMarksStale(t *testing.T) {
 	}
 	registry.RegisterProviderWithNameAndType(alpha, "alpha", "alpha")
 	registry.RegisterProviderWithNameAndType(beta, "beta", "beta")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("initial Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	beta.availabilityErr = errors.New("connection refused")
-	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
-		t.Fatal("RefreshProviderModels(beta) error = nil, want availability failure")
-	}
-	if registry.ModelAvailable("beta/beta-model") {
-		t.Fatal("ModelAvailable(beta) = true after failed availability check, want false")
-	}
-
-	// The availability failure never set a model fetch error, but the recheck
-	// loop must still re-probe the provider or it would stay stale until the
-	// next full sweep.
-	if got := registry.FailedProviderNames(); len(got) != 1 || got[0] != "beta" {
-		t.Fatalf("FailedProviderNames() = %v, want [beta] (availability-only failure)", got)
-	}
+	_, err = registry.RefreshProviderModels(context.Background(), "beta")
+	require.Error(t, err)
+	require.False(t, registry.ModelAvailable("beta/beta-model"))
+	got := // The availability failure never set a model fetch error, but the recheck
+		// loop must still re-probe the provider or it would stay stale until the
+		// next full sweep.
+		registry.FailedProviderNames()
+	require.Len(t, got, 1)
+	require.Equal(t, "beta", got[0])
 
 	// Recovery through the recheck path restores availability.
 	beta.availabilityErr = nil
-	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err != nil {
-		t.Fatalf("RefreshProviderModels(beta) error = %v, want recovery", err)
-	}
-	if !registry.ModelAvailable("beta/beta-model") {
-		t.Fatal("ModelAvailable(beta) = false after recovery, want true")
-	}
-	if got := registry.FailedProviderNames(); len(got) != 0 {
-		t.Fatalf("FailedProviderNames() = %v after recovery, want empty", got)
-	}
+	_, err = registry.RefreshProviderModels(context.Background(), "beta")
+	require.NoError(t, err)
+	require.True(t, registry.ModelAvailable("beta/beta-model"))
+	got = registry.FailedProviderNames()
+	require.Empty(t, got)
 }
 
 // A provider with a failed availability probe does not count as the healthy
@@ -1501,12 +1175,9 @@ func TestRefreshProviderModels_AvailabilityFailingPeerIsNotHealthyAlternative(t 
 	registry.RecordAvailabilityCheck("alpha", errors.New("connection refused"))
 
 	beta.err = errors.New("connection refused")
-	if _, err := registry.RefreshProviderModels(context.Background(), "beta"); err == nil {
-		t.Fatal("RefreshProviderModels(beta) error = nil, want failure")
-	}
-	if !registry.ModelAvailable("beta/beta-model") {
-		t.Fatal("ModelAvailable(beta) = false, want true (alpha's availability probe failed, so no healthy alternative)")
-	}
+	_, err := registry.RefreshProviderModels(context.Background(), "beta")
+	require.Error(t, err)
+	require.True(t, registry.ModelAvailable("beta/beta-model"))
 }
 
 // The refresh sweep shares one context budget across all providers; a slow
@@ -1538,17 +1209,12 @@ func TestInitialize_SlowProviderDoesNotStarveOthers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-
-	if err := registry.Initialize(ctx); err != nil {
-		t.Fatalf("Initialize() error = %v, want nil (fast provider succeeded)", err)
-	}
-
-	if provider := registry.GetProvider("fast-model"); provider != fast {
-		t.Fatal("fast provider's model missing: slow provider starved the sweep budget")
-	}
-	if provider := registry.GetProvider("slow-model"); provider != nil {
-		t.Fatal("slow provider's model registered, want fetch aborted by context deadline")
-	}
+	err := registry.Initialize(ctx)
+	require.NoError(t, err)
+	provider := registry.GetProvider("fast-model")
+	require.Equal(t, fast, provider)
+	provider = registry.GetProvider("slow-model")
+	require.Nil(t, provider)
 }
 
 func TestInitialize_LogsSingleMetadataSummaryPerCycle(t *testing.T) {
@@ -1603,9 +1269,8 @@ func TestInitialize_LogsSingleMetadataSummaryPerCycle(t *testing.T) {
 		"provider_models": {}
 	}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 
 	var buf bytes.Buffer
@@ -1614,35 +1279,23 @@ func TestInitialize_LogsSingleMetadataSummaryPerCycle(t *testing.T) {
 	t.Cleanup(func() {
 		slog.SetDefault(original)
 	})
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	logs := buf.String()
-	if got := strings.Count(logs, `"msg":"enriched models with metadata"`); got != 0 {
-		t.Fatalf("expected no standalone enrichment info logs, got %d:\n%s", got, logs)
-	}
-	if got := strings.Count(logs, `"msg":"model registry initialized"`); got != 1 {
-		t.Fatalf("expected one initialization summary log, got %d:\n%s", got, logs)
-	}
-	if !strings.Contains(logs, `"metadata_enriched":2`) {
-		t.Fatalf("expected initialization log to include metadata_enriched=2:\n%s", logs)
-	}
-	if !strings.Contains(logs, `"metadata_total":2`) {
-		t.Fatalf("expected initialization log to include metadata_total=2:\n%s", logs)
-	}
-	if !strings.Contains(logs, `"metadata_providers":2`) {
-		t.Fatalf("expected initialization log to include metadata_providers=2:\n%s", logs)
-	}
+	got := strings.Count(logs, `"msg":"enriched models with metadata"`)
+	require.Equal(t, 0, got)
+	got = strings.Count(logs, `"msg":"model registry initialized"`)
+	require.Equal(t, 1, got)
+	require.Contains(t, logs, `"metadata_enriched":2`)
+	require.Contains(t, logs, `"metadata_total":2`)
+	require.Contains(t, logs, `"metadata_providers":2`)
 }
 
 func TestListModelsWithProvider_Empty(t *testing.T) {
 	registry := NewModelRegistry()
 	models := registry.ListModelsWithProvider()
-	if len(models) != 0 {
-		t.Errorf("expected empty slice, got %d models", len(models))
-	}
+	assert.Empty(t, models)
 }
 
 func TestListModelsWithProvider_Sorted(t *testing.T) {
@@ -1672,18 +1325,10 @@ func TestListModelsWithProvider_Sorted(t *testing.T) {
 	_ = registry.Initialize(context.Background())
 
 	models := registry.ListModelsWithProvider()
-	if len(models) != 3 {
-		t.Fatalf("expected 3 models, got %d", len(models))
-	}
-	if models[0].Model.ID != "middle-model" {
-		t.Errorf("expected first model middle-model, got %s", models[0].Model.ID)
-	}
-	if models[1].Model.ID != "alpha-model" {
-		t.Errorf("expected second model alpha-model, got %s", models[1].Model.ID)
-	}
-	if models[2].Model.ID != "zebra-model" {
-		t.Errorf("expected third model zebra-model, got %s", models[2].Model.ID)
-	}
+	require.Len(t, models, 3)
+	assert.Equal(t, "middle-model", models[0].Model.ID)
+	assert.Equal(t, "alpha-model", models[1].Model.ID)
+	assert.Equal(t, "zebra-model", models[2].Model.ID)
 }
 
 func TestListModelsWithProvider_IncludesProviderType(t *testing.T) {
@@ -1712,17 +1357,11 @@ func TestListModelsWithProvider_IncludesProviderType(t *testing.T) {
 	_ = registry.Initialize(context.Background())
 
 	models := registry.ListModelsWithProvider()
-	if len(models) != 2 {
-		t.Fatalf("expected 2 models, got %d", len(models))
-	}
+	require.Len(t, models, 2)
 
 	// Models are sorted: claude-3 before gpt-4
-	if models[0].ProviderType != "anthropic" {
-		t.Errorf("expected claude-3 provider type 'anthropic', got %q", models[0].ProviderType)
-	}
-	if models[1].ProviderType != "openai" {
-		t.Errorf("expected gpt-4 provider type 'openai', got %q", models[1].ProviderType)
-	}
+	assert.Equal(t, "anthropic", models[0].ProviderType)
+	assert.Equal(t, "openai", models[1].ProviderType)
 }
 
 func TestInitialize_EnrichesAllProviderSpecificModels(t *testing.T) {
@@ -1766,30 +1405,23 @@ func TestInitialize_EnrichesAllProviderSpecificModels(t *testing.T) {
 		}
 	}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse() error = %v", err)
-	}
-	registry.SetModelList(list, raw)
+	require.NoError(t, err)
 
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	registry.SetModelList(list, raw)
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	openAIInfo := registry.GetModel("openai-main/shared-model")
-	if openAIInfo == nil || openAIInfo.Model.Metadata == nil {
-		t.Fatal("expected openai-main/shared-model metadata to be present")
-	}
-	if openAIInfo.Model.Metadata.ContextWindow == nil || *openAIInfo.Model.Metadata.ContextWindow != 111111 {
-		t.Fatalf("openai context window = %v, want 111111", openAIInfo.Model.Metadata.ContextWindow)
-	}
+	require.NotNil(t, openAIInfo)
+	require.NotNil(t, openAIInfo.Model.Metadata)
+	require.NotNil(t, openAIInfo.Model.Metadata.ContextWindow)
+	require.Equal(t, 111111, *openAIInfo.Model.Metadata.ContextWindow)
 
 	openRouterInfo := registry.GetModel("openrouter-main/shared-model")
-	if openRouterInfo == nil || openRouterInfo.Model.Metadata == nil {
-		t.Fatal("expected openrouter-main/shared-model metadata to be present")
-	}
-	if openRouterInfo.Model.Metadata.ContextWindow == nil || *openRouterInfo.Model.Metadata.ContextWindow != 222222 {
-		t.Fatalf("openrouter context window = %v, want 222222", openRouterInfo.Model.Metadata.ContextWindow)
-	}
+	require.NotNil(t, openRouterInfo)
+	require.NotNil(t, openRouterInfo.Model.Metadata)
+	require.NotNil(t, openRouterInfo.Model.Metadata.ContextWindow)
+	require.Equal(t, 222222, *openRouterInfo.Model.Metadata.ContextWindow)
 }
 
 func TestListPublicModels_UsesConfiguredProviderNamesAndIncludesDuplicates(t *testing.T) {
@@ -1826,14 +1458,11 @@ func TestListPublicModels_UsesConfiguredProviderNamesAndIncludesDuplicates(t *te
 	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
 	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
 	registry.RegisterProviderWithNameAndType(azure, "azure-openai", "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	models := registry.ListPublicModels()
-	if len(models) != 3 {
-		t.Fatalf("expected 3 public models, got %d", len(models))
-	}
+	require.Len(t, models, 3)
 
 	want := []core.Model{
 		{ID: "azure-openai/gpt-4o", OwnedBy: "azure-openai"},
@@ -1841,12 +1470,8 @@ func TestListPublicModels_UsesConfiguredProviderNamesAndIncludesDuplicates(t *te
 		{ID: "openrouter/gpt-4o", OwnedBy: "openrouter"},
 	}
 	for i, model := range want {
-		if models[i].ID != model.ID {
-			t.Fatalf("models[%d].ID = %q, want %q", i, models[i].ID, model.ID)
-		}
-		if models[i].OwnedBy != model.OwnedBy {
-			t.Fatalf("models[%d].OwnedBy = %q, want %q", i, models[i].OwnedBy, model.OwnedBy)
-		}
+		require.Equal(t, model.ID, models[i].ID, "models[%d].ID", i)
+		require.Equal(t, model.OwnedBy, models[i].OwnedBy, "models[%d].OwnedBy", i)
 	}
 }
 
@@ -1875,14 +1500,11 @@ func TestListModelsWithProvider_UsesConfiguredProviderNamesAndIncludesDuplicates
 
 	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
 	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	models := registry.ListModelsWithProvider()
-	if len(models) != 3 {
-		t.Fatalf("expected 3 models, got %d", len(models))
-	}
+	require.Len(t, models, 3)
 
 	want := []struct {
 		id           string
@@ -1895,18 +1517,10 @@ func TestListModelsWithProvider_UsesConfiguredProviderNamesAndIncludesDuplicates
 		{id: "openai/gpt-4o-mini", providerName: "openrouter", providerType: "openrouter", selector: "openrouter/openai/gpt-4o-mini"},
 	}
 	for i, wantModel := range want {
-		if models[i].Model.ID != wantModel.id {
-			t.Fatalf("models[%d].Model.ID = %q, want %q", i, models[i].Model.ID, wantModel.id)
-		}
-		if models[i].ProviderName != wantModel.providerName {
-			t.Fatalf("models[%d].ProviderName = %q, want %q", i, models[i].ProviderName, wantModel.providerName)
-		}
-		if models[i].ProviderType != wantModel.providerType {
-			t.Fatalf("models[%d].ProviderType = %q, want %q", i, models[i].ProviderType, wantModel.providerType)
-		}
-		if models[i].Selector != wantModel.selector {
-			t.Fatalf("models[%d].Selector = %q, want %q", i, models[i].Selector, wantModel.selector)
-		}
+		require.Equal(t, wantModel.id, models[i].Model.ID, "models[%d].Model.ID", i)
+		require.Equal(t, wantModel.providerName, models[i].ProviderName, "models[%d].ProviderName", i)
+		require.Equal(t, wantModel.providerType, models[i].ProviderType, "models[%d].ProviderType", i)
+		require.Equal(t, wantModel.selector, models[i].Selector, "models[%d].Selector", i)
 	}
 }
 
@@ -1946,10 +1560,8 @@ func TestApplyProviderRuntimeUpdates_ClearsStaleErrorOnSuccessfulRefresh(t *test
 			// lastModelFetchError intentionally empty; SuccessAt deliberately zero.
 		},
 	})
-
-	if got := registry.providerRuntime["test"].lastModelFetchError; got != "" {
-		t.Fatalf("lastModelFetchError = %q, want empty after successful refresh", got)
-	}
+	got := registry.providerRuntime["test"].lastModelFetchError
+	require.Empty(t, got)
 }
 
 func TestStartBackgroundRefresh(t *testing.T) {
@@ -1983,9 +1595,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 		time.Sleep(interval*3 + 25*time.Millisecond)
 
 		count := refreshCount.Load()
-		if count < 2 {
-			t.Errorf("expected at least 2 refreshes, got %d", count)
-		}
+		assert.GreaterOrEqual(t, count, int32(2))
 	})
 
 	t.Run("StopsOnCancel", func(t *testing.T) {
@@ -2018,9 +1628,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 		time.Sleep(interval * 3)
 
 		count := refreshCount.Load()
-		if count > 1 {
-			t.Errorf("expected at most 1 refresh after cancel, got %d", count)
-		}
+		assert.LessOrEqual(t, count, int32(1))
 	})
 
 	t.Run("CancelWaitsForInFlightRefreshToExit", func(t *testing.T) {
@@ -2171,9 +1779,7 @@ func TestStartBackgroundRefresh(t *testing.T) {
 		time.Sleep(interval*3 + 25*time.Millisecond)
 
 		count := refreshCount.Load()
-		if count < 2 {
-			t.Errorf("expected at least 2 refresh attempts despite errors, got %d", count)
-		}
+		assert.GreaterOrEqual(t, count, int32(2))
 	})
 }
 
@@ -2216,43 +1822,29 @@ func TestListModelsWithProviderByCategory(t *testing.T) {
 
 	t.Run("FilterTextGeneration", func(t *testing.T) {
 		models := registry.ListModelsWithProviderByCategory(core.CategoryTextGeneration)
-		if len(models) != 1 {
-			t.Fatalf("expected 1 text_generation model, got %d", len(models))
-		}
-		if models[0].Model.ID != "gpt-4o" {
-			t.Errorf("expected gpt-4o, got %s", models[0].Model.ID)
-		}
+		require.Len(t, models, 1)
+		assert.Equal(t, "gpt-4o", models[0].Model.ID)
 	})
 
 	t.Run("FilterEmbedding", func(t *testing.T) {
 		models := registry.ListModelsWithProviderByCategory(core.CategoryEmbedding)
-		if len(models) != 1 {
-			t.Fatalf("expected 1 embedding model, got %d", len(models))
-		}
-		if models[0].Model.ID != "text-embedding-3-small" {
-			t.Errorf("expected text-embedding-3-small, got %s", models[0].Model.ID)
-		}
+		require.Len(t, models, 1)
+		assert.Equal(t, "text-embedding-3-small", models[0].Model.ID)
 	})
 
 	t.Run("FilterImage", func(t *testing.T) {
 		models := registry.ListModelsWithProviderByCategory(core.CategoryImage)
-		if len(models) != 1 {
-			t.Fatalf("expected 1 image model, got %d", len(models))
-		}
+		require.Len(t, models, 1)
 	})
 
 	t.Run("FilterAll", func(t *testing.T) {
 		models := registry.ListModelsWithProviderByCategory(core.CategoryAll)
-		if len(models) != 4 {
-			t.Fatalf("expected 4 models for 'all', got %d", len(models))
-		}
+		require.Len(t, models, 4)
 	})
 
 	t.Run("FilterEmpty", func(t *testing.T) {
 		models := registry.ListModelsWithProviderByCategory(core.CategoryVideo)
-		if len(models) != 0 {
-			t.Fatalf("expected 0 video models, got %d", len(models))
-		}
+		require.Empty(t, models)
 	})
 }
 
@@ -2274,23 +1866,13 @@ func TestListModelsWithProviderByCategory_UsesStoredProviderMetadata(t *testing.
 	}
 
 	allModels := registry.ListModelsWithProvider()
-	if len(allModels) != 1 {
-		t.Fatalf("expected 1 model from full listing, got %d", len(allModels))
-	}
+	require.Len(t, allModels, 1)
 
 	filtered := registry.ListModelsWithProviderByCategory(core.CategoryTextGeneration)
-	if len(filtered) != 1 {
-		t.Fatalf("expected 1 model from category listing, got %d", len(filtered))
-	}
-	if filtered[0].ProviderName != allModels[0].ProviderName {
-		t.Fatalf("ProviderName = %q, want %q", filtered[0].ProviderName, allModels[0].ProviderName)
-	}
-	if filtered[0].ProviderType != allModels[0].ProviderType {
-		t.Fatalf("ProviderType = %q, want %q", filtered[0].ProviderType, allModels[0].ProviderType)
-	}
-	if filtered[0].Selector != "public-openai/gpt-4o" {
-		t.Fatalf("Selector = %q, want %q", filtered[0].Selector, "public-openai/gpt-4o")
-	}
+	require.Len(t, filtered, 1)
+	require.Equal(t, allModels[0].ProviderName, filtered[0].ProviderName)
+	require.Equal(t, allModels[0].ProviderType, filtered[0].ProviderType)
+	require.Equal(t, "public-openai/gpt-4o", filtered[0].Selector)
 }
 
 func TestGetCategoryCounts_CountsProviderBackedModels(t *testing.T) {
@@ -2331,9 +1913,8 @@ func TestGetCategoryCounts_CountsProviderBackedModels(t *testing.T) {
 
 	registry.RegisterProviderWithNameAndType(openAI, "openai", "openai")
 	registry.RegisterProviderWithNameAndType(openRouter, "openrouter", "openrouter")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	counts := registry.GetCategoryCounts()
 	var gotAll, gotTextGeneration int
@@ -2345,12 +1926,8 @@ func TestGetCategoryCounts_CountsProviderBackedModels(t *testing.T) {
 			gotTextGeneration = count.Count
 		}
 	}
-	if gotAll != 2 {
-		t.Fatalf("all count = %d, want 2", gotAll)
-	}
-	if gotTextGeneration != 2 {
-		t.Fatalf("text generation count = %d, want 2", gotTextGeneration)
-	}
+	require.Equal(t, 2, gotAll)
+	require.Equal(t, 2, gotTextGeneration)
 }
 
 func TestGetCategoryCounts(t *testing.T) {
@@ -2388,9 +1965,7 @@ func TestGetCategoryCounts(t *testing.T) {
 	counts := registry.GetCategoryCounts()
 
 	// Should have entries for all categories
-	if len(counts) != len(core.AllCategories()) {
-		t.Fatalf("expected %d category counts, got %d", len(core.AllCategories()), len(counts))
-	}
+	require.Equal(t, len(core.AllCategories()), len(counts))
 
 	// Verify specific counts
 	countMap := make(map[core.ModelCategory]int)
@@ -2398,37 +1973,19 @@ func TestGetCategoryCounts(t *testing.T) {
 		countMap[c.Category] = c.Count
 	}
 
-	if countMap[core.CategoryAll] != 5 {
-		t.Errorf("All count = %d, want 5", countMap[core.CategoryAll])
-	}
-	if countMap[core.CategoryTextGeneration] != 2 {
-		t.Errorf("TextGeneration count = %d, want 2", countMap[core.CategoryTextGeneration])
-	}
-	if countMap[core.CategoryEmbedding] != 1 {
-		t.Errorf("Embedding count = %d, want 1", countMap[core.CategoryEmbedding])
-	}
-	if countMap[core.CategoryImage] != 1 {
-		t.Errorf("Image count = %d, want 1", countMap[core.CategoryImage])
-	}
-	if countMap[core.CategoryAudio] != 0 {
-		t.Errorf("Audio count = %d, want 0", countMap[core.CategoryAudio])
-	}
+	assert.Equal(t, 5, countMap[core.CategoryAll])
+	assert.Equal(t, 2, countMap[core.CategoryTextGeneration])
+	assert.Equal(t, 1, countMap[core.CategoryEmbedding])
+	assert.Equal(t, 1, countMap[core.CategoryImage])
+	assert.Equal(t, 0, countMap[core.CategoryAudio])
 
 	// Verify ordering matches AllCategories()
-	if counts[0].Category != core.CategoryAll {
-		t.Errorf("first category = %q, want %q", counts[0].Category, core.CategoryAll)
-	}
-	if counts[1].Category != core.CategoryTextGeneration {
-		t.Errorf("second category = %q, want %q", counts[1].Category, core.CategoryTextGeneration)
-	}
+	assert.Equal(t, core.CategoryAll, counts[0].Category)
+	assert.Equal(t, core.CategoryTextGeneration, counts[1].Category)
 
 	// Verify display names
-	if counts[0].DisplayName != "All" {
-		t.Errorf("All display name = %q, want %q", counts[0].DisplayName, "All")
-	}
-	if counts[1].DisplayName != "Text Generation" {
-		t.Errorf("TextGeneration display name = %q, want %q", counts[1].DisplayName, "Text Generation")
-	}
+	assert.Equal(t, "All", counts[0].DisplayName)
+	assert.Equal(t, "Text Generation", counts[1].DisplayName)
 }
 
 // Verify ModelRegistry implements core.ModelLookup interface
@@ -2466,9 +2023,8 @@ func TestListPublicModels_HidesAudioOnlyModelsFromProvidersWithoutAudioSupport(t
 	withAudio := &audioRegistryMockProvider{registryMockProvider{modelsResponse: inventory()}}
 	registry.RegisterProviderWithNameAndType(noAudio, "gemini", "gemini")
 	registry.RegisterProviderWithNameAndType(withAudio, "openai", "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	got := make(map[string]bool)
 	for _, model := range registry.ListPublicModels() {
@@ -2481,14 +2037,10 @@ func TestListPublicModels_HidesAudioOnlyModelsFromProvidersWithoutAudioSupport(t
 		"openai/tts-model", "openai/stt-model", // provider supports audio: kept
 	}
 	for _, id := range wantListed {
-		if !got[id] {
-			t.Errorf("expected %q to be listed", id)
-		}
+		assert.True(t, got[id], "expected %q to be listed", id)
 	}
 	for _, id := range []string{"gemini/tts-model", "gemini/stt-model"} {
-		if got[id] {
-			t.Errorf("expected audio-only %q to be hidden (provider has no audio support)", id)
-		}
+		assert.False(t, got[id], "audio-only %q should be hidden (provider has no audio support)", id)
 	}
 }
 
@@ -2519,9 +2071,8 @@ func TestListPublicModels_HidesImageOnlyModelsFromProvidersWithoutImageSupport(t
 	withImages := &imageRegistryMockProvider{registryMockProvider{modelsResponse: inventory()}}
 	registry.RegisterProviderWithNameAndType(noImages, "gemini", "gemini")
 	registry.RegisterProviderWithNameAndType(withImages, "openai", "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	got := make(map[string]bool)
 	for _, model := range registry.ListPublicModels() {
@@ -2534,13 +2085,9 @@ func TestListPublicModels_HidesImageOnlyModelsFromProvidersWithoutImageSupport(t
 		"openai/image-model", // provider supports images: kept
 	}
 	for _, id := range wantListed {
-		if !got[id] {
-			t.Errorf("expected %q to be listed", id)
-		}
+		assert.True(t, got[id], "expected %q to be listed", id)
 	}
-	if got["gemini/image-model"] {
-		t.Error("expected image-only gemini/image-model to be hidden (provider has no image support)")
-	}
+	assert.False(t, got["gemini/image-model"], "image-only model should be hidden (provider has no image support)")
 }
 
 // TestProviderByTypeAndNameTrimConfiguredValues verifies that configured provider
@@ -2550,19 +2097,12 @@ func TestProviderByTypeAndNameTrimConfiguredValues(t *testing.T) {
 	registry := NewModelRegistry()
 	mock := &registryMockProvider{name: "padded"}
 	registry.RegisterProviderWithNameAndType(mock, "  padded-name  ", "  openai  ")
-
-	if got := registry.ProviderByType("openai"); got != mock {
-		t.Fatalf("ProviderByType(openai) = %v, want the registered provider", got)
-	}
-	if got := registry.ProviderByName("padded-name"); got != mock {
-		t.Fatalf("ProviderByName(padded-name) = %v, want the registered provider", got)
-	}
-	if got := registry.GetProviderTypeForName("padded-name"); got != "openai" {
-		t.Fatalf("GetProviderTypeForName(padded-name) = %q, want %q", got, "openai")
-	}
-	if got := registry.GetProviderNameForType("openai"); got != "padded-name" {
-		t.Fatalf("GetProviderNameForType(openai) = %q, want %q", got, "padded-name")
-	}
+	got := registry.ProviderByType("openai")
+	require.Equal(t, mock, got)
+	got = registry.ProviderByName("padded-name")
+	require.Equal(t, mock, got)
+	require.Equal(t, "openai", registry.GetProviderTypeForName("padded-name"))
+	require.Equal(t, "padded-name", registry.GetProviderNameForType("openai"))
 }
 
 func TestRefreshModelList_ConditionalFetch(t *testing.T) {
@@ -2591,41 +2131,26 @@ func TestRefreshModelList_ConditionalFetch(t *testing.T) {
 	registry := NewModelRegistry()
 
 	count, err := registry.RefreshModelList(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("RefreshModelList() error = %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("RefreshModelList() count = %d, want 1", count)
-	}
-	if fullFetches.Load() != 1 || notModified.Load() != 0 {
-		t.Fatalf("expected one full fetch, got full=%d notModified=%d", fullFetches.Load(), notModified.Load())
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, int64(1), fullFetches.Load())
+	require.Equal(t, int64(0), notModified.Load())
 
 	registry.mu.RLock()
 	listBefore := registry.modelList
 	registry.mu.RUnlock()
 
 	count, err = registry.RefreshModelList(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("RefreshModelList() second call error = %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("RefreshModelList() second call count = %d, want 1", count)
-	}
-	if notModified.Load() != 1 {
-		t.Fatalf("expected second fetch to be answered 304, got full=%d notModified=%d", fullFetches.Load(), notModified.Load())
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Equal(t, int64(1), notModified.Load(), "expected second fetch to be answered 304, got full=%d notModified=%d", fullFetches.Load(), notModified.Load())
 
 	registry.mu.RLock()
 	listAfter := registry.modelList
 	etagAfter := registry.modelListETag
 	registry.mu.RUnlock()
-	if listAfter != listBefore {
-		t.Fatal("expected 304 refresh to keep the existing parsed model list")
-	}
-	if etagAfter != etag {
-		t.Fatalf("modelListETag = %q, want %q", etagAfter, etag)
-	}
+	require.Same(t, listBefore, listAfter)
+	require.Equal(t, etag, etagAfter)
 }
 
 func TestRefreshModelList_ETagNotSentToDifferentURL(t *testing.T) {
@@ -2655,21 +2180,15 @@ func TestRefreshModelList_ETagNotSentToDifferentURL(t *testing.T) {
 	defer second.Close()
 
 	registry := NewModelRegistry()
-	if _, err := registry.RefreshModelList(context.Background(), first.URL); err != nil {
-		t.Fatalf("RefreshModelList() error = %v", err)
-	}
-	if _, err := registry.RefreshModelList(context.Background(), second.URL); err != nil {
-		t.Fatalf("RefreshModelList() against second URL error = %v", err)
-	}
-	if secondConditional.Load() != 0 {
-		t.Fatal("expected no If-None-Match against a different URL: validators identify one resource")
-	}
-	if got := registry.currentModelListETag(second.URL); got != etag {
-		t.Fatalf("currentModelListETag(second) = %q, want %q", got, etag)
-	}
-	if got := registry.currentModelListETag(first.URL); got != "" {
-		t.Fatalf("currentModelListETag(first) = %q, want empty after refreshing from second URL", got)
-	}
+	_, err := registry.RefreshModelList(context.Background(), first.URL)
+	require.NoError(t, err)
+	_, err = registry.RefreshModelList(context.Background(), second.URL)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), secondConditional.Load())
+	got := registry.currentModelListETag(second.URL)
+	require.Equal(t, etag, got)
+	got = registry.currentModelListETag(first.URL)
+	require.Empty(t, got)
 }
 
 func TestRefreshModelList_304AdoptsRefreshedETag(t *testing.T) {
@@ -2695,27 +2214,22 @@ func TestRefreshModelList_304AdoptsRefreshedETag(t *testing.T) {
 	defer server.Close()
 
 	registry := NewModelRegistry()
-	if _, err := registry.RefreshModelList(context.Background(), server.URL); err != nil {
-		t.Fatalf("RefreshModelList() error = %v", err)
-	}
-	if _, err := registry.RefreshModelList(context.Background(), server.URL); err != nil {
-		t.Fatalf("RefreshModelList() second call error = %v", err)
-	}
-	if got := registry.currentModelListETag(server.URL); got != `"list-v2"` {
-		t.Fatalf("currentModelListETag() = %q, want refreshed %q", got, `"list-v2"`)
-	}
+	_, err := registry.RefreshModelList(context.Background(), server.URL)
+	require.NoError(t, err)
+	_, err = registry.RefreshModelList(context.Background(), server.URL)
+	require.NoError(t, err)
+	got := registry.currentModelListETag(server.URL)
+	require.Equal(t, `"list-v2"`, got)
 }
 
 func TestSetModelList_ClearsETag(t *testing.T) {
 	registry := NewModelRegistry()
 	raw := []byte(`{"version": 1, "providers": {}, "models": {}, "provider_models": {}}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.setModelListAndEnrich(list, raw, `"old"`, "https://example.test/models.min.json")
 	registry.SetModelList(list, raw)
-	if got := registry.currentModelListETag("https://example.test/models.min.json"); got != "" {
-		t.Fatalf("currentModelListETag() = %q, want empty after SetModelList", got)
-	}
+	got := registry.currentModelListETag("https://example.test/models.min.json")
+	require.Empty(t, got)
 }

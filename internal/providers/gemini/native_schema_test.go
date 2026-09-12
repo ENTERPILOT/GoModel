@@ -2,8 +2,10 @@ package gemini
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGeminiToolsFromOpenAIUsesParametersJSONSchema(t *testing.T) {
@@ -31,41 +33,26 @@ func TestGeminiToolsFromOpenAIUsesParametersJSONSchema(t *testing.T) {
 			"parameters":  parameters,
 		},
 	}})
-	if err != nil {
-		t.Fatalf("geminiToolsFromOpenAI() error = %v", err)
-	}
-	if len(tools) != 1 || len(tools[0].FunctionDeclarations) != 1 {
-		t.Fatalf("tools = %#v, want one function declaration", tools)
-	}
+	require.NoError(t, err)
+	require.Len(t, tools, 1)
+	require.Len(t, tools[0].FunctionDeclarations, 1)
 
 	declaration := tools[0].FunctionDeclarations[0]
-	if len(declaration.Parameters) != 0 {
-		t.Fatalf("parameters = %s, want omitted when parametersJsonSchema is used", declaration.Parameters)
-	}
-	if len(declaration.ParametersJSONSchema) == 0 {
-		t.Fatal("parametersJsonSchema is empty")
-	}
-	if _, ok := parameters["$schema"]; !ok {
-		t.Fatal("input parameters were mutated")
-	}
+	require.Empty(t, declaration.Parameters)
+	require.NotEmpty(t, declaration.ParametersJSONSchema)
+	_, ok := parameters["$schema"]
+	require.True(t, ok)
 
 	var schema map[string]any
-	if err := json.Unmarshal(declaration.ParametersJSONSchema, &schema); err != nil {
-		t.Fatalf("failed to unmarshal parametersJsonSchema: %v", err)
-	}
-	if _, ok := schema["$schema"]; ok {
-		t.Fatalf("parametersJsonSchema = %s, want $schema stripped", declaration.ParametersJSONSchema)
-	}
-	if got := schema["additionalProperties"]; got != false {
-		t.Fatalf("additionalProperties = %#v, want false", got)
-	}
+	err = json.Unmarshal(declaration.ParametersJSONSchema, &schema)
+	require.NoError(t, err)
+	assert.NotContains(t, schema, "$schema", "parametersJsonSchema = %s, want $schema stripped", declaration.ParametersJSONSchema)
+	assert.Equal(t, false, schema["additionalProperties"])
 
-	properties := schema["properties"].(map[string]any)
-	labels := properties["labels"].(map[string]any)
-	additionalProperties := labels["additionalProperties"].(map[string]any)
-	if got := additionalProperties["type"]; got != "string" {
-		t.Fatalf("nested additionalProperties.type = %#v, want string", got)
-	}
+	properties, _ := schema["properties"].(map[string]any)
+	labels, _ := properties["labels"].(map[string]any)
+	additionalProperties, _ := labels["additionalProperties"].(map[string]any)
+	assert.Equal(t, "string", additionalProperties["type"])
 }
 
 func TestGeminiToolsFromOpenAINormalizesMissingObjectType(t *testing.T) {
@@ -81,17 +68,12 @@ func TestGeminiToolsFromOpenAINormalizesMissingObjectType(t *testing.T) {
 			},
 		},
 	}})
-	if err != nil {
-		t.Fatalf("geminiToolsFromOpenAI() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var schema map[string]any
-	if err := json.Unmarshal(tools[0].FunctionDeclarations[0].ParametersJSONSchema, &schema); err != nil {
-		t.Fatalf("failed to unmarshal parametersJsonSchema: %v", err)
-	}
-	if got := schema["type"]; got != "object" {
-		t.Fatalf("type = %#v, want object", got)
-	}
+	err = json.Unmarshal(tools[0].FunctionDeclarations[0].ParametersJSONSchema, &schema)
+	require.NoError(t, err)
+	assert.Equal(t, "object", schema["type"])
 }
 
 func TestGeminiToolsFromOpenAIRejectsInvalidParameterSchemas(t *testing.T) {
@@ -146,12 +128,8 @@ func TestGeminiToolsFromOpenAIRejectsInvalidParameterSchemas(t *testing.T) {
 					"parameters": tt.parameters,
 				},
 			}})
-			if err == nil {
-				t.Fatal("geminiToolsFromOpenAI() error = nil, want error")
-			}
-			if !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("error = %q, want to contain %q", err.Error(), tt.wantError)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantError)
 		})
 	}
 }
@@ -182,12 +160,8 @@ func TestGeminiToolsFromOpenAIRejectsUnsupportedToolShapes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := geminiToolsFromOpenAI([]map[string]any{tt.tool})
-			if err == nil {
-				t.Fatal("geminiToolsFromOpenAI() error = nil, want error")
-			}
-			if !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("error = %q, want to contain %q", err.Error(), tt.wantError)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantError)
 		})
 	}
 }
@@ -209,32 +183,18 @@ func TestCopyResponseFormatJSONSchemaUsesResponseJsonSchema(t *testing.T) {
 
 	cfg := map[string]any{}
 	copyResponseFormat(raw, cfg)
+	assert.Equal(t, "application/json", cfg["responseMimeType"])
+	assert.NotContains(t, cfg, "responseSchema")
 
-	if got := cfg["responseMimeType"]; got != "application/json" {
-		t.Fatalf("responseMimeType = %#v, want application/json", got)
-	}
-	if _, ok := cfg["responseSchema"]; ok {
-		t.Fatal("responseSchema should not be set; responseJsonSchema accepts full JSON Schema")
-	}
 	schema, ok := cfg["responseJsonSchema"].(map[string]any)
-	if !ok {
-		t.Fatalf("responseJsonSchema = %#v, want object", cfg["responseJsonSchema"])
-	}
-	if _, ok := schema["$schema"]; ok {
-		t.Fatal("$schema should be stripped")
-	}
-	if got := schema["additionalProperties"]; got != false {
-		t.Fatalf("additionalProperties = %#v, want false (preserved)", got)
-	}
+	require.True(t, ok, "responseJsonSchema = %#v, want object", cfg["responseJsonSchema"])
+	assert.NotContains(t, schema, "$schema")
+	assert.Equal(t, false, schema["additionalProperties"])
 }
 
 func TestCopyResponseFormatJSONObject(t *testing.T) {
 	cfg := map[string]any{}
 	copyResponseFormat([]byte(`{"type": "json_object"}`), cfg)
-	if got := cfg["responseMimeType"]; got != "application/json" {
-		t.Fatalf("responseMimeType = %#v, want application/json", got)
-	}
-	if _, ok := cfg["responseJsonSchema"]; ok {
-		t.Fatal("responseJsonSchema should not be set for json_object")
-	}
+	assert.Equal(t, "application/json", cfg["responseMimeType"])
+	assert.NotContains(t, cfg, "responseJsonSchema")
 }

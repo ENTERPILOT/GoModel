@@ -4,6 +4,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type chunkedReadCloser struct {
@@ -29,78 +31,54 @@ func TestEnsureResponsesDone_AppendsDoneMarker(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
-	if !strings.HasSuffix(got, "data: [DONE]\n\n") {
-		t.Fatalf("expected stream to end with done marker, got %q", got)
-	}
-	if strings.Count(got, "[DONE]") != 1 {
-		t.Fatalf("expected exactly one done marker, got %q", got)
-	}
+	require.True(t, strings.HasSuffix(got, "data: [DONE]\n\n"), "expected stream to end with done marker, got %q", got)
+	require.Equal(t, 1, strings.Count(got, "[DONE]"), "expected exactly one done marker, got %q", got)
 }
 
 func TestEnsureResponsesDone_AppendsDoneMarkerAfterIncomplete(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.incomplete\ndata: {\"type\":\"response.incomplete\"}\n\n"))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
-	if !strings.HasSuffix(got, "data: [DONE]\n\n") {
-		t.Fatalf("expected stream to end with done marker, got %q", got)
-	}
-	if strings.Count(got, "[DONE]") != 1 {
-		t.Fatalf("expected exactly one done marker, got %q", got)
-	}
+	require.True(t, strings.HasSuffix(got, "data: [DONE]\n\n"), "expected stream to end with done marker, got %q", got)
+	require.Equal(t, 1, strings.Count(got, "[DONE]"), "expected exactly one done marker, got %q", got)
 }
 
 func TestEnsureResponsesDone_InsertsEventSeparatorBeforeDoneMarker(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}\n"))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
 	want := "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"
-	if got != want {
-		t.Fatalf("expected wrapper to terminate the completed SSE event before [DONE], got %q", got)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestEnsureResponsesDone_HandlesCompletedDataLineAtEOFWithoutTrailingNewline(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}"))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
 	want := "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"
-	if got != want {
-		t.Fatalf("expected EOF-terminated completed line to still get a done marker, got %q", got)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestEnsureResponsesDone_PreservesExistingDoneMarker(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
-	if strings.Count(got, "[DONE]") != 1 {
-		t.Fatalf("expected existing done marker to be preserved without duplication, got %q", got)
-	}
+	require.Equal(t, 1, strings.Count(got, "[DONE]"), "expected existing done marker to be preserved without duplication, got %q", got)
 }
 
 func TestEnsureResponsesDone_PreservesSplitDoneMarker(t *testing.T) {
@@ -112,50 +90,34 @@ func TestEnsureResponsesDone_PreservesSplitDoneMarker(t *testing.T) {
 	}
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
 	want := "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"
-	if got != want {
-		t.Fatalf("expected split done marker to pass through unchanged, got %q", got)
-	}
-	if strings.Count(got, "[DONE]") != 1 {
-		t.Fatalf("expected exactly one done marker, got %q", got)
-	}
+	require.Equal(t, want, got)
+	require.Equal(t, 1, strings.Count(got, "[DONE]"), "expected exactly one done marker, got %q", got)
 }
 
 func TestEnsureResponsesDone_DoesNotMaskIncompleteStream(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hel\"}\n\n"))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
-	if strings.Contains(got, "[DONE]") {
-		t.Fatalf("expected incomplete stream to remain incomplete, got %q", got)
-	}
+	require.NotContains(t, got, "[DONE]", "incomplete stream should remain incomplete")
 }
 
 func TestEnsureResponsesDone_PreservesEOFTerminatedDoneMarker(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n"))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
 	want := "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n"
-	if got != want {
-		t.Fatalf("expected EOF-terminated done marker to pass through unchanged, got %q", got)
-	}
-	if strings.Count(got, "[DONE]") != 1 {
-		t.Fatalf("expected exactly one done marker, got %q", got)
-	}
+	require.Equal(t, want, got)
+	require.Equal(t, 1, strings.Count(got, "[DONE]"), "expected exactly one done marker, got %q", got)
 }
 
 func TestEnsureResponsesDone_CompletesPartialDonePrefixWithoutDuplication(t *testing.T) {
@@ -167,15 +129,11 @@ func TestEnsureResponsesDone_CompletesPartialDonePrefixWithoutDuplication(t *tes
 	}
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
 	want := "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\ndata: [DONE]\n\n"
-	if got != want {
-		t.Fatalf("expected partial done prefix to be completed in place, got %q", got)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestEnsureResponsesDone_IgnoresDoneSubstringInsideJSONPayload(t *testing.T) {
@@ -187,15 +145,9 @@ func TestEnsureResponsesDone_IgnoresDoneSubstringInsideJSONPayload(t *testing.T)
 	))
 
 	data, err := io.ReadAll(EnsureResponsesDone(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := string(data)
-	if !strings.Contains(got, "\"delta\":\"data: [DONE]\"") {
-		t.Fatalf("expected model text containing done literal to be preserved, got %q", got)
-	}
-	if !strings.HasSuffix(got, "\n\ndata: [DONE]\n\n") {
-		t.Fatalf("expected a real terminal done event at EOF, got %q", got)
-	}
+	require.Contains(t, got, "\"delta\":\"data: [DONE]\"")
+	require.True(t, strings.HasSuffix(got, "\n\ndata: [DONE]\n\n"), "expected a real terminal done event at EOF, got %q", got)
 }
