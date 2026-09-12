@@ -1333,6 +1333,7 @@
   "models_price_batch_output": "批量输出 $/MTok",
   "models_price_audio_input": "音频输入 $/MTok",
   "models_price_audio_output": "音频输出 $/MTok",
+  "models_price_output_image_per_mtok": "图像输出 $/MTok",
   "models_price_per_image": "$/图像",
   "models_price_input_image": "输入 $/图像",
   "models_price_input_second": "输入 $/秒",
