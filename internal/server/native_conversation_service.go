@@ -38,7 +38,7 @@ func (s *conversationService) CreateConversation(c *echo.Context) error {
 	}
 	req, err := core.DecodeConversationCreateRequest(body)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if len(req.Items) > core.MaxConversationInitialItems {
 		return handleError(c, core.NewInvalidRequestError(
@@ -105,7 +105,7 @@ func (s *conversationService) UpdateConversation(c *echo.Context) error {
 	}
 	req, err := core.DecodeConversationUpdateRequest(body)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if req.Metadata == nil {
 		return handleError(c, core.NewInvalidRequestError("metadata is required", nil).WithParam("metadata"))

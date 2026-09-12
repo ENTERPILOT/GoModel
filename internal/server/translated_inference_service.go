@@ -200,7 +200,7 @@ func handleTranslatedJSON[Req any](
 ) error {
 	req, err := canonicalJSONRequestFromSemantics[Req](c, decode)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 
 	ctx, preparedReq, workflow, err := prepare(s, promptEditCaptureContext(c, s.logger), req, translatedRequestMeta(c))
@@ -573,7 +573,7 @@ func (s *translatedInferenceService) recordResponseSnapshotStoreFailure(rec snap
 func (s *translatedInferenceService) Embeddings(c *echo.Context) error {
 	req, err := canonicalJSONRequestFromSemantics[*core.EmbeddingRequest](c, core.DecodeEmbeddingRequest)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 
 	prepared, err := s.inference().PrepareEmbeddingRequest(c.Request().Context(), req, translatedRequestMeta(c))

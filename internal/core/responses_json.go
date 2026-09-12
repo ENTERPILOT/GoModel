@@ -26,7 +26,9 @@ func responsesExtrasAndInput(data []byte, rawInput json.RawMessage, knownFields 
 	}
 	input, err := decodeResponsesInput(rawInput)
 	if err != nil {
-		return nil, UnknownJSONFields{}, err
+		// The input union is decoded from its own fragment, so the failure
+		// carries no position within the request body: name the member here.
+		return nil, UnknownJSONFields{}, wrapJSONMemberDecodeError("input", err)
 	}
 	return input, extraFields, nil
 }
@@ -43,7 +45,7 @@ func (r *ResponsesRequest) UnmarshalJSON(data []byte) error {
 		Input json.RawMessage `json:"input"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+		return wrapJSONDecodeError(err)
 	}
 	input, extraFields, err := responsesExtrasAndInput(data, raw.Input, responsesRequestFields)
 	if err != nil {

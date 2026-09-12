@@ -55,7 +55,7 @@ func (s *audioService) CreateSpeech(c *echo.Context) error {
 
 	req, err := canonicalJSONRequestFromSemantics[*core.AudioSpeechRequest](c, core.DecodeAudioSpeechRequest)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if strings.TrimSpace(req.Input) == "" {
 		return handleError(c, core.NewInvalidRequestError("input is required", nil))

@@ -67,6 +67,43 @@ func TestChatCompletion_MapsReasoningPerModelFamily(t *testing.T) {
 	}
 }
 
+// Groq rejects more than four stop sequences; the Messages API accepts more,
+// so the list is truncated instead of failing the request upstream.
+func TestChatCompletion_CapsStopSequences(t *testing.T) {
+	var raw map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider.SetBaseURL(server.URL)
+
+	extra, err := core.MergeUnknownJSONFields(core.UnknownJSONFields{}, map[string]json.RawMessage{
+		"stop": json.RawMessage(`["a","b","c","d","e","f"]`),
+	})
+	if err != nil {
+		t.Fatalf("MergeUnknownJSONFields: %v", err)
+	}
+	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:       "openai/gpt-oss-20b",
+		Messages:    []core.Message{{Role: "user", Content: "hi"}},
+		ExtraFields: extra,
+	}); err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+	stop, _ := raw["stop"].([]any)
+	if len(stop) != maxStopSequences {
+		t.Fatalf("stop = %v, want %d entries", raw["stop"], maxStopSequences)
+	}
+	if stop[0] != "a" || stop[3] != "d" {
+		t.Errorf("stop = %v, want the first four sequences", stop)
+	}
+}
+
 func TestChatCompletion_DefaultsReasoningFormatPerModelFamily(t *testing.T) {
 	tests := []struct {
 		name       string
