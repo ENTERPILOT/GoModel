@@ -73,15 +73,19 @@ func (p *Provider) CreateSpeech(ctx context.Context, req *core.AudioSpeechReques
 }
 
 // speechFormat maps an OpenAI response_format to MiMo's audio.format values.
-// MiMo only synthesizes wav and pcm16; wav is the default.
+// MiMo only synthesizes wav and pcm16. "mp3" is OpenAI's documented default, so
+// clients (and SDKs that materialize the default) send it as a synonym for
+// "unspecified"; it is treated like an omitted format and answered with wav
+// rather than a 400. The response Content-Type always describes the bytes
+// actually returned, so a caller that inspects it sees audio/wav.
 func speechFormat(responseFormat string) (format, contentType string, err error) {
 	switch strings.ToLower(strings.TrimSpace(responseFormat)) {
-	case "", "wav":
+	case "", "mp3", "wav":
 		return "wav", "audio/wav", nil
 	case "pcm":
 		return "pcm16", "audio/pcm", nil
 	default:
-		return "", "", core.NewInvalidRequestError("xiaomi supports wav or pcm response formats", nil)
+		return "", "", core.NewInvalidRequestError("xiaomi supports wav or pcm response formats (mp3 is served as wav)", nil)
 	}
 }
 
