@@ -14,7 +14,7 @@ func TestNormalizedUsageEntryForStorageClearsInvalidCacheTypeWithoutMutatingInpu
 	}
 
 	got := normalizedUsageEntryForStorage(entry)
-	require.NotEqual(t, entry, got)
+	require.NotSame(t, entry, got)
 	require.Empty(t, got.CacheType)
 	require.Equal(t, "invalid-cache-type", entry.CacheType)
 }

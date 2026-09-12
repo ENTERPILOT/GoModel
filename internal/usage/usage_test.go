@@ -132,7 +132,7 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	events := publisher.snapshot()
 	require.Len(t, events, 1)
 	require.Equal(t, LiveEventUsageFailed, events[0].eventType)
-	require.Equal(t, entry, events[0].entry)
+	require.Same(t, entry, events[0].entry)
 }
 
 func TestLoggerClose(t *testing.T) {
