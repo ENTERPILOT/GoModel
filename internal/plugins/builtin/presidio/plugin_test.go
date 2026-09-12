@@ -121,6 +121,29 @@ func newPlugin(t *testing.T, a *analyzer, cfg string) *Plugin {
 	return p.(*Plugin)
 }
 
+// A chained Responses request replays its stored history through the prompt
+// phase only when an instance edits content, so an instance that only flags
+// or blocks must say so.
+func TestEditsContent(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  string
+		want bool
+	}{
+		{name: "default anonymizes", cfg: `{}`, want: true},
+		{name: "warn only flags", cfg: `{"action":"warn"}`},
+		{name: "block only rejects", cfg: `{"action":"block"}`},
+		{name: "restore still edits", cfg: `{"action":"warn","restore":true}`, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := newPlugin(t, nil, tt.cfg).EditsContent(); got != tt.want {
+				t.Fatalf("EditsContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
 	if m.Name != "presidio" || !m.Mutates || !m.Guardrail {

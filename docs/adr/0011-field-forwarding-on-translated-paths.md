@@ -107,7 +107,48 @@ a provider starts accepting a field.
 | `response_format` of type `json_schema` | Anthropic | 3 | sent as `output_config.format` |
 | `response_format` of type `json_object` | Anthropic | 3 | sent as a system-prompt instruction |
 | `verbosity` | Anthropic | 4 | dropped |
+| `temperature` together with `top_p` | Anthropic | 4 | `top_p` dropped, `temperature` kept |
+| `metadata` | xAI `/responses` | 4 | dropped |
+| `stream_options.include_usage` | any | reserved | set by the gateway when usage tracking is on |
 | `provider` | any | reserved | set by the gateway |
+
+Two request rows deserve a note. Anthropic rejects a request that carries both
+`temperature` and `top_p` on every current model, and xAI rejects `metadata` on
+its native `/responses` endpoint; both are rule 4 because the dropped half does
+not change what the caller asked for, and rule 5 would lock OpenAI SDKs that
+fill in both sampling defaults out of Anthropic entirely. The dropped value is
+logged. `metadata` is removed only from the outbound provider request, so the
+gateway can still echo the member back to the client.
+
+### Response direction
+
+Rule 1 applies in both directions, so a member the gateway has no rule for
+comes back to the client exactly as the provider sent it. That is deliberate:
+it is how a client reads provider-native extras, and it is why vendor members
+such as Groq's `x_groq` and its `queue_time`/`prompt_time` usage timings, or
+DeepSeek's `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens`, are relayed
+rather than stripped.
+
+| Field | Source | Rule | Treatment |
+|---|---|---|---|
+| any unknown member | any | 1 | forwarded untouched |
+| `message.reasoning` / `delta.reasoning` | Groq | 3 | returned as `reasoning_content` |
+| `x_groq`, `queue_time`, `prompt_time`, `completion_time` | Groq | 1 | forwarded untouched |
+| `prompt_cache_hit_tokens`, `prompt_cache_miss_tokens` | DeepSeek | 1 | forwarded untouched (`prompt_tokens_details.cached_tokens` carries the same count) |
+
+`reasoning` is rule 3 rather than rule 1 because the gateway does have a rule
+for the field: `reasoning_content` is the spelling every other adapter emits
+and the one the Responses and Messages translation layers and the dashboard
+read, so relaying Groq's spelling would make identical client code work on
+DeepSeek and silently lose the reasoning on Groq. It is renamed rather than
+duplicated: two copies of the same chain of thought would double the payload
+of every reasoning response.
+
+On the streaming path the rename is gated on a byte scan for `"reasoning"`, so
+only the reasoning deltas of a reasoning model are decoded and re-encoded;
+every other line keeps the upstream bytes. Anything that would force a decode
+of *every* chunk needs the same justification, because the verbatim relay of
+chat SSE is a deliberate hot-path property.
 
 ## Consequences
 

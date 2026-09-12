@@ -10,6 +10,10 @@ import (
 // block, respond, or warn.
 const Code = "string_replace_match"
 
+// EditsContent reports whether this instance rewrites the text it matches.
+// Every other on_match (block, respond, warn) leaves the request as it is.
+func (p *Plugin) EditsContent() bool { return p.onMatch == OnMatchReplace }
+
 // OnPrompt edits or inspects the text of the prompt messages of the
 // configured roles, tool-result text included.
 func (p *Plugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {

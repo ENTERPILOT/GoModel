@@ -113,7 +113,7 @@ func (m *semanticCacheMiddleware) Handle(ex exchange, body []byte, next func() e
 	}
 
 	path := ex.Path()
-	if !cacheablePaths[path] || ex.Method() != http.MethodPost {
+	if !semanticCacheablePath(path) || ex.Method() != http.MethodPost {
 		return next()
 	}
 

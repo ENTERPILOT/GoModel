@@ -99,9 +99,20 @@ func (p *CompatibleProvider) createAudioTranscription(
 		return nil, err
 	}
 	return &core.AudioResponse{
-		ContentType: core.TranscriptionResponseContentType(req.ResponseFormat),
+		ContentType: transcriptionResponseContentType(raw, req.ResponseFormat),
 		Data:        raw.Body,
 	}, nil
+}
+
+// transcriptionResponseContentType keeps the response_format mapping for normal
+// replies, but honors an upstream event-stream type: a forwarded stream=true
+// makes the upstream answer with server-sent events, and labelling those as
+// JSON would leave the client unable to parse them.
+func transcriptionResponseContentType(raw *llmclient.Response, format string) string {
+	if raw != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(raw.ContentType)), "text/event-stream") {
+		return raw.ContentType
+	}
+	return core.TranscriptionResponseContentType(format)
 }
 
 // audioTranscriptionMultipart streams a multipart/form-data body for a
@@ -145,6 +156,18 @@ func audioTranscriptionMultipart(req *core.AudioTranscriptionRequest, content io
 					_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write timestamp_granularities field", err))
 					return
 				}
+			}
+		}
+		// Fields the gateway does not consume itself travel verbatim (ADR-0011
+		// rule 1). Gateway-controlled parts are re-checked here so a request
+		// built outside the server layer cannot duplicate model or file.
+		for _, field := range req.Fields {
+			if core.ReservedAudioTranscriptionFormFields[field.Name] {
+				continue
+			}
+			if err := writer.WriteField(field.Name, field.Value); err != nil {
+				_ = pw.CloseWithError(core.NewInvalidRequestError("failed to write "+field.Name+" field", err))
+				return
 			}
 		}
 

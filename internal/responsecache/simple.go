@@ -20,10 +20,20 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 )
 
+const embeddingsPath = "/v1/embeddings"
+
 var cacheablePaths = map[string]bool{
 	"/v1/chat/completions": true,
 	"/v1/responses":        true,
-	"/v1/embeddings":       true,
+	embeddingsPath:         true,
+}
+
+// semanticCacheablePath reports whether a path may be served from the semantic
+// layer. Embeddings are excluded on purpose: an embedding must represent the
+// exact text it was requested for, so replaying the vector of a merely similar
+// input would return a wrong answer rather than an equivalent one.
+func semanticCacheablePath(path string) bool {
+	return cacheablePaths[path] && path != embeddingsPath
 }
 
 const (
@@ -250,7 +260,7 @@ func isStreamingRequest(path string, body []byte) bool {
 }
 
 func isStreamingRequestGJSON(path string, body []byte) bool {
-	if path == "/v1/embeddings" {
+	if path == embeddingsPath {
 		return false
 	}
 	// gjson returns the first matching top-level field. That differs from

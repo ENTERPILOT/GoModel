@@ -33,6 +33,57 @@ test("the English source catalog contains valid flat semantic keys", () => {
   }
 });
 
+// The placeholders a message interpolates, whether it is a plain string or a
+// plural message whose variants live under nested "match" objects. A locale
+// may pick a different shape than en.json (Chinese has no plural), so the
+// union over every string leaf is what must match.
+function placeholders(message) {
+  const found = new Set();
+  const walk = (value) => {
+    if (typeof value === "string") {
+      for (const [, name] of value.matchAll(/\{(\w+)\}/g)) found.add(name);
+      return;
+    }
+    if (value && typeof value === "object") Object.values(value).forEach(walk);
+  };
+  walk(message);
+  return [...found].sort();
+}
+
+test("every locale catalog translates every English key", () => {
+  for (const locale of locales.filter((one) => one !== baseLocale)) {
+    const path = fileURLToPath(
+      new URL(`../messages/${locale}.json`, import.meta.url),
+    );
+    const { $schema: schema, ...messages } = JSON.parse(
+      readFileSync(path, "utf8"),
+    );
+    assert.equal(schema, "https://inlang.com/schema/inlang-message-format");
+
+    const missing = Object.keys(englishMessages).filter(
+      (key) => !(key in messages),
+    );
+    const extra = Object.keys(messages).filter(
+      (key) => !(key in englishMessages),
+    );
+    assert.deepEqual(missing, [], `${locale}.json is missing keys`);
+    assert.deepEqual(extra, [], `${locale}.json has keys en.json does not`);
+
+    for (const [key, message] of Object.entries(messages)) {
+      assert.ok(
+        (typeof message === "string" && message.trim() !== "") ||
+          (Array.isArray(message) && message.length > 0),
+        `${locale}.json: ${key} must contain a translation`,
+      );
+      assert.deepEqual(
+        placeholders(message),
+        placeholders(englishMessages[key]),
+        `${locale}.json: ${key} must use the same placeholders as en.json`,
+      );
+    }
+  }
+});
+
 test("Paraglide compiles interpolation and locale-aware plurals", () => {
   assert.equal(
     m.pagination_summary({ start: 1, end: 25, total: 80 }),

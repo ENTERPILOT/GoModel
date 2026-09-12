@@ -2378,6 +2378,73 @@ func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
 	}
 }
 
+// Reasoning another provider produced reaches Anthropic as a thinking block
+// with no signature of Anthropic's own. Anthropic rejects the whole request for
+// it ("signature: Field required", or "Invalid `signature`" for anything the
+// gateway could mint), so the block is dropped and the rest of the turn stands.
+func TestConvertToAnthropicRequest_DropsUnsignedThinkingBlocks(t *testing.T) {
+	tests := []struct {
+		name   string
+		blocks string
+		want   []string
+	}{
+		{
+			name:   "missing signature",
+			blocks: `[{"type":"thinking","thinking":"foreign"}]`,
+			want:   []string{"text"},
+		},
+		{
+			name:   "empty signature",
+			blocks: `[{"type":"thinking","thinking":"foreign","signature":""}]`,
+			want:   []string{"text"},
+		},
+		{
+			name:   "signed blocks are kept",
+			blocks: `[{"type":"thinking","thinking":"own","signature":"sig1"}]`,
+			want:   []string{"thinking", "text"},
+		},
+		{
+			name:   "redacted blocks carry data rather than a signature",
+			blocks: `[{"type":"redacted_thinking","data":"opaque"}]`,
+			want:   []string{"redacted_thinking", "text"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model: "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{
+					{Role: "user", Content: "hi"},
+					{
+						Role:    "assistant",
+						Content: "391",
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+							core.ExtraContentField: json.RawMessage(`{"anthropic":{"thinking_blocks":` + tt.blocks + `}}`),
+						}),
+					},
+					{Role: "user", Content: "and now?"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest: %v", err)
+			}
+			var got []string
+			switch content := req.Messages[1].Content.(type) {
+			case []anthropicContentBlock:
+				for _, block := range content {
+					got = append(got, block.Type)
+				}
+			case string:
+				got = []string{"text"}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("assistant blocks = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertToAnthropicRequest_RejectsMalformedAnthropicExtraContent(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -4091,8 +4158,10 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				if req.Temperature == nil || *req.Temperature != 0.7 {
 					t.Errorf("Temperature = %v, want 0.7", req.Temperature)
 				}
-				if req.TopP == nil || *req.TopP != 0.2 {
-					t.Errorf("TopP = %v, want 0.2", req.TopP)
+				// Anthropic rejects both sampling parameters at once, so
+				// top_p is dropped in favour of temperature.
+				if req.TopP != nil {
+					t.Errorf("TopP = %v, want nil", *req.TopP)
 				}
 				if req.MaxTokens != 1024 {
 					t.Errorf("MaxTokens = %d, want 1024", req.MaxTokens)
@@ -6410,6 +6479,70 @@ func TestRejectsSamplingParameters(t *testing.T) {
 	}
 }
 
+func TestConvertToAnthropicRequestDropsConflictingSamplingParameter(t *testing.T) {
+	ptr := func(v float64) *float64 { return &v }
+	tests := []struct {
+		name        string
+		model       string
+		temperature *float64
+		topP        *float64
+		wantTemp    *float64
+		wantTopP    *float64
+	}{
+		{
+			name:        "both sent keeps temperature only",
+			model:       "claude-haiku-4-5-20251001",
+			temperature: ptr(0.5),
+			topP:        ptr(0.9),
+			wantTemp:    ptr(0.5),
+		},
+		{
+			name:        "temperature alone is forwarded",
+			model:       "claude-haiku-4-5-20251001",
+			temperature: ptr(0.5),
+			wantTemp:    ptr(0.5),
+		},
+		{
+			name:     "top_p alone is forwarded",
+			model:    "claude-haiku-4-5-20251001",
+			topP:     ptr(0.9),
+			wantTopP: ptr(0.9),
+		},
+		{
+			name:        "models rejecting sampling lose both",
+			model:       "claude-opus-4-8",
+			temperature: ptr(0.5),
+			topP:        ptr(0.9),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model:       tt.model,
+				Messages:    []core.Message{{Role: "user", Content: "hi"}},
+				Temperature: tt.temperature,
+				TopP:        tt.topP,
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest: %v", err)
+			}
+			if !equalFloatPtr(out.Temperature, tt.wantTemp) {
+				t.Errorf("temperature = %v, want %v", out.Temperature, tt.wantTemp)
+			}
+			if !equalFloatPtr(out.TopP, tt.wantTopP) {
+				t.Errorf("top_p = %v, want %v", out.TopP, tt.wantTopP)
+			}
+		})
+	}
+}
+
+func equalFloatPtr(got, want *float64) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return *got == *want
+}
+
 func TestRejectsForcedToolChoice(t *testing.T) {
 	for model, want := range map[string]bool{
 		"claude-fable-5-1":          true,
@@ -6437,7 +6570,9 @@ func TestConvertToAnthropicRequest_DropsSamplingForModelsThatRejectIt(t *testing
 	}{
 		{name: "fable 5.1 drops temperature and top_p", model: "claude-fable-5-1"},
 		{name: "opus 4.7 drops temperature and top_p", model: "claude-opus-4-7"},
-		{name: "sonnet 4.6 keeps sampling parameters", model: "claude-sonnet-4-6", wantKept: true},
+		// Models that still accept sampling parameters keep temperature;
+		// top_p goes because Anthropic refuses the two together.
+		{name: "sonnet 4.6 keeps temperature", model: "claude-sonnet-4-6", wantKept: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -6451,8 +6586,8 @@ func TestConvertToAnthropicRequest_DropsSamplingForModelsThatRejectIt(t *testing
 				t.Fatalf("convertToAnthropicRequest() error = %v", err)
 			}
 			if tt.wantKept {
-				if out.Temperature == nil || *out.Temperature != temp || out.TopP == nil || *out.TopP != topP {
-					t.Fatalf("Temperature = %v, TopP = %v, want %v and %v", out.Temperature, out.TopP, temp, topP)
+				if out.Temperature == nil || *out.Temperature != temp || out.TopP != nil {
+					t.Fatalf("Temperature = %v, TopP = %v, want %v and nil", out.Temperature, out.TopP, temp)
 				}
 				return
 			}

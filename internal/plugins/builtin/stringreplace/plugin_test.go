@@ -20,6 +20,30 @@ func newPlugin(t *testing.T, cfg string) *Plugin {
 	return p.(*Plugin)
 }
 
+// A chained Responses request replays its stored history through the prompt
+// phase only when an instance edits content, so an instance that only blocks,
+// responds, or warns must say so.
+func TestEditsContent(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  string
+		want bool
+	}{
+		{name: "default replaces", cfg: `{"rules":"a => b"}`, want: true},
+		{name: "replace edits", cfg: `{"rules":"a => b","on_match":"replace"}`, want: true},
+		{name: "block only rejects", cfg: `{"rules":"a => b","on_match":"block"}`},
+		{name: "respond only answers", cfg: `{"rules":"a => b","on_match":"respond"}`},
+		{name: "warn only flags", cfg: `{"rules":"a => b","on_match":"warn"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := newPlugin(t, tt.cfg).EditsContent(); got != tt.want {
+				t.Fatalf("EditsContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
 	if m.Name != "string_replace" || !m.Mutates || !m.Guardrail {

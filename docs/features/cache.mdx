@@ -32,6 +32,14 @@ can reuse a stored response:
 X-Cache: HIT (semantic)
 ```
 
+<Note>
+  `/v1/embeddings` participates in the exact cache only. An embedding has to
+  represent the exact text it was requested for, so replaying the vector of a
+  merely similar input would be a wrong answer rather than an equivalent one.
+  Embeddings requests are also never streamed, so only the JSON response is
+  cached.
+</Note>
+
 ## Enable the exact cache
 
 Point response caching at Redis:
@@ -82,7 +90,10 @@ the final request sent upstream. Use `Cache-Control: no-cache` or
 [plugin](/advanced/plugins#decisions) can also keep one response out of both
 layers with `NoStore` on its decision, which a guardrail that restores
 request-specific data into the reply uses so the restored text is never
-replayed to another caller.
+replayed to another caller. A `background: true` request on
+[`/v1/responses`](/advanced/responses-api#background-responses) bypasses both
+layers as well: its `queued` body carries an id that belongs to one caller's
+response.
 
 For the full semantic-cache design and storage options, see
 [ADR-0006](/adr/0006-semantic-response-cache).
@@ -162,6 +173,25 @@ Common patterns:
 - use different scoped workflows for different `user_path` values
 - include scope-specific context so the final request body differs
 
+## Responses served through failover are not cached
+
+When a request is answered by a [failover](/features/failover) target rather
+than the one routing picked first, the response is not stored. The exact-cache
+key is hashed from the pre-failover resolution, so storing the backup's answer
+would serve it under the primary's key once the primary recovers.
+
+The practical consequence: a virtual model whose first target is chronically
+down stops accumulating cache entries for as long as it stays down — every
+request that misses fails over and is served fresh, and nothing it produces is
+stored. Entries written before the outage keep serving until their TTL expires:
+a lookup runs ahead of dispatch, so a hit is returned without touching either
+target. If a target is going to be unavailable for a while, reorder the chain
+(or point the virtual model at a healthy target) so the responses that answer
+it are cacheable again.
+
+Retries within one target are unaffected: only a response produced after the
+sweep moved to another target is withheld from both cache layers.
+
 ## Cache analytics
 
 When response caching and usage tracking are enabled, the admin API exposes a
@@ -171,5 +201,23 @@ cached-only overview at:
 /admin/cache/overview
 ```
 
-Cached usage entries are also visible in the regular usage log and summary
-endpoints.
+Cache hits are also recorded as usage entries, with the caller's `user_path`
+and a `cache_type` of `exact` or `semantic`. The usage endpoints
+(`/admin/usage/*` and `/v1/usage`) leave them out by default so that totals and
+cost track provider spend; pass `cache_mode=all` to include them, or
+`cache_mode=cached` to see only the hits. `/admin/usage/sessions` is the
+exception: session request and token totals always include cache hits, while
+its cost fields stay provider-only.
+
+```bash
+# provider-bound requests only (default)
+curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+
+# including local cache hits
+curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode=all" \
+  -H "Authorization: Bearer $GOMODEL_MASTER_KEY"
+```
+
+See [admin endpoints](/advanced/admin-endpoints#cache-mode) and the
+[usage API](/advanced/usage-api#cache-mode).

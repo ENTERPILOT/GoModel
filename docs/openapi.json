@@ -9404,6 +9404,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Anthropic API version, e.g. 2023-06-01. When present, the model and error bodies use the Anthropic envelopes instead of the OpenAI ones.",
+            "name": "anthropic-version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9412,7 +9420,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.Model"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.Model"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ModelInfo"
+                    }
+                  ]
                 }
               }
             }
@@ -9432,7 +9448,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -9442,7 +9466,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -11002,6 +11034,14 @@
             "in": "query",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "description": "Which requests to count: uncached (default, provider-bound only), cached (local response-cache hits only), or all",
+            "name": "cache_mode",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -12564,7 +12604,7 @@
             "type": "string"
           },
           "signature": {
-            "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it.",
+            "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it. Every\nthinking block carries the member, as the Anthropic schema requires;\nreasoning from a provider that does not sign its output is rendered with\nan empty signature. Hence the pointer: only a thinking block has one.",
             "type": "string"
           },
           "text": {
@@ -14627,6 +14667,14 @@
           }
         }
       },
+      "core.ResponsesIncompleteDetails": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
       "core.ResponsesOutputItem": {
         "type": "object",
         "properties": {
@@ -14786,6 +14834,14 @@
           "id": {
             "type": "string"
           },
+          "incomplete_details": {
+            "description": "IncompleteDetails explains a status of \"incomplete\": the model hit\nmax_output_tokens, was stopped by a content filter, or the upstream\nstream was interrupted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/core.ResponsesIncompleteDetails"
+              }
+            ]
+          },
           "model": {
             "type": "string"
           },
@@ -14807,7 +14863,7 @@
             "type": "string"
           },
           "status": {
-            "description": "\"completed\", \"failed\", \"in_progress\"",
+            "description": "\"completed\", \"incomplete\", \"failed\", \"in_progress\"",
             "type": "string"
           },
           "usage": {
@@ -16405,6 +16461,34 @@
             "$ref": "#/components/schemas/anthropicapi.SSEUnknownEvent"
           }
         ]
+      },
+      "anthropicapi.ModelInfo": {
+        "description": "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+        "type": "object",
+        "required": [
+          "created_at",
+          "display_name",
+          "id",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "model"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   }
