@@ -3,7 +3,6 @@ package bedrock
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -12,6 +11,8 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	brtypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -31,9 +32,8 @@ func TestCallObservationCoversBedrockSDKAndFirstChunk(t *testing.T) {
 			ends = append(ends, info)
 		},
 		OnStreamFirstChunk: func(ctx context.Context, info llmclient.ResponseInfo) {
-			if ctx.Value(contextKey{}) != true {
-				t.Error("first chunk hook did not receive derived context")
-			}
+			started, _ := ctx.Value(contextKey{}).(bool)
+			assert.True(t, started, "first-chunk hook must see the OnRequestStart context")
 			chunks = append(chunks, info)
 		},
 	}}
@@ -41,18 +41,15 @@ func TestCallObservationCoversBedrockSDKAndFirstChunk(t *testing.T) {
 	observation := p.beginCallObservation(t.Context(), "anthropic.claude", true)
 	observation.end(http.StatusOK, nil)
 	stream := observedStream(io.NopCloser(strings.NewReader("data: first\n\n")), observation)
-	if len(chunks) != 0 {
-		t.Fatal("first chunk hook fired before stream read")
-	}
-	if _, err := io.ReadAll(stream); err != nil {
-		t.Fatal(err)
-	}
-	if len(starts) != 1 || len(ends) != 1 || len(chunks) != 1 {
-		t.Fatalf("hook counts = start:%d end:%d chunk:%d, want 1/1/1", len(starts), len(ends), len(chunks))
-	}
-	if starts[0].Operation != llmclient.OperationChat || starts[0].Endpoint != converseEndpoint || !starts[0].Stream {
-		t.Fatalf("start info = %+v, want streaming Bedrock chat", starts[0])
-	}
+	require.Empty(t, chunks)
+	_, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	require.Len(t, starts, 1)
+	require.Len(t, ends, 1)
+	require.Len(t, chunks, 1)
+	require.Equal(t, llmclient.OperationChat, starts[0].Operation)
+	require.Equal(t, converseEndpoint, starts[0].Endpoint)
+	require.True(t, starts[0].Stream)
 }
 
 func TestParseBaseURL(t *testing.T) {
@@ -72,12 +69,8 @@ func TestParseBaseURL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			region, endpoint := parseBaseURL(tc.in)
-			if region != tc.wantRegion {
-				t.Errorf("region = %q, want %q", region, tc.wantRegion)
-			}
-			if endpoint != tc.wantEndpoint {
-				t.Errorf("endpoint = %q, want %q", endpoint, tc.wantEndpoint)
-			}
+			assert.Equal(t, tc.wantRegion, region)
+			assert.Equal(t, tc.wantEndpoint, endpoint)
 		})
 	}
 }
@@ -116,12 +109,8 @@ func TestPlaneEndpoint(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := runtimePlaneEndpoint(tc.in); got != tc.wantRuntime {
-				t.Errorf("runtimePlaneEndpoint(%q) = %q, want %q", tc.in, got, tc.wantRuntime)
-			}
-			if got := controlPlaneEndpoint(tc.in); got != tc.wantControl {
-				t.Errorf("controlPlaneEndpoint(%q) = %q, want %q", tc.in, got, tc.wantControl)
-			}
+			assert.Equal(t, tc.wantRuntime, runtimePlaneEndpoint(tc.in), "runtimePlaneEndpoint(%q)", tc.in)
+			assert.Equal(t, tc.wantControl, controlPlaneEndpoint(tc.in), "controlPlaneEndpoint(%q)", tc.in)
 		})
 	}
 }
@@ -144,10 +133,7 @@ func TestMapStopReason(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := mapStopReason(tc.reason, tc.hasTools)
-			if got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
+			assert.Equal(t, tc.want, mapStopReason(tc.reason, tc.hasTools))
 		})
 	}
 }
@@ -166,33 +152,16 @@ func TestBuildConverseParts_BasicRequest(t *testing.T) {
 	}
 
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if awssdk.ToString(parts.modelID) != req.Model {
-		t.Errorf("modelID = %q, want %q", awssdk.ToString(parts.modelID), req.Model)
-	}
-	if len(parts.system) != 1 {
-		t.Fatalf("expected 1 system block, got %d", len(parts.system))
-	}
-	if got := parts.system[0].(*brtypes.SystemContentBlockMemberText).Value; got != "You are concise" {
-		t.Errorf("system text = %q", got)
-	}
-	if len(parts.messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(parts.messages))
-	}
-	if parts.messages[0].Role != brtypes.ConversationRoleUser {
-		t.Errorf("role = %q", parts.messages[0].Role)
-	}
-	if parts.infCfg == nil {
-		t.Fatal("inference config should be set")
-	}
-	if awssdk.ToInt32(parts.infCfg.MaxTokens) != int32(maxTokens) {
-		t.Errorf("max tokens = %d", awssdk.ToInt32(parts.infCfg.MaxTokens))
-	}
-	if awssdk.ToFloat32(parts.infCfg.Temperature) != float32(temp) {
-		t.Errorf("temperature = %v", awssdk.ToFloat32(parts.infCfg.Temperature))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, req.Model, awssdk.ToString(parts.modelID))
+	require.Len(t, parts.system, 1)
+	got := parts.system[0].(*brtypes.SystemContentBlockMemberText).Value
+	assert.Equal(t, "You are concise", got)
+	require.Len(t, parts.messages, 1)
+	assert.Equal(t, brtypes.ConversationRoleUser, parts.messages[0].Role)
+	require.NotNil(t, parts.infCfg)
+	assert.Equal(t, int32(maxTokens), awssdk.ToInt32(parts.infCfg.MaxTokens))
+	assert.Equal(t, float32(temp), awssdk.ToFloat32(parts.infCfg.Temperature))
 }
 
 func TestBuildConverseParts_MaxCompletionTokensFallback(t *testing.T) {
@@ -204,15 +173,10 @@ func TestBuildConverseParts_MaxCompletionTokensFallback(t *testing.T) {
 		}),
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if parts.infCfg == nil {
-		t.Fatal("inference config should be set when max_completion_tokens is provided via ExtraFields")
-	}
-	if got := awssdk.ToInt32(parts.infCfg.MaxTokens); got != 256 {
-		t.Errorf("max tokens = %d, want 256", got)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, parts.infCfg)
+	got := awssdk.ToInt32(parts.infCfg.MaxTokens)
+	assert.Equal(t, int32(256), got)
 }
 
 func TestBuildConverseParts_MaxTokensWinsOverFallback(t *testing.T) {
@@ -226,23 +190,18 @@ func TestBuildConverseParts_MaxTokensWinsOverFallback(t *testing.T) {
 		}),
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if got := awssdk.ToInt32(parts.infCfg.MaxTokens); got != 128 {
-		t.Errorf("max tokens = %d, want 128 (max_tokens should take precedence)", got)
-	}
+	require.NoError(t, err)
+	got := awssdk.ToInt32(parts.infCfg.MaxTokens)
+	assert.Equal(t, int32(128), got)
 }
 
 func TestBuildConverseParts_RejectsEmptyModel(t *testing.T) {
 	_, err := buildConverseParts(&core.ChatRequest{Messages: []core.Message{{Role: "user", Content: "hi"}}})
-	if err == nil {
-		t.Fatal("expected error for missing model")
-	}
+	require.Error(t, err)
+
 	var ge *core.GatewayError
-	if !errors.As(err, &ge) || ge.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("expected invalid_request_error, got %v", err)
-	}
+	require.ErrorAs(t, err, &ge)
+	require.Equal(t, core.ErrorTypeInvalidRequest, ge.Type)
 }
 
 func TestBuildConverseParts_MergesParallelToolResults(t *testing.T) {
@@ -266,28 +225,20 @@ func TestBuildConverseParts_MergesParallelToolResults(t *testing.T) {
 		},
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
+	require.NoError(t, err)
+
 	// Expect: user(text), assistant(2 tool_use), user(2 tool_result) — three messages.
-	if len(parts.messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d: %+v", len(parts.messages), parts.messages)
-	}
+	require.Len(t, parts.messages, 3)
+
 	last := parts.messages[2]
-	if last.Role != brtypes.ConversationRoleUser {
-		t.Fatalf("merged tool results must be user-role, got %q", last.Role)
-	}
-	if len(last.Content) != 2 {
-		t.Fatalf("expected 2 ToolResult blocks in merged message, got %d", len(last.Content))
-	}
+	require.Equal(t, brtypes.ConversationRoleUser, last.Role)
+	require.Len(t, last.Content, 2)
+
 	for i, want := range []string{"call_1", "call_2"} {
 		tr, ok := last.Content[i].(*brtypes.ContentBlockMemberToolResult)
-		if !ok {
-			t.Fatalf("block %d not a ToolResult: %T", i, last.Content[i])
-		}
-		if got := awssdk.ToString(tr.Value.ToolUseId); got != want {
-			t.Errorf("block %d ToolUseId = %q, want %q", i, got, want)
-		}
+		require.True(t, ok, "block %d not a ToolResult: %T", i, last.Content[i])
+		got := awssdk.ToString(tr.Value.ToolUseId)
+		assert.Equal(t, want, got)
 	}
 }
 
@@ -300,15 +251,11 @@ func TestBuildConverseParts_TopPFromExtraFields(t *testing.T) {
 		}),
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if parts.infCfg == nil || parts.infCfg.TopP == nil {
-		t.Fatal("top_p was not forwarded to InferenceConfiguration.TopP")
-	}
-	if got := awssdk.ToFloat32(parts.infCfg.TopP); got != 0.7 {
-		t.Errorf("top_p = %v, want 0.7", got)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, parts.infCfg)
+	require.NotNil(t, parts.infCfg.TopP)
+	got := awssdk.ToFloat32(parts.infCfg.TopP)
+	assert.Equal(t, float32(0.7), got)
 }
 
 func TestBuildConverseParts_TopPFromTypedField(t *testing.T) {
@@ -319,15 +266,11 @@ func TestBuildConverseParts_TopPFromTypedField(t *testing.T) {
 		TopP:     &topP,
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if parts.infCfg == nil || parts.infCfg.TopP == nil {
-		t.Fatal("typed top_p was not forwarded to InferenceConfiguration.TopP")
-	}
-	if got := awssdk.ToFloat32(parts.infCfg.TopP); got != 0.8 {
-		t.Errorf("top_p = %v, want 0.8", got)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, parts.infCfg)
+	require.NotNil(t, parts.infCfg.TopP)
+	got := awssdk.ToFloat32(parts.infCfg.TopP)
+	assert.Equal(t, float32(0.8), got)
 }
 
 func TestBuildConverseParts_TypedTopPWinsOverExtraFields(t *testing.T) {
@@ -341,15 +284,11 @@ func TestBuildConverseParts_TypedTopPWinsOverExtraFields(t *testing.T) {
 		}),
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if parts.infCfg == nil || parts.infCfg.TopP == nil {
-		t.Fatal("typed top_p was not forwarded to InferenceConfiguration.TopP")
-	}
-	if got := awssdk.ToFloat32(parts.infCfg.TopP); got != 0.8 {
-		t.Errorf("top_p = %v, want typed value 0.8", got)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, parts.infCfg)
+	require.NotNil(t, parts.infCfg.TopP)
+	got := awssdk.ToFloat32(parts.infCfg.TopP)
+	assert.Equal(t, float32(0.8), got)
 }
 
 func TestBuildConverseParts_RejectsMaxTokensOverflow(t *testing.T) {
@@ -360,13 +299,11 @@ func TestBuildConverseParts_RejectsMaxTokensOverflow(t *testing.T) {
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
 	}
 	_, err := buildConverseParts(req)
-	if err == nil {
-		t.Fatal("expected invalid_request_error for oversized max_tokens")
-	}
+	require.Error(t, err)
+
 	var ge *core.GatewayError
-	if !errors.As(err, &ge) || ge.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("expected invalid_request_error, got %v", err)
-	}
+	require.ErrorAs(t, err, &ge)
+	require.Equal(t, core.ErrorTypeInvalidRequest, ge.Type)
 }
 
 func TestBuildConverseParts_ToolResultBatchesDoNotAliasAcrossTurns(t *testing.T) {
@@ -391,9 +328,7 @@ func TestBuildConverseParts_ToolResultBatchesDoNotAliasAcrossTurns(t *testing.T)
 		},
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
+	require.NoError(t, err)
 
 	collectIDs := func(content []brtypes.ContentBlock) []string {
 		var ids []string
@@ -419,12 +354,8 @@ func TestBuildConverseParts_ToolResultBatchesDoNotAliasAcrossTurns(t *testing.T)
 			secondBatch = ids
 		}
 	}
-	if got, want := firstBatch, []string{"c1", "c2"}; !equalStrings(got, want) {
-		t.Errorf("first turn tool result IDs = %v, want %v (aliasing bug overwrote them)", got, want)
-	}
-	if got, want := secondBatch, []string{"c3"}; !equalStrings(got, want) {
-		t.Errorf("second turn tool result IDs = %v, want %v", got, want)
-	}
+	assert.Equal(t, []string{"c1", "c2"}, firstBatch, "first turn tool result IDs (aliasing bug overwrote them)")
+	assert.Equal(t, []string{"c3"}, secondBatch, "second turn tool result IDs")
 }
 
 func TestBuildConverseParts_MergesUserTextAfterToolResult(t *testing.T) {
@@ -444,42 +375,20 @@ func TestBuildConverseParts_MergesUserTextAfterToolResult(t *testing.T) {
 		},
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if len(parts.messages) != 3 {
-		t.Fatalf("expected 3 turns (user, asst, merged-user), got %d", len(parts.messages))
-	}
-	last := parts.messages[2]
-	if last.Role != brtypes.ConversationRoleUser {
-		t.Fatalf("last role = %q, want user", last.Role)
-	}
-	// Expect [ToolResult, Text] in the merged user message.
-	if len(last.Content) != 2 {
-		t.Fatalf("merged user message should have 2 blocks, got %d", len(last.Content))
-	}
-	if _, ok := last.Content[0].(*brtypes.ContentBlockMemberToolResult); !ok {
-		t.Errorf("first block should be ToolResult, got %T", last.Content[0])
-	}
-	tb, ok := last.Content[1].(*brtypes.ContentBlockMemberText)
-	if !ok {
-		t.Fatalf("second block should be Text, got %T", last.Content[1])
-	}
-	if tb.Value != "thanks!" {
-		t.Errorf("merged text = %q, want %q", tb.Value, "thanks!")
-	}
-}
+	require.NoError(t, err)
+	require.Len(t, parts.messages, 3)
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	last := parts.messages[2]
+	require.Equal(t, brtypes.ConversationRoleUser, last.Role)
+
+	// Expect [ToolResult, Text] in the merged user message.
+	require.Len(t, last.Content, 2)
+	_, ok := last.Content[0].(*brtypes.ContentBlockMemberToolResult)
+	assert.True(t, ok, "first block should be ToolResult, got %T", last.Content[0])
+
+	tb, ok := last.Content[1].(*brtypes.ContentBlockMemberText)
+	require.True(t, ok, "second block should be Text, got %T", last.Content[1])
+	assert.Equal(t, "thanks!", tb.Value)
 }
 
 func TestBuildConverseParts_AssistantToolCallsRoundtrip(t *testing.T) {
@@ -502,36 +411,24 @@ func TestBuildConverseParts_AssistantToolCallsRoundtrip(t *testing.T) {
 		},
 	}
 	parts, err := buildConverseParts(req)
-	if err != nil {
-		t.Fatalf("buildConverseParts: %v", err)
-	}
-	if len(parts.messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(parts.messages))
-	}
+	require.NoError(t, err)
+	require.Len(t, parts.messages, 3)
+
 	// Assistant message should carry a ToolUse content block
 	asst := parts.messages[1]
-	if asst.Role != brtypes.ConversationRoleAssistant {
-		t.Fatalf("expected assistant role, got %q", asst.Role)
-	}
+	require.Equal(t, brtypes.ConversationRoleAssistant, asst.Role)
+
 	tu, ok := asst.Content[0].(*brtypes.ContentBlockMemberToolUse)
-	if !ok {
-		t.Fatalf("expected tool use block, got %T", asst.Content[0])
-	}
-	if awssdk.ToString(tu.Value.ToolUseId) != "tool_call_1" {
-		t.Errorf("tool use id = %q", awssdk.ToString(tu.Value.ToolUseId))
-	}
+	require.True(t, ok, "expected tool use block, got %T", asst.Content[0])
+	assert.Equal(t, "tool_call_1", awssdk.ToString(tu.Value.ToolUseId))
+
 	// Tool result message must be sent as user role with ContentBlockMemberToolResult
 	toolMsg := parts.messages[2]
-	if toolMsg.Role != brtypes.ConversationRoleUser {
-		t.Fatalf("expected tool result to use user role, got %q", toolMsg.Role)
-	}
+	require.Equal(t, brtypes.ConversationRoleUser, toolMsg.Role)
+
 	tr, ok := toolMsg.Content[0].(*brtypes.ContentBlockMemberToolResult)
-	if !ok {
-		t.Fatalf("expected tool result block, got %T", toolMsg.Content[0])
-	}
-	if awssdk.ToString(tr.Value.ToolUseId) != "tool_call_1" {
-		t.Errorf("tool result id = %q", awssdk.ToString(tr.Value.ToolUseId))
-	}
+	require.True(t, ok, "expected tool result block, got %T", toolMsg.Content[0])
+	assert.Equal(t, "tool_call_1", awssdk.ToString(tr.Value.ToolUseId))
 }
 
 func TestConvertTools_ToolChoiceNormalization(t *testing.T) {
@@ -564,18 +461,14 @@ func TestConvertTools_ToolChoiceNormalization(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := convertTools(tools, tc.choice)
-			if err != nil {
-				t.Fatalf("convertTools: %v", err)
-			}
+			require.NoError(t, err)
+
 			if tc.wantNil {
-				if cfg != nil {
-					t.Fatalf("expected nil ToolConfiguration when tool_choice is none, got %+v", cfg)
-				}
+				require.Nil(t, cfg)
 				return
 			}
-			if cfg == nil {
-				t.Fatal("expected ToolConfiguration")
-			}
+			require.NotNil(t, cfg)
+
 			gotName := "<nil>"
 			switch cfg.ToolChoice.(type) {
 			case *brtypes.ToolChoiceMemberAuto:
@@ -585,9 +478,7 @@ func TestConvertTools_ToolChoiceNormalization(t *testing.T) {
 			case *brtypes.ToolChoiceMemberTool:
 				gotName = "Tool"
 			}
-			if gotName != tc.wantChoice {
-				t.Errorf("got %s, want %s", gotName, tc.wantChoice)
-			}
+			assert.Equal(t, tc.wantChoice, gotName)
 		})
 	}
 }
@@ -611,21 +502,14 @@ func TestConvertConverseOutput_TextAndUsage(t *testing.T) {
 		Usage:      usage,
 	}
 	resp := convertConverseOutput("anthropic.claude-3-5-haiku-20241022-v1:0", out)
-	if resp.Provider != providerName {
-		t.Errorf("provider = %q", resp.Provider)
-	}
-	if len(resp.Choices) != 1 {
-		t.Fatalf("expected 1 choice, got %d", len(resp.Choices))
-	}
-	if resp.Choices[0].FinishReason != "stop" {
-		t.Errorf("finish_reason = %q", resp.Choices[0].FinishReason)
-	}
-	if got := core.ExtractTextContent(resp.Choices[0].Message.Content); got != "Hello there" {
-		t.Errorf("content = %q", got)
-	}
-	if resp.Usage.PromptTokens != 10 || resp.Usage.CompletionTokens != 20 || resp.Usage.TotalTokens != 30 {
-		t.Errorf("usage = %+v", resp.Usage)
-	}
+	assert.Equal(t, providerName, resp.Provider)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+	got := core.ExtractTextContent(resp.Choices[0].Message.Content)
+	assert.Equal(t, "Hello there", got)
+	assert.Equal(t, 10, resp.Usage.PromptTokens)
+	assert.Equal(t, 20, resp.Usage.CompletionTokens)
+	assert.Equal(t, 30, resp.Usage.TotalTokens)
 }
 
 func TestConvertConverseOutput_ToolUseRoundtripsArguments(t *testing.T) {
@@ -648,23 +532,16 @@ func TestConvertConverseOutput_ToolUseRoundtripsArguments(t *testing.T) {
 		Usage:      &brtypes.TokenUsage{InputTokens: awssdk.Int32(1), OutputTokens: awssdk.Int32(1), TotalTokens: awssdk.Int32(2)},
 	}
 	resp := convertConverseOutput("model", out)
-	if resp.Choices[0].FinishReason != "tool_calls" {
-		t.Fatalf("finish_reason = %q", resp.Choices[0].FinishReason)
-	}
+	require.Equal(t, "tool_calls", resp.Choices[0].FinishReason)
+
 	calls := resp.Choices[0].Message.ToolCalls
-	if len(calls) != 1 {
-		t.Fatalf("expected 1 tool call, got %d", len(calls))
-	}
-	if calls[0].Function.Name != "get_weather" {
-		t.Errorf("name = %q", calls[0].Function.Name)
-	}
+	require.Len(t, calls, 1)
+	assert.Equal(t, "get_weather", calls[0].Function.Name)
+
 	var args map[string]any
-	if err := json.Unmarshal([]byte(calls[0].Function.Arguments), &args); err != nil {
-		t.Fatalf("arguments not valid JSON: %v (%s)", err, calls[0].Function.Arguments)
-	}
-	if args["city"] != "Paris" {
-		t.Errorf("args = %v", args)
-	}
+	err := json.Unmarshal([]byte(calls[0].Function.Arguments), &args)
+	require.NoError(t, err, "arguments not valid JSON: %s", calls[0].Function.Arguments)
+	assert.Equal(t, "Paris", args["city"])
 }
 
 // TestNew_BearerTokenOnly ensures the provider initializes when the only AWS
@@ -685,61 +562,39 @@ func TestNew_BearerTokenOnly(t *testing.T) {
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/dev/null")
 
 	p := New(providers.ProviderConfig{BaseURL: "us-east-1"}, providers.ProviderOptions{}).(*Provider)
-	if p.configErr != nil {
-		t.Fatalf("configErr = %v, want nil", p.configErr)
-	}
-	if p.runtime == nil {
-		t.Fatal("runtime client should be constructed")
-	}
-	if p.region != "us-east-1" {
-		t.Errorf("region = %q, want us-east-1", p.region)
-	}
-	if err := p.ready(); err != nil {
-		t.Errorf("ready() = %v, want nil", err)
-	}
+	require.NoError(t, p.configErr)
+	require.NotNil(t, p.runtime)
+	assert.Equal(t, "us-east-1", p.region)
+	err := p.ready()
+	assert.NoError(t, err)
 }
 
 func TestRegistration(t *testing.T) {
-	if Registration.Type != providerName {
-		t.Errorf("Registration.Type = %q, want %q", Registration.Type, providerName)
-	}
-	if !Registration.Discovery.AllowAPIKeyless {
-		t.Error("Registration.Discovery.AllowAPIKeyless should be true")
-	}
-	if Registration.New == nil {
-		t.Fatal("Registration.New should not be nil")
-	}
+	assert.Equal(t, providerName, Registration.Type)
+	assert.True(t, Registration.Discovery.AllowAPIKeyless)
+	require.NotNil(t, Registration.New)
 }
 
 func TestStreamConverter_FormatChunkContent(t *testing.T) {
 	sc := newOpenAIStream(nil, "test-model")
 	chunk := sc.formatChunk(map[string]any{"content": "Hi"}, nil, nil)
-	if !strings.HasPrefix(chunk, "data: ") || !strings.HasSuffix(chunk, "\n\n") {
-		t.Fatalf("malformed SSE framing: %q", chunk)
-	}
+	require.True(t, strings.HasPrefix(chunk, "data: "))
+	require.True(t, strings.HasSuffix(chunk, "\n\n"), "malformed SSE framing: %q", chunk)
+
 	payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
 	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatalf("payload not JSON: %v", err)
-	}
-	if parsed["object"] != "chat.completion.chunk" {
-		t.Errorf("object = %v", parsed["object"])
-	}
-	if parsed["model"] != "test-model" {
-		t.Errorf("model = %v", parsed["model"])
-	}
-	if parsed["provider"] != providerName {
-		t.Errorf("provider = %v", parsed["provider"])
-	}
+	err := json.Unmarshal([]byte(payload), &parsed)
+	require.NoError(t, err)
+	assert.Equal(t, "chat.completion.chunk", parsed["object"])
+	assert.Equal(t, "test-model", parsed["model"])
+	assert.Equal(t, providerName, parsed["provider"])
+
 	choices, _ := parsed["choices"].([]any)
-	if len(choices) != 1 {
-		t.Fatalf("expected 1 choice, got %d", len(choices))
-	}
+	require.Len(t, choices, 1)
+
 	choice := choices[0].(map[string]any)
 	delta := choice["delta"].(map[string]any)
-	if delta["content"] != "Hi" {
-		t.Errorf("delta.content = %v", delta["content"])
-	}
+	assert.Equal(t, "Hi", delta["content"])
 }
 
 // TestStreamConverter_DeferredFinishWithUsage asserts that messageStop alone
@@ -751,12 +606,9 @@ func TestStreamConverter_DeferredFinishWithUsage(t *testing.T) {
 	sc.handleEvent(&brtypes.ConverseStreamOutputMemberMessageStop{
 		Value: brtypes.MessageStopEvent{StopReason: brtypes.StopReasonEndTurn},
 	})
-	if len(sc.buf) != 0 {
-		t.Fatalf("messageStop should not emit yet, got %q", string(sc.buf))
-	}
-	if !sc.havePendingStop || sc.finishSent {
-		t.Fatalf("expected pending finish, sent=%v pending=%v", sc.finishSent, sc.havePendingStop)
-	}
+	require.Empty(t, sc.buf)
+	require.True(t, sc.havePendingStop)
+	require.False(t, sc.finishSent)
 
 	sc.handleEvent(&brtypes.ConverseStreamOutputMemberMetadata{
 		Value: brtypes.ConverseStreamMetadataEvent{
@@ -767,27 +619,20 @@ func TestStreamConverter_DeferredFinishWithUsage(t *testing.T) {
 			},
 		},
 	})
-	if !sc.finishSent {
-		t.Fatal("metadata should have flushed the finish chunk")
-	}
+	require.True(t, sc.finishSent)
 
 	payload := strings.TrimSuffix(strings.TrimPrefix(string(sc.buf), "data: "), "\n\n")
 	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatalf("payload not JSON: %v (%q)", err, payload)
-	}
+	err := json.Unmarshal([]byte(payload), &parsed)
+	require.NoError(t, err, "payload not JSON: %q", payload)
+
 	choices := parsed["choices"].([]any)
 	choice := choices[0].(map[string]any)
-	if choice["finish_reason"] != "stop" {
-		t.Errorf("finish_reason = %v, want stop", choice["finish_reason"])
-	}
+	assert.Equal(t, "stop", choice["finish_reason"])
+
 	usage, ok := parsed["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("usage missing from finish chunk: %v", parsed)
-	}
-	if usage["total_tokens"].(float64) != 24 {
-		t.Errorf("total_tokens = %v, want 24", usage["total_tokens"])
-	}
+	require.True(t, ok, "usage missing from finish chunk: %v", parsed)
+	assert.Equal(t, float64(24), usage["total_tokens"])
 }
 
 // TestStreamConverter_DeferredFinishWithoutMetadata asserts that we still
@@ -798,25 +643,20 @@ func TestStreamConverter_DeferredFinishWithoutMetadata(t *testing.T) {
 	sc.handleEvent(&brtypes.ConverseStreamOutputMemberMessageStop{
 		Value: brtypes.MessageStopEvent{StopReason: brtypes.StopReasonMaxTokens},
 	})
-	if sc.finishSent {
-		t.Fatal("finish should still be deferred")
-	}
+	require.False(t, sc.finishSent)
+
 	sc.flushFinish()
-	if !sc.finishSent {
-		t.Fatal("flushFinish should have sent the chunk")
-	}
+	require.True(t, sc.finishSent)
+
 	payload := strings.TrimSuffix(strings.TrimPrefix(string(sc.buf), "data: "), "\n\n")
 	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatalf("payload not JSON: %v", err)
-	}
-	if _, ok := parsed["usage"]; ok {
-		t.Errorf("usage should be absent when metadata never arrived")
-	}
+	err := json.Unmarshal([]byte(payload), &parsed)
+	require.NoError(t, err)
+	_, ok := parsed["usage"]
+	assert.False(t, ok)
+
 	choice := parsed["choices"].([]any)[0].(map[string]any)
-	if choice["finish_reason"] != "length" {
-		t.Errorf("finish_reason = %v, want length", choice["finish_reason"])
-	}
+	assert.Equal(t, "length", choice["finish_reason"])
 }
 
 func TestStreamConverter_FormatChunkUsage(t *testing.T) {
@@ -828,38 +668,28 @@ func TestStreamConverter_FormatChunkUsage(t *testing.T) {
 	})
 	payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
 	var parsed map[string]any
-	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-		t.Fatalf("payload not JSON: %v", err)
-	}
+	err := json.Unmarshal([]byte(payload), &parsed)
+	require.NoError(t, err)
+
 	usage, ok := parsed["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("usage missing: %v", parsed)
-	}
-	if usage["total_tokens"].(float64) != 10 {
-		t.Errorf("total_tokens = %v", usage["total_tokens"])
-	}
+	require.True(t, ok, "usage missing: %v", parsed)
+	assert.Equal(t, float64(10), usage["total_tokens"])
 }
 
 func TestGatewayCachePointUsesJSONBooleanAndNeverCreatesEmptyMessage(t *testing.T) {
 	fields := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		core.GatewayCachePointField: json.RawMessage("  true\n"),
 	})
-	if !isGatewayCachePoint(fields) {
-		t.Fatal("formatted JSON true was not recognized")
-	}
+	require.True(t, isGatewayCachePoint(fields))
+
 	falseFields := core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 		core.GatewayCachePointField: json.RawMessage(`false`),
 	})
-	if isGatewayCachePoint(falseFields) {
-		t.Fatal("JSON false was recognized as a cache point")
-	}
+	require.False(t, isGatewayCachePoint(falseFields))
+
 	_, messages, err := convertMessages([]core.Message{{Role: "assistant", ExtraFields: fields}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(messages) != 0 {
-		t.Fatalf("empty assistant created a cache-only message: %+v", messages)
-	}
+	require.NoError(t, err)
+	require.Empty(t, messages)
 }
 
 type testBedrockAPIError struct{ code, message string }
@@ -869,12 +699,9 @@ func (e testBedrockAPIError) ErrorCode() string    { return e.code }
 func (e testBedrockAPIError) ErrorMessage() string { return e.message }
 
 func TestCachePointFallbackIsNarrowAndLossless(t *testing.T) {
-	if !isCachePointValidationError(testBedrockAPIError{"ValidationException", "cache point below minimum tokens"}) {
-		t.Fatal("cache-point validation error was not recognized")
-	}
-	if isCachePointValidationError(testBedrockAPIError{"ValidationException", "invalid tool schema"}) {
-		t.Fatal("unrelated validation error would trigger a retry")
-	}
+	require.True(t, isCachePointValidationError(testBedrockAPIError{"ValidationException", "cache point below minimum tokens"}))
+	require.False(t, isCachePointValidationError(testBedrockAPIError{"ValidationException", "invalid tool schema"}))
+
 	parts := converseParts{
 		system: []brtypes.SystemContentBlock{
 			&brtypes.SystemContentBlockMemberText{Value: "system"},
@@ -886,12 +713,11 @@ func TestCachePointFallbackIsNarrowAndLossless(t *testing.T) {
 		}}},
 	}
 	clean := withoutCachePoints(parts)
-	if partsHaveCachePoints(clean) || len(clean.system) != 1 || len(clean.messages) != 1 || len(clean.messages[0].Content) != 1 {
-		t.Fatalf("cache-point removal damaged request content: %+v", clean)
-	}
-	if !partsHaveCachePoints(parts) {
-		t.Fatal("cache-point removal mutated original parts")
-	}
+	require.False(t, partsHaveCachePoints(clean))
+	require.Len(t, clean.system, 1)
+	require.Len(t, clean.messages, 1)
+	require.Len(t, clean.messages[0].Content, 1, "cache-point removal damaged request content")
+	require.True(t, partsHaveCachePoints(parts))
 }
 
 func TestStreamConverter_FormatChunkForwardsCacheUsage(t *testing.T) {
@@ -919,13 +745,12 @@ func TestStreamConverter_FormatChunkForwardsCacheUsage(t *testing.T) {
 			})
 			payload := strings.TrimSuffix(strings.TrimPrefix(chunk, "data: "), "\n\n")
 			var parsed map[string]any
-			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-				t.Fatalf("payload not JSON: %v", err)
-			}
+			err := json.Unmarshal([]byte(payload), &parsed)
+			require.NoError(t, err)
+
 			usage, ok := parsed["usage"].(map[string]any)
-			if !ok {
-				t.Fatalf("usage missing: %v", parsed)
-			}
+			require.True(t, ok, "usage missing: %v", parsed)
+
 			assertCacheKey(t, usage, "cache_read_input_tokens", tc.wantRead)
 			assertCacheKey(t, usage, "cache_creation_input_tokens", tc.wantCreate)
 		})
@@ -936,20 +761,11 @@ func TestStreamConverter_FormatChunkForwardsCacheUsage(t *testing.T) {
 // absent, otherwise the key must be present with that value.
 func assertCacheKey(t *testing.T, usage map[string]any, key string, want int) {
 	t.Helper()
-	got, ok := usage[key]
 	if want < 0 {
-		if ok {
-			t.Errorf("%s = %v, want absent", key, got)
-		}
+		assert.NotContains(t, usage, key)
 		return
 	}
-	if !ok {
-		t.Errorf("%s missing, want %d", key, want)
-		return
-	}
-	if got.(float64) != float64(want) {
-		t.Errorf("%s = %v, want %d", key, got, want)
-	}
+	assert.Equal(t, float64(want), usage[key], "%s", key)
 }
 
 func TestBedrockUsageExtrasCacheKeys(t *testing.T) {
@@ -987,20 +803,14 @@ func TestBedrockUsageExtrasCacheKeys(t *testing.T) {
 				CacheWriteInputTokens: tc.write,
 			})
 			if len(tc.wantKeys) == 0 {
-				if out != nil {
-					t.Fatalf("extras = %v, want nil when no cache counters are set", out)
-				}
+				require.Nil(t, out)
 				return
 			}
 			for key, want := range tc.wantKeys {
-				if out[key] != want {
-					t.Errorf("%s = %v, want %d", key, out[key], want)
-				}
+				assert.Equal(t, want, out[key])
 			}
 			for _, key := range tc.absentKeys {
-				if got, ok := out[key]; ok {
-					t.Errorf("%s = %v, want absent", key, got)
-				}
+				assert.NotContains(t, out, key)
 			}
 		})
 	}

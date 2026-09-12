@@ -7,62 +7,77 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
-func TestCreateSpeech_UsesVoiceIDInPathAndDefaultsToMP3(t *testing.T) {
-	var gotPath, gotQuery, gotAuth string
-	var gotBody speechRequest
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotQuery = r.URL.RawQuery
-		gotAuth = r.Header.Get("xi-api-key")
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &gotBody)
-		w.Header().Set("Content-Type", "audio/mpeg")
+// audioServer answers every request with a one-byte audio payload.
+func audioServer(t *testing.T, contentType string) (string, *http.Client, *providertest.Capture) {
+	t.Helper()
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
 		_, _ = w.Write([]byte{0x49, 0x44, 0x33})
-	}))
-	defer server.Close()
+	})
+	return server.URL, server.Client(), capture
+}
 
-	provider := NewWithHTTPClient("elk_test", server.URL, server.Client(), llmclient.Hooks{})
+// multipartFields decodes the recorded multipart body into its form fields,
+// returning the file part's filename separately.
+func multipartFields(t *testing.T, req providertest.Recorded) (fields map[string]string, filename string) {
+	t.Helper()
+	_, params, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
+	require.NoError(t, err)
+
+	fields = map[string]string{}
+	reader := multipart.NewReader(bytes.NewReader(req.Body), params["boundary"])
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			return fields, filename
+		}
+		require.NoError(t, err)
+		data, err := io.ReadAll(part)
+		require.NoError(t, err)
+		fields[part.FormName()] = string(data)
+		if part.FormName() == "file" {
+			filename = part.FileName()
+		}
+	}
+}
+
+func TestCreateSpeech_UsesVoiceIDInPathAndDefaultsToMP3(t *testing.T) {
+	url, client, capture := audioServer(t, "audio/mpeg")
+
+	provider := NewWithHTTPClient("elk_test", url, client, llmclient.Hooks{})
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "eleven_multilingual_v2",
 		Input: "hello there",
 		Voice: "21m00Tcm4TlvDq8ikWAM",
 	})
-	if err != nil {
-		t.Fatalf("CreateSpeech() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	if gotPath != "/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM" {
-		t.Fatalf("path = %q, want voice_id in path", gotPath)
-	}
-	if gotQuery != "output_format=mp3_44100_128" {
-		t.Fatalf("query = %q, want mp3_44100_128 output format", gotQuery)
-	}
-	if gotAuth != "elk_test" {
-		t.Fatalf("xi-api-key = %q, want elk_test", gotAuth)
-	}
-	if gotBody.Text != "hello there" || gotBody.ModelID != "eleven_multilingual_v2" {
-		t.Fatalf("request body = %+v", gotBody)
-	}
-	if gotBody.VoiceSetting != nil {
-		t.Fatalf("voice_settings = %+v, want nil when speed unset", gotBody.VoiceSetting)
-	}
-	if resp.ContentType != "audio/mpeg" {
-		t.Fatalf("content type = %q, want audio/mpeg", resp.ContentType)
-	}
-	if !bytes.Equal(resp.Data, []byte{0x49, 0x44, 0x33}) {
-		t.Fatalf("audio data = %v", resp.Data)
-	}
+	req := capture.Last(t)
+	assert.Equal(t, "/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM", req.Path)
+	assert.Equal(t, "output_format=mp3_44100_128", req.Query.Encode())
+	assert.Equal(t, "elk_test", req.Header.Get("xi-api-key"))
+
+	var gotBody speechRequest
+	require.NoError(t, json.Unmarshal(req.Body, &gotBody))
+	assert.Equal(t, "hello there", gotBody.Text)
+	assert.Equal(t, "eleven_multilingual_v2", gotBody.ModelID)
+	assert.Nil(t, gotBody.VoiceSetting)
+	assert.Equal(t, "audio/mpeg", resp.ContentType)
+	assert.Equal(t, []byte{0x49, 0x44, 0x33}, resp.Data)
 }
 
 func TestCreateSpeech_MapsResponseFormats(t *testing.T) {
@@ -79,27 +94,16 @@ func TestCreateSpeech_MapsResponseFormats(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotQuery string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotQuery = r.URL.RawQuery
-				_, _ = w.Write([]byte{0x01})
-			}))
-			defer server.Close()
+			url, client, capture := audioServer(t, "")
 
-			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+			provider := NewWithHTTPClient("key", url, client, llmclient.Hooks{})
 			resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "eleven_multilingual_v2", Input: "hi", Voice: "voice-id",
 				ResponseFormat: tt.responseFormat,
 			})
-			if err != nil {
-				t.Fatalf("CreateSpeech() error = %v", err)
-			}
-			if gotQuery != tt.wantQuery {
-				t.Fatalf("query = %q, want %q", gotQuery, tt.wantQuery)
-			}
-			if resp.ContentType != tt.wantContent {
-				t.Fatalf("content type = %q, want %q", resp.ContentType, tt.wantContent)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantQuery, capture.Last(t).Query.Encode())
+			assert.Equal(t, tt.wantContent, resp.ContentType)
 		})
 	}
 }
@@ -116,23 +120,18 @@ func TestCreateSpeech_ClampsSpeedToSupportedRange(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotBody speechRequest
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				_ = json.Unmarshal(body, &gotBody)
-				_, _ = w.Write([]byte{0x01})
-			}))
-			defer server.Close()
+			url, client, capture := audioServer(t, "")
 
-			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
-			if _, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+			provider := NewWithHTTPClient("key", url, client, llmclient.Hooks{})
+			_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "eleven_multilingual_v2", Input: "hi", Voice: "voice-id", Speed: tt.speed,
-			}); err != nil {
-				t.Fatalf("CreateSpeech() error = %v", err)
-			}
-			if gotBody.VoiceSetting == nil || gotBody.VoiceSetting.Speed != tt.wantSpeed {
-				t.Fatalf("voice_settings = %+v, want speed %v", gotBody.VoiceSetting, tt.wantSpeed)
-			}
+			})
+			require.NoError(t, err)
+
+			var gotBody speechRequest
+			require.NoError(t, json.Unmarshal(capture.Last(t).Body, &gotBody))
+			require.NotNil(t, gotBody.VoiceSetting)
+			assert.Equal(t, tt.wantSpeed, gotBody.VoiceSetting.Speed)
 		})
 	}
 }
@@ -154,35 +153,24 @@ func TestCreateSpeech_ValidatesRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := provider.CreateSpeech(context.Background(), tt.req)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("CreateSpeech() error = %v, want substring %q", err, tt.want)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
 }
 
 func TestCreateSpeech_ReturnsUpstreamError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"detail":{"status":"invalid_api_key","message":"bad key"}}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusUnauthorized, `{"detail":{"status":"invalid_api_key","message":"bad key"}}`)
 
 	provider := NewWithHTTPClient("bad-key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "m", Input: "hi", Voice: "v",
 	})
-	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("error type = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.StatusCode != http.StatusUnauthorized || gatewayErr.Type != core.ErrorTypeAuthentication {
-		t.Fatalf("gateway error = %+v, want 401 authentication", gatewayErr)
-	}
-	if gatewayErr.Message != "bad key" {
-		t.Fatalf("message = %q, want the unwrapped detail.message, not the raw JSON body", gatewayErr.Message)
-	}
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusUnauthorized, gatewayErr.StatusCode)
+	assert.Equal(t, core.ErrorTypeAuthentication, gatewayErr.Type)
+	assert.Equal(t, "bad key", gatewayErr.Message)
 }
 
 func TestRefineElevenLabsError_UnwrapsDetailShapes(t *testing.T) {
@@ -200,58 +188,15 @@ func TestRefineElevenLabsError_UnwrapsDetailShapes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			original := core.ParseProviderError("elevenlabs", http.StatusBadRequest, []byte(tt.body), nil)
 			refined := refineElevenLabsError(original)
-			gatewayErr, ok := refined.(*core.GatewayError)
-			if !ok {
-				t.Fatalf("error type = %T, want *core.GatewayError", refined)
-			}
-			if gatewayErr.Message != tt.want {
-				t.Fatalf("message = %q, want %q", gatewayErr.Message, tt.want)
-			}
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, refined, &gatewayErr)
+			assert.Equal(t, tt.want, gatewayErr.Message)
 		})
 	}
 }
 
 func TestCreateTranscription_SendsMultipartAndReturnsJSON(t *testing.T) {
-	var gotPath, gotAuth string
-	var gotModelID, gotLanguage, gotGranularity, gotFilename, gotFileContent string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("xi-api-key")
-
-		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil {
-			http.Error(w, "bad content type", http.StatusBadRequest)
-			return
-		}
-		reader := multipart.NewReader(r.Body, params["boundary"])
-		for {
-			part, err := reader.NextPart()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				http.Error(w, "multipart error", http.StatusBadRequest)
-				return
-			}
-			data, _ := io.ReadAll(part)
-			switch part.FormName() {
-			case "model_id":
-				gotModelID = string(data)
-			case "language_code":
-				gotLanguage = string(data)
-			case "timestamps_granularity":
-				gotGranularity = string(data)
-			case "file":
-				gotFilename = part.FileName()
-				gotFileContent = string(data)
-			}
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"language_code":"en","text":"hello world","words":[{"text":"hello","type":"word","start":0,"end":0.5},{"text":" ","type":"spacing","start":0.5,"end":0.6},{"text":"world","type":"word","start":0.6,"end":1.1}]}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"language_code":"en","text":"hello world","words":[{"text":"hello","type":"word","start":0,"end":0.5},{"text":" ","type":"spacing","start":0.5,"end":0.6},{"text":"world","type":"word","start":0.6,"end":1.1}]}`)
 
 	provider := NewWithHTTPClient("elk_test", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
@@ -260,80 +205,44 @@ func TestCreateTranscription_SendsMultipartAndReturnsJSON(t *testing.T) {
 		File:     []byte("fake-audio-bytes"),
 		Language: "en",
 	})
-	if err != nil {
-		t.Fatalf("CreateTranscription() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	if gotPath != "/v1/speech-to-text" || gotAuth != "elk_test" {
-		t.Fatalf("path/auth = %q/%q", gotPath, gotAuth)
-	}
-	if gotModelID != "scribe_v1" || gotLanguage != "en" {
-		t.Fatalf("model_id/language_code = %q/%q", gotModelID, gotLanguage)
-	}
-	if gotGranularity != "none" {
-		t.Fatalf("timestamps_granularity = %q, want none", gotGranularity)
-	}
-	if gotFilename != "clip.mp3" || gotFileContent != "fake-audio-bytes" {
-		t.Fatalf("file = %q/%q", gotFilename, gotFileContent)
-	}
-	if resp.ContentType != "application/json" {
-		t.Fatalf("content type = %q, want application/json", resp.ContentType)
-	}
+	req := capture.Last(t)
+	assert.Equal(t, "/v1/speech-to-text", req.Path)
+	assert.Equal(t, "elk_test", req.Header.Get("xi-api-key"))
+
+	fields, filename := multipartFields(t, req)
+	assert.Equal(t, "scribe_v1", fields["model_id"])
+	assert.Equal(t, "en", fields["language_code"])
+	assert.Equal(t, "none", fields["timestamps_granularity"])
+	assert.Equal(t, "clip.mp3", filename)
+	assert.Equal(t, "fake-audio-bytes", fields["file"])
+	assert.Equal(t, "application/json", resp.ContentType)
+
 	var decoded struct {
 		Text string `json:"text"`
 	}
-	if err := json.Unmarshal(resp.Data, &decoded); err != nil || decoded.Text != "hello world" {
-		t.Fatalf("response body = %s, err = %v", resp.Data, err)
-	}
+	require.NoError(t, json.Unmarshal(resp.Data, &decoded))
+	assert.Equal(t, "hello world", decoded.Text)
 }
 
 func TestCreateTranscription_WordGranularityFromRequest(t *testing.T) {
-	var gotGranularity string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-		if err != nil {
-			http.Error(w, "bad content type", http.StatusBadRequest)
-			return
-		}
-		reader := multipart.NewReader(r.Body, params["boundary"])
-		for {
-			part, err := reader.NextPart()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				http.Error(w, "multipart error", http.StatusBadRequest)
-				return
-			}
-			if part.FormName() == "timestamps_granularity" {
-				data, _ := io.ReadAll(part)
-				gotGranularity = string(data)
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"text":"hi"}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"text":"hi"}`)
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+	_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:                  "scribe_v1",
 		File:                   []byte("audio"),
 		TimestampGranularities: []string{"word"},
-	}); err != nil {
-		t.Fatalf("CreateTranscription() error = %v", err)
-	}
-	if gotGranularity != "word" {
-		t.Fatalf("timestamps_granularity = %q, want word", gotGranularity)
-	}
+	})
+	require.NoError(t, err)
+
+	fields, _ := multipartFields(t, capture.Last(t))
+	assert.Equal(t, "word", fields["timestamps_granularity"])
 }
 
 func TestCreateTranscription_VerboseJSONIncludesWordsAndDuration(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"language_code":"en","text":"hi there","words":[{"text":"hi","type":"word","start":0,"end":0.3},{"text":"there","type":"word","start":0.4,"end":0.9}]}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"language_code":"en","text":"hi there","words":[{"text":"hi","type":"word","start":0,"end":0.3},{"text":"there","type":"word","start":0.4,"end":0.9}]}`)
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
@@ -341,9 +250,7 @@ func TestCreateTranscription_VerboseJSONIncludesWordsAndDuration(t *testing.T) {
 		File:           []byte("audio"),
 		ResponseFormat: "verbose_json",
 	})
-	if err != nil {
-		t.Fatalf("CreateTranscription() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded struct {
 		Language string  `json:"language"`
@@ -355,23 +262,16 @@ func TestCreateTranscription_VerboseJSONIncludesWordsAndDuration(t *testing.T) {
 			End   float64 `json:"end"`
 		} `json:"words"`
 	}
-	if err := json.Unmarshal(resp.Data, &decoded); err != nil {
-		t.Fatalf("unmarshal error = %v, body = %s", err, resp.Data)
-	}
-	if decoded.Language != "en" || decoded.Text != "hi there" || decoded.Duration != 0.9 {
-		t.Fatalf("verbose response = %+v", decoded)
-	}
-	if len(decoded.Words) != 2 || decoded.Words[1].Word != "there" {
-		t.Fatalf("words = %+v", decoded.Words)
-	}
+	require.NoError(t, json.Unmarshal(resp.Data, &decoded))
+	assert.Equal(t, "en", decoded.Language)
+	assert.Equal(t, "hi there", decoded.Text)
+	assert.Equal(t, 0.9, decoded.Duration)
+	require.Len(t, decoded.Words, 2)
+	assert.Equal(t, "there", decoded.Words[1].Word)
 }
 
 func TestCreateTranscription_TextFormatReturnsPlainText(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"text":"plain text result"}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"text":"plain text result"}`)
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
@@ -379,15 +279,9 @@ func TestCreateTranscription_TextFormatReturnsPlainText(t *testing.T) {
 		File:           []byte("audio"),
 		ResponseFormat: "text",
 	})
-	if err != nil {
-		t.Fatalf("CreateTranscription() error = %v", err)
-	}
-	if string(resp.Data) != "plain text result" {
-		t.Fatalf("data = %q, want plain text result", resp.Data)
-	}
-	if !strings.HasPrefix(resp.ContentType, "text/plain") {
-		t.Fatalf("content type = %q, want text/plain", resp.ContentType)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "plain text result", string(resp.Data))
+	assert.True(t, strings.HasPrefix(resp.ContentType, "text/plain"), "content type = %q, want text/plain", resp.ContentType)
 }
 
 func TestCreateTranscription_ValidatesRequest(t *testing.T) {
@@ -406,9 +300,8 @@ func TestCreateTranscription_ValidatesRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := provider.CreateTranscription(context.Background(), tt.req)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("CreateTranscription() error = %v, want substring %q", err, tt.want)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
 }

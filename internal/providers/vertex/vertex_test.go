@@ -11,71 +11,68 @@ import (
 	"encoding/pem"
 	"math"
 	"net/http"
-	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/googlecommon"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"golang.org/x/oauth2"
 )
 
+const (
+	nativeBasePath      = "/v1/projects/prod-ai/locations/us-central1/publishers/google"
+	generateContentJSON = `{
+		"responseId": "vertex-auth",
+		"candidates": [{
+			"content": {"role": "model", "parts": [{"text": "ok"}]},
+			"finishReason": "STOP"
+		}]
+	}`
+)
+
+// tokenServer answers every OAuth token exchange with accessToken; the
+// recorder keeps the form body so the test can inspect the grant type.
+func tokenServer(t *testing.T, accessToken string) (string, *providertest.Capture) {
+	t.Helper()
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": accessToken,
+			"token_type":   "Bearer",
+			"expires_in":   3600,
+		})
+	})
+	return server.URL, capture
+}
+
 func TestProviderDoesNotExposeFilesOrBatches(t *testing.T) {
 	provider := newProvider(testConfig(), providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
-
-	if _, ok := any(provider).(core.NativeFileProvider); ok {
-		t.Fatal("Vertex provider must not expose native files")
-	}
-	if _, ok := any(provider).(core.NativeBatchProvider); ok {
-		t.Fatal("Vertex provider must not expose native batches")
-	}
+	_, ok := any(provider).(core.NativeFileProvider)
+	assert.False(t, ok, "provider should not implement core.NativeFileProvider")
+	_, ok = any(provider).(core.NativeBatchProvider)
+	assert.False(t, ok, "provider should not implement core.NativeBatchProvider")
 }
 
 func TestEmbeddingsUsesNativePrediction(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"predictions": [
+			{"embeddings": {"values": [0.1, 0.2, 0.3], "statistics": {"token_count": 4}}},
+			{"embeddings": {"values": [0.4, 0.5, 0.6], "statistics": {"token_count": 5}}}
+		]
+	}`)
+
 	var operation string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/text-embedding-005:predict" {
-			t.Errorf("Path = %q, want Vertex native predict endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
-			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "" {
-			t.Errorf("x-goog-api-key = %q, want empty for Vertex OAuth", got)
-		}
-
-		var payload vertexEmbeddingPredictRequest
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if len(payload.Instances) != 2 {
-			t.Fatalf("instances = %+v, want 2", payload.Instances)
-		}
-		if payload.Instances[0].Content != "hello" || payload.Instances[1].Content != "world" {
-			t.Fatalf("instances = %+v, want hello/world", payload.Instances)
-		}
-		if got := payload.Parameters["outputDimensionality"]; got != float64(3) {
-			t.Fatalf("outputDimensionality = %#v, want 3", got)
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"predictions": [
-				{"embeddings": {"values": [0.1, 0.2, 0.3], "statistics": {"token_count": 4}}},
-				{"embeddings": {"values": [0.4, 0.5, 0.6], "statistics": {"token_count": 5}}}
-			]
-		}`))
-	}))
-	defer server.Close()
-
 	dimensions := 3
 	cfg := testConfig()
-	cfg.BaseURL = server.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
+	cfg.BaseURL = server.URL + nativeBasePath
 	provider := newProvider(cfg, providers.ProviderOptions{Hooks: llmclient.Hooks{
 		OnRequestStart: func(ctx context.Context, info llmclient.RequestInfo) context.Context {
 			operation = info.Operation
@@ -88,24 +85,25 @@ func TestEmbeddingsUsesNativePrediction(t *testing.T) {
 		Input:      []string{"hello", "world"},
 		Dimensions: &dimensions,
 	})
-	if err != nil {
-		t.Fatalf("Embeddings() error = %v", err)
-	}
-	if resp.Provider != "vertex" {
-		t.Fatalf("Provider = %q, want vertex", resp.Provider)
-	}
-	if len(resp.Data) != 2 {
-		t.Fatalf("data = %+v, want 2 embeddings", resp.Data)
-	}
-	if got := string(resp.Data[0].Embedding); got != `[0.1,0.2,0.3]` {
-		t.Fatalf("embedding = %s, want [0.1,0.2,0.3]", got)
-	}
-	if resp.Usage.PromptTokens != 9 || resp.Usage.TotalTokens != 9 {
-		t.Fatalf("usage = %+v, want 9 prompt/total tokens", resp.Usage)
-	}
-	if operation != llmclient.OperationEmbeddings {
-		t.Fatalf("operation = %q, want embeddings", operation)
-	}
+	require.NoError(t, err)
+
+	req := capture.Last(t)
+	assert.Equal(t, nativeBasePath+"/models/text-embedding-005:predict", req.Path)
+	assert.Equal(t, "Bearer vertex-token", req.Header.Get("Authorization"))
+	assert.Empty(t, req.Header.Get("x-goog-api-key"))
+	var payload vertexEmbeddingPredictRequest
+	require.NoError(t, json.Unmarshal(req.Body, &payload))
+	require.Len(t, payload.Instances, 2)
+	assert.Equal(t, "hello", payload.Instances[0].Content)
+	assert.Equal(t, "world", payload.Instances[1].Content)
+	assert.Equal(t, float64(3), payload.Parameters["outputDimensionality"])
+
+	assert.Equal(t, "vertex", resp.Provider)
+	require.Len(t, resp.Data, 2)
+	assert.Equal(t, `[0.1,0.2,0.3]`, string(resp.Data[0].Embedding))
+	assert.Equal(t, 9, resp.Usage.PromptTokens)
+	assert.Equal(t, 9, resp.Usage.TotalTokens)
+	assert.Equal(t, llmclient.OperationEmbeddings, operation)
 }
 
 func TestEmbeddingsRejectsEmptyStringInBatch(t *testing.T) {
@@ -115,12 +113,8 @@ func TestEmbeddingsRejectsEmptyStringInBatch(t *testing.T) {
 		Model: "google/text-embedding-005",
 		Input: []string{"hello", "", "world"},
 	})
-	if err == nil {
-		t.Fatal("expected empty batch embedding input to be rejected")
-	}
-	if !strings.Contains(err.Error(), "embedding input must not be empty") {
-		t.Fatalf("error = %v, want empty input error", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "embedding input must not be empty")
 }
 
 func TestOpenAIEmbeddingResponseSupportsBase64Encoding(t *testing.T) {
@@ -135,62 +129,43 @@ func TestOpenAIEmbeddingResponseSupportsBase64Encoding(t *testing.T) {
 			},
 		}},
 	})
-	if err != nil {
-		t.Fatalf("openAIEmbeddingResponse() error = %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("data = %+v, want one embedding", resp.Data)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
 
 	var encoded string
-	if err := json.Unmarshal(resp.Data[0].Embedding, &encoded); err != nil {
-		t.Fatalf("embedding is not JSON string: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(resp.Data[0].Embedding, &encoded))
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("embedding is not valid base64: %v", err)
-	}
-	if len(decoded) != 8 {
-		t.Fatalf("decoded length = %d, want 8", len(decoded))
-	}
+	require.NoError(t, err)
+	require.Len(t, decoded, 8)
+
 	values := []float32{
 		math.Float32frombits(binary.LittleEndian.Uint32(decoded[0:4])),
 		math.Float32frombits(binary.LittleEndian.Uint32(decoded[4:8])),
 	}
-	if values[0] != 0.5 || values[1] != -1.25 {
-		t.Fatalf("decoded values = %v, want [0.5 -1.25]", values)
-	}
-	if resp.Usage.PromptTokens != 3 || resp.Usage.TotalTokens != 3 {
-		t.Fatalf("usage = %+v, want 3 prompt/total tokens", resp.Usage)
-	}
+	assert.Equal(t, []float32{0.5, -1.25}, values)
+	assert.Equal(t, 3, resp.Usage.PromptTokens)
+	assert.Equal(t, 3, resp.Usage.TotalTokens)
 }
 
 func TestNewAcceptsBaseURLWithoutProjectLocation(t *testing.T) {
 	provider := newProvider(providers.ProviderConfig{
 		Type:     "vertex",
 		AuthType: "gcp_adc",
-		BaseURL:  "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+		BaseURL:  "https://proxy.example.com" + nativeBasePath,
 	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
-
-	if err := provider.ready(); err != nil {
-		t.Fatalf("ready() error = %v, want nil for custom Vertex base URL", err)
-	}
+	require.NoError(t, provider.ready())
 }
 
 func TestNewRejectsUnsupportedAuthType(t *testing.T) {
 	provider := newProvider(providers.ProviderConfig{
 		Type:     "vertex",
 		AuthType: "api_key",
-		BaseURL:  "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+		BaseURL:  "https://proxy.example.com" + nativeBasePath,
 	}, providers.ProviderOptions{}, authedTestClient(http.DefaultClient))
 
 	err := provider.ready()
-	if err == nil {
-		t.Fatal("expected unsupported auth type error")
-	}
-	if !strings.Contains(err.Error(), `unsupported vertex AI auth type "api_key"`) {
-		t.Fatalf("error = %v, want unsupported auth type", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unsupported vertex AI auth type "api_key"`)
 }
 
 func TestNewAuthFormsInjectBearerToken(t *testing.T) {
@@ -242,64 +217,32 @@ func TestNewAuthFormsInjectBearerToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotGrantType string
-			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if err := r.ParseForm(); err != nil {
-					t.Fatalf("ParseForm() error = %v", err)
-				}
-				gotGrantType = r.PostForm.Get("grant_type")
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"access_token": tt.token,
-					"token_type":   "Bearer",
-					"expires_in":   3600,
-				})
-			}))
-			defer tokenServer.Close()
-
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent" {
-					t.Errorf("Path = %q, want Vertex native generateContent endpoint", r.URL.Path)
-				}
-				if got := r.Header.Get("Authorization"); got != "Bearer "+tt.token {
-					t.Errorf("Authorization = %q, want Bearer %s", got, tt.token)
-				}
-				if got := r.Header.Get("x-goog-api-key"); got != "" {
-					t.Errorf("x-goog-api-key = %q, want empty for Vertex OAuth", got)
-				}
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{
-					"responseId": "vertex-auth",
-					"candidates": [{
-						"content": {"role": "model", "parts": [{"text": "ok"}]},
-						"finishReason": "STOP"
-					}]
-				}`))
-			}))
-			defer upstream.Close()
+			tokenURL, tokenCapture := tokenServer(t, tt.token)
+			upstream, upstreamCapture := providertest.JSONServer(t, http.StatusOK, generateContentJSON)
 
 			cfg := testConfig()
 			cfg.AuthType = tt.authType
 			cfg.APIMode = "native"
-			cfg.BaseURL = upstream.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
-			tt.configure(t, &cfg, tokenServer.URL)
+			cfg.BaseURL = upstream.URL + nativeBasePath
+			tt.configure(t, &cfg, tokenURL)
 
 			provider := New(cfg, providers.ProviderOptions{})
 			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-				Model: "google/gemini-2.5-flash",
-				Messages: []core.Message{
-					{Role: "user", Content: "Hello"},
-				},
+				Model:    "google/gemini-2.5-flash",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
 			})
-			if err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
-			if resp == nil || resp.Provider != "vertex" {
-				t.Fatalf("response = %+v, want vertex response", resp)
-			}
-			if gotGrantType != tt.grantType {
-				t.Fatalf("grant_type = %q, want %q", gotGrantType, tt.grantType)
-			}
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			assert.Equal(t, "vertex", resp.Provider)
+
+			form, err := url.ParseQuery(string(tokenCapture.Last(t).Body))
+			require.NoError(t, err)
+			assert.Equal(t, tt.grantType, form.Get("grant_type"))
+
+			req := upstreamCapture.Last(t)
+			assert.Equal(t, nativeBasePath+"/models/gemini-2.5-flash:generateContent", req.Path)
+			assert.Equal(t, "Bearer "+tt.token, req.Header.Get("Authorization"))
+			assert.Empty(t, req.Header.Get("x-goog-api-key"))
 		})
 	}
 }
@@ -318,7 +261,7 @@ func TestVertexBaseURLs(t *testing.T) {
 				VertexLocation: "us-central1",
 			},
 			wantCompat: "https://aiplatform.googleapis.com/v1/projects/prod-ai/locations/us-central1/endpoints/openapi",
-			wantNative: "https://aiplatform.googleapis.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+			wantNative: "https://aiplatform.googleapis.com" + nativeBasePath,
 		},
 		{
 			name: "custom OpenAI-compatible vertex URL derives native sibling",
@@ -326,27 +269,23 @@ func TestVertexBaseURLs(t *testing.T) {
 				BaseURL: "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/endpoints/openapi/",
 			},
 			wantCompat: "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/endpoints/openapi",
-			wantNative: "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+			wantNative: "https://proxy.example.com" + nativeBasePath,
 		},
 		{
 			name: "custom native vertex URL derives OpenAI-compatible sibling",
 			cfg: providers.ProviderConfig{
-				BaseURL: "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google/",
+				BaseURL: "https://proxy.example.com" + nativeBasePath + "/",
 			},
 			wantCompat: "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/endpoints/openapi",
-			wantNative: "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
+			wantNative: "https://proxy.example.com" + nativeBasePath,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotCompat, gotNative := googlecommon.VertexBaseURLs(tt.cfg.BaseURL, tt.cfg.VertexProject, tt.cfg.VertexLocation)
-			if gotCompat != tt.wantCompat {
-				t.Fatalf("OpenAI-compatible base = %q, want %q", gotCompat, tt.wantCompat)
-			}
-			if gotNative != tt.wantNative {
-				t.Fatalf("native base = %q, want %q", gotNative, tt.wantNative)
-			}
+			assert.Equal(t, tt.wantCompat, gotCompat)
+			assert.Equal(t, tt.wantNative, gotNative)
 		})
 	}
 }
@@ -386,12 +325,8 @@ func vertexADCCredentialsFileWithQuotaProject(t *testing.T, tokenURL, quotaProje
 		contents["quota_project_id"] = quotaProject
 	}
 	encoded, err := json.Marshal(contents)
-	if err != nil {
-		t.Fatalf("failed to marshal ADC credentials: %v", err)
-	}
-	if err := os.WriteFile(path, encoded, 0o600); err != nil {
-		t.Fatalf("failed to write ADC credentials: %v", err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, encoded, 0o600))
 	return path
 }
 
@@ -421,39 +356,21 @@ func TestNewSetsQuotaProjectHeaderOnVertexRequests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"access_token": "token",
-					"token_type":   "Bearer",
-					"expires_in":   3600,
-				})
-			}))
-			defer tokenServer.Close()
-
-			var gotProj string
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotProj = r.Header.Get("X-Goog-User-Project")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"responseId":"r","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`))
-			}))
-			defer upstream.Close()
+			tokenURL, _ := tokenServer(t, "token")
+			upstream, capture := providertest.JSONServer(t, http.StatusOK, generateContentJSON)
 
 			cfg := testConfig()
 			cfg.APIMode = "native"
-			cfg.BaseURL = upstream.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
-			tt.configure(t, &cfg, tokenServer.URL)
+			cfg.BaseURL = upstream.URL + nativeBasePath
+			tt.configure(t, &cfg, tokenURL)
 
 			provider := New(cfg, providers.ProviderOptions{})
-			if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:    "google/gemini-2.5-flash",
 				Messages: []core.Message{{Role: "user", Content: "hi"}},
-			}); err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
-			if gotProj != tt.wantProj {
-				t.Fatalf("X-Goog-User-Project = %q, want %q", gotProj, tt.wantProj)
-			}
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantProj, capture.Last(t).Header.Get("X-Goog-User-Project"))
 		})
 	}
 }
@@ -461,22 +378,18 @@ func TestNewSetsQuotaProjectHeaderOnVertexRequests(t *testing.T) {
 func vertexServiceAccountCredentialsFile(t *testing.T, tokenURL string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "service-account.json")
-	if err := os.WriteFile(path, []byte(vertexServiceAccountCredentials(t, tokenURL)), 0o600); err != nil {
-		t.Fatalf("failed to write service account credentials: %v", err)
-	}
+	require.NoError(t, os.WriteFile(path, []byte(vertexServiceAccountCredentials(t, tokenURL)), 0o600))
 	return path
 }
 
 func vertexServiceAccountCredentials(t *testing.T, tokenURL string) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate test RSA key: %v", err)
-	}
+	require.NoError(t, err)
+
 	keyBytes, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		t.Fatalf("failed to marshal test RSA key: %v", err)
-	}
+	require.NoError(t, err)
+
 	keyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "PRIVATE KEY",
 		Bytes: keyBytes,
@@ -489,41 +402,28 @@ func vertexServiceAccountCredentials(t *testing.T, tokenURL string) string {
 		"token_uri":      tokenURL,
 	}
 	encoded, err := json.Marshal(contents)
-	if err != nil {
-		t.Fatalf("failed to marshal service account credentials: %v", err)
-	}
+	require.NoError(t, err)
 	return string(encoded)
 }
 
 func TestCreateImageDelegatesToGeminiPredict(t *testing.T) {
 	t.Setenv("USE_GOOGLE_GEMINI_NATIVE_API", "true")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/imagen-4.0-generate-001:predict" {
-			t.Errorf("Path = %q, want Vertex Imagen predict endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
-			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"predictions": [{"bytesBase64Encoded": "aW1n", "mimeType": "image/png"}]}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"predictions": [{"bytesBase64Encoded": "aW1n", "mimeType": "image/png"}]}`)
 
 	cfg := testConfig()
-	cfg.BaseURL = server.URL + "/v1/projects/prod-ai/locations/us-central1/publishers/google"
+	cfg.BaseURL = server.URL + nativeBasePath
 	provider := newProvider(cfg, providers.ProviderOptions{}, authedTestClient(server.Client()))
 
 	resp, err := provider.CreateImage(context.Background(), &core.ImageGenerationRequest{
 		Model:  "google/imagen-4.0-generate-001",
 		Prompt: "a mountain",
 	})
-	if err != nil {
-		t.Fatalf("CreateImage() error = %v", err)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].B64JSON != "aW1n" {
-		t.Fatalf("data = %+v, want the predicted image", resp.Data)
-	}
-	if resp.Provider != "vertex" {
-		t.Fatalf("Provider = %q, want vertex", resp.Provider)
-	}
+	require.NoError(t, err)
+
+	req := capture.Last(t)
+	assert.Equal(t, nativeBasePath+"/models/imagen-4.0-generate-001:predict", req.Path)
+	assert.Equal(t, "Bearer vertex-token", req.Header.Get("Authorization"))
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, "aW1n", resp.Data[0].B64JSON)
+	assert.Equal(t, "vertex", resp.Provider)
 }

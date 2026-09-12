@@ -4,20 +4,20 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPassthroughSemanticEnricher_ProviderType(t *testing.T) {
 	e := passthroughSemanticEnricher
-	if got := e.ProviderType(); got != "deepseek" {
-		t.Fatalf("ProviderType() = %q, want deepseek", got)
-	}
+	got := e.ProviderType()
+	require.Equal(t, "deepseek", got)
 }
 
 func TestPassthroughSemanticEnricher_NilInfo_ReturnsNil(t *testing.T) {
 	e := passthroughSemanticEnricher
-	if got := e.Enrich(nil, nil, nil); got != nil {
-		t.Fatalf("Enrich(nil) = %v, want nil", got)
-	}
+	got := e.Enrich(nil, nil, nil)
+	require.Nil(t, got)
 }
 
 func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
@@ -63,15 +63,11 @@ func TestPassthroughSemanticEnricher_Enrich(t *testing.T) {
 				NormalizedEndpoint: tc.normalizedEndpoint,
 			}
 			got := e.Enrich(nil, nil, info)
-			if got == nil {
-				t.Fatal("Enrich() returned nil, want enriched info")
+			require.NotNil(t, got)
+			if tc.wantSemanticOp != "" {
+				assert.Equal(t, tc.wantSemanticOp, got.SemanticOperation)
 			}
-			if tc.wantSemanticOp != "" && got.SemanticOperation != tc.wantSemanticOp {
-				t.Errorf("SemanticOperation = %q, want %q", got.SemanticOperation, tc.wantSemanticOp)
-			}
-			if got.AuditPath != tc.wantAuditPath {
-				t.Errorf("AuditPath = %q, want %q", got.AuditPath, tc.wantAuditPath)
-			}
+			assert.Equal(t, tc.wantAuditPath, got.AuditPath)
 		})
 	}
 }

@@ -5,108 +5,60 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestChatCompletion_UsesBearerAuthAndChatEndpoint(t *testing.T) {
-	var gotPath string
-	var gotAuth string
+var _ core.PassthroughProvider = (*Provider)(nil)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-deepseek",
-			"created":1677652288,
-			"model":"deepseek-v4-pro",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
-	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "deepseek-v4-pro",
-		Messages: []core.Message{
-			{Role: "user", Content: "hi"},
+// DeepSeek is a thin wrapper over the shared chat-centric adapter, so the
+// shared contract covers its surface. DeepSeek exposes no embeddings
+// endpoint, so Embeddings must fail fast without an upstream call, and the
+// provider must not advertise native batch, file, audio, or
+// response-lifecycle support.
+func TestChatCompatibleContract(t *testing.T) {
+	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
+		Registration:   Registration,
+		Type:           "deepseek",
+		DefaultBaseURL: "https://api.deepseek.com",
+		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
+			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
 		},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if resp.Model != "deepseek-v4-pro" {
-		t.Fatalf("resp.Model = %q, want deepseek-v4-pro", resp.Model)
-	}
-	if gotPath != "/chat/completions" {
-		t.Fatalf("path = %q, want /chat/completions", gotPath)
-	}
-	if gotAuth != "Bearer deepseek-key" {
-		t.Fatalf("authorization = %q, want Bearer deepseek-key", gotAuth)
-	}
+
+	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+	providertest.AssertNoNativeSurfaces(t, provider)
+	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
+	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
 }
 
 func TestChatCompletion_MapsReasoningToDeepSeekReasoningEffort(t *testing.T) {
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-deepseek",
-			"created":1677652288,
-			"model":"deepseek-v4-pro",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:     "deepseek-v4-pro",
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
 		Reasoning: &core.Reasoning{Effort: "medium"},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if gotBody["reasoning"] != nil {
-		t.Fatalf("request body should not include nested reasoning, got %#v", gotBody["reasoning"])
-	}
-	if gotBody["reasoning_effort"] != "high" {
-		t.Fatalf("reasoning_effort = %#v, want high", gotBody["reasoning_effort"])
-	}
+	require.NoError(t, err)
+
+	sent := capture.Last(t).JSON(t)
+	assert.NotContains(t, sent, "reasoning")
+	assert.Equal(t, "high", sent["reasoning_effort"])
 }
 
 func TestChatCompletion_PadsMissingReasoningContentForAssistantToolCalls(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-deepseek",
-			"created":1,
-			"model":"deepseek-v4-pro",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 	var req core.ChatRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"deepseek-v4-pro",
 		"messages":[
 			{"role":"user","content":"check"},
@@ -115,27 +67,21 @@ func TestChatCompletion_PadsMissingReasoningContentForAssistantToolCalls(t *test
 			{"role":"assistant","content":null,"reasoning_content":"client reasoning","tool_calls":[{"id":"call_2","type":"function","function":{"name":"lookup","arguments":"{}"}}]}
 		],
 		"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.ChatCompletion(context.Background(), &req); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	_, err = provider.ChatCompletion(context.Background(), &req)
+	require.NoError(t, err)
 
-	messages, _ := gotBody["messages"].([]any)
+	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 4)
 	missingReasoning, _ := messages[1].(map[string]any)
-	if missingReasoning["reasoning_content"] != " " {
-		t.Fatalf("synthesized reasoning_content = %#v, want one space", missingReasoning["reasoning_content"])
-	}
+	assert.Equal(t, " ", missingReasoning["reasoning_content"])
 	preservedReasoning, _ := messages[3].(map[string]any)
-	if preservedReasoning["reasoning_content"] != "client reasoning" {
-		t.Fatalf("preserved reasoning_content = %#v, want client value", preservedReasoning["reasoning_content"])
-	}
-	if req.Messages[1].ExtraFields.Lookup("reasoning_content") != nil {
-		t.Fatal("ChatCompletion() mutated the caller's request")
-	}
+	assert.Equal(t, "client reasoning", preservedReasoning["reasoning_content"])
+	assert.Nil(t, req.Messages[1].ExtraFields.Lookup("reasoning_content"), "caller's request must not be mutated")
 }
 
 func TestAdaptChatRequest_DoesNotPadWithoutTools(t *testing.T) {
@@ -147,170 +93,94 @@ func TestAdaptChatRequest_DoesNotPadWithoutTools(t *testing.T) {
 	}
 
 	adapted, err := adaptChatRequest(req)
-	if err != nil {
-		t.Fatalf("adaptChatRequest() error = %v", err)
-	}
-	if adapted != req {
-		t.Fatal("adaptChatRequest() copied an unchanged request")
-	}
-	if adapted.Messages[0].ExtraFields.Lookup("reasoning_content") != nil {
-		t.Fatal("reasoning_content should not be added when the request has no tools")
-	}
+	require.NoError(t, err)
+	assert.Same(t, req, adapted)
+	assert.Nil(t, adapted.Messages[0].ExtraFields.Lookup("reasoning_content"))
 }
 
-func TestResponses_TranslatesToChatCompletions(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-deepseek",
-			"created":1677652288,
-			"model":"deepseek-v4-pro",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"translated"},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}
-		}`))
-	}))
-	defer server.Close()
+func TestResponses_MapsTokensAndReasoningEffort(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"id":"chatcmpl-deepseek",
+		"created":1677652288,
+		"model":"deepseek-v4-pro",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"translated"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}
+	}`)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
 	maxOutputTokens := 64
-
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model:           "deepseek-v4-pro",
 		Input:           "Reply with exactly ok",
 		MaxOutputTokens: &maxOutputTokens,
 		Reasoning:       &core.Reasoning{Effort: "xhigh"},
 	})
-	if err != nil {
-		t.Fatalf("Responses() error = %v", err)
-	}
-	if gotPath != "/chat/completions" {
-		t.Fatalf("path = %q, want /chat/completions", gotPath)
-	}
-	if gotBody["max_output_tokens"] != nil {
-		t.Fatalf("request body should not include max_output_tokens, got %#v", gotBody["max_output_tokens"])
-	}
-	if gotBody["max_tokens"] != float64(64) {
-		t.Fatalf("max_tokens = %#v, want 64", gotBody["max_tokens"])
-	}
-	if gotBody["reasoning_effort"] != "max" {
-		t.Fatalf("reasoning_effort = %#v, want max", gotBody["reasoning_effort"])
-	}
-	messages, ok := gotBody["messages"].([]any)
-	if !ok || len(messages) != 1 {
-		t.Fatalf("messages = %#v, want one chat message", gotBody["messages"])
-	}
-	message, _ := messages[0].(map[string]any)
-	if message["role"] != "user" || message["content"] != "Reply with exactly ok" {
-		t.Fatalf("message = %#v, want converted user message", message)
-	}
-	if resp.Object != "response" || resp.Status != "completed" {
-		t.Fatalf("response metadata = object %q status %q, want response/completed", resp.Object, resp.Status)
-	}
-	if len(resp.Output) != 1 || len(resp.Output[0].Content) != 1 || resp.Output[0].Content[0].Text != "translated" {
-		t.Fatalf("unexpected responses output: %+v", resp.Output)
-	}
-	if resp.Usage == nil || resp.Usage.TotalTokens != 5 {
-		t.Fatalf("usage = %+v, want total_tokens=5", resp.Usage)
-	}
+	require.NoError(t, err)
+
+	req := capture.Last(t)
+	assert.Equal(t, "/chat/completions", req.Path)
+	sent := req.JSON(t)
+	assert.NotContains(t, sent, "max_output_tokens")
+	assert.Equal(t, float64(64), sent["max_tokens"])
+	assert.Equal(t, "max", sent["reasoning_effort"])
+	assert.Equal(t, []any{map[string]any{"role": "user", "content": "Reply with exactly ok"}}, sent["messages"])
+
+	assert.Equal(t, "response", resp.Object)
+	assert.Equal(t, "completed", resp.Status)
+	require.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output[0].Content, 1)
+	assert.Equal(t, "translated", resp.Output[0].Content[0].Text)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 5, resp.Usage.TotalTokens)
 }
 
 func TestResponses_ReplaysReasoningContentForToolCall(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-deepseek",
-			"created":1,
-			"model":"deepseek-v4-pro",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"deepseek-v4-pro",
 		"input":[
 			{"type":"reasoning","summary":[],"content":[{"type":"reasoning_text","text":"Need the weather."}]},
 			{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
 			{"type":"function_call_output","call_id":"call_1","output":"sunny"}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.Responses(context.Background(), &req); err != nil {
-		t.Fatalf("Responses() error = %v", err)
-	}
+	_, err = provider.Responses(context.Background(), &req)
+	require.NoError(t, err)
 
-	messages, _ := gotBody["messages"].([]any)
-	if len(messages) != 2 {
-		t.Fatalf("messages = %#v, want assistant call and tool result", gotBody["messages"])
-	}
+	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 2)
 	assistant, _ := messages[0].(map[string]any)
-	if assistant["role"] != "assistant" || assistant["reasoning_content"] != "Need the weather." {
-		t.Fatalf("assistant = %#v", assistant)
-	}
-	if calls, _ := assistant["tool_calls"].([]any); len(calls) != 1 {
-		t.Fatalf("assistant tool_calls = %#v", assistant["tool_calls"])
-	}
+	assert.Equal(t, "assistant", assistant["role"])
+	assert.Equal(t, "Need the weather.", assistant["reasoning_content"])
+	assert.Len(t, assistant["tool_calls"], 1)
 }
 
 func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"id\":\"chatcmpl-deepseek\",\"object\":\"chat.completion.chunk\",\"created\":1677652288,\"model\":\"deepseek-v4-pro\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n"))
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
+	server, capture := providertest.SSEServer(t, "data: {\"id\":\"chatcmpl-deepseek\",\"object\":\"chat.completion.chunk\",\"created\":1677652288,\"model\":\"deepseek-v4-pro\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n")
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "deepseek-v4-pro",
 		Input: "hi",
 	})
-	if err != nil {
-		t.Fatalf("StreamResponses() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer stream.Close()
 
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-	if gotPath != "/chat/completions" {
-		t.Fatalf("path = %q, want /chat/completions", gotPath)
-	}
-	if gotBody["stream"] != true {
-		t.Fatalf("stream = %#v, want true", gotBody["stream"])
-	}
+	require.NoError(t, err)
 	raw := string(body)
-	if !strings.Contains(raw, "response.output_text.delta") || !strings.Contains(raw, "data: [DONE]") {
-		t.Fatalf("converted stream missing responses events or done marker: %s", raw)
-	}
+	assert.Contains(t, raw, "response.output_text.delta")
+	assert.Contains(t, raw, "data: [DONE]")
+
+	req := capture.Last(t)
+	assert.Equal(t, "/chat/completions", req.Path)
+	assert.Equal(t, true, req.JSON(t)["stream"])
 }
 
 func TestNormalizeReasoningEffort(t *testing.T) {
@@ -324,209 +194,81 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 	}
 	for input, expected := range tests {
 		t.Run(input, func(t *testing.T) {
-			if got := normalizeReasoningEffort(input); got != expected {
-				t.Fatalf("normalizeReasoningEffort(%q) = %q, want %q", input, got, expected)
-			}
+			assert.Equal(t, expected, normalizeReasoningEffort(input))
 		})
 	}
 }
 
-func TestProvider_DoesNotExposeOptionalNativeInterfaces(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
-
-	if _, ok := any(provider).(core.NativeBatchProvider); ok {
-		t.Fatal("deepseek provider should not implement native batch provider")
-	}
-	if _, ok := any(provider).(core.NativeFileProvider); ok {
-		t.Fatal("deepseek provider should not implement native file provider")
-	}
-	if _, ok := any(provider).(core.NativeResponseLifecycleProvider); ok {
-		t.Fatal("deepseek provider should not implement native response lifecycle provider")
-	}
-}
-
 func TestPassthrough_ForwardsRequestWithBearerAuth(t *testing.T) {
-	var gotPath, gotAuth, gotMethod string
-	var gotBody []byte
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		gotMethod = r.Method
-		gotBody, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"object":"fim_completion","choices":[{"text":"world"}]}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"fim_completion","choices":[{"text":"world"}]}`)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
-	body := strings.NewReader(`{"model":"deepseek-v4-pro","prompt":"hello "}`)
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "/beta/completions",
-		Body:     io.NopCloser(body),
+		Body:     io.NopCloser(strings.NewReader(`{"model":"deepseek-v4-pro","prompt":"hello "}`)),
+		Headers:  http.Header{"Content-Type": []string{"application/json"}},
 	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if gotPath != "/beta/completions" {
-		t.Fatalf("path = %q, want /beta/completions", gotPath)
-	}
-	if gotAuth != "Bearer deepseek-key" {
-		t.Fatalf("authorization = %q, want Bearer deepseek-key", gotAuth)
-	}
-	if gotMethod != http.MethodPost {
-		t.Fatalf("method = %q, want POST", gotMethod)
-	}
-	if !strings.Contains(string(gotBody), "deepseek-v4-pro") {
-		t.Fatalf("body = %q, want body containing deepseek-v4-pro", gotBody)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	req := capture.Last(t)
+	assert.Equal(t, http.MethodPost, req.Method)
+	assert.Equal(t, "/beta/completions", req.Path)
+	assert.Equal(t, "Bearer deepseek-key", req.Header.Get("Authorization"))
+	assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+	assert.Contains(t, string(req.Body), "deepseek-v4-pro")
 }
 
 func TestPassthrough_NilRequest_ReturnsError(t *testing.T) {
 	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
 	_, err := provider.Passthrough(context.Background(), nil)
-	if err == nil {
-		t.Fatal("expected error for nil passthrough request, got nil")
-	}
+	require.Error(t, err)
 }
 
-func TestPassthrough_ForwardsRequestHeaders(t *testing.T) {
-	var gotContentType string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotContentType = r.Header.Get("Content-Type")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
+func TestPassthrough_PreservesNon2xxStatusAndBody(t *testing.T) {
+	const upstreamBody = `{"error":{"message":"rate_limit_exceeded","type":"rate_limit_error"}}`
+	server, _ := providertest.JSONServer(t, http.StatusTooManyRequests, upstreamBody)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
-	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
-		Method:   http.MethodPost,
-		Endpoint: "/beta/completions",
-		Body:     io.NopCloser(strings.NewReader(`{}`)),
-		Headers:  http.Header{"Content-Type": []string{"application/json"}},
-	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
-	defer resp.Body.Close()
-	if gotContentType != "application/json" {
-		t.Fatalf("Content-Type = %q, want application/json", gotContentType)
-	}
-}
-
-func TestPassthrough_PreservesNon2xxStatus(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"error":{"code":"rate_limit_exceeded"}}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "/beta/completions",
 		Body:     io.NopCloser(strings.NewReader(`{}`)),
 	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429", resp.StatusCode)
-	}
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	assert.Equal(t, upstreamBody, string(body))
 }
 
 func TestPassthrough_ForwardsQueryString(t *testing.T) {
-	var gotPath string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.RequestURI()
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodGet,
 		Endpoint: "/beta/completions?stream=true",
 		Body:     io.NopCloser(strings.NewReader(``)),
 	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
-	if gotPath != "/beta/completions?stream=true" {
-		t.Fatalf("path = %q, want /beta/completions?stream=true", gotPath)
-	}
-}
 
-func TestPassthrough_PreservesResponseBody(t *testing.T) {
-	const upstreamBody = `{"error":{"message":"rate_limit_exceeded","type":"rate_limit_error"}}`
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(upstreamBody))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-
-	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
-		Method:   http.MethodPost,
-		Endpoint: "/beta/completions",
-		Body:     io.NopCloser(strings.NewReader(`{}`)),
-	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-	if string(body) != upstreamBody {
-		t.Fatalf("response body = %q, want %q", string(body), upstreamBody)
-	}
-}
-
-func TestProvider_ImplementsPassthroughProvider(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
-	var _ core.PassthroughProvider = provider
+	req := capture.Last(t)
+	assert.Equal(t, "/beta/completions", req.Path)
+	assert.Equal(t, "true", req.Query.Get("stream"))
 }
 
 func TestResponses_NilRequest_ReturnsError(t *testing.T) {
 	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
+
 	_, err := provider.Responses(context.Background(), nil)
-	if err == nil {
-		t.Fatal("expected error for nil Responses request, got nil")
-	}
-}
+	require.Error(t, err)
 
-func TestStreamResponses_NilRequest_ReturnsError(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
-	_, err := provider.StreamResponses(context.Background(), nil)
-	if err == nil {
-		t.Fatal("expected error for nil StreamResponses request, got nil")
-	}
-}
-
-func TestEmbeddings_ReturnsUnsupported(t *testing.T) {
-	provider := NewWithHTTPClient("deepseek-key", "", nil, llmclient.Hooks{})
-
-	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "embedding-model", Input: "hi"})
-	if err == nil {
-		t.Fatal("expected unsupported embeddings error, got nil")
-	}
+	_, err = provider.StreamResponses(context.Background(), nil)
+	require.Error(t, err)
 }

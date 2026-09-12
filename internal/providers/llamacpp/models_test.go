@@ -3,7 +3,6 @@ package llamacpp
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -11,7 +10,30 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// jsonRoute answers with status and body as JSON.
+func jsonRoute(status int, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}
+}
+
+// countPath returns how many recorded requests hit path.
+func countPath(capture *providertest.Capture, path string) int {
+	n := 0
+	for _, req := range capture.All() {
+		if req.Path == path {
+			n++
+		}
+	}
+	return n
+}
 
 // legacyListing is the /v1/models payload of builds whose meta object predates
 // n_ctx, leaving only the GGUF's trained context.
@@ -112,143 +134,79 @@ func TestListModels_SurfacesServerReportedMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			propsFetched := false
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				switch r.URL.Path {
-				case "/v1/models":
-					_, _ = w.Write([]byte(tt.listing))
-				case "/props":
-					propsFetched = true
-					w.WriteHeader(tt.propsStatus)
-					_, _ = w.Write([]byte(tt.props))
-				default:
-					t.Errorf("unexpected path %q", r.URL.Path)
-					w.WriteHeader(http.StatusNotFound)
-				}
-			}))
-			defer server.Close()
+			server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+				"/v1/models": jsonRoute(http.StatusOK, tt.listing),
+				"/props":     jsonRoute(tt.propsStatus, tt.props),
+			})
 
 			provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 
 			resp, err := provider.ListModels(context.Background())
-			if err != nil {
-				t.Fatalf("ListModels() error = %v", err)
-			}
-			if len(resp.Data) != 1 {
-				t.Fatalf("len(resp.Data) = %d, want 1", len(resp.Data))
-			}
-			if propsFetched != tt.wantPropsFetched {
-				t.Fatalf("props fetched = %v, want %v", propsFetched, tt.wantPropsFetched)
-			}
+			require.NoError(t, err)
+			require.Len(t, resp.Data, 1)
+			assert.Equal(t, tt.wantPropsFetched, countPath(capture, "/props") == 1)
 
 			model := resp.Data[0]
 			wantID := tt.wantModelID
 			if wantID == "" {
 				wantID = "Meta-Llama-3.1-8B-Instruct"
 			}
-			if model.ID != wantID {
-				t.Fatalf("model.ID = %q, want %q", model.ID, wantID)
-			}
-			if model.Metadata == nil {
-				t.Fatalf("model.Metadata = nil, want context window %d", tt.wantContextWindow)
-			}
-			if model.Metadata.ContextWindow == nil || *model.Metadata.ContextWindow != tt.wantContextWindow {
-				t.Fatalf("context window = %v, want %d", model.Metadata.ContextWindow, tt.wantContextWindow)
-			}
-			if len(model.Metadata.Capabilities) != len(tt.wantCapabilities) {
-				t.Fatalf("capabilities = %v, want %v", model.Metadata.Capabilities, tt.wantCapabilities)
-			}
+			assert.Equal(t, wantID, model.ID)
+			require.NotNil(t, model.Metadata)
+			require.NotNil(t, model.Metadata.ContextWindow)
+			assert.Equal(t, tt.wantContextWindow, *model.Metadata.ContextWindow)
+			assert.Len(t, model.Metadata.Capabilities, len(tt.wantCapabilities))
 			for name, want := range tt.wantCapabilities {
-				if model.Metadata.Capabilities[name] != want {
-					t.Fatalf("capability %q = %v, want %v", name, model.Metadata.Capabilities[name], want)
-				}
+				assert.Equal(t, want, model.Metadata.Capabilities[name], "capability %q", name)
 			}
 			// Modes must stay empty so the registry's ID heuristic can still
 			// classify local embedding and reranking GGUFs.
-			if len(model.Metadata.Modes) != 0 {
-				t.Fatalf("modes = %v, want none", model.Metadata.Modes)
-			}
+			assert.Empty(t, model.Metadata.Modes)
 		})
 	}
 }
 
 func TestListModels_RouterModeKeepsPerModelContextAndSkipsProps(t *testing.T) {
-	propsFetched := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = w.Write([]byte(`{
-				"object":"list",
-				"data":[
-					{"id":"gemma-3-4b","object":"model","meta":{"n_ctx":8192,"n_ctx_train":131072}},
-					{"id":"qwen3-8b","object":"model","meta":{"n_ctx":32768,"n_ctx_train":262144}}
-				]
-			}`))
-		case "/props":
-			propsFetched = true
-			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":512}}`))
-		default:
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer server.Close()
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/v1/models": jsonRoute(http.StatusOK, `{
+			"object":"list",
+			"data":[
+				{"id":"gemma-3-4b","object":"model","meta":{"n_ctx":8192,"n_ctx_train":131072}},
+				{"id":"qwen3-8b","object":"model","meta":{"n_ctx":32768,"n_ctx_train":262144}}
+			]
+		}`),
+		"/props": jsonRoute(http.StatusOK, `{"default_generation_settings":{"n_ctx":512}}`),
+	})
 
 	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if propsFetched {
-		t.Fatal("props was fetched for a multi-model listing; it describes a single loaded model")
-	}
+	require.NoError(t, err)
+	assert.Zero(t, countPath(capture, "/props"), "router mode must not probe /props")
 
 	want := map[string]int{"gemma-3-4b": 8192, "qwen3-8b": 32768}
 	for _, model := range resp.Data {
-		if model.Metadata == nil || model.Metadata.ContextWindow == nil {
-			t.Fatalf("model %q lost its context window", model.ID)
-		}
-		if got := *model.Metadata.ContextWindow; got != want[model.ID] {
-			t.Fatalf("model %q context window = %d, want %d", model.ID, got, want[model.ID])
-		}
+		require.NotNil(t, model.Metadata)
+		require.NotNil(t, model.Metadata.ContextWindow, "model %q lost its context window", model.ID)
+		assert.Equal(t, want[model.ID], *model.Metadata.ContextWindow, "model %q context window", model.ID)
 	}
 }
 
 func TestListModels_LeavesMetadataUnsetWhenServerReportsNothing(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/v1/models":
-			// LM Studio and other plain OpenAI-compatible servers omit "meta".
-			_, _ = w.Write([]byte(`{"data":[{"id":"local-model"}]}`))
-		case "/props":
-			_, _ = w.Write([]byte(`{"default_generation_settings":{"n_ctx":0}}`))
-		default:
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer server.Close()
+	server, _ := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		// LM Studio and other plain OpenAI-compatible servers omit "meta".
+		"/v1/models": jsonRoute(http.StatusOK, `{"data":[{"id":"local-model"}]}`),
+		"/props":     jsonRoute(http.StatusOK, `{"default_generation_settings":{"n_ctx":0}}`),
+	})
 
 	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("len(resp.Data) = %d, want 1", len(resp.Data))
-	}
-	if resp.Object != "list" {
-		t.Fatalf("resp.Object = %q, want list", resp.Object)
-	}
-	if resp.Data[0].Object != "model" {
-		t.Fatalf("model.Object = %q, want model", resp.Data[0].Object)
-	}
-	if resp.Data[0].Metadata != nil {
-		t.Fatalf("model.Metadata = %+v, want nil so lower metadata layers still apply", resp.Data[0].Metadata)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, "list", resp.Object)
+	assert.Equal(t, "model", resp.Data[0].Object)
+	assert.Nil(t, resp.Data[0].Metadata)
 }
 
 // TestListModels_FailingPropsLeavesNativeRoutesUsable pins the isolation of the
@@ -257,24 +215,11 @@ func TestListModels_LeavesMetadataUnsetWhenServerReportsNothing(t *testing.T) {
 // rootClient here cost four attempts per listing and locked /health out
 // entirely after six discovery cycles.
 func TestListModels_FailingPropsLeavesNativeRoutesUsable(t *testing.T) {
-	var propsAttempts, healthUpstream int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"m","object":"model","meta":{"n_ctx_train":8192}}]}`))
-		case "/props":
-			propsAttempts++
-			w.WriteHeader(http.StatusServiceUnavailable) // retryable status
-			_, _ = w.Write([]byte(`{"error":"unavailable"}`))
-		case "/health":
-			healthUpstream++
-			_, _ = w.Write([]byte(`{"status":"ok"}`))
-		default:
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer server.Close()
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/v1/models": jsonRoute(http.StatusOK, `{"object":"list","data":[{"id":"m","object":"model","meta":{"n_ctx_train":8192}}]}`),
+		"/props":     jsonRoute(http.StatusServiceUnavailable, `{"error":"unavailable"}`), // retryable status
+		"/health":    jsonRoute(http.StatusOK, `{"status":"ok"}`),
+	})
 
 	retry := config.DefaultRetryConfig()
 	retry.InitialBackoff = time.Millisecond // the attempt count is what matters
@@ -288,26 +233,18 @@ func TestListModels_FailingPropsLeavesNativeRoutesUsable(t *testing.T) {
 	const listings = 6
 	for i := range listings {
 		resp, err := provider.ListModels(context.Background())
-		if err != nil {
-			t.Fatalf("ListModels() #%d error = %v", i, err)
-		}
-		// The listing still succeeds on meta.n_ctx_train despite /props failing.
-		if resp.Data[0].Metadata == nil || *resp.Data[0].Metadata.ContextWindow != 8192 {
-			t.Fatalf("listing #%d lost its fallback context window", i)
-		}
-	}
-	if propsAttempts != listings {
-		t.Fatalf("props attempts = %d, want %d (one per listing, no retries)", propsAttempts, listings)
-	}
+		require.NoError(t, err)
 
-	if _, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
+		// The listing still succeeds on meta.n_ctx_train despite /props failing.
+		require.NotNil(t, resp.Data[0].Metadata)
+		assert.Equal(t, 8192, *resp.Data[0].Metadata.ContextWindow, "listing #%d lost its fallback context window", i)
+	}
+	assert.Equal(t, listings, countPath(capture, "/props"))
+	_, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodGet,
 		Endpoint: "health",
 		Headers:  http.Header{},
-	}); err != nil {
-		t.Fatalf("native /health rejected after failing /props calls: %v", err)
-	}
-	if healthUpstream != 1 {
-		t.Fatalf("health upstream hits = %d, want 1", healthUpstream)
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, countPath(capture, "/health"))
 }

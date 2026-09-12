@@ -2,13 +2,15 @@ package groq
 
 import (
 	"context"
+	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
-	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateTranscription_StripsVendorMember(t *testing.T) {
@@ -51,14 +53,10 @@ func TestCreateTranscription_StripsVendorMember(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, endpoint := range []string{"/audio/transcriptions", "/audio/translations"} {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path != endpoint {
-						t.Errorf("path = %q, want %q", r.URL.Path, endpoint)
-					}
-					_, _ = w.Write([]byte(tt.upstream))
-				}))
-				provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-				provider.SetBaseURL(server.URL)
+				server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+					_, _ = io.WriteString(w, tt.upstream)
+				})
+				provider := newTestProvider(server.URL)
 
 				req := &core.AudioTranscriptionRequest{
 					Model:          "whisper-large-v3-turbo",
@@ -75,42 +73,26 @@ func TestCreateTranscription_StripsVendorMember(t *testing.T) {
 				} else {
 					resp, err = provider.CreateTranslation(context.Background(), req)
 				}
-				server.Close()
-				if err != nil {
-					t.Fatalf("%s error = %v", endpoint, err)
-				}
-				if got := string(resp.Data); got != tt.want {
-					t.Errorf("%s body = %s, want %s", endpoint, got, tt.want)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, endpoint, capture.Last(t).Path)
+				assert.Equal(t, tt.want, string(resp.Data), "%s body", endpoint)
 			}
 		})
 	}
 }
 
 func TestCreateTranscription_PropagatesUpstreamError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"bad audio","type":"invalid_request_error"}}`))
-	}))
-	defer server.Close()
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, _ := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"bad audio","type":"invalid_request_error"}}`)
+	provider := newTestProvider(server.URL)
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model:    "whisper-large-v3-turbo",
 		File:     []byte("audio"),
 		Filename: "a.mp3",
 	})
-	if err == nil {
-		t.Fatalf("CreateTranscription() error = nil, want the upstream error (resp = %+v)", resp)
-	}
-	if resp != nil {
-		t.Errorf("response = %+v, want nil", resp)
-	}
-	if !strings.Contains(err.Error(), "bad audio") {
-		t.Errorf("error = %v, want it to carry the upstream message", err)
-	}
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Contains(t, err.Error(), "bad audio")
 }
 
 func TestWithoutJSONMember_LeavesMalformedBodiesAlone(t *testing.T) {
@@ -126,9 +108,8 @@ func TestWithoutJSONMember_LeavesMalformedBodiesAlone(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := string(withoutJSONMember([]byte(tt.body), vendorTranscriptionMember)); got != tt.body {
-				t.Errorf("withoutJSONMember() = %q, want %q", got, tt.body)
-			}
+			got := string(withoutJSONMember([]byte(tt.body), vendorTranscriptionMember))
+			assert.Equal(t, tt.body, got)
 		})
 	}
 }
