@@ -479,6 +479,7 @@ type mockProvider struct {
 	lastPassthroughReq      *core.PassthroughRequest
 
 	responseGetResponse         *core.ResponsesResponse
+	responseGetHook             func()
 	responseInputItemsResponse  *core.ResponseInputItemListResponse
 	responseCancelResponse      *core.ResponsesResponse
 	responseDeleteResponse      *core.ResponseDeleteResponse
@@ -843,6 +844,9 @@ func (m *mockProvider) Passthrough(_ context.Context, providerType string, req *
 
 func (m *mockProvider) GetResponse(_ context.Context, providerType, id string, _ core.ResponseRetrieveParams) (*core.ResponsesResponse, error) {
 	m.responseGetCalls = append(m.responseGetCalls, responseCall{provider: providerType, id: id})
+	if m.responseGetHook != nil {
+		m.responseGetHook()
+	}
 	if m.responseLifecycleErr != nil {
 		return nil, m.responseLifecycleErr
 	}
