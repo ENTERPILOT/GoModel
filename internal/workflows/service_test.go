@@ -668,7 +668,7 @@ func TestServiceRefresh_CompiledChainsFollowChatCompleterSwap(t *testing.T) {
 	require.NotNil(t, chains)
 	require.Equal(t, 1, chains.Prompt.Len())
 	require.Equal(t, 1, chains.Response.Len())
-	require.Equal(t, chains, service.ChainsForContext(core.WithWorkflow(context.Background(), workflow)))
+	require.Same(t, chains, service.ChainsForContext(core.WithWorkflow(context.Background(), workflow)))
 	require.Nil(t, service.ChainsForWorkflow(&core.Workflow{Policy: &core.ResolvedWorkflowPolicy{VersionID: "missing"}}))
 
 	assertChainRewrite(t, chains.Prompt, "[|---|](PERSON_1)")
