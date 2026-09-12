@@ -522,17 +522,17 @@ func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	chat, ok := byID["gemini-2.5-flash"]
 	require.True(t, ok)
 	require.NotNil(t, chat.Metadata, "gemini-2.5-flash missing or has no metadata: %+v", resp.Data)
-	assert.Len(t, chat.Metadata.Modes, 1)
+	require.Len(t, chat.Metadata.Modes, 1)
 	assert.Equal(t, "chat", chat.Metadata.Modes[0])
-	assert.Len(t, chat.Metadata.Categories, 1)
+	require.Len(t, chat.Metadata.Categories, 1)
 	assert.Equal(t, core.CategoryTextGeneration, chat.Metadata.Categories[0])
 
 	embed, ok := byID["text-embedding-004"]
 	require.True(t, ok)
 	require.NotNil(t, embed.Metadata, "text-embedding-004 missing or has no metadata: %+v", resp.Data)
-	assert.Len(t, embed.Metadata.Modes, 1)
+	require.Len(t, embed.Metadata.Modes, 1)
 	assert.Equal(t, "embedding", embed.Metadata.Modes[0])
-	assert.Len(t, embed.Metadata.Categories, 1)
+	require.Len(t, embed.Metadata.Categories, 1)
 	assert.Equal(t, core.CategoryEmbedding, embed.Metadata.Categories[0])
 }
 
