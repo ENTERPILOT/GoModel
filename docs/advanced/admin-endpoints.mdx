@@ -347,7 +347,9 @@ curl "http://localhost:8080/admin/usage/summary?user_path=/team/alpha&cache_mode
 Accepted by `/admin/usage/summary`, `/admin/usage/daily`, `/admin/usage/log`,
 `/admin/usage/models`, `/admin/usage/labels`, `/admin/usage/user-paths`, and
 `/v1/usage` (see the [usage API](/advanced/usage-api#cache-mode)). Unrecognized
-values fall back to `uncached`.
+values fall back to `uncached`. `/admin/usage/sessions` ignores it: session
+request and token totals always include cache hits, while its cost fields stay
+provider-only.
 
 Two endpoints ignore it by design: `/admin/cache/overview` always reports cache
 hits only, and `/admin/usage/sessions` always includes them (its cost fields
