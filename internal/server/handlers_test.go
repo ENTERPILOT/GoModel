@@ -7383,6 +7383,35 @@ func guardrailChainWorkflow(chainHash string) *core.Workflow {
 	}
 }
 
+// cacheWriteSignalStore reports each completed cache write so a test can wait
+// for the asynchronous store without shutting the middleware down.
+type cacheWriteSignalStore struct {
+	cache.Store
+	writes chan struct{}
+}
+
+func newCacheWriteSignalStore() *cacheWriteSignalStore {
+	return &cacheWriteSignalStore{Store: cache.NewMapStore(), writes: make(chan struct{}, 16)}
+}
+
+func (s *cacheWriteSignalStore) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	err := s.Store.Set(ctx, key, value, ttl)
+	select {
+	case s.writes <- struct{}{}:
+	default:
+	}
+	return err
+}
+
+func (s *cacheWriteSignalStore) waitForWrite(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.writes:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the response cache write")
+	}
+}
+
 // driveCachedChatRequest runs handleWithCache the way the translated service
 // does, with the workflow's guardrail chain identity on the request context.
 func driveCachedChatRequest(
@@ -7412,9 +7441,9 @@ func driveCachedChatRequest(
 // to a request whose workflow declares one. Cache hits skip dispatch, where the
 // response and stream chains run, so an entry may only serve a matching chain.
 func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
-	store := cache.NewMapStore()
-	defer store.Close()
+	store := newCacheWriteSignalStore()
 	mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	defer mw.Close()
 	s := &translatedInferenceService{responseCache: mw}
 	orchestrator := gateway.NewInferenceOrchestrator(gateway.InferenceConfig{})
 
@@ -7436,9 +7465,7 @@ func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
 	if got := driveCachedChatRequest(t, s, orchestrator, unguarded, req, body, raw).Header().Get("X-Cache"); got != "" {
 		t.Fatalf("priming request X-Cache = %q, want a miss", got)
 	}
-	if err := mw.Close(); err != nil {
-		t.Fatalf("wait for cache write: %v", err)
-	}
+	store.waitForWrite(t)
 
 	// Same chain: still a hit, and dispatch is skipped.
 	hit := driveCachedChatRequest(t, s, orchestrator, unguarded, req, body, raw)
@@ -7463,6 +7490,19 @@ func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
 	}
 	if strings.Contains(guarded.Body.String(), "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234") {
 		t.Fatalf("response guardrail was bypassed by the cache: %s", guarded.Body.String())
+	}
+
+	// The guarded miss stores its own entry, which replays only to its chain.
+	store.waitForWrite(t)
+	replay := driveCachedChatRequest(t, s, orchestrator, redacting, req, body, raw)
+	if got := replay.Header().Get("X-Cache"); got != "HIT (exact)" {
+		t.Fatalf("second request on the guarded chain X-Cache = %q, want HIT (exact)", got)
+	}
+	if !strings.Contains(replay.Body.String(), "[redacted]") {
+		t.Fatalf("guarded chain replayed %s, want the guarded body", replay.Body.String())
+	}
+	if dispatches != 2 {
+		t.Fatalf("guarded hit should not dispatch again, dispatches = %d", dispatches)
 	}
 }
 
