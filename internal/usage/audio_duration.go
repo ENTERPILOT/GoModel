@@ -32,6 +32,38 @@ func measureSpeechDurationSeconds(data []byte, format string) (float64, bool) {
 	return 0, false
 }
 
+// measureUploadDurationSeconds returns the playback duration of an uploaded
+// transcription or translation file. Unlike synthesized speech, an upload's
+// declared type is whatever the client chose to send, so the container is
+// identified from the bytes themselves (RIFF/WAVE, or an MPEG stream with or
+// without a leading ID3 tag) rather than from the filename or Content-Type.
+// Formats the gateway cannot measure without decoding (m4a, ogg/opus, flac,
+// webm) return ok=false so the caller records a caveat instead of a wrong
+// duration.
+func measureUploadDurationSeconds(audio []byte) (float64, bool) {
+	if len(audio) == 0 {
+		return 0, false
+	}
+	if seconds, ok := wavDurationSeconds(audio); ok {
+		return seconds, true
+	}
+	if looksLikeMP3(audio) {
+		return mp3DurationSeconds(audio)
+	}
+	return 0, false
+}
+
+// looksLikeMP3 reports whether the buffer starts as an MPEG audio stream: an
+// ID3v2 tag, or a frame sync word at the very first byte.
+func looksLikeMP3(data []byte) bool {
+	pos := skipID3v2(data)
+	if pos > 0 {
+		return true
+	}
+	_, _, ok := parseMP3FrameHeader(data)
+	return ok
+}
+
 // normalizeAudioFormat reduces a response_format token or audio MIME type to a
 // bare lowercase codec name (e.g. "audio/wav" -> "wav", "audio/mpeg" -> "mp3").
 func normalizeAudioFormat(format string) string {

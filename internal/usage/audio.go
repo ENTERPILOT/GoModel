@@ -76,30 +76,43 @@ func ExtractFromSpeechRequest(input string, output []byte, format, requestID, mo
 }
 
 // transcriptionUsage mirrors the optional usage object the gpt-4o transcription
-// models return. It is token-based or duration-based; whisper omits it entirely.
+// models return. Type names the provider's own billable unit ("tokens" or
+// "duration"); whisper omits the object entirely.
 type transcriptionUsage struct {
+	Type         string  `json:"type"`
 	InputTokens  int     `json:"input_tokens"`
 	OutputTokens int     `json:"output_tokens"`
 	TotalTokens  int     `json:"total_tokens"`
 	Seconds      float64 `json:"seconds"`
 }
 
+// tokenBilled reports that the provider named tokens as the billable unit, so
+// the audio duration must not be charged on top of (or instead of) them — even
+// when it reported a zero count.
+func (u *transcriptionUsage) tokenBilled() bool {
+	if u == nil {
+		return false
+	}
+	return u.Type == "tokens" || u.InputTokens+u.OutputTokens+u.TotalTokens > 0
+}
+
 // ExtractFromTranscriptionResponse builds a usage entry for a speech-to-text
 // request. The response body is proxied verbatim; when it is JSON it may carry a
-// usage object (token- or duration-based). The entry is always returned so the
-// interaction stays observable even when the provider reports no usage (whisper,
-// or non-JSON response formats such as text/srt/vtt).
-func ExtractFromTranscriptionResponse(body []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
-	return extractFromAudioTextResponse(body, requestID, model, provider, endpointAudioTranscriptions, pricing...)
+// usage object (token- or duration-based) or a verbose_json duration. Providers
+// and response formats that report neither (whisper text/srt/vtt, Groq,
+// ElevenLabs) are priced from the uploaded audio's own duration, so the same
+// call costs the same whatever format it asked for.
+func ExtractFromTranscriptionResponse(body, audio []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromAudioTextResponse(body, audio, requestID, model, provider, endpointAudioTranscriptions, pricing...)
 }
 
 // ExtractFromTranslationResponse builds a usage entry for an audio translation
 // request while preserving the translations endpoint in usage records.
-func ExtractFromTranslationResponse(body []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
-	return extractFromAudioTextResponse(body, requestID, model, provider, endpointAudioTranslations, pricing...)
+func ExtractFromTranslationResponse(body, audio []byte, requestID, model, provider string, pricing ...*core.ModelPricing) *UsageEntry {
+	return extractFromAudioTextResponse(body, audio, requestID, model, provider, endpointAudioTranslations, pricing...)
 }
 
-func extractFromAudioTextResponse(body []byte, requestID, model, provider, endpoint string, pricing ...*core.ModelPricing) *UsageEntry {
+func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider, endpoint string, pricing ...*core.ModelPricing) *UsageEntry {
 	entry := &UsageEntry{
 		ID:        uuid.New().String(),
 		RequestID: requestID,
@@ -111,21 +124,47 @@ func extractFromAudioTextResponse(body []byte, requestID, model, provider, endpo
 
 	var parsed struct {
 		Usage *transcriptionUsage `json:"usage"`
+		// Duration is the verbose_json transcript length, which OpenAI and Groq
+		// both report even when they report no usage object at all.
+		Duration any `json:"duration"`
 	}
-	if json.Unmarshal(body, &parsed) == nil && parsed.Usage != nil {
-		u := parsed.Usage
-		entry.InputTokens = u.InputTokens
-		entry.OutputTokens = u.OutputTokens
-		entry.TotalTokens = u.TotalTokens
-		if entry.TotalTokens == 0 {
-			entry.TotalTokens = u.InputTokens + u.OutputTokens
+	if json.Unmarshal(body, &parsed) == nil {
+		if u := parsed.Usage; u != nil {
+			entry.InputTokens = u.InputTokens
+			entry.OutputTokens = u.OutputTokens
+			entry.TotalTokens = u.TotalTokens
+			if entry.TotalTokens == 0 {
+				entry.TotalTokens = u.InputTokens + u.OutputTokens
+			}
 		}
-		if u.Seconds > 0 {
-			entry.RawData = map[string]any{rawKeyAudioSeconds: u.Seconds}
+	}
+	// A provider that reported tokens has named its own billable unit, so the
+	// duration is not a second charge on the same audio (whisper-1 publishes
+	// both a token rate and a per-second rate for it). Otherwise the duration is
+	// the billable unit: the reported one, then the verbose_json duration, then
+	// the upload the gateway already holds — so the same call costs the same
+	// whether the transcript comes back as json, text, srt or vtt.
+	var seconds float64
+	if !parsed.Usage.tokenBilled() {
+		if parsed.Usage != nil && parsed.Usage.Seconds > 0 {
+			seconds = parsed.Usage.Seconds
+		} else if duration, ok := numericFloat(parsed.Duration); ok && duration > 0 {
+			seconds = duration
+		} else if measured, ok := measureUploadDurationSeconds(audio); ok {
+			seconds = measured
 		}
+	}
+	if seconds > 0 {
+		entry.RawData = map[string]any{rawKeyAudioSeconds: seconds}
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
+	// Nothing billable was reported or measurable: a duration-priced model then
+	// costs $0, which reads as a free call rather than an unrecorded one.
+	if entry.CostsCalculationCaveat == "" && seconds <= 0 && entry.TotalTokens == 0 &&
+		audioDurationAffectsCost(effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...)) {
+		entry.CostsCalculationCaveat = caveatAudioMissingUsage
+	}
 
 	return entry
 }

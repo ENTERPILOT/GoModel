@@ -280,6 +280,37 @@ func TestStreamConverterThinkingSignature(t *testing.T) {
 	}
 }
 
+// A provider that reasons without signing its output (DeepSeek, Fireworks, …)
+// still has to produce a schema-valid thinking block: Anthropic opens one with
+// "signature": "" and the gateway must do the same, so a strictly typed client
+// can accumulate the stream. No signature_delta follows, because there is no
+// signature to report.
+func TestStreamConverterUnsignedThinkingCarriesEmptySignature(t *testing.T) {
+	chatStream := strings.Join([]string{
+		`data: {"id":"chatcmpl-1","model":"deepseek-flash","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Let me think."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}`,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`data: [DONE]`,
+		"",
+	}, "\n\n")
+
+	events := drainConverter(t, chatStream)
+	block := events[1]["content_block"].(map[string]any)
+	if events[1]["type"] != "content_block_start" || block["type"] != "thinking" {
+		t.Fatalf("event 1 = %v, want a thinking content_block_start", events[1])
+	}
+	signature, ok := block["signature"]
+	if !ok || signature != "" {
+		t.Fatalf("content_block = %v, want an empty signature member", block)
+	}
+	for _, event := range events {
+		if delta, ok := event["delta"].(map[string]any); ok && delta["type"] == "signature_delta" {
+			t.Fatalf("unsigned reasoning emitted %v, want no signature_delta", delta)
+		}
+	}
+}
+
 // A redacted thinking block has no deltas of its own: it arrives whole, and
 // the converter must open and close a content block for it so the client can
 // replay the opaque payload.
@@ -373,5 +404,43 @@ func TestStreamConverterThinkingBlocksAroundText(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("content events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// Providers that name the member "reasoning" instead of "reasoning_content"
+// (Groq, OpenRouter) must still produce thinking deltas.
+func TestStreamConverterVendorReasoningMember(t *testing.T) {
+	tests := []struct {
+		name  string
+		delta string
+		want  string
+	}{
+		{name: "reasoning alone", delta: `{"reasoning":"Let me think."}`, want: "Let me think."},
+		{name: "reasoning_content wins", delta: `{"reasoning_content":"Canonical.","reasoning":"Vendor."}`, want: "Canonical."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chatStream := strings.Join([]string{
+				`data: {"id":"chatcmpl-1","model":"qwen/qwen3.6-27b","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`,
+				`data: {"choices":[{"index":0,"delta":` + tt.delta + `,"finish_reason":null}]}`,
+				`data: {"choices":[{"index":0,"delta":{"content":"391"},"finish_reason":null}]}`,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				`data: [DONE]`,
+				"",
+			}, "\n\n")
+
+			events := drainConverter(t, chatStream)
+			var thinking []string
+			for _, event := range events {
+				delta, ok := event["delta"].(map[string]any)
+				if !ok || delta["type"] != "thinking_delta" {
+					continue
+				}
+				thinking = append(thinking, delta["thinking"].(string))
+			}
+			if strings.Join(thinking, "") != tt.want {
+				t.Errorf("thinking = %q, want %q", strings.Join(thinking, ""), tt.want)
+			}
+		})
 	}
 }

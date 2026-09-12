@@ -278,24 +278,34 @@ func AllCategories() []ModelCategory {
 
 // ModelPricing holds pricing information for cost calculation.
 type ModelPricing struct {
-	Currency               string             `json:"currency" yaml:"currency"`
-	InputPerMtok           *float64           `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
-	OutputPerMtok          *float64           `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
-	CachedInputPerMtok     *float64           `json:"cached_input_per_mtok,omitempty" yaml:"cached_input_per_mtok,omitempty"`
-	CacheWritePerMtok      *float64           `json:"cache_write_per_mtok,omitempty" yaml:"cache_write_per_mtok,omitempty"`
-	ReasoningOutputPerMtok *float64           `json:"reasoning_output_per_mtok,omitempty" yaml:"reasoning_output_per_mtok,omitempty"`
-	BatchInputPerMtok      *float64           `json:"batch_input_per_mtok,omitempty" yaml:"batch_input_per_mtok,omitempty"`
-	BatchOutputPerMtok     *float64           `json:"batch_output_per_mtok,omitempty" yaml:"batch_output_per_mtok,omitempty"`
-	AudioInputPerMtok      *float64           `json:"audio_input_per_mtok,omitempty" yaml:"audio_input_per_mtok,omitempty"`
-	AudioOutputPerMtok     *float64           `json:"audio_output_per_mtok,omitempty" yaml:"audio_output_per_mtok,omitempty"`
-	PerImage               *float64           `json:"per_image,omitempty" yaml:"per_image,omitempty"`
-	InputPerImage          *float64           `json:"input_per_image,omitempty" yaml:"input_per_image,omitempty"`
-	PerSecondInput         *float64           `json:"per_second_input,omitempty" yaml:"per_second_input,omitempty"`
-	PerSecondOutput        *float64           `json:"per_second_output,omitempty" yaml:"per_second_output,omitempty"`
-	PerCharacterInput      *float64           `json:"per_character_input,omitempty" yaml:"per_character_input,omitempty"`
-	PerRequest             *float64           `json:"per_request,omitempty" yaml:"per_request,omitempty"`
-	PerPage                *float64           `json:"per_page,omitempty" yaml:"per_page,omitempty"`
-	Tiers                  []ModelPricingTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
+	Currency               string   `json:"currency" yaml:"currency"`
+	InputPerMtok           *float64 `json:"input_per_mtok,omitempty" yaml:"input_per_mtok,omitempty"`
+	OutputPerMtok          *float64 `json:"output_per_mtok,omitempty" yaml:"output_per_mtok,omitempty"`
+	CachedInputPerMtok     *float64 `json:"cached_input_per_mtok,omitempty" yaml:"cached_input_per_mtok,omitempty"`
+	CacheWritePerMtok      *float64 `json:"cache_write_per_mtok,omitempty" yaml:"cache_write_per_mtok,omitempty"`
+	ReasoningOutputPerMtok *float64 `json:"reasoning_output_per_mtok,omitempty" yaml:"reasoning_output_per_mtok,omitempty"`
+	BatchInputPerMtok      *float64 `json:"batch_input_per_mtok,omitempty" yaml:"batch_input_per_mtok,omitempty"`
+	BatchOutputPerMtok     *float64 `json:"batch_output_per_mtok,omitempty" yaml:"batch_output_per_mtok,omitempty"`
+	AudioInputPerMtok      *float64 `json:"audio_input_per_mtok,omitempty" yaml:"audio_input_per_mtok,omitempty"`
+	AudioOutputPerMtok     *float64 `json:"audio_output_per_mtok,omitempty" yaml:"audio_output_per_mtok,omitempty"`
+	// OutputImagePerMtok prices generated image tokens, which providers bill at a
+	// different rate from text output (OpenAI gpt-image-1: $40/Mtok image output
+	// and no text output rate at all; Gemini 3 Pro Image: $120/Mtok image output
+	// versus $12/Mtok text). It is the output rate on the image endpoints.
+	OutputImagePerMtok *float64 `json:"output_image_per_mtok,omitempty" yaml:"output_image_per_mtok,omitempty"`
+	// PerImage prices a returned image as a flat unit, for models that report no
+	// token usage at all (DALL·E, Imagen, grok-imagine). It is an alternative
+	// expression of the same charge as OutputImagePerMtok, never an addition to
+	// it: catalog entries carry both, so only one may be applied (see
+	// usage.CalculateGranularCost).
+	PerImage          *float64           `json:"per_image,omitempty" yaml:"per_image,omitempty"`
+	InputPerImage     *float64           `json:"input_per_image,omitempty" yaml:"input_per_image,omitempty"`
+	PerSecondInput    *float64           `json:"per_second_input,omitempty" yaml:"per_second_input,omitempty"`
+	PerSecondOutput   *float64           `json:"per_second_output,omitempty" yaml:"per_second_output,omitempty"`
+	PerCharacterInput *float64           `json:"per_character_input,omitempty" yaml:"per_character_input,omitempty"`
+	PerRequest        *float64           `json:"per_request,omitempty" yaml:"per_request,omitempty"`
+	PerPage           *float64           `json:"per_page,omitempty" yaml:"per_page,omitempty"`
+	Tiers             []ModelPricingTier `json:"tiers,omitempty" yaml:"tiers,omitempty"`
 	// TimeWindows carry rates that replace the base prices during recurring
 	// UTC windows (see ModelPricingTimeWindow). Base prices are the standard
 	// (peak) rates; use AtTime to resolve the rates in effect at a moment.
@@ -331,6 +341,7 @@ func (p *ModelPricing) FieldSources(source string) map[string]string {
 	add("batch_output_per_mtok", p.BatchOutputPerMtok)
 	add("audio_input_per_mtok", p.AudioInputPerMtok)
 	add("audio_output_per_mtok", p.AudioOutputPerMtok)
+	add("output_image_per_mtok", p.OutputImagePerMtok)
 	add("per_image", p.PerImage)
 	add("input_per_image", p.InputPerImage)
 	add("per_second_input", p.PerSecondInput)
@@ -400,6 +411,7 @@ func (p *ModelPricing) Clone() *ModelPricing {
 	out.BatchOutputPerMtok = cloneFloatPtr(p.BatchOutputPerMtok)
 	out.AudioInputPerMtok = cloneFloatPtr(p.AudioInputPerMtok)
 	out.AudioOutputPerMtok = cloneFloatPtr(p.AudioOutputPerMtok)
+	out.OutputImagePerMtok = cloneFloatPtr(p.OutputImagePerMtok)
 	out.PerImage = cloneFloatPtr(p.PerImage)
 	out.InputPerImage = cloneFloatPtr(p.InputPerImage)
 	out.PerSecondInput = cloneFloatPtr(p.PerSecondInput)
