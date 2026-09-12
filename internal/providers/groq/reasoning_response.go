@@ -34,10 +34,16 @@ func normalizeChatResponse(resp *core.ChatResponse) {
 	for i := range resp.Choices {
 		fields := resp.Choices[i].Message.ExtraFields
 		raw := fields.Lookup(groqReasoningKey)
-		if raw == nil || fields.Lookup(canonicalKey) != nil {
+		if raw == nil {
 			continue
 		}
-		merged, err := core.MergeUnknownJSONFields(fields.Without(groqReasoningKey), map[string]json.RawMessage{
+		stripped := fields.Without(groqReasoningKey)
+		if fields.Lookup(canonicalKey) != nil {
+			// Already canonical: drop the duplicate spelling only.
+			resp.Choices[i].Message.ExtraFields = stripped
+			continue
+		}
+		merged, err := core.MergeUnknownJSONFields(stripped, map[string]json.RawMessage{
 			canonicalKey: raw,
 		})
 		if err != nil {
@@ -97,11 +103,15 @@ func renameReasoningLine(line []byte) []byte {
 		return line
 	}
 	payload := bytes.TrimRight(line[len(sseDataPrefix):], "\r\n")
-	var chunk map[string]any
+	// Members are decoded as raw JSON and re-emitted byte for byte: a
+	// map[string]any round trip would reformat every number it touches,
+	// silently truncating integers beyond 2^53 in unrelated vendor data.
+	var chunk map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return line
 	}
-	if !renameReasoningDeltas(chunk) {
+	renamed, err := renameReasoningDeltas(chunk)
+	if err != nil || !renamed {
 		return line
 	}
 	encoded, err := json.Marshal(chunk)
@@ -114,31 +124,62 @@ func renameReasoningLine(line []byte) []byte {
 	return append(out, '\n')
 }
 
-// renameReasoningDeltas reports whether it changed the decoded chunk.
-func renameReasoningDeltas(chunk map[string]any) bool {
-	choices, ok := chunk["choices"].([]any)
-	if !ok {
-		return false
+// renameReasoningDeltas rewrites chunk in place and reports whether anything
+// changed. Every member it does not rename keeps its original raw bytes.
+func renameReasoningDeltas(chunk map[string]json.RawMessage) (bool, error) {
+	var choices []json.RawMessage
+	if err := json.Unmarshal(chunk["choices"], &choices); err != nil {
+		return false, err
 	}
 	changed := false
-	for _, entry := range choices {
-		choice, ok := entry.(map[string]any)
-		if !ok {
+	for i, raw := range choices {
+		var choice map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &choice); err != nil {
+			return false, err
+		}
+		delta, err := renamedDelta(choice["delta"])
+		if err != nil {
+			return false, err
+		}
+		if delta == nil {
 			continue
 		}
-		delta, ok := choice["delta"].(map[string]any)
-		if !ok {
-			continue
+		choice["delta"] = delta
+		encoded, err := json.Marshal(choice)
+		if err != nil {
+			return false, err
 		}
-		value, ok := delta[groqReasoningKey]
-		if !ok {
-			continue
-		}
-		if _, exists := delta[canonicalKey]; !exists {
-			delta[canonicalKey] = value
-		}
-		delete(delta, groqReasoningKey)
+		choices[i] = encoded
 		changed = true
 	}
-	return changed
+	if !changed {
+		return false, nil
+	}
+	encoded, err := json.Marshal(choices)
+	if err != nil {
+		return false, err
+	}
+	chunk["choices"] = encoded
+	return true, nil
+}
+
+// renamedDelta returns the re-encoded delta object, or nil when it carries no
+// reasoning member to rename.
+func renamedDelta(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var delta map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &delta); err != nil {
+		return nil, err
+	}
+	value, ok := delta[groqReasoningKey]
+	if !ok {
+		return nil, nil
+	}
+	if _, exists := delta[canonicalKey]; !exists {
+		delta[canonicalKey] = value
+	}
+	delete(delta, groqReasoningKey)
+	return json.Marshal(delta)
 }

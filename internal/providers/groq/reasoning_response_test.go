@@ -24,9 +24,10 @@ func TestNormalizeChatResponse(t *testing.T) {
 			absent:  `"reasoning":`,
 		},
 		{
-			name:    "existing reasoning_content wins",
+			name:    "existing reasoning_content wins and the duplicate goes",
 			message: `{"role":"assistant","content":"4","reasoning":"drop","reasoning_content":"keep"}`,
 			want:    `"reasoning_content":"keep"`,
+			absent:  `"reasoning":`,
 		},
 		{
 			name:    "other members are untouched",
@@ -88,6 +89,17 @@ func TestNormalizeChatStream(t *testing.T) {
 			name: "the word reasoning in content is not rewritten",
 			in:   "data: {\"choices\":[{\"delta\":{\"content\":\"the \\\"reasoning\\\" step\"}}]}\n\n",
 			want: "data: {\"choices\":[{\"delta\":{\"content\":\"the \\\"reasoning\\\" step\"}}]}\n\n",
+		},
+		{
+			name: "duplicate spellings collapse onto the canonical one",
+			in:   "data: {\"choices\":[{\"delta\":{\"reasoning\":\"drop\",\"reasoning_content\":\"keep\"}}]}\n\n",
+			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"keep\"}}]}\n\n",
+		},
+		{
+			// A map[string]any round trip would round this to ...992.
+			name: "unrelated numbers keep full precision",
+			in:   "data: {\"vendor_counter\":9007199254740993,\"choices\":[{\"delta\":{\"reasoning\":\"We\"}}]}\n\n",
+			want: "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"We\"}}],\"vendor_counter\":9007199254740993}\n\n",
 		},
 		{
 			name: "unparsable payloads are relayed unchanged",
