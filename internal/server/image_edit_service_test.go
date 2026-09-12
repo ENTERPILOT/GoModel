@@ -105,11 +105,11 @@ func TestImageEdits_ReturnsProviderResponse(t *testing.T) {
 	assert.Equal(t, "gpt-image-1", req.Model)
 	assert.Empty(t, req.Provider)
 	assert.Equal(t, "add a hat", req.Prompt, "provider saw %+v", req)
-	assert.Len(t, req.Images, 1)
+	require.Len(t, req.Images, 1)
 	assert.Equal(t, "cat.png", req.Images[0].Filename)
 	assert.Equal(t, "image/png", req.Images[0].ContentType)
 	assert.Equal(t, "cat-bytes", string(req.Images[0].Data))
-	assert.NotNil(t, req.Mask)
+	require.NotNil(t, req.Mask)
 	assert.Equal(t, "mask-bytes", string(req.Mask.Data))
 
 	want := []core.FormField{{Name: "input_fidelity", Value: "high"}, {Name: "n", Value: "1"}, {Name: "size", Value: "1024x1024"}}
@@ -132,8 +132,8 @@ func TestImageEdits_CollectsImageArray(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	req := mock.capturedEdit
-	assert.NotNil(t, req)
-	assert.Len(t, req.Images, 2)
+	require.NotNil(t, req)
+	require.Len(t, req.Images, 2)
 	assert.Equal(t, "one", string(req.Images[0].Data))
 	assert.Equal(t, "two", string(req.Images[1].Data), "images = %+v", mock.capturedEdit)
 }
@@ -258,7 +258,7 @@ func TestImageEdits_LogsUsage(t *testing.T) {
 	assert.Equal(t, 1050, captured.TotalTokens)
 	got := captured.RawData["images"]
 	assert.Equal(t, 1, got)
-	assert.NotNil(t, captured.TotalCost)
+	require.NotNil(t, captured.TotalCost)
 	assert.GreaterOrEqual(t, *captured.TotalCost, 0.0399)
 	assert.LessOrEqual(t, *captured.TotalCost, 0.0401)
 }
@@ -280,7 +280,7 @@ func TestImageEdits_HandlerRoute(t *testing.T) {
 	got := echotest.Decode[map[string]any](t, rec)
 	data, _ := got["data"].([]any)
 	require.Len(t, data, 1)
-	assert.NotNil(t, mock.capturedEdit)
+	require.NotNil(t, mock.capturedEdit)
 	assert.Equal(t, "add a hat", mock.capturedEdit.Prompt)
 	assert.Len(t, mock.capturedEdit.Images, 1)
 }
@@ -354,7 +354,7 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 
 			respBody, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
 			require.True(t, ok, "response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
-			assert.Len(t, respBody.Items, 1)
+			require.Len(t, respBody.Items, 1)
 			assert.Equal(t, "output", respBody.Items[0].Role)
 			assert.Equal(t, tt.logImageOutputs, respBody.Items[0].Stored)
 			usage, _ := respBody.Meta["usage"].(map[string]any)

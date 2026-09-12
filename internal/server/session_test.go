@@ -403,7 +403,7 @@ func TestSessionCaptureDetectsBodySignalPastAuditCaptureLimit(t *testing.T) {
 
 		second, err := requestBodyBytes(c)
 		require.NoError(t, err)
-		require.Equal(t, &second[0], &first[0])
+		require.Same(t, &second[0], &first[0])
 		require.Equal(t, int64(len(bodyText)), body.read)
 
 		return nil

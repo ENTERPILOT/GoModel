@@ -155,7 +155,7 @@ func TestRealtimeCalls_MultipartRewritesSessionModel(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 
 	// The alias routes the request; the provider must see the resolved model.
-	assert.NotNil(t, mock.capturedCall)
+	require.NotNil(t, mock.capturedCall)
 	assert.Equal(t, "gpt-realtime-2", mock.capturedCall.Model)
 
 	_, params, err := mime.ParseMediaType(upstreamContentType)

@@ -459,7 +459,7 @@ func TestRequestBodyBytes_UsesSnapshotReadOnlyBodyView(t *testing.T) {
 	view := frame.CapturedBodyView()
 	require.NotNil(t, view)
 	require.NotEmpty(t, view)
-	require.Equal(t, &view[0], &body[0])
+	require.Same(t, &view[0], &body[0])
 }
 
 func TestRequestBodyBytes_AttachesReadBodyToSnapshot(t *testing.T) {
@@ -495,5 +495,5 @@ func TestRequestBodyBytes_AttachesReadBodyToSnapshot(t *testing.T) {
 
 	view := updated.CapturedBodyView()
 	require.NotEmpty(t, view)
-	require.Equal(t, &view[0], &second[0])
+	require.Same(t, &view[0], &second[0])
 }

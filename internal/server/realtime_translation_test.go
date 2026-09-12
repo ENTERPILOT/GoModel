@@ -60,7 +60,7 @@ func TestRealtimeTranslationSignalingRoutesSetIntent(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/realtime/translations/calls?model=gpt-realtime-translate", "v=0 offer", echotest.WithContentType("application/sdp"))
 	err := handler.RealtimeTranslationCalls(c)
 	require.NoError(t, err)
-	assert.NotNil(t, mock.capturedCall)
+	require.NotNil(t, mock.capturedCall)
 	assert.Equal(t, core.RealtimeIntentTranslation, mock.capturedCall.Intent)
 	// A translation call lives under its own path, so the relayed Location must
 	// address it there.
@@ -70,7 +70,7 @@ func TestRealtimeTranslationSignalingRoutesSetIntent(t *testing.T) {
 		`{"session":{"model":"gpt-realtime-translate","audio":{"output":{"language":"es"}}}}`)
 	err = handler.RealtimeTranslationClientSecrets(c)
 	require.NoError(t, err)
-	assert.NotNil(t, mock.capturedSecret)
+	require.NotNil(t, mock.capturedSecret)
 	assert.Equal(t, core.RealtimeIntentTranslation, mock.capturedSecret.Intent)
 }
 
