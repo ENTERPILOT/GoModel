@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/versioncheck"
 )
 
@@ -84,9 +87,9 @@ func visitCookie(t *testing.T, rec *httptest.ResponseRecorder) string {
 func decodeStatus(t *testing.T, rec *httptest.ResponseRecorder) versioncheck.Status {
 	t.Helper()
 	var status versioncheck.Status
-	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode /version body %q: %v", rec.Body.String(), err)
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &status)
+	require.NoError(t, err, "decode /version body %q: %v", rec.Body.String(), err)
+
 	return status
 }
 
@@ -99,30 +102,21 @@ func TestVersionEndpointChecksOnFirstVisit(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+
 	awaitChecks(t, calls, 1)
-	if value := headers().Get("X-GoModel-Host"); value != "" {
-		t.Errorf("X-GoModel-Host = %q, want the dashboard hostname kept local", value)
-	}
-	if value := headers().Get("X-Forwarded-For"); value != "" {
-		t.Errorf("X-Forwarded-For = %q, want the client address kept local", value)
-	}
-	if headers().Get("User-Agent") != "Mozilla/5.0 (X11; Linux x86_64)" {
-		t.Errorf("User-Agent = %q, want the browser's forwarded", headers().Get("User-Agent"))
-	}
+	value := headers().Get("X-GoModel-Host")
+	assert.Empty(t, value)
+	value = headers().Get("X-Forwarded-For")
+	assert.Empty(t, value)
+	assert.Equal(t, "Mozilla/5.0 (X11; Linux x86_64)", headers().Get("User-Agent"))
 
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
-	if date != time.Now().Format(time.DateOnly) || id == "" {
-		t.Fatalf("visit cookie = %q, want today plus a fresh id", visitCookie(t, rec))
-	}
-	if headers().Get("X-GoModel-Date") != visitCookie(t, rec) {
-		t.Errorf("X-GoModel-Date = %q, want the cookie value %q", headers().Get("X-GoModel-Date"), visitCookie(t, rec))
-	}
-	if cache := rec.Header().Get("Cache-Control"); cache != "no-store" {
-		t.Errorf("Cache-Control = %q, want no-store", cache)
-	}
+	require.Equal(t, time.Now().Format(time.DateOnly), date)
+	require.NotEmpty(t, id)
+	assert.Equal(t, headers().Get("X-GoModel-Date"), visitCookie(t, rec))
+	cache := rec.Header().Get("Cache-Control")
+	assert.Equal(t, "no-store", cache)
 }
 
 func TestVersionEndpointSkipsSecondVisitSameDay(t *testing.T) {
@@ -139,13 +133,10 @@ func TestVersionEndpointSkipsSecondVisitSameDay(t *testing.T) {
 	secondRec := httptest.NewRecorder()
 	srv.ServeHTTP(secondRec, second)
 
-	if calls.Load() != 1 {
-		t.Fatalf("made %d manifest requests, want the second visit served from cache", calls.Load())
-	}
-	// The first visit's check has landed by now, so the cached answer carries it.
-	if status := decodeStatus(t, secondRec); status.Latest != "0.1.82" {
-		t.Fatalf("cached response lost the result: %+v", status)
-	}
+	require.Equal(t, int64(1), calls.Load())
+	status := // The first visit's check has landed by now, so the cached answer carries it.
+		decodeStatus(t, secondRec)
+	require.Equal(t, "0.1.82", status.Latest, "cached response lost the result: %+v", status)
 }
 
 func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
@@ -159,12 +150,8 @@ func TestVersionEndpointRechecksOnANewDay(t *testing.T) {
 
 	awaitChecks(t, calls, 1)
 	date, id := versioncheck.SplitVisit(visitCookie(t, rec))
-	if date != time.Now().Format(time.DateOnly) {
-		t.Errorf("cookie date = %q, want it rolled to today", date)
-	}
-	if id != "3f2504e0-4f89-11d3-9a0c-0305e82c3301" {
-		t.Errorf("cookie id = %q, want the browser's id preserved across days", id)
-	}
+	assert.Equal(t, time.Now().Format(time.DateOnly), date)
+	assert.Equal(t, "3f2504e0-4f89-11d3-9a0c-0305e82c3301", id)
 }
 
 func TestVersionEndpointNeverForwardsCredentials(t *testing.T) {
@@ -180,14 +167,11 @@ func TestVersionEndpointNeverForwardsCredentials(t *testing.T) {
 	awaitChecks(t, calls, 1)
 
 	for _, forbidden := range []string{"Authorization", "X-API-Key", "Referer", "Cookie"} {
-		if value := headers().Get(forbidden); value != "" {
-			t.Errorf("%s leaked to the release host as %q", forbidden, value)
-		}
+		value := headers().Get(forbidden)
+		assert.Empty(t, value, "%s leaked to the release host as %q", forbidden, value)
 	}
 	for _, value := range headers() {
-		if strings.Contains(strings.Join(value, " "), "sk-") {
-			t.Errorf("a credential-shaped value reached the release host: %v", value)
-		}
+		assert.False(t, strings.Contains(strings.Join(value, " "), "sk-"), "a credential-shaped value reached the release host: %v", value)
 	}
 }
 
@@ -204,23 +188,15 @@ func TestVersionEndpointCookieIsReadableByTheDashboard(t *testing.T) {
 			cookie = c
 		}
 	}
-	if cookie == nil {
-		t.Fatal("no visit cookie was set")
-	}
-	if cookie.HttpOnly {
-		t.Error("cookie is HttpOnly; the dashboard cannot read the date to skip its daily check")
-	}
-	if cookie.Path != "/" || cookie.MaxAge != versioncheck.CookieMaxAge {
-		t.Errorf("cookie path/max-age = %q/%d", cookie.Path, cookie.MaxAge)
-	}
-	if cookie.SameSite != http.SameSiteLaxMode {
-		t.Errorf("SameSite = %v, want Lax", cookie.SameSite)
-	}
+	require.NotNil(t, cookie)
+	assert.False(t, cookie.HttpOnly)
+	assert.Equal(t, "/", cookie.Path)
+	assert.Equal(t, versioncheck.CookieMaxAge, cookie.MaxAge)
+	assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
+
 	// httptest requests are plain HTTP; Secure would make the browser drop
 	// the cookie and turn the daily gate into a per-page-load check.
-	if cookie.Secure {
-		t.Error("Secure was set on a plain-HTTP request")
-	}
+	assert.False(t, cookie.Secure)
 }
 
 func TestVersionEndpointSurvivesAnUnreachableManifest(t *testing.T) {
@@ -232,13 +208,11 @@ func TestVersionEndpointSurvivesAnUnreachableManifest(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want the local version served anyway", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+
 	status := decodeStatus(t, rec)
-	if status.Version != "0.1.81" || status.UpdateAvailable {
-		t.Fatalf("got %+v, want the local version with no update claimed", status)
-	}
+	require.Equal(t, "0.1.81", status.Version)
+	require.False(t, status.UpdateAvailable, "got %+v, want the local version with no update claimed", status)
 }
 
 func TestVersionEndpointWithoutACheckerReportsLocalBuild(t *testing.T) {
@@ -248,16 +222,12 @@ func TestVersionEndpointWithoutACheckerReportsLocalBuild(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+
 	status := decodeStatus(t, rec)
-	if status.App == "" || status.Version == "" {
-		t.Fatalf("got %+v, want the local build reported", status)
-	}
-	if status.UpdateAvailable {
-		t.Error("an unchecked gateway must not claim an update is available")
-	}
+	require.NotEmpty(t, status.App)
+	require.NotEmpty(t, status.Version, "got %+v, want the local build reported", status)
+	assert.False(t, status.UpdateAvailable)
 }
 
 func TestVersionEndpointSkipsAuthentication(t *testing.T) {
@@ -267,9 +237,7 @@ func TestVersionEndpointSkipsAuthentication(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want /version reachable without credentials", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 }
 
 // Greptile measured the first visit of the day taking the checker's whole
@@ -300,15 +268,10 @@ func TestVersionEndpointDoesNotWaitOnASlowManifest(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	elapsed := time.Since(start)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if elapsed > time.Second {
-		t.Fatalf("/version took %s against a stalled manifest; it must answer from cache", elapsed)
-	}
-	if status := decodeStatus(t, rec); status.Version != "0.1.81" {
-		t.Fatalf("got %+v, want the local build reported", status)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.LessOrEqual(t, elapsed, time.Second)
+	status := decodeStatus(t, rec)
+	require.Equal(t, "0.1.81", status.Version, "got %+v, want the local build reported", status)
 }
 
 // /version is unauthenticated, and the visit id it accepts is echoed into an
@@ -325,16 +288,15 @@ func TestVersionEndpointRejectsAForgedVisitID(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	awaitChecks(t, calls, 1)
+	sent := headers().Get("X-GoModel-Date")
+	assert.False(t, strings.Contains(sent, "injected"))
+	assert.NotContains(t, sent, "AAAA", "X-GoModel-Date should discard the forged id")
 
-	if sent := headers().Get("X-GoModel-Date"); strings.Contains(sent, "injected") || strings.Contains(sent, "AAAA") {
-		t.Errorf("X-GoModel-Date = %q, want the forged id discarded", sent)
-	}
 	issued := visitCookie(t, rec)
-	if strings.Contains(issued, "injected") || strings.Contains(issued, "AAAA") {
-		t.Errorf("Set-Cookie = %q, want the forged id discarded", issued)
-	}
+	assert.False(t, strings.Contains(issued, "injected"))
+	assert.NotContains(t, issued, "AAAA", "Set-Cookie should discard the forged id")
+
 	date, id := versioncheck.SplitVisit(issued)
-	if date != time.Now().UTC().Format(time.DateOnly) || id == "" {
-		t.Fatalf("issued cookie %q, want today plus a freshly minted id", issued)
-	}
+	require.Equal(t, time.Now().UTC().Format(time.DateOnly), date)
+	require.NotEmpty(t, id)
 }

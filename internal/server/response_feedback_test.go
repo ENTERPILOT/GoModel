@@ -3,14 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type capturedResponseFeedback struct {
@@ -61,22 +60,23 @@ func TestNotifyChatResponseFeedbackIncludesRouteAndCacheUsage(t *testing.T) {
 
 	usage := cacheUsageFromCore(resp.Usage.PromptTokens, resp.Usage.PromptTokensDetails, resp.Usage.RawUsage)
 	notifyResponseFeedback(ctx, []ext.ResponseFeedbackObserver{observer}, "req-1", "session-1", ext.EndpointChatCompletions, resp.Model, "anthropic", "primary", usage)
-	if len(observer.feedback) != 1 {
-		t.Fatalf("feedback count = %d, want 1", len(observer.feedback))
-	}
+	require.Len(t, observer.feedback, 1)
+
 	got := observer.feedback[0]
-	if got.requestID != "req-1" || got.sessionID != "session-1" || got.model != "gpt-5.6" ||
-		got.providerType != "anthropic" || got.providerName != "primary" || got.inputTokens != 2400 ||
-		got.cacheRead != 1800 || got.cacheWrite != 300 || !got.usageObserved {
-		t.Fatalf("feedback = %+v", got)
-	}
+	require.Equal(t, "req-1", got.requestID)
+	require.Equal(t, "session-1", got.sessionID)
+	require.Equal(t, "gpt-5.6", got.model)
+	require.Equal(t, "anthropic", got.providerType)
+	require.Equal(t, "primary", got.providerName)
+	require.Equal(t, 2400, got.inputTokens)
+	require.Equal(t, 1800, got.cacheRead)
+	require.Equal(t, 300, got.cacheWrite)
+	require.True(t, got.usageObserved, "feedback = %+v", got)
 }
 
 func TestNotifyResponsesResponseFeedbackPreservesObservedZeroUsage(t *testing.T) {
 	observer := &feedbackCaptureObserver{}
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	c := e.NewContext(req, httptest.NewRecorder())
+	c, _ := echotest.Post(t, "/v1/responses", nil)
 	setResponseFeedbackObservers(c, []ext.ResponseFeedbackObserver{observer})
 
 	notifyResponsesResponseFeedback(
@@ -88,13 +88,13 @@ func TestNotifyResponsesResponseFeedbackPreservesObservedZeroUsage(t *testing.T)
 		"primary",
 	)
 
-	if len(observer.feedback) != 1 {
-		t.Fatalf("feedback count = %d, want 1", len(observer.feedback))
-	}
+	require.Len(t, observer.feedback, 1)
+
 	got := observer.feedback[0]
-	if got.inputTokens != 0 || got.cacheRead != 0 || got.cacheWrite != 0 || !got.usageObserved {
-		t.Fatalf("feedback = %+v, want confirmed zero usage", got)
-	}
+	require.Equal(t, 0, got.inputTokens)
+	require.Equal(t, 0, got.cacheRead)
+	require.Equal(t, 0, got.cacheWrite)
+	require.True(t, got.usageObserved, "feedback = %+v, want confirmed zero usage", got)
 }
 
 func TestNumericIntRejectsInvalidOrOutOfRangeValues(t *testing.T) {
@@ -112,9 +112,8 @@ func TestNumericIntRejectsInvalidOrOutOfRangeValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, ok := numericInt(tt.value)
-			if got != tt.want || ok != tt.ok {
-				t.Fatalf("numericInt(%v) = (%d, %v), want (%d, %v)", tt.value, got, ok, tt.want, tt.ok)
-			}
+			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.ok, ok)
 		})
 	}
 }
@@ -141,20 +140,20 @@ func TestResponseFeedbackStreamObserverUsesLatestUsageEvent(t *testing.T) {
 	})
 	streamObserver.OnStreamClose()
 
-	if len(observer.feedback) != 1 {
-		t.Fatalf("feedback count = %d, want 1", len(observer.feedback))
-	}
+	require.Len(t, observer.feedback, 1)
+
 	got := observer.feedback[0]
-	if got.endpoint != ext.EndpointResponses || got.inputTokens != 2300 || got.cacheRead != 1900 || got.cacheWrite != 200 || !got.usageObserved {
-		t.Fatalf("feedback = %+v", got)
-	}
+	require.Equal(t, ext.EndpointResponses, got.endpoint)
+	require.Equal(t, 2300, got.inputTokens)
+	require.Equal(t, 1900, got.cacheRead)
+	require.Equal(t, 200, got.cacheWrite)
+	require.True(t, got.usageObserved, "feedback = %+v", got)
 }
 
 func TestResponseFeedbackStreamObserverReportsUnknownUsage(t *testing.T) {
 	observer := &feedbackCaptureObserver{}
 	streamObserver := &responseFeedbackStreamObserver{ctx: context.Background(), observers: []ext.ResponseFeedbackObserver{observer}, endpoint: ext.EndpointChatCompletions}
 	streamObserver.OnStreamClose()
-	if len(observer.feedback) != 1 || observer.feedback[0].usageObserved {
-		t.Fatalf("feedback = %+v, want one unknown-usage observation", observer.feedback)
-	}
+	require.Len(t, observer.feedback, 1)
+	require.False(t, observer.feedback[0].usageObserved)
 }

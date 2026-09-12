@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -48,12 +50,8 @@ func TestConversationPersistingStreamSuppressesEntireFragmentedCompletion(t *tes
 			t.Cleanup(func() { _ = stream.Close() })
 
 			got, err := io.ReadAll(stream)
-			if !errors.Is(err, storeErr) {
-				t.Fatalf("read error = %v, want append unavailable", err)
-			}
-			if string(got) != createdEvent {
-				t.Fatalf("stream body = %q, want only complete non-terminal event %q", got, createdEvent)
-			}
+			require.ErrorIs(t, err, storeErr)
+			require.Equal(t, createdEvent, string(got), "stream body = %q, want only complete non-terminal event %q", got, createdEvent)
 		})
 	}
 }
@@ -67,11 +65,11 @@ func TestConversationPersistingStreamPreservesFragmentedSuccessfulStream(t *test
 	ctx := context.Background()
 	store := conversationstore.NewMemoryStore()
 	t.Cleanup(func() { _ = store.Close() })
-	if err := store.Create(ctx, &conversationstore.StoredConversation{
+	err := store.Create(ctx, &conversationstore.StoredConversation{
 		Conversation: &core.Conversation{ID: "conv_fragmented", Object: "conversation", Metadata: map[string]string{}},
-	}); err != nil {
-		t.Fatalf("create conversation: %v", err)
-	}
+	})
+	require.NoError(t, err)
+
 	turn := &conversationTurn{store: store, id: "conv_fragmented", input: "hello"}
 	stream := turn.persistingStream(ctx, &maxReadCloser{
 		reader: strings.NewReader(streamData),
@@ -80,27 +78,15 @@ func TestConversationPersistingStreamPreservesFragmentedSuccessfulStream(t *test
 	t.Cleanup(func() { _ = stream.Close() })
 
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
-	if string(got) != streamData {
-		t.Fatalf("stream body changed:\n got: %q\nwant: %q", got, streamData)
-	}
+	require.NoError(t, err)
+	require.Equal(t, streamData, string(got), "stream body changed:\n got: %q\nwant: %q", got, streamData)
+
 	stored, err := store.Get(ctx, "conv_fragmented")
-	if err != nil {
-		t.Fatalf("get conversation: %v", err)
-	}
-	if len(stored.Items) != 2 {
-		t.Fatalf("stored items = %d, want input and output items", len(stored.Items))
-	}
+	require.NoError(t, err)
+	require.Len(t, stored.Items, 2)
+
 	output, err := decodeRawJSONObject(stored.Items[1])
-	if err != nil {
-		t.Fatalf("decode stored output: %v", err)
-	}
-	if got := string(output["future_counter"]); got != "9007199254740993" {
-		t.Fatalf("stored future_counter = %s, want exact large integer", got)
-	}
-	if got := string(output["future_payload"]); got != `{"preserved":true}` {
-		t.Fatalf("stored future_payload = %s, want unknown field preserved", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "9007199254740993", string(output["future_counter"]), "want the exact large integer")
+	require.Equal(t, `{"preserved":true}`, string(output["future_payload"]), "want the unknown field preserved")
 }

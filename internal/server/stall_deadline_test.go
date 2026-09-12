@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 )
 
 // A client that opens a stream and never reads it must not hold the handler
@@ -41,31 +42,26 @@ func TestStreamStallTimeout_ReleasesHandlerWhenClientStopsReading(t *testing.T) 
 	})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err)
+
 	server := &http.Server{Handler: e, WriteTimeout: 30 * time.Second}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 
 	conn, err := net.Dial("tcp", listener.Addr().String())
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = conn.Close() })
-	if _, err := fmt.Fprintf(conn, "POST /v1/chat/completions HTTP/1.1\r\nHost: gateway\r\nContent-Length: 0\r\n\r\n"); err != nil {
-		t.Fatalf("write request: %v", err)
-	}
+	_, err = fmt.Fprintf(conn, "POST /v1/chat/completions HTTP/1.1\r\nHost: gateway\r\nContent-Length: 0\r\n\r\n")
+	require.NoError(t, err)
 	// Read the status line to prove the stream started, then stop reading.
-	if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
-		t.Fatalf("read status line: %v", err)
-	}
+	_, err = bufio.NewReader(conn).ReadString('\n')
+	require.NoError(t, err)
 
 	select {
 	case err := <-handlerDone:
-		if !errors.Is(err, ErrClientStall) {
-			t.Fatalf("handler error = %v, want ErrClientStall", err)
-		}
+		require.ErrorIs(t, err, ErrClientStall)
+
 	case <-time.After(10 * time.Second):
 		t.Fatal("handler still blocked on a client that stopped reading")
 	}
@@ -94,17 +90,15 @@ func TestStreamStallTimeout_ToleratesQuietProvider(t *testing.T) {
 	})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err)
+
 	server := &http.Server{Handler: e, WriteTimeout: 30 * time.Second}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 
 	resp, err := http.Post("http://"+listener.Addr().String()+"/v1/chat/completions", "application/json", nil)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
 	reader := bufio.NewReader(resp.Body)
 	var got string
@@ -115,24 +109,22 @@ func TestStreamStallTimeout_ToleratesQuietProvider(t *testing.T) {
 			break
 		}
 	}
-	if want := "data: first\n\ndata: second\n\n"; got != want {
-		t.Fatalf("body = %q, want %q", got, want)
-	}
+	want := "data: first\n\ndata: second\n\n"
+	require.Equal(t, want, got)
 }
 
 func TestStallDeadlineWriter_ClassifiesOnlyTimeouts(t *testing.T) {
 	w := newStallDeadlineWriter(nil, time.Second)
 	timeout := &net.OpError{Op: "write", Err: &timeoutError{}}
-	if got := w.classify(timeout); !errors.Is(got, ErrClientStall) || !errors.Is(got, timeout) {
-		t.Fatalf("classify(timeout) = %v, want ErrClientStall wrapping the cause", got)
-	}
+	got := w.classify(timeout)
+	require.ErrorIs(t, got, ErrClientStall)
+	require.ErrorIs(t, got, timeout)
+
 	reset := &net.OpError{Op: "write", Err: errors.New("connection reset by peer")}
-	if got := w.classify(reset); got != reset {
-		t.Fatalf("classify(reset) = %v, want the error unchanged", got)
-	}
-	if got := w.classify(nil); got != nil {
-		t.Fatalf("classify(nil) = %v, want nil", got)
-	}
+	got = w.classify(reset)
+	require.Equal(t, reset, got)
+	got = w.classify(nil)
+	require.NoError(t, got)
 }
 
 type timeoutError struct{}
@@ -151,15 +143,11 @@ func TestFlushStream_ReportsStallDuringFinalFlush(t *testing.T) {
 	capture := &typeAssertingCapture{ResponseWriter: res}
 
 	err := flushStream(capture, io.NopCloser(strings.NewReader("data: last\n\n")))
-	if !errors.Is(err, ErrClientStall) {
-		t.Fatalf("flushStream() error = %v, want ErrClientStall", err)
-	}
-	if got := inner.Body.String(); got != "data: last\n\n" {
-		t.Fatalf("body = %q, want the chunk written before the stalled flush", got)
-	}
-	if _, err := capture.Write([]byte("more")); !errors.Is(err, ErrClientStall) {
-		t.Fatalf("Write after stall error = %v, want ErrClientStall", err)
-	}
+	require.ErrorIs(t, err, ErrClientStall)
+	got := inner.Body.String()
+	require.Equal(t, "data: last\n\n", got)
+	_, err = capture.Write([]byte("more"))
+	require.ErrorIs(t, err, ErrClientStall)
 }
 
 // A stall on the header flush must return before the upstream is read at
@@ -171,9 +159,7 @@ func TestFlushStream_ReportsStallDuringInitialFlush(t *testing.T) {
 	res := echo.NewResponse(stallWriter, nil)
 
 	err := flushStream(res, readerThatMustNotBeRead{t})
-	if !errors.Is(err, ErrClientStall) {
-		t.Fatalf("flushStream() error = %v, want ErrClientStall", err)
-	}
+	require.ErrorIs(t, err, ErrClientStall)
 }
 
 type readerThatMustNotBeRead struct{ t *testing.T }
@@ -210,29 +196,24 @@ func TestModelInteractionWriteDeadlineMiddleware_PreservesHijack(t *testing.T) {
 	})
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err)
+
 	server := &http.Server{Handler: e, WriteTimeout: 30 * time.Second}
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() { _ = server.Close() })
 
 	conn, err := net.Dial("tcp", listener.Addr().String())
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if _, err := fmt.Fprintf(conn, "GET /v1/realtime HTTP/1.1\r\nHost: gateway\r\n\r\n"); err != nil {
-		t.Fatalf("write request: %v", err)
-	}
+	_, err = fmt.Fprintf(conn, "GET /v1/realtime HTTP/1.1\r\nHost: gateway\r\n\r\n")
+	require.NoError(t, err)
+
 	got, err := io.ReadAll(conn)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if want := "HTTP/1.1 101 Switching Protocols\r\n\r\nhello"; string(got) != want {
-		t.Fatalf("response = %q, want %q", got, want)
-	}
+	require.NoError(t, err)
+	want := "HTTP/1.1 101 Switching Protocols\r\n\r\nhello"
+	require.Equal(t, want, string(got))
 }
 
 // flushStallingWriter fails every flush from the stallFrom-th one on, the

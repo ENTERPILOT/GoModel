@@ -3,15 +3,14 @@ package server
 import (
 	"context"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
@@ -39,9 +38,8 @@ func TestSlowedStreamRecordsUsageConsumedBeforeClientCancellation(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			req := httptest.NewRequest(http.MethodPost, tt.endpoint, nil).WithContext(ctx)
-			rec := httptest.NewRecorder()
-			c := echo.New().NewContext(req, rec)
+			c, _ := echotest.Post(t, tt.endpoint, nil)
+			c.SetRequest(c.Request().WithContext(ctx))
 			logger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
 			handler := NewHandler(&mockProvider{}, nil, logger, nil)
 			source := newDrainSignalingStream(tt.data)
@@ -63,9 +61,8 @@ func TestSlowedStreamRecordsUsageConsumedBeforeClientCancellation(t *testing.T) 
 				t.Fatal("slowdown wrapper did not finish and close the upstream stream")
 			}
 			entries := logger.Entries()
-			if len(entries) != 1 {
-				t.Fatalf("usage entries before client delivery = %d, want 1 after provider completion", len(entries))
-			}
+			require.Len(t, entries, 1)
+
 			cancel()
 			select {
 			case <-done:
@@ -74,12 +71,8 @@ func TestSlowedStreamRecordsUsageConsumedBeforeClientCancellation(t *testing.T) 
 			}
 
 			entries = logger.Entries()
-			if len(entries) != 1 {
-				t.Fatalf("usage entries = %d, want 1 after provider completed before disconnect", len(entries))
-			}
-			if entries[0].TotalTokens != 6 {
-				t.Fatalf("TotalTokens = %d, want 6", entries[0].TotalTokens)
-			}
+			require.Len(t, entries, 1)
+			require.Equal(t, 6, entries[0].TotalTokens)
 		})
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSwaggerEndpoint_RequestedButNotAvailable(t *testing.T) {
@@ -17,7 +19,5 @@ func TestSwaggerEndpoint_RequestedButNotAvailable(t *testing.T) {
 
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }

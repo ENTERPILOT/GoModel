@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
 )
@@ -34,20 +36,12 @@ func TestApplyWorkflowPolicy_NormalizesResolverErrors(t *testing.T) {
 	err := applyWorkflowPolicy(context.Background(), workflow, requestWorkflowPolicyResolverFunc(func(core.WorkflowSelector) (*core.ResolvedWorkflowPolicy, error) {
 		return nil, errors.New("storage unavailable")
 	}), core.NewWorkflowSelector("openai", "gpt-4o-mini"))
-	if err == nil {
-		t.Fatal("applyWorkflowPolicy() error = nil, want gateway error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("applyWorkflowPolicy() error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider {
-		t.Fatalf("gateway error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusInternalServerError {
-		t.Fatalf("gateway error status = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusInternalServerError)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+	require.Equal(t, http.StatusInternalServerError, gatewayErr.HTTPStatusCode())
 }
 
 func TestDetermineBatchExecutionSelection_UsesSingleResolutionPass(t *testing.T) {
@@ -75,16 +69,9 @@ func TestDetermineBatchExecutionSelection_UsesSingleResolutionPass(t *testing.T)
 	}
 
 	selection, err := gateway.DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(context.Background(), provider, resolver, nil, nil, req)
-	if err != nil {
-		t.Fatalf("DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver() error = %v", err)
-	}
-	if selection.ProviderType != "openai" {
-		t.Fatalf("providerType = %q, want openai", selection.ProviderType)
-	}
-	if selection.Selector.Provider != "openai" || selection.Selector.Model != "gpt-4o-mini" {
-		t.Fatalf("selector = %+v, want openai/gpt-4o-mini", selection.Selector)
-	}
-	if resolver.calls != len(req.Requests) {
-		t.Fatalf("resolver calls = %d, want %d", resolver.calls, len(req.Requests))
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai", selection.ProviderType)
+	require.Equal(t, "openai", selection.Selector.Provider)
+	require.Equal(t, "gpt-4o-mini", selection.Selector.Model, "selector = %+v, want openai/gpt-4o-mini", selection.Selector)
+	require.Equal(t, len(req.Requests), resolver.calls)
 }

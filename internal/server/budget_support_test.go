@@ -4,17 +4,16 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type countingBudgetChecker struct {
@@ -29,45 +28,29 @@ func (c *countingBudgetChecker) Check(_ context.Context, subjects budget.Subject
 }
 
 func TestEnforceBudgetSkipsWhenWorkflowBudgetDisabled(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Policy: &core.ResolvedWorkflowPolicy{
 			VersionID: "workflow-v1",
 			Features: core.WorkflowFeatures{
 				Budget: false,
 			},
 		},
-	}))
-	c := e.NewContext(req, httptest.NewRecorder())
+	})))
 	checker := &countingBudgetChecker{}
-
-	if err := enforceBudget(c, checker); err != nil {
-		t.Fatalf("enforceBudget returned error: %v", err)
-	}
-	if checker.calls != 0 {
-		t.Fatalf("budget checker was called %d times, want 0", checker.calls)
-	}
+	err := enforceBudget(c, checker)
+	require.NoError(t, err)
+	require.Equal(t, 0, checker.calls)
 }
 
 func TestEnforceBudgetDefaultsEnabledWithoutWorkflow(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	c := e.NewContext(req, httptest.NewRecorder())
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
 	checker := &countingBudgetChecker{}
-
-	if err := enforceBudget(c, checker); err != nil {
-		t.Fatalf("enforceBudget returned error: %v", err)
-	}
-	if checker.calls != 1 {
-		t.Fatalf("budget checker was called %d times, want 1", checker.calls)
-	}
-	if checker.subjects.UserPath != "/" {
-		t.Fatalf("budget user path = %q, want /", checker.subjects.UserPath)
-	}
-	if len(checker.subjects.Labels) != 0 {
-		t.Fatalf("budget labels = %v, want none for an untagged request", checker.subjects.Labels)
-	}
+	err := enforceBudget(c, checker)
+	require.NoError(t, err)
+	require.Equal(t, 1, checker.calls)
+	require.Equal(t, "/", checker.subjects.UserPath)
+	require.Empty(t, checker.subjects.Labels)
 }
 
 // Label budgets can only match if the labels tagging attached at ingress reach
@@ -97,24 +80,17 @@ func TestEnforceBudgetPassesRequestLabelsAndUserPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-			ctx := core.WithRequestLabels(req.Context(), tt.labels)
+			c, _ := echotest.Post(t, "/v1/chat/completions", nil)
+			ctx := core.WithRequestLabels(c.Request().Context(), tt.labels)
 			if tt.userPath != "" {
 				ctx = core.WithEffectiveUserPath(ctx, tt.userPath)
 			}
-			c := e.NewContext(req.WithContext(ctx), httptest.NewRecorder())
+			c.SetRequest(c.Request().WithContext(ctx))
 			checker := &countingBudgetChecker{}
-
-			if err := enforceBudget(c, checker); err != nil {
-				t.Fatalf("enforceBudget returned error: %v", err)
-			}
-			if checker.subjects.UserPath != tt.wantPath {
-				t.Fatalf("budget user path = %q, want %q", checker.subjects.UserPath, tt.wantPath)
-			}
-			if !slices.Equal(checker.subjects.Labels, tt.wantLabels) {
-				t.Fatalf("budget labels = %v, want %v", checker.subjects.Labels, tt.wantLabels)
-			}
+			err := enforceBudget(c, checker)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantPath, checker.subjects.UserPath)
+			require.True(t, slices.Equal(checker.subjects.Labels, tt.wantLabels), "budget labels = %v, want %v", checker.subjects.Labels, tt.wantLabels)
 		})
 	}
 }
@@ -122,9 +98,7 @@ func TestEnforceBudgetPassesRequestLabelsAndUserPath(t *testing.T) {
 func TestBatchBudgetEnforcerUsesResolvedWorkflow(t *testing.T) {
 	checker := &countingBudgetChecker{}
 	enforcer := batchAdmissionEnforcer(nil, checker)
-	if enforcer == nil {
-		t.Fatal("batchAdmissionEnforcer() = nil, want function")
-	}
+	require.NotNil(t, enforcer)
 
 	ctx := core.WithWorkflow(context.Background(), &core.Workflow{
 		Policy: &core.ResolvedWorkflowPolicy{
@@ -135,21 +109,15 @@ func TestBatchBudgetEnforcerUsesResolvedWorkflow(t *testing.T) {
 			},
 		},
 	})
-
-	if err := enforcer(ctx); err != nil {
-		t.Fatalf("batch budget enforcer returned error: %v", err)
-	}
-	if checker.calls != 0 {
-		t.Fatalf("budget checker was called %d times, want 0", checker.calls)
-	}
+	err := enforcer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, checker.calls)
 }
 
 func TestBatchBudgetEnforcerInvokesCheckerWhenEnabled(t *testing.T) {
 	checker := &countingBudgetChecker{}
 	enforcer := batchAdmissionEnforcer(nil, checker)
-	if enforcer == nil {
-		t.Fatal("batchAdmissionEnforcer() = nil, want function")
-	}
+	require.NotNil(t, enforcer)
 
 	ctx := core.WithWorkflow(context.Background(), &core.Workflow{
 		Policy: &core.ResolvedWorkflowPolicy{
@@ -160,22 +128,16 @@ func TestBatchBudgetEnforcerInvokesCheckerWhenEnabled(t *testing.T) {
 			},
 		},
 	})
-
-	if err := enforcer(ctx); err != nil {
-		t.Fatalf("batch budget enforcer returned error: %v", err)
-	}
-	if checker.calls != 1 {
-		t.Fatalf("budget checker was called %d times, want 1", checker.calls)
-	}
+	err := enforcer(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, checker.calls)
 }
 
 func TestBatchAdmissionEnforcerAppliesRateLimits(t *testing.T) {
 	checker := &countingBudgetChecker{}
 	limiter := newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
 	enforcer := batchAdmissionEnforcer(limiter, checker)
-	if enforcer == nil {
-		t.Fatal("batchAdmissionEnforcer() = nil, want function")
-	}
+	require.NotNil(t, enforcer)
 
 	ctx := core.WithWorkflow(context.Background(), &core.Workflow{
 		Policy: &core.ResolvedWorkflowPolicy{
@@ -186,35 +148,21 @@ func TestBatchAdmissionEnforcerAppliesRateLimits(t *testing.T) {
 			},
 		},
 	})
-
-	if err := enforcer(ctx); err != nil {
-		t.Fatalf("first batch submission rejected: %v", err)
-	}
-	if checker.calls != 1 {
-		t.Fatalf("budget checker was called %d times, want 1", checker.calls)
-	}
-
 	err := enforcer(ctx)
-	if err == nil {
-		t.Fatal("second batch submission admitted over the request window")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, checker.calls)
+
+	err = enforcer(ctx)
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error %T does not unwrap to GatewayError", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429", gatewayErr.HTTPStatusCode())
-	}
-	if checker.calls != 1 {
-		t.Fatalf("budget checker was called %d times after a rate-limited submission, want 1 (rate limits check first)", checker.calls)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
+	require.Equal(t, 1, checker.calls)
 }
 
 func TestBudgetExceededResponseIncludesRetryAfter(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
 
 	err := budgetCheckError(&budget.ExceededError{
 		Result: budget.CheckResult{
@@ -228,51 +176,30 @@ func TestBudgetExceededResponseIncludesRetryAfter(t *testing.T) {
 			Spent:     1,
 		},
 	})
-	if err := handleError(c, err); err != nil {
-		t.Fatalf("handleError() error = %v", err)
-	}
+	err = handleError(c, err)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusTooManyRequests, rec.Code)
 
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
-	}
 	retryAfter := rec.Header().Get("Retry-After")
-	if retryAfter == "" {
-		t.Fatal("Retry-After header is empty")
-	}
+	require.NotEmpty(t, retryAfter)
+
 	seconds, parseErr := strconv.Atoi(retryAfter)
-	if parseErr != nil {
-		t.Fatalf("Retry-After = %q, want delay seconds", retryAfter)
-	}
-	if seconds <= 0 || seconds > 300 {
-		t.Fatalf("Retry-After = %d, want between 1 and 300", seconds)
-	}
+	require.NoError(t, parseErr, "Retry-After = %q, want delay seconds", retryAfter)
+	require.Greater(t, seconds, 0)
+	require.LessOrEqual(t, seconds, 300)
 }
 
 func TestBudgetCheckFailedResponseMapping(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
 
 	err := budgetCheckError(errors.New("backend details should not leak"))
-	if err := handleError(c, err); err != nil {
-		t.Fatalf("handleError() error = %v", err)
-	}
+	err = handleError(c, err)
+	require.NoError(t, err)
+	require.NotEqual(t, http.StatusTooManyRequests, rec.Code)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	if rec.Code == http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want non-rate-limit budget_check_failed response", rec.Code)
-	}
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
-	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `"code":"budget_check_failed"`) {
-		t.Fatalf("body = %s, want budget_check_failed code", body)
-	}
-	if !strings.Contains(body, `"message":"budget check failed"`) {
-		t.Fatalf("body = %s, want generic budget check message", body)
-	}
-	if strings.Contains(body, "backend details should not leak") {
-		t.Fatalf("body leaked wrapped error detail: %s", body)
-	}
+	require.Contains(t, body, `"code":"budget_check_failed"`)
+	require.Contains(t, body, `"message":"budget check failed"`)
+	require.NotContains(t, body, "backend details should not leak", "body leaked wrapped error detail: %s", body)
 }

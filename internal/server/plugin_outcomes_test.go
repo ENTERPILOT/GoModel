@@ -3,14 +3,13 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
-	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -40,19 +39,11 @@ func runGuardrailOutcomes(t *testing.T, body string, chains *plugins.Chains) (in
 	t.Helper()
 	auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
 	handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
-	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(body), false, "", nil)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
+	c, rec := chatContext(t, body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+
 	if len(auditLogger.entries) > 0 {
 		// A streamed request is written by the stream observer.
 		return rec.Code, auditLogger.entries[0].Data.Guardrails
@@ -184,31 +175,26 @@ func TestChatCompletion_GuardrailOutcomes(t *testing.T) {
 				definitions, steps = single(cfg[0].(map[string]string), cfg[1].(pluginapi.Kind))
 			}
 			status, outcomes := runGuardrailOutcomes(t, tt.body, outcomeChains(t, definitions, steps...))
-			if status != tt.wantStatus {
-				t.Fatalf("status = %d, want %d", status, tt.wantStatus)
-			}
-			if len(outcomes) != len(tt.want) {
-				t.Fatalf("outcomes = %+v, want %d", outcomes, len(tt.want))
-			}
+			require.Equal(t, tt.wantStatus, status)
+			require.Len(t, outcomes, len(tt.want))
+
 			for i, want := range tt.want {
 				got := outcomes[i]
-				if got.Seq != i+1 || got.Step != 1 || got.Type != "phase_test" {
-					t.Errorf("outcome %d = %+v, want seq %d, step 1, type phase_test", i, got, i+1)
-				}
-				if got.Phase != want.phase || got.Instance != want.instance || got.Action != want.action || got.Code != want.code {
-					t.Errorf("outcome %d = %+v, want %+v", i, got, want)
-				}
-				if got.Edited != want.edited || got.Target != want.target || got.FailMode != want.failMode {
-					t.Errorf("outcome %d = %+v, want edited %v target %q fail mode %q", i, got, want.edited, want.target, want.failMode)
-				}
-				if (got.Action == auditlog.GuardrailActionFailure) != (got.Error != "") {
-					t.Errorf("outcome %d = %+v: a failure carries its error and nothing else does", i, got)
-				}
-				if want.replaced != (got.ReplacedEvents > 0) {
-					t.Errorf("outcome %d = %+v, want replaced events %v", i, got, want.replaced)
-				}
-				if got.Phase == "stream" && got.DurationNs == 0 {
-					t.Errorf("outcome %d = %+v, want the stream hooks' time", i, got)
+				assert.Equal(t, i+1, got.Seq)
+				assert.Equal(t, 1, got.Step)
+				assert.Equal(t, "phase_test", got.Type, "outcome %d = %+v, want seq %d, step 1, type phase_test", i, got, i+1)
+				assert.Equal(t, want.phase, got.Phase)
+				assert.Equal(t, want.instance, got.Instance)
+				assert.Equal(t, want.action, got.Action)
+				assert.Equal(t, want.code, got.Code, "outcome %d = %+v, want %+v", i, got, want)
+				assert.Equal(t, want.edited, got.Edited)
+				assert.Equal(t, want.target, got.Target)
+				assert.Equal(t, want.failMode, got.FailMode, "outcome %d = %+v, want edited %v target %q fail mode %q", i, got, want.edited, want.target, want.failMode)
+				assert.Equal(t, got.Error != "", got.Action == auditlog.GuardrailActionFailure, "outcome %d = %+v: a failure carries its error and nothing else does", i, got)
+				assert.Equal(t, want.replaced, got.ReplacedEvents > 0, "outcome %d = %+v, want replaced events %v", i, got, want.replaced)
+
+				if got.Phase == "stream" {
+					assert.NotZero(t, got.DurationNs, "outcome %d = %+v, want the stream hooks' time", i, got)
 				}
 			}
 		})
@@ -219,9 +205,7 @@ func TestChatCompletion_GuardrailOutcomes(t *testing.T) {
 // an empty one.
 func TestChatCompletion_NoGuardrailsNoOutcomes(t *testing.T) {
 	_, outcomes := runGuardrailOutcomes(t, chatBody, outcomeChains(t, nil))
-	if outcomes != nil {
-		t.Fatalf("outcomes = %+v, want none", outcomes)
-	}
+	require.Nil(t, outcomes)
 }
 
 func TestGuardrailOutcomesFromRecords(t *testing.T) {
@@ -236,18 +220,23 @@ func TestGuardrailOutcomesFromRecords(t *testing.T) {
 		{Phase: "stream", Instance: "b", Action: "failure", Error: "failed", FailMode: "closed", Edited: true, Target: "response", ReplacedEvents: 2, DroppedEvents: 1},
 		{Phase: "response", Instance: "c", Action: "allow"},
 	}
-	if len(got) != len(want) {
-		t.Fatalf("outcomes = %+v, want %+v", got, want)
-	}
+	require.Len(t, got, len(want))
+
 	for i := range want {
 		g, w := got[i], want[i]
-		if g.Phase != w.Phase || g.Instance != w.Instance || g.Type != w.Type || g.Step != w.Step || g.Action != w.Action ||
-			g.Code != w.Code || g.Message != w.Message || g.Error != w.Error || g.FailMode != w.FailMode ||
-			g.Edited != w.Edited || g.Target != w.Target || g.ReplacedEvents != w.ReplacedEvents || g.DroppedEvents != w.DroppedEvents {
-			t.Errorf("outcome %d = %+v, want %+v", i, g, w)
-		}
+		assert.Equal(t, w.Phase, g.Phase)
+		assert.Equal(t, w.Instance, g.Instance)
+		assert.Equal(t, w.Type, g.Type)
+		assert.Equal(t, w.Step, g.Step)
+		assert.Equal(t, w.Action, g.Action)
+		assert.Equal(t, w.Code, g.Code)
+		assert.Equal(t, w.Message, g.Message)
+		assert.Equal(t, w.Error, g.Error)
+		assert.Equal(t, w.FailMode, g.FailMode)
+		assert.Equal(t, w.Edited, g.Edited)
+		assert.Equal(t, w.Target, g.Target)
+		assert.Equal(t, w.ReplacedEvents, g.ReplacedEvents)
+		assert.Equal(t, w.DroppedEvents, g.DroppedEvents, "outcome %d = %+v, want %+v", i, g, w)
 	}
-	if got[0].Detail == nil {
-		t.Errorf("decision detail must be kept: %+v", got[0])
-	}
+	assert.NotNil(t, got[0].Detail, "decision detail must be kept: %+v", got[0])
 }

@@ -8,12 +8,13 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
@@ -43,12 +44,10 @@ func newAliasResolvingService(t *testing.T, aliasSource, targetModel string) *vi
 	service, err := virtualmodels.NewService(newAliasesTestStore(
 		redirectVM(aliasSource, targetModel, "openai", true),
 	), catalog, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return service
 }
 
@@ -79,24 +78,13 @@ func TestRealtimeClientSecrets_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	handler := newHandler(mock, nil, nil, nil, service, nil, nil, nil)
 	handler.realtimeEnabled = true
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/client_secrets",
-		strings.NewReader(`{"session":{"type":"realtime","model":"voice-alias"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeClientSecrets(c); err != nil {
-		t.Fatalf("RealtimeClientSecrets returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (alias should resolve, not 404) (body: %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedSecret == nil || mock.capturedSecret.Model != "gpt-realtime-2" {
-		t.Errorf("router received %+v, want the resolved model gpt-realtime-2", mock.capturedSecret)
-	}
-	if upstreamModel != "gpt-realtime-2" {
-		t.Errorf("upstream session.model = %q, want the alias rewritten to gpt-realtime-2", upstreamModel)
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/client_secrets", `{"session":{"type":"realtime","model":"voice-alias"}}`)
+	err := handler.RealtimeClientSecrets(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
+	assert.NotNil(t, mock.capturedSecret)
+	assert.Equal(t, "gpt-realtime-2", mock.capturedSecret.Model)
+	assert.Equal(t, "gpt-realtime-2", upstreamModel)
 }
 
 func TestRealtimeCalls_ResolvesAliasThroughVirtualModels(t *testing.T) {
@@ -119,28 +107,18 @@ func TestRealtimeCalls_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	handler := newHandler(mock, nil, nil, nil, service, nil, nil, nil)
 	handler.realtimeEnabled = true
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=voice-alias", strings.NewReader("v=0 offer"))
-	req.Header.Set("Content-Type", "application/sdp")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeCalls(c); err != nil {
-		t.Fatalf("RealtimeCalls returned error: %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (alias should resolve, not 404) (body: %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedCall == nil || mock.capturedCall.Model != "gpt-realtime-2" {
-		t.Errorf("router received %+v, want the resolved model gpt-realtime-2", mock.capturedCall)
-	}
-	if upstreamModelQuery != "gpt-realtime-2" {
-		t.Errorf("upstream model query = %q, want the alias rewritten to gpt-realtime-2", upstreamModelQuery)
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/calls?model=voice-alias", "v=0 offer", echotest.WithContentType("application/sdp"))
+	err := handler.RealtimeCalls(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
+	assert.NotNil(t, mock.capturedCall)
+	assert.Equal(t, "gpt-realtime-2", mock.capturedCall.Model)
+	assert.Equal(t, "gpt-realtime-2", upstreamModelQuery)
 	// The call is registered under the resolved model so a later sideband attach
 	// gates on the concrete model, not the alias.
-	if route, ok := handler.realtimeCalls.Lookup("rtc_alias1"); !ok || route.Model != "gpt-realtime-2" {
-		t.Errorf("registry entry = %+v (found %v), want the resolved model registered", route, ok)
-	}
+	route, ok := handler.realtimeCalls.Lookup("rtc_alias1")
+	require.True(t, ok)
+	assert.Equal(t, "gpt-realtime-2", route.Model)
 }
 
 func TestRealtimeWebsocket_ResolvesAliasThroughVirtualModels(t *testing.T) {
@@ -154,18 +132,13 @@ func TestRealtimeWebsocket_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	// The websocket dial fails (no upstream), but resolution happens before the
 	// dial: the captured RealtimeTarget request proves the concrete model — not the
 	// alias — reached the router. A 404 here would mean the alias never resolved.
-	req := httptest.NewRequest(http.MethodGet, "/v1/realtime?model=voice-alias", nil)
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/realtime?model=voice-alias")
 
 	_ = handler.Realtime(c)
 
-	if rec.Code == http.StatusNotFound {
-		t.Fatalf("status = 404, alias failed to resolve (body: %s)", rec.Body.String())
-	}
-	if mock.capturedRealtime == nil || mock.capturedRealtime.Model != "gpt-realtime-2" {
-		t.Errorf("router received %+v, want the resolved model gpt-realtime-2", mock.capturedRealtime)
-	}
+	require.NotEqual(t, http.StatusNotFound, rec.Code, "status = 404, alias failed to resolve (body: %s)", rec.Body.String())
+	assert.NotNil(t, mock.capturedRealtime)
+	assert.Equal(t, "gpt-realtime-2", mock.capturedRealtime.Model)
 }
 
 func TestAudioSpeech_ResolvesAliasThroughVirtualModels(t *testing.T) {
@@ -176,22 +149,14 @@ func TestAudioSpeech_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	service := newAliasResolvingService(t, "voice-alias", "gpt-4o-mini-tts")
 	handler := newHandler(mock, nil, nil, nil, service, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech",
-		strings.NewReader(`{"model":"voice-alias","input":"hello","voice":"alloy"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/audio/speech", `{"model":"voice-alias","input":"hello","voice":"alloy"}`)
+	err := handler.AudioSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
 
-	if err := handler.AudioSpeech(c); err != nil {
-		t.Fatalf("AudioSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (alias should resolve, not 404) (body: %s)", rec.Code, rec.Body.String())
-	}
 	// The provider must be dispatched on the resolved model, not the alias.
-	if mock.capturedSpeech == nil || mock.capturedSpeech.Model != "gpt-4o-mini-tts" {
-		t.Errorf("provider received %+v, want the resolved model gpt-4o-mini-tts", mock.capturedSpeech)
-	}
+	assert.NotNil(t, mock.capturedSpeech)
+	assert.Equal(t, "gpt-4o-mini-tts", mock.capturedSpeech.Model)
 }
 
 func TestAudioTranscription_ResolvesAliasThroughVirtualModels(t *testing.T) {
@@ -206,26 +171,16 @@ func TestAudioTranscription_ResolvesAliasThroughVirtualModels(t *testing.T) {
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("model", "scribe-alias")
 	part, err := w.CreateFormFile("file", "speech.mp3")
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
-	}
+	require.NoError(t, err)
+
 	_, _ = part.Write([]byte("audio-bytes"))
-	if err := w.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
+	err = w.Close()
+	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioTranscriptions(c); err != nil {
-		t.Fatalf("AudioTranscriptions returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (alias should resolve, not 404) (body: %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedTranscription == nil || mock.capturedTranscription.Model != "gpt-4o-transcribe" {
-		t.Errorf("provider received %+v, want the resolved model gpt-4o-transcribe", mock.capturedTranscription)
-	}
+	c, rec := echotest.Post(t, "/v1/audio/transcriptions", &buf, echotest.WithContentType(w.FormDataContentType()))
+	err = handler.AudioTranscriptions(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, "alias should resolve, not 404: %s", rec.Body.String())
+	assert.NotNil(t, mock.capturedTranscription)
+	assert.Equal(t, "gpt-4o-transcribe", mock.capturedTranscription.Model)
 }

@@ -3,8 +3,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -12,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
@@ -81,7 +80,6 @@ func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := echo.New()
 			chain := RequestSnapshotCapture(tt.configuredHeader)(AuthMiddleware("master-key", nil)(func(c *echo.Context) error {
 				ctx := c.Request().Context()
 				snapshot := core.GetRequestSnapshot(ctx)
@@ -91,16 +89,14 @@ func TestMasterKeyUserPathHeaderScopesRestrictedModelAccess(t *testing.T) {
 				return c.String(http.StatusOK, "ok")
 			}))
 
-			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions",
-				strings.NewReader(`{"model":"openai/gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", "Bearer master-key")
+			opts := []echotest.Option{echotest.WithHeader("Authorization", "Bearer master-key")}
 			if tt.userPathHeader != "" {
-				req.Header.Set(core.UserPathHeaderName(tt.sentHeader), tt.userPathHeader)
+				opts = append(opts, echotest.WithHeader(core.UserPathHeaderName(tt.sentHeader), tt.userPathHeader))
 			}
-			rec := httptest.NewRecorder()
+			c, rec := echotest.Post(t, "/v1/chat/completions",
+				`{"model":"openai/gpt-4o","messages":[{"role":"user","content":"hi"}]}`, opts...)
 
-			require.NoError(t, chain(e.NewContext(req, rec)))
+			require.NoError(t, chain(c))
 			assert.Equal(t, http.StatusOK, rec.Code)
 		})
 	}

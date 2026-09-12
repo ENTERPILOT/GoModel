@@ -3,13 +3,14 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 func messagesBatchMock() *mockProvider {
@@ -35,92 +36,59 @@ const messagesBatchCreateBody = `{
   ]
 }`
 
-func createMessagesBatch(t *testing.T, e *echo.Echo, handler *Handler) map[string]any {
+func createMessagesBatch(t *testing.T, handler *Handler) map[string]any {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages/batches", strings.NewReader(messagesBatchCreateBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	if err := handler.MessagesBatches(c); err != nil {
-		t.Fatalf("create handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var created map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	return created
+	c, rec := echotest.Post(t, "/v1/messages/batches", messagesBatchCreateBody)
+	err := handler.MessagesBatches(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	return echotest.Decode[map[string]any](t, rec)
 }
 
 func TestMessagesBatches_CreateGetList(t *testing.T) {
 	mock := messagesBatchMock()
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	created := createMessagesBatch(t, e, handler)
+	created := createMessagesBatch(t, handler)
 	id, _ := created["id"].(string)
-	if !strings.HasPrefix(id, "msgbatch_") {
-		t.Fatalf("id = %q, want msgbatch_ prefix", id)
-	}
-	if created["type"] != "message_batch" || created["processing_status"] != "in_progress" {
-		t.Fatalf("created = %v", created)
-	}
+	require.True(t, strings.HasPrefix(id, "msgbatch_"), "id = %q, want msgbatch_ prefix", id)
+	assert.Equal(t, "message_batch", created["type"])
+	assert.Equal(t, "in_progress", created["processing_status"])
+
 	counts := created["request_counts"].(map[string]any)
-	if counts["processing"] != float64(2) || counts["succeeded"] != float64(0) {
-		t.Fatalf("request_counts = %v", counts)
-	}
-	if created["results_url"] != nil {
-		t.Fatalf("results_url should be null while in progress, got %v", created["results_url"])
-	}
+	assert.Equal(t, float64(2), counts["processing"])
+	assert.Equal(t, float64(0), counts["succeeded"])
+	assert.Nil(t, created["results_url"])
 
 	// The provider received translated canonical chat items.
-	if mock.capturedBatchReq == nil || len(mock.capturedBatchReq.Requests) != 2 {
-		t.Fatalf("capturedBatchReq = %+v", mock.capturedBatchReq)
-	}
-	if got := core.RequestDialectFromContext(mock.capturedBatchCtx); got != core.RequestDialectAnthropicMessages {
-		t.Fatalf("request dialect = %q, want %q", got, core.RequestDialectAnthropicMessages)
-	}
+	require.NotNil(t, mock.capturedBatchReq)
+	require.Len(t, mock.capturedBatchReq.Requests, 2)
+	assert.Equal(t, core.RequestDialectAnthropicMessages, core.RequestDialectFromContext(mock.capturedBatchCtx))
+
 	item := mock.capturedBatchReq.Requests[0]
-	if item.CustomID != "first" || item.URL != "/v1/chat/completions" {
-		t.Fatalf("item = %+v", item)
-	}
+	assert.Equal(t, "first", item.CustomID)
+	assert.Equal(t, "/v1/chat/completions", item.URL)
 
 	// Retrieve through the msgbatch_ alias.
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/messages/batches/"+id, nil)
-	getRec := httptest.NewRecorder()
-	getCtx := e.NewContext(getReq, getRec)
-	getCtx.SetPath("/v1/messages/batches/:id")
-	setPathParam(getCtx, "id", id)
-	if err := handler.GetMessagesBatch(getCtx); err != nil {
-		t.Fatalf("get handler returned error: %v", err)
-	}
-	var fetched map[string]any
-	if err := json.Unmarshal(getRec.Body.Bytes(), &fetched); err != nil {
-		t.Fatalf("decode get response: %v", err)
-	}
-	if fetched["id"] != id {
-		t.Fatalf("get id = %v, want %v", fetched["id"], id)
-	}
+	getCtx, getRec := echotest.Get(t, "/v1/messages/batches/"+id,
+		echotest.WithPath("/v1/messages/batches/:id"), echotest.WithPathValue("id", id))
+	err := handler.GetMessagesBatch(getCtx)
+	require.NoError(t, err)
+	fetched := echotest.Decode[map[string]any](t, getRec)
+	assert.Equal(t, id, fetched["id"])
 
 	// List renders msgbatch_ IDs.
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/messages/batches", nil)
-	listRec := httptest.NewRecorder()
-	listCtx := e.NewContext(listReq, listRec)
-	if err := handler.ListMessagesBatches(listCtx); err != nil {
-		t.Fatalf("list handler returned error: %v", err)
-	}
-	var list struct {
+	listCtx, listRec := echotest.Get(t, "/v1/messages/batches")
+	err = handler.ListMessagesBatches(listCtx)
+	require.NoError(t, err)
+
+	list := echotest.Decode[struct {
 		Data    []map[string]any `json:"data"`
 		HasMore bool             `json:"has_more"`
-	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
-	if len(list.Data) != 1 || list.Data[0]["id"] != id {
-		t.Fatalf("list = %+v", list)
-	}
+	}](t, listRec)
+	require.Len(t, list.Data, 1)
+	assert.Equal(t, id, list.Data[0]["id"])
 }
 
 func TestMessagesBatches_Results(t *testing.T) {
@@ -149,29 +117,20 @@ func TestMessagesBatches_Results(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
-	created := createMessagesBatch(t, e, handler)
+	created := createMessagesBatch(t, handler)
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/messages/batches/"+id+"/results", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/messages/batches/:id/results")
-	setPathParam(c, "id", id)
-	if err := handler.MessagesBatchResults(c); err != nil {
-		t.Fatalf("results handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("results status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/x-jsonl") {
-		t.Fatalf("content-type = %q", got)
-	}
+	c, rec := echotest.Get(t, "/v1/messages/batches/"+id+"/results",
+		echotest.WithPath("/v1/messages/batches/:id/results"), echotest.WithPathValue("id", id))
+	err := handler.MessagesBatchResults(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.True(t, strings.HasPrefix(rec.Header().Get("Content-Type"), "application/x-jsonl"), "content-type = %q", rec.Header().Get("Content-Type"))
+
 	lines := strings.Split(strings.TrimSpace(rec.Body.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("len(lines) = %d body=%s", len(lines), rec.Body.String())
-	}
+	require.Len(t, lines, 2)
+
 	var succeeded struct {
 		CustomID string `json:"custom_id"`
 		Result   struct {
@@ -184,13 +143,13 @@ func TestMessagesBatches_Results(t *testing.T) {
 			} `json:"message"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal([]byte(lines[0]), &succeeded); err != nil {
-		t.Fatalf("decode succeeded line: %v", err)
-	}
-	if succeeded.CustomID != "first" || succeeded.Result.Type != "succeeded" ||
-		succeeded.Result.Message.Type != "message" || succeeded.Result.Message.Content[0].Text != "hello" {
-		t.Fatalf("succeeded line = %+v", succeeded)
-	}
+	err = json.Unmarshal([]byte(lines[0]), &succeeded)
+	require.NoError(t, err)
+	assert.Equal(t, "first", succeeded.CustomID)
+	assert.Equal(t, "succeeded", succeeded.Result.Type)
+	assert.Equal(t, "message", succeeded.Result.Message.Type)
+	require.Len(t, succeeded.Result.Message.Content, 1)
+	assert.Equal(t, "hello", succeeded.Result.Message.Content[0].Text)
 }
 
 func TestMessagesBatches_Cancel(t *testing.T) {
@@ -202,26 +161,17 @@ func TestMessagesBatches_Cancel(t *testing.T) {
 		CreatedAt: 1000,
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
-	created := createMessagesBatch(t, e, handler)
+	created := createMessagesBatch(t, handler)
 	id := created["id"].(string)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages/batches/"+id+"/cancel", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/messages/batches/:id/cancel")
-	setPathParam(c, "id", id)
-	if err := handler.CancelMessagesBatch(c); err != nil {
-		t.Fatalf("cancel handler returned error: %v", err)
-	}
-	var canceled map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &canceled); err != nil {
-		t.Fatalf("decode cancel response: %v", err)
-	}
-	if canceled["processing_status"] != "canceling" {
-		t.Fatalf("processing_status = %v", canceled["processing_status"])
-	}
+	c, rec := echotest.Post(t, "/v1/messages/batches/"+id+"/cancel", nil,
+		echotest.WithPath("/v1/messages/batches/:id/cancel"), echotest.WithPathValue("id", id))
+	err := handler.CancelMessagesBatch(c)
+	require.NoError(t, err)
+
+	canceled := echotest.Decode[map[string]any](t, rec)
+	assert.Equal(t, "canceling", canceled["processing_status"])
 }
 
 func TestMessagesBatches_Delete(t *testing.T) {
@@ -244,80 +194,52 @@ func TestMessagesBatches_Delete(t *testing.T) {
 				RequestCounts: core.BatchRequestCounts{Total: 2, Completed: 2},
 			}
 
-			e := echo.New()
 			handler := NewHandler(mock, nil, nil, nil)
-			created := createMessagesBatch(t, e, handler)
+			created := createMessagesBatch(t, handler)
 			id := created["id"].(string)
 
-			req := httptest.NewRequest(http.MethodDelete, "/v1/messages/batches/"+id, nil)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-			c.SetPath("/v1/messages/batches/:id")
-			setPathParam(c, "id", id)
-			if err := handler.DeleteMessagesBatch(c); err != nil {
-				t.Fatalf("delete handler returned error: %v", err)
-			}
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
-			}
+			c, rec := echotest.Request(t, http.MethodDelete, "/v1/messages/batches/"+id, nil,
+				echotest.WithPath("/v1/messages/batches/:id"), echotest.WithPathValue("id", id))
+			err := handler.DeleteMessagesBatch(c)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantStatus, rec.Code, rec.Body.String())
+
 			if tc.wantStatus != http.StatusOK {
 				// The Anthropic dialect renders the canonical error envelope.
-				if !strings.Contains(rec.Body.String(), `"type":"error"`) {
-					t.Fatalf("error body = %s", rec.Body.String())
-				}
+				assert.Contains(t, rec.Body.String(), `"type":"error"`)
 				return
 			}
-			var deleted map[string]any
-			if err := json.Unmarshal(rec.Body.Bytes(), &deleted); err != nil {
-				t.Fatalf("decode delete response: %v", err)
-			}
-			if deleted["id"] != id || deleted["type"] != "message_batch_deleted" {
-				t.Fatalf("deleted = %v", deleted)
-			}
+			deleted := echotest.Decode[map[string]any](t, rec)
+			assert.Equal(t, id, deleted["id"])
+			assert.Equal(t, "message_batch_deleted", deleted["type"])
 
 			// The batch is gone afterwards.
-			getReq := httptest.NewRequest(http.MethodGet, "/v1/messages/batches/"+id, nil)
-			getRec := httptest.NewRecorder()
-			getCtx := e.NewContext(getReq, getRec)
-			getCtx.SetPath("/v1/messages/batches/:id")
-			setPathParam(getCtx, "id", id)
-			if err := handler.GetMessagesBatch(getCtx); err != nil {
-				t.Fatalf("get handler returned error: %v", err)
-			}
-			if getRec.Code != http.StatusNotFound {
-				t.Fatalf("get after delete = %d", getRec.Code)
-			}
+			getCtx, getRec := echotest.Get(t, "/v1/messages/batches/"+id,
+				echotest.WithPath("/v1/messages/batches/:id"), echotest.WithPathValue("id", id))
+			err = handler.GetMessagesBatch(getCtx)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusNotFound, getRec.Code)
 		})
 	}
 }
 
 func TestMessagesBatches_InvalidCreateReturnsAnthropicError(t *testing.T) {
-	e := echo.New()
 	handler := NewHandler(messagesBatchMock(), nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/messages/batches",
-		strings.NewReader(`{"requests":[{"custom_id":"a","params":{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"hi"}]}}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	if err := handler.MessagesBatches(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var envelope struct {
+	c, rec := echotest.Post(t, "/v1/messages/batches",
+		`{"requests":[{"custom_id":"a","params":{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"hi"}]}}]}`)
+	err := handler.MessagesBatches(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+
+	envelope := echotest.Decode[struct {
 		Type  string `json:"type"`
 		Error struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
 		} `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-		t.Fatalf("decode error envelope: %v", err)
-	}
-	if envelope.Type != "error" || envelope.Error.Type != "invalid_request_error" ||
-		!strings.Contains(envelope.Error.Message, "requests[0].params") {
-		t.Fatalf("envelope = %+v", envelope)
-	}
+	}](t, rec)
+	assert.Equal(t, "error", envelope.Type)
+	assert.Equal(t, "invalid_request_error", envelope.Error.Type)
+	assert.Contains(t, envelope.Error.Message, "requests[0].params")
 }

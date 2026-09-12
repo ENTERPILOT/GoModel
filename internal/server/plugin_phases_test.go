@@ -11,9 +11,12 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -153,17 +156,21 @@ func phaseHandlerWithLogger(t *testing.T, inner core.RoutableProvider, logger au
 
 func doChat(t *testing.T, handler *Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
-	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(body), false, "", nil)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	if err := handler.ChatCompletion(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
+	c, rec := chatContext(t, body)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+
 	return rec
+}
+
+// chatContext builds a chat completion context whose body is only reachable
+// through the request snapshot, as it is after ingress middleware ran.
+func chatContext(t *testing.T, body string, opts ...echotest.Option) (*echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	c, rec := echotest.Post(t, "/v1/chat/completions", &explodingReadCloser{}, opts...)
+	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(body), false, "", nil)
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	return c, rec
 }
 
 func phaseProvider() *capturingProvider {
@@ -198,17 +205,13 @@ func TestChatCompletion_PromptPluginRespondShortCircuits(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			inner := phaseProvider()
 			rec := doChat(t, phaseHandler(t, inner, chains), tt.body)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), tt.want) {
-				t.Fatalf("body = %s, want %s", rec.Body.String(), tt.want)
-			}
-			if inner.capturedChatReq != nil {
-				t.Fatal("provider was called despite short-circuit")
-			}
-			if tt.name == "stream" && (!strings.HasSuffix(strings.TrimSpace(rec.Body.String()), "[DONE]") || rec.Header().Get("Content-Type") != "text/event-stream") {
-				t.Fatalf("stream body = %s", rec.Body.String())
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), tt.want)
+			require.Nil(t, inner.capturedChatReq)
+
+			if tt.name == "stream" {
+				require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+				require.True(t, strings.HasSuffix(strings.TrimSpace(rec.Body.String()), "[DONE]"), "stream body = %s", rec.Body.String())
 			}
 		})
 	}
@@ -231,18 +234,14 @@ func TestChatCompletion_ResponsePhaseDecisions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			chains := phaseChains(t, tt.cfg, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1})
 			rec := doChat(t, phaseHandler(t, phaseProvider(), chains), chatBody)
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d (%s)", rec.Code, tt.wantStatus, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), tt.wantBody) {
-				t.Fatalf("body = %s, want %s", rec.Body.String(), tt.wantBody)
-			}
-			if got := rec.Header().Get(plugins.GuardrailHeader); got != tt.wantHeader {
-				t.Fatalf("header = %q, want %q", got, tt.wantHeader)
-			}
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), tt.wantBody)
+			got := rec.Header().Get(plugins.GuardrailHeader)
+			require.Equal(t, tt.wantHeader, got)
+
 			// The provider billed the original completion; every 200 keeps its usage.
-			if rec.Code == http.StatusOK && !strings.Contains(rec.Body.String(), `"total_tokens":8`) {
-				t.Fatalf("body = %s, want provider usage", rec.Body.String())
+			if rec.Code == http.StatusOK {
+				require.Contains(t, rec.Body.String(), `"total_tokens":8`, "want provider usage")
 			}
 		})
 	}
@@ -266,17 +265,14 @@ func TestChatCompletion_StreamPhase(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			chains := phaseChains(t, tt.cfg, guardrails.StepReference{Ref: "phase", Phase: tt.phase, Step: 1})
 			rec := doChat(t, phaseHandler(t, phaseProvider(), chains), chatStreamBody)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 			body := rec.Body.String()
 			for _, want := range tt.want {
-				if !strings.Contains(body, want) {
-					t.Fatalf("body = %s, want %q", body, want)
-				}
+				require.Contains(t, body, want)
 			}
-			if tt.notWant != "" && strings.Contains(body, tt.notWant) {
-				t.Fatalf("body = %s, must not contain %q", body, tt.notWant)
+			if tt.notWant != "" {
+				require.NotContains(t, body, tt.notWant)
 			}
 		})
 	}
@@ -286,13 +282,10 @@ func TestCanForwardMessagesNatively_DisabledByPostResponsePlugins(t *testing.T) 
 	chains := phaseChains(t, map[string]string{"response": "warn"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1})
 	svc := &translatedInferenceService{provider: &capturingProvider{}, pluginChains: staticChainsResolver{chains: chains}}
 	workflow := &core.Workflow{ProviderType: anthropicProviderType}
-	if svc.canForwardMessagesNatively(context.Background(), workflow, false) {
-		t.Fatal("native fast path allowed with a response chain")
-	}
+	require.False(t, svc.canForwardMessagesNatively(context.Background(), workflow, false))
+
 	svc.pluginChains = staticChainsResolver{chains: &plugins.Chains{}}
-	if svc.hasPostResponsePlugins(context.Background()) {
-		t.Fatal("empty chains reported as post-response plugins")
-	}
+	require.False(t, svc.hasPostResponsePlugins(context.Background()))
 }
 
 // usageStreamProvider streams a completion whose final chunk carries usage,
@@ -323,13 +316,9 @@ func TestChatCompletion_BufferedStreamKeepsProviderUsage(t *testing.T) {
 			rec := doChat(t, phaseHandler(t, usageStreamProvider(), chains), chatStreamBody)
 			body := rec.Body.String()
 			for _, want := range tt.want {
-				if !strings.Contains(body, want) {
-					t.Fatalf("body = %s, want %q", body, want)
-				}
+				require.Contains(t, body, want)
 			}
-			if strings.Count(body, "[DONE]") != 1 {
-				t.Fatalf("body = %s, want exactly one [DONE]", body)
-			}
+			require.Equal(t, 1, strings.Count(body, "[DONE]"), "body = %s, want exactly one [DONE]", body)
 		})
 	}
 }
@@ -345,23 +334,19 @@ func TestChatCompletion_TwoBufferedMutatingInstances(t *testing.T) {
 		guardrails.Definition{Name: "two", Type: "phase_test", Config: second})
 	rec := doChat(t, phaseHandler(t, phaseProvider(), chains), chatStreamBody)
 	body := rec.Body.String()
-	if strings.Contains(body, "plugin_failure") || !strings.Contains(body, `"content":"second"`) {
-		t.Fatalf("body = %s, want the second editor's text and no plugin_failure", body)
-	}
+	require.NotContains(t, body, "plugin_failure")
+	require.Contains(t, body, `"content":"second"`)
 }
 
 func TestChatCompletion_StreamWarnHeaderCommitsWithFirstBytes(t *testing.T) {
 	chains := phaseChains(t, map[string]string{"response": "warn"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1})
 	rec := doChat(t, phaseHandler(t, phaseProvider(), chains), chatStreamBody)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get(plugins.GuardrailHeader); got != "warn; code=pii" {
-		t.Fatalf("header = %q, want the buffered response's warn", got)
-	}
-	if body := rec.Body.String(); !strings.Contains(body, "secret answer") || !strings.HasSuffix(strings.TrimSpace(body), "[DONE]") {
-		t.Fatalf("body = %s", body)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := rec.Header().Get(plugins.GuardrailHeader)
+	require.Equal(t, "warn; code=pii", got)
+	body := rec.Body.String()
+	require.Contains(t, body, "secret answer")
+	require.True(t, strings.HasSuffix(strings.TrimSpace(body), "[DONE]"))
 }
 
 // Requests hold their plugin instances only while a phase runs (the whole
@@ -375,14 +360,11 @@ func TestChatCompletion_PluginChainsReleasedAfterRequest(t *testing.T) {
 				guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindResponse, Step: 1},
 				guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindStream, Step: 1})
 			rec := doChat(t, phaseHandler(t, phaseProvider(), chains), tt.body)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 			for _, chain := range []*plugins.Chain{chains.Prompt, chains.Response, chains.Stream} {
 				for _, inst := range chain.Instances() {
-					if inst.Held() {
-						t.Fatalf("instance %q still held after the request", inst.Name)
-					}
+					require.False(t, inst.Held(), "instance %q still held after the request", inst.Name)
 				}
 			}
 		})
@@ -409,16 +391,12 @@ func TestChatCompletion_StreamEndSeesTransformedText(t *testing.T) {
 		"watch": {"stream": "end_block"},
 	}, guardrails.StepReference{Ref: "scrub", Phase: pluginapi.KindStream, Step: 1}, guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindStream, Step: 2})
 	rec := doChat(t, phaseHandler(t, phaseProvider(), chains), chatStreamBody)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	body := rec.Body.String()
-	if !strings.Contains(body, "[x] answer") || strings.Contains(body, "secret") {
-		t.Fatalf("body = %s, want the scrubbed text only", body)
-	}
-	if strings.Contains(body, `"policy"`) {
-		t.Fatalf("body = %s: the observing instance blocked over already-scrubbed text", body)
-	}
+	require.Contains(t, body, "[x] answer")
+	require.NotContains(t, body, "secret")
+	require.NotContains(t, body, `"policy"`, "body = %s: the observing instance blocked over already-scrubbed text", body)
 }
 
 // A buffered instance's MaxBufferBytes must not cap the buffer the response
@@ -438,16 +416,14 @@ func TestChatCompletion_BufferCapIsNotBorrowedByResponseChain(t *testing.T) {
 	t.Run("response chain uses the default", func(t *testing.T) {
 		rec := doChat(t, phaseHandler(t, phaseProvider(), phaseChainsNamed(t, cfgs, steps(true)...)), chatStreamBody)
 		body := rec.Body.String()
-		if rec.Code != http.StatusOK || !strings.Contains(body, "secret answer") || !strings.Contains(body, "[DONE]") {
-			t.Fatalf("status = %d body = %s, want the full answer", rec.Code, body)
-		}
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, body, "secret answer")
+		require.Contains(t, body, "[DONE]")
 	})
 	t.Run("alone the cap applies", func(t *testing.T) {
 		rec := doChat(t, phaseHandler(t, phaseProvider(), phaseChainsNamed(t, cfgs, steps(false)...)), chatStreamBody)
 		body := rec.Body.String()
-		if strings.Contains(body, "secret answer") {
-			t.Fatalf("body = %s, want the stream cut by the buffer cap", body)
-		}
+		require.NotContains(t, body, "secret answer", "body = %s, want the stream cut by the buffer cap", body)
 	})
 }
 
@@ -456,23 +432,11 @@ func TestChatCompletion_BufferCapIsNotBorrowedByResponseChain(t *testing.T) {
 func TestChatCompletion_BlockedRequestKeepsWorkflow(t *testing.T) {
 	chains := phaseChains(t, map[string]string{"prompt": "block"}, guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1})
 	handler := phaseHandler(t, phaseProvider(), chains)
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
-	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(chatBody), false, "", nil)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d (%s), want the block", rec.Code, rec.Body.String())
-	}
-	if core.GetWorkflow(c.Request().Context()) == nil {
-		t.Fatal("blocked request lost its resolved workflow")
-	}
+	c, rec := chatContext(t, chatBody)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.NotNil(t, core.GetWorkflow(c.Request().Context()))
 }
 
 // A prompt edit is applied back to the request once, after the whole chain;
@@ -485,55 +449,41 @@ func TestChatCompletion_PromptEditRecordsRevisionBody(t *testing.T) {
 			guardrails.StepReference{Ref: "phase", Phase: pluginapi.KindPrompt, Step: 1})
 		auditLogger := &capturingAuditLogger{config: auditlog.Config{Enabled: true, LogBodies: logBodies, LogRevisionBodies: logRevisionBodies, LogGuardrailSteps: true}}
 		handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
-		e := echo.New()
-		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-		req.Header.Set("Content-Type", "application/json")
-		req.Body = &explodingReadCloser{}
-		frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(chatBody), false, "", nil)
-		req = withRequestSnapshotAndPrompt(req, frame)
-		rec := httptest.NewRecorder()
-		c := e.NewContext(req, rec)
 		entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-		c.Set(string(auditlog.LogEntryKey), entry)
-		if err := handler.ChatCompletion(c); err != nil {
-			t.Fatalf("handler returned error: %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-		}
+		c, rec := chatContext(t, chatBody, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+		err := handler.ChatCompletion(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 		entry.CompleteRequestRevisions()
 		revisions := entry.Data.RequestRevisions
-		if len(revisions) != 1 {
-			t.Fatalf("expected 1 revision, got %d: %+v", len(revisions), revisions)
-		}
+		require.Len(t, revisions, 1)
+
 		revision := revisions[0]
-		if revision.Seq != 1 || revision.Rewriter != "phase" || revision.NoChange {
-			t.Errorf("revision must name the editing instance as a change: %+v", revision)
-		}
-		if revision.BytesBefore == 0 || revision.BytesAfter == 0 {
-			t.Errorf("revision sizes missing: %+v", revision)
-		}
+		assert.Equal(t, 1, revision.Seq)
+		assert.Equal(t, "phase", revision.Rewriter)
+		assert.False(t, revision.NoChange, "revision must name the editing instance as a change: %+v", revision)
+		assert.NotZero(t, revision.BytesBefore)
+		assert.NotZero(t, revision.BytesAfter, "revision sizes missing: %+v", revision)
+
 		return entry
 	}
 
 	t.Run("with body logging", func(t *testing.T) {
 		revision := run(t, true, true).Data.RequestRevisions[0]
 		body, _ := json.Marshal(revision.Body)
-		if !strings.Contains(string(body), "rewritten by guardrail") || strings.Contains(string(body), `"hi"`) {
-			t.Errorf("revision body must be the applied request: %s", body)
-		}
+		assert.Contains(t, string(body), "rewritten by guardrail")
+		assert.NotContains(t, string(body), `"hi"`, "revision body must be the applied request: %s", body)
 	})
 
 	t.Run("without body logging", func(t *testing.T) {
-		if revision := run(t, false, true).Data.RequestRevisions[0]; revision.Body != nil {
-			t.Errorf("body must not be captured when body logging is off: %+v", revision)
-		}
+		revision := run(t, false, true).Data.RequestRevisions[0]
+		assert.Nil(t, revision.Body, "body must not be captured when body logging is off: %+v", revision)
 	})
 
 	t.Run("without revision body logging", func(t *testing.T) {
-		if revision := run(t, true, false).Data.RequestRevisions[0]; revision.Body != nil {
-			t.Errorf("body must not be captured when revision body logging is off: %+v", revision)
-		}
+		revision := run(t, true, false).Data.RequestRevisions[0]
+		assert.Nil(t, revision.Body, "body must not be captured when revision body logging is off: %+v", revision)
 	})
 }
 
@@ -550,22 +500,12 @@ func runPromptRevisionsExpecting(t *testing.T, wantStatus int, body string, cfg 
 	chains := phaseChainsNamed(t, cfgs, steps...)
 	auditLogger := &capturingAuditLogger{config: cfg}
 	handler := phaseHandlerWithLogger(t, phaseProvider(), auditLogger, chains)
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
-	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "application/json", []byte(body), false, "", nil)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != wantStatus {
-		t.Fatalf("status = %d, want %d (%s)", rec.Code, wantStatus, rec.Body.String())
-	}
+	c, rec := chatContext(t, body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, wantStatus, rec.Code, rec.Body.String())
+
 	if len(auditLogger.entries) > 0 {
 		// A streamed request is written by the stream observer.
 		return auditLogger.entries[0].Data.RequestRevisions
@@ -596,12 +536,10 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 			"noop":   {},
 		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
 			guardrails.StepReference{Ref: "noop", Phase: pluginapi.KindPrompt, Step: 2})
-		if len(revisions) != 1 || revisions[0].Rewriter != "editor" || revisions[0].NoChange {
-			t.Fatalf("expected one changed revision for the editor, got %+v", revisions)
-		}
-		if !strings.Contains(bodyText(revisions[0]), "rewritten by editor") {
-			t.Errorf("editor revision must carry the applied body: %+v", revisions[0])
-		}
+		require.Len(t, revisions, 1)
+		require.Equal(t, "editor", revisions[0].Rewriter)
+		require.False(t, revisions[0].NoChange)
+		assert.Contains(t, bodyText(revisions[0]), "rewritten by editor", "editor revision must carry the applied body: %+v", revisions[0])
 	})
 
 	for _, tt := range []struct{ name, body string }{{"editor then editor", chatBody}, {"editor then editor, streamed", chatStreamBody}} {
@@ -611,22 +549,22 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 				"second": {"prompt": "edit", "text": "rewritten second"},
 			}, guardrails.StepReference{Ref: "first", Phase: pluginapi.KindPrompt, Step: 1},
 				guardrails.StepReference{Ref: "second", Phase: pluginapi.KindPrompt, Step: 2})
-			if len(revisions) != 2 || revisions[0].Rewriter != "first" || revisions[1].Rewriter != "second" || revisions[0].NoChange || revisions[1].NoChange {
-				t.Fatalf("expected one changed revision per editing step, got %+v", revisions)
-			}
-			if revisions[0].Seq != 1 || revisions[1].Seq != 2 {
-				t.Errorf("sequence = %d, %d", revisions[0].Seq, revisions[1].Seq)
-			}
+			require.Len(t, revisions, 2)
+			require.Equal(t, "first", revisions[0].Rewriter)
+			require.Equal(t, "second", revisions[1].Rewriter)
+			require.False(t, revisions[0].NoChange)
+			require.False(t, revisions[1].NoChange)
+			assert.Equal(t, 1, revisions[0].Seq)
+			assert.Equal(t, 2, revisions[1].Seq)
+
 			first, second := bodyText(revisions[0]), bodyText(revisions[1])
-			if !strings.Contains(first, "rewritten first") || strings.Contains(first, "rewritten second") {
-				t.Errorf("step 1 must carry the request as it left step 1: %s", first)
-			}
-			if !strings.Contains(second, "rewritten second") {
-				t.Errorf("step 2 must carry the request as it left step 2: %s", second)
-			}
-			if revisions[0].BytesBefore == 0 || revisions[0].BytesAfter == 0 || revisions[1].BytesBefore != revisions[0].BytesAfter || revisions[1].BytesAfter == 0 {
-				t.Errorf("each step must be measured against the previous one: %+v", revisions)
-			}
+			assert.Contains(t, first, "rewritten first")
+			assert.NotContains(t, first, "rewritten second")
+			assert.Contains(t, second, "rewritten second")
+			assert.NotZero(t, revisions[0].BytesBefore)
+			assert.NotZero(t, revisions[0].BytesAfter)
+			assert.Equal(t, revisions[0].BytesAfter, revisions[1].BytesBefore)
+			assert.NotZero(t, revisions[1].BytesAfter, "each step must be measured against the previous one: %+v", revisions)
 		})
 	}
 
@@ -636,16 +574,18 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 			"editor": {"prompt": "edit", "text": "rewritten by editor"},
 		}, guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindPrompt, Step: 1},
 			guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 2})
-		if len(revisions) != 2 || revisions[0].Rewriter != "watch" || !revisions[0].NoChange || revisions[0].Body != nil {
-			t.Fatalf("expected the warning as a no-change entry first, got %+v", revisions)
-		}
-		if revisions[1].Rewriter != "editor" || revisions[1].NoChange || !strings.Contains(bodyText(revisions[1]), "rewritten by editor") {
-			t.Errorf("the edit revision must follow with the applied body: %+v", revisions[1])
-		}
+		require.Len(t, revisions, 2)
+		require.Equal(t, "watch", revisions[0].Rewriter)
+		require.True(t, revisions[0].NoChange)
+		require.Nil(t, revisions[0].Body)
+		assert.Equal(t, "editor", revisions[1].Rewriter)
+		assert.False(t, revisions[1].NoChange)
+		assert.Contains(t, bodyText(revisions[1]), "rewritten by editor", "the edit revision must follow with the applied body: %+v", revisions[1])
+
 		// The warning inspected the original request: sized as such on both sides.
-		if revisions[0].BytesBefore == 0 || revisions[0].BytesBefore != revisions[0].BytesAfter || revisions[1].BytesBefore != revisions[0].BytesAfter {
-			t.Errorf("no-change sizes must be the request the step saw: %+v", revisions)
-		}
+		assert.NotZero(t, revisions[0].BytesBefore)
+		assert.Equal(t, revisions[0].BytesAfter, revisions[0].BytesBefore)
+		assert.Equal(t, revisions[0].BytesAfter, revisions[1].BytesBefore, "no-change sizes must be the request the step saw: %+v", revisions)
 	})
 
 	t.Run("editor then warning", func(t *testing.T) {
@@ -654,13 +594,13 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 			"watch":  {"prompt": "warn"},
 		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
 			guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindPrompt, Step: 2})
-		if len(revisions) != 2 || revisions[1].Rewriter != "watch" || !revisions[1].NoChange {
-			t.Fatalf("expected the edit then the warning, got %+v", revisions)
-		}
+		require.Len(t, revisions, 2)
+		require.Equal(t, "watch", revisions[1].Rewriter)
+		require.True(t, revisions[1].NoChange)
+
 		// The warning inspected the edited request.
-		if revisions[1].BytesBefore != revisions[0].BytesAfter || revisions[1].BytesAfter != revisions[0].BytesAfter {
-			t.Errorf("no-change sizes must follow the edit: %+v", revisions)
-		}
+		assert.Equal(t, revisions[0].BytesAfter, revisions[1].BytesBefore)
+		assert.Equal(t, revisions[0].BytesAfter, revisions[1].BytesAfter, "no-change sizes must follow the edit: %+v", revisions)
 	})
 
 	t.Run("editor then block", func(t *testing.T) {
@@ -669,29 +609,30 @@ func TestChatCompletion_PromptEditsRecordEachStep(t *testing.T) {
 			"gate":   {"prompt": "block"},
 		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1},
 			guardrails.StepReference{Ref: "gate", Phase: pluginapi.KindPrompt, Step: 2})
-		if len(revisions) != 2 || revisions[0].Rewriter != "editor" || revisions[0].NoChange || revisions[1].Rewriter != "gate" || !revisions[1].NoChange {
-			t.Fatalf("expected the edit then the block, got %+v", revisions)
-		}
+		require.Len(t, revisions, 2)
+		require.Equal(t, "editor", revisions[0].Rewriter)
+		require.False(t, revisions[0].NoChange)
+		require.Equal(t, "gate", revisions[1].Rewriter)
+		require.True(t, revisions[1].NoChange)
+
 		// Nothing was forwarded, but the edit still shows what the block saw.
-		if !strings.Contains(bodyText(revisions[0]), "rewritten by editor") || revisions[1].BytesBefore != revisions[0].BytesAfter {
-			t.Errorf("the edit snapshot must survive a later block: %+v", revisions)
-		}
+		assert.Contains(t, bodyText(revisions[0]), "rewritten by editor")
+		assert.Equal(t, revisions[0].BytesAfter, revisions[1].BytesBefore, "the edit snapshot must survive a later block: %+v", revisions)
 	})
 
 	t.Run("edit then fail closed", func(t *testing.T) {
 		revisions := runPromptRevisionsExpecting(t, http.StatusInternalServerError, chatBody, auditlog.Config{Enabled: true, LogBodies: true, LogRevisionBodies: true, LogGuardrailSteps: true}, map[string]map[string]string{
 			"editor": {"prompt": "edit_fail", "text": "rewritten then failed"},
 		}, guardrails.StepReference{Ref: "editor", Phase: pluginapi.KindPrompt, Step: 1})
-		if len(revisions) != 1 || revisions[0].Rewriter != "editor" || revisions[0].NoChange {
-			t.Fatalf("expected the edit as a changed revision, got %+v", revisions)
-		}
+		require.Len(t, revisions, 1)
+		require.Equal(t, "editor", revisions[0].Rewriter)
+		require.False(t, revisions[0].NoChange)
+
 		// The failure came after the edit, so the trail shows the edited request.
-		if !strings.Contains(bodyText(revisions[0]), "rewritten then failed") || revisions[0].BytesAfter == revisions[0].BytesBefore {
-			t.Errorf("the edit snapshot must survive the instance's own failure: %+v", revisions[0])
-		}
-		if detail := revisions[0].Detail.(pluginDecisionDetail); !strings.Contains(detail.Error, "failed after editing") {
-			t.Errorf("detail must carry the failure: %+v", detail)
-		}
+		assert.Contains(t, bodyText(revisions[0]), "rewritten then failed")
+		assert.NotEqual(t, revisions[0].BytesBefore, revisions[0].BytesAfter, "the edit snapshot must survive the instance's own failure: %+v", revisions[0])
+		detail := revisions[0].Detail.(pluginDecisionDetail)
+		assert.Contains(t, detail.Error, "failed after editing", "detail must carry the failure: %+v", detail)
 	})
 }
 
@@ -710,20 +651,23 @@ func TestPromptStepRevisionsKeepSizesWhenASnapshotFails(t *testing.T) {
 		}},
 	}
 	revisions := promptStepRevisions(records, edits, []byte(`{"model":"m"}`), true)
-	if len(revisions) != 3 {
-		t.Fatalf("revisions = %+v", revisions)
-	}
+	require.Len(t, revisions, 3)
+
 	failed := revisions[0]
-	if failed.NoChange || failed.BytesBefore != 13 || failed.BytesAfter != 13 || failed.Body != nil || !strings.Contains(failed.Detail.(pluginDecisionDetail).Error, "boom") {
-		t.Errorf("failed snapshot revision = %+v", failed)
-	}
+	assert.False(t, failed.NoChange)
+	assert.Equal(t, 13, failed.BytesBefore)
+	assert.Equal(t, 13, failed.BytesAfter)
+	assert.Nil(t, failed.Body)
+	assert.Contains(t, failed.Detail.(pluginDecisionDetail).Error, "boom", "failed snapshot revision = %+v", failed)
+
 	applied := revisions[1]
-	if applied.NoChange || applied.BytesBefore != 13 || applied.BytesAfter == 0 || applied.Body == nil {
-		t.Errorf("applied snapshot revision = %+v", applied)
-	}
-	if revisions[2].BytesBefore != applied.BytesAfter || revisions[2].BytesAfter != applied.BytesAfter || !revisions[2].NoChange {
-		t.Errorf("no-change revision after the chain = %+v", revisions[2])
-	}
+	assert.False(t, applied.NoChange)
+	assert.Equal(t, 13, applied.BytesBefore)
+	assert.NotZero(t, applied.BytesAfter)
+	assert.NotNil(t, applied.Body, "applied snapshot revision = %+v", applied)
+	assert.Equal(t, applied.BytesAfter, revisions[2].BytesBefore)
+	assert.Equal(t, applied.BytesAfter, revisions[2].BytesAfter)
+	assert.True(t, revisions[2].NoChange, "no-change revision after the chain = %+v", revisions[2])
 }
 
 // With step logging off the phase keeps no snapshots: the chain's edits are
@@ -737,18 +681,20 @@ func TestChatCompletion_PromptEditsRecordOneRevisionWithoutStepLogging(t *testin
 	}, guardrails.StepReference{Ref: "first", Phase: pluginapi.KindPrompt, Step: 1},
 		guardrails.StepReference{Ref: "watch", Phase: pluginapi.KindPrompt, Step: 2},
 		guardrails.StepReference{Ref: "second", Phase: pluginapi.KindPrompt, Step: 3})
-	if len(revisions) != 2 || revisions[0].Rewriter != "watch" || !revisions[0].NoChange {
-		t.Fatalf("expected the warning then one chain revision, got %+v", revisions)
-	}
+	require.Len(t, revisions, 2)
+	require.Equal(t, "watch", revisions[0].Rewriter)
+	require.True(t, revisions[0].NoChange)
+
 	chain := revisions[1]
-	if chain.Rewriter != "first, second" || chain.NoChange || chain.Seq != 2 || chain.BytesBefore == 0 || chain.BytesAfter == 0 {
-		t.Errorf("chain revision = %+v", chain)
-	}
-	if body := revisionBodyText(chain); !strings.Contains(body, "rewritten second") || strings.Contains(body, "rewritten first") {
-		t.Errorf("chain revision must carry the request as forwarded: %s", body)
-	}
+	assert.Equal(t, "first, second", chain.Rewriter)
+	assert.False(t, chain.NoChange)
+	assert.Equal(t, 2, chain.Seq)
+	assert.NotZero(t, chain.BytesBefore)
+	assert.NotZero(t, chain.BytesAfter, "chain revision = %+v", chain)
+	body := revisionBodyText(chain)
+	assert.Contains(t, body, "rewritten second")
+	assert.NotContains(t, body, "rewritten first")
+
 	detail, _ := json.Marshal(chain.Detail)
-	if string(detail) != `{"phase":"prompt","edited":["first","second"]}` {
-		t.Errorf("detail = %s", detail)
-	}
+	assert.Equal(t, `{"phase":"prompt","edited":["first","second"]}`, string(detail), "detail = %s", detail)
 }

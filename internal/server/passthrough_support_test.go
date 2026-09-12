@@ -4,14 +4,15 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -23,15 +24,12 @@ func TestBuildPassthroughHeadersSkipsConfiguredUserPathHeader(t *testing.T) {
 	headers.Set("OpenAI-Beta", "responses=v1")
 
 	got := buildPassthroughHeaders(ctx, headers)
-	if value := got.Get("X-Tenant-Path"); value != "" {
-		t.Fatalf("X-Tenant-Path should not be forwarded, got %q", value)
-	}
-	if value := got.Get(core.UserPathHeader); value != "" {
-		t.Fatalf("%s should not be forwarded, got %q", core.UserPathHeader, value)
-	}
-	if value := got.Get("OpenAI-Beta"); value != "responses=v1" {
-		t.Fatalf("OpenAI-Beta = %q, want responses=v1", value)
-	}
+	value := got.Get("X-Tenant-Path")
+	require.Empty(t, value)
+	value = got.Get(core.UserPathHeader)
+	require.Empty(t, value, "%s should not be forwarded, got %q", core.UserPathHeader, value)
+	value = got.Get("OpenAI-Beta")
+	require.Equal(t, "responses=v1", value)
 }
 
 // TestDefaultEnabledPassthroughProvidersIncludesHetzner asserts that the default
@@ -40,9 +38,7 @@ func TestBuildPassthroughHeadersSkipsConfiguredUserPathHeader(t *testing.T) {
 // upstream. Caught by greptile P1 on PR #701.
 func TestDefaultEnabledPassthroughProvidersIncludesHetzner(t *testing.T) {
 	found := slices.Contains(defaultEnabledPassthroughProviders, "hetzner")
-	if !found {
-		t.Fatalf("defaultEnabledPassthroughProviders = %v, want hetzner included", defaultEnabledPassthroughProviders)
-	}
+	require.True(t, found, "defaultEnabledPassthroughProviders = %v, want hetzner included", defaultEnabledPassthroughProviders)
 }
 
 // A successful non-streaming JSON passthrough response must produce a usage
@@ -57,28 +53,18 @@ func TestProxyPassthroughNonStreamingLogsUsage(t *testing.T) {
 	}
 	usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/p/anthropic/messages", `{}`)
 
 	info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages", Model: "claude-fable-5"}
-	if err := proxyPassthroughResponse(c, nil, usageLogger, nil, "anthropic", "anthropic", "messages", info, resp); err != nil {
-		t.Fatalf("proxyPassthroughResponse: %v", err)
-	}
-	if rec.Body.String() != body {
-		t.Fatalf("body not relayed verbatim: %s", rec.Body.String())
-	}
-	if len(usageLogger.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLogger.entries))
-	}
+	err := proxyPassthroughResponse(c, nil, usageLogger, nil, "anthropic", "anthropic", "messages", info, resp)
+	require.NoError(t, err)
+	require.Equal(t, body, rec.Body.String())
+	require.Len(t, usageLogger.entries, 1)
+
 	entry := usageLogger.entries[0]
-	if entry.InputTokens != 42 || entry.OutputTokens != 6 {
-		t.Errorf("tokens = (%d, %d), want (42, 6)", entry.InputTokens, entry.OutputTokens)
-	}
-	if entry.ProviderID != "msg_p" {
-		t.Errorf("ProviderID = %q, want msg_p", entry.ProviderID)
-	}
+	assert.Equal(t, 42, entry.InputTokens)
+	assert.Equal(t, 6, entry.OutputTokens)
+	assert.Equal(t, "msg_p", entry.ProviderID)
 }
 
 // Any complete-body success status must be accounted, not only 200: /p/ is
@@ -93,21 +79,13 @@ func TestProxyPassthroughNonStreamingLogsUsageForNon200Success(t *testing.T) {
 		}
 		usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
 
-		e := echo.New()
-		req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{}`))
-		rec := httptest.NewRecorder()
-		c := e.NewContext(req, rec)
+		c, rec := echotest.Post(t, "/p/anthropic/messages", `{}`)
 
 		info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages"}
-		if err := proxyPassthroughResponse(c, nil, usageLogger, nil, "anthropic", "anthropic", "messages", info, resp); err != nil {
-			t.Fatalf("status %d: proxyPassthroughResponse: %v", status, err)
-		}
-		if len(usageLogger.entries) != 1 {
-			t.Fatalf("status %d: usage entries = %d, want 1", status, len(usageLogger.entries))
-		}
-		if rec.Code != status {
-			t.Fatalf("status = %d, want %d", rec.Code, status)
-		}
+		err := proxyPassthroughResponse(c, nil, usageLogger, nil, "anthropic", "anthropic", "messages", info, resp)
+		require.NoError(t, err, "status %d: proxyPassthroughResponse: %v", status, err)
+		require.Len(t, usageLogger.entries, 1)
+		require.Equal(t, status, rec.Code)
 	}
 }
 
@@ -135,24 +113,14 @@ func TestProxyPassthroughNonStreamingSkipsNonAccountableResponses(t *testing.T) 
 			}
 			usageLogger := &collectingUsageLogger{config: usage.Config{Enabled: true}}
 
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/p/anthropic/messages", strings.NewReader(`{}`))
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := echotest.Post(t, "/p/anthropic/messages", `{}`)
 
 			info := &core.PassthroughRouteInfo{Provider: "anthropic", RawEndpoint: "messages"}
-			if err := proxyPassthroughResponse(c, nil, usageLogger, nil, "anthropic", "anthropic", "messages", info, resp); err != nil {
-				t.Fatalf("proxyPassthroughResponse: %v", err)
-			}
-			if rec.Body.String() != body {
-				t.Fatalf("body not relayed verbatim: %s", rec.Body.String())
-			}
-			if len(usageLogger.entries) != 0 {
-				t.Fatalf("usage entries = %d, want 0", len(usageLogger.entries))
-			}
-			if rec.Code != tc.status {
-				t.Fatalf("status = %d, want %d", rec.Code, tc.status)
-			}
+			err := proxyPassthroughResponse(c, nil, usageLogger, nil, "anthropic", "anthropic", "messages", info, resp)
+			require.NoError(t, err)
+			require.Equal(t, body, rec.Body.String())
+			require.Empty(t, usageLogger.entries)
+			require.Equal(t, tc.status, rec.Code)
 		})
 	}
 }

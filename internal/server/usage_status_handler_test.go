@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/budget"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
@@ -71,9 +74,8 @@ func getUsageStatus(t *testing.T, cfg *Config, target string, headers map[string
 
 	var body usageStatusResponse
 	if rec.Code == http.StatusOK {
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decode body: %v (body: %s)", err, rec.Body.String())
-		}
+		err := json.Unmarshal(rec.Body.Bytes(), &body)
+		require.NoError(t, err, "decode body: %v (body: %s)", err, rec.Body.String())
 	}
 	return rec, body
 }
@@ -107,44 +109,38 @@ func TestUsageStatusReportsManagedKeyPath(t *testing.T) {
 	}
 
 	rec, body := getUsageStatus(t, cfg, "/v1/usage", map[string]string{"Authorization": "Bearer sk_gom_test"})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if body.UserPath != "/team/alice" {
-		t.Fatalf("user_path = %q, want /team/alice", body.UserPath)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "/team/alice", body.UserPath)
+
 	for name, got := range map[string]string{
 		"summarizer": summarizer.gotParams.UserPath,
 		"budgets":    budgets.gotSubjects.UserPath,
 		"ratelimits": limiter.gotPath,
 	} {
-		if got != "/team/alice" {
-			t.Fatalf("%s queried path %q, want /team/alice", name, got)
-		}
+		require.Equal(t, "/team/alice", got, "%s queried path %q, want /team/alice", name, got)
 	}
 
-	if body.Usage == nil || body.Usage.TotalRequests != 7 || body.Usage.TotalTokens != 1234 {
-		t.Fatalf("usage = %+v, want 7 requests / 1234 tokens", body.Usage)
-	}
-	if window := summarizer.gotParams.EndDate.Sub(summarizer.gotParams.StartDate); window != 29*24*time.Hour {
-		t.Fatalf("default window = %s, want 29 days between inclusive bounds", window)
-	}
+	require.NotNil(t, body.Usage)
+	require.Equal(t, 7, body.Usage.TotalRequests)
+	require.Equal(t, int64(1234), body.Usage.TotalTokens)
+	window := summarizer.gotParams.EndDate.Sub(summarizer.gotParams.StartDate)
+	require.Equal(t, 29*24*time.Hour, window)
+	require.Len(t, body.Budgets, 1)
 
-	if len(body.Budgets) != 1 {
-		t.Fatalf("budgets = %d, want 1", len(body.Budgets))
-	}
 	b := body.Budgets[0]
-	if b.UserPath != "/team" || b.PeriodLabel != "daily" || b.Spent != 12 || b.Remaining != -2 || !b.Exceeded {
-		t.Fatalf("budget status = %+v, want exceeded daily /team budget", b)
-	}
+	require.Equal(t, "/team", b.UserPath)
+	require.Equal(t, "daily", b.PeriodLabel)
+	require.Equal(t, float64(12), b.Spent)
+	require.Equal(t, float64(-2), b.Remaining)
+	require.True(t, b.Exceeded, "daily /team budget should be exceeded: %+v", b)
+	require.Len(t, body.RateLimits, 1)
 
-	if len(body.RateLimits) != 1 {
-		t.Fatalf("rate_limits = %d, want 1", len(body.RateLimits))
-	}
 	rl := body.RateLimits[0]
-	if rl.UserPath != "/team" || rl.PeriodLabel != "minute" || rl.RequestsUsed != 3 || rl.MaxRequests == nil || *rl.MaxRequests != 7 {
-		t.Fatalf("rate limit status = %+v, want /team minute rule with 3 used", rl)
-	}
+	require.Equal(t, "/team", rl.UserPath)
+	require.Equal(t, "minute", rl.PeriodLabel)
+	require.Equal(t, int64(3), rl.RequestsUsed)
+	require.NotNil(t, rl.MaxRequests)
+	require.Equal(t, int64(7), *rl.MaxRequests, "expected the /team minute rule: %+v", rl)
 }
 
 // A per-child template reports the parent it was declared on as `subject`
@@ -196,27 +192,19 @@ func TestUsageStatusReportsPerChildSubjects(t *testing.T) {
 			}
 
 			rec, body := getUsageStatus(t, cfg, "/v1/usage", map[string]string{core.UserPathHeader: "/team/alice"})
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Len(t, body.Budgets, 1)
 
-			if len(body.Budgets) != 1 {
-				t.Fatalf("budgets = %d, want 1", len(body.Budgets))
-			}
 			b := body.Budgets[0]
-			if b.Subject != "/team" || b.PerChild != tt.perChild || b.UserPath != tt.wantUserPath {
-				t.Errorf("budget subject/per_child/user_path = %q/%v/%q, want /team/%v/%q",
-					b.Subject, b.PerChild, b.UserPath, tt.perChild, tt.wantUserPath)
-			}
+			assert.Equal(t, "/team", b.Subject)
+			assert.Equal(t, tt.perChild, b.PerChild)
+			assert.Equal(t, tt.wantUserPath, b.UserPath)
+			require.Len(t, body.RateLimits, 1)
 
-			if len(body.RateLimits) != 1 {
-				t.Fatalf("rate_limits = %d, want 1", len(body.RateLimits))
-			}
 			rl := body.RateLimits[0]
-			if rl.Subject != "/team" || rl.PerChild != tt.perChild || rl.UserPath != tt.wantUserPath {
-				t.Errorf("rate limit subject/per_child/user_path = %q/%v/%q, want /team/%v/%q",
-					rl.Subject, rl.PerChild, rl.UserPath, tt.perChild, tt.wantUserPath)
-			}
+			assert.Equal(t, "/team", rl.Subject)
+			assert.Equal(t, tt.perChild, rl.PerChild)
+			assert.Equal(t, tt.wantUserPath, rl.UserPath)
 		})
 	}
 }
@@ -258,46 +246,29 @@ func TestUsageStatusDerivedFields(t *testing.T) {
 	}}
 
 	rec, body := getUsageStatus(t, &Config{BudgetChecker: budgets, RateLimiter: limiter}, "/v1/usage", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Len(t, body.Budgets, 1)
 
-	if len(body.Budgets) != 1 {
-		t.Fatalf("budgets = %d, want 1", len(body.Budgets))
-	}
 	b := body.Budgets[0]
-	if b.UsageRatio != 1.2 {
-		t.Fatalf("budget usage_ratio = %v, want 1.2 (unclamped)", b.UsageRatio)
-	}
-	if b.ResetsInSeconds <= 85*60 || b.ResetsInSeconds > 90*60 {
-		t.Fatalf("budget resets_in_seconds = %d, want ~90 minutes", b.ResetsInSeconds)
-	}
+	require.Equal(t, 1.2, b.UsageRatio)
+	require.Greater(t, b.ResetsInSeconds, int64(85*60))
+	require.LessOrEqual(t, b.ResetsInSeconds, int64(90*60))
+	require.Len(t, body.RateLimits, 2)
 
-	if len(body.RateLimits) != 2 {
-		t.Fatalf("rate_limits = %d, want 2", len(body.RateLimits))
-	}
 	windowed, concurrent := body.RateLimits[0], body.RateLimits[1]
-	if windowed.RequestsUsageRatio == nil || *windowed.RequestsUsageRatio != 3.0/10.0 {
-		t.Fatalf("windowed requests_usage_ratio = %v, want 0.3", windowed.RequestsUsageRatio)
-	}
-	if windowed.TokensUsageRatio == nil || *windowed.TokensUsageRatio != 1.2 {
-		t.Fatalf("windowed tokens_usage_ratio = %v, want 1.2 (unclamped)", windowed.TokensUsageRatio)
-	}
-	if !windowed.Exhausted {
-		t.Fatal("windowed rule with zero tokens remaining must be exhausted")
-	}
-	if windowed.ResetsInSeconds == nil || *windowed.ResetsInSeconds <= 0 || *windowed.ResetsInSeconds > 45 {
-		t.Fatalf("windowed resets_in_seconds = %v, want within (0, 45]", windowed.ResetsInSeconds)
-	}
-	if concurrent.RequestsUsageRatio == nil || *concurrent.RequestsUsageRatio != 1.0 {
-		t.Fatalf("concurrent requests_usage_ratio = %v, want 1.0 (from in-flight)", concurrent.RequestsUsageRatio)
-	}
-	if !concurrent.Exhausted {
-		t.Fatal("concurrent rule at capacity must be exhausted")
-	}
-	if concurrent.ResetsInSeconds != nil || concurrent.TokensUsageRatio != nil {
-		t.Fatalf("concurrent rule resets/tokens ratio = %v/%v, want both omitted", concurrent.ResetsInSeconds, concurrent.TokensUsageRatio)
-	}
+	require.NotNil(t, windowed.RequestsUsageRatio)
+	require.Equal(t, 3.0/10.0, *windowed.RequestsUsageRatio)
+	require.NotNil(t, windowed.TokensUsageRatio)
+	require.Equal(t, 1.2, *windowed.TokensUsageRatio)
+	require.True(t, windowed.Exhausted)
+	require.NotNil(t, windowed.ResetsInSeconds)
+	require.Greater(t, *windowed.ResetsInSeconds, int64(0))
+	require.LessOrEqual(t, *windowed.ResetsInSeconds, int64(45))
+	require.NotNil(t, concurrent.RequestsUsageRatio)
+	require.Equal(t, 1.0, *concurrent.RequestsUsageRatio)
+	require.True(t, concurrent.Exhausted)
+	require.Nil(t, concurrent.ResetsInSeconds)
+	require.Nil(t, concurrent.TokensUsageRatio)
 }
 
 func TestUsageStatusMasterKeyUsesHeaderPath(t *testing.T) {
@@ -308,18 +279,12 @@ func TestUsageStatusMasterKeyUsesHeaderPath(t *testing.T) {
 		"Authorization":       "Bearer secret",
 		"X-GoModel-User-Path": "/team",
 	})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if body.UserPath != "/team" {
-		t.Fatalf("user_path = %q, want /team", body.UserPath)
-	}
-	if body.Usage == nil || body.Usage.StartDate != "2026-07-01" || body.Usage.EndDate != "2026-07-06" {
-		t.Fatalf("usage window = %+v, want 2026-07-01..2026-07-06", body.Usage)
-	}
-	if summarizer.gotParams.UserPath != "/team" {
-		t.Fatalf("summarizer path = %q, want /team", summarizer.gotParams.UserPath)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "/team", body.UserPath)
+	require.NotNil(t, body.Usage)
+	require.Equal(t, "2026-07-01", body.Usage.StartDate)
+	require.Equal(t, "2026-07-06", body.Usage.EndDate)
+	require.Equal(t, "/team", summarizer.gotParams.UserPath)
 }
 
 func TestUsageStatusCacheMode(t *testing.T) {
@@ -339,37 +304,26 @@ func TestUsageStatusCacheMode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{}}
 			rec, _ := getUsageStatus(t, &Config{UsageSummarizer: summarizer}, tc.target, nil)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-			}
-			if summarizer.gotParams.CacheMode != tc.want {
-				t.Fatalf("cache_mode = %q, want %q", summarizer.gotParams.CacheMode, tc.want)
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, tc.want, summarizer.gotParams.CacheMode)
 		})
 	}
 }
 
 func TestUsageStatusWithoutDependenciesReturnsEmptyStatus(t *testing.T) {
 	rec, body := getUsageStatus(t, &Config{}, "/v1/usage", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if body.UserPath != "/" {
-		t.Fatalf("user_path = %q, want /", body.UserPath)
-	}
-	if body.Usage != nil {
-		t.Fatalf("usage = %+v, want null without a summarizer", body.Usage)
-	}
-	if body.Budgets == nil || len(body.Budgets) != 0 || body.RateLimits == nil || len(body.RateLimits) != 0 {
-		t.Fatalf("budgets/rate_limits = %v/%v, want empty arrays", body.Budgets, body.RateLimits)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "/", body.UserPath)
+	require.Nil(t, body.Usage)
+	require.NotNil(t, body.Budgets)
+	require.Empty(t, body.Budgets)
+	require.NotNil(t, body.RateLimits)
+	require.Empty(t, body.RateLimits)
 }
 
 func TestUsageStatusRequiresAuth(t *testing.T) {
 	rec, _ := getUsageStatus(t, &Config{MasterKey: "secret"}, "/v1/usage", nil)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
 func TestUsageStatusRejectsInvalidDates(t *testing.T) {
@@ -382,9 +336,7 @@ func TestUsageStatusRejectsInvalidDates(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec, _ := getUsageStatus(t, &Config{}, target, nil)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-			}
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 		})
 	}
 }
@@ -392,49 +344,36 @@ func TestUsageStatusRejectsInvalidDates(t *testing.T) {
 func TestUsageStatusClampsOversizedDays(t *testing.T) {
 	summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{}}
 	rec, _ := getUsageStatus(t, &Config{UsageSummarizer: summarizer}, "/v1/usage?days=1000", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if window := summarizer.gotParams.EndDate.Sub(summarizer.gotParams.StartDate); window != 364*24*time.Hour {
-		t.Fatalf("window = %s, want 364 days between inclusive bounds (365-day cap)", window)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	window := summarizer.gotParams.EndDate.Sub(summarizer.gotParams.StartDate)
+	require.Equal(t, 364*24*time.Hour, window)
 }
 
 func TestUsageStatusRejectsInvalidUserPathHeader(t *testing.T) {
 	rec, _ := getUsageStatus(t, &Config{}, "/v1/usage", map[string]string{
 		"X-GoModel-User-Path": "/team/../secrets",
 	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
 
 func TestUsageStatusBudgetErrors(t *testing.T) {
 	t.Run("unavailable budgets degrade to empty", func(t *testing.T) {
 		budgets := &fakeBudgetStatusChecker{err: budget.ErrUnavailable}
 		rec, body := getUsageStatus(t, &Config{BudgetChecker: budgets}, "/v1/usage", nil)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-		}
-		if len(body.Budgets) != 0 {
-			t.Fatalf("budgets = %v, want empty", body.Budgets)
-		}
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Empty(t, body.Budgets)
 	})
 	t.Run("store failure surfaces as 503", func(t *testing.T) {
 		budgets := &fakeBudgetStatusChecker{err: errors.New("store down")}
 		rec, _ := getUsageStatus(t, &Config{BudgetChecker: budgets}, "/v1/usage", nil)
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503 (body: %s)", rec.Code, rec.Body.String())
-		}
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 	})
 }
 
 func TestUsageStatusSummaryErrorSurfacesAs503(t *testing.T) {
 	summarizer := &fakeUsageSummarizer{err: errors.New("query failed")}
 	rec, _ := getUsageStatus(t, &Config{UsageSummarizer: summarizer}, "/v1/usage", nil)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 (body: %s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
 }
 
 // TestUsageStatusScopedKeyIgnoresHeaderPath pins that a key bound to a user
@@ -457,11 +396,8 @@ func TestUsageStatusScopedKeyIgnoresHeaderPath(t *testing.T) {
 			"Authorization":     "Bearer sk_gom_test",
 			core.UserPathHeader: header,
 		})
-		if rec.Code != http.StatusOK {
-			t.Fatalf("header %q: status = %d, want 200 (body: %s)", header, rec.Code, rec.Body.String())
-		}
-		if body.UserPath != "/team/alice" || summarizer.gotParams.UserPath != "/team/alice" {
-			t.Fatalf("header %q: reported %q, queried %q, want /team/alice for both", header, body.UserPath, summarizer.gotParams.UserPath)
-		}
+		require.Equal(t, http.StatusOK, rec.Code, "header %q: %s", header, rec.Body.String())
+		require.Equal(t, "/team/alice", body.UserPath)
+		require.Equal(t, "/team/alice", summarizer.gotParams.UserPath, "header %q: reported %q, queried %q, want /team/alice for both", header, body.UserPath, summarizer.gotParams.UserPath)
 	}
 }
