@@ -353,7 +353,7 @@ func prependThinkingBlocks(msg core.Message, content any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	thinking := extra.ThinkingBlocks
+	thinking := signedThinkingBlocks(extra.ThinkingBlocks)
 	if len(thinking) == 0 {
 		return content, nil
 	}
@@ -368,6 +368,24 @@ func prependThinkingBlocks(msg core.Message, content any) (any, error) {
 		blocks = append(blocks, c...)
 	}
 	return blocks, nil
+}
+
+// signedThinkingBlocks keeps the replayed blocks Anthropic can accept back.
+// Anthropic rejects a thinking block whose signature it did not mint — a
+// missing one with "signature: Field required", any other with "Invalid
+// signature" — so reasoning another provider produced (which the Messages
+// dialect surfaces as a thinking block with an empty signature) is dropped
+// here instead of failing the whole turn. Redacted blocks carry opaque data
+// rather than a signature and are always kept.
+func signedThinkingBlocks(blocks []anthropicContentBlock) []anthropicContentBlock {
+	kept := make([]anthropicContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type == "thinking" && strings.TrimSpace(block.Signature) == "" {
+			continue
+		}
+		kept = append(kept, block)
+	}
+	return kept
 }
 
 // convertToAnthropicRequest converts core.ChatRequest to Anthropic format.

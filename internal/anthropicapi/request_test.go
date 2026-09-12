@@ -832,6 +832,87 @@ func TestToChatRequestPreservesAssistantThinkingBlocks(t *testing.T) {
 	}
 }
 
+// The documented agent loop echoes the assistant turn back verbatim. A turn
+// from a provider that does not sign its reasoning carries an empty signature,
+// which must survive the round trip as replay state rather than failing the
+// request: the block reaches the same provider again, and the Anthropic egress
+// drops it before it can reach Claude.
+func TestMessagesRoundTripUnsignedThinking(t *testing.T) {
+	resp := &core.ChatResponse{Choices: []core.Choice{{
+		Message: core.ResponseMessage{
+			Role:        "assistant",
+			Content:     "391",
+			ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"reasoning_content": json.RawMessage(`"17*23"`)}),
+		},
+		FinishReason: "stop",
+	}}}
+	content, err := json.Marshal(FromChatResponse(resp).Content)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(content), `"signature":""`) {
+		t.Fatalf("content = %s, want an empty signature on the thinking block", content)
+	}
+
+	body := `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":` +
+		string(content) + `},{"role":"user","content":"and now?"}]}`
+	decoded := mustDecode(t, body)
+	if !HasUnsignedThinking(decoded) {
+		t.Error("HasUnsignedThinking = false, want the replayed unsigned block detected")
+	}
+	chat, err := ToChatRequest(decoded)
+	if err != nil {
+		t.Fatalf("ToChatRequest: %v", err)
+	}
+	want := `{"thinking_blocks":[{"type":"thinking","thinking":"17*23"}]}`
+	if got := string(chat.Messages[1].ExtraFields.ExtraContent(core.ExtraContentVendorAnthropic)); got != want {
+		t.Errorf("extra_content.anthropic = %s, want %s", got, want)
+	}
+}
+
+func TestHasUnsignedThinking(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "signed assistant thinking",
+			body: `{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"t","signature":"sig"}]}]}`,
+		},
+		{
+			name: "redacted thinking carries data instead of a signature",
+			body: `{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"opaque"}]}]}`,
+		},
+		{
+			name: "string content",
+			body: `{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":"hi"}]}`,
+		},
+		{
+			name: "a stray user thinking block is not replay state",
+			body: `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"thinking","thinking":"t"}]}]}`,
+		},
+		{
+			name: "missing signature",
+			body: `{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"t"}]}]}`,
+			want: true,
+		},
+		{
+			name: "empty signature",
+			body: `{"model":"m","max_tokens":10,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"t","signature":"  "}]}]}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := HasUnsignedThinking(mustDecode(t, tt.body)); got != tt.want {
+				t.Errorf("HasUnsignedThinking = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToChatRequestLenientDropsUnsupportedContent(t *testing.T) {
 	body := `{
 		"model":"m","max_tokens":10,

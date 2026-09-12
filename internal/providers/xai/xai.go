@@ -85,11 +85,42 @@ func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
 // reasoning_effort as a top-level string (e.g. grok-4.5: low/medium/high,
 // default high), not "reasoning": {"effort": "..."}; the nested shape is
 // native only to xAI's Responses API, which passes through untouched.
+// Models that do not take a configurable effort reject the parameter
+// outright, so it is dropped for them instead of forwarded.
 func adaptChatRequest(req *core.ChatRequest) (*core.ChatRequest, error) {
-	if req == nil || req.Reasoning == nil || strings.TrimSpace(req.Reasoning.Effort) == "" {
+	if req == nil || req.Reasoning == nil {
 		return req, nil
 	}
-	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Model, req.Reasoning.Effort))
+	effort := strings.TrimSpace(req.Reasoning.Effort)
+	if effort == "" || rejectsReasoningEffort(req.Model) {
+		return providers.DropReasoning(req), nil
+	}
+	return providers.AdaptReasoningEffortRequest(req, normalizeReasoningEffort(req.Model, effort))
+}
+
+// rejectsReasoningEffort reports whether an xAI chat model answers 400
+// "Model ... does not support parameter reasoningEffort": the explicit
+// "-non-reasoning" Grok variants, the grok-build coding family (it thinks,
+// but the effort is fixed), grok-2, and grok-3 (only grok-3-mini takes an
+// effort). Unknown ids are not included, so a new reasoning model keeps the
+// parameter before this list learns about it.
+func rejectsReasoningEffort(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if i := strings.LastIndex(m, "/"); i >= 0 {
+		m = m[i+1:]
+	}
+	switch {
+	case strings.Contains(m, "non-reasoning"):
+		return true
+	case strings.HasPrefix(m, "grok-build"):
+		return true
+	case strings.HasPrefix(m, "grok-2"):
+		return true
+	case strings.HasPrefix(m, "grok-3"):
+		return !strings.Contains(m, "mini")
+	default:
+		return false
+	}
 }
 
 // normalizeReasoningEffort downgrades GoModel effort levels xAI does not

@@ -273,6 +273,21 @@ included, because that is what an Anthropic client echoes back:
 Streaming emits the signature as a `signature_delta` inside the thinking
 block, before it closes, exactly as Anthropic does.
 
+### Reasoning from providers that do not sign it
+
+DeepSeek, Fireworks and other providers return reasoning text with nothing to
+authenticate it. The Anthropic Messages API still renders it as a `thinking`
+block, with `signature: ""` — the schema marks the member required, so a
+strictly typed client would reject a block that omits it, and streaming opens
+the block with an empty signature and sends no `signature_delta`, which is the
+shape Anthropic itself streams before the real signature arrives. Echo the turn
+back unchanged: the block replays to that provider like any other.
+
+Anthropic accepts only signatures it minted (a missing one fails with
+`signature: Field required`, anything else with ``Invalid `signature` in
+`thinking` block``), so when such a history is routed to Anthropic the unsigned
+block is dropped and the rest of the turn is sent as usual.
+
 The other dialects have no thinking block, so they carry the same data under
 `extra_content.anthropic.thinking_blocks` — on the assistant message in Chat
 Completions, on the `reasoning` output item in the Responses API. Streaming
@@ -310,7 +325,7 @@ before dispatch, on every route, in every dialect.
 | --- | --- | --- |
 | `extra_content.google` | `gemini`, `vertex` | the signature, replayed on the matching part |
 | `extra_content.google` | any other provider | nothing; the member is dropped |
-| `extra_content.anthropic` | `anthropic` | thinking blocks and `is_error`, restored in place |
+| `extra_content.anthropic` | `anthropic` | thinking blocks and `is_error`, restored in place; a thinking block Anthropic did not sign is dropped |
 | `extra_content.anthropic` | any other provider | nothing; the member is dropped |
 
 The client's own history is never modified. The filtering happens on the copy

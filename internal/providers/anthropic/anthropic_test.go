@@ -2125,6 +2125,73 @@ func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
 	}
 }
 
+// Reasoning another provider produced reaches Anthropic as a thinking block
+// with no signature of Anthropic's own. Anthropic rejects the whole request for
+// it ("signature: Field required", or "Invalid `signature`" for anything the
+// gateway could mint), so the block is dropped and the rest of the turn stands.
+func TestConvertToAnthropicRequest_DropsUnsignedThinkingBlocks(t *testing.T) {
+	tests := []struct {
+		name   string
+		blocks string
+		want   []string
+	}{
+		{
+			name:   "missing signature",
+			blocks: `[{"type":"thinking","thinking":"foreign"}]`,
+			want:   []string{"text"},
+		},
+		{
+			name:   "empty signature",
+			blocks: `[{"type":"thinking","thinking":"foreign","signature":""}]`,
+			want:   []string{"text"},
+		},
+		{
+			name:   "signed blocks are kept",
+			blocks: `[{"type":"thinking","thinking":"own","signature":"sig1"}]`,
+			want:   []string{"thinking", "text"},
+		},
+		{
+			name:   "redacted blocks carry data rather than a signature",
+			blocks: `[{"type":"redacted_thinking","data":"opaque"}]`,
+			want:   []string{"redacted_thinking", "text"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := convertToAnthropicRequest(&core.ChatRequest{
+				Model: "claude-sonnet-4-5-20250929",
+				Messages: []core.Message{
+					{Role: "user", Content: "hi"},
+					{
+						Role:    "assistant",
+						Content: "391",
+						ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+							core.ExtraContentField: json.RawMessage(`{"anthropic":{"thinking_blocks":` + tt.blocks + `}}`),
+						}),
+					},
+					{Role: "user", Content: "and now?"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("convertToAnthropicRequest: %v", err)
+			}
+			var got []string
+			switch content := req.Messages[1].Content.(type) {
+			case []anthropicContentBlock:
+				for _, block := range content {
+					got = append(got, block.Type)
+				}
+			case string:
+				got = []string{"text"}
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("assistant blocks = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConvertToAnthropicRequest_RejectsMalformedAnthropicExtraContent(t *testing.T) {
 	_, err := convertToAnthropicRequest(&core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
