@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,8 +9,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
 
@@ -48,26 +49,23 @@ func newTestRateLimitService(t *testing.T, rules ...ratelimit.Rule) *ratelimit.S
 	normalized := make([]ratelimit.Rule, 0, len(rules))
 	for _, rule := range rules {
 		item, err := ratelimit.NormalizeRule(rule)
-		if err != nil {
-			t.Fatalf("NormalizeRule() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		normalized = append(normalized, item)
 	}
 	service, err := ratelimit.NewService(context.Background(), &staticRuleStore{rules: normalized})
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	return service
 }
 
-func newRateLimitTestContext(userPath string) (*echo.Context, *httptest.ResponseRecorder) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+func newRateLimitTestContext(t *testing.T, userPath string) (*echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
 	if userPath != "" {
-		req = req.WithContext(core.WithEffectiveUserPath(req.Context(), userPath))
+		c.SetRequest(c.Request().WithContext(core.WithEffectiveUserPath(c.Request().Context(), userPath)))
 	}
-	rec := httptest.NewRecorder()
-	return e.NewContext(req, rec), rec
+	return c, rec
 }
 
 func rateLimitRuleWithRequests(path string, maxRequests int64) ratelimit.Rule {
@@ -75,98 +73,72 @@ func rateLimitRuleWithRequests(path string, maxRequests int64) ratelimit.Rule {
 }
 
 func TestEnforceRateLimitNilLimiterIsNoop(t *testing.T) {
-	c, rec := newRateLimitTestContext("/team")
+	c, rec := newRateLimitTestContext(t, "/team")
 	release, err := enforceRateLimit(c, nil, rateLimitRoute{})
-	if err != nil {
-		t.Fatalf("enforceRateLimit() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	release()
-	if len(rec.Header()) != 0 {
-		t.Fatalf("headers = %v, want none", rec.Header())
-	}
+	require.Empty(t, rec.Header())
 }
 
 func TestEnforceRateLimitSetsSuccessHeaders(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/team", 5))
-	c, rec := newRateLimitTestContext("/team/alice")
+	c, rec := newRateLimitTestContext(t, "/team/alice")
 
 	release, err := enforceRateLimit(c, service, rateLimitRoute{})
-	if err != nil {
-		t.Fatalf("enforceRateLimit() error = %v", err)
-	}
-	defer release()
+	require.NoError(t, err)
 
-	if got := rec.Header().Get("x-ratelimit-limit-requests"); got != "5" {
-		t.Fatalf("x-ratelimit-limit-requests = %q, want 5", got)
-	}
-	if got := rec.Header().Get("x-ratelimit-remaining-requests"); got != "4" {
-		t.Fatalf("x-ratelimit-remaining-requests = %q, want 4", got)
-	}
+	defer release()
+	require.Equal(t, "5", rec.Header().Get("x-ratelimit-limit-requests"))
+	require.Equal(t, "4", rec.Header().Get("x-ratelimit-remaining-requests"))
+
 	reset, err := strconv.Atoi(rec.Header().Get("x-ratelimit-reset-requests"))
-	if err != nil || reset < 1 || reset > 60 {
-		t.Fatalf("x-ratelimit-reset-requests = %q, want 1..60", rec.Header().Get("x-ratelimit-reset-requests"))
-	}
-	if rec.Header().Get("x-ratelimit-limit-tokens") != "" {
-		t.Fatal("token headers set without a token rule")
-	}
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, reset, 1)
+	require.LessOrEqual(t, reset, 60)
+	require.Empty(t, rec.Header().Get("x-ratelimit-limit-tokens"))
 }
 
 func TestEnforceRateLimitBreachReturns429WithHeaders(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/team", 1))
 
-	c, _ := newRateLimitTestContext("/team/alice")
-	if _, err := enforceRateLimit(c, service, rateLimitRoute{}); err != nil {
-		t.Fatalf("first enforceRateLimit() error = %v", err)
-	}
+	c, _ := newRateLimitTestContext(t, "/team/alice")
+	_, err := enforceRateLimit(c, service, rateLimitRoute{})
+	require.NoError(t, err)
 
-	c2, _ := newRateLimitTestContext("/team/alice")
-	_, err := enforceRateLimit(c2, service, rateLimitRoute{})
-	if err == nil {
-		t.Fatal("second enforceRateLimit() succeeded, want breach")
-	}
+	c2, _ := newRateLimitTestContext(t, "/team/alice")
+	_, err = enforceRateLimit(c2, service, rateLimitRoute{})
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error %T does not unwrap to GatewayError", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429", gatewayErr.HTTPStatusCode())
-	}
-	if gatewayErr.Type != core.ErrorTypeRateLimit {
-		t.Fatalf("type = %q, want rate_limit_error", gatewayErr.Type)
-	}
-	if gatewayErr.Code == nil || *gatewayErr.Code != "rate_limit_exceeded" {
-		t.Fatalf("code = %v, want rate_limit_exceeded", gatewayErr.Code)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
+	require.Equal(t, core.ErrorTypeRateLimit, gatewayErr.Type)
+	require.NotNil(t, gatewayErr.Code)
+	require.Equal(t, "rate_limit_exceeded", *gatewayErr.Code)
 
 	headerErr, ok := err.(*gatewayErrorWithResponseHeaders)
-	if !ok {
-		t.Fatalf("error %T does not carry response headers", err)
-	}
+	require.True(t, ok)
+
 	headers := headerErr.ResponseHeaders()
 	retryAfter, convErr := strconv.Atoi(headers.Get("Retry-After"))
-	if convErr != nil || retryAfter < 1 || retryAfter > 120 {
-		t.Fatalf("Retry-After = %q, want 1..120 (sliding-window recovery can pass the boundary)", headers.Get("Retry-After"))
-	}
-	if got := headers.Get("x-ratelimit-remaining-requests"); got != "0" {
-		t.Fatalf("x-ratelimit-remaining-requests = %q, want 0", got)
-	}
-	if got := headers.Get("x-ratelimit-limit-requests"); got != "1" {
-		t.Fatalf("x-ratelimit-limit-requests = %q, want 1", got)
-	}
+	require.NoError(t, convErr)
+	require.GreaterOrEqual(t, retryAfter, 1)
+	require.LessOrEqual(t, retryAfter, 120, "Retry-After = %q, want 1..120 (sliding-window recovery can pass the boundary)", headers.Get("Retry-After"))
+	require.Equal(t, "0", headers.Get("x-ratelimit-remaining-requests"))
+	require.Equal(t, "1", headers.Get("x-ratelimit-limit-requests"))
 }
 
 func TestEnforceRateLimitDefaultsToRootPath(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
 
-	c, _ := newRateLimitTestContext("")
-	if _, err := enforceRateLimit(c, service, rateLimitRoute{}); err != nil {
-		t.Fatalf("enforceRateLimit() error = %v", err)
-	}
-	c2, _ := newRateLimitTestContext("")
-	if _, err := enforceRateLimit(c2, service, rateLimitRoute{}); err == nil {
-		t.Fatal("root rule did not apply to requests without a user path")
-	}
+	c, _ := newRateLimitTestContext(t, "")
+	_, err := enforceRateLimit(c, service, rateLimitRoute{})
+	require.NoError(t, err)
+
+	c2, _ := newRateLimitTestContext(t, "")
+	_, err = enforceRateLimit(c2, service, rateLimitRoute{})
+	require.Error(t, err)
 }
 
 func TestEnforceRateLimitReleaseReturnsConcurrencySlot(t *testing.T) {
@@ -177,21 +149,19 @@ func TestEnforceRateLimitReleaseReturnsConcurrencySlot(t *testing.T) {
 		MaxRequests:   &maxInFlight,
 	})
 
-	c, _ := newRateLimitTestContext("/team")
+	c, _ := newRateLimitTestContext(t, "/team")
 	release, err := enforceRateLimit(c, service, rateLimitRoute{})
-	if err != nil {
-		t.Fatalf("enforceRateLimit() error = %v", err)
-	}
-	c2, _ := newRateLimitTestContext("/team")
-	if _, err := enforceRateLimit(c2, service, rateLimitRoute{}); err == nil {
-		t.Fatal("second in-flight request admitted over the concurrency cap")
-	}
+	require.NoError(t, err)
+
+	c2, _ := newRateLimitTestContext(t, "/team")
+	_, err = enforceRateLimit(c2, service, rateLimitRoute{})
+	require.Error(t, err)
+
 	release()
-	c3, _ := newRateLimitTestContext("/team")
+	c3, _ := newRateLimitTestContext(t, "/team")
 	release3, err := enforceRateLimit(c3, service, rateLimitRoute{})
-	if err != nil {
-		t.Fatalf("enforceRateLimit() after release error = %v", err)
-	}
+	require.NoError(t, err)
+
 	release3()
 }
 
@@ -203,18 +173,13 @@ func TestBatchRateLimitEnforcerCountsAndReleases(t *testing.T) {
 		ratelimit.Rule{Subject: "/", PeriodSeconds: ratelimit.PeriodMinuteSeconds, MaxRequests: &requestLimit},
 	)
 	enforcer := batchRateLimitEnforcer(service)
-
-	// The concurrency slot is released immediately, so repeated submissions
-	// are bounded by the request window, not the in-flight cap.
-	if err := enforcer(context.Background()); err != nil {
-		t.Fatalf("first batch submission rejected: %v", err)
-	}
-	if err := enforcer(context.Background()); err != nil {
-		t.Fatalf("second batch submission rejected: %v", err)
-	}
-	if err := enforcer(context.Background()); err == nil {
-		t.Fatal("third batch submission admitted over the request window")
-	}
+	err := // The concurrency slot is released immediately, so repeated submissions
+		// are bounded by the request window, not the in-flight cap.
+		enforcer(context.Background())
+	require.NoError(t, err)
+	err = enforcer(context.Background())
+	require.NoError(t, err)
+	require.Error(t, enforcer(context.Background()))
 }
 
 func rateLimitProviderRule(provider string, maxRequests int64) ratelimit.Rule {
@@ -232,43 +197,34 @@ func TestEnforceAdmissionDefersSaturatedRouteToFailover(t *testing.T) {
 	checker := &countingBudgetChecker{}
 	route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}.withFailovers(1)
 
-	c, _ := newRateLimitTestContext("/team")
+	c, _ := newRateLimitTestContext(t, "/team")
 	first, err := enforceAdmission(c, service, checker, route)
-	if err != nil {
-		t.Fatalf("first enforceAdmission() error = %v", err)
-	}
-	if first.saturatedRoute != nil {
-		t.Fatal("first admission reported a saturated route")
-	}
+	require.NoError(t, err)
+	require.NoError(t, first.saturatedRoute)
+
 	first.release()
 
-	c2, _ := newRateLimitTestContext("/team")
+	c2, _ := newRateLimitTestContext(t, "/team")
 	second, err := enforceAdmission(c2, service, checker, route)
-	if err != nil {
-		t.Fatalf("second enforceAdmission() error = %v (saturated route must defer to failover)", err)
-	}
+	require.NoError(t, err)
+
 	defer second.release()
-	if second.saturatedRoute == nil {
-		t.Fatal("second admission did not report the saturated route")
-	}
+	require.Error(t, second.saturatedRoute)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(second.saturatedRoute, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
-		t.Fatalf("saturated route error = %v, want 429 gateway error", second.saturatedRoute)
-	}
+	require.ErrorAs(t, second.saturatedRoute, &gatewayErr)
+	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
+
 	ctx := second.dispatchContext(context.Background())
-	if core.PrimaryRouteSaturated(ctx) == nil {
-		t.Fatal("dispatchContext did not stamp the saturation marker")
-	}
+	require.Error(t, core.PrimaryRouteSaturated(ctx))
 
 	// The deferred request still consumed its consumer window.
 	for _, status := range service.Statuses(time.Now().UTC()) {
-		if status.Rule.Scope == ratelimit.ScopeUserPath && status.RequestsUsed != 2 {
-			t.Fatalf("user-path requests used = %d, want 2 (deferred request still counts)", status.RequestsUsed)
+		if status.Rule.Scope == ratelimit.ScopeUserPath {
+			require.Equal(t, int64(2), status.RequestsUsed, "deferred request still counts")
 		}
 	}
-	if checker.calls != 2 {
-		t.Fatalf("budget checker calls = %d, want 2", checker.calls)
-	}
+	require.Equal(t, 2, checker.calls)
 }
 
 // Without failover targets the saturated route stays an outright 429.
@@ -277,17 +233,15 @@ func TestEnforceAdmissionRejectsSaturatedRouteWithoutFailovers(t *testing.T) {
 	checker := &countingBudgetChecker{}
 	route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}
 
-	c, _ := newRateLimitTestContext("/team")
+	c, _ := newRateLimitTestContext(t, "/team")
 	adm, err := enforceAdmission(c, service, checker, route)
-	if err != nil {
-		t.Fatalf("first enforceAdmission() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	adm.release()
 
-	c2, _ := newRateLimitTestContext("/team")
-	if _, err := enforceAdmission(c2, service, checker, route); err == nil {
-		t.Fatal("saturated route without failovers admitted, want 429")
-	}
+	c2, _ := newRateLimitTestContext(t, "/team")
+	_, err = enforceAdmission(c2, service, checker, route)
+	require.Error(t, err)
 }
 
 // Consumer breaches never defer: switching targets cannot relieve them.
@@ -296,20 +250,17 @@ func TestEnforceAdmissionNeverDefersConsumerBreaches(t *testing.T) {
 	checker := &countingBudgetChecker{}
 	route := rateLimitRoute{provider: "openai", model: "openai/gpt-4o"}.withFailovers(3)
 
-	c, _ := newRateLimitTestContext("/team")
+	c, _ := newRateLimitTestContext(t, "/team")
 	adm, err := enforceAdmission(c, service, checker, route)
-	if err != nil {
-		t.Fatalf("first enforceAdmission() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	adm.release()
 
-	c2, _ := newRateLimitTestContext("/team")
+	c2, _ := newRateLimitTestContext(t, "/team")
 	_, err = enforceAdmission(c2, service, checker, route)
-	if err == nil {
-		t.Fatal("consumer breach with failovers admitted, want 429")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
-		t.Fatalf("error = %v, want 429 gateway error", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
 }

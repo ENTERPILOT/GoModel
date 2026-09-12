@@ -9,15 +9,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -111,15 +113,15 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 	tests := []struct {
 		name       string
 		model      string
-		newContext func() (*echo.Context, *httptest.ResponseRecorder)
+		newContext func(t *testing.T) (*echo.Context, *httptest.ResponseRecorder)
 		call       func(*Handler, *echo.Context) error
 		response   func(*audioMockProvider)
 	}{
 		{
 			name:  "speech",
 			model: "gpt-4o-mini-tts",
-			newContext: func() (*echo.Context, *httptest.ResponseRecorder) {
-				c, rec, _ := newSpeechRequestWithAuditEntry()
+			newContext: func(t *testing.T) (*echo.Context, *httptest.ResponseRecorder) {
+				c, rec, _ := newSpeechRequestWithAuditEntry(t)
 				return c, rec
 			},
 			call: func(h *Handler, c *echo.Context) error { return h.AudioSpeech(c) },
@@ -130,8 +132,8 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 		{
 			name:  "transcription",
 			model: "gpt-4o-transcribe",
-			newContext: func() (*echo.Context, *httptest.ResponseRecorder) {
-				c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio"))
+			newContext: func(t *testing.T) (*echo.Context, *httptest.ResponseRecorder) {
+				c, rec, _ := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("audio"))
 				return c, rec
 			},
 			call: func(h *Handler, c *echo.Context) error { return h.AudioTranscriptions(c) },
@@ -159,21 +161,16 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 			}
 			tt.response(provider)
 			handler := newHandler(provider, nil, nil, nil, resolver, nil, nil, nil)
-			c, rec := tt.newContext()
+			c, rec := tt.newContext(t)
 
 			started := time.Now()
-			if err := tt.call(handler, c); err != nil {
-				t.Fatalf("audio handler error = %v", err)
-			}
-			if elapsed := time.Since(started); elapsed < 25*time.Millisecond {
-				t.Fatalf("handler returned after %v, want provider time plus matching slowdown", elapsed)
-			}
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-			}
-			if resolver.requested != tt.model || resolver.resolved != tt.model {
-				t.Fatalf("slowdown resolver inputs = (%q, %q), want (%q, %q)", resolver.requested, resolver.resolved, tt.model, tt.model)
-			}
+			err := tt.call(handler, c)
+			require.NoError(t, err)
+			elapsed := time.Since(started)
+			require.GreaterOrEqual(t, elapsed, 25*time.Millisecond)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, tt.model, resolver.requested)
+			require.Equal(t, tt.model, resolver.resolved)
 		})
 
 		t.Run(tt.name+" cancellation", func(t *testing.T) {
@@ -186,7 +183,7 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 			}
 			tt.response(provider)
 			handler := newHandler(provider, nil, nil, nil, resolver, nil, nil, nil)
-			c, _ := tt.newContext()
+			c, _ := tt.newContext(t)
 			ctx, cancel := context.WithCancel(c.Request().Context())
 			c.SetRequest(c.Request().WithContext(ctx))
 
@@ -215,17 +212,14 @@ func TestAudioSlowdownAppliesAfterInferenceAndHonorsCancellation(t *testing.T) {
 	}
 }
 
-func newTranslationSlowdownTestContext() (*echo.Context, *httptest.ResponseRecorder) {
+func newTranslationSlowdownTestContext(t *testing.T) (*echo.Context, *httptest.ResponseRecorder) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("model", "whisper-1")
 	part, _ := w.CreateFormFile("file", "speech.mp3")
 	_, _ = part.Write([]byte("audio"))
 	_ = w.Close()
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	rec := httptest.NewRecorder()
-	return echo.New().NewContext(req, rec), rec
+	return echotest.Post(t, "/v1/audio/translations", &buf, echotest.WithContentType(w.FormDataContentType()))
 }
 
 func TestAudioSpeech_HappyPath(t *testing.T) {
@@ -236,26 +230,16 @@ func TestAudioSpeech_HappyPath(t *testing.T) {
 	handler := NewHandler(mock, nil, nil, nil)
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioSpeech(c); err != nil {
-		t.Fatalf("AudioSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); got != "audio/mpeg" {
-		t.Errorf("Content-Type = %q, want audio/mpeg", got)
-	}
-	if rec.Body.String() != "synthetic-audio" {
-		t.Errorf("body = %q, want synthetic-audio", rec.Body.String())
-	}
-	if mock.capturedSpeech == nil || mock.capturedSpeech.Model != "gpt-4o-mini-tts" || mock.capturedSpeech.Input != "hello" {
-		t.Errorf("captured speech request mismatch: %+v", mock.capturedSpeech)
-	}
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
+	err := handler.AudioSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := rec.Header().Get("Content-Type")
+	assert.Equal(t, "audio/mpeg", got)
+	assert.Equal(t, "synthetic-audio", rec.Body.String())
+	require.NotNil(t, mock.capturedSpeech)
+	assert.Equal(t, "gpt-4o-mini-tts", mock.capturedSpeech.Model)
+	assert.Equal(t, "hello", mock.capturedSpeech.Input)
 }
 
 func TestAudioSpeech_MissingInput(t *testing.T) {
@@ -263,20 +247,11 @@ func TestAudioSpeech_MissingInput(t *testing.T) {
 	handler := NewHandler(mock, nil, nil, nil)
 
 	body := `{"model":"gpt-4o-mini-tts","voice":"alloy"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioSpeech(c); err != nil {
-		t.Fatalf("AudioSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if mock.capturedSpeech != nil {
-		t.Error("provider should not be called when input is missing")
-	}
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
+	err := handler.AudioSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Nil(t, mock.capturedSpeech)
 }
 
 func TestAudioSpeech_MissingVoice(t *testing.T) {
@@ -284,20 +259,11 @@ func TestAudioSpeech_MissingVoice(t *testing.T) {
 	handler := NewHandler(mock, nil, nil, nil)
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioSpeech(c); err != nil {
-		t.Fatalf("AudioSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if mock.capturedSpeech != nil {
-		t.Error("provider should not be called when voice is missing")
-	}
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
+	err := handler.AudioSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Nil(t, mock.capturedSpeech)
 }
 
 // TestAudioSpeech_AuthorizesResolvedSelector verifies the authorizer receives the
@@ -312,23 +278,12 @@ func TestAudioSpeech_AuthorizesResolvedSelector(t *testing.T) {
 	svc := &audioService{provider: mock, modelAuthorizer: authorizer}
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if authorizer.lastSelector.Provider != "openai" {
-		t.Errorf("authorizer saw provider %q, want resolved %q", authorizer.lastSelector.Provider, "openai")
-	}
-	if authorizer.lastSelector.Model != "gpt-4o-mini-tts" {
-		t.Errorf("authorizer saw model %q, want %q", authorizer.lastSelector.Model, "gpt-4o-mini-tts")
-	}
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
+	err := svc.CreateSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "openai", authorizer.lastSelector.Provider)
+	assert.Equal(t, "gpt-4o-mini-tts", authorizer.lastSelector.Model)
 }
 
 func TestAudioSpeech_AuthorizerDeniesAccess(t *testing.T) {
@@ -340,20 +295,11 @@ func TestAudioSpeech_AuthorizerDeniesAccess(t *testing.T) {
 	svc := &audioService{provider: mock, modelAuthorizer: authorizer}
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if mock.capturedSpeech != nil {
-		t.Error("provider should not be called when authorization denies access")
-	}
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
+	err := svc.CreateSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Nil(t, mock.capturedSpeech)
 }
 
 func TestAudioTranscription_HappyPath(t *testing.T) {
@@ -368,38 +314,25 @@ func TestAudioTranscription_HappyPath(t *testing.T) {
 	_ = w.WriteField("model", "gpt-4o-transcribe")
 	_ = w.WriteField("response_format", "json")
 	part, err := w.CreateFormFile("file", "speech.mp3")
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
-	}
+	require.NoError(t, err)
+
 	_, _ = part.Write([]byte("audio-bytes"))
-	if err := w.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
+	err = w.Close()
+	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/audio/transcriptions", &buf, echotest.WithContentType(w.FormDataContentType()))
+	err = handler.AudioTranscriptions(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	got := rec.Header().Get("Content-Type")
+	assert.Equal(t, "application/json", got)
+	assert.Equal(t, `{"text":"hi"}`, rec.Body.String())
 
-	if err := handler.AudioTranscriptions(c); err != nil {
-		t.Fatalf("AudioTranscriptions returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", got)
-	}
-	if rec.Body.String() != `{"text":"hi"}` {
-		t.Errorf("body = %q", rec.Body.String())
-	}
 	captured := mock.capturedTranscription
-	if captured == nil || captured.Model != "gpt-4o-transcribe" || captured.Filename != "speech.mp3" {
-		t.Fatalf("captured transcription request mismatch: %+v", captured)
-	}
-	if string(captured.File) != "audio-bytes" {
-		t.Errorf("captured file = %q, want audio-bytes", string(captured.File))
-	}
+	require.NotNil(t, captured)
+	require.Equal(t, "gpt-4o-transcribe", captured.Model)
+	require.Equal(t, "speech.mp3", captured.Filename)
+	assert.Equal(t, "audio-bytes", string(captured.File))
 }
 
 func TestAudioTranscription_UsesConfiguredMultipartMemoryLimit(t *testing.T) {
@@ -407,16 +340,13 @@ func TestAudioTranscription_UsesConfiguredMultipartMemoryLimit(t *testing.T) {
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("model", "gpt-4o-transcribe")
 	part, err := w.CreateFormFile("file", "speech.mp3")
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
-	}
+	require.NoError(t, err)
+
 	audio := bytes.Repeat([]byte("a"), 1024)
-	if _, err := part.Write(audio); err != nil {
-		t.Fatalf("write audio: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
+	_, err = part.Write(audio)
+	require.NoError(t, err)
+	err = w.Close()
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
@@ -425,29 +355,20 @@ func TestAudioTranscription_UsesConfiguredMultipartMemoryLimit(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	parsed, err := audioTranscriptionRequestFromForm(c, true)
-	if err != nil {
-		t.Fatalf("audioTranscriptionRequestFromForm returned error: %v", err)
-	}
-	if !bytes.Equal(parsed.File, audio) {
-		t.Fatalf("parsed file length = %d, want %d", len(parsed.File), len(audio))
-	}
-	if req.MultipartForm == nil {
-		t.Fatal("multipart form was not parsed")
-	}
+	require.NoError(t, err)
+	require.Equal(t, audio, parsed.File)
+	require.NotNil(t, req.MultipartForm)
+
 	t.Cleanup(func() { _ = req.MultipartForm.RemoveAll() })
 	files := req.MultipartForm.File["file"]
-	if len(files) != 1 {
-		t.Fatalf("parsed uploads = %d, want 1", len(files))
-	}
+	require.Len(t, files, 1)
 
 	upload, err := files[0].Open()
-	if err != nil {
-		t.Fatalf("open parsed upload: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = upload.Close() }()
-	if _, ok := upload.(*os.File); !ok {
-		t.Fatalf("uploaded file type = %T, want disk-backed *os.File", upload)
-	}
+	_, ok := upload.(*os.File)
+	require.True(t, ok, "uploaded file type = %T, want disk-backed *os.File", upload)
 }
 
 func TestAudioTranslation_HappyPath(t *testing.T) {
@@ -464,31 +385,28 @@ func TestAudioTranslation_HappyPath(t *testing.T) {
 	_ = w.WriteField("response_format", "json")
 	_ = w.WriteField("temperature", "0.2")
 	part, err := w.CreateFormFile("file", "speech.wav")
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
-	}
+	require.NoError(t, err)
+
 	_, _ = part.Write([]byte("audio-bytes"))
-	if err := w.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
+	err = w.Close()
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &buf)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || rec.Body.String() != `{"text":"hello"}` {
-		t.Fatalf("status/body = %d %q, want 200 translation response", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, `{"text":"hello"}`, rec.Body.String())
+
 	captured := mock.capturedTranslation
-	if captured == nil || captured.Model != "whisper-1" || captured.Filename != "speech.wav" {
-		t.Fatalf("captured translation request mismatch: %+v", captured)
-	}
-	if captured.Language != "" || len(captured.TimestampGranularities) != 0 {
-		t.Errorf("translation accepted transcription-only fields: %+v", captured)
-	}
-	if captured.Prompt != "Use product names" || captured.ResponseFormat != "json" || captured.Temperature != "0.2" {
-		t.Errorf("translation fields were not preserved: %+v", captured)
-	}
+	require.NotNil(t, captured)
+	require.Equal(t, "whisper-1", captured.Model)
+	require.Equal(t, "speech.wav", captured.Filename)
+	assert.Empty(t, captured.Language)
+	assert.Empty(t, captured.TimestampGranularities, "translation accepted transcription-only fields: %+v", captured)
+	assert.Equal(t, "Use product names", captured.Prompt)
+	assert.Equal(t, "json", captured.ResponseFormat)
+	assert.Equal(t, "0.2", captured.Temperature, "translation fields were not preserved: %+v", captured)
 }
 
 func TestAudioTranslation_ErrorResponses(t *testing.T) {
@@ -550,39 +468,32 @@ func TestAudioTranslation_ErrorResponses(t *testing.T) {
 				}
 			}
 			part, err := writer.CreateFormFile("file", "speech.wav")
-			if err != nil {
-				t.Fatalf("CreateFormFile: %v", err)
-			}
+			require.NoError(t, err)
+
 			_, _ = part.Write([]byte("audio-bytes"))
-			if err := writer.Close(); err != nil {
-				t.Fatalf("close multipart writer: %v", err)
-			}
+			err = writer.Close()
+			require.NoError(t, err)
 
 			req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &buf)
 			req.Header.Set("Content-Type", writer.FormDataContentType())
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
-			}
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+
 			var envelope core.OpenAIErrorEnvelope
-			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-				t.Fatalf("decode error response: %v", err)
-			}
-			if envelope.Error.Type != tt.wantType || envelope.Error.Message != tt.wantMessage {
-				t.Fatalf("error = %+v, want type %q and message %q", envelope.Error, tt.wantType, tt.wantMessage)
-			}
-			if (mock.capturedTranslation != nil) != tt.wantProvider {
-				t.Fatalf("provider called = %v, want %v", mock.capturedTranslation != nil, tt.wantProvider)
-			}
+			err = json.Unmarshal(rec.Body.Bytes(), &envelope)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantType, envelope.Error.Type)
+			require.Equal(t, tt.wantMessage, envelope.Error.Message)
+			require.Equal(t, tt.wantProvider, mock.capturedTranslation != nil)
 		})
 	}
 }
 
 // newTranscriptionRequestWithAuditEntry builds a multipart /v1/audio/transcriptions
 // request carrying the given audio bytes and seeds an empty audit entry.
-func newTranscriptionRequestWithAuditEntry(filename string, audio []byte) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+func newTranscriptionRequestWithAuditEntry(t *testing.T, filename string, audio []byte) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("model", "gpt-4o-transcribe")
@@ -591,10 +502,7 @@ func newTranscriptionRequestWithAuditEntry(filename string, audio []byte) (*echo
 	_, _ = part.Write(audio)
 	_ = w.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/audio/transcriptions", &buf, echotest.WithContentType(w.FormDataContentType()))
 	entry := &auditlog.LogEntry{}
 	c.Set(string(auditlog.LogEntryKey), entry)
 	return c, rec, entry
@@ -613,29 +521,21 @@ func newTranscriptionMock() *audioMockProvider {
 // extension when the multipart part declares a non-audio type.
 func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: true}
-	c, rec, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
-
-	if err := svc.CreateTranscription(c); err != nil {
-		t.Fatalf("CreateTranscription returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
+	c, rec, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	err := svc.CreateTranscription(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
-	if !ok {
-		t.Fatalf("request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
-	}
-	if !body.Stored || body.ContentType != "audio/mpeg" {
-		t.Fatalf("expected stored audio/mpeg (from .mp3 extension), got %+v", body)
-	}
+	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
+	require.True(t, body.Stored)
+	require.Equal(t, "audio/mpeg", body.ContentType, "expected stored audio/mpeg (from .mp3 extension), got %+v", body)
+
 	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	if err != nil || string(decoded) != "uploaded-audio-bytes" {
-		t.Errorf("uploaded audio not preserved losslessly: decoded=%q err=%v", decoded, err)
-	}
-	if body.Meta["model"] != "gpt-4o-transcribe" || body.Meta["language"] != "en" {
-		t.Errorf("upload metadata mismatch: %+v", body.Meta)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, "uploaded-audio-bytes", string(decoded))
+	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"])
+	assert.Equal(t, "en", body.Meta["language"], "upload metadata mismatch: %+v", body.Meta)
 }
 
 // TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled: with LogBodies on
@@ -643,34 +543,27 @@ func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 // (no audio bytes), mirroring the speech-response behavior.
 func TestAudioTranscription_MetadataPlaceholderWhenAudioDisabled(t *testing.T) {
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: true, logAudioBodies: false}
-	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
+	c, _, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	err := svc.CreateTranscription(c)
+	require.NoError(t, err)
 
-	if err := svc.CreateTranscription(c); err != nil {
-		t.Fatalf("CreateTranscription returned error: %v", err)
-	}
 	body, ok := entry.Data.RequestBody.(auditlog.AudioBodyLog)
-	if !ok {
-		t.Fatalf("request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
-	}
-	if body.Stored || body.Data != "" {
-		t.Errorf("audio bytes must not be stored when LogAudioBodies is off, got %+v", body)
-	}
-	if body.Meta["model"] != "gpt-4o-transcribe" {
-		t.Errorf("metadata must be preserved on the placeholder, got %+v", body.Meta)
-	}
+	require.True(t, ok, "request body not an AudioBodyLog, got %T", entry.Data.RequestBody)
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.Data, "audio bytes must not be stored when LogAudioBodies is off, got %+v", body)
+	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"], "metadata must be preserved on the placeholder, got %+v", body.Meta)
 }
 
 // TestAudioTranscription_NoCaptureWhenBodiesDisabled: nothing is captured when
 // the master LogBodies switch is off.
 func TestAudioTranscription_NoCaptureWhenBodiesDisabled(t *testing.T) {
 	svc := &audioService{provider: newTranscriptionMock(), logBodies: false, logAudioBodies: true}
-	c, _, entry := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("uploaded-audio-bytes"))
+	c, _, entry := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("uploaded-audio-bytes"))
+	err := svc.CreateTranscription(c)
+	require.NoError(t, err)
 
-	if err := svc.CreateTranscription(c); err != nil {
-		t.Fatalf("CreateTranscription returned error: %v", err)
-	}
-	if entry.Data != nil && entry.Data.RequestBody != nil {
-		t.Errorf("nothing should be captured when LogBodies is off, got %+v", entry.Data.RequestBody)
+	if entry.Data != nil {
+		assert.Nil(t, entry.Data.RequestBody, "nothing should be captured when LogBodies is off")
 	}
 }
 
@@ -680,26 +573,15 @@ func TestAudioSpeech_LogsUsage(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
-	c, rec, _ := newSpeechRequestWithAuditEntry()
-
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if captured == nil {
-		t.Fatal("expected a usage entry to be written")
-	}
-	if captured.Endpoint != "/v1/audio/speech" {
-		t.Errorf("endpoint = %q, want /v1/audio/speech", captured.Endpoint)
-	}
-	if captured.Model != "gpt-4o-mini-tts" {
-		t.Errorf("model = %q, want gpt-4o-mini-tts", captured.Model)
-	}
-	if got := captured.RawData["input_characters"]; got != len("hello") {
-		t.Errorf("input_characters = %v, want %d", got, len("hello"))
-	}
+	c, rec, _ := newSpeechRequestWithAuditEntry(t)
+	err := svc.CreateSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, captured)
+	assert.Equal(t, "/v1/audio/speech", captured.Endpoint)
+	assert.Equal(t, "gpt-4o-mini-tts", captured.Model)
+	got := captured.RawData["input_characters"]
+	assert.Equal(t, len("hello"), got)
 }
 
 // TestAudioSpeech_CostsOutputAudioDuration verifies the full wire path for
@@ -745,33 +627,23 @@ func TestAudioSpeech_CostsOutputAudioDuration(t *testing.T) {
 				body += `,"response_format":"` + tt.responseFormat + `"`
 			}
 			body += `}`
-			req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			c := echo.New().NewContext(req, httptest.NewRecorder())
-			c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{})
-
-			if err := svc.CreateSpeech(c); err != nil {
-				t.Fatalf("CreateSpeech returned error: %v", err)
-			}
-			if captured == nil {
-				t.Fatal("expected a usage entry to be written")
-			}
+			c, _ := echotest.Post(t, "/v1/audio/speech", body, echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{}))
+			err := svc.CreateSpeech(c)
+			require.NoError(t, err)
+			require.NotNil(t, captured)
 
 			got, hasSeconds := captured.RawData["audio_output_seconds"]
 			if tt.wantSeconds > 0 {
-				if !hasSeconds || got != tt.wantSeconds {
-					t.Errorf("audio_output_seconds = %v (present=%v), want %v", got, hasSeconds, tt.wantSeconds)
-				}
-			} else if hasSeconds {
-				t.Errorf("audio_output_seconds = %v, want none", got)
+				assert.True(t, hasSeconds)
+				assert.Equal(t, tt.wantSeconds, got)
+			} else {
+				assert.False(t, hasSeconds, "unexpected audio_output_seconds %v", got)
 			}
 
-			if captured.TotalCost == nil || *captured.TotalCost != tt.wantCost {
-				t.Fatalf("total_cost = %v, want %v", captured.TotalCost, tt.wantCost)
-			}
-			if hasCaveat := captured.CostsCalculationCaveat != ""; hasCaveat != tt.wantCaveat {
-				t.Errorf("caveat = %q, want present=%v", captured.CostsCalculationCaveat, tt.wantCaveat)
-			}
+			require.NotNil(t, captured.TotalCost)
+			require.Equal(t, tt.wantCost, *captured.TotalCost)
+			hasCaveat := captured.CostsCalculationCaveat != ""
+			assert.Equal(t, tt.wantCaveat, hasCaveat, "caveat %q", captured.CostsCalculationCaveat)
 		})
 	}
 }
@@ -805,23 +677,13 @@ func TestAudioTranscription_LogsUsage(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	svc := &audioService{provider: newTranscriptionMock(), usageLogger: logger}
-	c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio-bytes"))
-
-	if err := svc.CreateTranscription(c); err != nil {
-		t.Fatalf("CreateTranscription returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if captured == nil {
-		t.Fatal("expected a usage entry to be written")
-	}
-	if captured.Endpoint != "/v1/audio/transcriptions" {
-		t.Errorf("endpoint = %q, want /v1/audio/transcriptions", captured.Endpoint)
-	}
-	if captured.Model != "gpt-4o-transcribe" {
-		t.Errorf("model = %q, want gpt-4o-transcribe", captured.Model)
-	}
+	c, rec, _ := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("audio-bytes"))
+	err := svc.CreateTranscription(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, captured)
+	assert.Equal(t, "/v1/audio/transcriptions", captured.Endpoint)
+	assert.Equal(t, "gpt-4o-transcribe", captured.Model)
 }
 
 // TestAudioSpeech_NoUsageWhenDisabled verifies nothing is written when usage
@@ -830,17 +692,11 @@ func TestAudioSpeech_NoUsageWhenDisabled(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: false}, captured: &captured}
 	svc := &audioService{provider: newSpeechMock(), usageLogger: logger}
-	c, rec, _ := newSpeechRequestWithAuditEntry()
-
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if captured != nil {
-		t.Errorf("no usage entry should be written when disabled, got %+v", captured)
-	}
+	c, rec, _ := newSpeechRequestWithAuditEntry(t)
+	err := svc.CreateSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, captured)
 }
 
 func TestAudioUploadContentType(t *testing.T) {
@@ -861,9 +717,7 @@ func TestAudioUploadContentType(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := audioUploadContentType(&core.AudioTranscriptionRequest{FileContentType: tc.contentType, Filename: tc.filename})
-		if got != tc.want {
-			t.Errorf("audioUploadContentType(ct=%q, file=%q) = %q, want %q", tc.contentType, tc.filename, got, tc.want)
-		}
+		assert.Equal(t, tc.want, got, "audioUploadContentType(ct=%q, file=%q)", tc.contentType, tc.filename)
 	}
 }
 
@@ -877,28 +731,18 @@ func TestAudioTranscription_MissingModel(t *testing.T) {
 	_, _ = part.Write([]byte("audio-bytes"))
 	_ = w.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioTranscriptions(c); err != nil {
-		t.Fatalf("AudioTranscriptions returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
+	c, rec := echotest.Post(t, "/v1/audio/transcriptions", &buf, echotest.WithContentType(w.FormDataContentType()))
+	err := handler.AudioTranscriptions(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 // newSpeechRequestWithAuditEntry builds a /v1/audio/speech request and seeds an
 // empty audit entry into the context (as the audit middleware would), returning
 // the context, recorder, and the entry to assert on.
-func newSpeechRequestWithAuditEntry() (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
+func newSpeechRequestWithAuditEntry(t *testing.T) (*echo.Context, *httptest.ResponseRecorder, *auditlog.LogEntry) {
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
 	entry := &auditlog.LogEntry{}
 	c.Set(string(auditlog.LogEntryKey), entry)
 	return c, rec, entry
@@ -916,34 +760,24 @@ func newSpeechMock() *audioMockProvider {
 // losslessly as base64 for playback.
 func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: true}
-	c, rec, entry := newSpeechRequestWithAuditEntry()
-
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	c, rec, entry := newSpeechRequestWithAuditEntry(t)
+	err := svc.CreateSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
 	reqBody, ok := entry.Data.RequestBody.(map[string]any)
-	if !ok {
-		t.Fatalf("request body not captured as map, got %T", entry.Data.RequestBody)
-	}
-	if reqBody["input"] != "hello" || reqBody["voice"] != "alloy" {
-		t.Errorf("request body mismatch: %+v", reqBody)
-	}
+	require.True(t, ok, "request body not captured as map, got %T", entry.Data.RequestBody)
+	assert.Equal(t, "hello", reqBody["input"])
+	assert.Equal(t, "alloy", reqBody["voice"], "request body mismatch: %+v", reqBody)
 
 	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
-	if !ok {
-		t.Fatalf("response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
-	}
-	if !respBody.Stored || respBody.Encoding != "base64" {
-		t.Fatalf("expected stored base64 audio, got %+v", respBody)
-	}
+	require.True(t, ok, "response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
+	require.True(t, respBody.Stored)
+	require.Equal(t, "base64", respBody.Encoding, "expected stored base64 audio, got %+v", respBody)
+
 	decoded, err := base64.StdEncoding.DecodeString(respBody.Data)
-	if err != nil || string(decoded) != "synthetic-audio" {
-		t.Errorf("base64 did not round-trip to the audio bytes: decoded=%q err=%v", decoded, err)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, "synthetic-audio", string(decoded))
 }
 
 // TestAudioSpeech_PlaceholderWhenAudioDisabled: with LogBodies on but
@@ -951,42 +785,32 @@ func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 // input is not captured.
 func TestAudioSpeech_PlaceholderWhenAudioDisabled(t *testing.T) {
 	svc := &audioService{provider: newSpeechMock(), logBodies: true, logAudioBodies: false}
-	c, _, entry := newSpeechRequestWithAuditEntry()
+	c, _, entry := newSpeechRequestWithAuditEntry(t)
+	err := svc.CreateSpeech(c)
+	require.NoError(t, err)
 
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-
-	if entry.Data != nil && entry.Data.RequestBody != nil {
-		t.Errorf("input should not be captured when LogAudioBodies is off, got %+v", entry.Data.RequestBody)
+	if entry.Data != nil {
+		assert.Nil(t, entry.Data.RequestBody, "input should not be captured when LogAudioBodies is off")
 	}
 	respBody, ok := entry.Data.ResponseBody.(auditlog.AudioBodyLog)
-	if !ok {
-		t.Fatalf("response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
-	}
-	if respBody.Stored || respBody.Data != "" {
-		t.Errorf("audio bytes must not be stored when LogAudioBodies is off, got %+v", respBody)
-	}
-	if respBody.Bytes != len("synthetic-audio") {
-		t.Errorf("placeholder should still record byte size, got %d", respBody.Bytes)
-	}
+	require.True(t, ok, "response body not an AudioBodyLog, got %T", entry.Data.ResponseBody)
+	assert.False(t, respBody.Stored)
+	assert.Empty(t, respBody.Data, "audio bytes must not be stored when LogAudioBodies is off, got %+v", respBody)
+	assert.Equal(t, len("synthetic-audio"), respBody.Bytes)
 }
 
 // TestAudioSpeech_NoAudioBodyWhenBodiesDisabled: LogBodies is the master switch.
 // With it off, no audio body is captured even if LogAudioBodies is on.
 func TestAudioSpeech_NoAudioBodyWhenBodiesDisabled(t *testing.T) {
 	svc := &audioService{provider: newSpeechMock(), logBodies: false, logAudioBodies: true}
-	c, rec, entry := newSpeechRequestWithAuditEntry()
+	c, rec, entry := newSpeechRequestWithAuditEntry(t)
+	err := svc.CreateSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := svc.CreateSpeech(c); err != nil {
-		t.Fatalf("CreateSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if entry.Data != nil && (entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil) {
-		t.Errorf("no body should be captured when LogBodies is off, got req=%+v resp=%+v",
-			entry.Data.RequestBody, entry.Data.ResponseBody)
+	if entry.Data != nil {
+		assert.Nil(t, entry.Data.RequestBody, "no request body should be captured when LogBodies is off")
+		assert.Nil(t, entry.Data.ResponseBody, "no response body should be captured when LogBodies is off")
 	}
 }
 
@@ -1003,20 +827,11 @@ func TestAudioSpeech_NilResponseReturns502(t *testing.T) {
 	handler := NewHandler(mock, nil, nil, nil)
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioSpeech(c); err != nil {
-		t.Fatalf("AudioSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), `"provider":"audio-primary"`) {
-		t.Errorf("response does not identify the provider: %s", rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
+	err := handler.AudioSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"provider":"audio-primary"`)
 }
 
 // TestAudio_NilResponseSkipsUsage covers the nil-response guard: a (nil, nil)
@@ -1029,17 +844,11 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 		svc := &audioService{
 			provider:    &audioMockProvider{mockProvider: &mockProvider{supportedModels: []string{"gpt-4o-mini-tts"}}, speechResp: nil},
 			usageLogger: logger}
-		c, rec, _ := newSpeechRequestWithAuditEntry()
-
-		if err := svc.CreateSpeech(c); err != nil {
-			t.Fatalf("CreateSpeech returned error: %v", err)
-		}
-		if rec.Code != http.StatusBadGateway {
-			t.Fatalf("status = %d, want 502", rec.Code)
-		}
-		if captured != nil {
-			t.Errorf("no usage should be written for a failed call, got %+v", captured)
-		}
+		c, rec, _ := newSpeechRequestWithAuditEntry(t)
+		err := svc.CreateSpeech(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		assert.Nil(t, captured)
 	})
 
 	t.Run("transcription", func(t *testing.T) {
@@ -1051,22 +860,14 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 				providerNames:   map[string]string{"gpt-4o-transcribe": "audio-transcription"},
 			}, transcriptionResp: nil},
 			usageLogger: logger}
-		c, rec, _ := newTranscriptionRequestWithAuditEntry("speech.mp3", []byte("audio-bytes"))
-
-		// Must not panic on resp.Data when resp is nil.
-		if err := svc.CreateTranscription(c); err != nil {
-			t.Fatalf("CreateTranscription returned error: %v", err)
-		}
-		if rec.Code != http.StatusBadGateway {
-			t.Fatalf("status = %d, want 502", rec.Code)
-		}
-		if !strings.Contains(rec.Body.String(), `"provider":"audio-transcription"`) ||
-			!strings.Contains(rec.Body.String(), "provider audio-transcription returned empty audio response") {
-			t.Errorf("response does not identify the provider: %s", rec.Body.String())
-		}
-		if captured != nil {
-			t.Errorf("no usage should be written for a failed call, got %+v", captured)
-		}
+		c, rec, _ := newTranscriptionRequestWithAuditEntry(t, "speech.mp3", []byte("audio-bytes"))
+		err := // Must not panic on resp.Data when resp is nil.
+			svc.CreateTranscription(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"provider":"audio-transcription"`)
+		assert.Contains(t, rec.Body.String(), "provider audio-transcription returned empty audio response")
+		assert.Nil(t, captured)
 	})
 
 	t.Run("translation", func(t *testing.T) {
@@ -1086,24 +887,13 @@ func TestAudio_NilResponseSkipsUsage(t *testing.T) {
 		part, _ := writer.CreateFormFile("file", "speech.mp3")
 		_, _ = part.Write([]byte("audio-bytes"))
 		_ = writer.Close()
-		req := httptest.NewRequest(http.MethodPost, "/v1/audio/translations", &body)
-		req.Header.Set("Content-Type", writer.FormDataContentType())
-		rec := httptest.NewRecorder()
-		c := echo.New().NewContext(req, rec)
-
-		if err := svc.CreateTranslation(c); err != nil {
-			t.Fatalf("CreateTranslation returned error: %v", err)
-		}
-		if rec.Code != http.StatusBadGateway {
-			t.Fatalf("status = %d, want 502", rec.Code)
-		}
-		if !strings.Contains(rec.Body.String(), `"provider":"audio-translation"`) ||
-			!strings.Contains(rec.Body.String(), "provider audio-translation returned empty audio response") {
-			t.Errorf("response does not identify the provider: %s", rec.Body.String())
-		}
-		if captured != nil {
-			t.Errorf("no usage should be written for a failed call, got %+v", captured)
-		}
+		c, rec := echotest.Post(t, "/v1/audio/translations", &body, echotest.WithContentType(writer.FormDataContentType()))
+		err := svc.CreateTranslation(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		assert.Contains(t, rec.Body.String(), `"provider":"audio-translation"`)
+		assert.Contains(t, rec.Body.String(), "provider audio-translation returned empty audio response")
+		assert.Nil(t, captured)
 	})
 }
 
@@ -1117,20 +907,12 @@ func TestAudioSpeech_EmptyContentTypeDefaults(t *testing.T) {
 	handler := NewHandler(mock, nil, nil, nil)
 
 	body := `{"model":"gpt-4o-mini-tts","input":"hello","voice":"alloy"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/speech", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioSpeech(c); err != nil {
-		t.Fatalf("AudioSpeech returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
-		t.Errorf("Content-Type = %q, want application/octet-stream", got)
-	}
+	c, rec := echotest.Post(t, "/v1/audio/speech", body)
+	err := handler.AudioSpeech(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	got := rec.Header().Get("Content-Type")
+	assert.Equal(t, "application/octet-stream", got)
 }
 
 // TestAudioTranscription_MissingFile covers the multipart guard: a request with a
@@ -1144,18 +926,9 @@ func TestAudioTranscription_MissingFile(t *testing.T) {
 	_ = w.WriteField("model", "gpt-4o-transcribe")
 	_ = w.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/audio/transcriptions", &buf)
-	req.Header.Set("Content-Type", w.FormDataContentType())
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.AudioTranscriptions(c); err != nil {
-		t.Fatalf("AudioTranscriptions returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if mock.capturedTranscription != nil {
-		t.Error("provider should not be called when file is missing")
-	}
+	c, rec := echotest.Post(t, "/v1/audio/transcriptions", &buf, echotest.WithContentType(w.FormDataContentType()))
+	err := handler.AudioTranscriptions(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Nil(t, mock.capturedTranscription)
 }

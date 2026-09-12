@@ -3,6 +3,8 @@ package server
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/gateway"
@@ -48,14 +50,9 @@ func TestHandlerLogBatchUsageFromBatchResultsUsesStoredUserPath(t *testing.T) {
 	}
 
 	logged := gateway.LogBatchUsageFromBatchResults(stored, result, "", handler.usageLogger, handler.pricingResolver)
-	if !logged {
-		t.Fatal("logBatchUsageFromBatchResults() = false, want true")
-	}
+	require.True(t, logged)
+
 	entries := logger.Entries()
-	if len(entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(entries))
-	}
-	if got := entries[0].UserPath; got != "/team/alpha" {
-		t.Fatalf("UserPath = %q, want /team/alpha", got)
-	}
+	require.Len(t, entries, 1)
+	require.Equal(t, "/team/alpha", entries[0].UserPath)
 }

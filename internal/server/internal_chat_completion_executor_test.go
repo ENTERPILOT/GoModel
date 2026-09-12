@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -81,45 +83,24 @@ func TestInternalChatCompletionExecutor_UsesTranslatedPlanAndAuditMetadata(t *te
 			{Role: "user", Content: "John Smith"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "openai", resp.Provider)
+	require.Equal(t, "/team/alpha/guardrails/privacy", capturedSelector.UserPath)
+	require.NotNil(t, provider.capturedChatReq)
+	require.Len(t, provider.capturedChatReq.Messages, 1)
+	require.Equal(t, "user", provider.capturedChatReq.Messages[0].Role)
+	origin := core.GetRequestOrigin(provider.capturedCtx)
+	require.Equal(t, core.RequestOriginGuardrail, origin)
+	require.Len(t, logger.entries, 1)
 
-	if resp == nil || resp.Provider != "openai" {
-		t.Fatalf("resp = %#v, want openai response", resp)
-	}
-	if capturedSelector.UserPath != "/team/alpha/guardrails/privacy" {
-		t.Fatalf("selector.UserPath = %q, want /team/alpha/guardrails/privacy", capturedSelector.UserPath)
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected provider chat request to be captured")
-	}
-	if len(provider.capturedChatReq.Messages) != 1 || provider.capturedChatReq.Messages[0].Role != "user" {
-		t.Fatalf("provider messages = %#v, want unpatched user-only request", provider.capturedChatReq.Messages)
-	}
-	if origin := core.GetRequestOrigin(provider.capturedCtx); origin != core.RequestOriginGuardrail {
-		t.Fatalf("provider request origin = %q, want %q", origin, core.RequestOriginGuardrail)
-	}
-
-	if len(logger.entries) != 1 {
-		t.Fatalf("audit entries = %d, want 1", len(logger.entries))
-	}
 	entry := logger.entries[0]
-	if entry.Path != "/v1/chat/completions" {
-		t.Fatalf("audit path = %q, want /v1/chat/completions", entry.Path)
-	}
-	if entry.UserPath != "/team/alpha/guardrails/privacy" {
-		t.Fatalf("audit user path = %q, want /team/alpha/guardrails/privacy", entry.UserPath)
-	}
-	if entry.WorkflowVersionID != "workflow-guardrail" {
-		t.Fatalf("audit workflow version = %q, want workflow-guardrail", entry.WorkflowVersionID)
-	}
-	if entry.Data == nil || entry.Data.WorkflowFeatures == nil {
-		t.Fatalf("audit workflow features = %#v, want populated snapshot", entry.Data)
-	}
-	if entry.Data.WorkflowFeatures.Guardrails {
-		t.Fatalf("audit guardrails feature = true, want false for internal guardrail calls")
-	}
+	require.Equal(t, "/v1/chat/completions", entry.Path)
+	require.Equal(t, "/team/alpha/guardrails/privacy", entry.UserPath)
+	require.Equal(t, "workflow-guardrail", entry.WorkflowVersionID)
+	require.NotNil(t, entry.Data)
+	require.NotNil(t, entry.Data.WorkflowFeatures)
+	require.False(t, entry.Data.WorkflowFeatures.Guardrails)
 }
 
 func TestInternalChatCompletionExecutor_DoesNotReuseParentWorkflowResolution(t *testing.T) {
@@ -169,32 +150,17 @@ func TestInternalChatCompletionExecutor_DoesNotReuseParentWorkflowResolution(t *
 			{Role: "user", Content: "rewrite this"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if resp == nil || resp.Model != "gpt-4o-mini" {
-		t.Fatalf("resp = %#v, want gpt-4o-mini response", resp)
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected provider chat request to be captured")
-	}
-	if provider.capturedChatReq.Model != "gpt-4o-mini" {
-		t.Fatalf("provider request model = %q, want gpt-4o-mini", provider.capturedChatReq.Model)
-	}
-	if provider.capturedChatReq.Provider != "openai" {
-		t.Fatalf("provider request provider = %q, want openai", provider.capturedChatReq.Provider)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "gpt-4o-mini", resp.Model)
+	require.NotNil(t, provider.capturedChatReq)
+	require.Equal(t, "gpt-4o-mini", provider.capturedChatReq.Model)
+	require.Equal(t, "openai", provider.capturedChatReq.Provider)
+	require.Len(t, logger.entries, 1)
 
-	if len(logger.entries) != 1 {
-		t.Fatalf("audit entries = %d, want 1", len(logger.entries))
-	}
 	entry := logger.entries[0]
-	if entry.RequestedModel != "openai/gpt-4o-mini" {
-		t.Fatalf("audit requested model = %q, want openai/gpt-4o-mini", entry.RequestedModel)
-	}
-	if entry.ResolvedModel != "openai/gpt-4o-mini" {
-		t.Fatalf("audit resolved model = %q, want openai/gpt-4o-mini", entry.ResolvedModel)
-	}
+	require.Equal(t, "openai/gpt-4o-mini", entry.RequestedModel)
+	require.Equal(t, "openai/gpt-4o-mini", entry.ResolvedModel)
 }
 
 func TestInternalChatCompletionExecutor_PreservesBoundedAuditCapture(t *testing.T) {
@@ -256,38 +222,18 @@ func TestInternalChatCompletionExecutor_PreservesBoundedAuditCapture(t *testing.
 			{Role: "user", Content: bigPrompt},
 		},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("audit entries = %d, want 1", len(logger.entries))
-	}
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
 
 	entry := logger.entries[0]
-	if entry.Data == nil {
-		t.Fatal("audit data = nil, want populated capture data")
-	}
-	if entry.Data.RequestHeaders["Content-Type"] != "application/json" {
-		t.Fatalf("request Content-Type = %q, want application/json", entry.Data.RequestHeaders["Content-Type"])
-	}
-	if entry.Data.RequestHeaders["Traceparent"] == "" {
-		t.Fatal("request Traceparent header missing from audit capture")
-	}
-	if entry.Data.ResponseHeaders["Content-Type"] != "application/json" {
-		t.Fatalf("response Content-Type = %q, want application/json", entry.Data.ResponseHeaders["Content-Type"])
-	}
-	if !entry.Data.RequestBodyTooBigToHandle {
-		t.Fatal("RequestBodyTooBigToHandle = false, want true")
-	}
-	if entry.Data.RequestBody != nil {
-		t.Fatalf("request body = %#v, want omitted body for oversized payload", entry.Data.RequestBody)
-	}
-	if !entry.Data.ResponseBodyTooBigToHandle {
-		t.Fatal("ResponseBodyTooBigToHandle = false, want true")
-	}
-	if entry.Data.ResponseBody == nil {
-		t.Fatal("response body = nil, want truncated captured payload")
-	}
+	require.NotNil(t, entry.Data)
+	require.Equal(t, "application/json", entry.Data.RequestHeaders["Content-Type"])
+	require.NotEmpty(t, entry.Data.RequestHeaders["Traceparent"])
+	require.Equal(t, "application/json", entry.Data.ResponseHeaders["Content-Type"])
+	require.True(t, entry.Data.RequestBodyTooBigToHandle)
+	require.Nil(t, entry.Data.RequestBody)
+	require.True(t, entry.Data.ResponseBodyTooBigToHandle)
+	require.NotNil(t, entry.Data.ResponseBody)
 }
 
 func TestInternalChatCompletionExecutor_RoutesThroughResponseCache(t *testing.T) {
@@ -330,24 +276,16 @@ func TestInternalChatCompletionExecutor_RoutesThroughResponseCache(t *testing.T)
 	}
 
 	resp1, err := executor.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("first ChatCompletion() error = %v", err)
-	}
-	if err := rcm.Close(); err != nil {
-		t.Fatalf("ResponseCacheMiddleware.Close() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = rcm.Close()
+	require.NoError(t, err)
 
 	resp2, err := executor.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("second ChatCompletion() error = %v", err)
-	}
-
-	if provider.chatCalls != 1 {
-		t.Fatalf("provider chat calls = %d, want 1 with second response served from cache", provider.chatCalls)
-	}
-	if resp1 == nil || resp2 == nil || resp2.Choices[0].Message.Content != resp1.Choices[0].Message.Content {
-		t.Fatalf("responses = %#v / %#v, want identical cached response", resp1, resp2)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.chatCalls)
+	require.NotNil(t, resp1)
+	require.NotNil(t, resp2)
+	require.Equal(t, resp1.Choices[0].Message.Content, resp2.Choices[0].Message.Content)
 }
 
 func TestInternalChatCompletionExecutor_CachedNilWorkflowDoesNotPanic(t *testing.T) {
@@ -389,35 +327,19 @@ func TestInternalChatCompletionExecutor_CachedNilWorkflowDoesNotPanic(t *testing
 	}
 
 	_, _, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
-	if err != nil {
-		t.Fatalf("first executeChatCompletion() error = %v", err)
-	}
-	if cacheType != "" {
-		t.Fatalf("first cacheType = %q, want empty", cacheType)
-	}
-	if err := rcm.Close(); err != nil {
-		t.Fatalf("ResponseCacheMiddleware.Close() error = %v", err)
-	}
+	require.NoError(t, err)
+	require.Empty(t, cacheType)
+	err = rcm.Close()
+	require.NoError(t, err)
 
 	resp, meta, cacheType, err := executor.executeChatCompletion(context.Background(), nil, req)
-	if err != nil {
-		t.Fatalf("cached executeChatCompletion() error = %v", err)
-	}
-	if provider.chatCalls != 1 {
-		t.Fatalf("provider chat calls = %d, want 1 with second response served from cache", provider.chatCalls)
-	}
-	if resp == nil || resp.ID != "chatcmpl-internal-cache-nil-workflow" {
-		t.Fatalf("resp = %#v, want cached provider response", resp)
-	}
-	if meta.ProviderType != "" {
-		t.Fatalf("meta.ProviderType = %q, want empty for nil workflow cache hit", meta.ProviderType)
-	}
-	if meta.ProviderName != "" {
-		t.Fatalf("meta.ProviderName = %q, want empty for nil workflow cache hit", meta.ProviderName)
-	}
-	if cacheType != responsecache.CacheTypeExact {
-		t.Fatalf("cacheType = %q, want %q", cacheType, responsecache.CacheTypeExact)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.chatCalls)
+	require.NotNil(t, resp)
+	require.Equal(t, "chatcmpl-internal-cache-nil-workflow", resp.ID)
+	require.Empty(t, meta.ProviderType)
+	require.Empty(t, meta.ProviderName)
+	require.Equal(t, responsecache.CacheTypeExact, cacheType)
 }
 
 func TestInternalChatCompletionExecutor_MarshalFailureFallsBackToNoCacheDispatch(t *testing.T) {
@@ -459,13 +381,8 @@ func TestInternalChatCompletionExecutor_MarshalFailureFallsBackToNoCacheDispatch
 		},
 		Tools: []map[string]any{{"unsupported": func() {}}},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if resp == nil || resp.ID != "chatcmpl-internal-marshal-fallback" {
-		t.Fatalf("resp = %#v, want provider response", resp)
-	}
-	if provider.chatCalls != 1 {
-		t.Fatalf("provider chat calls = %d, want one no-cache dispatch", provider.chatCalls)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, "chatcmpl-internal-marshal-fallback", resp.ID)
+	require.Equal(t, 1, provider.chatCalls)
 }

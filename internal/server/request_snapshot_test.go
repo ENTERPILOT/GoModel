@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -15,6 +14,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type explodingReadCloser struct{}
@@ -43,15 +43,8 @@ func (r *countingReadCloser) Close() error {
 }
 
 func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
-	e := echo.New()
-
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema"}}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions?foo=bar", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-123")
-	req.Header.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions?foo=bar", reqBody, echotest.WithHeader("X-Request-ID", "req-123"), echotest.WithHeader("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"))
 
 	var capturedFrame *core.RequestSnapshot
 	var capturedEnv *core.WhiteBoxPrompt
@@ -68,19 +61,17 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	require.NotNil(t, capturedFrame)
 	assert.Equal(t, http.MethodPost, capturedFrame.Method)
 	assert.Equal(t, "/v1/chat/completions", capturedFrame.Path)
 	assert.Equal(t, "application/json", capturedFrame.ContentType)
 	assert.Equal(t, "req-123", capturedFrame.RequestID)
-	assert.Equal(t, "", capturedFrame.UserPath)
+	assert.Empty(t, capturedFrame.UserPath)
 	assert.Equal(t, []string{"bar"}, capturedFrame.GetQueryParams()["foo"])
 	assert.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00", capturedFrame.GetTraceMetadata()["Traceparent"])
 	assert.JSONEq(t, reqBody, string(capturedFrame.CapturedBody()))
 	assert.False(t, capturedFrame.BodyNotCaptured)
 	assert.JSONEq(t, reqBody, downstreamBody)
-
 	require.NotNil(t, capturedEnv)
 	assert.Equal(t, "openai_compat", capturedEnv.RouteType)
 	assert.Equal(t, "chat_completions", capturedEnv.OperationType)
@@ -93,17 +84,11 @@ func TestRequestSnapshotCapture_SetsSnapshotAndSemantics(t *testing.T) {
 }
 
 func TestRequestSnapshotCapture_PeeksSelectorsWithoutReadingWholeBody(t *testing.T) {
-	e := echo.New()
-
 	largeContent := strings.Repeat("x", 256*1024)
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"` + largeContent + `"}]}`
 	body := &countingReadCloser{reader: strings.NewReader(reqBody)}
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Body = body
-	req.ContentLength = int64(len(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", body)
+	c.Request().ContentLength = int64(len(reqBody))
 
 	var capturedFrame *core.RequestSnapshot
 	var capturedEnv *core.WhiteBoxPrompt
@@ -122,26 +107,20 @@ func TestRequestSnapshotCapture_PeeksSelectorsWithoutReadingWholeBody(t *testing
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	require.NotNil(t, capturedFrame)
 	assert.Nil(t, capturedFrame.CapturedBody())
 	assert.False(t, capturedFrame.BodyNotCaptured)
 	require.NotNil(t, capturedEnv)
-	assert.Equal(t, "", capturedEnv.RouteHints.Model)
+	assert.Empty(t, capturedEnv.RouteHints.Model)
 	assert.False(t, capturedEnv.JSONBodyParsed)
 	assert.Less(t, readBeforeHandler, int64(len(reqBody)))
 	assert.JSONEq(t, reqBody, downstreamBody)
 }
 
 func TestSemanticJSONBodyRefreshesPromptFromFullBody(t *testing.T) {
-	e := echo.New()
-
 	largeContent := strings.Repeat("x", int(auditlog.MaxBodyCapture)+1)
 	reqBody := `{"messages":[{"role":"user","content":"` + largeContent + `"}],"model":"gpt-5-mini","provider":"openai"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	snapshot := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -155,9 +134,9 @@ func TestSemanticJSONBodyRefreshesPromptFromFullBody(t *testing.T) {
 		"",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), snapshot)
+	ctx := core.WithRequestSnapshot(c.Request().Context(), snapshot)
 	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(snapshot))
-	c.SetRequest(req.WithContext(ctx))
+	c.SetRequest(c.Request().WithContext(ctx))
 
 	bodyBytes, env, err := semanticJSONBody(c)
 	require.NoError(t, err)
@@ -174,13 +153,9 @@ func TestSemanticJSONBodyRefreshesPromptFromFullBody(t *testing.T) {
 }
 
 func TestStoreRequestBodySnapshot_PreservesPassthroughEnrichment(t *testing.T) {
-	e := echo.New()
 	padding := strings.Repeat("x", int(requestSnapshotInlineBodyLimit)+1)
 	reqBody := `{"model":"stub-model","padding":"` + padding + `","stream":true}`
-	req := httptest.NewRequest(http.MethodPost, "/p/vllm/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/p/vllm/chat/completions", reqBody)
 
 	snapshot := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -207,9 +182,9 @@ func TestStoreRequestBodySnapshot_PreservesPassthroughEnrichment(t *testing.T) {
 		AuditPath:          "/v1/chat/completions",
 		Model:              "stub-model",
 	})
-	ctx := core.WithRequestSnapshot(req.Context(), snapshot)
+	ctx := core.WithRequestSnapshot(c.Request().Context(), snapshot)
 	ctx = core.WithWhiteBoxPrompt(ctx, prompt)
-	c.SetRequest(req.WithContext(ctx))
+	c.SetRequest(c.Request().WithContext(ctx))
 
 	storeRequestBodySnapshot(c, []byte(reqBody))
 
@@ -229,13 +204,7 @@ func TestStoreRequestBodySnapshot_PreservesPassthroughEnrichment(t *testing.T) {
 }
 
 func TestRequestSnapshotCapture_NormalizesUserPathHeader(t *testing.T) {
-	e := echo.New()
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(core.UserPathHeader, " team//alpha/user/ ")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`, echotest.WithHeader(core.UserPathHeader, " team//alpha/user/ "))
 
 	var capturedFrame *core.RequestSnapshot
 	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
@@ -256,11 +225,7 @@ func TestRequestSnapshotCapture_StampsUserPathForNonIngressManagedModelEndpoints
 	// budgets, and usage attribution read core.UserPathFromContext.
 	for _, path := range []string{"/mcp", "/mcp/alpha", "/v1/realtime/calls", "/v1/audio/speech"} {
 		t.Run(path, func(t *testing.T) {
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
-			req.Header.Set(core.UserPathHeader, " team//alpha/ ")
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, _ := echotest.Post(t, path, `{}`, echotest.WithHeader(core.UserPathHeader, " team//alpha/ "))
 
 			var capturedUserPath string
 			handler := RequestSnapshotCapture()(func(c *echo.Context) error {
@@ -277,11 +242,7 @@ func TestRequestSnapshotCapture_StampsUserPathForNonIngressManagedModelEndpoints
 }
 
 func TestRequestSnapshotCapture_RejectsInvalidUserPathOnNonIngressManagedModelEndpoints(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{}`))
-	req.Header.Set(core.UserPathHeader, "/team/../escape")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/mcp", `{}`, echotest.WithHeader(core.UserPathHeader, "/team/../escape"))
 
 	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
 		t.Fatal("handler must not run for an invalid user-path header")
@@ -293,11 +254,7 @@ func TestRequestSnapshotCapture_RejectsInvalidUserPathOnNonIngressManagedModelEn
 }
 
 func TestRequestSnapshotCapture_SkipsUserPathStampingForNonModelEndpoints(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/providers", nil)
-	req.Header.Set(core.UserPathHeader, "/team/alpha")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/admin/providers", echotest.WithHeader(core.UserPathHeader, "/team/alpha"))
 
 	var capturedUserPath string
 	handler := RequestSnapshotCapture()(func(c *echo.Context) error {
@@ -306,18 +263,13 @@ func TestRequestSnapshotCapture_SkipsUserPathStampingForNonModelEndpoints(t *tes
 	})
 
 	require.NoError(t, handler(c))
-	assert.Equal(t, "", capturedUserPath)
+	assert.Empty(t, capturedUserPath)
 }
 
 func TestRequestSnapshotCapture_UsesConfiguredUserPathHeader(t *testing.T) {
-	e := echo.New()
 	const headerName = "X-Tenant-Path"
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(headerName, " team//alpha/user/ ")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`, echotest.WithHeader(headerName, " team//alpha/user/ "))
 
 	var capturedFrame *core.RequestSnapshot
 	handler := RequestSnapshotCapture(headerName)(func(c *echo.Context) error {
@@ -334,12 +286,7 @@ func TestRequestSnapshotCapture_UsesConfiguredUserPathHeader(t *testing.T) {
 }
 
 func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {
-	e := echo.New()
-
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/responses", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/p/openai/responses", `{"model":"gpt-5-mini"}`)
 	c.SetPathValues(echo.PathValues{
 		{Name: "provider", Value: "openai"},
 		{Name: "endpoint", Value: "responses"},
@@ -356,11 +303,9 @@ func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	require.NotNil(t, capturedFrame)
 	assert.Equal(t, "openai", capturedFrame.GetRouteParams()["provider"])
 	assert.Equal(t, "responses", capturedFrame.GetRouteParams()["endpoint"])
-
 	require.NotNil(t, capturedEnv)
 	assert.Equal(t, "provider_passthrough", capturedEnv.RouteType)
 	assert.Equal(t, "openai", capturedEnv.RouteHints.Provider)
@@ -373,15 +318,9 @@ func TestRequestSnapshotCapture_PreservesPassthroughRouteParams(t *testing.T) {
 }
 
 func TestRequestSnapshotCapture_GeneratesRequestIDWhenMissing(t *testing.T) {
-	e := echo.New()
-
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
 	// A caller-supplied ID that is not a plain token is replaced, not echoed.
-	req.Header.Set(core.RequestIDHeader, "req 123\x1b[31m")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody, echotest.WithHeader(core.RequestIDHeader, "req 123\x1b[31m"))
 
 	var capturedFrame *core.RequestSnapshot
 	var downstreamBody string
@@ -396,20 +335,14 @@ func TestRequestSnapshotCapture_GeneratesRequestIDWhenMissing(t *testing.T) {
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	require.NotNil(t, capturedFrame)
-	if capturedFrame.RequestID == "" {
-		t.Fatal("expected generated request id")
-	}
-	if _, parseErr := uuid.Parse(capturedFrame.RequestID); parseErr != nil {
-		t.Fatalf("generated request id is not a valid UUID: %v", parseErr)
-	}
-	if got := rec.Result().Header.Get("X-Request-ID"); got != capturedFrame.RequestID {
-		t.Fatalf("response X-Request-ID = %q, want %q", got, capturedFrame.RequestID)
-	}
-	if got := core.GetRequestID(c.Request().Context()); got != capturedFrame.RequestID {
-		t.Fatalf("context request id = %q, want %q", got, capturedFrame.RequestID)
-	}
+	require.NotEmpty(t, capturedFrame.RequestID)
+	_, parseErr := uuid.Parse(capturedFrame.RequestID)
+	require.NoError(t, parseErr)
+	got := rec.Result().Header.Get("X-Request-ID")
+	require.Equal(t, capturedFrame.RequestID, got)
+	got = core.GetRequestID(c.Request().Context())
+	require.Equal(t, capturedFrame.RequestID, got)
 	assert.JSONEq(t, reqBody, downstreamBody)
 }
 
@@ -427,11 +360,7 @@ func TestExtractTraceMetadata_JoinsMultipleHeaderValues(t *testing.T) {
 func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 	provider := &mockProvider{supportedModels: []string{"gpt-4o-mini"}}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-123")
-	req.Body = &explodingReadCloser{}
+	c, rec := echotest.Post(t, "/v1/chat/completions", &explodingReadCloser{}, echotest.WithHeader("X-Request-ID", "req-123"))
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -445,12 +374,7 @@ func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 		"req-123",
 		nil,
 	)
-	ctx := core.WithRequestSnapshot(req.Context(), frame)
-	ctx = core.WithWhiteBoxPrompt(ctx, core.DeriveWhiteBoxPrompt(frame))
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	handler := WorkflowResolution(provider)(func(c *echo.Context) error {
 		return c.String(http.StatusOK, "ok")
@@ -462,14 +386,9 @@ func TestModelValidation_UsesSemanticEnvelopeWithoutReadingBody(t *testing.T) {
 }
 
 func TestRequestSnapshotCapture_SkipsOversizedBodies(t *testing.T) {
-	e := echo.New()
-
 	largeContent := strings.Repeat("x", int(auditlog.MaxBodyCapture)+128)
 	reqBody := `{"model":"gpt-5-mini","messages":[{"role":"user","content":"` + largeContent + `"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	var capturedFrame *core.RequestSnapshot
 	var downstreamBody string
@@ -484,7 +403,6 @@ func TestRequestSnapshotCapture_SkipsOversizedBodies(t *testing.T) {
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	require.NotNil(t, capturedFrame)
 	assert.Nil(t, capturedFrame.CapturedBody())
 	assert.True(t, capturedFrame.BodyNotCaptured)
@@ -494,13 +412,7 @@ func TestRequestSnapshotCapture_SkipsOversizedBodies(t *testing.T) {
 }
 
 func TestRequestSnapshotCapture_ManagesFilesWithoutReadingMultipartBody(t *testing.T) {
-	e := echo.New()
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/files", nil)
-	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
-	req.Body = &explodingReadCloser{}
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/files", &explodingReadCloser{}, echotest.WithContentType("multipart/form-data; boundary=test"))
 
 	var capturedFrame *core.RequestSnapshot
 	var capturedEnv *core.WhiteBoxPrompt
@@ -513,23 +425,18 @@ func TestRequestSnapshotCapture_ManagesFilesWithoutReadingMultipartBody(t *testi
 
 	err := handler(c)
 	require.NoError(t, err)
-
 	require.NotNil(t, capturedFrame)
 	assert.Equal(t, "/v1/files", capturedFrame.Path)
 	assert.Equal(t, "multipart/form-data; boundary=test", capturedFrame.ContentType)
 	assert.Nil(t, capturedFrame.CapturedBody())
 	assert.False(t, capturedFrame.BodyNotCaptured)
-
 	require.NotNil(t, capturedEnv)
 	assert.Equal(t, "files", capturedEnv.OperationType)
 	assert.False(t, capturedEnv.JSONBodyParsed)
 }
 
 func TestRequestBodyBytes_UsesSnapshotReadOnlyBodyView(t *testing.T) {
-	e := echo.New()
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Body = &explodingReadCloser{}
+	c, _ := echotest.Post(t, "/v1/chat/completions", &explodingReadCloser{})
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
 		"/v1/chat/completions",
@@ -542,10 +449,7 @@ func TestRequestBodyBytes_UsesSnapshotReadOnlyBodyView(t *testing.T) {
 		"req-body-bytes-123",
 		nil,
 	)
-	req = req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(c.Request().WithContext(core.WithRequestSnapshot(c.Request().Context(), frame)))
 
 	body, err := requestBodyBytes(c)
 	require.NoError(t, err)
@@ -555,34 +459,26 @@ func TestRequestBodyBytes_UsesSnapshotReadOnlyBodyView(t *testing.T) {
 	view := frame.CapturedBodyView()
 	require.NotNil(t, view)
 	require.NotEmpty(t, view)
-	if &body[0] != &view[0] {
-		t.Fatal("requestBodyBytes returned a cloned snapshot body, want shared read-only view")
-	}
+	require.Same(t, &view[0], &body[0])
 }
 
 func TestRequestBodyBytes_AttachesReadBodyToSnapshot(t *testing.T) {
-	e := echo.New()
-
 	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
+	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
 		"/v1/chat/completions",
 		nil,
 		nil,
-		req.Header,
+		c.Request().Header,
 		"application/json",
 		nil,
 		false,
 		"req-body-capture-123",
 		nil,
 	)
-	req = req.WithContext(core.WithRequestSnapshot(req.Context(), frame))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(c.Request().WithContext(core.WithRequestSnapshot(c.Request().Context(), frame)))
 
 	body, err := requestBodyBytes(c)
 	require.NoError(t, err)
@@ -599,7 +495,5 @@ func TestRequestBodyBytes_AttachesReadBodyToSnapshot(t *testing.T) {
 
 	view := updated.CapturedBodyView()
 	require.NotEmpty(t, view)
-	if &second[0] != &view[0] {
-		t.Fatal("second requestBodyBytes call did not reuse snapshot body")
-	}
+	require.Same(t, &view[0], &second[0])
 }

@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/realtime"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -102,44 +104,21 @@ func TestRealtimeCalls_SDPHappyPath(t *testing.T) {
 	}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0 offer"))
-	req.Header.Set("Content-Type", "application/sdp")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeCalls(c); err != nil {
-		t.Fatalf("RealtimeCalls returned error: %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if rec.Body.String() != "v=0 answer" {
-		t.Errorf("body = %q, want relayed SDP answer", rec.Body.String())
-	}
-	if got := rec.Header().Get("Location"); got != "/v1/realtime/calls/rtc_abc123" {
-		t.Errorf("Location = %q, want gateway-relative call path", got)
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/sdp" {
-		t.Errorf("Content-Type = %q, want application/sdp", got)
-	}
-	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Errorf("X-Content-Type-Options = %q, want nosniff on relayed upstream bytes", got)
-	}
-	if upstreamReq.body != "v=0 offer" {
-		t.Errorf("upstream body = %q, want the SDP offer", upstreamReq.body)
-	}
-	if upstreamReq.contentType != "application/sdp" {
-		t.Errorf("upstream Content-Type = %q, want application/sdp", upstreamReq.contentType)
-	}
-	if upstreamReq.auth != "Bearer upstream-key" {
-		t.Errorf("upstream Authorization = %q, want injected credentials", upstreamReq.auth)
-	}
-	if upstreamReq.model != "gpt-realtime" {
-		t.Errorf("upstream model query = %q, want resolved model", upstreamReq.model)
-	}
-	if route, ok := handler.realtimeCalls.Lookup("rtc_abc123"); !ok || route.Model != "gpt-realtime" {
-		t.Errorf("registry entry = %+v (found %v), want the created call registered", route, ok)
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/calls?model=gpt-realtime", "v=0 offer", echotest.WithContentType("application/sdp"))
+	err := handler.RealtimeCalls(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Equal(t, "v=0 answer", rec.Body.String())
+	assert.Equal(t, "/v1/realtime/calls/rtc_abc123", rec.Header().Get("Location"))
+	assert.Equal(t, "application/sdp", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "v=0 offer", upstreamReq.body)
+	assert.Equal(t, "application/sdp", upstreamReq.contentType)
+	assert.Equal(t, "Bearer upstream-key", upstreamReq.auth)
+	assert.Equal(t, "gpt-realtime", upstreamReq.model)
+	route, ok := handler.realtimeCalls.Lookup("rtc_abc123")
+	require.True(t, ok, "created call must be registered")
+	assert.Equal(t, "gpt-realtime", route.Model)
 }
 
 func TestRealtimeCalls_MultipartRewritesSessionModel(t *testing.T) {
@@ -148,9 +127,8 @@ func TestRealtimeCalls_MultipartRewritesSessionModel(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		upstreamBody, _ = io.ReadAll(r.Body)
 		upstreamContentType = r.Header.Get("Content-Type")
-		if r.URL.Query().Has("model") {
-			t.Error("model query must be absent when the model travels in the session field")
-		}
+		assert.False(t, r.URL.Query().Has("model"))
+
 		w.Header().Set("Content-Type", "application/sdp")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte("v=0 answer"))
@@ -171,26 +149,18 @@ func TestRealtimeCalls_MultipartRewritesSessionModel(t *testing.T) {
 	_ = form.WriteField("session", `{"type":"realtime","model":"voice-alias","audio":{"output":{"voice":"marin"}}}`)
 	_ = form.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls", &buf)
-	req.Header.Set("Content-Type", form.FormDataContentType())
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/realtime/calls", &buf, echotest.WithContentType(form.FormDataContentType()))
+	err := handler.RealtimeCalls(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 
-	if err := handler.RealtimeCalls(c); err != nil {
-		t.Fatalf("RealtimeCalls returned error: %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
-	}
 	// The alias routes the request; the provider must see the resolved model.
-	if mock.capturedCall == nil || mock.capturedCall.Model != "gpt-realtime-2" {
-		t.Errorf("router received %+v, want the resolved model gpt-realtime-2", mock.capturedCall)
-	}
+	require.NotNil(t, mock.capturedCall)
+	assert.Equal(t, "gpt-realtime-2", mock.capturedCall.Model)
 
 	_, params, err := mime.ParseMediaType(upstreamContentType)
-	if err != nil {
-		t.Fatalf("upstream content type %q invalid: %v", upstreamContentType, err)
-	}
+	require.NoError(t, err, "upstream content type %q invalid: %v", upstreamContentType, err)
+
 	reader := multipart.NewReader(bytes.NewReader(upstreamBody), params["boundary"])
 	fields := map[string]string{}
 	for {
@@ -198,33 +168,27 @@ func TestRealtimeCalls_MultipartRewritesSessionModel(t *testing.T) {
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
-			t.Fatalf("upstream multipart invalid: %v", err)
-		}
+		require.NoError(t, err)
+
 		content, _ := io.ReadAll(part)
 		fields[part.FormName()] = string(content)
 	}
-	if fields["sdp"] != "v=0 offer" {
-		t.Errorf("sdp field = %q, want the original offer", fields["sdp"])
-	}
+	assert.Equal(t, "v=0 offer", fields["sdp"])
+
 	var session map[string]any
-	if err := json.Unmarshal([]byte(fields["session"]), &session); err != nil {
-		t.Fatalf("session field is not JSON: %v", err)
-	}
-	if session["model"] != "gpt-realtime-2" {
-		t.Errorf("session.model = %v, want rewritten to the resolved model", session["model"])
-	}
-	if audio, ok := session["audio"].(map[string]any); !ok || audio["output"] == nil {
-		t.Error("session fields beyond model must be preserved")
-	}
+	err = json.Unmarshal([]byte(fields["session"]), &session)
+	require.NoError(t, err)
+	assert.Equal(t, "gpt-realtime-2", session["model"])
+	audio, ok := session["audio"].(map[string]any)
+	require.True(t, ok)
+	assert.NotNil(t, audio["output"])
 }
 
 func TestRealtimeCalls_ObserverRecordsUsage(t *testing.T) {
 	responseDone := `{"type":"response.done","response":{"usage":{"input_tokens":12,"output_tokens":34,"total_tokens":46}}}`
 	sideband := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("call_id") != "rtc_obs" {
-			t.Errorf("sideband call_id = %q, want rtc_obs", r.URL.Query().Get("call_id"))
-		}
+		assert.Equal(t, "rtc_obs", r.URL.Query().Get("call_id"))
+
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
@@ -249,40 +213,27 @@ func TestRealtimeCalls_ObserverRecordsUsage(t *testing.T) {
 	usageLogger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
 	handler := newRealtimeTestHandler(mock, usageLogger)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0 offer"))
-	req.Header.Set("Content-Type", "application/sdp")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeCalls(c); err != nil {
-		t.Fatalf("RealtimeCalls returned error: %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedRealtime == nil || mock.capturedRealtime.CallID != "rtc_obs" {
-		t.Fatalf("observer target request = %+v, want the created call id", mock.capturedRealtime)
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/calls?model=gpt-realtime", "v=0 offer", echotest.WithContentType("application/sdp"))
+	err := handler.RealtimeCalls(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.NotNil(t, mock.capturedRealtime)
+	require.Equal(t, "rtc_obs", mock.capturedRealtime.CallID)
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		entries := usageLogger.Entries()
 		if len(entries) > 0 {
 			entry := entries[0]
-			if entry.InputTokens != 12 || entry.OutputTokens != 34 {
-				t.Errorf("usage tokens = %d/%d, want 12/34", entry.InputTokens, entry.OutputTokens)
-			}
-			if entry.Endpoint != "/v1/realtime/calls" {
-				t.Errorf("usage endpoint = %q, want /v1/realtime/calls", entry.Endpoint)
-			}
-			if entry.Model != "gpt-realtime" {
-				t.Errorf("usage model = %q, want gpt-realtime", entry.Model)
-			}
+			assert.Equal(t, 12, entry.InputTokens)
+			assert.Equal(t, 34, entry.OutputTokens)
+			assert.Equal(t, "/v1/realtime/calls", entry.Endpoint)
+			assert.Equal(t, "gpt-realtime", entry.Model)
+
 			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("observer did not record usage before timeout")
-		}
+		require.False(t, time.Now().After(deadline))
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
@@ -317,17 +268,10 @@ func TestRealtimeCalls_ErrorCases(t *testing.T) {
 			handler := newRealtimeTestHandler(mock, nil)
 			handler.realtimeEnabled = tt.enabled
 
-			req := httptest.NewRequest(http.MethodPost, tt.target, strings.NewReader(tt.body))
-			req.Header.Set("Content-Type", "application/sdp")
-			rec := httptest.NewRecorder()
-			c := echo.New().NewContext(req, rec)
-
-			if err := handler.RealtimeCalls(c); err != nil {
-				t.Fatalf("RealtimeCalls returned error: %v", err)
-			}
-			if rec.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d (body: %s)", rec.Code, tt.wantStatus, rec.Body.String())
-			}
+			c, rec := echotest.Post(t, tt.target, tt.body, echotest.WithContentType("application/sdp"))
+			err := handler.RealtimeCalls(c)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 		})
 	}
 }
@@ -338,20 +282,11 @@ func TestRealtimeCalls_RouterWithoutCapability(t *testing.T) {
 	handler := NewHandler(&mockProvider{supportedModels: []string{"gpt-realtime"}}, nil, nil, nil)
 	handler.realtimeEnabled = true
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0"))
-	req.Header.Set("Content-Type", "application/sdp")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeCalls(c); err != nil {
-		t.Fatalf("RealtimeCalls returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "not supported") {
-		t.Errorf("body = %q, want a capability error", rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/calls?model=gpt-realtime", "v=0", echotest.WithContentType("application/sdp"))
+	err := handler.RealtimeCalls(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "not supported")
 }
 
 func TestRealtimeCalls_MalformedMultipart(t *testing.T) {
@@ -377,17 +312,10 @@ func TestRealtimeCalls_MalformedMultipart(t *testing.T) {
 			mock := &realtimeWebRTCMock{mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}}}
 			handler := newRealtimeTestHandler(mock, nil)
 
-			req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls", strings.NewReader(tt.body))
-			req.Header.Set("Content-Type", tt.contentType)
-			rec := httptest.NewRecorder()
-			c := echo.New().NewContext(req, rec)
-
-			if err := handler.RealtimeCalls(c); err != nil {
-				t.Fatalf("RealtimeCalls returned error: %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-			}
+			c, rec := echotest.Post(t, "/v1/realtime/calls", tt.body, echotest.WithContentType(tt.contentType))
+			err := handler.RealtimeCalls(c)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 		})
 	}
 }
@@ -399,17 +327,10 @@ func TestRealtimeCalls_UnreachableUpstream(t *testing.T) {
 	}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0"))
-	req.Header.Set("Content-Type", "application/sdp")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeCalls(c); err != nil {
-		t.Fatalf("RealtimeCalls returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/calls?model=gpt-realtime", "v=0", echotest.WithContentType("application/sdp"))
+	err := handler.RealtimeCalls(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
 }
 
 func TestRealtimeCalls_NoLocationHeader(t *testing.T) {
@@ -428,23 +349,12 @@ func TestRealtimeCalls_NoLocationHeader(t *testing.T) {
 	usageLogger := &usageCaptureLogger{config: usage.Config{Enabled: true}}
 	handler := newRealtimeTestHandler(mock, usageLogger)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/calls?model=gpt-realtime", strings.NewReader("v=0"))
-	req.Header.Set("Content-Type", "application/sdp")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeCalls(c); err != nil {
-		t.Fatalf("RealtimeCalls returned error: %v", err)
-	}
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if rec.Header().Get("Location") != "" {
-		t.Errorf("Location = %q, want unset when upstream sent none", rec.Header().Get("Location"))
-	}
-	if mock.capturedRealtime != nil {
-		t.Error("no observer must be attached without a call id")
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/calls?model=gpt-realtime", "v=0", echotest.WithContentType("application/sdp"))
+	err := handler.RealtimeCalls(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Empty(t, rec.Header().Get("Location"))
+	assert.Nil(t, mock.capturedRealtime)
 }
 
 func TestRealtimeClientSecrets_HappyPath(t *testing.T) {
@@ -470,33 +380,19 @@ func TestRealtimeClientSecrets_HappyPath(t *testing.T) {
 	handler := newRealtimeTestHandler(mock, nil)
 
 	body := `{"expires_after":{"anchor":"created_at","seconds":600},"session":{"type":"realtime","model":"voice-alias","instructions":"be brief"}}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/client_secrets", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/realtime/client_secrets", body)
+	err := handler.RealtimeClientSecrets(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "ek_test")
+	assert.Equal(t, "Bearer upstream-key", upstreamAuth)
 
-	if err := handler.RealtimeClientSecrets(c); err != nil {
-		t.Fatalf("RealtimeClientSecrets returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "ek_test") {
-		t.Errorf("body = %q, want relayed client secret", rec.Body.String())
-	}
-	if upstreamAuth != "Bearer upstream-key" {
-		t.Errorf("upstream Authorization = %q, want injected credentials", upstreamAuth)
-	}
 	session, _ := upstreamBody["session"].(map[string]any)
-	if session == nil || session["model"] != "gpt-realtime-2" {
-		t.Errorf("upstream session = %+v, want model rewritten to resolved", upstreamBody["session"])
-	}
-	if session["instructions"] != "be brief" {
-		t.Error("session fields beyond model must be preserved")
-	}
-	if expires, _ := upstreamBody["expires_after"].(map[string]any); expires == nil {
-		t.Error("expires_after must be forwarded")
-	}
+	require.NotNil(t, session)
+	assert.Equal(t, "gpt-realtime-2", session["model"])
+	assert.Equal(t, "be brief", session["instructions"])
+	expires, _ := upstreamBody["expires_after"].(map[string]any)
+	assert.NotNil(t, expires)
 }
 
 func TestRealtimeClientSecrets_TranscriptionModelFallback(t *testing.T) {
@@ -514,54 +410,32 @@ func TestRealtimeClientSecrets_TranscriptionModelFallback(t *testing.T) {
 	handler := newRealtimeTestHandler(mock, nil)
 
 	body := `{"session":{"type":"transcription","audio":{"input":{"transcription":{"model":"gpt-4o-transcribe"}}}}}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/client_secrets", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeClientSecrets(c); err != nil {
-		t.Fatalf("RealtimeClientSecrets returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedSecret == nil || mock.capturedSecret.Model != "gpt-4o-transcribe" {
-		t.Errorf("router received %+v, want the transcription model", mock.capturedSecret)
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/client_secrets", body)
+	err := handler.RealtimeClientSecrets(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, mock.capturedSecret)
+	assert.Equal(t, "gpt-4o-transcribe", mock.capturedSecret.Model)
 }
 
 func TestRealtimeClientSecrets_InvalidJSON(t *testing.T) {
 	mock := &realtimeWebRTCMock{mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}}}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/client_secrets", strings.NewReader("not-json"))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeClientSecrets(c); err != nil {
-		t.Fatalf("RealtimeClientSecrets returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/client_secrets", "not-json")
+	err := handler.RealtimeClientSecrets(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
 
 func TestRealtimeClientSecrets_MissingModel(t *testing.T) {
 	mock := &realtimeWebRTCMock{mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}}}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/client_secrets", strings.NewReader(`{"session":{"type":"realtime"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.RealtimeClientSecrets(c); err != nil {
-		t.Fatalf("RealtimeClientSecrets returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/client_secrets", `{"session":{"type":"realtime"}}`)
+	err := handler.RealtimeClientSecrets(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
 
 func TestRealtimeAttach_UsesRegistry(t *testing.T) {
@@ -573,22 +447,13 @@ func TestRealtimeAttach_UsesRegistry(t *testing.T) {
 	handler := newRealtimeTestHandler(mock, nil)
 	handler.realtimeCalls.Register("rtc_55", realtime.CallRoute{Model: "gpt-realtime", Provider: "mock"})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/realtime?call_id=rtc_55", nil)
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.Realtime(c); err != nil {
-		t.Fatalf("Realtime returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 from the empty target (body: %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedRealtime == nil {
-		t.Fatal("router was not consulted")
-	}
-	if mock.capturedRealtime.Model != "gpt-realtime" || mock.capturedRealtime.CallID != "rtc_55" {
-		t.Errorf("router received %+v, want registry model and call id", mock.capturedRealtime)
-	}
+	c, rec := echotest.Get(t, "/v1/realtime?call_id=rtc_55")
+	err := handler.Realtime(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code, "empty target must yield 502: %s", rec.Body.String())
+	require.NotNil(t, mock.capturedRealtime)
+	assert.Equal(t, "gpt-realtime", mock.capturedRealtime.Model)
+	assert.Equal(t, "rtc_55", mock.capturedRealtime.CallID)
 }
 
 func TestRealtimeAttach_RegistryOverridesConflictingModel(t *testing.T) {
@@ -601,35 +466,21 @@ func TestRealtimeAttach_RegistryOverridesConflictingModel(t *testing.T) {
 	handler := newRealtimeTestHandler(mock, nil)
 	handler.realtimeCalls.Register("rtc_77", realtime.CallRoute{Model: "gpt-realtime", Provider: "mock"})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/realtime?call_id=rtc_77&model=other-model", nil)
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.Realtime(c); err != nil {
-		t.Fatalf("Realtime returned error: %v", err)
-	}
-	if mock.capturedRealtime == nil {
-		t.Fatal("router was not consulted")
-	}
-	if mock.capturedRealtime.Model != "gpt-realtime" {
-		t.Errorf("router received model %q, want the registered call's model", mock.capturedRealtime.Model)
-	}
+	c, _ := echotest.Get(t, "/v1/realtime?call_id=rtc_77&model=other-model")
+	err := handler.Realtime(c)
+	require.NoError(t, err)
+	require.NotNil(t, mock.capturedRealtime)
+	assert.Equal(t, "gpt-realtime", mock.capturedRealtime.Model)
 }
 
 func TestRealtimeAttach_UnknownCallID(t *testing.T) {
 	mock := &realtimeWebRTCMock{mockProvider: &mockProvider{supportedModels: []string{"gpt-realtime"}}}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/realtime?call_id=rtc_missing", nil)
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
-
-	if err := handler.Realtime(c); err != nil {
-		t.Fatalf("Realtime returned error: %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/v1/realtime?call_id=rtc_missing")
+	err := handler.Realtime(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 }
 
 func TestRealtimeCallIDFromLocation(t *testing.T) {
@@ -644,9 +495,7 @@ func TestRealtimeCallIDFromLocation(t *testing.T) {
 		{location: "   ", want: ""},
 	}
 	for _, tt := range tests {
-		if got := realtimeCallIDFromLocation(tt.location); got != tt.want {
-			t.Errorf("realtimeCallIDFromLocation(%q) = %q, want %q", tt.location, got, tt.want)
-		}
+		assert.Equal(t, tt.want, realtimeCallIDFromLocation(tt.location), "location %q", tt.location)
 	}
 }
 
@@ -675,13 +524,12 @@ func TestRealtimeSessionModel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var payload map[string]any
-			if err := json.Unmarshal([]byte(tt.payload), &payload); err != nil {
-				t.Fatal(err)
-			}
+			err := json.Unmarshal([]byte(tt.payload), &payload)
+			require.NoError(t, err)
+
 			model, setModel := realtimeSessionModel(payload)
-			if model != tt.wantModel {
-				t.Fatalf("model = %q, want %q", model, tt.wantModel)
-			}
+			require.Equal(t, tt.wantModel, model)
+
 			if tt.wantModel == "" {
 				return
 			}
@@ -690,9 +538,7 @@ func TestRealtimeSessionModel(t *testing.T) {
 			for _, key := range tt.wantPath {
 				node = node.(map[string]any)[key]
 			}
-			if node != "rewritten" {
-				t.Errorf("rewrite landed on %v, want %q at %v", node, "rewritten", tt.wantPath)
-			}
+			assert.Equal(t, "rewritten", node, "rewrite must land at %v", tt.wantPath)
 		})
 	}
 }

@@ -11,7 +11,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -29,6 +28,7 @@ import (
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/cache"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/filestore"
 	"github.com/enterpilot/gomodel/internal/gateway"
 	"github.com/enterpilot/gomodel/internal/guardrails"
@@ -295,10 +295,6 @@ func (r *closeCountingReadCloser) Close() error {
 	return r.ReadCloser.Close()
 }
 
-func setPathParam(c *echo.Context, name, value string) {
-	c.SetPathValues(echo.PathValues{{Name: name, Value: value}})
-}
-
 type capturingAuditLogger struct {
 	config  auditlog.Config
 	entries []*auditlog.LogEntry
@@ -552,9 +548,8 @@ func readPassthroughRequestBody(t *testing.T, body io.ReadCloser) string {
 		_ = body.Close()
 	}()
 	data, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read passthrough request body: %v", err)
-	}
+	require.NoError(t, err)
+
 	return string(data)
 }
 
@@ -1197,31 +1192,18 @@ func TestChatCompletion(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "chatcmpl-123") {
-		t.Errorf("response missing expected ID, got: %s", body)
-	}
-	if !strings.Contains(body, "Hello!") {
-		t.Errorf("response missing expected content, got: %s", body)
-	}
+	assert.Contains(t, body, "chatcmpl-123")
+	assert.Contains(t, body, "Hello!")
 }
 
 func TestChatCompletion_BindsMultimodalContent(t *testing.T) {
@@ -1242,39 +1224,24 @@ func TestChatCompletion_BindsMultimodalContent(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":[{"type":"text","text":"Describe this image"},{"type":"image_url","image_url":{"url":"https://example.com/image.png","detail":"high"}}]}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedChatReq)
 
 	parts, ok := core.NormalizeContentParts(provider.capturedChatReq.Messages[0].Content)
-	if !ok {
-		t.Fatalf("captured content type = %T, want structured content", provider.capturedChatReq.Messages[0].Content)
-	}
-	if len(parts) != 2 {
-		t.Fatalf("len(parts) = %d, want 2", len(parts))
-	}
-	if parts[0].Type != "text" || parts[0].Text != "Describe this image" {
-		t.Fatalf("unexpected first part: %+v", parts[0])
-	}
-	if parts[1].Type != "image_url" || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/image.png" {
-		t.Fatalf("unexpected second part: %+v", parts[1])
-	}
+	require.True(t, ok, "captured content type = %T, want structured content", provider.capturedChatReq.Messages[0].Content)
+	require.Len(t, parts, 2)
+	require.Equal(t, "text", parts[0].Type)
+	require.Equal(t, "Describe this image", parts[0].Text)
+	require.Equal(t, "image_url", parts[1].Type)
+	require.NotNil(t, parts[1].ImageURL)
+	require.Equal(t, "https://example.com/image.png", parts[1].ImageURL.URL)
 }
 
 func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
@@ -1295,7 +1262,6 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{
@@ -1309,28 +1275,15 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 			}
 		}
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
-	if provider.capturedChatReq.ExtraFields.Lookup("response_format") == nil {
-		t.Fatal("response_format missing from ExtraFields")
-	}
+	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.NotNil(t, provider.capturedChatReq)
+	require.NotNil(t, provider.capturedChatReq.ExtraFields.Lookup("response_format"))
 
 	body, err := json.Marshal(provider.capturedChatReq)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if !bytes.Contains(body, []byte(`"response_format"`)) {
-		t.Fatalf("marshaled request missing response_format: %s", string(body))
-	}
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"response_format"`)
 }
 
 func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
@@ -1351,7 +1304,6 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{
@@ -1364,40 +1316,27 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 			}
 		]
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ChatCompletion(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
-	if provider.capturedChatReq.Messages[0].ExtraFields.Lookup("name") == nil {
-		t.Fatal("message.name missing from ExtraFields")
-	}
+	c, _ := echotest.Post(t, "/v1/chat/completions", reqBody)
+	err := handler.ChatCompletion(c)
+	require.NoError(t, err)
+	require.NotNil(t, provider.capturedChatReq)
+	require.NotNil(t, provider.capturedChatReq.Messages[0].ExtraFields.Lookup("name"))
 
 	body, err := json.Marshal(provider.capturedChatReq)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	messages := decoded["messages"].([]any)
 	firstMsg := messages[0].(map[string]any)
-	if firstMsg["name"] != "alice" {
-		t.Fatalf("messages[0].name = %#v, want alice", firstMsg["name"])
-	}
+	require.Equal(t, "alice", firstMsg["name"])
+
 	content := firstMsg["content"].([]any)
 	firstPart := content[0].(map[string]any)
-	if _, ok := firstPart["cache_control"].(map[string]any); !ok {
-		t.Fatalf("messages[0].content[0].cache_control = %#v, want object", firstPart["cache_control"])
-	}
+	_, ok := firstPart["cache_control"].(map[string]any)
+	require.True(t, ok, "messages[0].content[0].cache_control = %#v, want object", firstPart["cache_control"])
 }
 
 func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
@@ -1418,13 +1357,7 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-ingress-1")
-	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -1442,32 +1375,19 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 		"req-ingress-1",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", &explodingReadCloser{}, echotest.WithHeader("X-Request-ID", "req-ingress-1"))
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
-	if provider.capturedChatReq.ExtraFields.Lookup("response_format") == nil {
-		t.Fatal("response_format missing from ExtraFields")
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedChatReq)
+	require.NotNil(t, provider.capturedChatReq.ExtraFields.Lookup("response_format"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
-	if env == nil || env.CachedChatRequest() == nil {
-		t.Fatalf("expected semantic envelope to cache ChatRequest, got %+v", env)
-	}
-	if env.CachedChatRequest() != provider.capturedChatReq {
-		t.Fatal("cached ChatRequest does not match provider request")
-	}
+	require.NotNil(t, env)
+	require.NotNil(t, env.CachedChatRequest())
+	require.Same(t, provider.capturedChatReq, env.CachedChatRequest())
 }
 
 func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
@@ -1490,12 +1410,7 @@ func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -1512,38 +1427,21 @@ func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", &explodingReadCloser{})
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
-	if provider.capturedChatReq.Model != "gpt-5-mini" {
-		t.Fatalf("captured model = %q, want gpt-5-mini", provider.capturedChatReq.Model)
-	}
-	if provider.capturedChatReq.Provider != "openai" {
-		t.Fatalf("captured provider = %q, want openai", provider.capturedChatReq.Provider)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedChatReq)
+	require.Equal(t, "gpt-5-mini", provider.capturedChatReq.Model)
+	require.Equal(t, "openai", provider.capturedChatReq.Provider)
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
-	if env == nil || env.CachedChatRequest() == nil {
-		t.Fatalf("expected semantic envelope to cache ChatRequest, got %+v", env)
-	}
-	if env.RouteHints.Model != "gpt-5-mini" {
-		t.Fatalf("RouteHints.Model = %q, want gpt-5-mini", env.RouteHints.Model)
-	}
-	if env.RouteHints.Provider != "openai" {
-		t.Fatalf("RouteHints.Provider = %q, want openai", env.RouteHints.Provider)
-	}
+	require.NotNil(t, env)
+	require.NotNil(t, env.CachedChatRequest())
+	require.Equal(t, "gpt-5-mini", env.RouteHints.Model)
+	require.Equal(t, "openai", env.RouteHints.Provider)
 }
 
 func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *testing.T) {
@@ -1565,12 +1463,9 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 	service, err := virtualmodels.NewService(newAliasesTestStore(
 		redirectVM("anthropic/claude-opus-4-6", "gpt-5-nano", "openai", true),
 	), &catalog, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	inner := &capturingProvider{
 		supportedModels: []string{"gpt-5-nano"},
@@ -1595,12 +1490,7 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 		},
 	}
 
-	e := echo.New()
 	handler := newHandler(inner, nil, nil, nil, service, nil, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -1617,38 +1507,21 @@ func TestChatCompletion_UsesExplicitAliasResolverWithoutProviderDecorator(t *tes
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", &explodingReadCloser{})
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err = handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if inner.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
-	if inner.capturedChatReq.Model != "gpt-5-nano" {
-		t.Fatalf("captured model = %q, want gpt-5-nano", inner.capturedChatReq.Model)
-	}
-	if inner.capturedChatReq.Provider != "openai" {
-		t.Fatalf("captured provider = %q, want openai", inner.capturedChatReq.Provider)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, inner.capturedChatReq)
+	require.Equal(t, "gpt-5-nano", inner.capturedChatReq.Model)
+	require.Equal(t, "openai", inner.capturedChatReq.Provider)
 
 	workflow := core.GetWorkflow(c.Request().Context())
-	if workflow == nil || workflow.Resolution == nil {
-		t.Fatal("expected workflow resolution in context")
-	}
-	if !workflow.Resolution.AliasApplied {
-		t.Fatal("expected alias resolution to be marked as applied")
-	}
-	if workflow.ResolvedQualifiedModel() != "openai/gpt-5-nano" {
-		t.Fatalf("workflow resolved model = %q, want openai/gpt-5-nano", workflow.ResolvedQualifiedModel())
-	}
+	require.NotNil(t, workflow)
+	require.NotNil(t, workflow.Resolution)
+	require.True(t, workflow.Resolution.AliasApplied)
+	require.Equal(t, "openai/gpt-5-nano", workflow.ResolvedQualifiedModel())
 }
 
 func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
@@ -1679,12 +1552,7 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 
 	patcher := guardrails.NewWorkflowRequestPatcher(staticChainsResolver{chains: chains})
 
-	e := echo.New()
 	handler := newHandler(inner, nil, nil, nil, nil, nil, nil, patcher)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -1701,30 +1569,17 @@ func TestChatCompletion_UsesExplicitTranslatedRequestPatcher(t *testing.T) {
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", &explodingReadCloser{})
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if inner.capturedChatReq == nil {
-		t.Fatal("expected chat request to be captured")
-	}
-	if len(inner.capturedChatReq.Messages) != 2 {
-		t.Fatalf("captured messages = %d, want 2", len(inner.capturedChatReq.Messages))
-	}
-	if inner.capturedChatReq.Messages[0].Role != "system" || inner.capturedChatReq.Messages[0].Content != "guardrail system" {
-		t.Fatalf("first message = %+v, want injected guardrail system prompt", inner.capturedChatReq.Messages[0])
-	}
-	if inner.capturedChatReq.Messages[1].Role != "user" {
-		t.Fatalf("second message role = %q, want user", inner.capturedChatReq.Messages[1].Role)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, inner.capturedChatReq)
+	require.Len(t, inner.capturedChatReq.Messages, 2)
+	require.Equal(t, "system", inner.capturedChatReq.Messages[0].Role)
+	require.Equal(t, "guardrail system", inner.capturedChatReq.Messages[0].Content, "first message = %+v, want injected guardrail system prompt", inner.capturedChatReq.Messages[0])
+	require.Equal(t, "user", inner.capturedChatReq.Messages[1].Role)
 }
 
 func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
@@ -1746,7 +1601,6 @@ func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
 	}
 	batchPreparer := guardrails.NewWorkflowBatchPreparer(mock, staticChainsResolver{chains: chains})
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.batchRequestPreparer = batchPreparer
 
@@ -1761,32 +1615,20 @@ func TestBatches_UsesExplicitGuardrailBatchPreparer(t *testing.T) {
 	    }
 	  ]
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/batches", reqBody)
 
 	err := handler.Batches(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedBatchReq == nil || len(mock.capturedBatchReq.Requests) != 1 {
-		t.Fatalf("capturedBatchReq = %#v, want one request", mock.capturedBatchReq)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, mock.capturedBatchReq)
+	require.Len(t, mock.capturedBatchReq.Requests, 1)
 
 	var chatReq core.ChatRequest
-	if err := json.Unmarshal(mock.capturedBatchReq.Requests[0].Body, &chatReq); err != nil {
-		t.Fatalf("failed to decode rewritten batch item: %v", err)
-	}
-	if len(chatReq.Messages) != 2 {
-		t.Fatalf("rewritten batch messages = %d, want 2", len(chatReq.Messages))
-	}
-	if chatReq.Messages[0].Role != "system" || chatReq.Messages[0].Content != "guardrail system" {
-		t.Fatalf("first batch message = %+v, want injected guardrail system prompt", chatReq.Messages[0])
-	}
+	err = json.Unmarshal(mock.capturedBatchReq.Requests[0].Body, &chatReq)
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 2)
+	require.Equal(t, "system", chatReq.Messages[0].Role)
+	require.Equal(t, "guardrail system", chatReq.Messages[0].Content, "first batch message = %+v, want injected guardrail system prompt", chatReq.Messages[0])
 }
 
 func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
@@ -1801,12 +1643,7 @@ func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -1823,35 +1660,22 @@ func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
+	c, rec := echotest.Post(t, "/v1/responses", &explodingReadCloser{})
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedResponsesReq)
 
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedResponsesReq == nil {
-		t.Fatal("expected responses request to be captured")
-	}
 	input, ok := provider.capturedResponsesReq.Input.([]core.ResponsesInputElement)
-	if !ok || len(input) != 1 {
-		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
-	}
-	if input[0].ExtraFields.Lookup("x_trace") == nil {
-		t.Fatal("input[0].x_trace missing from ExtraFields")
-	}
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	require.NotNil(t, input[0].ExtraFields.Lookup("x_trace"))
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
-	if env == nil || env.CachedResponsesRequest() == nil {
-		t.Fatalf("expected semantic envelope to cache ResponsesRequest, got %+v", env)
-	}
-	if env.CachedResponsesRequest() != provider.capturedResponsesReq {
-		t.Fatal("cached ResponsesRequest does not match provider request")
-	}
+	require.NotNil(t, env)
+	require.NotNil(t, env.CachedResponsesRequest())
+	require.Same(t, provider.capturedResponsesReq, env.CachedResponsesRequest())
 }
 
 func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
@@ -1866,12 +1690,7 @@ func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -1889,31 +1708,18 @@ func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Embeddings(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedEmbeddingReq == nil {
-		t.Fatal("expected embeddings request to be captured")
-	}
-	if provider.capturedEmbeddingReq.ExtraFields.Lookup("x_meta") == nil {
-		t.Fatalf("x_meta missing from ExtraFields: %+v", provider.capturedEmbeddingReq.ExtraFields)
-	}
+	c, rec := echotest.Post(t, "/v1/embeddings", &explodingReadCloser{})
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	err := handler.Embeddings(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, provider.capturedEmbeddingReq)
+	require.NotNil(t, provider.capturedEmbeddingReq.ExtraFields.Lookup("x_meta"), "x_meta missing from ExtraFields: %+v", provider.capturedEmbeddingReq.ExtraFields)
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
-	if env == nil || env.CachedEmbeddingRequest() == nil {
-		t.Fatalf("expected semantic envelope to cache EmbeddingRequest, got %+v", env)
-	}
-	if env.CachedEmbeddingRequest() != provider.capturedEmbeddingReq {
-		t.Fatal("cached EmbeddingRequest does not match provider request")
-	}
+	require.NotNil(t, env)
+	require.NotNil(t, env.CachedEmbeddingRequest())
+	require.Same(t, provider.capturedEmbeddingReq, env.CachedEmbeddingRequest())
 }
 
 func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
@@ -1932,12 +1738,7 @@ func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", nil)
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = &explodingReadCloser{}
 
 	frame := core.NewRequestSnapshot(
 		http.MethodPost,
@@ -1961,37 +1762,20 @@ func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Batches(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedBatchReq == nil {
-		t.Fatal("expected batch request to be captured")
-	}
-	if mock.capturedBatchReq.ExtraFields.Lookup("x_top") == nil {
-		t.Fatalf("x_top missing from ExtraFields: %+v", mock.capturedBatchReq.ExtraFields)
-	}
-	if len(mock.capturedBatchReq.Requests) != 1 {
-		t.Fatalf("len(Requests) = %d, want 1", len(mock.capturedBatchReq.Requests))
-	}
-	if mock.capturedBatchReq.Requests[0].ExtraFields.Lookup("x_item_flag") == nil {
-		t.Fatalf("x_item_flag missing from item ExtraFields: %+v", mock.capturedBatchReq.Requests[0].ExtraFields)
-	}
+	c, rec := echotest.Post(t, "/v1/batches", &explodingReadCloser{})
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	err := handler.Batches(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, mock.capturedBatchReq)
+	require.NotNil(t, mock.capturedBatchReq.ExtraFields.Lookup("x_top"), "x_top missing from ExtraFields: %+v", mock.capturedBatchReq.ExtraFields)
+	require.Len(t, mock.capturedBatchReq.Requests, 1)
+	require.NotNil(t, mock.capturedBatchReq.Requests[0].ExtraFields.Lookup("x_item_flag"), "x_item_flag missing from item ExtraFields: %+v", mock.capturedBatchReq.Requests[0].ExtraFields)
 
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
-	if env == nil || env.CachedBatchRequest() == nil {
-		t.Fatalf("expected semantic envelope to cache BatchRequest, got %+v", env)
-	}
-	if env.CachedBatchRequest() != mock.capturedBatchReq {
-		t.Fatal("cached BatchRequest does not match provider request")
-	}
+	require.NotNil(t, env)
+	require.NotNil(t, env.CachedBatchRequest())
+	require.Same(t, mock.capturedBatchReq, env.CachedBatchRequest())
 }
 
 func TestGetBatch_UsesSemanticEnvelopeRouteMetadata(t *testing.T) {
@@ -2008,30 +1792,20 @@ func TestGetBatch_UsesSemanticEnvelopeRouteMetadata(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	createBody := `{
 		"endpoint":"/v1/chat/completions",
 		"requests":[{"custom_id":"chat-1","method":"POST","body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}}]
 	}`
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
+	createCtx, createRec := echotest.Post(t, "/v1/batches", createBody)
 	require.NoError(t, handler.Batches(createCtx))
 
-	var created core.BatchResponse
-	require.NoError(t, json.Unmarshal(createRec.Body.Bytes(), &created))
+	created := echotest.Decode[core.BatchResponse](t, createRec)
 
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/batches/wrong-id", nil)
 	frame := core.NewRequestSnapshot(http.MethodGet, "/v1/batches/"+created.ID, map[string]string{"id": created.ID}, nil, nil, "", nil, false, "", nil)
-	getReq = withRequestSnapshotAndPrompt(getReq, frame)
-
-	getRec := httptest.NewRecorder()
-	getCtx := e.NewContext(getReq, getRec)
-	getCtx.SetPath("/v1/batches/:id")
-	setPathParam(getCtx, "id", "wrong-id")
+	getCtx, getRec := echotest.Get(t, "/v1/batches/wrong-id", echotest.WithPath("/v1/batches/:id"), echotest.WithPathValue("id", "wrong-id"))
+	getCtx.SetRequest(withRequestSnapshotAndPrompt(getCtx.Request(), frame))
 
 	require.NoError(t, handler.GetBatch(getCtx))
 	require.Equal(t, http.StatusOK, getRec.Code)
@@ -2052,20 +1826,15 @@ func TestListBatches_UsesSemanticEnvelopeQueryMetadata(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	createBody := `{
 		"endpoint":"/v1/chat/completions",
 		"requests":[{"custom_id":"chat-1","method":"POST","body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}}]
 	}`
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
+	createCtx, _ := echotest.Post(t, "/v1/batches", createBody)
 	require.NoError(t, handler.Batches(createCtx))
 
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/batches?limit=bad", nil)
 	frame := core.NewRequestSnapshot(
 		http.MethodGet,
 		"/v1/batches",
@@ -2080,16 +1849,13 @@ func TestListBatches_UsesSemanticEnvelopeQueryMetadata(t *testing.T) {
 		"",
 		nil,
 	)
-	listReq = withRequestSnapshotAndPrompt(listReq, frame)
-
-	listRec := httptest.NewRecorder()
-	listCtx := e.NewContext(listReq, listRec)
+	listCtx, listRec := echotest.Get(t, "/v1/batches?limit=bad")
+	listCtx.SetRequest(withRequestSnapshotAndPrompt(listCtx.Request(), frame))
 
 	require.NoError(t, handler.ListBatches(listCtx))
 	require.Equal(t, http.StatusOK, listRec.Code)
 
-	var listResp core.BatchListResponse
-	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &listResp))
+	listResp := echotest.Decode[core.BatchListResponse](t, listRec)
 	require.Len(t, listResp.Data, 1)
 }
 
@@ -2106,45 +1872,29 @@ data: [DONE]
 		streamData:      streamData,
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "stream": true, "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	contentType := rec.Header().Get("Content-Type")
-	if contentType != "text/event-stream" {
-		t.Errorf("expected Content-Type text/event-stream, got %s", contentType)
-	}
+	assert.Equal(t, "text/event-stream", contentType)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "data:") {
-		t.Errorf("response should contain SSE data, got: %s", body)
-	}
-	if !strings.Contains(body, "[DONE]") {
-		t.Errorf("response should contain [DONE], got: %s", body)
-	}
+	assert.Contains(t, body, "data:")
+	assert.Contains(t, body, "[DONE]")
 }
 
 func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
-	e := echo.New()
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	rec := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
-	c := e.NewContext(req, rec)
+	c := echo.New().NewContext(req, rec)
 
 	stream := &chunkedReadCloser{
 		chunks: [][]byte{
@@ -2157,21 +1907,11 @@ func TestHandleStreamingResponse_FlushesEachChunk(t *testing.T) {
 	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return stream, nil
 	})
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-
-	if rec.flushes != 4 {
-		t.Fatalf("expected 4 flushes (headers + 3 chunks), got %d", rec.flushes)
-	}
-
-	if got := rec.Body.String(); got != "data: {\"id\":\"1\"}\n\ndata: {\"id\":\"2\"}\n\ndata: [DONE]\n\n" {
-		t.Fatalf("unexpected body %q", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 4, rec.flushes)
+	got := rec.Body.String()
+	require.Equal(t, "data: {\"id\":\"1\"}\n\ndata: {\"id\":\"2\"}\n\ndata: [DONE]\n\n", got)
 }
 
 func TestFlushStream_ReturnsReadError(t *testing.T) {
@@ -2182,9 +1922,7 @@ func TestFlushStream_ReturnsReadError(t *testing.T) {
 	}
 
 	err := flushStream(io.Discard, stream)
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected read error %v, got %v", expectedErr, err)
-	}
+	require.ErrorIs(t, err, expectedErr)
 }
 
 func TestFlushStream_ReturnsWriteError(t *testing.T) {
@@ -2192,9 +1930,7 @@ func TestFlushStream_ReturnsWriteError(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader("data: {\"id\":\"1\"}\n\n"))
 
 	err := flushStream(&erroringWriter{err: expectedErr}, stream)
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected write error %v, got %v", expectedErr, err)
-	}
+	require.ErrorIs(t, err, expectedErr)
 }
 
 func TestRequestIDFromContextOrHeader(t *testing.T) {
@@ -2202,25 +1938,20 @@ func TestRequestIDFromContextOrHeader(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 		req.Header.Set("X-Request-ID", "header-id")
 		req = req.WithContext(core.WithRequestID(req.Context(), "context-id"))
-
-		if got := requestIDFromContextOrHeader(req); got != "context-id" {
-			t.Fatalf("requestIDFromContextOrHeader() = %q, want context-id", got)
-		}
+		got := requestIDFromContextOrHeader(req)
+		require.Equal(t, "context-id", got)
 	})
 
 	t.Run("falls back to header request id", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 		req.Header.Set("X-Request-ID", "  header-id  ")
-
-		if got := requestIDFromContextOrHeader(req); got != "header-id" {
-			t.Fatalf("requestIDFromContextOrHeader() = %q, want header-id", got)
-		}
+		got := requestIDFromContextOrHeader(req)
+		require.Equal(t, "header-id", got)
 	})
 
 	t.Run("nil request returns empty", func(t *testing.T) {
-		if got := requestIDFromContextOrHeader(nil); got != "" {
-			t.Fatalf("requestIDFromContextOrHeader(nil) = %q, want empty", got)
-		}
+		got := requestIDFromContextOrHeader(nil)
+		require.Empty(t, got)
 	})
 }
 
@@ -2230,21 +1961,19 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 		config: auditlog.Config{Enabled: true},
 	}
 
-	e := echo.New()
 	handler := NewHandler(&mockProvider{}, logger, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("X-Request-ID", "req-stream-1")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{
+	entry := &auditlog.LogEntry{
 		ID:        "entry-1",
 		Timestamp: time.Now(),
 		RequestID: "req-stream-1",
 		Method:    http.MethodPost,
 		Path:      "/v1/chat/completions",
 		Data:      &auditlog.LogData{},
-	})
+	}
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil,
+		echotest.WithHeader("X-Request-ID", "req-stream-1"),
+		echotest.WithValue(string(auditlog.LogEntryKey), entry))
 
 	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return &erroringReadCloser{
@@ -2252,33 +1981,18 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 			err:  expectedErr,
 		}, nil
 	})
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, logger.entries, 1)
 
-	if len(logger.entries) != 1 {
-		t.Fatalf("expected 1 audit log entry, got %d", len(logger.entries))
-	}
-
-	entry := logger.entries[0]
-	if entry.ErrorType != "stream_error" {
-		t.Fatalf("expected stream_error, got %q", entry.ErrorType)
-	}
-	if entry.Data == nil || entry.Data.ErrorMessage != expectedErr.Error() {
-		t.Fatalf("expected error message %q, got %+v", expectedErr.Error(), entry.Data)
-	}
+	logged := logger.entries[0]
+	require.Equal(t, "stream_error", logged.ErrorType)
+	require.NotNil(t, logged.Data)
+	require.Equal(t, expectedErr.Error(), logged.Data.ErrorMessage)
 }
 
 func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
-	e := echo.New()
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	ctx, cancel := context.WithCancel(req.Context())
-	cancel() // simulate client gone before streamFn returns
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
 	entry := &auditlog.LogEntry{
 		ID:        "entry-cancel",
 		Timestamp: time.Now(),
@@ -2286,21 +2000,17 @@ func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {
 		Path:      "/v1/chat/completions",
 		Data:      &auditlog.LogData{},
 	}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	cancel() // simulate client gone before streamFn returns
+	c.SetRequest(c.Request().WithContext(ctx))
 
 	err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 		return nil, context.Canceled
 	})
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if !entry.Stream {
-		t.Fatalf("expected entry.Stream=true, got false")
-	}
-	if entry.ErrorType != "client_disconnected" {
-		t.Fatalf("expected error_type client_disconnected, got %q", entry.ErrorType)
-	}
+	require.NoError(t, err)
+	require.True(t, entry.Stream)
+	require.Equal(t, "client_disconnected", entry.ErrorType)
 }
 
 // At pre-flush dispatch time the only socket in play is the upstream
@@ -2312,7 +2022,6 @@ func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(
 		config: auditlog.Config{Enabled: true},
 	}
 
-	e := echo.New()
 	handler := NewHandler(&mockProvider{}, logger, nil, nil)
 
 	for _, tt := range []struct {
@@ -2323,9 +2032,6 @@ func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(
 		{name: "wrapped syscall.EPIPE", err: fmt.Errorf("dial upstream: %w", syscall.EPIPE)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
 			entry := &auditlog.LogEntry{
 				ID:        "entry-upstream-reset",
 				Timestamp: time.Now(),
@@ -2333,7 +2039,7 @@ func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(
 				Path:      "/v1/chat/completions",
 				Data:      &auditlog.LogData{},
 			}
-			c.Set(string(auditlog.LogEntryKey), entry)
+			c, rec := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithValue(string(auditlog.LogEntryKey), entry))
 
 			err := handler.translatedInference().handleStreamingResponse(c, nil, "gpt-4o-mini", "openai", "primary-openai", func() (io.ReadCloser, error) {
 				return nil, tt.err
@@ -2342,18 +2048,10 @@ func TestHandleStreamingResponse_UpstreamResetIsNotClassifiedAsClientDisconnect(
 			// handleStreamingResponse always swallows the error by writing a
 			// JSON response via handleError; the gateway response must be the
 			// upstream failure, not an empty 200.
-			if err != nil {
-				t.Fatalf("handler returned error: %v", err)
-			}
-			if rec.Code == http.StatusOK {
-				t.Fatalf("upstream reset surfaced as 200 OK; want non-2xx, got body=%q", rec.Body.String())
-			}
-			if entry.ErrorType == "client_disconnected" {
-				t.Fatalf("upstream reset misclassified as client_disconnected (err=%v)", tt.err)
-			}
-			if !entry.Stream {
-				t.Fatalf("expected entry.Stream=true regardless of classification, got false")
-			}
+			require.NoError(t, err)
+			require.NotEqual(t, http.StatusOK, rec.Code, "upstream reset surfaced as 200 OK; want non-2xx, got body=%q", rec.Body.String())
+			require.NotEqual(t, "client_disconnected", entry.ErrorType, "upstream reset misclassified as client_disconnected (err=%v)", tt.err)
+			require.True(t, entry.Stream)
 		})
 	}
 }
@@ -2439,9 +2137,7 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
 			recordStreamingError(entry, "gpt-4o-mini", "openai", "/v1/chat/completions", "req-"+tt.name, tt.ctx, tt.err)
-			if entry.ErrorType != tt.wantType {
-				t.Fatalf("error_type = %q, want %q", entry.ErrorType, tt.wantType)
-			}
+			require.Equal(t, tt.wantType, entry.ErrorType)
 
 			wantMessage := ""
 			switch {
@@ -2450,9 +2146,7 @@ func TestRecordStreamingError_ClassifiesClientDisconnect(t *testing.T) {
 			case tt.ctx != nil && tt.ctx.Err() != nil:
 				wantMessage = tt.ctx.Err().Error()
 			}
-			if entry.Data.ErrorMessage != wantMessage {
-				t.Fatalf("error_message = %q, want %q", entry.Data.ErrorMessage, wantMessage)
-			}
+			require.Equal(t, wantMessage, entry.Data.ErrorMessage)
 		})
 	}
 }
@@ -2484,15 +2178,13 @@ func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
 
 	reqBody := `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/chat/completions", strings.NewReader(reqBody))
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
+	require.NoError(t, err)
+
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("stream request: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = resp.Body.Close() }()
 
 	readResult := make(chan struct {
@@ -2529,36 +2221,21 @@ func TestChatCompletionStreaming_FlushesBeforeNextChunkArrives(t *testing.T) {
 
 	close(releaseSecondChunk)
 
-	if result.err != nil {
-		t.Fatalf("read first chunk: %v", result.err)
-	}
+	require.NoError(t, result.err)
 
 	firstChunk := string(result.buf[:result.n])
-	if !strings.Contains(firstChunk, `"id":"1"`) {
-		t.Fatalf("expected first streamed chunk before delayed tail, got %q", firstChunk)
-	}
+	require.Contains(t, firstChunk, `"id":"1"`)
 }
 
 func TestHealth(t *testing.T) {
-	e := echo.New()
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/health")
 
 	err := handler.Health(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
-
-	if !strings.Contains(rec.Body.String(), "ok") {
-		t.Errorf("expected ok status in body")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "ok")
 }
 
 func TestListModels(t *testing.T) {
@@ -2582,32 +2259,18 @@ func TestListModels(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/models")
 
 	err := handler.ListModels(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `"object":"list"`) {
-		t.Errorf("response missing object field, got: %s", body)
-	}
-	if !strings.Contains(body, "gpt-4o-mini") {
-		t.Errorf("response missing gpt-4o-mini model, got: %s", body)
-	}
-	if !strings.Contains(body, "gpt-4-turbo") {
-		t.Errorf("response missing gpt-4-turbo model, got: %s", body)
-	}
+	assert.Contains(t, body, `"object":"list"`)
+	assert.Contains(t, body, "gpt-4o-mini")
+	assert.Contains(t, body, "gpt-4-turbo")
 }
 
 func TestListModels_AnthropicDialect(t *testing.T) {
@@ -2632,21 +2295,15 @@ func TestListModels_AnthropicDialect(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	// The anthropic-version header marks an Anthropic SDK client; the shared
 	// models route renders the Anthropic list shape for it.
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/models", echotest.WithHeader("anthropic-version", "2023-06-01"))
+	err := handler.ListModels(c)
+	require.NoError(t, err)
 
-	if err := handler.ListModels(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	var body struct {
+	body := echotest.Decode[struct {
 		Data []struct {
 			Type        string `json:"type"`
 			ID          string `json:"id"`
@@ -2656,30 +2313,22 @@ func TestListModels_AnthropicDialect(t *testing.T) {
 		HasMore bool    `json:"has_more"`
 		FirstID *string `json:"first_id"`
 		LastID  *string `json:"last_id"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(body.Data) != 2 {
-		t.Fatalf("len(data) = %d, want 2", len(body.Data))
-	}
+	}](t, rec)
+	require.Len(t, body.Data, 2)
+
 	first := body.Data[0]
-	if first.Type != "model" || first.ID != "gpt-4o-mini" || first.DisplayName != "GPT-4o mini" {
-		t.Errorf("first model = %+v", first)
-	}
-	if first.CreatedAt != "2024-07-16T23:32:21Z" {
-		t.Errorf("created_at = %q, want RFC3339", first.CreatedAt)
-	}
+	assert.Equal(t, "model", first.Type)
+	assert.Equal(t, "gpt-4o-mini", first.ID)
+	assert.Equal(t, "GPT-4o mini", first.DisplayName)
+	assert.Equal(t, "2024-07-16T23:32:21Z", first.CreatedAt)
+
 	// Models without metadata fall back to the ID as display name.
-	if body.Data[1].DisplayName != "gpt-4-turbo" {
-		t.Errorf("fallback display_name = %q", body.Data[1].DisplayName)
-	}
-	if body.HasMore {
-		t.Error("has_more should be false (single page)")
-	}
-	if body.FirstID == nil || *body.FirstID != "gpt-4o-mini" || body.LastID == nil || *body.LastID != "gpt-4-turbo" {
-		t.Errorf("first_id/last_id = %v/%v", body.FirstID, body.LastID)
-	}
+	assert.Equal(t, "gpt-4-turbo", body.Data[1].DisplayName)
+	assert.False(t, body.HasMore)
+	require.NotNil(t, body.FirstID)
+	assert.Equal(t, "gpt-4o-mini", *body.FirstID)
+	require.NotNil(t, body.LastID)
+	assert.Equal(t, "gpt-4-turbo", *body.LastID)
 }
 
 func TestListModels_MergesExposedModelsWithoutAliasProviderDecorator(t *testing.T) {
@@ -2714,13 +2363,10 @@ func TestListModels_MergesExposedModelsWithoutAliasProviderDecorator(t *testing.
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.exposedModelLister = service
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/models")
 
 	err = handler.ListModels(c)
 	require.NoError(t, err)
@@ -2758,21 +2404,17 @@ func TestListModels_KeepOnlyAliasesOmitsProviderModels(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.exposedModelLister = service
 	handler.keepOnlyAliasesAtModelsEndpoint = true
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/models")
 
 	err = handler.ListModels(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	var resp core.ModelsResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	resp := echotest.Decode[core.ModelsResponse](t, rec)
 	require.Len(t, resp.Data, 1)
 	require.Equal(t, "smart", resp.Data[0].ID)
 }
@@ -2792,7 +2434,6 @@ func TestListModels_FiltersExposedModelsWhenAuthorizerIsPresent(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.modelAuthorizer = authorizer
 	handler.exposedModelLister = staticExposedModelLister{
@@ -2802,9 +2443,7 @@ func TestListModels_FiltersExposedModelsWhenAuthorizerIsPresent(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/models")
 
 	err := handler.ListModels(c)
 	require.NoError(t, err)
@@ -2821,26 +2460,16 @@ func TestListModelsError(t *testing.T) {
 		err: io.EOF, // Simulate an error
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/models")
 
 	err := handler.ListModels(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected status 500, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "error") {
-		t.Errorf("response should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "error")
 }
 
 // Tests for typed error handling
@@ -2851,31 +2480,18 @@ func TestHandleError_ProviderError(t *testing.T) {
 		err:             core.NewProviderError("openai", http.StatusBadGateway, "upstream error", nil),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("expected status 502, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "provider_error") {
-		t.Errorf("response should contain error type, got: %s", body)
-	}
-	if !strings.Contains(body, "upstream error") {
-		t.Errorf("response should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "provider_error")
+	assert.Contains(t, body, "upstream error")
 }
 
 func TestHandleError_RateLimitError(t *testing.T) {
@@ -2884,31 +2500,18 @@ func TestHandleError_RateLimitError(t *testing.T) {
 		err:             core.NewRateLimitError("openai", "rate limit exceeded"),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("expected status 429, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "rate_limit_error") {
-		t.Errorf("response should contain error type, got: %s", body)
-	}
-	if !strings.Contains(body, "rate limit exceeded") {
-		t.Errorf("response should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "rate_limit_error")
+	assert.Contains(t, body, "rate limit exceeded")
 }
 
 func TestHandleError_InvalidRequestError(t *testing.T) {
@@ -2919,46 +2522,23 @@ func TestHandleError_InvalidRequestError(t *testing.T) {
 		err:             core.NewInvalidRequestError("invalid parameters", nil).WithParam(param).WithCode(code),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to decode error response: %v", err)
-	}
+	body := echotest.Decode[map[string]any](t, rec)
 
 	errorBody, ok := body["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", body["error"])
-	}
-
-	if errorBody["type"] != "invalid_request_error" {
-		t.Errorf("error.type = %v, want invalid_request_error", errorBody["type"])
-	}
-	if errorBody["message"] != "invalid parameters" {
-		t.Errorf("error.message = %v, want invalid parameters", errorBody["message"])
-	}
-	if errorBody["param"] != param {
-		t.Errorf("error.param = %v, want %v", errorBody["param"], param)
-	}
-	if errorBody["code"] != code {
-		t.Errorf("error.code = %v, want %v", errorBody["code"], code)
-	}
+	require.True(t, ok, "error body = %#v, want object", body["error"])
+	assert.Equal(t, "invalid_request_error", errorBody["type"])
+	assert.Equal(t, "invalid parameters", errorBody["message"])
+	assert.Equal(t, param, errorBody["param"])
+	assert.Equal(t, code, errorBody["code"])
 }
 
 func TestHandleError_AuthenticationError(t *testing.T) {
@@ -2967,31 +2547,18 @@ func TestHandleError_AuthenticationError(t *testing.T) {
 		err:             core.NewAuthenticationError("openai", "invalid API key"),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected status 401, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "authentication_error") {
-		t.Errorf("response should contain error type, got: %s", body)
-	}
-	if !strings.Contains(body, "invalid API key") {
-		t.Errorf("response should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "authentication_error")
+	assert.Contains(t, body, "invalid API key")
 }
 
 func TestHandleError_NotFoundError(t *testing.T) {
@@ -3000,31 +2567,18 @@ func TestHandleError_NotFoundError(t *testing.T) {
 		err:             core.NewNotFoundError("model not found"),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status 404, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "not_found_error") {
-		t.Errorf("response should contain error type, got: %s", body)
-	}
-	if !strings.Contains(body, "model not found") {
-		t.Errorf("response should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "not_found_error")
+	assert.Contains(t, body, "model not found")
 }
 
 func TestHandleError_StreamingError(t *testing.T) {
@@ -3033,28 +2587,17 @@ func TestHandleError_StreamingError(t *testing.T) {
 		err:             core.NewRateLimitError("openai", "rate limit exceeded during streaming"),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "stream": true, "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("expected status 429, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "rate_limit_error") {
-		t.Errorf("response should contain error type, got: %s", body)
-	}
+	assert.Contains(t, body, "rate_limit_error")
 }
 
 func TestHandleError_UnexpectedErrorUsesOpenAISchema(t *testing.T) {
@@ -3063,46 +2606,27 @@ func TestHandleError_UnexpectedErrorUsesOpenAISchema(t *testing.T) {
 		err:             errors.New("boom"),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status 500, got %d", rec.Code)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to decode error response: %v", err)
-	}
+	body := echotest.Decode[map[string]any](t, rec)
 
 	errorBody, ok := body["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("error body = %#v, want object", body["error"])
-	}
-
-	if errorBody["type"] != "provider_error" {
-		t.Errorf("error.type = %v, want provider_error", errorBody["type"])
-	}
-	if errorBody["message"] != "an unexpected error occurred" {
-		t.Errorf("error.message = %v, want unexpected error message", errorBody["message"])
-	}
-	if value, ok := errorBody["param"]; !ok || value != nil {
-		t.Errorf("error.param = %v, want nil", value)
-	}
-	if value, ok := errorBody["code"]; !ok || value != nil {
-		t.Errorf("error.code = %v, want nil", value)
-	}
+	require.True(t, ok, "error body = %#v, want object", body["error"])
+	assert.Equal(t, "provider_error", errorBody["type"])
+	assert.Equal(t, "an unexpected error occurred", errorBody["message"])
+	value, ok := errorBody["param"]
+	assert.True(t, ok)
+	assert.Nil(t, value)
+	value, ok = errorBody["code"]
+	assert.True(t, ok)
+	assert.Nil(t, value)
 }
 
 func TestChatCompletion_InvalidJSON(t *testing.T) {
@@ -3110,31 +2634,18 @@ func TestChatCompletion_InvalidJSON(t *testing.T) {
 		supportedModels: []string{"gpt-4o-mini"},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{invalid json}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "invalid_request_error") {
-		t.Errorf("response should contain error type, got: %s", body)
-	}
-	if !strings.Contains(body, "invalid request body") {
-		t.Errorf("response should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "invalid_request_error")
+	assert.Contains(t, body, "invalid request body")
 }
 
 func TestChatCompletion_InvalidContentType(t *testing.T) {
@@ -3142,34 +2653,19 @@ func TestChatCompletion_InvalidContentType(t *testing.T) {
 		supportedModels: []string{"gpt-4o-mini"},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":123}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedChatReq != nil {
-		t.Fatal("provider should not have been called for invalid content")
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	require.Nil(t, provider.capturedChatReq)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "invalid request body") {
-		t.Fatalf("response should contain invalid request message, got: %s", body)
-	}
-	if !strings.Contains(body, "string or array of content parts") {
-		t.Fatalf("response should mention supported content types, got: %s", body)
-	}
+	require.Contains(t, body, "invalid request body")
+	require.Contains(t, body, "string or array of content parts")
 }
 
 func TestEmbeddings(t *testing.T) {
@@ -3186,53 +2682,31 @@ func TestEmbeddings(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "text-embedding-3-small", "input": "hello world"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/embeddings", reqBody)
 
 	err := handler.Embeddings(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "text-embedding-3-small") {
-		t.Errorf("response missing model, got: %s", body)
-	}
-	if !strings.Contains(body, "embedding") {
-		t.Errorf("response missing embedding data, got: %s", body)
-	}
+	assert.Contains(t, body, "text-embedding-3-small")
+	assert.Contains(t, body, "embedding")
 }
 
 func TestEmbeddings_InvalidJSON(t *testing.T) {
 	mock := &mockProvider{supportedModels: []string{"text-embedding-3-small"}}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{bad json}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/embeddings", reqBody)
 
 	err := handler.Embeddings(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestEmbeddings_ProviderReturnsError(t *testing.T) {
@@ -3241,28 +2715,17 @@ func TestEmbeddings_ProviderReturnsError(t *testing.T) {
 		embeddingErr:    core.NewInvalidRequestError("embeddings not supported by this provider", nil),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{"model": "text-embedding-3-small", "input": "hello"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/embeddings", reqBody)
 
 	err := handler.Embeddings(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status 400, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "embeddings not supported") {
-		t.Errorf("expected error message about embeddings, got: %s", body)
-	}
+	assert.Contains(t, body, "embeddings not supported")
 }
 
 // TestEmbeddings_ExactCache covers the exact cache on /v1/embeddings: an
@@ -3308,51 +2771,40 @@ func TestEmbeddings_ExactCache(t *testing.T) {
 			mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
 			defer mw.Close()
 
-			e := echo.New()
 			handler := NewHandler(mock, nil, nil, nil)
 			handler.responseCache = mw
 
 			call := func(body, cacheControl string) *httptest.ResponseRecorder {
 				t.Helper()
-				req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
-				req.Header.Set("Content-Type", "application/json")
+				var opts []echotest.Option
 				if cacheControl != "" {
-					req.Header.Set("Cache-Control", cacheControl)
+					opts = append(opts, echotest.WithHeader("Cache-Control", cacheControl))
 				}
-				rec := httptest.NewRecorder()
-				if err := handler.Embeddings(e.NewContext(req, rec)); err != nil {
-					t.Fatalf("handler.Embeddings() error = %v", err)
-				}
-				if rec.Code != http.StatusOK {
-					t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-				}
+				c, rec := echotest.Post(t, "/v1/embeddings", body, opts...)
+				err := handler.Embeddings(c)
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 				return rec
 			}
 
 			first := call(firstBody, "")
-			if got := first.Header().Get("X-Cache"); got != "" {
-				t.Fatalf("first request X-Cache = %q, want empty", got)
-			}
-			// The cache write is asynchronous; drain it before the repeat.
-			if err := mw.Close(); err != nil {
-				t.Fatalf("flush cache writes: %v", err)
-			}
+			got := first.Header().Get("X-Cache")
+			require.Empty(t, got)
+			err := // The cache write is asynchronous; drain it before the repeat.
+				mw.Close()
+			require.NoError(t, err)
 
 			second := call(tt.secondBody, tt.header)
 			gotHit := second.Header().Get("X-Cache") == "HIT (exact)"
-			if gotHit != tt.wantHit {
-				t.Fatalf("second request X-Cache = %q, want hit = %v", second.Header().Get("X-Cache"), tt.wantHit)
-			}
+			require.Equal(t, tt.wantHit, gotHit, "second request X-Cache = %q, want hit = %v", second.Header().Get("X-Cache"), tt.wantHit)
+
 			wantCalls := 2
 			if tt.wantHit {
 				wantCalls = 1
-				if second.Body.String() != first.Body.String() {
-					t.Fatalf("cached body = %s, want %s", second.Body.String(), first.Body.String())
-				}
+				require.Equal(t, first.Body.String(), second.Body.String())
 			}
-			if mock.embeddingCalls != wantCalls {
-				t.Fatalf("provider calls = %d, want %d", mock.embeddingCalls, wantCalls)
-			}
+			require.Equal(t, wantCalls, mock.embeddingCalls)
 		})
 	}
 }
@@ -3370,28 +2822,19 @@ func TestEmbeddings_ProviderErrorNotCached(t *testing.T) {
 	mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
 	defer mw.Close()
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.responseCache = mw
 
 	const body = `{"model":"text-embedding-3-small","input":"hello world"}`
 	for i := range 2 {
-		req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		if err := handler.Embeddings(e.NewContext(req, rec)); err != nil {
-			t.Fatalf("handler.Embeddings() error = %v", err)
-		}
-		if rec.Code == http.StatusOK {
-			t.Fatalf("request %d: status = 200, want an error status", i+1)
-		}
-		if got := rec.Header().Get("X-Cache"); got != "" {
-			t.Fatalf("request %d: X-Cache = %q, want empty", i+1, got)
-		}
+		c, rec := echotest.Post(t, "/v1/embeddings", body)
+		err := handler.Embeddings(c)
+		require.NoError(t, err)
+		require.NotEqual(t, http.StatusOK, rec.Code, "request %d: status = 200, want an error status", i+1)
+		got := rec.Header().Get("X-Cache")
+		require.Empty(t, got, "request %d: X-Cache = %q, want empty", i+1, got)
 	}
-	if mock.embeddingCalls != 2 {
-		t.Fatalf("provider calls = %d, want 2", mock.embeddingCalls)
-	}
+	require.Equal(t, 2, mock.embeddingCalls)
 }
 
 func TestEmbeddings_WithUsageTracking(t *testing.T) {
@@ -3421,40 +2864,20 @@ func TestEmbeddings_WithUsageTracking(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, usageLog, resolver)
 
 	reqBody := `{"model": "text-embedding-3-small", "input": "hello world"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "test-req-embed-usage")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/embeddings", reqBody, echotest.WithHeader("X-Request-ID", "test-req-embed-usage"))
 
 	err := handler.Embeddings(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
-
-	if capturedEntry == nil {
-		t.Fatal("expected usage entry to be captured, got nil")
-	}
-	if capturedEntry.InputTokens != 10 {
-		t.Errorf("InputTokens = %d, want 10", capturedEntry.InputTokens)
-	}
-	if capturedEntry.RequestID != "test-req-embed-usage" {
-		t.Errorf("RequestID = %q, want %q", capturedEntry.RequestID, "test-req-embed-usage")
-	}
-	if resolver.model != "text-embedding-3-small" {
-		t.Errorf("pricing resolver model = %q, want requested model", resolver.model)
-	}
-	if capturedEntry.InputCost == nil || *capturedEntry.InputCost == 0 {
-		t.Error("expected non-zero InputCost from pricing resolver")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, capturedEntry)
+	assert.Equal(t, 10, capturedEntry.InputTokens)
+	assert.Equal(t, "test-req-embed-usage", capturedEntry.RequestID)
+	assert.Equal(t, "text-embedding-3-small", resolver.model)
+	require.NotNil(t, capturedEntry.InputCost)
+	assert.NotEqual(t, float64(0), *capturedEntry.InputCost)
 }
 
 func TestListModels_TypedError(t *testing.T) {
@@ -3462,29 +2885,17 @@ func TestListModels_TypedError(t *testing.T) {
 		err: core.NewProviderError("openai", http.StatusBadGateway, "failed to list models", nil),
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/models")
 
 	err := handler.ListModels(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("expected status 502, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "provider_error") {
-		t.Errorf("response should contain error type, got: %s", body)
-	}
-	if !strings.Contains(body, "failed to list models") {
-		t.Errorf("response should contain error message, got: %s", body)
-	}
+	assert.Contains(t, body, "provider_error")
+	assert.Contains(t, body, "failed to list models")
 }
 
 func TestBatches(t *testing.T) {
@@ -3503,7 +2914,6 @@ func TestBatches(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{
@@ -3517,37 +2927,17 @@ func TestBatches(t *testing.T) {
 	    }
 	  ]
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/batches", reqBody)
 
 	err := handler.Batches(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-
-	var resp core.BatchResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if resp.Object != "batch" {
-		t.Errorf("Object = %q, want %q", resp.Object, "batch")
-	}
-	if resp.Status != "in_progress" {
-		t.Errorf("Status = %q, want %q", resp.Status, "in_progress")
-	}
-	if resp.Provider != "mock" {
-		t.Errorf("Provider = %q, want %q", resp.Provider, "mock")
-	}
-	if resp.ProviderBatchID != "provider-batch-123" {
-		t.Errorf("ProviderBatchID = %q, want %q", resp.ProviderBatchID, "provider-batch-123")
-	}
+	resp := echotest.Decode[core.BatchResponse](t, rec)
+	assert.Equal(t, "batch", resp.Object)
+	assert.Equal(t, "in_progress", resp.Status)
+	assert.Equal(t, "mock", resp.Provider)
+	assert.Equal(t, "provider-batch-123", resp.ProviderBatchID)
 }
 
 func TestBatches_FullURLResponsesItemUsesSharedSelectorExtraction(t *testing.T) {
@@ -3566,7 +2956,6 @@ func TestBatches_FullURLResponsesItemUsesSharedSelectorExtraction(t *testing.T) 
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{
@@ -3580,29 +2969,15 @@ func TestBatches_FullURLResponsesItemUsesSharedSelectorExtraction(t *testing.T) 
 	    }
 	  ]
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/batches", reqBody)
 
 	err := handler.Batches(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if mock.capturedBatchReq == nil {
-		t.Fatal("capturedBatchReq = nil")
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, mock.capturedBatchReq)
 
-	var resp core.BatchResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if resp.Provider != "openai" {
-		t.Fatalf("Provider = %q, want openai", resp.Provider)
-	}
+	resp := echotest.Decode[core.BatchResponse](t, rec)
+	require.Equal(t, "openai", resp.Provider)
 }
 
 func TestBatches_UsesExplicitAliasResolverAndBatchPreparerWithoutAliasProviderDecorator(t *testing.T) {
@@ -3638,7 +3013,6 @@ func TestBatches_UsesExplicitAliasResolverAndBatchPreparerWithoutAliasProviderDe
 	}
 	aliasBatchPreparer := virtualmodels.NewBatchPreparer(mock, service)
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.modelResolver = service
 	handler.batchRequestPreparer = aliasBatchPreparer
@@ -3654,10 +3028,7 @@ func TestBatches_UsesExplicitAliasResolverAndBatchPreparerWithoutAliasProviderDe
 	    }
 	  ]
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/batches", reqBody)
 
 	err = handler.Batches(c)
 	require.NoError(t, err)
@@ -3672,8 +3043,7 @@ func TestBatches_UsesExplicitAliasResolverAndBatchPreparerWithoutAliasProviderDe
 	_, hasProvider := rewritten["provider"]
 	require.False(t, hasProvider)
 
-	var resp core.BatchResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	resp := echotest.Decode[core.BatchResponse](t, rec)
 	require.Equal(t, "openai", resp.Provider)
 }
 
@@ -3707,21 +3077,17 @@ func TestBatches_UsesExplicitBatchRequestPreparer(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.batchRequestPreparer = preparer
 	store := batchstore.NewMemoryStore()
 	handler.SetBatchStore(store)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	c, rec := echotest.Post(t, "/v1/batches", `{
 	  "input_file_id":"file_source",
 	  "endpoint":"/v1/chat/completions",
 	  "completion_window":"24h",
 	  "metadata":{"provider":"openai"}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
 
 	err := handler.Batches(c)
 	require.NoError(t, err)
@@ -3735,8 +3101,7 @@ func TestBatches_UsesExplicitBatchRequestPreparer(t *testing.T) {
 	require.Equal(t, "openai", mock.clearedBatchHintProvider)
 	require.Equal(t, "provider-batch-prepare-123", mock.clearedBatchHintID)
 
-	var created core.BatchResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	created := echotest.Decode[core.BatchResponse](t, rec)
 	require.Equal(t, "file_source", created.InputFileID)
 
 	stored, err := store.Get(context.Background(), created.ID)
@@ -3750,7 +3115,7 @@ func TestBatches_UsesExplicitBatchRequestPreparer(t *testing.T) {
 	}, stored.RequestEndpointByCustomID)
 }
 
-func uploadBatchInputFileForTest(t *testing.T, e *echo.Echo, handler *Handler, providerType string) {
+func uploadBatchInputFileForTest(t *testing.T, handler *Handler, providerType string) {
 	t.Helper()
 
 	var body bytes.Buffer
@@ -3765,18 +3130,15 @@ func uploadBatchInputFileForTest(t *testing.T, e *echo.Echo, handler *Handler, p
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
-	uploadReq := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
-	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
 	uploadFrame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
-	uploadReq = withRequestSnapshotAndPrompt(uploadReq, uploadFrame)
-	uploadRec := httptest.NewRecorder()
-	uploadCtx := e.NewContext(uploadReq, uploadRec)
+	uploadCtx, uploadRec := echotest.Post(t, "/v1/files", &body, echotest.WithContentType(writer.FormDataContentType()))
+	uploadCtx.SetRequest(withRequestSnapshotAndPrompt(uploadCtx.Request(), uploadFrame))
 
 	require.NoError(t, handler.CreateFile(uploadCtx))
 	require.Equal(t, http.StatusOK, uploadRec.Code)
 }
 
-func createInputFileBatchForTest(t *testing.T, e *echo.Echo, handler *Handler, inputFileID, metadataProvider string) *httptest.ResponseRecorder {
+func createInputFileBatchForTest(t *testing.T, handler *Handler, inputFileID, metadataProvider string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	payload := map[string]any{
@@ -3787,14 +3149,7 @@ func createInputFileBatchForTest(t *testing.T, e *echo.Echo, handler *Handler, i
 	if metadataProvider != "" {
 		payload["metadata"] = map[string]string{"provider": metadataProvider}
 	}
-	body, err := json.Marshal(payload)
-	require.NoError(t, err)
-
-	batchReq := httptest.NewRequest(http.MethodPost, "/v1/batches", bytes.NewReader(body))
-	batchReq.Header.Set("Content-Type", "application/json")
-	batchRec := httptest.NewRecorder()
-	batchCtx := e.NewContext(batchReq, batchRec)
-
+	batchCtx, batchRec := echotest.Post(t, "/v1/batches", payload)
 	require.NoError(t, handler.Batches(batchCtx))
 	return batchRec
 }
@@ -3824,18 +3179,17 @@ func TestBatches_InputFileUsesStoredFileProviderWithoutMetadata(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	fileStore := filestore.NewMemoryStore()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.SetFileStore(fileStore)
 
-	uploadBatchInputFileForTest(t, e, handler, "openai")
+	uploadBatchInputFileForTest(t, handler, "openai")
 
 	stored, err := fileStore.Get(context.Background(), "file_source")
 	require.NoError(t, err)
 	require.Equal(t, "openai", stored.ProviderType)
 
-	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "")
+	batchRec := createInputFileBatchForTest(t, handler, "file_source", "")
 	require.Equal(t, http.StatusOK, batchRec.Code)
 	require.Equal(t, "openai", mock.capturedBatchProvider)
 	require.NotNil(t, mock.capturedBatchReq)
@@ -3867,18 +3221,17 @@ func TestBatches_InputFileUsesMetadataProviderOverride(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	fileStore := filestore.NewMemoryStore()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.SetFileStore(fileStore)
 
-	uploadBatchInputFileForTest(t, e, handler, "openai")
+	uploadBatchInputFileForTest(t, handler, "openai")
 
 	stored, err := fileStore.Get(context.Background(), "file_source")
 	require.NoError(t, err)
 	require.Equal(t, "openai", stored.ProviderType)
 
-	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "anthropic")
+	batchRec := createInputFileBatchForTest(t, handler, "file_source", "anthropic")
 	require.Equal(t, http.StatusOK, batchRec.Code)
 	require.Equal(t, "anthropic", mock.capturedBatchProvider)
 	require.NotNil(t, mock.capturedBatchReq)
@@ -3915,11 +3268,10 @@ func TestBatches_LegacyFallbackUsesFileProvider(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.SetFileStore(emptyProviderFileStore{})
 
-	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "")
+	batchRec := createInputFileBatchForTest(t, handler, "file_source", "")
 	require.Equal(t, http.StatusOK, batchRec.Code)
 	require.Equal(t, "anthropic", mock.capturedBatchProvider)
 	require.NotNil(t, mock.capturedBatchReq)
@@ -3956,11 +3308,10 @@ func TestBatches_FileStoreLookupErrorFallsBackToProvider(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.SetFileStore(failingFileStore{err: errors.New("file store unavailable")})
 
-	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "")
+	batchRec := createInputFileBatchForTest(t, handler, "file_source", "")
 	require.Equal(t, http.StatusOK, batchRec.Code)
 	require.Equal(t, "anthropic", mock.capturedBatchProvider)
 	require.NotNil(t, mock.capturedBatchReq)
@@ -3980,11 +3331,10 @@ func TestBatches_FileStoreLookupErrorPreservesClientFallbackError(t *testing.T) 
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.SetFileStore(failingFileStore{err: errors.New("file store unavailable")})
 
-	batchRec := createInputFileBatchForTest(t, e, handler, "file_source", "")
+	batchRec := createInputFileBatchForTest(t, handler, "file_source", "")
 	require.Equal(t, http.StatusBadRequest, batchRec.Code)
 	require.Contains(t, batchRec.Body.String(), "provider rejected file id")
 	require.Nil(t, mock.capturedBatchReq)
@@ -4006,18 +3356,14 @@ func TestBatches_CleansUpPreparedInputFileOnCreateFailure(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.batchRequestPreparer = preparer
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	c, rec := echotest.Post(t, "/v1/batches", `{
 	  "input_file_id":"file_source",
 	  "endpoint":"/v1/chat/completions",
 	  "metadata":{"provider":"openai"}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
 
 	err := handler.Batches(c)
 	require.NoError(t, err)
@@ -4034,7 +3380,6 @@ func TestBatches_MixedProviderRejected(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	reqBody := `{
@@ -4051,18 +3396,11 @@ func TestBatches_MixedProviderRejected(t *testing.T) {
 	    }
 	  ]
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/batches", reqBody)
 
 	err := handler.Batches(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.T) {
@@ -4118,16 +3456,12 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 	batchStore := batchstore.NewMemoryStore()
 	handler.SetBatchStore(batchStore)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	c, rec := echotest.Post(t, "/v1/batches", `{
 	  "input_file_id":"file_source",
 	  "endpoint":"/v1/chat/completions",
 	  "completion_window":"24h",
 	  "metadata":{"provider":"openai"}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
 
 	err = handler.Batches(c)
 	require.NoError(t, err)
@@ -4137,8 +3471,7 @@ func TestBatches_InputFileRewritesAliasesAndPersistsBatchPreparation(t *testing.
 	require.Len(t, inner.capturedFileCreateReqs, 1)
 	require.Contains(t, string(inner.capturedFileCreateReqs[0].Content), `"model":"gpt-4o"`)
 
-	var created core.BatchResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	created := echotest.Decode[core.BatchResponse](t, rec)
 	require.Equal(t, "file_source", created.InputFileID)
 
 	stored, err := batchStore.Get(context.Background(), created.ID)
@@ -4179,20 +3512,16 @@ func TestBatches_InputFileRejectsUnsupportedExplicitProviderSelector(t *testing.
 	}
 	aliasBatchPreparer := virtualmodels.NewBatchPreparer(mock, service)
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.modelResolver = service
 	handler.batchRequestPreparer = aliasBatchPreparer
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	c, rec := echotest.Post(t, "/v1/batches", `{
 	  "input_file_id":"file_source",
 	  "endpoint":"/v1/chat/completions",
 	  "completion_window":"24h",
 	  "metadata":{"provider":"openai"}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
 
 	err = handler.Batches(c)
 	require.NoError(t, err)
@@ -4231,16 +3560,12 @@ func TestBatches_RollsBackPreparedInputAndUpstreamBatchWhenStoreCreateFails(t *t
 	}
 	handler.SetBatchStore(&failingBatchStore{createErr: errors.New("boom")})
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	c, rec := echotest.Post(t, "/v1/batches", `{
 	  "input_file_id":"file_source",
 	  "endpoint":"/v1/chat/completions",
 	  "completion_window":"24h",
 	  "metadata":{"provider":"openai"}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
 
 	err := handler.Batches(c)
 	require.NoError(t, err)
@@ -4285,16 +3610,12 @@ func TestBatches_InputFileRejectsDisabledAlias(t *testing.T) {
 	handler.modelResolver = service
 	handler.batchRequestPreparer = virtualmodels.NewBatchPreparer(inner, service)
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(`{
+	c, rec := echotest.Post(t, "/v1/batches", `{
 	  "input_file_id":"file_source",
 	  "endpoint":"/v1/chat/completions",
 	  "completion_window":"24h",
 	  "metadata":{"provider":"openai"}
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	}`)
 
 	err = handler.Batches(c)
 	require.NoError(t, err)
@@ -4332,46 +3653,32 @@ func TestGetBatch_PreservesClientInputFileIDAndCleansUpRewrittenFile(t *testing.
 		RewrittenInputFileID: "file_hidden",
 	}))
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/v1/batches/batch_1", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/batches/:id")
-	setPathParam(c, "id", "batch_1")
+	c, rec := echotest.Get(t, "/v1/batches/batch_1", echotest.WithPath("/v1/batches/:id"), echotest.WithPathValue("id", "batch_1"))
 
 	err := handler.GetBatch(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, []string{"file_hidden"}, provider.capturedFileDeleteIDs)
 
-	var resp core.BatchResponse
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	resp := echotest.Decode[core.BatchResponse](t, rec)
 	require.Equal(t, "file_source", resp.InputFileID)
 	require.Equal(t, "completed", resp.Status)
 
 	stored, err := store.Get(context.Background(), "batch_1")
 	require.NoError(t, err)
-	require.Equal(t, "", stored.RewrittenInputFileID)
+	require.Empty(t, stored.RewrittenInputFileID)
 	require.Equal(t, "file_source", stored.Batch.InputFileID)
 }
 
 func TestBatches_EmptyRequests(t *testing.T) {
-	e := echo.New()
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
 
 	reqBody := `{"requests":[]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/batches", reqBody)
 
 	err := handler.Batches(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status 400, got %d", rec.Code)
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestBatches_LifecycleEndpoints(t *testing.T) {
@@ -4410,7 +3717,6 @@ func TestBatches_LifecycleEndpoints(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	// 1) Create
@@ -4418,91 +3724,44 @@ func TestBatches_LifecycleEndpoints(t *testing.T) {
 	  "endpoint":"/v1/chat/completions",
 	  "requests":[{"custom_id":"life-1","method":"POST","body":{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}}]
 	}`
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
-	if err := handler.Batches(createCtx); err != nil {
-		t.Fatalf("create handler returned error: %v", err)
-	}
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200", createRec.Code)
-	}
+	createCtx, createRec := echotest.Post(t, "/v1/batches", createBody)
+	err := handler.Batches(createCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, createRec.Code)
 
-	var created core.BatchResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	if created.ID == "" {
-		t.Fatal("expected created batch id")
-	}
+	created := echotest.Decode[core.BatchResponse](t, createRec)
+	require.NotEmpty(t, created.ID)
 
 	// 2) Get
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID, nil)
-	getRec := httptest.NewRecorder()
-	getCtx := e.NewContext(getReq, getRec)
-	getCtx.SetPath("/v1/batches/:id")
-	setPathParam(getCtx, "id", created.ID)
-	if err := handler.GetBatch(getCtx); err != nil {
-		t.Fatalf("get handler returned error: %v", err)
-	}
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("get status = %d, want 200", getRec.Code)
-	}
+	getCtx, getRec := echotest.Get(t, "/v1/batches/"+created.ID, echotest.WithPath("/v1/batches/:id"), echotest.WithPathValue("id", created.ID))
+	err = handler.GetBatch(getCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, getRec.Code)
 
 	// 3) List
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/batches?limit=10", nil)
-	listRec := httptest.NewRecorder()
-	listCtx := e.NewContext(listReq, listRec)
-	if err := handler.ListBatches(listCtx); err != nil {
-		t.Fatalf("list handler returned error: %v", err)
-	}
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list status = %d, want 200", listRec.Code)
-	}
-	var listResp core.BatchListResponse
-	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
-	if len(listResp.Data) == 0 {
-		t.Fatal("expected at least one batch in list")
-	}
+	listCtx, listRec := echotest.Get(t, "/v1/batches?limit=10")
+	err = handler.ListBatches(listCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, listRec.Code)
+
+	listResp := echotest.Decode[core.BatchListResponse](t, listRec)
+	require.NotEmpty(t, listResp.Data)
 
 	// 4) Results
-	resReq := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID+"/results", nil)
-	resRec := httptest.NewRecorder()
-	resCtx := e.NewContext(resReq, resRec)
-	resCtx.SetPath("/v1/batches/:id/results")
-	setPathParam(resCtx, "id", created.ID)
-	if err := handler.BatchResults(resCtx); err != nil {
-		t.Fatalf("results handler returned error: %v", err)
-	}
-	if resRec.Code != http.StatusOK {
-		t.Fatalf("results status = %d, want 200", resRec.Code)
-	}
-	var resultsResp core.BatchResultsResponse
-	if err := json.Unmarshal(resRec.Body.Bytes(), &resultsResp); err != nil {
-		t.Fatalf("decode results response: %v", err)
-	}
-	if resultsResp.BatchID != created.ID {
-		t.Fatalf("results batch id = %q, want %q", resultsResp.BatchID, created.ID)
-	}
-	if len(resultsResp.Data) != 1 {
-		t.Fatalf("results len = %d, want 1", len(resultsResp.Data))
-	}
+	resCtx, resRec := echotest.Get(t, "/v1/batches/"+created.ID+"/results", echotest.WithPath("/v1/batches/:id/results"), echotest.WithPathValue("id", created.ID))
+	err = handler.BatchResults(resCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resRec.Code)
+
+	resultsResp := echotest.Decode[core.BatchResultsResponse](t, resRec)
+	require.Equal(t, created.ID, resultsResp.BatchID)
+	require.Len(t, resultsResp.Data, 1)
 
 	// 5) Cancel (completed batch stays completed)
-	cancelReq := httptest.NewRequest(http.MethodPost, "/v1/batches/"+created.ID+"/cancel", nil)
-	cancelRec := httptest.NewRecorder()
-	cancelCtx := e.NewContext(cancelReq, cancelRec)
-	cancelCtx.SetPath("/v1/batches/:id/cancel")
-	setPathParam(cancelCtx, "id", created.ID)
-	if err := handler.CancelBatch(cancelCtx); err != nil {
-		t.Fatalf("cancel handler returned error: %v", err)
-	}
-	if cancelRec.Code != http.StatusOK {
-		t.Fatalf("cancel status = %d, want 200", cancelRec.Code)
-	}
+	cancelCtx, cancelRec := echotest.Post(t, "/v1/batches/"+created.ID+"/cancel", nil, echotest.WithPath("/v1/batches/:id/cancel"), echotest.WithPathValue("id", created.ID))
+	err = handler.CancelBatch(cancelCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, cancelRec.Code)
 }
 
 func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
@@ -4533,75 +3792,41 @@ func TestBatchLifecyclePersistsAndUsesInternalEndpointHints(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	createBody := `{
 	  "endpoint":"/v1/responses",
 	  "requests":[{"custom_id":"resp-1","method":"POST","body":{"model":"claude-sonnet-4-5-20250929","input":"hi"}}]
 	}`
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
-	createReq = createReq.WithContext(context.WithValue(createReq.Context(), ctxKey("phase"), "create"))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
-	if err := handler.Batches(createCtx); err != nil {
-		t.Fatalf("create handler returned error: %v", err)
-	}
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200", createRec.Code)
-	}
-	if strings.Contains(createRec.Body.String(), "request_endpoint_by_custom_id") {
-		t.Fatalf("create response leaked internal hints: %s", createRec.Body.String())
-	}
-	if mock.capturedBatchProvider != "anthropic" {
-		t.Fatalf("capturedBatchProvider = %q, want anthropic", mock.capturedBatchProvider)
-	}
-	if got := core.GetRequestID(mock.capturedBatchCtx); got == "" {
-		t.Fatal("expected request ID on create batch provider context")
-	}
-	if got := mock.capturedBatchCtx.Value(ctxKey("phase")); got != "create" {
-		t.Fatalf("capturedBatchCtx phase = %#v, want create", got)
-	}
-	if mock.clearedBatchHintProvider != "anthropic" {
-		t.Fatalf("clearedBatchHintProvider = %q, want anthropic", mock.clearedBatchHintProvider)
-	}
-	if mock.clearedBatchHintID != "provider-batch-1" {
-		t.Fatalf("clearedBatchHintID = %q, want provider-batch-1", mock.clearedBatchHintID)
-	}
+	createCtx, createRec := echotest.Post(t, "/v1/batches", createBody)
+	createCtx.SetRequest(createCtx.Request().WithContext(context.WithValue(createCtx.Request().Context(), ctxKey("phase"), "create")))
+	err := handler.Batches(createCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, createRec.Code)
+	require.False(t, strings.Contains(createRec.Body.String(), "request_endpoint_by_custom_id"), "create response leaked internal hints: %s", createRec.Body.String())
+	require.Equal(t, "anthropic", mock.capturedBatchProvider)
+	got := core.GetRequestID(mock.capturedBatchCtx)
+	require.NotEmpty(t, got)
 
-	var created core.BatchResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	require.Equal(t, "create", mock.capturedBatchCtx.Value(ctxKey("phase")))
+	require.Equal(t, "anthropic", mock.clearedBatchHintProvider)
+	require.Equal(t, "provider-batch-1", mock.clearedBatchHintID)
 
-	resReq := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID+"/results", nil)
-	resReq = resReq.WithContext(context.WithValue(resReq.Context(), ctxKey("phase"), "results"))
-	resRec := httptest.NewRecorder()
-	resCtx := e.NewContext(resReq, resRec)
-	resCtx.SetPath("/v1/batches/:id/results")
-	setPathParam(resCtx, "id", created.ID)
-	if err := handler.BatchResults(resCtx); err != nil {
-		t.Fatalf("results handler returned error: %v", err)
-	}
-	if resRec.Code != http.StatusOK {
-		t.Fatalf("results status = %d, want 200", resRec.Code)
-	}
-	if got := mock.capturedBatchHints["resp-1"]; got != "/v1/responses" {
-		t.Fatalf("capturedBatchHints[resp-1] = %q, want /v1/responses", got)
-	}
-	if mock.capturedBatchHintsProvider != "anthropic" {
-		t.Fatalf("capturedBatchHintsProvider = %q, want anthropic", mock.capturedBatchHintsProvider)
-	}
-	if mock.capturedBatchHintsBatchID != "provider-batch-1" {
-		t.Fatalf("capturedBatchHintsBatchID = %q, want provider-batch-1", mock.capturedBatchHintsBatchID)
-	}
-	if got := core.GetRequestID(mock.capturedBatchHintsCtx); got == "" {
-		t.Fatal("expected request ID on batch results provider context")
-	}
-	if got := mock.capturedBatchHintsCtx.Value(ctxKey("phase")); got != "results" {
-		t.Fatalf("capturedBatchHintsCtx phase = %#v, want results", got)
-	}
+	created := echotest.Decode[core.BatchResponse](t, createRec)
+
+	resCtx, resRec := echotest.Get(t, "/v1/batches/"+created.ID+"/results", echotest.WithPath("/v1/batches/:id/results"), echotest.WithPathValue("id", created.ID))
+	resCtx.SetRequest(resCtx.Request().WithContext(context.WithValue(resCtx.Request().Context(), ctxKey("phase"), "results")))
+	err = handler.BatchResults(resCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resRec.Code)
+	got = mock.capturedBatchHints["resp-1"]
+	require.Equal(t, "/v1/responses", got)
+	require.Equal(t, "anthropic", mock.capturedBatchHintsProvider)
+	require.Equal(t, "provider-batch-1", mock.capturedBatchHintsBatchID)
+	got = core.GetRequestID(mock.capturedBatchHintsCtx)
+	require.NotEmpty(t, got)
+
+	require.Equal(t, "results", mock.capturedBatchHintsCtx.Value(ctxKey("phase")))
 }
 
 func TestBatchResults_PendingReturnsConflict(t *testing.T) {
@@ -4630,40 +3855,23 @@ func TestBatchResults_PendingReturnsConflict(t *testing.T) {
 		batchResultsErr: notReadyErr,
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	createBody := `{
 	  "endpoint":"/v1/chat/completions",
 	  "requests":[{"custom_id":"pending-1","method":"POST","body":{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"hi"}]}}]
 	}`
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
-	if err := handler.Batches(createCtx); err != nil {
-		t.Fatalf("create handler returned error: %v", err)
-	}
+	createCtx, createRec := echotest.Post(t, "/v1/batches", createBody)
+	err := handler.Batches(createCtx)
+	require.NoError(t, err)
 
-	var created core.BatchResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := echotest.Decode[core.BatchResponse](t, createRec)
 
-	resReq := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID+"/results", nil)
-	resRec := httptest.NewRecorder()
-	resCtx := e.NewContext(resReq, resRec)
-	resCtx.SetPath("/v1/batches/:id/results")
-	setPathParam(resCtx, "id", created.ID)
-	if err := handler.BatchResults(resCtx); err != nil {
-		t.Fatalf("results handler returned error: %v", err)
-	}
-	if resRec.Code != http.StatusConflict {
-		t.Fatalf("results status = %d, want 409", resRec.Code)
-	}
-	if !strings.Contains(resRec.Body.String(), "results are not ready yet") {
-		t.Fatalf("results body should describe pending state, got: %s", resRec.Body.String())
-	}
+	resCtx, resRec := echotest.Get(t, "/v1/batches/"+created.ID+"/results", echotest.WithPath("/v1/batches/:id/results"), echotest.WithPathValue("id", created.ID))
+	err = handler.BatchResults(resCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusConflict, resRec.Code)
+	require.Contains(t, resRec.Body.String(), "results are not ready yet")
 }
 
 func TestBatchResults_DoesNotCleanupRewrittenFileBeforeTerminalStatus(t *testing.T) {
@@ -4693,12 +3901,7 @@ func TestBatchResults_DoesNotCleanupRewrittenFileBeforeTerminalStatus(t *testing
 		RewrittenInputFileID: "file_hidden",
 	}))
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/v1/batches/batch_1/results", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/batches/:id/results")
-	setPathParam(c, "id", "batch_1")
+	c, rec := echotest.Get(t, "/v1/batches/batch_1/results", echotest.WithPath("/v1/batches/:id/results"), echotest.WithPathValue("id", "batch_1"))
 
 	err := handler.BatchResults(c)
 	require.NoError(t, err)
@@ -4766,109 +3969,60 @@ func TestBatchResults_LogsUsageOnce(t *testing.T) {
 		config: usage.Config{Enabled: true},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, usageLog, resolver)
 
 	createBody := `{
 	  "endpoint":"/v1/chat/completions",
 	  "requests":[{"custom_id":"usage-1","method":"POST","body":{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"hi"}]}}]
 	}`
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/batches", strings.NewReader(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("X-Request-ID", "batch-usage-request-id")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
-	if err := handler.Batches(createCtx); err != nil {
-		t.Fatalf("create handler returned error: %v", err)
-	}
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200", createRec.Code)
-	}
+	createCtx, createRec := echotest.Post(t, "/v1/batches", createBody, echotest.WithHeader("X-Request-ID", "batch-usage-request-id"))
+	err := handler.Batches(createCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, createRec.Code)
 
-	var created core.BatchResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
+	created := echotest.Decode[core.BatchResponse](t, createRec)
 
 	// First results call should log usage.
-	resReq1 := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID+"/results", nil)
-	resRec1 := httptest.NewRecorder()
-	resCtx1 := e.NewContext(resReq1, resRec1)
-	resCtx1.SetPath("/v1/batches/:id/results")
-	setPathParam(resCtx1, "id", created.ID)
-	if err := handler.BatchResults(resCtx1); err != nil {
-		t.Fatalf("results handler returned error: %v", err)
-	}
-	if resRec1.Code != http.StatusOK {
-		t.Fatalf("results status = %d, want 200", resRec1.Code)
-	}
+	resCtx1, resRec1 := echotest.Get(t, "/v1/batches/"+created.ID+"/results", echotest.WithPath("/v1/batches/:id/results"), echotest.WithPathValue("id", created.ID))
+	err = handler.BatchResults(resCtx1)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resRec1.Code)
 
 	// Second results call should not duplicate usage writes.
-	resReq2 := httptest.NewRequest(http.MethodGet, "/v1/batches/"+created.ID+"/results", nil)
-	resRec2 := httptest.NewRecorder()
-	resCtx2 := e.NewContext(resReq2, resRec2)
-	resCtx2.SetPath("/v1/batches/:id/results")
-	setPathParam(resCtx2, "id", created.ID)
-	if err := handler.BatchResults(resCtx2); err != nil {
-		t.Fatalf("second results handler returned error: %v", err)
-	}
-	if resRec2.Code != http.StatusOK {
-		t.Fatalf("second results status = %d, want 200", resRec2.Code)
-	}
-
-	if len(usageLog.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
-	}
+	resCtx2, resRec2 := echotest.Get(t, "/v1/batches/"+created.ID+"/results", echotest.WithPath("/v1/batches/:id/results"), echotest.WithPathValue("id", created.ID))
+	err = handler.BatchResults(resCtx2)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resRec2.Code)
+	require.Len(t, usageLog.entries, 1)
 
 	entry := usageLog.entries[0]
-	if entry.RequestID != "batch-usage-request-id" {
-		t.Errorf("RequestID = %q, want %q", entry.RequestID, "batch-usage-request-id")
-	}
-	if entry.Endpoint != "/v1/batches" {
-		t.Errorf("Endpoint = %q, want %q", entry.Endpoint, "/v1/batches")
-	}
-	if entry.ProviderID != "msg_usage_1" {
-		t.Errorf("ProviderID = %q, want %q", entry.ProviderID, "msg_usage_1")
-	}
-	if entry.InputTokens != 1000 || entry.OutputTokens != 500 || entry.TotalTokens != 1500 {
-		t.Errorf("unexpected token totals: input=%d output=%d total=%d", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
-	}
-	if entry.TotalCost == nil || *entry.TotalCost <= 0 {
-		t.Fatalf("expected non-zero total cost, got %+v", entry.TotalCost)
-	}
+	assert.Equal(t, "batch-usage-request-id", entry.RequestID)
+	assert.Equal(t, "/v1/batches", entry.Endpoint)
+	assert.Equal(t, "msg_usage_1", entry.ProviderID)
+	assert.Equal(t, 1000, entry.InputTokens)
+	assert.Equal(t, 500, entry.OutputTokens)
+	assert.Equal(t, 1500, entry.TotalTokens)
+	require.NotNil(t, entry.TotalCost)
+	require.Greater(t, *entry.TotalCost, float64(0))
+
 	// 1000 * 1$/Mt + 500 * 2$/Mt = 0.001 + 0.001 = 0.002
 	expectedTotalCost := 0.002
 	delta := *entry.TotalCost - expectedTotalCost
 	if delta < 0 {
 		delta = -delta
 	}
-	if delta > 1e-9 {
-		t.Errorf("TotalCost = %.6f, want %.6f", *entry.TotalCost, expectedTotalCost)
-	}
-	if entry.RawData == nil {
-		t.Fatal("expected raw usage data")
-	}
-	if entry.RawData["batch_custom_id"] != "usage-1" {
-		t.Errorf("batch_custom_id = %v, want %q", entry.RawData["batch_custom_id"], "usage-1")
-	}
+	assert.LessOrEqual(t, delta, 1e-9, "TotalCost = %.6f, want %.6f", *entry.TotalCost, expectedTotalCost)
+	require.NotNil(t, entry.RawData)
+	assert.Equal(t, "usage-1", entry.RawData["batch_custom_id"])
 }
 
 func TestGetBatch_NotFound(t *testing.T) {
-	e := echo.New()
 	handler := NewHandler(&mockProvider{}, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/batches/missing", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/batches/:id")
-	setPathParam(c, "id", "missing")
-
-	if err := handler.GetBatch(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rec.Code)
-	}
+	c, rec := echotest.Get(t, "/v1/batches/missing", echotest.WithPath("/v1/batches/:id"), echotest.WithPathValue("id", "missing"))
+	err := handler.GetBatch(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestResponsesLifecycle_RetrievesStoredResponseAndInputItems(t *testing.T) {
@@ -4902,53 +4056,42 @@ func TestResponsesLifecycle_RetrievesStoredResponseAndInputItems(t *testing.T) {
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
+
 	srv.handler.drainSnapshotWrites()
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_store_1", nil)
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("get status = %d, want 200 (%s)", getRec.Code, getRec.Body.String())
-	}
-	var got core.ResponsesResponse
-	if err := json.Unmarshal(getRec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode get response: %v", err)
-	}
-	if got.ID != "resp_store_1" || got.Provider != "mock" {
-		t.Fatalf("stored response = %+v, want id resp_store_1 provider mock", got)
-	}
+	require.Equal(t, http.StatusOK, getRec.Code, getRec.Body.String())
+
+	got := echotest.Decode[core.ResponsesResponse](t, getRec)
+	require.Equal(t, "resp_store_1", got.ID)
+	require.Equal(t, "mock", got.Provider)
 
 	itemsReq := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_store_1/input_items?order=asc", nil)
 	itemsRec := httptest.NewRecorder()
 	srv.ServeHTTP(itemsRec, itemsReq)
-	if itemsRec.Code != http.StatusOK {
-		t.Fatalf("input items status = %d, want 200 (%s)", itemsRec.Code, itemsRec.Body.String())
-	}
-	var items core.ResponseInputItemListResponse
-	if err := json.Unmarshal(itemsRec.Body.Bytes(), &items); err != nil {
-		t.Fatalf("decode input items response: %v", err)
-	}
-	if items.Object != "list" || len(items.Data) != 1 || items.HasMore {
-		t.Fatalf("input items = %+v, want one-item list", items)
-	}
+	require.Equal(t, http.StatusOK, itemsRec.Code, itemsRec.Body.String())
+
+	items := echotest.Decode[core.ResponseInputItemListResponse](t, itemsRec)
+	require.Equal(t, "list", items.Object)
+	require.Len(t, items.Data, 1)
+	require.False(t, items.HasMore)
+
 	var first map[string]any
-	if err := json.Unmarshal(items.Data[0], &first); err != nil {
-		t.Fatalf("decode first input item: %v", err)
-	}
-	if first["type"] != "message" || first["role"] != "user" {
-		t.Fatalf("input item = %+v, want user message", first)
-	}
+	require.NoError(t, json.Unmarshal(items.Data[0], &first))
+	require.Equal(t, "message", first["type"])
+	require.Equal(t, "user", first["role"])
+
 	content, ok := first["content"].([]any)
-	if !ok || len(content) != 1 {
-		t.Fatalf("input content = %+v, want one content item", first["content"])
-	}
+	require.True(t, ok)
+	require.Len(t, content, 1)
+
 	text, ok := content[0].(map[string]any)
-	if !ok || text["type"] != "input_text" || text["text"] != "hello" {
-		t.Fatalf("input content item = %+v, want input_text hello", content[0])
-	}
+	require.True(t, ok)
+	require.Equal(t, "input_text", text["type"])
+	require.Equal(t, "hello", text["text"])
 }
 
 func TestResponsesLifecycle_StoresConcreteProviderName(t *testing.T) {
@@ -4974,21 +4117,14 @@ func TestResponsesLifecycle_StoresConcreteProviderName(t *testing.T) {
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
+
 	srv.handler.drainSnapshotWrites()
 
 	stored, err := store.Get(context.Background(), "resp_provider_name_1")
-	if err != nil {
-		t.Fatalf("store.Get() error = %v", err)
-	}
-	if stored.Provider != "openai" {
-		t.Fatalf("stored provider = %q, want openai", stored.Provider)
-	}
-	if stored.ProviderName != "openai_primary" {
-		t.Fatalf("stored provider name = %q, want openai_primary", stored.ProviderName)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai", stored.Provider)
+	require.Equal(t, "openai_primary", stored.ProviderName)
 }
 
 func TestResponsesLifecycle_StoreFalseSkipsLocalSnapshot(t *testing.T) {
@@ -5011,14 +4147,11 @@ func TestResponsesLifecycle_StoreFalseSkipsLocalSnapshot(t *testing.T) {
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
-	}
-	srv.handler.drainSnapshotWrites()
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
 
-	if _, err := store.Get(context.Background(), "resp_store_false_1"); !errors.Is(err, responsestore.ErrNotFound) {
-		t.Fatalf("store.Get() error = %v, want ErrNotFound", err)
-	}
+	srv.handler.drainSnapshotWrites()
+	_, err := store.Get(context.Background(), "resp_store_false_1")
+	require.ErrorIs(t, err, responsestore.ErrNotFound)
 }
 
 func TestResponsesLifecycle_ReturnsSuccessWhenSnapshotStoreFails(t *testing.T) {
@@ -5042,22 +4175,16 @@ func TestResponsesLifecycle_ReturnsSuccessWhenSnapshotStoreFails(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var resp core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.ID != "resp_store_failure_1" {
-		t.Fatalf("response id = %q, want resp_store_failure_1", resp.ID)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	resp := echotest.Decode[core.ResponsesResponse](t, rec)
+	require.Equal(t, "resp_store_failure_1", resp.ID)
+
 	srv.handler.drainSnapshotWrites()
 
 	counter := observability.ResponseSnapshotStoreFailures.WithLabelValues("mock", "", "store")
-	if got := testutil.ToFloat64(counter); got != 1 {
-		t.Fatalf("snapshot store failures = %v, want 1", got)
-	}
+	got := testutil.ToFloat64(counter)
+	require.Equal(t, float64(1), got)
 }
 
 // blockingResponseStore delays Create until released, to prove the request
@@ -5117,22 +4244,17 @@ func TestResponsesLifecycle_SnapshotWriteDoesNotBlockResponse(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("request blocked on the snapshot write; snapshot persistence must be asynchronous")
 	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	if _, err := inner.Get(context.Background(), "resp_async_1"); !errors.Is(err, responsestore.ErrNotFound) {
-		t.Fatalf("snapshot stored before release, Get() error = %v, want ErrNotFound", err)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	_, err := inner.Get(context.Background(), "resp_async_1")
+	require.ErrorIs(t, err, responsestore.ErrNotFound)
 
 	// Releasing the write and draining must leave the snapshot stored.
 	releaseOnce()
 	srv.handler.drainSnapshotWrites()
-	if id := <-store.created; id != "resp_async_1" {
-		t.Fatalf("created id = %q, want resp_async_1", id)
-	}
-	if _, err := inner.Get(context.Background(), "resp_async_1"); err != nil {
-		t.Fatalf("store.Get() after drain error = %v", err)
-	}
+	id := <-store.created
+	require.Equal(t, "resp_async_1", id)
+	_, err = inner.Get(context.Background(), "resp_async_1")
+	require.NoError(t, err)
 }
 
 func TestResponsesLifecycle_SnapshotWriteSkippedAfterDrain(t *testing.T) {
@@ -5159,16 +4281,13 @@ func TestResponsesLifecycle_SnapshotWriteSkippedAfterDrain(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	if _, err := store.Get(context.Background(), "resp_after_drain_1"); !errors.Is(err, responsestore.ErrNotFound) {
-		t.Fatalf("store.Get() error = %v, want ErrNotFound", err)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	_, err := store.Get(context.Background(), "resp_after_drain_1")
+	require.ErrorIs(t, err, responsestore.ErrNotFound)
+
 	counter := observability.ResponseSnapshotStoreFailures.WithLabelValues("mock", "", "store")
-	if got := testutil.ToFloat64(counter); got != 1 {
-		t.Fatalf("snapshot store failures = %v, want 1", got)
-	}
+	got := testutil.ToFloat64(counter)
+	require.Equal(t, float64(1), got)
 }
 
 func TestHandlerSetResponseStoreUpdatesCachedTranslatedInferenceService(t *testing.T) {
@@ -5178,14 +4297,10 @@ func TestHandlerSetResponseStoreUpdatesCachedTranslatedInferenceService(t *testi
 
 	handler.SetResponseStore(first)
 	service := handler.translatedInference()
-	if service.currentResponseStore() != first {
-		t.Fatal("translatedInferenceService did not capture first response store")
-	}
+	require.Equal(t, first, service.currentResponseStore())
 
 	handler.SetResponseStore(second)
-	if service.currentResponseStore() != second {
-		t.Fatal("SetResponseStore did not update cached translatedInferenceService response store")
-	}
+	require.Equal(t, second, service.currentResponseStore())
 }
 
 func TestHandlerSetResponseStoreIsConcurrentSafe(t *testing.T) {
@@ -5227,23 +4342,15 @@ func TestResponsesLifecycle_CancelUnsupportedProviderReturnsCompatibilityError(t
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
 
 	cancelReq := httptest.NewRequest(http.MethodPost, "/v1/responses/resp_cancel_1/cancel", nil)
 	cancelRec := httptest.NewRecorder()
 	srv.ServeHTTP(cancelRec, cancelReq)
-	if cancelRec.Code != http.StatusNotImplemented {
-		t.Fatalf("cancel status = %d, want 501 (%s)", cancelRec.Code, cancelRec.Body.String())
-	}
-	var body map[string]map[string]any
-	if err := json.Unmarshal(cancelRec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode cancel error: %v", err)
-	}
-	if body["error"]["code"] != "unsupported_response_operation" {
-		t.Fatalf("error code = %v, want unsupported_response_operation", body["error"]["code"])
-	}
+	require.Equal(t, http.StatusNotImplemented, cancelRec.Code, cancelRec.Body.String())
+
+	body := echotest.Decode[map[string]map[string]any](t, cancelRec)
+	require.Equal(t, "unsupported_response_operation", body["error"]["code"])
 }
 
 func TestResponsesLifecycle_DeleteStoredResponseWithoutNativeSupport(t *testing.T) {
@@ -5265,31 +4372,23 @@ func TestResponsesLifecycle_DeleteStoredResponseWithoutNativeSupport(t *testing.
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", createRec.Code, createRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
+
 	srv.handler.drainSnapshotWrites()
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/responses/resp_delete_1", nil)
 	deleteRec := httptest.NewRecorder()
 	srv.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("delete status = %d, want 200 (%s)", deleteRec.Code, deleteRec.Body.String())
-	}
-	var deleted core.ResponseDeleteResponse
-	if err := json.Unmarshal(deleteRec.Body.Bytes(), &deleted); err != nil {
-		t.Fatalf("decode delete response: %v", err)
-	}
-	if deleted.ID != "resp_delete_1" || !deleted.Deleted {
-		t.Fatalf("delete response = %+v, want deleted resp_delete_1", deleted)
-	}
+	require.Equal(t, http.StatusOK, deleteRec.Code, deleteRec.Body.String())
+
+	deleted := echotest.Decode[core.ResponseDeleteResponse](t, deleteRec)
+	require.Equal(t, "resp_delete_1", deleted.ID)
+	require.True(t, deleted.Deleted)
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_delete_1", nil)
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusNotImplemented {
-		t.Fatalf("get after delete status = %d, want 501 (%s)", getRec.Code, getRec.Body.String())
-	}
+	require.Equal(t, http.StatusNotImplemented, getRec.Code, getRec.Body.String())
 }
 
 func TestResponsesUtilityRoutes(t *testing.T) {
@@ -5313,41 +4412,27 @@ func TestResponsesUtilityRoutes(t *testing.T) {
 	tokensReq.Header.Set("Content-Type", "application/json")
 	tokensRec := httptest.NewRecorder()
 	srv.ServeHTTP(tokensRec, tokensReq)
-	if tokensRec.Code != http.StatusOK {
-		t.Fatalf("input_tokens status = %d, want 200 (%s)", tokensRec.Code, tokensRec.Body.String())
-	}
-	var tokens core.ResponseInputTokensResponse
-	if err := json.Unmarshal(tokensRec.Body.Bytes(), &tokens); err != nil {
-		t.Fatalf("decode input_tokens response: %v", err)
-	}
-	if tokens.InputTokens != 42 {
-		t.Fatalf("input tokens = %d, want 42", tokens.InputTokens)
-	}
+	require.Equal(t, http.StatusOK, tokensRec.Code, tokensRec.Body.String())
+
+	tokens := echotest.Decode[core.ResponseInputTokensResponse](t, tokensRec)
+	require.Equal(t, 42, tokens.InputTokens)
 
 	compactReq := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"model":"gpt-5-mini","input":"hello"}`))
 	compactReq.Header.Set("Content-Type", "application/json")
 	compactRec := httptest.NewRecorder()
 	srv.ServeHTTP(compactRec, compactReq)
-	if compactRec.Code != http.StatusOK {
-		t.Fatalf("compact status = %d, want 200 (%s)", compactRec.Code, compactRec.Body.String())
-	}
-	var compact core.ResponseCompactResponse
-	if err := json.Unmarshal(compactRec.Body.Bytes(), &compact); err != nil {
-		t.Fatalf("decode compact response: %v", err)
-	}
-	if compact.ID != "cmp_42" || compact.Provider != "mock" {
-		t.Fatalf("compact response = %+v, want id cmp_42 provider mock", compact)
-	}
-	if len(provider.capturedResponseUtilityReqs) != 2 {
-		t.Fatalf("utility calls = %d, want 2", len(provider.capturedResponseUtilityReqs))
-	}
+	require.Equal(t, http.StatusOK, compactRec.Code, compactRec.Body.String())
+
+	compact := echotest.Decode[core.ResponseCompactResponse](t, compactRec)
+	require.Equal(t, "cmp_42", compact.ID)
+	require.Equal(t, "mock", compact.Provider)
+	require.Len(t, provider.capturedResponseUtilityReqs, 2)
+
 	wantUtility := []responseUtilityCall{
 		{provider: "mock", operation: "CountResponseInputTokens"},
 		{provider: "mock", operation: "CompactResponse"},
 	}
-	if !reflect.DeepEqual(provider.capturedResponseUtility, wantUtility) {
-		t.Fatalf("utility routing = %+v, want %+v", provider.capturedResponseUtility, wantUtility)
-	}
+	require.Equal(t, wantUtility, provider.capturedResponseUtility)
 }
 
 func TestResponsesUtilityRoutesReturnProviderErrorWhenProviderTypeMissing(t *testing.T) {
@@ -5365,8 +4450,7 @@ func TestResponsesUtilityRoutesReturnProviderErrorWhenProviderTypeMissing(t *tes
 	srv.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
-	var envelope core.OpenAIErrorEnvelope
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope))
+	envelope := echotest.Decode[core.OpenAIErrorEnvelope](t, rec)
 	require.Equal(t, core.ErrorTypeProvider, envelope.Error.Type)
 	require.Equal(t, "unable to resolve provider for response utility operation", envelope.Error.Message)
 	require.Empty(t, provider.capturedResponseUtilityReqs)
@@ -5495,33 +4579,18 @@ func TestStreamingResponses_ChatBackedProviderInjectsUsageWhenEnforced(t *testin
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLog, nil)
 
 	reqBody := `{"model":"gpt-4o-mini","input":"Hello","stream":true}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if provider.capturedResponsesReq == nil {
-		t.Fatal("capturedResponsesReq = nil")
-	}
-	if provider.capturedResponsesReq.StreamOptions != nil {
-		t.Fatalf("responses request was mutated: %+v", provider.capturedResponsesReq.StreamOptions)
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("capturedChatReq = nil")
-	}
-	if provider.capturedChatReq.StreamOptions == nil || !provider.capturedChatReq.StreamOptions.IncludeUsage {
-		t.Fatalf("captured chat StreamOptions = %+v, want include_usage=true", provider.capturedChatReq.StreamOptions)
-	}
+	c, rec := echotest.Post(t, "/v1/responses", reqBody)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, provider.capturedResponsesReq)
+	require.Nil(t, provider.capturedResponsesReq.StreamOptions)
+	require.NotNil(t, provider.capturedChatReq)
+	require.NotNil(t, provider.capturedChatReq.StreamOptions)
+	require.True(t, provider.capturedChatReq.StreamOptions.IncludeUsage)
 }
 
 func TestStreamingResponses_ChatBackedProviderDoesNotInjectUsageWhenDisabled(t *testing.T) {
@@ -5538,24 +4607,14 @@ func TestStreamingResponses_ChatBackedProviderDoesNotInjectUsageWhenDisabled(t *
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLog, nil)
 
 	reqBody := `{"model":"gpt-4o-mini","input":"Hello","stream":true}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if provider.capturedChatReq == nil {
-		t.Fatal("capturedChatReq = nil")
-	}
-	if provider.capturedChatReq.StreamOptions != nil {
-		t.Fatalf("captured chat StreamOptions = %+v, want nil", provider.capturedChatReq.StreamOptions)
-	}
+	c, _ := echotest.Post(t, "/v1/responses", reqBody)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.NotNil(t, provider.capturedChatReq)
+	require.Nil(t, provider.capturedChatReq.StreamOptions)
 }
 
 func TestStreamingResponses_NativeProviderRequestRemainsUnchanged(t *testing.T) {
@@ -5572,27 +4631,15 @@ func TestStreamingResponses_NativeProviderRequestRemainsUnchanged(t *testing.T) 
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLog, nil)
 
 	reqBody := `{"model":"gpt-4o-mini","input":"Hello","stream":true}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if provider.capturedResponsesReq == nil {
-		t.Fatal("capturedResponsesReq = nil")
-	}
-	if provider.capturedResponsesReq.StreamOptions != nil {
-		t.Fatalf("native responses request should remain unchanged, got %+v", provider.capturedResponsesReq.StreamOptions)
-	}
+	c, rec := echotest.Post(t, "/v1/responses", reqBody)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, provider.capturedResponsesReq)
+	require.Nil(t, provider.capturedResponsesReq.StreamOptions)
 }
 
 func TestStreamingResponses_ChatBackedProviderWritesExactlyOneUsageEntry(t *testing.T) {
@@ -5614,35 +4661,21 @@ func TestStreamingResponses_ChatBackedProviderWritesExactlyOneUsageEntry(t *test
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLog, nil)
 
 	reqBody := `{"model":"gemini-2.0-flash","input":"Hello","stream":true}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Request-ID", "req-stream-responses-1")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/responses", reqBody, echotest.WithHeader("X-Request-ID", "req-stream-responses-1"))
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.Len(t, usageLog.entries, 1)
 
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if len(usageLog.entries) != 1 {
-		t.Fatalf("expected exactly 1 usage entry, got %d", len(usageLog.entries))
-	}
 	entry := usageLog.entries[0]
-	if entry.RequestID != "req-stream-responses-1" {
-		t.Fatalf("RequestID = %q, want req-stream-responses-1", entry.RequestID)
-	}
-	if entry.Provider != "mock" {
-		t.Fatalf("Provider = %q, want mock", entry.Provider)
-	}
-	if entry.Endpoint != "/v1/responses" {
-		t.Fatalf("Endpoint = %q, want /v1/responses", entry.Endpoint)
-	}
-	if entry.InputTokens != 11 || entry.OutputTokens != 5 || entry.TotalTokens != 16 {
-		t.Fatalf("usage entry = %+v, want 11/5/16 tokens", entry)
-	}
+	require.Equal(t, "req-stream-responses-1", entry.RequestID)
+	require.Equal(t, "mock", entry.Provider)
+	require.Equal(t, "/v1/responses", entry.Endpoint)
+	require.Equal(t, 11, entry.InputTokens)
+	require.Equal(t, 5, entry.OutputTokens)
+	require.Equal(t, 16, entry.TotalTokens)
 }
 
 func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
@@ -5668,47 +4701,33 @@ func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	reqBody := `{
 		"model":"gpt-5-mini",
 		"input":[{"type":"message","role":"user","content":"hello","x_trace":{"id":"trace-1"}}]
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.Responses(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if provider.capturedResponsesReq == nil {
-		t.Fatal("expected responses request to be captured")
-	}
+	c, _ := echotest.Post(t, "/v1/responses", reqBody)
+	err := handler.Responses(c)
+	require.NoError(t, err)
+	require.NotNil(t, provider.capturedResponsesReq)
 
 	input, ok := provider.capturedResponsesReq.Input.([]core.ResponsesInputElement)
-	if !ok || len(input) != 1 {
-		t.Fatalf("captured input = %#v, want []ResponsesInputElement len=1", provider.capturedResponsesReq.Input)
-	}
-	if input[0].ExtraFields.Lookup("x_trace") == nil {
-		t.Fatal("input[0].x_trace missing from ExtraFields")
-	}
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	require.NotNil(t, input[0].ExtraFields.Lookup("x_trace"))
 
 	body, err := json.Marshal(provider.capturedResponsesReq)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	decodedInput := decoded["input"].([]any)
 	firstInput := decodedInput[0].(map[string]any)
-	if _, ok := firstInput["x_trace"].(map[string]any); !ok {
-		t.Fatalf("input[0].x_trace = %#v, want object", firstInput["x_trace"])
-	}
+	_, ok = firstInput["x_trace"].(map[string]any)
+	require.True(t, ok, "input[0].x_trace = %#v, want object", firstInput["x_trace"])
 }
 
 func TestStreamingChatCompletion_InjectsStreamOptions(t *testing.T) {
@@ -5728,36 +4747,18 @@ func TestStreamingChatCompletion_InjectsStreamOptions(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, usageLog, nil)
 
 	// Streaming ChatCompletion request SHOULD have StreamOptions injected
 	reqBody := `{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", reqBody)
 
 	err := handler.ChatCompletion(c)
-	if err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rec.Code)
-	}
-
-	if provider.lastPassthroughReq != nil {
-		t.Fatal("lastPassthroughReq != nil, want usage-enforced streaming to stay on translated stream path")
-	}
-
-	if provider.capturedChatReq.StreamOptions == nil {
-		t.Fatal("ChatCompletion streaming should have StreamOptions injected")
-	}
-
-	if !provider.capturedChatReq.StreamOptions.IncludeUsage {
-		t.Error("ChatCompletion streaming should have IncludeUsage=true")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	require.Nil(t, provider.lastPassthroughReq)
+	require.NotNil(t, provider.capturedChatReq.StreamOptions)
+	assert.True(t, provider.capturedChatReq.StreamOptions.IncludeUsage)
 }
 
 func TestCreateFile(t *testing.T) {
@@ -5776,49 +4777,31 @@ func TestCreateFile(t *testing.T) {
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("purpose", "batch"); err != nil {
-		t.Fatalf("write purpose: %v", err)
-	}
-	part, err := writer.CreateFormFile("file", "requests.jsonl")
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write([]byte("{\"custom_id\":\"1\"}\n")); err != nil {
-		t.Fatalf("write form file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
+	err := writer.WriteField("purpose", "batch")
+	require.NoError(t, err)
 
-	e := echo.New()
+	part, err := writer.CreateFormFile("file", "requests.jsonl")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("{\"custom_id\":\"1\"}\n"))
+	require.NoError(t, err)
+	err = writer.Close()
+	require.NoError(t, err)
+
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/files", &body, echotest.WithContentType(writer.FormDataContentType()))
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	err = handler.CreateFile(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "\"object\":\"file\"")
 
-	if err := handler.CreateFile(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "\"object\":\"file\"") {
-		t.Fatalf("unexpected response body: %s", rec.Body.String())
-	}
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
-	if env == nil || env.CachedFileRouteInfo() == nil {
-		t.Fatal("expected file semantic envelope to be populated")
-	}
-	if env.CachedFileRouteInfo().Purpose != "batch" {
-		t.Fatalf("purpose = %q, want batch", env.CachedFileRouteInfo().Purpose)
-	}
-	if env.CachedFileRouteInfo().Filename != "requests.jsonl" {
-		t.Fatalf("filename = %q, want requests.jsonl", env.CachedFileRouteInfo().Filename)
-	}
+	require.NotNil(t, env)
+	require.NotNil(t, env.CachedFileRouteInfo())
+	require.Equal(t, "batch", env.CachedFileRouteInfo().Purpose)
+	require.Equal(t, "requests.jsonl", env.CachedFileRouteInfo().Filename)
 }
 
 func TestCreateFileWithExplicitProviderDoesNotRequireProviderInventory(t *testing.T) {
@@ -5835,44 +4818,29 @@ func TestCreateFileWithExplicitProviderDoesNotRequireProviderInventory(t *testin
 	}
 
 	provider := &providerWithoutFileInventory{inner: base}
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("purpose", "batch"); err != nil {
-		t.Fatalf("write purpose: %v", err)
-	}
-	if err := writer.WriteField("provider", "openai"); err != nil {
-		t.Fatalf("write provider: %v", err)
-	}
+	err := writer.WriteField("purpose", "batch")
+	require.NoError(t, err)
+	err = writer.WriteField("provider", "openai")
+	require.NoError(t, err)
+
 	part, err := writer.CreateFormFile("file", "requests.jsonl")
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write([]byte("{\"custom_id\":\"1\"}\n")); err != nil {
-		t.Fatalf("write form file: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("close multipart writer: %v", err)
-	}
+	require.NoError(t, err)
+	_, err = part.Write([]byte("{\"custom_id\":\"1\"}\n"))
+	require.NoError(t, err)
+	err = writer.Close()
+	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
 	frame := core.NewRequestSnapshot(http.MethodPost, "/v1/files", nil, nil, nil, writer.FormDataContentType(), nil, false, "", nil)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.CreateFile(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if len(base.capturedFileCreateReqs) != 1 {
-		t.Fatalf("len(capturedFileCreateReqs) = %d, want 1", len(base.capturedFileCreateReqs))
-	}
+	c, rec := echotest.Post(t, "/v1/files", &body, echotest.WithContentType(writer.FormDataContentType()))
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	err = handler.CreateFile(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, base.capturedFileCreateReqs, 1)
 }
 
 func TestGetDeleteAndContentFile(t *testing.T) {
@@ -5889,50 +4857,26 @@ func TestGetDeleteAndContentFile(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
 	// Get file
-	getReq := httptest.NewRequest(http.MethodGet, "/v1/files/file_1", nil)
-	getRec := httptest.NewRecorder()
-	getCtx := e.NewContext(getReq, getRec)
-	getCtx.SetPath("/v1/files/:id")
-	setPathParam(getCtx, "id", "file_1")
-	if err := handler.GetFile(getCtx); err != nil {
-		t.Fatalf("get handler returned error: %v", err)
-	}
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("expected get status 200, got %d", getRec.Code)
-	}
+	getCtx, getRec := echotest.Get(t, "/v1/files/file_1", echotest.WithPath("/v1/files/:id"), echotest.WithPathValue("id", "file_1"))
+	err := handler.GetFile(getCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, getRec.Code)
 
 	// Delete file
-	delReq := httptest.NewRequest(http.MethodDelete, "/v1/files/file_1", nil)
-	delRec := httptest.NewRecorder()
-	delCtx := e.NewContext(delReq, delRec)
-	delCtx.SetPath("/v1/files/:id")
-	setPathParam(delCtx, "id", "file_1")
-	if err := handler.DeleteFile(delCtx); err != nil {
-		t.Fatalf("delete handler returned error: %v", err)
-	}
-	if delRec.Code != http.StatusOK {
-		t.Fatalf("expected delete status 200, got %d", delRec.Code)
-	}
+	delCtx, delRec := echotest.Request(t, http.MethodDelete, "/v1/files/file_1", nil, echotest.WithPath("/v1/files/:id"), echotest.WithPathValue("id", "file_1"))
+	err = handler.DeleteFile(delCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, delRec.Code)
 
 	// Get file content
-	contentReq := httptest.NewRequest(http.MethodGet, "/v1/files/file_1/content", nil)
-	contentRec := httptest.NewRecorder()
-	contentCtx := e.NewContext(contentReq, contentRec)
-	contentCtx.SetPath("/v1/files/:id/content")
-	setPathParam(contentCtx, "id", "file_1")
-	if err := handler.GetFileContent(contentCtx); err != nil {
-		t.Fatalf("content handler returned error: %v", err)
-	}
-	if contentRec.Code != http.StatusOK {
-		t.Fatalf("expected content status 200, got %d", contentRec.Code)
-	}
-	if !strings.Contains(contentRec.Body.String(), "\"ok\":true") {
-		t.Fatalf("unexpected content body: %s", contentRec.Body.String())
-	}
+	contentCtx, contentRec := echotest.Get(t, "/v1/files/file_1/content", echotest.WithPath("/v1/files/:id/content"), echotest.WithPathValue("id", "file_1"))
+	err = handler.GetFileContent(contentCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, contentRec.Code)
+	require.Contains(t, contentRec.Body.String(), "\"ok\":true")
 }
 
 func TestGetFileContent_TypedNilResponseReturnsBadGateway(t *testing.T) {
@@ -5949,31 +4893,17 @@ func TestGetFileContent_TypedNilResponseReturnsBadGateway(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_1/content?provider=openai", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/files/:id/content")
-	setPathParam(c, "id", "file_1")
+	c, rec := echotest.Get(t, "/v1/files/file_1/content?provider=openai", echotest.WithPath("/v1/files/:id/content"), echotest.WithPathValue("id", "file_1"))
+	err := handler.GetFileContent(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
 
-	if err := handler.GetFileContent(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("expected status 502, got %d", rec.Code)
-	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "provider_error") {
-		t.Fatalf("expected provider_error body, got: %s", body)
-	}
-	if !strings.Contains(body, "provider openai-primary returned empty file content response") {
-		t.Fatalf("expected empty file content response message, got: %s", body)
-	}
-	if !strings.Contains(body, `"provider":"openai-primary"`) {
-		t.Fatalf("expected provider in response body, got: %s", body)
-	}
+	require.Contains(t, body, "provider_error")
+	require.Contains(t, body, "provider openai-primary returned empty file content response")
+	require.Contains(t, body, `"provider":"openai-primary"`)
 }
 
 func TestListFiles(t *testing.T) {
@@ -6014,10 +4944,8 @@ func TestListFiles(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files?limit=5", nil)
 	frame := core.NewRequestSnapshot(
 		http.MethodGet,
 		"/v1/files",
@@ -6032,29 +4960,19 @@ func TestListFiles(t *testing.T) {
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/files?limit=5")
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	err := handler.ListFiles(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "\"object\":\"list\"")
+	require.Contains(t, rec.Body.String(), "\"id\":\"file_ok_1\"")
 
-	if err := handler.ListFiles(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "\"object\":\"list\"") {
-		t.Fatalf("unexpected response body: %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "\"id\":\"file_ok_1\"") {
-		t.Fatalf("unexpected response body: %s", rec.Body.String())
-	}
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
-	if env == nil || env.CachedFileRouteInfo() == nil {
-		t.Fatal("expected file semantic envelope to be populated")
-	}
-	if !env.CachedFileRouteInfo().HasLimit || env.CachedFileRouteInfo().Limit != 5 {
-		t.Fatalf("limit = %d/%v, want 5/true", env.CachedFileRouteInfo().Limit, env.CachedFileRouteInfo().HasLimit)
-	}
+	require.NotNil(t, env)
+	require.NotNil(t, env.CachedFileRouteInfo())
+	require.True(t, env.CachedFileRouteInfo().HasLimit)
+	require.Equal(t, 5, env.CachedFileRouteInfo().Limit)
 }
 
 func TestListFilesWithUnknownAfterCursorReturnsNotFound(t *testing.T) {
@@ -6087,22 +5005,13 @@ func TestListFilesWithUnknownAfterCursorReturnsNotFound(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files?after=missing-cursor", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ListFiles(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "after cursor file not found") {
-		t.Fatalf("unexpected response body: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/v1/files?after=missing-cursor")
+	err := handler.ListFiles(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.Contains(t, rec.Body.String(), "after cursor file not found")
 }
 
 func TestListFilesWithoutProviderPagesProvidersUntilAfterCursor(t *testing.T) {
@@ -6152,10 +5061,8 @@ func TestListFilesWithoutProviderPagesProvidersUntilAfterCursor(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files?limit=2&after=file_a1", nil)
 	frame := core.NewRequestSnapshot(
 		http.MethodGet,
 		"/v1/files",
@@ -6171,34 +5078,21 @@ func TestListFilesWithoutProviderPagesProvidersUntilAfterCursor(t *testing.T) {
 		"",
 		nil,
 	)
-	req = withRequestSnapshotAndPrompt(req, frame)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/files?limit=2&after=file_a1")
+	c.SetRequest(withRequestSnapshotAndPrompt(c.Request(), frame))
+	err := handler.ListFiles(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := handler.ListFiles(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	resp := echotest.Decode[core.FileListResponse](t, rec)
+	got := []string{resp.Data[0].ID, resp.Data[1].ID}
+	require.Equal(t, []string{"file_o3", "file_o2"}, got)
+	require.True(t, resp.HasMore)
+	require.GreaterOrEqual(t, len(mock.fileListCalls), 3)
 
-	var resp core.FileListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if got := []string{resp.Data[0].ID, resp.Data[1].ID}; !reflect.DeepEqual(got, []string{"file_o3", "file_o2"}) {
-		t.Fatalf("response ids = %v, want [file_o3 file_o2]", got)
-	}
-	if !resp.HasMore {
-		t.Fatal("HasMore = false, want true")
-	}
-	if len(mock.fileListCalls) < 3 {
-		t.Fatalf("len(fileListCalls) = %d, want at least 3", len(mock.fileListCalls))
-	}
 	lastCall := mock.fileListCalls[len(mock.fileListCalls)-1]
-	if lastCall.provider != "openai" || lastCall.after != "file_o4" {
-		t.Fatalf("last file list call = %#v, want openai after file_o4", lastCall)
-	}
+	require.Equal(t, "openai", lastCall.provider)
+	require.Equal(t, "file_o4", lastCall.after)
 }
 
 func TestGetFileWithoutProviderSkipsProviderErrors(t *testing.T) {
@@ -6234,29 +5128,18 @@ func TestGetFileWithoutProviderSkipsProviderErrors(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_ok_1", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/files/:id")
-	setPathParam(c, "id", "file_ok_1")
 	entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
-	c.Set(string(auditlog.LogEntryKey), entry)
-
-	if err := handler.GetFile(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "\"id\":\"file_ok_1\"") {
-		t.Fatalf("unexpected response body: %s", rec.Body.String())
-	}
-	if entry.Provider != "openai" {
-		t.Fatalf("audit entry provider = %q, want openai", entry.Provider)
-	}
+	c, rec := echotest.Get(t, "/v1/files/file_ok_1",
+		echotest.WithPath("/v1/files/:id"),
+		echotest.WithPathValue("id", "file_ok_1"),
+		echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	err := handler.GetFile(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "\"id\":\"file_ok_1\"")
+	require.Equal(t, "openai", entry.Provider)
 }
 
 func TestGetFile_FileStoreLookupErrorFallsBackToProvider(t *testing.T) {
@@ -6278,25 +5161,14 @@ func TestGetFile_FileStoreLookupErrorFallsBackToProvider(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.SetFileStore(failingFileStore{err: errors.New("file store unavailable")})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_ok_1", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/files/:id")
-	setPathParam(c, "id", "file_ok_1")
-
-	if err := handler.GetFile(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "\"provider\":\"openai\"") {
-		t.Fatalf("unexpected response body: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/v1/files/file_ok_1", echotest.WithPath("/v1/files/:id"), echotest.WithPathValue("id", "file_ok_1"))
+	err := handler.GetFile(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "\"provider\":\"openai\"")
 }
 
 func TestGetFileWithoutProviderUsesProviderInventoryWhenAliasMasksModel(t *testing.T) {
@@ -6318,12 +5190,9 @@ func TestGetFileWithoutProviderUsesProviderInventoryWhenAliasMasksModel(t *testi
 	service, err := virtualmodels.NewService(newAliasesTestStore(
 		redirectVM("gpt-4o", "claude-3-haiku", "", true),
 	), &catalog, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	mock := &mockProvider{
 		supportedModels: []string{"gpt-4o", "claude-3-haiku"},
@@ -6354,25 +5223,14 @@ func TestGetFileWithoutProviderUsesProviderInventoryWhenAliasMasksModel(t *testi
 		},
 	}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.modelResolver = service
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_ok_1", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/files/:id")
-	setPathParam(c, "id", "file_ok_1")
-
-	if err := handler.GetFile(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "\"provider\":\"openai\"") {
-		t.Fatalf("unexpected response body: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/v1/files/file_ok_1", echotest.WithPath("/v1/files/:id"), echotest.WithPathValue("id", "file_ok_1"))
+	err = handler.GetFile(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "\"provider\":\"openai\"")
 }
 
 func TestGetFileWithoutProviderRequiresFileProviderInventory(t *testing.T) {
@@ -6395,28 +5253,16 @@ func TestGetFileWithoutProviderRequiresFileProviderInventory(t *testing.T) {
 	}
 
 	provider := &providerWithoutFileInventory{inner: base}
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/files/file_ok_1", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.SetPath("/v1/files/:id")
-	setPathParam(c, "id", "file_ok_1")
+	c, rec := echotest.Get(t, "/v1/files/file_ok_1", echotest.WithPath("/v1/files/:id"), echotest.WithPathValue("id", "file_ok_1"))
+	err := handler.GetFile(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 
-	if err := handler.GetFile(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status 500, got %d", rec.Code)
-	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "provider_error") {
-		t.Fatalf("expected provider_error body, got: %s", body)
-	}
-	if !strings.Contains(body, "file provider inventory is unavailable") {
-		t.Fatalf("unexpected response body: %s", body)
-	}
+	require.Contains(t, body, "provider_error")
+	require.Contains(t, body, "file provider inventory is unavailable")
 }
 
 func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
@@ -6448,21 +5294,11 @@ func TestMergeStoredBatchFromUpstreamPreservesGatewayMetadata(t *testing.T) {
 
 	gateway.MergeStoredBatchFromUpstream(stored, upstream)
 
-	if stored.Batch.Metadata["provider"] != "openai" {
-		t.Fatalf("provider metadata overwritten: %q", stored.Batch.Metadata["provider"])
-	}
-	if stored.Batch.Metadata["provider_batch_id"] != "provider-batch-1" {
-		t.Fatalf("provider_batch_id metadata overwritten: %q", stored.Batch.Metadata["provider_batch_id"])
-	}
-	if stored.Batch.Metadata["existing"] != "upstream-overwrite" {
-		t.Fatalf("expected non-gateway key overwrite from upstream, got %q", stored.Batch.Metadata["existing"])
-	}
-	if stored.Batch.Metadata["new_key"] != "new-value" {
-		t.Fatalf("expected merged upstream key, got %q", stored.Batch.Metadata["new_key"])
-	}
-	if stored.Batch.InputFileID != "file_source" {
-		t.Fatalf("input_file_id overwritten: %q", stored.Batch.InputFileID)
-	}
+	require.Equal(t, "openai", stored.Batch.Metadata["provider"])
+	require.Equal(t, "provider-batch-1", stored.Batch.Metadata["provider_batch_id"])
+	require.Equal(t, "upstream-overwrite", stored.Batch.Metadata["existing"])
+	require.Equal(t, "new-value", stored.Batch.Metadata["new_key"])
+	require.Equal(t, "file_source", stored.Batch.InputFileID)
 }
 
 func TestMergeStoredBatchFromUpstreamPreservesExistingValuesOnSparseUpstream(t *testing.T) {
@@ -6515,37 +5351,25 @@ func TestMergeStoredBatchFromUpstreamPreservesExistingValuesOnSparseUpstream(t *
 	}
 
 	gateway.MergeStoredBatchFromUpstream(stored, upstream)
+	got := stored.Batch.Status
+	require.Equal(t, "in_progress", got)
+	got = stored.Batch.Endpoint
+	require.Equal(t, "/v1/chat/completions", got)
+	got = stored.Batch.InputFileID
+	require.Equal(t, "file_source", got)
+	got = stored.Batch.CompletionWindow
+	require.Equal(t, "24h", got)
 
-	if got := stored.Batch.Status; got != "in_progress" {
-		t.Fatalf("Status = %q, want in_progress", got)
-	}
-	if got := stored.Batch.Endpoint; got != "/v1/chat/completions" {
-		t.Fatalf("Endpoint = %q, want /v1/chat/completions", got)
-	}
-	if got := stored.Batch.InputFileID; got != "file_source" {
-		t.Fatalf("InputFileID = %q, want file_source", got)
-	}
-	if got := stored.Batch.CompletionWindow; got != "24h" {
-		t.Fatalf("CompletionWindow = %q, want 24h", got)
-	}
-	if got := stored.Batch.RequestCounts; got != (core.BatchRequestCounts{Total: 10, Completed: 4, Failed: 1}) {
-		t.Fatalf("RequestCounts = %#v, want preserved counts", got)
-	}
-	if got := stored.Batch.Usage; got.InputTokens != 100 || got.OutputTokens != 50 || got.TotalTokens != 150 || got.InputCost == nil || *got.InputCost != inputCost || got.TotalCost == nil || *got.TotalCost != totalCost {
-		t.Fatalf("Usage = %#v, want preserved usage", got)
-	}
-	if len(stored.Batch.Results) != 1 || stored.Batch.Results[0].CustomID != "keep-me" {
-		t.Fatalf("Results = %#v, want preserved results", stored.Batch.Results)
-	}
-	if stored.Batch.InProgressAt == nil || *stored.Batch.InProgressAt != inProgressAt {
-		t.Fatalf("InProgressAt = %#v, want %d", stored.Batch.InProgressAt, inProgressAt)
-	}
-	if stored.Batch.CompletedAt == nil || *stored.Batch.CompletedAt != completedAt {
-		t.Fatalf("CompletedAt = %#v, want %d", stored.Batch.CompletedAt, completedAt)
-	}
-	if got := stored.Batch.Metadata["upstream_only"]; got != "value" {
-		t.Fatalf("metadata[upstream_only] = %q, want value", got)
-	}
+	require.Equal(t, core.BatchRequestCounts{Total: 10, Completed: 4, Failed: 1}, stored.Batch.RequestCounts)
+	require.Equal(t, core.BatchUsageSummary{InputTokens: 100, OutputTokens: 50, TotalTokens: 150, InputCost: &inputCost, TotalCost: &totalCost}, stored.Batch.Usage)
+	require.Len(t, stored.Batch.Results, 1)
+	require.Equal(t, "keep-me", stored.Batch.Results[0].CustomID)
+	require.NotNil(t, stored.Batch.InProgressAt)
+	require.Equal(t, inProgressAt, *stored.Batch.InProgressAt)
+	require.NotNil(t, stored.Batch.CompletedAt)
+	require.Equal(t, completedAt, *stored.Batch.CompletedAt)
+	got = stored.Batch.Metadata["upstream_only"]
+	require.Equal(t, "value", got)
 }
 
 func TestProviderPassthrough_OpenAI(t *testing.T) {
@@ -6582,57 +5406,37 @@ func TestProviderPassthrough_OpenAI(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
-	}
-	if got := rec.Body.String(); got != `{"ok":true}` {
-		t.Fatalf("body = %q", got)
-	}
-	if got := rec.Header().Get("X-Upstream"); got != "openai" {
-		t.Fatalf("X-Upstream = %q, want openai", got)
-	}
-	if got := rec.Header().Get("Set-Cookie"); got != "" {
-		t.Fatalf("Set-Cookie should not be forwarded, got %q", got)
-	}
-	if got := rec.Header().Get("X-Upstream-Hop"); got != "" {
-		t.Fatalf("hop-by-hop header should not be forwarded, got %q", got)
-	}
-	if provider.lastPassthroughProvider != "openai" {
-		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "responses?api-version=2026-03-10" {
-		t.Fatalf("endpoint = %q", got)
-	}
-	if got := readPassthroughRequestBody(t, provider.lastPassthroughReq.Body); got != `{"foo":"bar"}` {
-		t.Fatalf("body = %q", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("Authorization"); got != "" {
-		t.Fatalf("authorization header should not be forwarded, got %q", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("Cookie"); got != "" {
-		t.Fatalf("cookie header should not be forwarded, got %q", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("Forwarded"); got != "" {
-		t.Fatalf("forwarded header should not be forwarded, got %q", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Forwarded-For"); got != "" {
-		t.Fatalf("x-forwarded-for header should not be forwarded, got %q", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Debug"); got != "" {
-		t.Fatalf("connection-nominated header should not be forwarded, got %q", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("OpenAI-Beta"); got != "responses=v1" {
-		t.Fatalf("OpenAI-Beta = %q, want responses=v1", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Request-ID"); got != "req_123" {
-		t.Fatalf("X-Request-ID = %q, want req_123", got)
-	}
-	if got := provider.lastPassthroughReq.Headers.Get(core.UserPathHeader); got != "" {
-		t.Fatalf("%s should not be forwarded, got %q", core.UserPathHeader, got)
-	}
+	require.Equal(t, http.StatusAccepted, rec.Code)
+	got := rec.Body.String()
+	require.Equal(t, `{"ok":true}`, got)
+	got = rec.Header().Get("X-Upstream")
+	require.Equal(t, "openai", got)
+	got = rec.Header().Get("Set-Cookie")
+	require.Empty(t, got)
+	got = rec.Header().Get("X-Upstream-Hop")
+	require.Empty(t, got)
+	require.Equal(t, "openai", provider.lastPassthroughProvider)
+	require.NotNil(t, provider.lastPassthroughReq)
+	got = provider.lastPassthroughReq.Endpoint
+	require.Equal(t, "responses?api-version=2026-03-10", got)
+	got = readPassthroughRequestBody(t, provider.lastPassthroughReq.Body)
+	require.Equal(t, `{"foo":"bar"}`, got)
+	got = provider.lastPassthroughReq.Headers.Get("Authorization")
+	require.Empty(t, got)
+	got = provider.lastPassthroughReq.Headers.Get("Cookie")
+	require.Empty(t, got)
+	got = provider.lastPassthroughReq.Headers.Get("Forwarded")
+	require.Empty(t, got)
+	got = provider.lastPassthroughReq.Headers.Get("X-Forwarded-For")
+	require.Empty(t, got)
+	got = provider.lastPassthroughReq.Headers.Get("X-Debug")
+	require.Empty(t, got)
+	got = provider.lastPassthroughReq.Headers.Get("OpenAI-Beta")
+	require.Equal(t, "responses=v1", got)
+	got = provider.lastPassthroughReq.Headers.Get("X-Request-ID")
+	require.Equal(t, "req_123", got)
+	got = provider.lastPassthroughReq.Headers.Get(core.UserPathHeader)
+	require.Empty(t, got)
 }
 
 func TestProviderPassthrough_PrefersContextRequestID(t *testing.T) {
@@ -6658,15 +5462,10 @@ func TestProviderPassthrough_PrefersContextRequestID(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Headers.Get("X-Request-ID"); got != "ctx_req_123" {
-		t.Fatalf("X-Request-ID = %q, want ctx_req_123", got)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, provider.lastPassthroughReq)
+	got := provider.lastPassthroughReq.Headers.Get("X-Request-ID")
+	require.Equal(t, "ctx_req_123", got)
 }
 
 func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
@@ -6691,15 +5490,12 @@ func TestProviderPassthrough_NormalizesErrorResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
-	}
-	if got := rec.Header().Get("X-Upstream"); got != "" {
-		t.Fatalf("X-Upstream should not be forwarded on normalized errors, got %q", got)
-	}
-	if body := rec.Body.String(); !strings.Contains(body, `"message":"upstream missing"`) || !strings.Contains(body, `"error"`) {
-		t.Fatalf("unexpected error body: %s", body)
-	}
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	got := rec.Header().Get("X-Upstream")
+	require.Empty(t, got)
+	body := rec.Body.String()
+	require.Contains(t, body, `"message":"upstream missing"`)
+	require.Contains(t, body, `"error"`)
 }
 
 func TestProviderPassthrough_LLMDDroppedReasonOnNormalizedError(t *testing.T) {
@@ -6730,21 +5526,15 @@ func TestProviderPassthrough_LLMDDroppedReasonOnNormalizedError(t *testing.T) {
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusTooManyRequests {
-				t.Fatalf("status = %d, want %d", rec.Code, http.StatusTooManyRequests)
-			}
-			if got := rec.Header().Get(llmdDroppedReasonHeader); got != "rejected-saturated" {
-				t.Fatalf("%s = %q, want rejected-saturated", llmdDroppedReasonHeader, got)
-			}
-			if got := rec.Header().Get("X-Upstream"); got != "" {
-				t.Fatalf("X-Upstream should not be forwarded, got %q", got)
-			}
-			if got := rec.Header().Get("Set-Cookie"); got != "" {
-				t.Fatalf("Set-Cookie should not be forwarded, got %q", got)
-			}
-			if body := rec.Body.String(); !strings.Contains(body, `"message":"request dropped"`) {
-				t.Fatalf("unexpected error body: %s", body)
-			}
+			require.Equal(t, http.StatusTooManyRequests, rec.Code)
+			got := rec.Header().Get(llmdDroppedReasonHeader)
+			require.Equal(t, "rejected-saturated", got, "%s = %q, want rejected-saturated", llmdDroppedReasonHeader, got)
+			got = rec.Header().Get("X-Upstream")
+			require.Empty(t, got)
+			got = rec.Header().Get("Set-Cookie")
+			require.Empty(t, got)
+			body := rec.Body.String()
+			require.Contains(t, body, `"message":"request dropped"`)
 		})
 	}
 }
@@ -6769,15 +5559,10 @@ func TestProviderPassthrough_OpenAIV1AliasNormalizesByDefault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "chat/completions" {
-		t.Fatalf("endpoint = %q, want chat/completions", got)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, provider.lastPassthroughReq)
+	got := provider.lastPassthroughReq.Endpoint
+	require.Equal(t, "chat/completions", got)
 }
 
 func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
@@ -6800,15 +5585,10 @@ func TestProviderPassthrough_AnthropicV1AliasNormalizesByDefault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "messages" {
-		t.Fatalf("endpoint = %q, want messages", got)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, provider.lastPassthroughReq)
+	got := provider.lastPassthroughReq.Endpoint
+	require.Equal(t, "messages", got)
 }
 
 func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
@@ -6824,12 +5604,11 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 		providerNames: map[string]string{"openai_test/gpt-5-mini": "openai_test"},
 	}
 
-	e := echo.New()
 	handler := NewHandler(provider, nil, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	entry := &auditlog.LogEntry{}
+	c, rec := echotest.Post(t, "/p/openai_test/v1/chat/completions", `{"model":"gpt-5-mini"}`, echotest.WithValue(string(auditlog.LogEntryKey), entry))
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -6839,28 +5618,13 @@ func TestProviderPassthrough_UsesPassthroughModelForAuditEntry(t *testing.T) {
 			Model:              "gpt-5-mini",
 			AuditPath:          "/v1/chat/completions",
 		},
-	}))
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
-
-	if err := handler.ProviderPassthrough(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if entry.RequestedModel != "gpt-5-mini" {
-		t.Fatalf("audit entry requested model = %q, want gpt-5-mini", entry.RequestedModel)
-	}
-	if entry.Provider != "openai" {
-		t.Fatalf("audit entry provider = %q, want openai", entry.Provider)
-	}
-	if entry.ProviderName != "openai_test" {
-		t.Fatalf("audit entry provider name = %q, want openai_test", entry.ProviderName)
-	}
+	})))
+	err := handler.ProviderPassthrough(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "gpt-5-mini", entry.RequestedModel)
+	require.Equal(t, "openai", entry.Provider)
+	require.Equal(t, "openai_test", entry.ProviderName)
 }
 
 func TestProviderPassthrough_UsesConfiguredProviderNameForAccessValidation(t *testing.T) {
@@ -6879,11 +5643,9 @@ func TestProviderPassthrough_UsesConfiguredProviderNameForAccessValidation(t *te
 	}
 	authorizer := &recordingModelAuthorizer{}
 
-	e := echo.New()
 	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/p/openai_test/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, rec := echotest.Post(t, "/p/openai_test/chat/completions", `{"model":"gpt-5-mini"}`)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -6893,22 +5655,13 @@ func TestProviderPassthrough_UsesConfiguredProviderNameForAccessValidation(t *te
 			Model:              "gpt-5-mini",
 			AuditPath:          "/p/openai_test/chat/completions",
 		},
-	}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ProviderPassthrough(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughProvider != "openai" {
-		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
-	}
-	if authorizer.lastSelector.Provider != "openai_test" || authorizer.lastSelector.Model != "gpt-5-mini" {
-		t.Fatalf("validated selector = %#v, want openai_test/gpt-5-mini", authorizer.lastSelector)
-	}
+	})))
+	err := handler.ProviderPassthrough(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "openai", provider.lastPassthroughProvider)
+	require.Equal(t, "openai_test", authorizer.lastSelector.Provider)
+	require.Equal(t, "gpt-5-mini", authorizer.lastSelector.Model)
 }
 
 func TestProviderPassthrough_FallsBackFromProviderTypeToCanonicalProviderNameForAccessValidation(t *testing.T) {
@@ -6927,11 +5680,9 @@ func TestProviderPassthrough_FallsBackFromProviderTypeToCanonicalProviderNameFor
 	}
 	authorizer := &recordingModelAuthorizer{}
 
-	e := echo.New()
 	handler := newHandlerWithAuthorizer(provider, nil, nil, nil, nil, authorizer, nil, nil, nil)
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req = req.WithContext(core.WithWorkflow(req.Context(), &core.Workflow{
+	c, rec := echotest.Post(t, "/p/openai/chat/completions", `{"model":"gpt-5-mini"}`)
+	c.SetRequest(c.Request().WithContext(core.WithWorkflow(c.Request().Context(), &core.Workflow{
 		Mode:         core.ExecutionModePassthrough,
 		ProviderType: "openai",
 		Passthrough: &core.PassthroughRouteInfo{
@@ -6941,22 +5692,13 @@ func TestProviderPassthrough_FallsBackFromProviderTypeToCanonicalProviderNameFor
 			Model:              "gpt-5-mini",
 			AuditPath:          "/p/openai/chat/completions",
 		},
-	}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := handler.ProviderPassthrough(c); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughProvider != "openai" {
-		t.Fatalf("providerType = %q, want openai", provider.lastPassthroughProvider)
-	}
-	if authorizer.lastSelector.Provider != "openai_test" || authorizer.lastSelector.Model != "gpt-5-mini" {
-		t.Fatalf("validated selector = %#v, want openai_test/gpt-5-mini", authorizer.lastSelector)
-	}
+	})))
+	err := handler.ProviderPassthrough(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "openai", provider.lastPassthroughProvider)
+	require.Equal(t, "openai_test", authorizer.lastSelector.Provider)
+	require.Equal(t, "gpt-5-mini", authorizer.lastSelector.Model)
 }
 
 func TestProviderPassthrough_V1AliasDisabledReturnsBadRequest(t *testing.T) {
@@ -6980,15 +5722,9 @@ func TestProviderPassthrough_V1AliasDisabledReturnsBadRequest(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "v1 alias is disabled") {
-		t.Fatalf("body = %q, want v1 alias error", rec.Body.String())
-	}
-	if provider.lastPassthroughReq != nil {
-		t.Fatalf("provider should not have been called, got endpoint %q", provider.lastPassthroughReq.Endpoint)
-	}
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "v1 alias is disabled")
+	require.Nil(t, provider.lastPassthroughReq)
 }
 
 func TestProviderPassthrough_AnthropicStream(t *testing.T) {
@@ -7017,18 +5753,12 @@ func TestProviderPassthrough_AnthropicStream(t *testing.T) {
 	rec := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
-		t.Fatalf("content-type = %q", got)
-	}
-	if rec.flushes == 0 {
-		t.Fatal("expected streaming response to flush")
-	}
-	if got := rec.Body.String(); !strings.Contains(got, "message_start") {
-		t.Fatalf("unexpected stream body: %q", got)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	got := rec.Header().Get("Content-Type")
+	require.Equal(t, "text/event-stream", got)
+	require.NotZero(t, rec.flushes)
+	got = rec.Body.String()
+	require.Contains(t, got, "message_start")
 }
 
 func TestProviderPassthrough_StreamWithoutObserversClosesUpstreamBodyOnce(t *testing.T) {
@@ -7060,12 +5790,8 @@ func TestProviderPassthrough_StreamWithoutObserversClosesUpstreamBodyOnce(t *tes
 	rec := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if body.closes != 1 {
-		t.Fatalf("Close calls = %d, want 1", body.closes)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, body.closes)
 }
 
 func TestProviderPassthrough_OpenAIStreamWritesUsageEntry(t *testing.T) {
@@ -7097,32 +5823,16 @@ func TestProviderPassthrough_OpenAIStreamWritesUsageEntry(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if len(usageLog.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, usageLog.entries, 1)
 
 	entry := usageLog.entries[0]
-	if entry.Provider != "openai" {
-		t.Fatalf("Provider = %q, want openai", entry.Provider)
-	}
-	if entry.ProviderName != "openai_test" {
-		t.Fatalf("ProviderName = %q, want openai_test", entry.ProviderName)
-	}
-	if entry.Endpoint != "/p/openai_test/responses" {
-		t.Fatalf("Endpoint = %q, want /p/openai_test/responses", entry.Endpoint)
-	}
-	if entry.Model != "gpt-5-mini" {
-		t.Fatalf("Model = %q, want gpt-5-mini", entry.Model)
-	}
-	if entry.TotalTokens != 10 {
-		t.Fatalf("TotalTokens = %d, want 10", entry.TotalTokens)
-	}
-	if entry.RequestID != "req-pass-stream-usage" {
-		t.Fatalf("RequestID = %q, want req-pass-stream-usage", entry.RequestID)
-	}
+	require.Equal(t, "openai", entry.Provider)
+	require.Equal(t, "openai_test", entry.ProviderName)
+	require.Equal(t, "/p/openai_test/responses", entry.Endpoint)
+	require.Equal(t, "gpt-5-mini", entry.Model)
+	require.Equal(t, 10, entry.TotalTokens)
+	require.Equal(t, "req-pass-stream-usage", entry.RequestID)
 }
 
 func TestProviderPassthrough_OpenAIStreamUsageKeepsClientVisibleRoute(t *testing.T) {
@@ -7163,15 +5873,10 @@ func TestProviderPassthrough_OpenAIStreamUsageKeepsClientVisibleRoute(t *testing
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if len(usageLog.entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(usageLog.entries))
-	}
-	if got := usageLog.entries[0].Endpoint; got != "/p/openai/v1/responses" {
-		t.Fatalf("Endpoint = %q, want /p/openai/v1/responses", got)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, usageLog.entries, 1)
+	got := usageLog.entries[0].Endpoint
+	require.Equal(t, "/p/openai/v1/responses", got)
 }
 
 func TestPassthroughStreamAuditPath_NormalizesKnownEndpoints(t *testing.T) {
@@ -7207,9 +5912,8 @@ func TestPassthroughStreamAuditPath_NormalizesKnownEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := passthroughStreamAuditPath(tt.requestPath, tt.provider, tt.endpoint); got != tt.want {
-				t.Fatalf("passthroughStreamAuditPath(%q, %q, %q) = %q, want %q", tt.requestPath, tt.provider, tt.endpoint, got, tt.want)
-			}
+			got := passthroughStreamAuditPath(tt.requestPath, tt.provider, tt.endpoint)
+			require.Equal(t, tt.want, got, "passthroughStreamAuditPath(%q, %q, %q) = %q, want %q", tt.requestPath, tt.provider, tt.endpoint, got, tt.want)
 		})
 	}
 }
@@ -7225,15 +5929,9 @@ func TestProviderPassthrough_RejectsUnsupportedProvider(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), `provider passthrough for \"groq\" is not enabled`) {
-		t.Fatalf("unexpected error body: %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "anthropic, deepseek, hetzner, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai") {
-		t.Fatalf("unexpected error body: %s", rec.Body.String())
-	}
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), `provider passthrough for \"groq\" is not enabled`)
+	require.Contains(t, rec.Body.String(), "anthropic, deepseek, hetzner, kilo, llamacpp, llmd, openai, openrouter, sglang, vllm, zai")
 }
 
 func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {
@@ -7253,12 +5951,8 @@ func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {
 	blockedRec := httptest.NewRecorder()
 	e.ServeHTTP(blockedRec, blockedReq)
 
-	if blockedRec.Code != http.StatusBadRequest {
-		t.Fatalf("default status = %d, want 400: %s", blockedRec.Code, blockedRec.Body.String())
-	}
-	if provider.lastPassthroughReq != nil {
-		t.Fatal("default Chutes passthrough reached provider, want rejection before forwarding")
-	}
+	require.Equal(t, http.StatusBadRequest, blockedRec.Code, blockedRec.Body.String())
+	require.Nil(t, provider.lastPassthroughReq)
 
 	handler.setEnabledPassthroughProviders([]string{"chutes"})
 	req := httptest.NewRequest(http.MethodPost, "/p/chutes/chat/completions", strings.NewReader(`{"model":"Qwen/Qwen3-32B-TEE"}`))
@@ -7266,15 +5960,10 @@ func TestProviderPassthrough_ChutesRequiresExplicitOptIn(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("opt-in status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	if provider.lastPassthroughProvider != "chutes" {
-		t.Fatalf("providerType = %q, want chutes", provider.lastPassthroughProvider)
-	}
-	if provider.lastPassthroughReq == nil || provider.lastPassthroughReq.Endpoint != "chat/completions" {
-		t.Fatalf("passthrough request = %+v, want chat/completions endpoint", provider.lastPassthroughReq)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, "opt-in status = %d, want 200: %s", rec.Code, rec.Body.String())
+	require.Equal(t, "chutes", provider.lastPassthroughProvider)
+	require.NotNil(t, provider.lastPassthroughReq)
+	require.Equal(t, "chat/completions", provider.lastPassthroughReq.Endpoint)
 }
 
 func TestProviderPassthrough_UsesConfiguredSupportedProviders(t *testing.T) {
@@ -7296,24 +5985,15 @@ func TestProviderPassthrough_UsesConfiguredSupportedProviders(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if provider.lastPassthroughProvider != "groq" {
-		t.Fatalf("providerType = %q, want groq", provider.lastPassthroughProvider)
-	}
-	if provider.lastPassthroughReq == nil {
-		t.Fatal("lastPassthroughReq = nil")
-	}
-	if got := provider.lastPassthroughReq.Endpoint; got != "chat/completions" {
-		t.Fatalf("endpoint = %q, want chat/completions", got)
-	}
-	if got := readPassthroughRequestBody(t, provider.lastPassthroughReq.Body); got != `{}` {
-		t.Fatalf("body = %q, want {}", got)
-	}
-	if got := rec.Body.String(); !strings.Contains(got, `"ok":true`) {
-		t.Fatalf("unexpected error body: %s", rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "groq", provider.lastPassthroughProvider)
+	require.NotNil(t, provider.lastPassthroughReq)
+	got := provider.lastPassthroughReq.Endpoint
+	require.Equal(t, "chat/completions", got)
+	got = readPassthroughRequestBody(t, provider.lastPassthroughReq.Body)
+	require.Equal(t, `{}`, got)
+	got = rec.Body.String()
+	require.Contains(t, got, `"ok":true`, "unexpected error body: %s", rec.Body.String())
 }
 
 func TestIsNativeBatchResultsPending(t *testing.T) {
@@ -7322,22 +6002,17 @@ func TestIsNativeBatchResultsPending(t *testing.T) {
 	}
 	anthropicErr := core.NewProviderError("anthropic", http.StatusNotFound, "pending", nil)
 	pending, latest := gateway.IsNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr)
-	if !pending {
-		t.Fatal("expected anthropic 404 to be treated as pending")
-	}
-	if latest == nil || latest.Status != "in_progress" {
-		t.Fatalf("latest = %#v, want in_progress batch", latest)
-	}
+	require.True(t, pending)
+	require.NotNil(t, latest)
+	require.Equal(t, "in_progress", latest.Status)
 
 	openAIErr := core.NewProviderError("openai", http.StatusNotFound, "not found", nil)
-	if pending, _ := gateway.IsNativeBatchResultsPending(context.Background(), provider, "openai", "provider-batch-1", openAIErr); pending {
-		t.Fatal("expected openai 404 not to be treated as pending")
-	}
+	pending, _ = gateway.IsNativeBatchResultsPending(context.Background(), provider, "openai", "provider-batch-1", openAIErr)
+	require.False(t, pending)
 
 	provider.batchGetResponse = &core.BatchResponse{ID: "provider-batch-1", Status: "expired"}
-	if pending, _ := gateway.IsNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr); pending {
-		t.Fatal("expected terminal anthropic batch not to be treated as pending")
-	}
+	pending, _ = gateway.IsNativeBatchResultsPending(context.Background(), provider, "anthropic", "provider-batch-1", anthropicErr)
+	require.False(t, pending)
 }
 
 // staticChainsResolver returns fixed plugin chains regardless of context,
@@ -7365,17 +6040,16 @@ func TestListModels_ScopesByUserPathHeader(t *testing.T) {
 		"/acme/eng": "anthropic",
 	}}
 
-	e := echo.New()
 	handler := NewHandler(mock, nil, nil, nil)
 	handler.modelAuthorizer = authorizer
 
 	list := func(headers map[string]string) (int, string) {
-		req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		var opts []echotest.Option
 		for k, v := range headers {
-			req.Header.Set(k, v)
+			opts = append(opts, echotest.WithHeader(k, v))
 		}
-		rec := httptest.NewRecorder()
-		require.NoError(t, handler.ListModels(e.NewContext(req, rec)))
+		c, rec := echotest.Get(t, "/v1/models", opts...)
+		require.NoError(t, handler.ListModels(c))
 		return rec.Code, rec.Body.String()
 	}
 
@@ -7455,9 +6129,8 @@ func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
 
 	req := &core.ChatRequest{Model: "gpt-4o-mini", Stream: true, Messages: []core.Message{{Role: "user", Content: "cached-stall"}}}
 	body, err := marshalRequestBody(req)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	e := echo.New()
 	newContext := func(w http.ResponseWriter) *echo.Context {
 		r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
@@ -7466,19 +6139,17 @@ func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
 	}
 
 	primeCtx := newContext(httptest.NewRecorder())
-	if err := mw.HandleRequest(primeCtx, body, func() error {
+	err = mw.HandleRequest(primeCtx, body, func() error {
 		primeCtx.Response().Header().Set("Content-Type", "text/event-stream")
 		primeCtx.Response().WriteHeader(http.StatusOK)
 		_, _ = primeCtx.Response().Write([]byte("data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"streamed\"},\"finish_reason\":null}]}\n\n" +
 			"data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1,\"total_tokens\":10}}\n\n" +
 			"data: [DONE]\n\n"))
 		return nil
-	}); err != nil {
-		t.Fatalf("prime cache: %v", err)
-	}
-	if err := mw.Close(); err != nil {
-		t.Fatalf("wait for cache write: %v", err)
-	}
+	})
+	require.NoError(t, err)
+	err = mw.Close()
+	require.NoError(t, err)
 
 	c := newContext(&stalledCachedClientWriter{ResponseWriter: httptest.NewRecorder()})
 	entry := &auditlog.LogEntry{ID: "audit-entry"}
@@ -7487,18 +6158,11 @@ func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
 		t.Fatal("cached stream must not dispatch to the provider")
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("handleWithCache() error = %v, want nil after recording the stall", err)
-	}
-	if entry.ErrorType != "client_stalled" {
-		t.Fatalf("error_type = %q, want client_stalled", entry.ErrorType)
-	}
-	if entry.Data == nil || !strings.Contains(entry.Data.ErrorMessage, ErrClientStall.Error()) {
-		t.Fatalf("error_message = %#v, want the stall cause", entry.Data)
-	}
-	if entry.CacheType != auditlog.CacheTypeExact {
-		t.Fatalf("cache_type = %q, want %q", entry.CacheType, auditlog.CacheTypeExact)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "client_stalled", entry.ErrorType)
+	require.NotNil(t, entry.Data)
+	require.Contains(t, entry.Data.ErrorMessage, ErrClientStall.Error())
+	require.Equal(t, auditlog.CacheTypeExact, entry.CacheType)
 }
 
 // guardrailChainWorkflow builds a resolved workflow whose policy carries the
@@ -7559,15 +6223,11 @@ func driveCachedChatRequest(
 	dispatch func(*echo.Context, *core.ChatRequest, *core.Workflow) error,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	e := echo.New()
-	rec := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-	r = r.WithContext(orchestrator.WithCacheRequestContext(r.Context(), workflow))
-	c := e.NewContext(r, rec)
-	if err := handleWithCache(s, c, req, workflow, dispatch); err != nil {
-		t.Fatalf("handleWithCache: %v", err)
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", body)
+	c.SetRequest(c.Request().WithContext(orchestrator.WithCacheRequestContext(c.Request().Context(), workflow)))
+	err := handleWithCache(s, c, req, workflow, dispatch)
+	require.NoError(t, err)
+
 	return rec
 }
 
@@ -7584,9 +6244,7 @@ func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
 
 	req := &core.ChatRequest{Model: "gpt-4o-mini", Messages: []core.Message{{Role: "user", Content: "give me the key"}}}
 	body, err := marshalRequestBody(req)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
 
 	unguarded := guardrailChainWorkflow("")
 	redacting := guardrailChainWorkflow("response-redaction-chain")
@@ -7596,20 +6254,16 @@ func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
 		dispatches++
 		return c.JSON(http.StatusOK, map[string]string{"answer": "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234"})
 	}
+	got := driveCachedChatRequest(t, s, orchestrator, unguarded, req, body, raw).Header().Get("X-Cache")
+	require.Empty(t, got)
 
-	if got := driveCachedChatRequest(t, s, orchestrator, unguarded, req, body, raw).Header().Get("X-Cache"); got != "" {
-		t.Fatalf("priming request X-Cache = %q, want a miss", got)
-	}
 	store.waitForWrite(t)
 
 	// Same chain: still a hit, and dispatch is skipped.
 	hit := driveCachedChatRequest(t, s, orchestrator, unguarded, req, body, raw)
-	if got := hit.Header().Get("X-Cache"); got != "HIT (exact)" {
-		t.Fatalf("unchanged chain X-Cache = %q, want HIT (exact)", got)
-	}
-	if dispatches != 1 {
-		t.Fatalf("dispatches after the hit = %d, want 1", dispatches)
-	}
+	got = hit.Header().Get("X-Cache")
+	require.Equal(t, "HIT (exact)", got)
+	require.Equal(t, 1, dispatches)
 
 	// A workflow with a response-phase redaction step must not be served the
 	// body stored under the unguarded chain.
@@ -7617,28 +6271,18 @@ func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
 		dispatches++
 		return c.JSON(http.StatusOK, map[string]string{"answer": "[redacted]"})
 	})
-	if got := guarded.Header().Get("X-Cache"); got != "" {
-		t.Fatalf("changed chain X-Cache = %q, want a miss", got)
-	}
-	if dispatches != 2 {
-		t.Fatalf("changed chain must run dispatch, dispatches = %d", dispatches)
-	}
-	if strings.Contains(guarded.Body.String(), "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234") {
-		t.Fatalf("response guardrail was bypassed by the cache: %s", guarded.Body.String())
-	}
+	got = guarded.Header().Get("X-Cache")
+	require.Empty(t, got)
+	require.Equal(t, 2, dispatches)
+	require.False(t, strings.Contains(guarded.Body.String(), "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234"), "response guardrail was bypassed by the cache: %s", guarded.Body.String())
 
 	// The guarded miss stores its own entry, which replays only to its chain.
 	store.waitForWrite(t)
 	replay := driveCachedChatRequest(t, s, orchestrator, redacting, req, body, raw)
-	if got := replay.Header().Get("X-Cache"); got != "HIT (exact)" {
-		t.Fatalf("second request on the guarded chain X-Cache = %q, want HIT (exact)", got)
-	}
-	if !strings.Contains(replay.Body.String(), "[redacted]") {
-		t.Fatalf("guarded chain replayed %s, want the guarded body", replay.Body.String())
-	}
-	if dispatches != 2 {
-		t.Fatalf("guarded hit should not dispatch again, dispatches = %d", dispatches)
-	}
+	got = replay.Header().Get("X-Cache")
+	require.Equal(t, "HIT (exact)", got)
+	require.Contains(t, replay.Body.String(), "[redacted]")
+	require.Equal(t, 2, dispatches)
 }
 
 // TestHandleWithCache_BlockedResponseIsNotServedFromCache covers a response
@@ -7654,9 +6298,8 @@ func TestHandleWithCache_BlockedResponseIsNotServedFromCache(t *testing.T) {
 
 	req := &core.ChatRequest{Model: "gpt-4o-mini", Messages: []core.Message{{Role: "user", Content: "blocked"}}}
 	body, err := marshalRequestBody(req)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	workflow := guardrailChainWorkflow("response-block-chain")
 
 	dispatches := 0
@@ -7667,14 +6310,9 @@ func TestHandleWithCache_BlockedResponseIsNotServedFromCache(t *testing.T) {
 
 	for i := range 2 {
 		rec := driveCachedChatRequest(t, s, orchestrator, workflow, req, body, blocking)
-		if got := rec.Header().Get("X-Cache"); got != "" {
-			t.Fatalf("request %d X-Cache = %q, want no cache hit for a blocked response", i+1, got)
-		}
-		if rec.Code != http.StatusUnavailableForLegalReasons {
-			t.Fatalf("request %d status = %d, want the guardrail block status", i+1, rec.Code)
-		}
+		got := rec.Header().Get("X-Cache")
+		require.Empty(t, got, "request %d X-Cache = %q, want no cache hit for a blocked response", i+1, got)
+		require.Equal(t, http.StatusUnavailableForLegalReasons, rec.Code, "request %d", i+1)
 	}
-	if dispatches != 2 {
-		t.Fatalf("dispatches = %d, want the blocking chain to run on every request", dispatches)
-	}
+	require.Equal(t, 2, dispatches)
 }

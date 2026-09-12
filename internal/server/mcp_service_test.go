@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/mcpgateway"
 	"github.com/enterpilot/gomodel/internal/ratelimit"
 )
@@ -62,9 +64,8 @@ func TestMCPAuditLabel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := mcpAuditLabel([]byte(tt.body)); got != tt.want {
-				t.Fatalf("mcpAuditLabel(%s) = %q, want %q", tt.body, got, tt.want)
-			}
+			got := mcpAuditLabel([]byte(tt.body))
+			require.Equal(t, tt.want, got, "mcpAuditLabel(%s) = %q, want %q", tt.body, got, tt.want)
 		})
 	}
 }
@@ -95,26 +96,23 @@ func (rejectingBudgetChecker) Check(context.Context, budget.Subjects, time.Time)
 func newEmptyMCPGateway(t *testing.T) *mcpgateway.Service {
 	t.Helper()
 	gateway, err := mcpgateway.NewService(context.Background(), mcpgateway.Options{})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(gateway.Close)
 	return gateway
 }
 
 const mcpInitializeBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`
 
-func newMCPTestContext(method, body string) (*echo.Context, *httptest.ResponseRecorder) {
-	e := echo.New()
-	var reader io.Reader
+func newMCPTestContext(t *testing.T, method, body string) (*echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	var reader any
 	if body != "" {
-		reader = strings.NewReader(body)
+		reader = body
 	}
-	req := httptest.NewRequest(method, "/mcp", reader)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	rec := httptest.NewRecorder()
-	return e.NewContext(req, rec), rec
+	return echotest.Request(t, method, "/mcp", reader,
+		echotest.WithHeader("Content-Type", "application/json"),
+		echotest.WithHeader("Accept", "application/json, text/event-stream"))
 }
 
 func errorCodeFromBody(t *testing.T, body []byte) string {
@@ -124,9 +122,9 @@ func errorCodeFromBody(t *testing.T, body []byte) string {
 			Code string `json:"code"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatalf("decode error body %q: %v", body, err)
-	}
+	err := json.Unmarshal(body, &envelope)
+	require.NoError(t, err)
+
 	return envelope.Error.Code
 }
 
@@ -135,147 +133,101 @@ func errorCodeFromBody(t *testing.T, body []byte) string {
 func TestMCPServiceHandleGates(t *testing.T) {
 	t.Run("disabled gateway is 501", func(t *testing.T) {
 		svc := &mcpService{enabled: false}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusNotImplemented {
-			t.Fatalf("status = %d, want 501", rec.Code)
-		}
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotImplemented, rec.Code)
 	})
 
 	t.Run("nil gateway is 501 even when enabled", func(t *testing.T) {
 		svc := &mcpService{enabled: true}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusNotImplemented {
-			t.Fatalf("status = %d, want 501", rec.Code)
-		}
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotImplemented, rec.Code)
 	})
 
 	t.Run("rate limit breach is 429 and never reaches the gateway", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, rateLimiter: rejectingRateLimiter{}}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusTooManyRequests {
-			t.Fatalf("status = %d, want 429 body=%s", rec.Code, rec.Body.String())
-		}
-		if code := errorCodeFromBody(t, rec.Body.Bytes()); code != "rate_limit_exceeded" {
-			t.Fatalf("error code = %q, want rate_limit_exceeded", code)
-		}
-		if rec.Header().Get("Retry-After") == "" {
-			t.Fatalf("429 response missing Retry-After header")
-		}
-		if rec.Header().Get("Mcp-Session-Id") != "" {
-			t.Fatalf("gateway ran despite the rate-limit breach")
-		}
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+		code := errorCodeFromBody(t, rec.Body.Bytes())
+		require.Equal(t, "rate_limit_exceeded", code)
+		require.NotEmpty(t, rec.Header().Get("Retry-After"))
+		require.Empty(t, rec.Header().Get("Mcp-Session-Id"))
 	})
 
 	t.Run("budget rejection blocks after rate limiting", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, budgetChecker: rejectingBudgetChecker{}}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503 (budget check failed) body=%s", rec.Code, rec.Body.String())
-		}
-		if code := errorCodeFromBody(t, rec.Body.Bytes()); code != "budget_check_failed" {
-			t.Fatalf("error code = %q, want budget_check_failed", code)
-		}
-		if rec.Header().Get("Mcp-Session-Id") != "" {
-			t.Fatalf("gateway ran despite the budget rejection")
-		}
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+		code := errorCodeFromBody(t, rec.Body.Bytes())
+		require.Equal(t, "budget_check_failed", code)
+		require.Empty(t, rec.Header().Get("Mcp-Session-Id"))
 	})
 
 	t.Run("happy path delegates to the gateway", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
-		if rec.Header().Get("Mcp-Session-Id") == "" {
-			t.Fatalf("initialize response missing Mcp-Session-Id; delegation did not happen")
-		}
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.NotEmpty(t, rec.Header().Get("Mcp-Session-Id"))
 	})
 
 	t.Run("body logging captures the JSON-RPC exchange on the audit entry", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, logBodies: true}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
 		entry := &auditlog.LogEntry{}
 		c.Set(string(auditlog.LogEntryKey), entry)
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.NotNil(t, entry.Data)
+		require.NotNil(t, entry.Data.RequestBody)
+		require.NotNil(t, entry.Data.ResponseBody, "response body missing from the audit entry (content-type %q, body %q)", rec.Header().Get("Content-Type"), rec.Body.String())
 
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
-		if entry.Data == nil || entry.Data.RequestBody == nil {
-			t.Fatalf("request body missing from the audit entry")
-		}
-		if entry.Data.ResponseBody == nil {
-			t.Fatalf("response body missing from the audit entry (content-type %q, body %q)",
-				rec.Header().Get("Content-Type"), rec.Body.String())
-		}
 		frame, ok := entry.Data.ResponseBody.(map[string]any)
-		if !ok {
-			t.Fatalf("response body type = %T, want decoded JSON-RPC frame", entry.Data.ResponseBody)
-		}
-		if frame["jsonrpc"] != "2.0" {
-			t.Fatalf("response frame = %v, want a JSON-RPC message", frame)
-		}
+		require.True(t, ok, "response body type = %T, want decoded JSON-RPC frame", entry.Data.ResponseBody)
+		require.Equal(t, "2.0", frame["jsonrpc"], "response frame = %v, want a JSON-RPC message", frame)
 	})
 
 	t.Run("body logging off leaves the audit entry without bodies", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, logBodies: false}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
 		entry := &auditlog.LogEntry{}
 		c.Set(string(auditlog.LogEntryKey), entry)
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
-		if entry.Data != nil && entry.Data.RequestBody != nil {
-			t.Fatalf("request body captured with body logging off: %v", entry.Data.RequestBody)
-		}
-		if entry.Data != nil && entry.Data.ResponseBody != nil {
-			t.Fatalf("response body captured with body logging off: %v", entry.Data.ResponseBody)
+		if entry.Data != nil {
+			require.Nil(t, entry.Data.RequestBody, "body logging is off")
+			require.Nil(t, entry.Data.ResponseBody, "body logging is off")
 		}
 	})
 
 	t.Run("GET skips the admission gates", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true, rateLimiter: rejectingRateLimiter{}}
-		c, rec := newMCPTestContext(http.MethodGet, "")
-		if err := svc.handle(c, ""); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
+		c, rec := newMCPTestContext(t, http.MethodGet, "")
+		err := svc.handle(c, "")
+		require.NoError(t, err)
+
 		// The SDK rejects the sessionless GET itself; the point is that the
 		// breaching rate limiter never turned it into a 429.
-		if rec.Code == http.StatusTooManyRequests {
-			t.Fatalf("GET was rate limited; the notification stream must not consume request budget")
-		}
+		require.NotEqual(t, http.StatusTooManyRequests, rec.Code)
 	})
 
 	t.Run("unknown pinned server is 404", func(t *testing.T) {
 		svc := &mcpService{gateway: newEmptyMCPGateway(t), enabled: true}
-		c, rec := newMCPTestContext(http.MethodPost, mcpInitializeBody)
-		if err := svc.handle(c, "ghost"); err != nil {
-			t.Fatalf("handle() error = %v", err)
-		}
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
-		}
+		c, rec := newMCPTestContext(t, http.MethodPost, mcpInitializeBody)
+		err := svc.handle(c, "ghost")
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 	})
 }
 
@@ -319,21 +271,16 @@ func TestMCPResponseCaptureWrite(t *testing.T) {
 			var forwarded int
 			for _, w := range tt.writes {
 				n, err := capture.Write([]byte(w))
-				if err != nil {
-					t.Fatalf("Write() error = %v", err)
-				}
+				require.NoError(t, err)
+
 				forwarded += n
 			}
-			if got := capture.body.String(); got != tt.wantCaptured {
-				t.Fatalf("captured %d bytes, want %d", len(got), len(tt.wantCaptured))
-			}
-			if capture.truncated != tt.wantTruncated {
-				t.Fatalf("truncated = %v, want %v", capture.truncated, tt.wantTruncated)
-			}
-			if want := len(strings.Join(tt.writes, "")); rec.Body.Len() != want || forwarded != want {
-				t.Fatalf("client received %d bytes (Write reported %d), want %d — the tee must never cut the response",
-					rec.Body.Len(), forwarded, want)
-			}
+			got := capture.body.String()
+			require.Equal(t, tt.wantCaptured, got)
+			require.Equal(t, tt.wantTruncated, capture.truncated)
+			want := len(strings.Join(tt.writes, ""))
+			require.Equal(t, want, rec.Body.Len())
+			require.Equal(t, want, forwarded)
 		})
 	}
 }
@@ -372,26 +319,23 @@ func TestMCPResponseCaptureEnrich(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, rec := newMCPTestContext(http.MethodPost, "")
+			c, rec := newMCPTestContext(t, http.MethodPost, "")
 			entry := &auditlog.LogEntry{}
 			c.Set(string(auditlog.LogEntryKey), entry)
 			capture := &mcpResponseCapture{ResponseWriter: rec}
 			capture.Header().Set("Content-Type", tt.contentType)
-			if _, err := capture.Write([]byte(tt.body)); err != nil {
-				t.Fatalf("Write() error = %v", err)
-			}
+			_, err := capture.Write([]byte(tt.body))
+			require.NoError(t, err)
+
 			capture.truncated = tt.truncated
 
 			capture.enrich(c)
 
 			gotBody := entry.Data != nil && entry.Data.ResponseBody != nil
-			if gotBody != tt.wantBody {
-				t.Fatalf("response body recorded = %v, want %v", gotBody, tt.wantBody)
-			}
+			require.Equal(t, tt.wantBody, gotBody)
+
 			gotTruncated := entry.Data != nil && entry.Data.ResponseBodyTooBigToHandle
-			if gotTruncated != tt.wantTruncated {
-				t.Fatalf("truncation flag = %v, want %v", gotTruncated, tt.wantTruncated)
-			}
+			require.Equal(t, tt.wantTruncated, gotTruncated)
 		})
 	}
 }
@@ -418,69 +362,48 @@ func TestHandlerMCPLogBodies(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := &Handler{logger: tt.logger}
-			if got := h.mcp().logBodies; got != tt.want {
-				t.Fatalf("mcp().logBodies = %v, want %v", got, tt.want)
-			}
+			got := h.mcp().logBodies
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
 
 func TestEnrichMCPAuditEntryRestoresBody(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`
-	e := echo.New()
-	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/mcp", body)
 
 	enrichMCPAuditEntry(c, false)
 
 	restored, err := io.ReadAll(c.Request().Body)
-	if err != nil {
-		t.Fatalf("read restored body: %v", err)
-	}
-	if string(restored) != body {
-		t.Fatalf("restored body = %q, want %q (must reach the MCP handler intact)", restored, body)
-	}
+	require.NoError(t, err)
+	require.Equal(t, body, string(restored))
 }
 
 func TestEnrichMCPAuditEntryCapturesRequestBody(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"linear_list_issues"}}`
-	e := echo.New()
-	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
 	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	c, _ := echotest.Post(t, "/mcp", body, echotest.WithValue(string(auditlog.LogEntryKey), entry))
 
 	enrichMCPAuditEntry(c, true)
 
-	if entry.Data == nil || entry.Data.RequestBody == nil {
-		t.Fatalf("request body was not captured on the audit entry")
-	}
+	require.NotNil(t, entry.Data)
+	require.NotNil(t, entry.Data.RequestBody)
+
 	captured, ok := auditlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
-	if !ok {
-		t.Fatalf("captured body type = %T, want JSON object", entry.Data.RequestBody)
-	}
-	if captured["method"] != "tools/call" {
-		t.Fatalf("captured method = %v, want tools/call", captured["method"])
-	}
-	if entry.RequestedModel != "linear_list_issues" || entry.Provider != "mcp" {
-		t.Fatalf("entry label = (%q, %q), want (linear_list_issues, mcp)", entry.RequestedModel, entry.Provider)
-	}
+	require.True(t, ok, "captured body type = %T, want JSON object", entry.Data.RequestBody)
+	require.Equal(t, "tools/call", captured["method"])
+	require.Equal(t, "linear_list_issues", entry.RequestedModel)
+	require.Equal(t, "mcp", entry.Provider)
 }
 
 func TestEnrichMCPAuditEntryBodyLoggingOff(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
 	entry := &auditlog.LogEntry{}
-	c.Set(string(auditlog.LogEntryKey), entry)
+	c, _ := echotest.Post(t, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, echotest.WithValue(string(auditlog.LogEntryKey), entry))
 
 	enrichMCPAuditEntry(c, false)
 
-	if entry.Data != nil && entry.Data.RequestBody != nil {
-		t.Fatalf("request body captured with body logging off: %v", entry.Data.RequestBody)
+	if entry.Data != nil {
+		require.Nil(t, entry.Data.RequestBody, "body logging is off")
 	}
 }
 
@@ -495,12 +418,9 @@ func TestMCPSSEAuditBody(t *testing.T) {
 			raw:  "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n",
 			want: func(t *testing.T, got any) {
 				frame, ok := got.(map[string]any)
-				if !ok {
-					t.Fatalf("got %T, want single decoded object", got)
-				}
-				if frame["id"] != float64(1) {
-					t.Fatalf("frame id = %v, want 1", frame["id"])
-				}
+				require.True(t, ok, "got %T, want single decoded object", got)
+				require.Equal(t, float64(1), frame["id"])
+
 			},
 		},
 		{
@@ -508,27 +428,26 @@ func TestMCPSSEAuditBody(t *testing.T) {
 			raw:  "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n\n",
 			want: func(t *testing.T, got any) {
 				frames, ok := got.([]any)
-				if !ok || len(frames) != 2 {
-					t.Fatalf("got %T (%v), want list of 2 frames", got, got)
-				}
+				require.True(t, ok)
+				require.Len(t, frames, 2)
+
 			},
 		},
 		{
 			name: "truncated payload falls back to raw text",
 			raw:  "data: {\"jsonrpc\":\"2.0\",\"id\":3,\"resu",
 			want: func(t *testing.T, got any) {
-				if _, ok := got.(string); !ok {
-					t.Fatalf("got %T, want raw string fallback", got)
-				}
+				_, ok := got.(string)
+				require.True(t, ok, "got %T, want raw string fallback", got)
+
 			},
 		},
 		{
 			name: "no data lines is nil",
 			raw:  ": keepalive\n\n",
 			want: func(t *testing.T, got any) {
-				if got != nil {
-					t.Fatalf("got %v, want nil", got)
-				}
+				require.Nil(t, got)
+
 			},
 		},
 	}

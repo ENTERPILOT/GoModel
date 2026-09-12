@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func readChained(t *testing.T, stream string, id string, oneByte bool) string {
@@ -14,9 +17,8 @@ func readChained(t *testing.T, stream string, id string, oneByte bool) string {
 		src = iotest.OneByteReader(src)
 	}
 	out, err := io.ReadAll(withPreviousResponseID(io.NopCloser(src), id))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
+	require.NoError(t, err)
+
 	return string(out)
 }
 
@@ -68,9 +70,8 @@ func TestWithPreviousResponseID(t *testing.T) {
 			}
 			got := readChained(t, tc.stream, tc.id, oneByte)
 			if tc.same {
-				if got != tc.stream {
-					t.Errorf("%s (one byte reads %v): got %q, want the input unchanged", tc.name, oneByte, got)
-				}
+				assert.Equal(t, tc.stream, got)
+
 				continue
 			}
 			rest := got

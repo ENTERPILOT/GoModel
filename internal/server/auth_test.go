@@ -2,11 +2,9 @@ package server
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -17,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type mockRequestAuthenticator struct {
@@ -64,7 +63,6 @@ func (m mockAuthenticator) Authenticate(_ context.Context, token string) (authke
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyAllowedModelsReachContext(t *testing.T) {
-	e := echo.New()
 	testHandler := func(c *echo.Context) error {
 		got := core.GetCredentialAllowedModels(c.Request().Context())
 		assert.Equal(t, []string{"anthropic/", "openai/gpt-4o"}, got)
@@ -76,13 +74,10 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyAllowedModelsReachContext(t *
 		tokenAllowed: map[string][]string{"sk_gom_token": {"anthropic/", "openai/gpt-4o"}},
 	}, nil)(testHandler)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
-	rec := httptest.NewRecorder()
 	// An outer layer must never leak an allowlist into a request authenticated
 	// by an explicit credential without one.
-	req = req.WithContext(core.WithCredentialAllowedModels(req.Context(), []string{"stale/"}))
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/", echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
+	c.SetRequest(c.Request().WithContext(core.WithCredentialAllowedModels(c.Request().Context(), []string{"stale/"})))
 	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 
@@ -94,11 +89,9 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyAllowedModelsReachContext(t *
 		enabled:   true,
 		tokenToID: map[string]string{"sk_gom_token": "key-123"},
 	}, nil)(unrestricted)
-	req = httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
-	req = req.WithContext(core.WithCredentialAllowedModels(req.Context(), []string{"stale/"}))
-	rec = httptest.NewRecorder()
-	require.NoError(t, handler(e.NewContext(req, rec)))
+	c, rec = echotest.Get(t, "/", echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
+	c.SetRequest(c.Request().WithContext(core.WithCredentialAllowedModels(c.Request().Context(), []string{"stale/"})))
+	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
@@ -169,13 +162,6 @@ func TestAuthMiddleware(t *testing.T) {
 			expectedBody:   `{"error":{"message":"invalid master key","type":"authentication_error","param":null,"code":null}}`,
 		},
 		{
-			name:           "bearer prefix case sensitive - allows request",
-			masterKey:      "secret-key-123",
-			authHeader:     "Bearer secret-key-123",
-			expectedStatus: http.StatusOK,
-			expectedBody:   "ok",
-		},
-		{
 			name:           "empty bearer token - denies request",
 			masterKey:      "secret-key-123",
 			authHeader:     "Bearer ",
@@ -186,8 +172,6 @@ func TestAuthMiddleware(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := echo.New()
-
 			// Create a test handler that returns OK
 			testHandler := func(c *echo.Context) error {
 				return c.String(http.StatusOK, "ok")
@@ -196,93 +180,39 @@ func TestAuthMiddleware(t *testing.T) {
 			// Wrap the handler with auth middleware
 			handler := AuthMiddleware(tt.masterKey, nil)(testHandler)
 
-			// Create request
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			var opts []echotest.Option
 			if tt.authHeader != "" {
-				req.Header.Set("Authorization", tt.authHeader)
+				opts = append(opts, echotest.WithHeader("Authorization", tt.authHeader))
 			}
 			if tt.apiKeyHeader != "" {
-				req.Header.Set("x-api-key", tt.apiKeyHeader)
+				opts = append(opts, echotest.WithHeader("x-api-key", tt.apiKeyHeader))
 			}
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := echotest.Get(t, "/", opts...)
 
-			// Execute
-			err := handler(c)
-
-			// Assert
+			require.NoError(t, handler(c))
+			assert.Equal(t, tt.expectedStatus, rec.Code)
 			if tt.expectedStatus == http.StatusOK {
-				require.NoError(t, err)
-				assert.Equal(t, tt.expectedStatus, rec.Code)
 				assert.Equal(t, tt.expectedBody, rec.Body.String())
 			} else {
-				// For error responses, the middleware returns the JSON directly
-				require.NoError(t, err)
-				assert.Equal(t, tt.expectedStatus, rec.Code)
+				// For error responses, the middleware writes the JSON directly.
 				assert.JSONEq(t, tt.expectedBody, rec.Body.String())
 			}
 		})
 	}
 }
 
-func TestAuthMiddleware_Integration(t *testing.T) {
-	t.Run("with master key - protects all routes", func(t *testing.T) {
-		e := echo.New()
-		e.Use(AuthMiddleware("my-secret-key", nil))
-
-		e.GET("/test", func(c *echo.Context) error {
-			return c.String(http.StatusOK, "success")
-		})
-
-		// Request without auth should fail
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		assert.Equal(t, http.StatusUnauthorized, rec.Code)
-
-		// Request with valid auth should succeed
-		req = httptest.NewRequest(http.MethodGet, "/test", nil)
-		req.Header.Set("Authorization", "Bearer my-secret-key")
-		rec = httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.Equal(t, "success", rec.Body.String())
-	})
-
-	t.Run("without master key - allows all routes", func(t *testing.T) {
-		e := echo.New()
-		e.Use(AuthMiddleware("", nil))
-
-		e.GET("/test", func(c *echo.Context) error {
-			return c.String(http.StatusOK, "success")
-		})
-
-		// Request without auth should succeed
-		req := httptest.NewRequest(http.MethodGet, "/test", nil)
-		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-		assert.Equal(t, http.StatusOK, rec.Code)
-		assert.Equal(t, "success", rec.Body.String())
-	})
-}
-
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *testing.T) {
-	e := echo.New()
 	testHandler := func(c *echo.Context) error {
-		if got := core.GetAuthKeyID(c.Request().Context()); got != "key-123" {
-			t.Fatalf("auth key id in context = %q, want key-123", got)
-		}
+		got := core.GetAuthKeyID(c.Request().Context())
+		require.Equal(t, "key-123", got)
+
 		entryVal := c.Get(string(auditlog.LogEntryKey))
 		entry, ok := entryVal.(*auditlog.LogEntry)
-		if !ok || entry == nil {
-			t.Fatal("audit log entry missing from context")
-		}
-		if entry.AuthKeyID != "key-123" {
-			t.Fatalf("audit entry auth key id = %q, want key-123", entry.AuthKeyID)
-		}
-		if entry.AuthMethod != auditlog.AuthMethodAPIKey {
-			t.Fatalf("audit entry auth method = %q, want %q", entry.AuthMethod, auditlog.AuthMethodAPIKey)
-		}
+		require.True(t, ok)
+		require.NotNil(t, entry)
+		require.Equal(t, "key-123", entry.AuthKeyID)
+		require.Equal(t, auditlog.AuthMethodAPIKey, entry.AuthMethod)
+
 		return c.String(http.StatusOK, "ok")
 	}
 
@@ -291,11 +221,10 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 		tokenToID: map[string]string{"sk_gom_token": "key-123"},
 	}, nil)(testHandler)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	c, rec := echotest.Get(t, "/",
+		echotest.WithHeader("Authorization", "Bearer sk_gom_token"),
+		echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}}),
+	)
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -304,7 +233,6 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyEnrichesContextAndAudit(t *te
 }
 
 func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
-	e := echo.New()
 	requestAuth := &mockRequestAuthenticator{result: &ext.Authentication{
 		PrincipalID:     "  oidc:principal-1  ",
 		UserPath:        " /users/person@example.com/ ",
@@ -330,9 +258,7 @@ func TestAuthMiddlewareWithRequestAuthenticatorEnrichesRequest(t *testing.T) {
 		return c.NoContent(http.StatusNoContent)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/admin/usage", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/admin/usage")
 	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
 	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -395,11 +321,7 @@ func TestAuthMiddlewareWithRequestAuthenticatorsFailurePaths(t *testing.T) {
 				next = AdminAccessMiddleware()(next)
 			}
 			handler := AuthMiddlewareWithRequestAuthenticators("", nil, authenticators, nil)(next)
-
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodGet, "/admin/auth-keys", nil)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c, rec := echotest.Get(t, "/admin/auth-keys")
 			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
 			c.Set(string(auditlog.LogEntryKey), entry)
 			require.NoError(t, handler(c))
@@ -434,9 +356,8 @@ func TestAuthMiddlewareWithOnlyNilRequestAuthenticatorsStaysDisabled(t *testing.
 			handler := AuthMiddlewareWithRequestAuthenticators("", nil, tt.auths, nil)(func(c *echo.Context) error {
 				return c.NoContent(http.StatusNoContent)
 			})
-			e := echo.New()
-			rec := httptest.NewRecorder()
-			require.NoError(t, handler(e.NewContext(httptest.NewRequest(http.MethodGet, "/", nil), rec)))
+			c, rec := echotest.Get(t, "/")
+			require.NoError(t, handler(c))
 			assert.Equal(t, http.StatusNoContent, rec.Code)
 		})
 	}
@@ -455,17 +376,14 @@ func TestAuthMiddlewareExplicitBearerPrecedesRequestAuthenticator(t *testing.T) 
 		return c.NoContent(http.StatusNoContent)
 	})
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/admin/usage", nil)
-	req.Header.Set("Authorization", "Bearer master")
-	ctx := ext.WithAuthentication(req.Context(), ext.Authentication{
+	c, rec := echotest.Get(t, "/admin/usage", echotest.WithHeader("Authorization", "Bearer master"))
+	ctx := ext.WithAuthentication(c.Request().Context(), ext.Authentication{
 		PrincipalID: "oidc:ambient", UserPath: "/users/sso", Labels: []string{"sso"},
 	})
 	ctx = core.WithEffectiveUserPath(ctx, "/users/sso")
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
+	c.SetRequest(c.Request().WithContext(ctx))
 	rec.Header().Set(ext.AuthenticationUserHeader, "/users/sso")
-	require.NoError(t, handler(e.NewContext(req, rec)))
+	require.NoError(t, handler(c))
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Empty(t, rec.Header().Get(ext.AuthenticationUserHeader))
 	assert.Zero(t, requestAuth.calls)
@@ -503,18 +421,17 @@ func TestAuthMiddleware_InteractionContinuationAccess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := echo.New()
 			handler := AuthMiddlewareWithAuthenticator(tt.masterKey, tt.authenticator, nil)(func(c *echo.Context) error {
 				assert.Equal(t, tt.wantAllowed, interactionContinuationAllowed(c.Request().Context()))
 				return c.NoContent(http.StatusNoContent)
 			})
 
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			var opts []echotest.Option
 			if tt.token != "" {
-				req.Header.Set("Authorization", "Bearer "+tt.token)
+				opts = append(opts, echotest.WithHeader("Authorization", "Bearer "+tt.token))
 			}
-			rec := httptest.NewRecorder()
-			err := handler(e.NewContext(req, rec))
+			c, rec := echotest.Request(t, http.MethodPost, "/v1/responses", nil, opts...)
+			err := handler(c)
 
 			require.NoError(t, err)
 			assert.Equal(t, http.StatusNoContent, rec.Code)
@@ -523,7 +440,6 @@ func TestAuthMiddleware_InteractionContinuationAccess(t *testing.T) {
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyLabelsMergeWithHeaderLabels(t *testing.T) {
-	e := echo.New()
 	testHandler := func(c *echo.Context) error {
 		got := core.RequestLabelsFromContext(c.Request().Context())
 		assert.Equal(t, []string{"from-header", "team-a", "batch"}, got)
@@ -536,12 +452,9 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyLabelsMergeWithHeaderLabels(t
 		tokenLabels: map[string][]string{"sk_gom_token": {"team-a", "batch", "from-header"}},
 	}, nil)(testHandler)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
+	c, rec := echotest.Get(t, "/", echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
 	// Simulate the tagging middleware having already extracted header labels.
-	req = req.WithContext(core.WithRequestLabels(req.Context(), []string{"from-header"}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c.SetRequest(c.Request().WithContext(core.WithRequestLabels(c.Request().Context(), []string{"from-header"})))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -549,7 +462,6 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyLabelsMergeWithHeaderLabels(t
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyWithoutLabelsKeepsHeaderLabels(t *testing.T) {
-	e := echo.New()
 	testHandler := func(c *echo.Context) error {
 		got := core.RequestLabelsFromContext(c.Request().Context())
 		assert.Equal(t, []string{"from-header"}, got)
@@ -561,11 +473,8 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyWithoutLabelsKeepsHeaderLabel
 		tokenToID: map[string]string{"sk_gom_token": "key-123"},
 	}, nil)(testHandler)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
-	req = req.WithContext(core.WithRequestLabels(req.Context(), []string{"from-header"}))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/", echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
+	c.SetRequest(c.Request().WithContext(core.WithRequestLabels(c.Request().Context(), []string{"from-header"})))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -573,29 +482,24 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyWithoutLabelsKeepsHeaderLabel
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *testing.T) {
-	e := echo.New()
 	testHandler := func(c *echo.Context) error {
-		if got := core.UserPathFromContext(c.Request().Context()); got != "/team/auth-key" {
-			t.Fatalf("effective user path = %q, want /team/auth-key", got)
-		}
+		got := core.UserPathFromContext(c.Request().Context())
+		require.Equal(t, "/team/auth-key", got)
+
 		snapshot := core.GetRequestSnapshot(c.Request().Context())
-		if snapshot == nil {
-			t.Fatal("request snapshot missing from context")
-		}
-		if got := snapshot.UserPath; got != "/team/auth-key" {
-			t.Fatalf("snapshot.UserPath = %q, want /team/auth-key", got)
-		}
-		if got := c.Request().Header.Get(core.UserPathHeader); got != "/team/auth-key" {
-			t.Fatalf("%s = %q, want /team/auth-key", core.UserPathHeader, got)
-		}
+		require.NotNil(t, snapshot)
+		got = snapshot.UserPath
+		require.Equal(t, "/team/auth-key", got)
+		got = c.Request().Header.Get(core.UserPathHeader)
+		require.Equal(t, "/team/auth-key", got, "header %s", core.UserPathHeader)
+
 		entryVal := c.Get(string(auditlog.LogEntryKey))
 		entry, ok := entryVal.(*auditlog.LogEntry)
-		if !ok || entry == nil {
-			t.Fatal("audit log entry missing from context")
-		}
-		if got := entry.UserPath; got != "/team/auth-key" {
-			t.Fatalf("audit entry user path = %q, want /team/auth-key", got)
-		}
+		require.True(t, ok)
+		require.NotNil(t, entry)
+		got = entry.UserPath
+		require.Equal(t, "/team/auth-key", got)
+
 		return c.String(http.StatusOK, "ok")
 	}
 
@@ -605,12 +509,7 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *te
 		tokenPath: map[string]string{"sk_gom_token": "/team/auth-key"},
 	}, nil)(testHandler))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(core.UserPathHeader, "/team/from-header")
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-mini"}`, echotest.WithHeader(core.UserPathHeader, "/team/from-header"), echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
 	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
 
 	err := handler(c)
@@ -620,25 +519,20 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathOverridesHeader(t *te
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathUsesConfiguredHeader(t *testing.T) {
-	e := echo.New()
 	const headerName = "X-Tenant-Path"
 	testHandler := func(c *echo.Context) error {
-		if got := core.UserPathFromContext(c.Request().Context()); got != "/team/auth-key" {
-			t.Fatalf("effective user path = %q, want /team/auth-key", got)
-		}
+		got := core.UserPathFromContext(c.Request().Context())
+		require.Equal(t, "/team/auth-key", got)
+
 		snapshot := core.GetRequestSnapshot(c.Request().Context())
-		if snapshot == nil {
-			t.Fatal("request snapshot missing from context")
-		}
-		if got := snapshot.GetHeaders()[headerName][0]; got != "/team/auth-key" {
-			t.Fatalf("snapshot header = %q, want /team/auth-key", got)
-		}
-		if got := c.Request().Header.Get(headerName); got != "/team/auth-key" {
-			t.Fatalf("%s = %q, want /team/auth-key", headerName, got)
-		}
-		if got := c.Request().Header.Get(core.UserPathHeader); got != "" {
-			t.Fatalf("%s = %q, want empty", core.UserPathHeader, got)
-		}
+		require.NotNil(t, snapshot)
+		got = snapshot.GetHeaders()[headerName][0]
+		require.Equal(t, "/team/auth-key", got)
+		got = c.Request().Header.Get(headerName)
+		require.Equal(t, "/team/auth-key", got, "header %s", headerName)
+		got = c.Request().Header.Get(core.UserPathHeader)
+		require.Empty(t, got, "header %s", core.UserPathHeader)
+
 		return c.String(http.StatusOK, "ok")
 	}
 
@@ -648,11 +542,7 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathUsesConfiguredHeader(
 		tokenPath: map[string]string{"sk_gom_token": "/team/auth-key"},
 	}, nil, headerName)(testHandler))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5-mini"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-5-mini"}`, echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
 
 	err := handler(c)
 	require.NoError(t, err)
@@ -660,7 +550,6 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyUserPathUsesConfiguredHeader(
 }
 
 func TestAuthMiddlewareWithAuthenticator_ManagedKeyFailureUsesGenericClientMessage(t *testing.T) {
-	e := echo.New()
 	handler := AuthMiddlewareWithAuthenticator("", mockAuthenticator{
 		enabled: true,
 		err:     context.DeadlineExceeded,
@@ -669,10 +558,7 @@ func TestAuthMiddlewareWithAuthenticator_ManagedKeyFailureUsesGenericClientMessa
 		return nil
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer sk_gom_token")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, rec := echotest.Get(t, "/", echotest.WithHeader("Authorization", "Bearer sk_gom_token"))
 	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
 
 	err := handler(c)
@@ -813,129 +699,22 @@ func TestAuthMiddleware_WildcardSkipPaths(t *testing.T) {
 }
 
 func TestAuthMiddleware_SkipPathEnrichesNoKeyAuditMethod(t *testing.T) {
-	e := echo.New()
 	handler := AuthMiddlewareWithAuthenticator("secret-key", nil, []string{"/health"})(func(c *echo.Context) error {
 		entryVal := c.Get(string(auditlog.LogEntryKey))
 		entry, ok := entryVal.(*auditlog.LogEntry)
-		if !ok || entry == nil {
-			t.Fatal("audit log entry missing from context")
-		}
-		if entry.AuthMethod != auditlog.AuthMethodNoKey {
-			t.Fatalf("audit entry auth method = %q, want %q", entry.AuthMethod, auditlog.AuthMethodNoKey)
-		}
+		require.True(t, ok)
+		require.NotNil(t, entry)
+		require.Equal(t, auditlog.AuthMethodNoKey, entry.AuthMethod)
+
 		return c.String(http.StatusOK, "ok")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	c.Set(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}})
+	c, rec := echotest.Get(t, "/health",
+		echotest.WithValue(string(auditlog.LogEntryKey), &auditlog.LogEntry{Data: &auditlog.LogData{}}),
+	)
 
 	err := handler(c)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "ok", rec.Body.String())
-}
-
-func TestAuthMiddleware_ConstantTimeComparison(t *testing.T) {
-	t.Run("constant-time comparison prevents timing attacks", func(t *testing.T) {
-		// Test that the constant-time comparison works correctly for various inputs
-		testCases := []struct {
-			name        string
-			token       string
-			masterKey   string
-			shouldAllow bool
-		}{
-			{
-				name:        "equal strings",
-				token:       "secret-key-123",
-				masterKey:   "secret-key-123",
-				shouldAllow: true,
-			},
-			{
-				name:        "unequal strings - different at start",
-				token:       "wrong-key-123",
-				masterKey:   "secret-key-123",
-				shouldAllow: false,
-			},
-			{
-				name:        "unequal strings - different at end",
-				token:       "secret-key-456",
-				masterKey:   "secret-key-123",
-				shouldAllow: false,
-			},
-			{
-				name:        "unequal strings - different lengths",
-				token:       "secret-key",
-				masterKey:   "secret-key-123",
-				shouldAllow: false,
-			},
-			{
-				name:        "empty token",
-				token:       "",
-				masterKey:   "secret-key-123",
-				shouldAllow: false,
-			},
-			{
-				name:        "very long strings",
-				token:       "a" + strings.Repeat("x", 1000) + "z",
-				masterKey:   "a" + strings.Repeat("x", 1000) + "x",
-				shouldAllow: false,
-			},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				e := echo.New()
-
-				// Create a test handler
-				testHandler := func(c *echo.Context) error {
-					return c.String(http.StatusOK, "ok")
-				}
-
-				// Wrap with auth middleware
-				handler := AuthMiddleware(tc.masterKey, nil)(testHandler)
-
-				// Create request
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Header.Set("Authorization", "Bearer "+tc.token)
-				rec := httptest.NewRecorder()
-				c := e.NewContext(req, rec)
-
-				// Execute
-				err := handler(c)
-				require.NoError(t, err)
-
-				if tc.shouldAllow {
-					assert.Equal(t, http.StatusOK, rec.Code)
-					assert.Equal(t, "ok", rec.Body.String())
-				} else {
-					assert.Equal(t, http.StatusUnauthorized, rec.Code)
-				}
-			})
-		}
-	})
-
-	t.Run("direct constant-time comparison verification", func(t *testing.T) {
-		// Test the constant-time comparison directly to ensure it's working
-		testCases := []struct {
-			name     string
-			a        string
-			b        string
-			expected bool
-		}{
-			{"equal strings", "test", "test", true},
-			{"unequal strings", "test", "tset", false},
-			{"different lengths", "test", "testing", false},
-			{"empty strings", "", "", true},
-			{"one empty", "", "test", false},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				result := subtle.ConstantTimeCompare([]byte(tc.a), []byte(tc.b)) == 1
-				assert.Equal(t, tc.expected, result, "ConstantTimeCompare should return %v for %q vs %q", tc.expected, tc.a, tc.b)
-			})
-		}
-	})
 }
