@@ -81,6 +81,56 @@ func TestCreateTranslation_ForwardsExtraFormFields(t *testing.T) {
 	}
 }
 
+// TestCreateTranscription_HostileFieldNamesKeepMultipartFraming pins the
+// framing guarantee of the passthrough path: a forwarded field name or value is
+// client input, so it must stay inside its own part. Each case would otherwise
+// let a caller graft a second gateway-controlled part onto the upstream body.
+func TestCreateTranscription_HostileFieldNamesKeepMultipartFraming(t *testing.T) {
+	tests := []struct {
+		name  string
+		field core.FormField
+	}{
+		{"crlf in name", core.FormField{
+			Name:  "evil\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nhijacked\r\n",
+			Value: "v",
+		}},
+		{"quote escape promoting to a file part", core.FormField{
+			Name: "x\"; filename=\"boom.txt", Value: "v",
+		}},
+		{"forged boundary in value", core.FormField{
+			Name:  "ok",
+			Value: "v\r\n--boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nhijacked",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var form map[string][]string
+			provider := newSpeechTestProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseMultipartForm(1 << 20); err != nil {
+					t.Fatalf("upstream could not parse the multipart body: %v", err)
+				}
+				form = r.MultipartForm.Value
+				if len(r.MultipartForm.File) != 1 {
+					t.Errorf("upstream file parts = %d, want only the audio", len(r.MultipartForm.File))
+				}
+				_, _ = w.Write([]byte(`{"text":"hi"}`))
+			})
+
+			if _, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
+				Model:    "gpt-4o-transcribe",
+				Filename: "speech.wav",
+				File:     []byte("wave-bytes"),
+				Fields:   []core.FormField{tt.field},
+			}); err != nil {
+				t.Fatalf("CreateTranscription() error = %v", err)
+			}
+			if want := []string{"gpt-4o-transcribe"}; !reflect.DeepEqual(form["model"], want) {
+				t.Errorf("model = %v, want %v (the hostile field must not forge a part)", form["model"], want)
+			}
+		})
+	}
+}
+
 // TestCreateTranscription_StreamedResponseKeepsEventStreamType ensures a
 // forwarded stream=true is not mislabelled as JSON: the client needs the
 // upstream text/event-stream type to parse the body it gets back.
