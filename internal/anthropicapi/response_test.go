@@ -2,10 +2,11 @@ package anthropicapi
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFromChatResponseText(t *testing.T) {
@@ -18,21 +19,15 @@ func TestFromChatResponseText(t *testing.T) {
 		}},
 		Usage: core.Usage{PromptTokens: 12, CompletionTokens: 7},
 	})
-	if resp.ID != "msg_abc123" {
-		t.Errorf("ID = %q, want msg_abc123", resp.ID)
-	}
-	if resp.Type != "message" || resp.Role != "assistant" {
-		t.Errorf("envelope = %+v", resp)
-	}
-	if len(resp.Content) != 1 || resp.Content[0].Type != "text" || resp.Content[0].Text != "hello there" {
-		t.Fatalf("content = %+v", resp.Content)
-	}
-	if resp.StopReason != "end_turn" {
-		t.Errorf("StopReason = %q, want end_turn", resp.StopReason)
-	}
-	if resp.Usage.InputTokens != 12 || resp.Usage.OutputTokens != 7 {
-		t.Errorf("usage = %+v", resp.Usage)
-	}
+	assert.Equal(t, "msg_abc123", resp.ID)
+	assert.Equal(t, "message", resp.Type)
+	assert.Equal(t, "assistant", resp.Role, "envelope = %+v", resp)
+	require.Len(t, resp.Content, 1)
+	require.Equal(t, "text", resp.Content[0].Type)
+	require.Equal(t, "hello there", resp.Content[0].Text)
+	assert.Equal(t, "end_turn", resp.StopReason)
+	assert.Equal(t, 12, resp.Usage.InputTokens)
+	assert.Equal(t, 7, resp.Usage.OutputTokens, "usage = %+v", resp.Usage)
 }
 
 func TestFromChatResponseToolCalls(t *testing.T) {
@@ -51,22 +46,15 @@ func TestFromChatResponseToolCalls(t *testing.T) {
 			FinishReason: "tool_calls",
 		}},
 	})
-	if len(resp.Content) != 1 || resp.Content[0].Type != "tool_use" {
-		t.Fatalf("content = %+v", resp.Content)
-	}
+	require.Len(t, resp.Content, 1)
+	require.Equal(t, "tool_use", resp.Content[0].Type)
+
 	block := resp.Content[0]
-	if block.ID != "tu_1" || block.Name != "get_weather" {
-		t.Errorf("tool_use block = %+v", block)
-	}
-	if string(block.Input) != `{"city":"paris"}` {
-		t.Errorf("input = %s", block.Input)
-	}
-	if resp.StopReason != "tool_use" {
-		t.Errorf("StopReason = %q, want tool_use", resp.StopReason)
-	}
-	if len(block.ExtraContent) != 0 {
-		t.Errorf("extra_content = %s, want absent", block.ExtraContent)
-	}
+	assert.Equal(t, "tu_1", block.ID)
+	assert.Equal(t, "get_weather", block.Name, "tool_use block = %+v", block)
+	assert.Equal(t, `{"city":"paris"}`, string(block.Input), "input = %s", block.Input)
+	assert.Equal(t, "tool_use", resp.StopReason)
+	assert.Empty(t, block.ExtraContent)
 }
 
 func TestFromChatResponseToolCallExtraContent(t *testing.T) {
@@ -85,16 +73,12 @@ func TestFromChatResponseToolCallExtraContent(t *testing.T) {
 			FinishReason: "tool_calls",
 		}},
 	})
-	if len(resp.Content) != 1 || string(resp.Content[0].ExtraContent) != string(extra) {
-		t.Fatalf("content = %+v, want tool_use with extra_content", resp.Content)
-	}
+	require.Len(t, resp.Content, 1)
+	require.Equal(t, string(extra), string(resp.Content[0].ExtraContent))
+
 	encoded, err := json.Marshal(resp.Content[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(encoded), `"extra_content":{"google":{"thought_signature":"sig"}}`) {
-		t.Errorf("encoded block = %s", encoded)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"extra_content":{"google":{"thought_signature":"sig"}}`, "encoded block = %s", encoded)
 }
 
 func TestFromChatResponseThinking(t *testing.T) {
@@ -113,15 +97,10 @@ func TestFromChatResponseThinking(t *testing.T) {
 			FinishReason: "stop",
 		}},
 	})
-	if len(resp.Content) != 2 {
-		t.Fatalf("content = %+v, want thinking + text", resp.Content)
-	}
-	if resp.Content[0].Type != "thinking" || resp.Content[0].Thinking != "let me think" {
-		t.Errorf("thinking block = %+v", resp.Content[0])
-	}
-	if resp.Content[1].Type != "text" {
-		t.Errorf("text block = %+v", resp.Content[1])
-	}
+	require.Len(t, resp.Content, 2)
+	assert.Equal(t, "thinking", resp.Content[0].Type)
+	assert.Equal(t, "let me think", resp.Content[0].Thinking, "thinking block = %+v", resp.Content[0])
+	assert.Equal(t, "text", resp.Content[1].Type, "text block = %+v", resp.Content[1])
 }
 
 func TestFromChatResponseStopReasons(t *testing.T) {
@@ -158,9 +137,7 @@ func TestFromChatResponseStopReasons(t *testing.T) {
 					FinishReason: tc.finish,
 				}},
 			})
-			if resp.StopReason != tc.want {
-				t.Errorf("StopReason = %q, want %q", resp.StopReason, tc.want)
-			}
+			assert.Equal(t, tc.want, resp.StopReason)
 		})
 	}
 }
@@ -176,16 +153,15 @@ func TestFromChatResponseCacheUsage(t *testing.T) {
 			},
 		},
 	})
-	if resp.Usage.CacheCreationInputTokens != 30 || resp.Usage.CacheReadInputTokens != 40 {
-		t.Errorf("cache usage = %+v", resp.Usage)
-	}
+	assert.Equal(t, 30, resp.Usage.CacheCreationInputTokens)
+	assert.Equal(t, 40, resp.Usage.CacheReadInputTokens, "cache usage = %+v", resp.Usage)
 }
 
 func TestFromChatResponseNil(t *testing.T) {
 	resp := FromChatResponse(nil)
-	if resp == nil || resp.Type != "message" || resp.Content == nil {
-		t.Fatalf("FromChatResponse(nil) = %+v", resp)
-	}
+	require.NotNil(t, resp)
+	require.Equal(t, "message", resp.Type)
+	require.NotNil(t, resp.Content)
 }
 
 func TestFromChatResponseStopSequence(t *testing.T) {
@@ -199,12 +175,9 @@ func TestFromChatResponseStopSequence(t *testing.T) {
 		}},
 	}
 	out := FromChatResponse(resp)
-	if out.StopReason != "stop_sequence" {
-		t.Errorf("StopReason = %q, want stop_sequence", out.StopReason)
-	}
-	if out.StopSequence == nil || *out.StopSequence != "7" {
-		t.Errorf("StopSequence = %v, want 7", out.StopSequence)
-	}
+	assert.Equal(t, "stop_sequence", out.StopReason)
+	assert.NotNil(t, out.StopSequence)
+	assert.Equal(t, "7", *out.StopSequence)
 }
 
 func TestFromChatResponseStopSequenceDoesNotOverrideToolUse(t *testing.T) {
@@ -219,9 +192,8 @@ func TestFromChatResponseStopSequenceDoesNotOverrideToolUse(t *testing.T) {
 		}},
 	}
 	out := FromChatResponse(resp)
-	if out.StopReason != "tool_use" || out.StopSequence != nil {
-		t.Errorf("got stop_reason=%q stop_sequence=%v, want tool_use/nil", out.StopReason, out.StopSequence)
-	}
+	assert.Equal(t, "tool_use", out.StopReason)
+	assert.Nil(t, out.StopSequence)
 }
 
 // FromChatResponse renders thinking from the replay state a provider attached
@@ -297,12 +269,8 @@ func TestFromChatResponseThinkingBlocks(t *testing.T) {
 				FinishReason: "stop",
 			}}}
 			got, err := json.Marshal(FromChatResponse(resp).Content)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			if string(got) != tt.want {
-				t.Errorf("content = %s, want %s", got, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, string(got))
 		})
 	}
 }

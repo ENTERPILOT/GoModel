@@ -1,11 +1,12 @@
 package streaming
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -40,18 +41,14 @@ func TestChatStreamRoundTrip(t *testing.T) {
 	for name, resp := range chatFixtureResponses() {
 		t.Run(name, func(t *testing.T) {
 			stream := SynthesizeChatStream(resp, true)
-			if !strings.HasSuffix(string(stream), "data: [DONE]\n\n") {
-				t.Fatalf("stream must end with [DONE]:\n%s", stream)
-			}
+			require.True(t, strings.HasSuffix(string(stream), "data: [DONE]\n\n"), "stream must end with [DONE]:\n%s", stream)
+
 			got, err := AssembleChatResponse(decodeChatEvents(t, stream))
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			wantJSON, _ := json.Marshal(resp)
 			gotJSON, _ := json.Marshal(got)
-			if !reflect.DeepEqual(decodeMap(t, wantJSON), decodeMap(t, gotJSON)) {
-				t.Errorf("round trip mismatch:\n got %s\nwant %s", gotJSON, wantJSON)
-			}
+			assert.Equal(t, decodeMap(t, gotJSON), decodeMap(t, wantJSON), "round trip mismatch:\n got %s\nwant %s", gotJSON, wantJSON)
 		})
 	}
 }
@@ -60,25 +57,20 @@ func TestSynthesizeChatStream_Shape(t *testing.T) {
 	resp := chatFixtureResponses()["tool call"]
 	events := decodeStreamEvents(t, SynthesizeChatStream(resp, false))
 	// role, two tool calls, finish; no usage chunk.
-	if len(events) != 4 {
-		t.Fatalf("got %d chunks, want 4:\n%s", len(events), SynthesizeChatStream(resp, false))
-	}
+	require.Len(t, events, 4)
+
 	for i, ev := range events {
-		if ev["object"] != "chat.completion.chunk" || ev["id"] != "chatcmpl-2" || ev["provider"] != "openai" {
-			t.Errorf("chunk %d envelope = %v", i, ev)
-		}
-		if _, ok := ev["usage"]; ok {
-			t.Errorf("chunk %d carries usage without include_usage", i)
-		}
+		assert.Equal(t, "chat.completion.chunk", ev["object"])
+		assert.Equal(t, "chatcmpl-2", ev["id"])
+		assert.Equal(t, "openai", ev["provider"], "chunk %d envelope = %v", i, ev)
+		_, ok := ev["usage"]
+		assert.False(t, ok, "chunk %d carries usage without include_usage", i)
 	}
 	first := events[0]["choices"].([]any)[0].(map[string]any)["delta"].(map[string]any)
-	if first["role"] != "assistant" {
-		t.Errorf("first chunk delta = %v", first)
-	}
+	assert.Equal(t, "assistant", first["role"], "first chunk delta = %v", first)
+
 	last := events[3]["choices"].([]any)[0].(map[string]any)
-	if last["finish_reason"] != "tool_calls" {
-		t.Errorf("last chunk = %v", last)
-	}
+	assert.Equal(t, "tool_calls", last["finish_reason"], "last chunk = %v", last)
 }
 
 func TestAssembleChatResponse_ProviderShapes(t *testing.T) {
@@ -111,17 +103,12 @@ func TestAssembleChatResponse_ProviderShapes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, err := AssembleChatResponse(decodeChatEvents(t, []byte(tt.stream)))
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resp.Choices[0].Message.Content != tt.want || resp.Choices[0].FinishReason != tt.finish {
-				t.Errorf("choice = %+v", resp.Choices[0])
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, resp.Choices[0].Message.Content)
+			assert.Equal(t, tt.finish, resp.Choices[0].FinishReason, "choice = %+v", resp.Choices[0])
 		})
 	}
 }
@@ -154,14 +141,11 @@ func TestResponsesStreamRoundTrip(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			stream := SynthesizeResponsesStream(resp)
 			got, err := AssembleResponsesResponse(decodeResponsesEvents(t, stream))
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			wantJSON, _ := json.Marshal(resp)
 			gotJSON, _ := json.Marshal(got)
-			if !reflect.DeepEqual(decodeMap(t, wantJSON), decodeMap(t, gotJSON)) {
-				t.Errorf("round trip mismatch:\n got %s\nwant %s", gotJSON, wantJSON)
-			}
+			assert.Equal(t, decodeMap(t, gotJSON), decodeMap(t, wantJSON), "round trip mismatch:\n got %s\nwant %s", gotJSON, wantJSON)
 		})
 	}
 }
@@ -169,16 +153,13 @@ func TestResponsesStreamRoundTrip(t *testing.T) {
 func TestSynthesizeResponsesStream_Shape(t *testing.T) {
 	resp := responsesFixtures()["text"]
 	stream := SynthesizeResponsesStream(resp)
-	if !strings.HasSuffix(string(stream), "data: [DONE]\n\n") {
-		t.Fatalf("stream must end with [DONE]:\n%s", stream)
-	}
+	require.True(t, strings.HasSuffix(string(stream), "data: [DONE]\n\n"), "stream must end with [DONE]:\n%s", stream)
+
 	events := decodeStreamEvents(t, stream)
 	var types []string
 	for i, ev := range events {
 		types = append(types, ev["type"].(string))
-		if ev["sequence_number"] != float64(i) {
-			t.Errorf("event %d sequence_number = %v", i, ev["sequence_number"])
-		}
+		assert.Equal(t, float64(i), ev["sequence_number"], "event %d", i)
 	}
 	want := []string{
 		"response.created", "response.in_progress",
@@ -187,20 +168,18 @@ func TestSynthesizeResponsesStream_Shape(t *testing.T) {
 		"response.content_part.done", "response.output_item.done",
 		"response.completed",
 	}
-	if !equalStrings(types, want) {
-		t.Errorf("types = %v, want %v", types, want)
-	}
-	if events[4]["delta"] != "Hello there" {
-		t.Errorf("delta event = %v", events[4])
-	}
+	assert.Equal(t, want, types)
+	assert.Equal(t, "Hello there", events[4]["delta"], "delta event = %v", events[4])
+
 	created := events[0]["response"].(map[string]any)
-	if created["status"] != "in_progress" || len(created["output"].([]any)) != 0 {
-		t.Errorf("response.created = %v", created)
-	}
+	assert.Equal(t, "in_progress", created["status"])
+	assert.Empty(t, created["output"].([]any), "response.created = %v", created)
+
 	for _, raw := range scanAll(t, &EventScanner{}, string(stream)) {
-		if !raw.Comment && string(raw.Data) != "[DONE]" && raw.Name == "" {
-			t.Errorf("event without event: line: %s", raw.Raw)
+		if raw.Comment || string(raw.Data) == "[DONE]" {
+			continue
 		}
+		assert.NotEmpty(t, raw.Name, "event without event: line: %s", raw.Raw)
 	}
 }
 
@@ -230,17 +209,14 @@ func TestAssembleResponsesResponse_FromDeltasOnly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, []byte(tt.stream)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resp.Status != tt.status || len(resp.Output) != 1 || resp.Output[0].Content[0].Text != tt.text {
-				t.Errorf("assembled = %+v", resp)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.status, resp.Status)
+			assert.Len(t, resp.Output, 1)
+			assert.Equal(t, tt.text, resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 		})
 	}
-	if _, err := AssembleResponsesResponse(nil); err != ErrNoEvents {
-		t.Errorf("empty assemble err = %v", err)
-	}
+	_, err := AssembleResponsesResponse(nil)
+	assert.Equal(t, ErrNoEvents, err)
 }
 
 // content_index is provider JSON: a negative value must not panic and a huge
@@ -248,17 +224,15 @@ func TestAssembleResponsesResponse_FromDeltasOnly(t *testing.T) {
 func TestAppendOutputText_BoundsContentIndex(t *testing.T) {
 	item := &core.ResponsesOutputItem{Type: "message"}
 	appendOutputText(item, -1, "neg")
-	if len(item.Content) != 1 || item.Content[0].Text != "neg" {
-		t.Fatalf("after negative index: %+v", item.Content)
-	}
+	require.Len(t, item.Content, 1)
+	require.Equal(t, "neg", item.Content[0].Text)
+
 	appendOutputText(item, 1<<30, "far")
-	if len(item.Content) != maxAssembledContentParts || item.Content[len(item.Content)-1].Text != "far" {
-		t.Fatalf("after huge index: %d parts, last %q", len(item.Content), item.Content[len(item.Content)-1].Text)
-	}
+	require.Equal(t, maxAssembledContentParts, len(item.Content))
+	require.Equal(t, "far", item.Content[len(item.Content)-1].Text)
+
 	appendOutputText(item, 1, "one")
-	if item.Content[1].Text != "one" {
-		t.Fatalf("after index 1: %+v", item.Content[:2])
-	}
+	require.Equal(t, "one", item.Content[1].Text, "after index 1: %+v", item.Content[:2])
 }
 
 // A synthesized stream is indistinguishable from a real one to the client, so
@@ -298,24 +272,19 @@ func TestSynthesizeChatStream_CarriesReplayState(t *testing.T) {
 			textAt = i
 		}
 	}
-	if got == "" {
-		t.Fatal("no chunk carried extra_content")
-	}
+	require.NotEmpty(t, got)
+
 	// The Anthropic Messages converter closes the thinking block when the
 	// first text arrives, so a signature that came after it would be dropped.
 	if textAt >= 0 && extraAt > textAt {
 		t.Errorf("extra_content at chunk %d, first content at %d; want the replay state first", extraAt, textAt)
 	}
 	var want, have any
-	if err := json.Unmarshal([]byte(replay), &want); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(got), &have); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(want, have) {
-		t.Errorf("extra_content = %s, want %s", got, replay)
-	}
+	err := json.Unmarshal([]byte(replay), &want)
+	require.NoError(t, err)
+	err = json.Unmarshal([]byte(got), &have)
+	require.NoError(t, err)
+	assert.Equal(t, want, have)
 }
 
 // A buffered plugin run assembles the stream, hands the response to the
@@ -333,24 +302,17 @@ func TestAssembleChatResponse_KeepsReplayState(t *testing.T) {
 	}, "\n\n")
 
 	resp, err := AssembleChatResponse(decodeChatEvents(t, []byte(stream)))
-	if err != nil {
-		t.Fatalf("AssembleChatResponse: %v", err)
-	}
+	require.NoError(t, err)
+
 	got := resp.Choices[0].Message.ExtraFields.Lookup(core.ExtraContentField)
-	if len(got) == 0 {
-		t.Fatal("the assembled response lost extra_content")
-	}
+	require.NotEmpty(t, got)
+
 	var want, have any
-	if err := json.Unmarshal([]byte(replay), &want); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(got, &have); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(want, have) {
-		t.Errorf("extra_content = %s, want %s", got, replay)
-	}
-	if reasoning := resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content"); string(reasoning) != `"hm"` {
-		t.Errorf("reasoning_content = %s, want \"hm\"", reasoning)
-	}
+	err = json.Unmarshal([]byte(replay), &want)
+	require.NoError(t, err)
+	err = json.Unmarshal(got, &have)
+	require.NoError(t, err)
+	assert.Equal(t, want, have)
+	reasoning := resp.Choices[0].Message.ExtraFields.Lookup("reasoning_content")
+	assert.Equal(t, `"hm"`, string(reasoning))
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/require"
 )
 
 type retryFailoverProvider struct {
@@ -54,15 +55,10 @@ func TestCloudflareTimeoutRetriesBeforeModelFailover(t *testing.T) {
 	}
 	for range 2 {
 		response, _, err := orchestrator.DispatchChatCompletion(context.Background(), workflow, &core.ChatRequest{Model: "model1"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if response.ID != "backup" {
-			t.Fatalf("response=%+v", response)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "backup", response.ID, "response=%+v", response)
 	}
 	// First request exhausts model1; the second skips its open breaker.
-	if got := strings.Join(calls, ","); got != "/model1,/model1,/model1,/model2,/model2" {
-		t.Fatalf("upstream calls=%s", got)
-	}
+	got := strings.Join(calls, ",")
+	require.Equal(t, "/model1,/model1,/model1,/model2,/model2", got)
 }

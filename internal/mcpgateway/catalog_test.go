@@ -1,18 +1,17 @@
 package mcpgateway
 
 import (
-	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNamespacedName(t *testing.T) {
 	t.Parallel()
-	if full := NamespacedName("github", "create_issue"); full != "github_create_issue" {
-		t.Fatalf("NamespacedName() = %q, want github_create_issue", full)
-	}
+	full := NamespacedName("github", "create_issue")
+	require.Equal(t, "github_create_issue", full)
 }
 
 func TestBareToolAliases(t *testing.T) {
@@ -52,14 +51,7 @@ func TestBareToolAliases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := bareToolAliases(tt.owners)
-			if len(got) != len(tt.want) {
-				t.Fatalf("bareToolAliases() = %v, want %v", got, tt.want)
-			}
-			for bare, exposed := range tt.want {
-				if got[bare] != exposed {
-					t.Fatalf("bareToolAliases()[%q] = %q, want %q", bare, got[bare], exposed)
-				}
-			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -93,9 +85,7 @@ func TestFilterTools(t *testing.T) {
 			for _, tool := range filtered {
 				names = append(names, tool.Name)
 			}
-			if !slices.Equal(names, tt.want) {
-				t.Fatalf("filterTools() = %v, want %v", names, tt.want)
-			}
+			require.True(t, slices.Equal(names, tt.want), "filterTools() = %v, want %v", names, tt.want)
 		})
 	}
 }
@@ -115,19 +105,11 @@ func TestFilterToolsNormalizesSchemasForDownstream(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 	for _, name := range []string{"missing", "invalid", "valid"} {
-		if !isObjectSchema(byName[name].InputSchema) {
-			t.Fatalf("%s input schema = %#v, want object schema", name, byName[name].InputSchema)
-		}
+		require.True(t, isObjectSchema(byName[name].InputSchema), "%s input schema = %#v, want object schema", name, byName[name].InputSchema)
 	}
-	if byName["invalid"].OutputSchema != nil {
-		t.Fatalf("invalid output schema = %#v, want nil", byName["invalid"].OutputSchema)
-	}
-	if !reflect.DeepEqual(byName["valid"].InputSchema, validInput) {
-		t.Fatalf("valid input schema = %#v, want %#v", byName["valid"].InputSchema, validInput)
-	}
-	if !isObjectSchema(byName["valid"].OutputSchema) {
-		t.Fatalf("valid output schema = %#v, want preserved object", byName["valid"].OutputSchema)
-	}
+	require.Nil(t, byName["invalid"].OutputSchema)
+	require.Equal(t, validInput, byName["valid"].InputSchema)
+	require.True(t, isObjectSchema(byName["valid"].OutputSchema), "valid output schema = %#v, want preserved object", byName["valid"].OutputSchema)
 }
 
 func TestUserPathAllowed(t *testing.T) {
@@ -150,9 +132,8 @@ func TestUserPathAllowed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			allowed := normalizeUserPaths(tt.allowed)
-			if got := userPathAllowed(tt.userPath, allowed); got != tt.want {
-				t.Fatalf("userPathAllowed(%q, %v) = %v, want %v", tt.userPath, tt.allowed, got, tt.want)
-			}
+			got := userPathAllowed(tt.userPath, allowed)
+			require.Equal(t, tt.want, got, "userPathAllowed(%q, %v) = %v, want %v", tt.userPath, tt.allowed, got, tt.want)
 		})
 	}
 }

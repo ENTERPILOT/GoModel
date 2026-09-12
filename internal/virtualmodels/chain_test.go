@@ -3,10 +3,10 @@ package virtualmodels
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 // upsertRedirect stores an enabled redirect over the given target models.
@@ -17,9 +17,7 @@ func upsertRedirect(t *testing.T, svc *Service, source, strategy string, models 
 		targets[i] = Target{Model: model}
 	}
 	err := svc.Upsert(context.Background(), VirtualModel{Source: source, Targets: targets, Strategy: strategy, Enabled: true})
-	if err != nil {
-		t.Fatalf("Upsert(%s) error = %v", source, err)
-	}
+	require.NoError(t, err)
 }
 
 func TestChain_ResolvesThroughVirtualModel(t *testing.T) {
@@ -29,22 +27,17 @@ func TestChain_ResolvesThroughVirtualModel(t *testing.T) {
 	upsertRedirect(t, svc, "production", "", "cheap")
 
 	sel, changed, err := svc.ResolveModel(core.NewRequestedModelSelector("production", ""))
-	if err != nil || !changed {
-		t.Fatalf("ResolveModel() = %v, %v, %v; want change", sel, changed, err)
-	}
-	if got := sel.QualifiedModel(); got != "groq/llama" {
-		t.Fatalf("ResolveModel() = %q, want groq/llama", got)
-	}
-	if !svc.Supports("production") {
-		t.Fatalf("Supports(production) = false, want true")
-	}
-	if got := svc.GetProviderType("production"); got != "openai" {
-		t.Fatalf("GetProviderType(production) = %q, want openai", got)
-	}
+	require.NoError(t, err)
+	require.True(t, changed, "ResolveModel() = %v, %v, %v; want change", sel, changed, err)
+	got := sel.QualifiedModel()
+	require.Equal(t, "groq/llama", got)
+	require.True(t, svc.Supports("production"))
+	got = svc.GetProviderType("production")
+	require.Equal(t, "openai", got)
+
 	refresh, ok, _ := svc.ResolveRefreshTarget(core.NewRequestedModelSelector("production", ""))
-	if !ok || refresh.QualifiedModel() != "groq/llama" {
-		t.Fatalf("ResolveRefreshTarget(production) = %v, %v; want groq/llama", refresh, ok)
-	}
+	require.True(t, ok)
+	require.Equal(t, "groq/llama", refresh.QualifiedModel(), "ResolveRefreshTarget(production) = %v, %v; want groq/llama", refresh, ok)
 }
 
 func TestChain_OuterStrategyComposesWithInner(t *testing.T) {
@@ -57,9 +50,7 @@ func TestChain_OuterStrategyComposesWithInner(t *testing.T) {
 	// advances when its leg is chosen, so every inner target keeps its share.
 	got := resolvedModels(t, svc, "smart", 4)
 	want := []string{"groq/llama", "openai/gpt-4o", "local/mistral", "openai/gpt-4o"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("resolved = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestChain_CostPricesLegAtCheapestLeaf(t *testing.T) {
@@ -69,9 +60,7 @@ func TestChain_CostPricesLegAtCheapestLeaf(t *testing.T) {
 	upsertRedirect(t, svc, "frugal", StrategyCost, "openai/gpt-4o", "budget")
 
 	for _, got := range resolvedModels(t, svc, "frugal", 3) {
-		if got != "groq/llama" {
-			t.Fatalf("cost strategy resolved %q, want groq/llama through the budget leg", got)
-		}
+		require.Equal(t, "groq/llama", got)
 	}
 }
 
@@ -82,29 +71,23 @@ func TestChain_DisabledOrUnavailableInnerLegIsSkipped(t *testing.T) {
 	upsertRedirect(t, svc, "smart", StrategyRoundRobin, "cheap", "openai/gpt-4o")
 
 	ctx := context.Background()
-	if err := svc.Upsert(ctx, VirtualModel{Source: "cheap", Targets: []Target{{Model: "groq/llama"}}, Enabled: false}); err != nil {
-		t.Fatalf("Upsert(disable cheap) error = %v", err)
-	}
+	err := svc.Upsert(ctx, VirtualModel{Source: "cheap", Targets: []Target{{Model: "groq/llama"}}, Enabled: false})
+	require.NoError(t, err)
+
 	for _, got := range resolvedModels(t, svc, "smart", 3) {
-		if got != "openai/gpt-4o" {
-			t.Fatalf("resolved %q through a disabled leg, want openai/gpt-4o", got)
-		}
+		require.Equal(t, "openai/gpt-4o", got)
 	}
 
 	// The refresh target skips the disabled leg and lands on the next concrete one.
 	refresh, ok, _ := svc.ResolveRefreshTarget(core.NewRequestedModelSelector("smart", ""))
-	if !ok || refresh.QualifiedModel() != "openai/gpt-4o" {
-		t.Fatalf("ResolveRefreshTarget(smart) = %v, %v; want openai/gpt-4o past the disabled leg", refresh, ok)
-	}
+	require.True(t, ok)
+	require.Equal(t, "openai/gpt-4o", refresh.QualifiedModel(), "ResolveRefreshTarget(smart) = %v, %v; want openai/gpt-4o past the disabled leg", refresh, ok)
 
 	// An outer alias whose only leg is a disabled virtual model does not resolve.
 	upsertRedirect(t, svc, "only-cheap", "", "cheap")
-	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("only-cheap", "")); changed {
-		t.Fatalf("ResolveModel(only-cheap) changed = true, want fall-through")
-	}
-	if svc.Supports("only-cheap") {
-		t.Fatalf("Supports(only-cheap) = true, want false")
-	}
+	_, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("only-cheap", ""))
+	require.False(t, changed)
+	require.False(t, svc.Supports("only-cheap"))
 }
 
 func TestChain_ExposedModelsProjectLeafMetadata(t *testing.T) {
@@ -117,26 +100,24 @@ func TestChain_ExposedModelsProjectLeafMetadata(t *testing.T) {
 	for _, model := range svc.ExposedModels() {
 		if model.ID == "production" {
 			found = true
-			if model.Metadata == nil || model.Metadata.Pricing == nil {
-				t.Fatalf("production exposed without leaf pricing metadata")
-			}
+			require.NotNil(t, model.Metadata)
+			require.NotNil(t, model.Metadata.Pricing)
 		}
 	}
-	if !found {
-		t.Fatalf("ExposedModels() did not list the chained alias")
-	}
+	require.True(t, found)
+
 	// The exposure filter sees the concrete leaf, not the alias name.
 	filtered := svc.ExposedModelsFiltered(func(sel core.ModelSelector) bool { return sel.Provider != "groq" })
 	for _, model := range filtered {
-		if model.ID == "production" {
-			t.Fatalf("ExposedModelsFiltered() listed production although its leaf is filtered out")
-		}
+		require.NotEqual(t, "production", model.ID)
 	}
 
 	for _, view := range svc.ListViews() {
-		if view.Source == "production" && (view.ResolvedModel != "groq/llama" || !view.Valid) {
-			t.Fatalf("view = %+v, want resolved groq/llama and valid", view)
+		if view.Source != "production" {
+			continue
 		}
+		require.Equal(t, "groq/llama", view.ResolvedModel)
+		require.True(t, view.Valid, "view = %+v", view)
 	}
 }
 
@@ -148,15 +129,8 @@ func TestChain_RejectsCycles(t *testing.T) {
 	upsertRedirect(t, svc, "c", "", "b")
 
 	err := svc.Upsert(context.Background(), VirtualModel{Source: "a", Targets: []Target{{Model: "c"}}, Enabled: true})
-	if err == nil {
-		t.Fatalf("Upsert(cycle) error = nil, want rejection")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("Upsert(cycle) error = %v, want validation error", err)
-	}
-	if !strings.Contains(err.Error(), "a -> c -> b -> a") {
-		t.Fatalf("Upsert(cycle) error = %q, want the cycle spelled out", err)
-	}
+	require.ErrorContains(t, err, "a -> c -> b -> a")
+	require.True(t, IsValidationError(err))
 }
 
 func TestChain_RejectsTooDeepChains(t *testing.T) {
@@ -172,9 +146,8 @@ func TestChain_RejectsTooDeepChains(t *testing.T) {
 		Targets: []Target{{Model: fmt.Sprintf("v%d", MaxChainDepth)}},
 		Enabled: true,
 	})
-	if err == nil || !IsValidationError(err) {
-		t.Fatalf("Upsert(too deep) error = %v, want validation error", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 func TestChain_RejectsUnknownTargetAndDeletingReferencedModel(t *testing.T) {
@@ -184,27 +157,23 @@ func TestChain_RejectsUnknownTargetAndDeletingReferencedModel(t *testing.T) {
 
 	// A target must be a catalog model or an existing virtual model.
 	err := svc.Upsert(ctx, VirtualModel{Source: "outer", Targets: []Target{{Model: "missing"}}, Enabled: true})
-	if err == nil || !IsValidationError(err) {
-		t.Fatalf("Upsert(unknown target) error = %v, want validation error", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 
 	upsertRedirect(t, svc, "cheap", "", "groq/llama")
 	upsertRedirect(t, svc, "outer", "", "cheap")
+	err = svc.Delete(ctx, "cheap")
+	require.ErrorContains(t, err, "outer")
+	require.True(t, IsValidationError(err))
 
-	if err := svc.Delete(ctx, "cheap"); err == nil || !IsValidationError(err) || !strings.Contains(err.Error(), "outer") {
-		t.Fatalf("Delete(referenced) error = %v, want validation error naming outer", err)
-	}
 	renamed := VirtualModel{Source: "cheaper", Targets: []Target{{Model: "groq/llama"}}, Enabled: true}
-	if err := svc.Rename(ctx, "cheap", renamed); err == nil || !IsValidationError(err) {
-		t.Fatalf("Rename(referenced) error = %v, want validation error", err)
-	}
-
-	if err := svc.Delete(ctx, "outer"); err != nil {
-		t.Fatalf("Delete(outer) error = %v", err)
-	}
-	if err := svc.Delete(ctx, "cheap"); err != nil {
-		t.Fatalf("Delete(cheap) after removing outer error = %v", err)
-	}
+	err = svc.Rename(ctx, "cheap", renamed)
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
+	err = svc.Delete(ctx, "outer")
+	require.NoError(t, err)
+	err = svc.Delete(ctx, "cheap")
+	require.NoError(t, err)
 }
 
 func TestChain_SessionAffinityPinsThroughChain(t *testing.T) {
@@ -215,9 +184,8 @@ func TestChain_SessionAffinityPinsThroughChain(t *testing.T) {
 
 	first := resolveSession(t, svc, "smart", "sess-a")
 	for range 5 {
-		if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
-			t.Fatalf("session moved from %q to %q", first, got)
-		}
+		got := resolveSession(t, svc, "smart", "sess-a")
+		require.Equal(t, first, got)
 	}
 }
 
@@ -232,19 +200,18 @@ func TestChain_SlashNamedVirtualModelIsChained(t *testing.T) {
 	upsertRedirect(t, svc, "outer", "", "team/cheap")
 
 	sel, changed, err := svc.ResolveModel(core.NewRequestedModelSelector("outer", ""))
-	if err != nil || !changed || sel.QualifiedModel() != "groq/llama" {
-		t.Fatalf("ResolveModel(outer) = %v, %v, %v; want groq/llama", sel, changed, err)
-	}
-	if err := svc.Delete(ctx, "team/cheap"); err == nil || !IsValidationError(err) {
-		t.Fatalf("Delete(team/cheap) error = %v, want dependent rejection", err)
-	}
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "groq/llama", sel.QualifiedModel(), "ResolveModel(outer) = %v, %v, %v; want groq/llama", sel, changed, err)
+	err = svc.Delete(ctx, "team/cheap")
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 
 	// An explicit provider pins the target to a concrete model even when a
 	// virtual model of the same qualified name exists.
 	err = svc.Upsert(ctx, VirtualModel{Source: "pinned", Targets: []Target{{Provider: "team", Model: "cheap"}}, Enabled: true})
-	if err == nil || !IsValidationError(err) {
-		t.Fatalf("Upsert(pinned) error = %v, want unknown provider rejection", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 // A redirect that shadows its own source covers a real model rather than
@@ -262,9 +229,8 @@ func TestChain_SelfShadowingRedirectIsNotAChainLeg(t *testing.T) {
 
 	for _, source := range []string{"openai/gpt-4o", "groq/llama"} {
 		sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector(source, ""))
-		if err != nil || sel.QualifiedModel() != source {
-			t.Fatalf("ResolveModel(%s) = %v, %v; want the model itself", source, sel, err)
-		}
+		require.NoError(t, err)
+		require.Equal(t, source, sel.QualifiedModel(), "ResolveModel(%s) = %v, %v; want the model itself", source, sel, err)
 	}
 
 	// An alias on a shadowed model chains into the shadow (a failover shadow
@@ -272,31 +238,27 @@ func TestChain_SelfShadowingRedirectIsNotAChainLeg(t *testing.T) {
 	// alias reverts to the concrete model when the shadow is deleted.
 	upsertRedirect(t, svc, "prod", "", "openai/gpt-4o")
 	sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
-	if err != nil || sel.QualifiedModel() != "openai/gpt-4o" {
-		t.Fatalf("ResolveModel(prod) = %v, %v; want openai/gpt-4o", sel, err)
-	}
-	if err := svc.Delete(ctx, "openai/gpt-4o"); err != nil {
-		t.Fatalf("Delete(self-shadow referenced by prod) error = %v, want success", err)
-	}
-	sel, _, err = svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
-	if err != nil || sel.QualifiedModel() != "openai/gpt-4o" {
-		t.Fatalf("ResolveModel(prod) after shadow delete = %v, %v; want openai/gpt-4o", sel, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "openai/gpt-4o", sel.QualifiedModel(), "ResolveModel(prod) = %v, %v; want openai/gpt-4o", sel, err)
+	err = svc.Delete(ctx, "openai/gpt-4o")
+	require.NoError(t, err)
 
+	sel, _, err = svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
+	require.NoError(t, err)
+	require.Equal(t, "openai/gpt-4o", sel.QualifiedModel(), "ResolveModel(prod) after shadow delete = %v, %v; want openai/gpt-4o", sel, err)
 	// A redirect that replaces the model (no self target) is still a chain leg.
 	// The groq/llama self-shadow must go first: its fallback reference to
 	// openai/gpt-4o would chain into the replacing shadow and genuinely cycle.
-	if err := svc.Delete(ctx, "groq/llama"); err != nil {
-		t.Fatalf("Delete(groq/llama shadow) error = %v", err)
-	}
+	err = svc.Delete(ctx, "groq/llama")
+	require.NoError(t, err)
+
 	upsertRedirect(t, svc, "openai/gpt-4o", "", "groq/llama")
 	sel, _, err = svc.ResolveModel(core.NewRequestedModelSelector("prod", ""))
-	if err != nil || sel.QualifiedModel() != "groq/llama" {
-		t.Fatalf("ResolveModel(prod) through replacing shadow = %v, %v; want groq/llama", sel, err)
-	}
-	if err := svc.Delete(ctx, "openai/gpt-4o"); err == nil || !IsValidationError(err) {
-		t.Fatalf("Delete(replacing shadow referenced by prod) error = %v, want validation error", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "groq/llama", sel.QualifiedModel(), "ResolveModel(prod) through replacing shadow = %v, %v; want groq/llama", sel, err)
+	err = svc.Delete(ctx, "openai/gpt-4o")
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 // A load-balanced shadow (source enlisted among its targets) balances the
@@ -317,9 +279,8 @@ func TestChain_SelfShadowingRedirectBalancesForReferences(t *testing.T) {
 		viaAlias[got] = true
 	}
 	for _, want := range []string{"openai/gpt-4o", "groq/llama"} {
-		if !direct[want] || !viaAlias[want] {
-			t.Fatalf("rotation: direct=%v viaAlias=%v; want both to include %s", direct, viaAlias, want)
-		}
+		require.True(t, direct[want])
+		require.True(t, viaAlias[want], "rotation: direct=%v viaAlias=%v; want both to include %s", direct, viaAlias, want)
 	}
 
 	// Mutual balanced shadows load like mutual failover shadows.
@@ -331,18 +292,14 @@ func TestChain_SelfShadowingRedirectBalancesForReferences(t *testing.T) {
 func TestChain_MutualMigratedFailoverRulesLoad(t *testing.T) {
 	t.Parallel()
 	a, ok := failoverModel("openai/gpt-4o", []string{"groq/llama"}, true)
-	if !ok {
-		t.Fatalf("failoverModel(a) = !ok")
-	}
+	require.True(t, ok)
+
 	b, ok := failoverModel("groq/llama", []string{"openai/gpt-4o"}, true)
-	if !ok {
-		t.Fatalf("failoverModel(b) = !ok")
-	}
-	if _, err := buildSnapshot([]VirtualModel{a, b}, true); err != nil {
-		t.Fatalf("buildSnapshot(mutual rules) error = %v", err)
-	}
+	require.True(t, ok)
+	_, err := buildSnapshot([]VirtualModel{a, b}, true)
+	require.NoError(t, err)
+
 	snap, _ := buildSnapshot([]VirtualModel{a, b}, true)
-	if err := validateChains(&snap); err != nil {
-		t.Fatalf("validateChains(mutual rules) error = %v, want none", err)
-	}
+	err = validateChains(&snap)
+	require.NoError(t, err)
 }

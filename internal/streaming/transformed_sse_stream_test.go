@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const chatFixture = `data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}
@@ -112,42 +114,23 @@ func texts(events []Event) []string {
 	return out
 }
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func TestTransformedSSEStream_PassThroughIsByteIdentical(t *testing.T) {
 	for _, readSize := range []int{1, 5, 64, 4096} {
 		upstream := &trackingCloser{Reader: &chunkedReader{data: []byte(chatFixture), n: readSize}}
 		tr := &funcTransformer{}
 		stream := NewTransformedSSEStream(upstream, ChatCodec(), tr, TransformOptions{})
 		got, err := readAllSmall(t, stream)
-		if err != nil {
-			t.Fatalf("read size %d: %v", readSize, err)
-		}
-		if string(got) != chatFixture {
-			t.Errorf("read size %d: output differs from upstream:\n%s", readSize, got)
-		}
+		require.NoError(t, err, "read size %d", readSize)
+		assert.Equal(t, chatFixture, string(got), "read size %d: output differs from upstream", readSize)
+
 		want := []EventKind{KindOther, KindTextDelta, KindTextDelta, KindTextDelta, KindFinish, KindUsage}
-		if got := kinds(tr.seen); len(got) != len(want) || strings.Join(kindStrings(got), ",") != strings.Join(kindStrings(want), ",") {
-			t.Errorf("read size %d: transformer saw %v, want %v", readSize, got, want)
-		}
+		assert.Equal(t, kindStrings(want), kindStrings(kinds(tr.seen)), "read size %d", readSize)
 		for i, ev := range tr.seen {
-			if ev.Seq != i {
-				t.Errorf("event %d has Seq %d", i, ev.Seq)
-			}
+			assert.Equal(t, i, ev.Seq)
 		}
-		if err := stream.Close(); err != nil || !upstream.closed {
-			t.Errorf("Close: err=%v closed=%v", err, upstream.closed)
-		}
+		err = stream.Close()
+		assert.NoError(t, err)
+		assert.True(t, upstream.closed)
 	}
 }
 
@@ -176,32 +159,21 @@ func TestTransformedSSEStream_ReplaceAndDrop(t *testing.T) {
 	upstream := &trackingCloser{Reader: strings.NewReader(chatFixture)}
 	stream := NewTransformedSSEStream(upstream, ChatCodec(), tr, TransformOptions{OnError: func(err error) { reported = append(reported, err) }})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	out := string(got)
-	if strings.Contains(out, "555-") || !strings.Contains(out, `"content":"call [phone]"`) {
-		t.Errorf("replacement missing:\n%s", out)
-	}
-	if strings.Contains(out, `"usage"`) {
-		t.Errorf("dropped usage chunk still present:\n%s", out)
-	}
-	if !strings.Contains(out, `"finish_reason":"stop"`) || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Errorf("finish chunk or [DONE] missing:\n%s", out)
-	}
-	if !strings.Contains(out, ": keep-alive\n\n") {
-		t.Errorf("comment not relayed:\n%s", out)
-	}
-	if len(reported) != 1 || !errors.Is(reported[0], ErrNotTextEvent) {
-		t.Errorf("reported errors = %v", reported)
-	}
+	assert.NotContains(t, out, "555-")
+	assert.Contains(t, out, `"content":"call [phone]"`)
+	assert.NotContains(t, out, `"usage"`, "dropped usage chunk still present:\n%s", out)
+	assert.Contains(t, out, `"finish_reason":"stop"`)
+	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
+	assert.Contains(t, out, ": keep-alive\n\n")
+	assert.Len(t, reported, 1)
+	assert.ErrorIs(t, reported[0], ErrNotTextEvent)
+
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Choices[0].Message.Content != "Hello, call [phone]1234 now" {
-		t.Errorf("assembled content = %q", resp.Choices[0].Message.Content)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Hello, call [phone]1234 now", resp.Choices[0].Message.Content)
 }
 
 func decodeChatEvents(t *testing.T, stream []byte) []Event {
@@ -227,36 +199,26 @@ func TestTransformedSSEStream_TerminateMidStream(t *testing.T) {
 	upstream := &trackingCloser{Reader: strings.NewReader(chatFixture)}
 	stream := NewTransformedSSEStream(upstream, ChatCodec(), tr, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	out := string(got)
-	if !upstream.closed {
-		t.Error("upstream not closed on terminate")
-	}
-	if strings.Contains(out, "555-") || strings.Contains(out, "1234 now") {
-		t.Errorf("content after the cut leaked:\n%s", out)
-	}
-	if !strings.Contains(out, `"content":"[blocked]"`) || !strings.Contains(out, `"finish_reason":"content_filter"`) {
-		t.Errorf("terminal chunks missing:\n%s", out)
-	}
-	if strings.Count(out, "[DONE]") != 1 || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Errorf("exactly one trailing [DONE] expected:\n%s", out)
-	}
-	if len(tr.seen) != 3 {
-		t.Errorf("transformer saw %d events after terminate, want 3", len(tr.seen))
-	}
+	assert.True(t, upstream.closed)
+	assert.NotContains(t, out, "555-")
+	assert.NotContains(t, out, "1234 now", "content after the cut leaked:\n%s", out)
+	assert.Contains(t, out, `"content":"[blocked]"`)
+	assert.Contains(t, out, `"finish_reason":"content_filter"`)
+	assert.Equal(t, 1, strings.Count(out, "[DONE]"))
+	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "exactly one trailing [DONE] expected:\n%s", out)
+	assert.Len(t, tr.seen, 3)
+
 	n, err := stream.Read(make([]byte, 8))
-	if n != 0 || err != io.EOF {
-		t.Errorf("Read after termination = (%d, %v), want (0, EOF)", n, err)
-	}
+	assert.Equal(t, 0, n)
+	assert.Equal(t, io.EOF, err)
+
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Choices[0].Message.Content != "Hello, [blocked]" || resp.Choices[0].FinishReason != "content_filter" {
-		t.Errorf("assembled = %+v", resp.Choices[0])
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Hello, [blocked]", resp.Choices[0].Message.Content)
+	assert.Equal(t, "content_filter", resp.Choices[0].FinishReason, "assembled = %+v", resp.Choices[0])
 }
 
 func TestTransformedSSEStream_TransformerErrorFailsClosed(t *testing.T) {
@@ -279,22 +241,15 @@ func TestTransformedSSEStream_TransformerErrorFailsClosed(t *testing.T) {
 			upstream := &trackingCloser{Reader: strings.NewReader(chatFixture)}
 			stream := NewTransformedSSEStream(upstream, ChatCodec(), tt.tr, TransformOptions{OnError: func(err error) { reported = append(reported, err) }})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			out := string(got)
-			if !strings.Contains(out, `"code":"plugin_failure"`) || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-				t.Errorf("fail-closed terminal events missing:\n%s", out)
-			}
-			if strings.Count(out, "[DONE]") != 1 {
-				t.Errorf("exactly one [DONE] expected:\n%s", out)
-			}
-			if len(reported) != 1 || !errors.Is(reported[0], boom) {
-				t.Errorf("reported = %v", reported)
-			}
-			if !upstream.closed {
-				t.Error("upstream not closed")
-			}
+			assert.Contains(t, out, `"code":"plugin_failure"`)
+			assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
+			assert.Equal(t, 1, strings.Count(out, "[DONE]"), "exactly one [DONE] expected:\n%s", out)
+			assert.Len(t, reported, 1)
+			assert.ErrorIs(t, reported[0], boom)
+			assert.True(t, upstream.closed)
 		})
 	}
 }
@@ -305,18 +260,16 @@ func TestTransformedSSEStream_OnEndTerminatesBeforeDone(t *testing.T) {
 	}}
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(chatFixture)), ChatCodec(), tr, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	out := string(got)
-	if strings.Count(out, "[DONE]") != 1 || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Errorf("exactly one trailing [DONE] expected:\n%s", out)
-	}
+	assert.Equal(t, 1, strings.Count(out, "[DONE]"))
+	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "exactly one trailing [DONE] expected:\n%s", out)
+
 	// The provider already finished the only choice, so the termination adds
 	// no second finish_reason.
-	if strings.Contains(out, `"finish_reason":"length"`) || strings.Count(out, `"finish_reason":"stop"`) != 1 {
-		t.Errorf("want the provider's finish once and no termination finish:\n%s", out)
-	}
+	assert.NotContains(t, out, `"finish_reason":"length"`)
+	assert.Equal(t, 1, strings.Count(out, `"finish_reason":"stop"`), "want the provider's finish once and no termination finish:\n%s", out)
 }
 
 func TestTransformedSSEStream_UpstreamWithoutDoneStillCallsOnEnd(t *testing.T) {
@@ -325,21 +278,17 @@ func TestTransformedSSEStream_UpstreamWithoutDoneStillCallsOnEnd(t *testing.T) {
 	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n"
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != nil || string(got) != input || !ended {
-		t.Errorf("got %q err=%v ended=%v", got, err, ended)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, input, string(got))
+	assert.True(t, ended)
 }
 
 func TestTransformedSSEStream_UpstreamErrorIsPropagatedAfterOutput(t *testing.T) {
 	failing := io.MultiReader(strings.NewReader("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n"), &errReader{err: io.ErrUnexpectedEOF})
 	stream := NewTransformedSSEStream(io.NopCloser(failing), ChatCodec(), &funcTransformer{}, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != io.ErrUnexpectedEOF {
-		t.Errorf("err = %v, want ErrUnexpectedEOF", err)
-	}
-	if !strings.Contains(string(got), `"content":"hi"`) {
-		t.Errorf("output before the failure missing: %q", got)
-	}
+	assert.Equal(t, io.ErrUnexpectedEOF, err)
+	assert.Contains(t, string(got), `"content":"hi"`, "output before the failure missing: %q", got)
 }
 
 type errReader struct{ err error }
@@ -357,51 +306,32 @@ func TestTransformedSSEStream_LookbehindJoinsPatternAcrossChunks(t *testing.T) {
 	}}
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(chatFixture)), ChatCodec(), tr, TransformOptions{LookbehindChars: 8})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !sawPattern {
-		t.Fatalf("pattern spanning two chunks was not visible in one event; transformer saw %q", texts(tr.seen))
-	}
+	require.NoError(t, err)
+	require.True(t, sawPattern, "pattern spanning two chunks was not visible in one event; transformer saw %q", texts(tr.seen))
+
 	out := string(got)
-	if strings.Contains(out, "555-1234") {
-		t.Errorf("pattern leaked:\n%s", out)
-	}
+	assert.NotContains(t, out, "555-1234", "pattern leaked:\n%s", out)
 	// Three overlapping windows, then the tail flushed before the finish event.
-	if want := []EventKind{KindOther, KindTextDelta, KindTextDelta, KindTextDelta, KindTextDelta, KindFinish, KindUsage}; strings.Join(kindStrings(kinds(tr.seen)), ",") != strings.Join(kindStrings(want), ",") {
-		t.Errorf("transformer saw %v, want %v", kinds(tr.seen), want)
-	}
-	if want := []string{"Hello, ", "Hello, call 555-", "all 555-1234 now", "one] now"}; !equalStrings(texts(tr.seen), want) {
-		t.Errorf("windows = %q, want %q", texts(tr.seen), want)
-	}
+	want := []EventKind{KindOther, KindTextDelta, KindTextDelta, KindTextDelta, KindTextDelta, KindFinish, KindUsage}
+	assert.Equal(t, kindStrings(want), kindStrings(kinds(tr.seen)))
+	assert.Equal(t, []string{"Hello, ", "Hello, call 555-", "all 555-1234 now", "one] now"}, texts(tr.seen), "windows")
 	var overlaps []int
 	var finals []bool
 	for _, ev := range tr.seen {
 		if ev.Kind == KindTextDelta {
 			overlaps = append(overlaps, ev.Overlap)
 			finals = append(finals, ev.Final)
-			if !strings.Contains(string(ev.Data), `"content":"`+jsonEscape(ev.Text)+`"`) {
-				t.Errorf("event Data does not carry the window text: %s vs %q", ev.Data, ev.Text)
-			}
+			assert.Contains(t, string(ev.Data), `"content":"`+jsonEscape(ev.Text)+`"`, "event Data does not carry the window text: %s vs %q", ev.Data, ev.Text)
 		}
 	}
-	if want := []int{0, 7, 8, 8}; !reflect.DeepEqual(overlaps, want) {
-		t.Errorf("overlaps = %v, want %v", overlaps, want)
-	}
+	assert.Equal(t, []int{0, 7, 8, 8}, overlaps, "overlaps")
 	// Only the flush before the finish event closes the window.
-	if want := []bool{false, false, false, true}; !reflect.DeepEqual(finals, want) {
-		t.Errorf("finals = %v, want %v", finals, want)
-	}
+	assert.Equal(t, []bool{false, false, false, true}, finals, "finals")
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Choices[0].Message.Content != "Hello, call [phone] now" || resp.Choices[0].FinishReason != "stop" {
-		t.Errorf("assembled = %+v", resp.Choices[0])
-	}
-	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Errorf("[DONE] missing:\n%s", out)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Hello, call [phone] now", resp.Choices[0].Message.Content)
+	assert.Equal(t, "stop", resp.Choices[0].FinishReason, "assembled = %+v", resp.Choices[0])
+	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "[DONE] missing:\n%s", out)
 }
 
 func jsonEscape(s string) string {
@@ -474,15 +404,10 @@ func TestTransformedSSEStream_LookbehindRule(t *testing.T) {
 			}}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(tt.input)), ChatCodec(), tr, TransformOptions{LookbehindChars: tt.lookbehind})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !equalStrings(texts(tr.seen), tt.wantTexts) {
-				t.Errorf("transformer saw %q, want %q", texts(tr.seen), tt.wantTexts)
-			}
-			if emitted := texts(decodeChatEvents(t, got)); !equalStrings(emitted, tt.wantEmit) {
-				t.Errorf("emitted deltas = %q, want %q", emitted, tt.wantEmit)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTexts, texts(tr.seen), "transformer texts")
+			emitted := texts(decodeChatEvents(t, got))
+			assert.Equal(t, tt.wantEmit, emitted, "emitted deltas")
 		})
 	}
 }
@@ -496,27 +421,22 @@ func TestTransformedSSEStream_LookbehindOrderingWithToolCallAndFinish(t *testing
 	tr := &funcTransformer{}
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{LookbehindChars: 16})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	// The tool call's arguments are a window of their own: seen once on
 	// arrival and once more when the next text delta flushes them.
 	want := []EventKind{KindTextDelta, KindTextDelta, KindToolCallDelta, KindToolCallDelta, KindTextDelta, KindTextDelta, KindFinish}
-	if strings.Join(kindStrings(kinds(tr.seen)), ",") != strings.Join(kindStrings(want), ",") {
-		t.Errorf("transformer saw %v, want %v", kinds(tr.seen), want)
-	}
+	assert.Equal(t, kindStrings(want), kindStrings(kinds(tr.seen)))
+
 	emitted := decodeChatEvents(t, got)
 	wantOut := []EventKind{KindTextDelta, KindToolCallDelta, KindTextDelta, KindFinish, KindDone}
-	if strings.Join(kindStrings(kinds(emitted)), ",") != strings.Join(kindStrings(wantOut), ",") {
-		t.Errorf("output order %v, want %v", kinds(emitted), wantOut)
-	}
+	assert.Equal(t, kindStrings(wantOut), kindStrings(kinds(emitted)), "output order")
+
 	resp, err := AssembleChatResponse(emitted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Choices[0].Message.Content != "abcdef" || len(resp.Choices[0].Message.ToolCalls) != 1 || resp.Choices[0].FinishReason != "tool_calls" {
-		t.Errorf("assembled = %+v", resp.Choices[0])
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "abcdef", resp.Choices[0].Message.Content)
+	assert.Len(t, resp.Choices[0].Message.ToolCalls, 1)
+	assert.Equal(t, "tool_calls", resp.Choices[0].FinishReason, "assembled = %+v", resp.Choices[0])
 }
 
 func TestTransformedSSEStream_ResponsesDialect(t *testing.T) {
@@ -534,23 +454,18 @@ func TestTransformedSSEStream_ResponsesDialect(t *testing.T) {
 	}}
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ResponsesCodec(), tr, TransformOptions{LookbehindChars: 6})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	out := string(got)
-	if strings.Contains(out, "sk-abc123") {
-		t.Errorf("secret leaked:\n%s", out)
-	}
-	if !strings.Contains(out, "event: response.incomplete\n") || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Errorf("terminal events missing:\n%s", out)
-	}
+	assert.NotContains(t, out, "sk-abc123", "secret leaked:\n%s", out)
+	assert.Contains(t, out, "event: response.incomplete\n")
+	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
+
 	resp, err := AssembleResponsesResponse(decodeResponsesEvents(t, got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Status != "incomplete" || len(resp.Output) != 1 || resp.Output[0].Content[0].Text != "my key [redacted]" {
-		t.Errorf("assembled = %+v", resp)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "incomplete", resp.Status)
+	assert.Len(t, resp.Output, 1)
+	assert.Equal(t, "my key [redacted]", resp.Output[0].Content[0].Text, "assembled = %+v", resp)
 }
 
 func decodeResponsesEvents(t *testing.T, stream []byte) []Event {
@@ -568,15 +483,11 @@ func decodeResponsesEvents(t *testing.T, stream []byte) []Event {
 
 func TestTransformedSSEStream_ReadAfterClose(t *testing.T) {
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(chatFixture)), ChatCodec(), &funcTransformer{}, TransformOptions{})
-	if err := stream.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatal("second Close must be a no-op")
-	}
-	if _, err := stream.Read(make([]byte, 4)); err != ErrStreamClosed {
-		t.Errorf("Read after Close err = %v", err)
-	}
+	err := stream.Close()
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+	_, err = stream.Read(make([]byte, 4))
+	assert.Equal(t, ErrStreamClosed, err)
 }
 
 func TestTransformedSSEStream_OversizedEventFailsClosed(t *testing.T) {
@@ -597,28 +508,17 @@ func TestTransformedSSEStream_OversizedEventFailsClosed(t *testing.T) {
 			upstream := &trackingCloser{Reader: tt.reader}
 			stream := NewTransformedSSEStream(upstream, ChatCodec(), tr, TransformOptions{MaxEventBytes: 128, OnError: func(err error) { reported = err }})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			out := string(got)
-			if !strings.HasPrefix(out, ": keep-alive\n\n") {
-				t.Errorf("comment not relayed:\n%s", out)
-			}
-			if strings.Contains(out, "secret") || strings.Contains(out, "after") {
-				t.Errorf("uninspected content leaked:\n%s", out)
-			}
-			if !strings.Contains(out, `"code":"event_too_large"`) || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-				t.Errorf("fail-closed output = %s", out)
-			}
-			if !errors.Is(reported, ErrEventTooLarge) {
-				t.Errorf("reported = %v", reported)
-			}
-			if len(tr.seen) != 0 {
-				t.Errorf("transformer saw %d events, want none", len(tr.seen))
-			}
-			if !upstream.closed {
-				t.Error("upstream not closed")
-			}
+			assert.True(t, strings.HasPrefix(out, ": keep-alive\n\n"), "comment not relayed:\n%s", out)
+			assert.NotContains(t, out, "secret")
+			assert.NotContains(t, out, "after", "uninspected content leaked:\n%s", out)
+			assert.Contains(t, out, `"code":"event_too_large"`)
+			assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
+			assert.ErrorIs(t, reported, ErrEventTooLarge)
+			assert.Empty(t, tr.seen)
+			assert.True(t, upstream.closed)
 		})
 	}
 }
@@ -655,27 +555,23 @@ func TestTransformedSSEStream_LookbehindDeliversFinishAndUsageOnce(t *testing.T)
 			tr := &funcTransformer{onEvent: tc.onEvent}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{LookbehindChars: 3})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			out := string(got)
-			if n := strings.Count(out, `"finish_reason":"stop"`); n != 1 {
-				t.Errorf("finish_reason emitted %d times, want once:\n%s", n, out)
-			}
-			if n := strings.Count(out, `"total_tokens":5`); n != 1 {
-				t.Errorf("usage emitted %d times, want once:\n%s", n, out)
-			}
+			n := strings.Count(out, `"finish_reason":"stop"`)
+			assert.Equal(t, 1, n)
+			n = strings.Count(out, `"total_tokens":5`)
+			assert.Equal(t, 1, n)
+
 			events := strings.Split(strings.TrimSpace(strings.TrimSuffix(out, "data: [DONE]\n\n")), "\n\n")
-			if last := events[len(events)-1]; !strings.Contains(last, `"finish_reason":"stop"`) {
-				t.Errorf("finish_reason is not on the last chunk:\n%s", out)
-			}
+			last := events[len(events)-1]
+			assert.Contains(t, last, `"finish_reason":"stop"`)
+
 			resp, err := AssembleChatResponse(decodeChatEvents(t, got))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resp.Choices[0].Message.Content != tc.content || resp.Choices[0].FinishReason != "stop" || resp.Usage.TotalTokens != 5 {
-				t.Errorf("assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.content, resp.Choices[0].Message.Content)
+			assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+			assert.Equal(t, 5, resp.Usage.TotalTokens, "assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
 		})
 	}
 }
@@ -687,12 +583,10 @@ func TestTransformedSSEStream_UpstreamErrorOutranksOnEndTermination(t *testing.T
 	tr := &funcTransformer{onEnd: func() (*Termination, error) { return &Termination{FinishReason: "length"}, nil }}
 	stream := NewTransformedSSEStream(io.NopCloser(failing), ChatCodec(), tr, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != io.ErrUnexpectedEOF {
-		t.Errorf("err = %v, want ErrUnexpectedEOF", err)
-	}
-	if out := string(got); !strings.Contains(out, `"finish_reason":"length"`) || !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Errorf("termination missing:\n%s", out)
-	}
+	assert.Equal(t, io.ErrUnexpectedEOF, err)
+	out := string(got)
+	assert.Contains(t, out, `"finish_reason":"length"`)
+	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
 }
 
 // A chunk carrying text and finish_reason together closes its choice, so a
@@ -704,16 +598,13 @@ func TestTransformedSSEStream_ContentWithFinishNeedsNoSecondFinish(t *testing.T)
 			tr := &funcTransformer{onEnd: func() (*Termination, error) { return &Termination{FinishReason: "length"}, nil }}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{LookbehindChars: lookbehind})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			out := string(got)
-			if n := strings.Count(out, "finish_reason"); n != 1 || !strings.Contains(out, `"finish_reason":"stop"`) {
-				t.Errorf("finish_reason appears %d times, want the provider's once:\n%s", n, out)
-			}
-			if !strings.HasSuffix(out, "data: [DONE]\n\n") {
-				t.Errorf("stream not closed:\n%s", out)
-			}
+			n := strings.Count(out, "finish_reason")
+			assert.Equal(t, 1, n)
+			assert.Contains(t, out, `"finish_reason":"stop"`)
+			assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "stream not closed:\n%s", out)
 		})
 	}
 }
@@ -794,22 +685,16 @@ func TestTransformedSSEStream_MinChunkRule(t *testing.T) {
 			}}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(tt.input)), ChatCodec(), tr, TransformOptions{LookbehindChars: tt.lookbehind, MinChunkChars: tt.minChunk})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !equalStrings(texts(tr.seen), tt.wantTexts) {
-				t.Errorf("transformer saw %q, want %q", texts(tr.seen), tt.wantTexts)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTexts, texts(tr.seen), "transformer texts")
+
 			var overlaps []int
 			for _, ev := range tr.seen {
 				overlaps = append(overlaps, ev.Overlap)
 			}
-			if !reflect.DeepEqual(overlaps, tt.wantOverlaps) {
-				t.Errorf("overlaps = %v, want %v", overlaps, tt.wantOverlaps)
-			}
-			if emitted := texts(decodeChatEvents(t, got)); !equalStrings(emitted, tt.wantEmit) {
-				t.Errorf("emitted deltas = %q, want %q", emitted, tt.wantEmit)
-			}
+			assert.Equal(t, tt.wantOverlaps, overlaps)
+			emitted := texts(decodeChatEvents(t, got))
+			assert.Equal(t, tt.wantEmit, emitted, "emitted deltas")
 		})
 	}
 }
@@ -833,26 +718,21 @@ func TestTransformedSSEStream_MinChunkDeliversFinishAndUsageOnce(t *testing.T) {
 			tr := &funcTransformer{onEvent: tc.onEvent}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{MinChunkChars: 100})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if want := []string{"hello world"}; !equalStrings(texts(tr.seen), want) {
-				t.Errorf("transformer saw %q, want %q", texts(tr.seen), want)
-			}
+			require.NoError(t, err)
+			want := []string{"hello world"}
+			assert.Equal(t, want, texts(tr.seen), "transformer texts")
+
 			out := string(got)
-			if n := strings.Count(out, `"finish_reason":"stop"`); n != 1 {
-				t.Errorf("finish_reason emitted %d times, want once:\n%s", n, out)
-			}
-			if n := strings.Count(out, `"total_tokens":5`); n != 1 {
-				t.Errorf("usage emitted %d times, want once:\n%s", n, out)
-			}
+			n := strings.Count(out, `"finish_reason":"stop"`)
+			assert.Equal(t, 1, n)
+			n = strings.Count(out, `"total_tokens":5`)
+			assert.Equal(t, 1, n)
+
 			resp, err := AssembleChatResponse(decodeChatEvents(t, got))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resp.Choices[0].Message.Content != tc.content || resp.Choices[0].FinishReason != "stop" || resp.Usage.TotalTokens != 5 {
-				t.Errorf("assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.content, resp.Choices[0].Message.Content)
+			assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+			assert.Equal(t, 5, resp.Usage.TotalTokens, "assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
 		})
 	}
 }
@@ -880,36 +760,28 @@ func TestTransformedSSEStream_MinChunkKeepsRunTemplateMembers(t *testing.T) {
 			tr := &funcTransformer{}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{MinChunkChars: tc.minChunk})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !equalStrings(texts(tr.seen), tc.wantSeen) {
-				t.Errorf("transformer saw %q, want %q", texts(tr.seen), tc.wantSeen)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantSeen, texts(tr.seen), "transformer texts")
+
 			out := string(got)
-			if n := strings.Count(out, `"role":"assistant"`); n != tc.wantRoles {
-				t.Errorf("role emitted %d times, want %d:\n%s", n, tc.wantRoles, out)
-			}
-			if n := strings.Count(out, `"finish_reason":"stop"`); n != 1 {
-				t.Errorf("finish_reason emitted %d times, want once:\n%s", n, out)
-			}
-			if n := strings.Count(out, `"total_tokens":5`); n != 1 {
-				t.Errorf("usage emitted %d times, want once:\n%s", n, out)
-			}
+			n := strings.Count(out, `"role":"assistant"`)
+			assert.Equal(t, tc.wantRoles, n)
+			n = strings.Count(out, `"finish_reason":"stop"`)
+			assert.Equal(t, 1, n)
+			n = strings.Count(out, `"total_tokens":5`)
+			assert.Equal(t, 1, n)
+
 			events := decodeChatEvents(t, got)
-			if emitted := texts(events); !equalStrings(emitted, tc.wantEmit) {
-				t.Errorf("emitted deltas = %q, want %q", emitted, tc.wantEmit)
-			}
-			if first := events[0]; !strings.Contains(string(first.Data), `"role":"assistant"`) {
-				t.Errorf("first emitted chunk lacks the role: %s", first.Data)
-			}
+			emitted := texts(events)
+			assert.Equal(t, tc.wantEmit, emitted, "emitted deltas")
+			first := events[0]
+			assert.Contains(t, string(first.Data), `"role":"assistant"`, "first emitted chunk lacks the role: %s", first.Data)
+
 			resp, err := AssembleChatResponse(events)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resp.Choices[0].Message.Content != "Hello world" || resp.Choices[0].FinishReason != "stop" || resp.Usage.TotalTokens != 5 {
-				t.Errorf("assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, "Hello world", resp.Choices[0].Message.Content)
+			assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+			assert.Equal(t, 5, resp.Usage.TotalTokens, "assembled = %+v usage %+v", resp.Choices[0], resp.Usage)
 		})
 	}
 }
@@ -922,17 +794,15 @@ func TestTransformedSSEStream_MinChunkIsCapped(t *testing.T) {
 	}
 	tr := &funcTransformer{}
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{MinChunkChars: 1 << 30})
-	if s := stream.(*transformedSSEStream); s.opts.MinChunkChars != MaxMinChunkChars {
-		t.Fatalf("MinChunkChars = %d, want clamped to %d", s.opts.MinChunkChars, MaxMinChunkChars)
-	}
-	if _, err := io.ReadAll(stream); err != nil {
-		t.Fatal(err)
-	}
+	s := stream.(*transformedSSEStream)
+	require.Equal(t, MaxMinChunkChars, s.opts.MinChunkChars)
+	_, err := io.ReadAll(stream)
+	require.NoError(t, err)
+
 	var lengths []int
 	for _, ev := range tr.seen {
 		lengths = append(lengths, len(ev.Text))
 	}
-	if want := []int{24000}; !reflect.DeepEqual(lengths, want) {
-		t.Errorf("window lengths = %v, want %v (a window once the cap is reached, nothing left to flush)", lengths, want)
-	}
+	want := []int{24000}
+	assert.Equal(t, want, lengths)
 }

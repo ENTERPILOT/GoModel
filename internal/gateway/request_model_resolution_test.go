@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type requestRefreshProvider struct {
@@ -139,17 +140,14 @@ func TestResolveRequestModelCarriesResolvedSlowdownFactor(t *testing.T) {
 				context.Background(), newRequestRefreshProvider(1), tt.resolver, nil,
 				core.NewRequestedModelSelector(tt.requested, ""),
 			)
-			if err != nil {
-				t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v", err)
-			}
-			if resolution.Slowdown != tt.wantSlowdown {
-				t.Fatalf("resolution.Slowdown = %v, want %v", resolution.Slowdown, tt.wantSlowdown)
-			}
-			if got := resolution.ResolvedSelector.QualifiedModel(); got != tt.wantResolved {
-				t.Fatalf("resolved selector = %q, want %q", got, tt.wantResolved)
-			}
-			if tt.capture != nil && (tt.capture.requested != tt.requested || tt.capture.resolved != tt.wantResolved) {
-				t.Fatalf("slowdown resolver inputs = (%q, %q), want (%q, %q)", tt.capture.requested, tt.capture.resolved, tt.requested, tt.wantResolved)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantSlowdown, resolution.Slowdown)
+			got := resolution.ResolvedSelector.QualifiedModel()
+			require.Equal(t, tt.wantResolved, got)
+
+			if tt.capture != nil {
+				require.Equal(t, tt.requested, tt.capture.requested, "slowdown resolver requested model")
+				require.Equal(t, tt.wantResolved, tt.capture.resolved, "slowdown resolver resolved model")
 			}
 		})
 	}
@@ -189,18 +187,12 @@ func TestResolveRequestModelRefreshesBeforeUnsupportedModel(t *testing.T) {
 		nil,
 		core.NewRequestedModelSelector("ollama/qwen3:8b", ""),
 	)
-	if err != nil {
-		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
-	}
-	if provider.refreshCalls != 1 {
-		t.Fatalf("refresh calls = %d, want 1", provider.refreshCalls)
-	}
-	if got := resolution.ResolvedQualifiedModel(); got != "ollama/qwen3:8b" {
-		t.Fatalf("ResolvedQualifiedModel() = %q, want ollama/qwen3:8b", got)
-	}
-	if got := resolution.ProviderType; got != "ollama" {
-		t.Fatalf("ProviderType = %q, want ollama", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.refreshCalls)
+	got := resolution.ResolvedQualifiedModel()
+	require.Equal(t, "ollama/qwen3:8b", got)
+	got = resolution.ProviderType
+	require.Equal(t, "ollama", got)
 }
 
 func TestResolveRequestModelRefreshesBeforeEmptyRegistryFailure(t *testing.T) {
@@ -213,15 +205,10 @@ func TestResolveRequestModelRefreshesBeforeEmptyRegistryFailure(t *testing.T) {
 		nil,
 		core.NewRequestedModelSelector("ollama/qwen3:8b", ""),
 	)
-	if err != nil {
-		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
-	}
-	if provider.refreshCalls != 1 {
-		t.Fatalf("refresh calls = %d, want 1", provider.refreshCalls)
-	}
-	if got := resolution.ResolvedQualifiedModel(); got != "ollama/qwen3:8b" {
-		t.Fatalf("ResolvedQualifiedModel() = %q, want ollama/qwen3:8b", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.refreshCalls)
+	got := resolution.ResolvedQualifiedModel()
+	require.Equal(t, "ollama/qwen3:8b", got)
 }
 
 func TestResolveRequestModelRefreshesAliasTargetBeforeCatalogSupportsIt(t *testing.T) {
@@ -238,18 +225,11 @@ func TestResolveRequestModelRefreshesAliasTargetBeforeCatalogSupportsIt(t *testi
 		nil,
 		core.NewRequestedModelSelector("smart", ""),
 	)
-	if err != nil {
-		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
-	}
-	if provider.refreshCalls != 1 {
-		t.Fatalf("refresh calls = %d, want 1", provider.refreshCalls)
-	}
-	if got := resolution.ResolvedQualifiedModel(); got != "ollama/qwen3:8b" {
-		t.Fatalf("ResolvedQualifiedModel() = %q, want ollama/qwen3:8b", got)
-	}
-	if !resolution.AliasApplied {
-		t.Fatal("AliasApplied = false, want true")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.refreshCalls)
+	got := resolution.ResolvedQualifiedModel()
+	require.Equal(t, "ollama/qwen3:8b", got)
+	require.True(t, resolution.AliasApplied)
 }
 
 func TestResolveRequestModelReturnsRefreshTargetError(t *testing.T) {
@@ -268,15 +248,9 @@ func TestResolveRequestModelReturnsRefreshTargetError(t *testing.T) {
 		nil,
 		core.NewRequestedModelSelector("smart", ""),
 	)
-	if err == nil {
-		t.Fatal("ResolveRequestModelWithAuthorizer() error = nil, want refresh target error")
-	}
-	if !errors.Is(err, targetErr) {
-		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want %v", err, targetErr)
-	}
-	if provider.refreshCalls != 0 {
-		t.Fatalf("refresh calls = %d, want 0 after refresh target error", provider.refreshCalls)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, targetErr)
+	require.Equal(t, 0, provider.refreshCalls)
 }
 
 func TestResolveRequestModelRefreshesAliasTargetAfterResolverFailure(t *testing.T) {
@@ -293,18 +267,11 @@ func TestResolveRequestModelRefreshesAliasTargetAfterResolverFailure(t *testing.
 		nil,
 		core.NewRequestedModelSelector("smart", ""),
 	)
-	if err != nil {
-		t.Fatalf("ResolveRequestModelWithAuthorizer() error = %v, want nil", err)
-	}
-	if provider.refreshCalls != 1 {
-		t.Fatalf("refresh calls = %d, want 1", provider.refreshCalls)
-	}
-	if got := resolution.ResolvedQualifiedModel(); got != "ollama/qwen3:8b" {
-		t.Fatalf("ResolvedQualifiedModel() = %q, want ollama/qwen3:8b", got)
-	}
-	if !resolution.AliasApplied {
-		t.Fatal("AliasApplied = false, want true")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.refreshCalls)
+	got := resolution.ResolvedQualifiedModel()
+	require.Equal(t, "ollama/qwen3:8b", got)
+	require.True(t, resolution.AliasApplied)
 }
 
 func TestResolveRequestModelReturnsRefreshError(t *testing.T) {
@@ -318,17 +285,10 @@ func TestResolveRequestModelReturnsRefreshError(t *testing.T) {
 		nil,
 		core.NewRequestedModelSelector("ollama/qwen3:8b", ""),
 	)
-	if err == nil {
-		t.Fatal("ResolveRequestModelWithAuthorizer() error = nil, want refresh error")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want GatewayError", err)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusServiceUnavailable)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider {
-		t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeProvider)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.HTTPStatusCode())
+	require.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
 }

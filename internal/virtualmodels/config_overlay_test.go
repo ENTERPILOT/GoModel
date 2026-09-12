@@ -2,11 +2,11 @@ package virtualmodels
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfigModels_Conversion(t *testing.T) {
@@ -25,18 +25,16 @@ func TestConfigModels_Conversion(t *testing.T) {
 		{Source: "off", Target: "openai/gpt-4o", Enabled: &enabled},
 	})
 
-	if len(got) != 3 {
-		t.Fatalf("ConfigModels len = %d, want 3", len(got))
-	}
-	if got[0].Targets[0].Model != "openai/gpt-4o" || got[0].Slowdown == nil || *got[0].Slowdown != 0.5 || !got[0].Enabled || !got[0].Managed {
-		t.Fatalf("shorthand target conversion = %#v", got[0])
-	}
-	if len(got[1].Targets) != 2 || got[1].Strategy != StrategyCost || got[1].Targets[0].Weight != 2 {
-		t.Fatalf("multi-target conversion = %#v", got[1])
-	}
-	if got[2].Enabled {
-		t.Fatalf("explicit enabled=false not honored: %#v", got[2])
-	}
+	require.Len(t, got, 3)
+	require.Equal(t, "openai/gpt-4o", got[0].Targets[0].Model)
+	require.NotNil(t, got[0].Slowdown)
+	require.Equal(t, 0.5, *got[0].Slowdown)
+	require.True(t, got[0].Enabled)
+	require.True(t, got[0].Managed, "shorthand target conversion = %#v", got[0])
+	require.Len(t, got[1].Targets, 2)
+	require.Equal(t, StrategyCost, got[1].Strategy)
+	require.Equal(t, float64(2), got[1].Targets[0].Weight, "multi-target conversion = %#v", got[1])
+	require.False(t, got[2].Enabled, "explicit enabled=false not honored: %#v", got[2])
 }
 
 func TestConfigModels_PreservesSlowdownPresence(t *testing.T) {
@@ -57,18 +55,14 @@ func TestConfigModels_PreservesSlowdownPresence(t *testing.T) {
 			got := ConfigModels([]config.VirtualModelConfig{{
 				Source: "alias", Target: "openai/gpt-4o", Slowdown: tt.in,
 			}})
-			if len(got) != 1 {
-				t.Fatalf("ConfigModels len = %d, want 1", len(got))
-			}
+			require.Len(t, got, 1)
+
 			if tt.want == nil {
-				if got[0].Slowdown != nil {
-					t.Fatalf("Slowdown = %v, want nil", got[0].Slowdown)
-				}
+				require.Nil(t, got[0].Slowdown)
 				return
 			}
-			if got[0].Slowdown == nil || *got[0].Slowdown != *tt.want {
-				t.Fatalf("Slowdown = %v, want %v", got[0].Slowdown, *tt.want)
-			}
+			require.NotNil(t, got[0].Slowdown)
+			require.Equal(t, *tt.want, *got[0].Slowdown)
 		})
 	}
 }
@@ -86,64 +80,54 @@ func TestService_ConfigOverlayResolvesAndIsReadOnly(t *testing.T) {
 			{Provider: "groq", Model: "llama"},
 		},
 	}}))
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	err := svc.Refresh(ctx)
+	require.NoError(t, err)
 
 	// The managed redirect resolves and load balances.
 	counts := countByModel(resolvedModels(t, svc, "smart", 4))
-	if counts["openai/gpt-4o"] != 2 || counts["groq/llama"] != 2 {
-		t.Fatalf("managed redirect distribution = %v", counts)
-	}
+	require.Equal(t, 2, counts["openai/gpt-4o"])
+	require.Equal(t, 2, counts["groq/llama"], "managed redirect distribution = %v", counts)
 
 	// The admin view marks it managed.
 	view, ok := svc.Get("smart")
-	if !ok || !view.Managed {
-		t.Fatalf("managed virtual model not marked managed: %#v", view)
-	}
-
+	require.True(t, ok)
+	require.True(t, view.Managed, "managed virtual model not marked managed: %#v", view)
 	// Admin writes to a managed source are rejected.
-	if err := svc.Upsert(ctx, VirtualModel{
+	err = svc.Upsert(ctx, VirtualModel{
 		Source:  "smart",
 		Targets: []Target{{Provider: "openai", Model: "gpt-4o"}},
 		Enabled: true,
-	}); err == nil || !IsValidationError(err) {
-		t.Fatalf("Upsert(managed) error = %v, want validation rejection", err)
-	}
-	if err := svc.Delete(ctx, "smart"); err == nil || !IsValidationError(err) {
-		t.Fatalf("Delete(managed) error = %v, want validation rejection", err)
-	}
+	})
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
+	err = svc.Delete(ctx, "smart")
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 func TestService_ConfigOverlayOverridesStoreRow(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)
 	ctx := context.Background()
-
 	// A store row points "smart" at the expensive model.
-	if err := svc.store.Upsert(ctx, VirtualModel{
+	err := svc.store.Upsert(ctx, VirtualModel{
 		Source:  "smart",
 		Targets: []Target{{Provider: "anthropic", Model: "claude"}},
 		Enabled: true,
-	}); err != nil {
-		t.Fatalf("store.Upsert() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
+
 	// Config redefines "smart" to the cheap model; config must win.
 	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
 		Source: "smart",
 		Target: "groq/llama",
 	}}))
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	err = svc.Refresh(ctx)
+	require.NoError(t, err)
 
 	sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector("smart", ""))
-	if err != nil {
-		t.Fatalf("ResolveModel() error = %v", err)
-	}
-	if sel.QualifiedModel() != "groq/llama" {
-		t.Fatalf("config overlay did not override store row: got %q", sel.QualifiedModel())
-	}
+	require.NoError(t, err)
+	require.Equal(t, "groq/llama", sel.QualifiedModel())
 }
 
 // Only STRUCTURAL problems (catalog-independent) abort startup. Catalog
@@ -181,18 +165,13 @@ func TestService_ConfigOverlayRejectsInvalidRedirectTargets(t *testing.T) {
 			// rejects chain cycles), then the managed-config check rejects the
 			// remaining invalid declarations.
 			err := svc.Refresh(context.Background())
-			if (err != nil) != tt.rejectedByRefresh {
-				t.Fatalf("Refresh() error = %v, want rejected by refresh = %v", err, tt.rejectedByRefresh)
-			}
+			require.Equal(t, tt.rejectedByRefresh, err != nil)
+
 			if err == nil {
 				err = svc.ValidateManagedConfig(nil)
 			}
-			if err == nil {
-				t.Fatalf("startup validation error = nil, want validation failure")
-			}
-			if !IsValidationError(err) {
-				t.Fatalf("startup validation error = %v, want validation error", err)
-			}
+			require.Error(t, err)
+			require.True(t, IsValidationError(err))
 		})
 	}
 }
@@ -205,16 +184,14 @@ func TestService_ConfigOverlayChainsVirtualModels(t *testing.T) {
 		{Source: "production", Target: "cheap"},
 		{Source: "cheap", Target: "groq/llama"},
 	}))
-	if err := svc.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if err := svc.ValidateManagedConfig(nil); err != nil {
-		t.Fatalf("ValidateManagedConfig() error = %v", err)
-	}
+	err := svc.Refresh(context.Background())
+	require.NoError(t, err)
+	err = svc.ValidateManagedConfig(nil)
+	require.NoError(t, err)
+
 	sel, _, err := svc.ResolveModel(core.NewRequestedModelSelector("production", ""))
-	if err != nil || sel.QualifiedModel() != "groq/llama" {
-		t.Fatalf("ResolveModel(production) = %q, %v; want groq/llama", sel.QualifiedModel(), err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "groq/llama", sel.QualifiedModel())
 }
 
 // Target provider names are static configuration known before any model loads,
@@ -265,29 +242,22 @@ func TestService_ValidateManagedConfigTargetProviders(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			svc, err := NewService(newSQLVMStore(t), testCatalog(), true)
-			if err != nil {
-				t.Fatalf("NewService() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{
 				Source:  "smart",
 				Targets: tt.targets,
 			}}))
-			if err := svc.Refresh(context.Background()); err != nil {
-				t.Fatalf("Refresh() error = %v", err)
-			}
+			err = svc.Refresh(context.Background())
+			require.NoError(t, err)
+
 			err = svc.ValidateManagedConfig(tt.declared)
 			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("ValidateManagedConfig() error = %v, want nil", err)
-				}
+				require.NoError(t, err)
 				return
 			}
-			if err == nil || !IsValidationError(err) {
-				t.Fatalf("ValidateManagedConfig() error = %v, want validation error", err)
-			}
-			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("ValidateManagedConfig() error = %q, want it to contain %q", err, tt.wantErr)
-			}
+			require.ErrorContains(t, err, tt.wantErr)
+			require.True(t, IsValidationError(err))
 		})
 	}
 }
@@ -302,12 +272,8 @@ func TestService_UpsertRejectsUnknownTargetProvider(t *testing.T) {
 		Targets: []Target{{Provider: "opnai", Model: "gpt-4o"}},
 		Enabled: true,
 	})
-	if err == nil || !IsValidationError(err) {
-		t.Fatalf("Upsert(unknown provider) error = %v, want validation rejection", err)
-	}
-	if !strings.Contains(err.Error(), `unknown target provider "opnai"`) {
-		t.Fatalf("Upsert(unknown provider) error = %q, want unknown-target-provider message", err)
-	}
+	require.ErrorContains(t, err, `unknown target provider "opnai"`)
+	require.True(t, IsValidationError(err))
 }
 
 // A managed redirect declared against a model the catalog cannot serve YET — a
@@ -321,30 +287,26 @@ func TestService_ManagedRedirectToleratesColdCatalogAtStartup(t *testing.T) {
 	supported := map[string]core.Model{} // cold: no provider models loaded yet
 	store := newSQLVMStore(t)
 	svc, err := NewService(store, fakeCatalog{providers: []string{"openai"}, supported: supported}, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	// Startup against a cold catalog must succeed for a structurally-valid target.
 	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("startup Refresh() error = %v", err)
-	}
-	if err := svc.ValidateManagedConfig(nil); err != nil {
-		t.Fatalf("ValidateManagedConfig() on a cold catalog error = %v, want nil", err)
-	}
+	err = svc.Refresh(ctx)
+	require.NoError(t, err)
+	err = svc.ValidateManagedConfig(nil)
+	require.NoError(t, err)
 	// While the catalog is cold the redirect is simply unavailable, not fatal.
-	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); changed {
-		t.Fatalf("redirect resolved before its target was in the catalog")
-	}
+	_, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	require.False(t, changed)
 
 	// Once the async model load warms the catalog, the same redirect resolves —
 	// supportedTargets consults the live catalog at resolve time, no refresh needed.
 	supported["openai/gpt-4o"] = core.Model{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"}
-	if sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
-		t.Fatalf("redirect did not resolve after catalog warm: changed=%v sel=%q", changed, sel.QualifiedModel())
-	}
+	sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	require.True(t, changed)
+	require.Equal(t, "openai/gpt-4o", sel.QualifiedModel())
 }
 
 // The admin write path keeps the catalog-availability check: it runs against a
@@ -357,9 +319,8 @@ func TestService_UpsertRejectsUnsupportedTarget(t *testing.T) {
 		Targets: []Target{{Provider: "openai", Model: "unknown"}},
 		Enabled: true,
 	})
-	if err == nil || !IsValidationError(err) {
-		t.Fatalf("Upsert(unsupported target) error = %v, want validation rejection", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 // A managed redirect target that drops out of the catalog after startup must not
@@ -373,50 +334,41 @@ func TestService_ManagedRedirectToleratesTransientCatalogGapAfterStartup(t *test
 	}
 	store := newSQLVMStore(t)
 	svc, err := NewService(store, fakeCatalog{providers: []string{"openai"}, supported: supported}, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	ctx := context.Background()
 
 	// Startup: the managed redirect's target is supported, so validation passes.
 	svc.SetConfigModels(ConfigModels([]config.VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}))
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("startup Refresh() error = %v", err)
-	}
-	if err := svc.ValidateManagedConfig(nil); err != nil {
-		t.Fatalf("startup ValidateManagedConfig() error = %v", err)
-	}
+	err = svc.Refresh(ctx)
+	require.NoError(t, err)
+	err = svc.ValidateManagedConfig(nil)
+	require.NoError(t, err)
 
 	// A provider catalog refresh transiently drops the managed target, while an
 	// unrelated store alias is added that a working refresh must surface.
 	delete(supported, "openai/gpt-4o")
-	if err := store.Upsert(ctx, VirtualModel{
+	err = store.Upsert(ctx, VirtualModel{
 		Source:  "later",
 		Targets: []Target{{Provider: "openai", Model: "gpt-4o-mini"}},
 		Enabled: true,
-	}); err != nil {
-		t.Fatalf("store.Upsert(later) error = %v", err)
-	}
-
+	})
+	require.NoError(t, err)
 	// The refresh must not fail despite the now-unsupported managed target.
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh() after catalog gap error = %v, want nil (snapshot must not freeze)", err)
-	}
+	err = svc.Refresh(ctx)
+	require.NoError(t, err)
 	// The snapshot swapped: the new store alias is visible.
-	if _, ok := svc.Get("later"); !ok {
-		t.Fatalf("snapshot did not swap: alias %q missing after refresh", "later")
-	}
+	_, ok := svc.Get("later")
+	require.True(t, ok, "snapshot did not swap: alias %q missing after refresh", "later")
 	// The managed redirect is simply unavailable while its target is gone.
-	if _, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); changed {
-		t.Fatalf("managed redirect resolved despite an unsupported target")
-	}
+	_, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	require.False(t, changed)
 
 	// When the target returns, the managed redirect resolves again.
 	supported["openai/gpt-4o"] = core.Model{ID: "openai/gpt-4o", Object: "model", OwnedBy: "openai"}
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh() after catalog recovery error = %v", err)
-	}
-	if sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", "")); !changed || sel.QualifiedModel() != "openai/gpt-4o" {
-		t.Fatalf("managed redirect did not recover: changed=%v sel=%q", changed, sel.QualifiedModel())
-	}
+	err = svc.Refresh(ctx)
+	require.NoError(t, err)
+	sel, changed, _ := svc.ResolveModel(core.NewRequestedModelSelector("smart", ""))
+	require.True(t, changed)
+	require.Equal(t, "openai/gpt-4o", sel.QualifiedModel())
 }

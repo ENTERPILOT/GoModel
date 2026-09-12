@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/internal/plugins/builtin"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 type staticStore struct {
@@ -366,25 +366,16 @@ func TestServiceMatch_MostSpecificWins(t *testing.T) {
 	}
 
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	assertMatch := func(name string, selector core.WorkflowSelector, wantVersionID string) {
 		t.Helper()
 		policy, err := service.Match(selector)
-		if err != nil {
-			t.Fatalf("%s: Match() error = %v", name, err)
-		}
-		if policy == nil {
-			t.Fatalf("%s: Match() returned nil policy", name)
-		}
-		if policy.VersionID != wantVersionID {
-			t.Fatalf("%s: VersionID = %q, want %q", name, policy.VersionID, wantVersionID)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, policy)
+		require.Equal(t, wantVersionID, policy.VersionID, "%s", name)
 	}
 
 	assertMatch("provider+model+path", core.NewWorkflowSelector("openai", "gpt-5", "/team/a/user"), "provider-model-path")
@@ -433,16 +424,10 @@ func TestServiceRefresh_RejectsInvalidActiveSets(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service, err := NewService(&staticStore{versions: tt.versions}, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-			if err != nil {
-				t.Fatalf("NewService() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			err = service.Refresh(context.Background())
-			if err == nil {
-				t.Fatal("Refresh() error = nil, want error")
-			}
-			if !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("Refresh() error = %q, want it to contain %q", err.Error(), tt.wantErr)
-			}
+			require.ErrorContains(t, err, tt.wantErr)
 		})
 	}
 }
@@ -450,9 +435,7 @@ func TestServiceRefresh_RejectsInvalidActiveSets(t *testing.T) {
 func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
 	store := &staticStore{}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	err = service.EnsureDefaultGlobal(context.Background(), CreateInput{
 		Activate: true,
@@ -462,28 +445,16 @@ func TestServiceEnsureDefaultGlobal_CreatesWhenMissing(t *testing.T) {
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("EnsureDefaultGlobal() error = %v", err)
-	}
-	if len(store.versions) != 1 {
-		t.Fatalf("len(store.versions) = %d, want 1", len(store.versions))
-	}
-	if got := store.versions[0].ScopeKey; got != "global" {
-		t.Fatalf("ScopeKey = %q, want global", got)
-	}
-	if !store.versions[0].Managed {
-		t.Fatal("Managed = false, want true for managed default global")
-	}
+	require.NoError(t, err)
+	require.Len(t, store.versions, 1)
+	got := store.versions[0].ScopeKey
+	require.Equal(t, "global", got)
+	require.True(t, store.versions[0].Managed)
+
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != store.versions[0].ID {
-		t.Fatalf("Match().VersionID = %q, want %q", policy.VersionID, store.versions[0].ID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, store.versions[0].ID, policy.VersionID)
 }
 
 func TestServiceEnsureDefaultGlobal_ReconcilesManagedDefault(t *testing.T) {
@@ -507,12 +478,9 @@ func TestServiceEnsureDefaultGlobal_ReconcilesManagedDefault(t *testing.T) {
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	err = service.EnsureDefaultGlobal(context.Background(), CreateInput{
 		Activate:    true,
@@ -523,24 +491,12 @@ func TestServiceEnsureDefaultGlobal_ReconcilesManagedDefault(t *testing.T) {
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("EnsureDefaultGlobal() error = %v", err)
-	}
-	if len(store.versions) != 2 {
-		t.Fatalf("len(store.versions) = %d, want 2", len(store.versions))
-	}
-	if store.versions[0].Active {
-		t.Fatal("store.versions[0].Active = true, want old managed default deactivated")
-	}
-	if !store.versions[1].Active {
-		t.Fatal("store.versions[1].Active = false, want updated managed default active")
-	}
-	if !store.versions[1].Managed {
-		t.Fatal("store.versions[1].Managed = false, want updated managed default marker")
-	}
-	if !store.versions[1].Payload.Features.Cache {
-		t.Fatal("store.versions[1].Payload.Features.Cache = false, want updated payload")
-	}
+	require.NoError(t, err)
+	require.Len(t, store.versions, 2)
+	require.False(t, store.versions[0].Active)
+	require.True(t, store.versions[1].Active)
+	require.True(t, store.versions[1].Managed)
+	require.True(t, store.versions[1].Payload.Features.Cache)
 }
 
 func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
@@ -563,12 +519,9 @@ func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	err = service.EnsureDefaultGlobal(context.Background(), CreateInput{
 		Activate:    true,
@@ -579,15 +532,10 @@ func TestServiceEnsureDefaultGlobal_PreservesCustomGlobal(t *testing.T) {
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("EnsureDefaultGlobal() error = %v", err)
-	}
-	if len(store.versions) != 1 {
-		t.Fatalf("len(store.versions) = %d, want 1", len(store.versions))
-	}
-	if store.versions[0].Name != "custom-global" || !store.versions[0].Active {
-		t.Fatalf("store.versions[0] = %#v, want unchanged active custom global", store.versions[0])
-	}
+	require.NoError(t, err)
+	require.Len(t, store.versions, 1)
+	require.Equal(t, "custom-global", store.versions[0].Name)
+	require.True(t, store.versions[0].Active, "store.versions[0] = %#v, want unchanged active custom global", store.versions[0])
 }
 
 func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *testing.T) {
@@ -610,9 +558,7 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	err = service.EnsureDefaultGlobal(context.Background(), CreateInput{
 		Activate:    true,
@@ -623,20 +569,12 @@ func TestServiceEnsureDefaultGlobal_LoadsPreservedCustomGlobalIntoSnapshot(t *te
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("EnsureDefaultGlobal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != "global-v1" {
-		t.Fatalf("Match().VersionID = %q, want global-v1", policy.VersionID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, "global-v1", policy.VersionID)
 }
 
 func TestServiceEnsureDefaultGlobal_ValidatesBeforeStoreMutation(t *testing.T) {
@@ -644,9 +582,7 @@ func TestServiceEnsureDefaultGlobal_ValidatesBeforeStoreMutation(t *testing.T) {
 		createCalled: make(chan struct{}, 1),
 	}
 	service, err := NewService(store, &previewEmptyCompiler{delegate: NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures())})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	err = service.EnsureDefaultGlobal(context.Background(), CreateInput{
 		Activate:    true,
@@ -657,15 +593,10 @@ func TestServiceEnsureDefaultGlobal_ValidatesBeforeStoreMutation(t *testing.T) {
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err == nil {
-		t.Fatal("EnsureDefaultGlobal() error = nil, want validation error")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("EnsureDefaultGlobal() error = %v, want validation error", err)
-	}
-	if len(store.versions) != 0 {
-		t.Fatalf("len(store.versions) = %d, want 0", len(store.versions))
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
+	require.Empty(t, store.versions)
+
 	select {
 	case <-store.createCalled:
 		t.Fatal("EnsureDefaultGlobal() mutated store before validation")
@@ -718,34 +649,27 @@ func TestServiceRefresh_CompiledChainsFollowChatCompleterSwap(t *testing.T) {
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(guardrailService, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("service.Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	selector := core.NewWorkflowSelector("", "", "/")
 	policy, err := service.Match(selector)
-	if err != nil {
-		t.Fatalf("service.Match() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	// With a response chain the cache key covers every phase, so it differs
 	// from the prompt hash alone.
-	if policy.GuardrailsHash == "" || policy.ChainHashes["prompt"] == policy.GuardrailsHash || policy.ChainHashes["response"] == "" {
-		t.Fatalf("policy hashes = %q / %v", policy.GuardrailsHash, policy.ChainHashes)
-	}
+	require.NotEmpty(t, policy.GuardrailsHash)
+	require.NotEqual(t, policy.GuardrailsHash, policy.ChainHashes["prompt"])
+	require.NotEmpty(t, policy.ChainHashes["response"], "policy hashes = %q / %v", policy.GuardrailsHash, policy.ChainHashes)
+
 	workflow := &core.Workflow{Policy: policy}
 	chains := service.ChainsForWorkflow(workflow)
-	if chains == nil || chains.Prompt.Len() != 1 || chains.Response.Len() != 1 {
-		t.Fatalf("chains = %+v", chains)
-	}
-	if service.ChainsForContext(core.WithWorkflow(context.Background(), workflow)) != chains {
-		t.Fatal("ChainsForContext() differs from ChainsForWorkflow()")
-	}
-	if service.ChainsForWorkflow(&core.Workflow{Policy: &core.ResolvedWorkflowPolicy{VersionID: "missing"}}) != nil {
-		t.Fatal("unknown version should resolve no chains")
-	}
+	require.NotNil(t, chains)
+	require.Equal(t, 1, chains.Prompt.Len())
+	require.Equal(t, 1, chains.Response.Len())
+	require.Equal(t, chains, service.ChainsForContext(core.WithWorkflow(context.Background(), workflow)))
+	require.Nil(t, service.ChainsForWorkflow(&core.Workflow{Policy: &core.ResolvedWorkflowPolicy{VersionID: "missing"}}))
 
 	assertChainRewrite(t, chains.Prompt, "[|---|](PERSON_1)")
 
@@ -815,81 +739,73 @@ func (f guardrailExecutorFunc) ChatCompletion(ctx context.Context, req *core.Cha
 func mustMarshalJSON(t *testing.T, value any) []byte {
 	t.Helper()
 	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return raw
 }
 
 // newGuardrailService builds a guardrails service over the built-in plugins.
+// globalVersionV1 is the active v1 global workflow the service tests start
+// from, with the given feature flags.
+func globalVersionV1(features FeatureFlags) Version {
+	return Version{
+		ID:       "global-v1",
+		Scope:    Scope{},
+		ScopeKey: "global",
+		Version:  1,
+		Active:   true,
+		Name:     "global",
+		Payload:  Payload{SchemaVersion: 1, Features: features},
+	}
+}
+
 func newGuardrailService(t *testing.T, chat plugins.ChatCompleter, definitions ...guardrails.Definition) *guardrails.Service {
 	t.Helper()
 	catalog := plugins.NewCatalog()
 	for _, factory := range builtin.All() {
-		if err := catalog.Register(factory, plugins.SourceBuiltin); err != nil {
-			t.Fatalf("catalog.Register() error = %v", err)
-		}
+		err := catalog.Register(factory, plugins.SourceBuiltin)
+		require.NoError(t, err)
 	}
 	store := &guardrailTestStore{definitions: map[string]guardrails.Definition{}}
 	for _, definition := range definitions {
 		store.definitions[definition.Name] = definition
 	}
 	service, err := guardrails.NewService(store, catalog, plugins.HostDeps{Chat: chat})
-	if err != nil {
-		t.Fatalf("guardrails.NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("guardrailService.Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return service
 }
 
 func assertChainRewrite(t *testing.T, chain *plugins.Chain, want string) {
 	t.Helper()
-	if chain.Empty() {
-		t.Fatal("chain = empty, want a prompt chain")
-	}
+	require.False(t, chain.Empty())
+
 	msg := pluginapi.TextMessage(pluginapi.RoleUser, "John Smith")
 	msg.ID = "m0"
 	prompt := &pluginapi.Prompt{Messages: []pluginapi.Message{msg}}
 	prompt.Reset()
 	x := plugins.NewRequestState().NewExchange(context.Background(), pluginapi.Meta{})
 	x.Prompt = prompt
-	if _, err := chain.RunPrompt(context.Background(), x); err != nil {
-		t.Fatalf("RunPrompt() error = %v", err)
-	}
-	if len(prompt.Messages) != 1 || prompt.Messages[0].Role != pluginapi.RoleUser {
-		t.Fatalf("messages = %+v, want one user message", prompt.Messages)
-	}
-	if got := prompt.Messages[0].Text(); got != want {
-		t.Fatalf("rewritten text = %q, want %q", got, want)
-	}
+	_, err := chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err)
+	require.Len(t, prompt.Messages, 1)
+	require.Equal(t, pluginapi.RoleUser, prompt.Messages[0].Role)
+	got := prompt.Messages[0].Text()
+	require.Equal(t, want, got)
 }
 
 func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	created, err := service.Create(context.Background(), CreateInput{
 		Scope:    Scope{Provider: "openai"},
@@ -900,40 +816,19 @@ func TestServiceCreate_RefreshesSnapshot(t *testing.T) {
 			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if created == nil {
-		t.Fatal("Create() returned nil version")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, created)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != created.ID {
-		t.Fatalf("VersionID = %q, want %q", policy.VersionID, created.ID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, created.ID, policy.VersionID)
 }
 
 func TestServiceListViews_IncludesEffectiveFeatures(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: true}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.WorkflowFeatures{
@@ -942,57 +837,31 @@ func TestServiceListViews_IncludesEffectiveFeatures(t *testing.T) {
 		Usage:      true,
 		Guardrails: false,
 	}))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	views, err := service.ListViews(context.Background())
-	if err != nil {
-		t.Fatalf("ListViews() error = %v", err)
-	}
-	if len(views) != 1 {
-		t.Fatalf("len(views) = %d, want 1", len(views))
-	}
-	if views[0].ScopeType != "global" {
-		t.Fatalf("ScopeType = %q, want global", views[0].ScopeType)
-	}
-	if views[0].EffectiveFeatures.Cache {
-		t.Fatal("EffectiveFeatures.Cache = true, want false")
-	}
-	if views[0].EffectiveFeatures.Guardrails {
-		t.Fatal("EffectiveFeatures.Guardrails = true, want false")
-	}
+	require.NoError(t, err)
+	require.Len(t, views, 1)
+	require.Equal(t, "global", views[0].ScopeType)
+	require.False(t, views[0].EffectiveFeatures.Cache)
+	require.False(t, views[0].EffectiveFeatures.Guardrails)
+
 	rawView, err := json.Marshal(views[0])
-	if err != nil {
-		t.Fatalf("marshal view: %v", err)
-	}
+	require.NoError(t, err)
+
 	var response map[string]any
-	if err := json.Unmarshal(rawView, &response); err != nil {
-		t.Fatalf("unmarshal marshaled view: %v", err)
-	}
-	if _, ok := response["scope_key"]; ok {
-		t.Fatalf("view JSON exposed storage-only scope_key: %s", rawView)
-	}
+	err = json.Unmarshal(rawView, &response)
+	require.NoError(t, err)
+	_, ok := response["scope_key"]
+	require.False(t, ok, "view JSON exposed storage-only scope_key: %s", rawView)
 }
 
 func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -1012,60 +881,27 @@ func TestServiceListViews_AnnotatesCompileFailuresPerRow(t *testing.T) {
 		version:  "provider-v1",
 		err:      errors.New("compile failed for provider-v1"),
 	})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	views, err := service.ListViews(context.Background())
-	if err != nil {
-		t.Fatalf("ListViews() error = %v, want nil", err)
-	}
-	if len(views) != 2 {
-		t.Fatalf("len(views) = %d, want 2", len(views))
-	}
-
-	if views[0].ID != "global-v1" {
-		t.Fatalf("views[0].ID = %q, want global-v1", views[0].ID)
-	}
-	if views[0].CompileError != "" {
-		t.Fatalf("views[0].CompileError = %q, want empty", views[0].CompileError)
-	}
-
-	if views[1].ID != "provider-v1" {
-		t.Fatalf("views[1].ID = %q, want provider-v1", views[1].ID)
-	}
-	if views[1].CompileError != "compile workflow \"provider-v1\": compile failed for provider-v1" {
-		t.Fatalf("views[1].CompileError = %q, want wrapped compile failure", views[1].CompileError)
-	}
-	if views[1].ScopeType != "provider" {
-		t.Fatalf("views[1].ScopeType = %q, want provider", views[1].ScopeType)
-	}
-	if views[1].ScopeDisplay != "openai" {
-		t.Fatalf("views[1].ScopeDisplay = %q, want openai", views[1].ScopeDisplay)
-	}
+	require.NoError(t, err)
+	require.Len(t, views, 2)
+	require.Equal(t, "global-v1", views[0].ID)
+	require.Empty(t, views[0].CompileError)
+	require.Equal(t, "provider-v1", views[1].ID)
+	require.Equal(t, "compile workflow \"provider-v1\": compile failed for provider-v1", views[1].CompileError)
+	require.Equal(t, "provider", views[1].ScopeType)
+	require.Equal(t, "openai", views[1].ScopeDisplay)
 }
 
 func TestViewScopeSpecificity_PathExceedsProvider(t *testing.T) {
-	if got, provider := viewScopeSpecificity("path"), viewScopeSpecificity("provider"); got <= provider {
-		t.Fatalf("viewScopeSpecificity(path) = %d, want > provider specificity %d", got, provider)
-	}
+	require.Greater(t, viewScopeSpecificity("path"), viewScopeSpecificity("provider"))
 }
 
 func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -1081,78 +917,38 @@ func TestServiceDeactivate_RefreshesSnapshot(t *testing.T) {
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-
-	if err := service.Deactivate(context.Background(), "provider-v1"); err != nil {
-		t.Fatalf("Deactivate() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	err = service.Deactivate(context.Background(), "provider-v1")
+	require.NoError(t, err)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != "global-v1" {
-		t.Fatalf("VersionID = %q, want global-v1", policy.VersionID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, "global-v1", policy.VersionID)
 }
 
 func TestServiceDeactivate_RejectsGlobalWorkflow(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	err = service.Deactivate(context.Background(), "global-v1")
-	if err == nil {
-		t.Fatal("Deactivate() error = nil, want validation error")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("Deactivate() error = %v, want validation error", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }
 
 func TestServiceDeactivate_AllowsPathScopedWorkflow(t *testing.T) {
 	store := &staticStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "path-v1",
 				Scope:    Scope{UserPath: "/team/a"},
@@ -1168,36 +964,18 @@ func TestServiceDeactivate_AllowsPathScopedWorkflow(t *testing.T) {
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-
-	if err := service.Deactivate(context.Background(), "path-v1"); err != nil {
-		t.Fatalf("Deactivate() error = %v", err)
-	}
-	if store.versions[1].Active {
-		t.Fatal("path-scoped workflow remained active after deactivation")
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	err = service.Deactivate(context.Background(), "path-v1")
+	require.NoError(t, err)
+	require.False(t, store.versions[1].Active)
 }
 
 func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 	store := &concurrentStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 		},
 		createCalled: make(chan struct{}, 1),
 	}
@@ -1208,12 +986,9 @@ func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 		release:   make(chan struct{}),
 	}
 	service, err := NewService(store, compiler)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	refreshDone := make(chan error, 1)
 	go func() {
@@ -1247,55 +1022,30 @@ func TestServiceCreateWaitsForInFlightRefreshBeforePersisting(t *testing.T) {
 	}
 
 	close(compiler.release)
+	err = <-refreshDone
+	require.NoError(t, err)
 
-	if err := <-refreshDone; err != nil {
-		t.Fatalf("background Refresh() error = %v", err)
-	}
 	result := <-createDone
-	if result.err != nil {
-		t.Fatalf("Create() error = %v", result.err)
-	}
-	if result.version == nil {
-		t.Fatal("Create() returned nil version")
-	}
+	require.NoError(t, result.err)
+	require.NotNil(t, result.version)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != result.version.ID {
-		t.Fatalf("VersionID = %q, want %q", policy.VersionID, result.version.ID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, result.version.ID, policy.VersionID)
 }
 
 func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) {
 	store := &concurrentStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 		},
 		createCalled: make(chan struct{}, 1),
 	}
 	service, err := NewService(store, &previewEmptyCompiler{delegate: NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures())})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	created, err := service.Create(context.Background(), CreateInput{
 		Scope:    Scope{Provider: "openai"},
@@ -1306,18 +1056,11 @@ func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) 
 			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err == nil {
-		t.Fatal("Create() error = nil, want validation error")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("Create() error = %v, want validation error", err)
-	}
-	if err.Error() != "compiled workflow is empty or missing policy" {
-		t.Fatalf("Create() error = %q, want compiled workflow is empty or missing policy", err.Error())
-	}
-	if created != nil {
-		t.Fatalf("Create() version = %#v, want nil", created)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
+	require.Equal(t, "compiled workflow is empty or missing policy", err.Error())
+	require.Nil(t, created)
+
 	select {
 	case <-store.createCalled:
 		t.Fatal("Create() persisted a version even though preview compilation was empty")
@@ -1328,27 +1071,13 @@ func TestServiceCreateRejectsEmptyCompiledPreviewBeforePersisting(t *testing.T) 
 func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *testing.T) {
 	store := &contextCancelingStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	store.cancelOnCreate = cancel
@@ -1362,49 +1091,25 @@ func TestServiceCreateRefreshIgnoresRequestContextCancellationAfterPersist(t *te
 			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if created == nil {
-		t.Fatal("Create() returned nil version")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, created)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != created.ID {
-		t.Fatalf("VersionID = %q, want %q", policy.VersionID, created.ID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, created.ID, policy.VersionID)
 }
 
 func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
 	store := &refreshFailingStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	created, err := service.Create(context.Background(), CreateInput{
 		Scope:    Scope{Provider: "openai"},
@@ -1415,40 +1120,19 @@ func TestServiceCreateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testin
 			Features:      FeatureFlags{Cache: false, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if created == nil {
-		t.Fatal("Create() returned nil version")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, created)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != created.ID {
-		t.Fatalf("VersionID = %q, want %q", policy.VersionID, created.ID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, created.ID, policy.VersionID)
 }
 
 func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t *testing.T) {
 	store := &contextCancelingStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -1464,47 +1148,25 @@ func TestServiceDeactivateRefreshIgnoresRequestContextCancellationAfterPersist(t
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	store.cancelOnDeactivate = cancel
-
-	if err := service.Deactivate(ctx, "provider-v1"); err != nil {
-		t.Fatalf("Deactivate() error = %v", err)
-	}
+	err = service.Deactivate(ctx, "provider-v1")
+	require.NoError(t, err)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != "global-v1" {
-		t.Fatalf("VersionID = %q, want global-v1", policy.VersionID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, "global-v1", policy.VersionID)
 }
 
 func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *testing.T) {
 	store := &refreshFailingStore{
 		versions: []Version{
-			{
-				ID:       "global-v1",
-				Scope:    Scope{},
-				ScopeKey: "global",
-				Version:  1,
-				Active:   true,
-				Name:     "global",
-				Payload: Payload{
-					SchemaVersion: 1,
-					Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
-				},
-			},
+			globalVersionV1(FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false}),
 			{
 				ID:       "provider-v1",
 				Scope:    Scope{Provider: "openai"},
@@ -1520,25 +1182,14 @@ func TestServiceDeactivateReturnsSuccessWhenReloadRefreshFailsAfterPersist(t *te
 		},
 	}
 	service, err := NewService(store, NewCompilerWithFeatureCaps(nil, core.DefaultWorkflowFeatures()))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-
-	if err := service.Deactivate(context.Background(), "provider-v1"); err != nil {
-		t.Fatalf("Deactivate() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	err = service.Deactivate(context.Background(), "provider-v1")
+	require.NoError(t, err)
 
 	policy, err := service.Match(core.NewWorkflowSelector("openai", "gpt-5"))
-	if err != nil {
-		t.Fatalf("Match() error = %v", err)
-	}
-	if policy == nil {
-		t.Fatal("Match() returned nil policy")
-	}
-	if policy.VersionID != "global-v1" {
-		t.Fatalf("VersionID = %q, want global-v1", policy.VersionID)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, policy)
+	require.Equal(t, "global-v1", policy.VersionID)
 }

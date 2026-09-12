@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSlowdownStreamDrainsUpstreamBeforeDelayedRelease(t *testing.T) {
@@ -27,18 +29,14 @@ func TestSlowdownStreamDrainsUpstreamBeforeDelayedRelease(t *testing.T) {
 	// factor 5. The background drainer must still consume the whole source while
 	// the downstream reader is waiting, proving that delayed data is buffered.
 	time.Sleep(60 * time.Millisecond)
-	if reads := source.reads.Load(); reads < 3 {
-		t.Fatalf("source reads after 60ms = %d, want at least 3 (fully drained)", reads)
-	}
+	reads := source.reads.Load()
+	require.GreaterOrEqual(t, reads, int32(3))
 
 	select {
 	case body := <-result:
-		if body != "ab" {
-			t.Fatalf("delayed body = %q, want %q", body, "ab")
-		}
-		if elapsed := time.Since(started); elapsed < 90*time.Millisecond {
-			t.Fatalf("stream completed after %v, want scaled release near 120ms", elapsed)
-		}
+		require.Equal(t, "ab", body)
+		elapsed := time.Since(started)
+		require.GreaterOrEqual(t, elapsed, 90*time.Millisecond)
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timed out waiting for delayed stream")
 	}
@@ -52,9 +50,8 @@ func TestSlowdownStreamReadStopsOnCancellation(t *testing.T) {
 
 	cancel()
 	buf := make([]byte, 8)
-	if _, err := stream.Read(buf); err != context.Canceled {
-		t.Fatalf("Read() error = %v, want context.Canceled", err)
-	}
+	_, err := stream.Read(buf)
+	require.Equal(t, context.Canceled, err)
 }
 
 func TestSlowdownStreamPreservesTerminalError(t *testing.T) {
@@ -76,9 +73,8 @@ func TestSlowdownStreamPreservesTerminalError(t *testing.T) {
 			buf := make([]byte, 8)
 			if tt.firstChunk != "" {
 				n, err := stream.Read(buf)
-				if err != nil || string(buf[:n]) != tt.firstChunk {
-					t.Fatalf("first Read() = (%q, %v), want (%q, nil)", buf[:n], err, tt.firstChunk)
-				}
+				require.NoError(t, err)
+				require.Equal(t, tt.firstChunk, string(buf[:n]), "first Read() err = %v", err)
 			}
 
 			for read := 1; read <= 2; read++ {
@@ -89,9 +85,7 @@ func TestSlowdownStreamPreservesTerminalError(t *testing.T) {
 				}()
 				select {
 				case err := <-result:
-					if !errors.Is(err, tt.wantErr) {
-						t.Fatalf("terminal Read() %d error = %v, want %v", read, err, tt.wantErr)
-					}
+					require.ErrorIs(t, err, tt.wantErr)
 				case <-time.After(time.Second):
 					t.Fatalf("terminal Read() %d blocked", read)
 				}

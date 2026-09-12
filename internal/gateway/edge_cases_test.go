@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -12,6 +11,7 @@ import (
 	batchstore "github.com/enterpilot/gomodel/internal/batch"
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMergeStoredBatchFromUpstreamPreservesGatewayOwnedMetadata(t *testing.T) {
@@ -33,58 +33,51 @@ func TestMergeStoredBatchFromUpstreamPreservesGatewayOwnedMetadata(t *testing.T)
 	}
 
 	MergeStoredBatchFromUpstream(stored, upstream)
-
-	if got := stored.Batch.Metadata["provider"]; got != "openai" {
-		t.Fatalf("provider metadata = %q, want openai", got)
-	}
-	if got := stored.Batch.Metadata["provider_batch_id"]; got != "batch-primary" {
-		t.Fatalf("provider_batch_id metadata = %q, want batch-primary", got)
-	}
-	if got := stored.Batch.Metadata["client"]; got != "upstream" {
-		t.Fatalf("client metadata = %q, want upstream", got)
-	}
+	got := stored.Batch.Metadata["provider"]
+	require.Equal(t, "openai", got)
+	got = stored.Batch.Metadata["provider_batch_id"]
+	require.Equal(t, "batch-primary", got)
+	got = stored.Batch.Metadata["client"]
+	require.Equal(t, "upstream", got)
 }
 
 func TestDetermineBatchExecutionSelectionRejectsNilRequest(t *testing.T) {
 	_, err := DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver(context.Background(), nil, nil, nil, nil, nil)
-	if err == nil {
-		t.Fatal("DetermineBatchExecutionSelectionWithAuthorizerAndInputFileResolver() error = nil, want error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest || gatewayErr.Message != "batch request is required" {
-		t.Fatalf("gateway error = (%s, %q), want invalid batch request", gatewayErr.Type, gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, "batch request is required", gatewayErr.Message)
 }
 
 func TestExtractTokenTotalsOnlySynthesizesAuthoritativeTotals(t *testing.T) {
 	input, output, total, hasUsage, hasTotal := extractTokenTotals(map[string]any{
 		"input_tokens": 10,
 	})
-	if input != 10 || output != 0 || total != 0 || !hasUsage || hasTotal {
-		t.Fatalf("input-only totals = (%d,%d,%d,%t,%t), want (10,0,0,true,false)", input, output, total, hasUsage, hasTotal)
-	}
+	require.Equal(t, 10, input)
+	require.Equal(t, 0, output)
+	require.Equal(t, 0, total)
+	require.True(t, hasUsage)
+	require.False(t, hasTotal)
 
 	input, output, total, hasUsage, hasTotal = extractTokenTotals(map[string]any{
 		"input_tokens":  10,
 		"output_tokens": 5,
 	})
-	if input != 10 || output != 5 || total != 15 || !hasUsage || !hasTotal {
-		t.Fatalf("complete totals = (%d,%d,%d,%t,%t), want (10,5,15,true,true)", input, output, total, hasUsage, hasTotal)
-	}
+	require.Equal(t, 10, input)
+	require.Equal(t, 5, output)
+	require.Equal(t, 15, total)
+	require.True(t, hasUsage)
+	require.True(t, hasTotal)
 }
 
 func TestIntFromFloat64RejectsBoundaryOverflow(t *testing.T) {
 	outOfRange := float64(uint64(1) << (strconv.IntSize - 1))
-	if _, ok := intFromFloat64(outOfRange); ok {
-		t.Fatalf("intFromFloat64(%g) ok = true, want false", outOfRange)
-	}
-	if _, ok := intFromFloat64(1.9); ok {
-		t.Fatal("intFromFloat64(1.9) ok = true, want false")
-	}
+	_, ok := intFromFloat64(outOfRange)
+	require.False(t, ok)
+	_, ok = intFromFloat64(1.9)
+	require.False(t, ok)
 }
 
 func TestCloneRequestsForSelectorCopiesMutableFields(t *testing.T) {
@@ -105,18 +98,12 @@ func TestCloneRequestsForSelectorCopiesMutableFields(t *testing.T) {
 	chatClone.StreamOptions.IncludeUsage = true
 	chatClone.Reasoning.Effort = "high"
 
-	if chatReq.Messages[0].Role != "user" || chatReq.Messages[0].ToolCalls[0].ID != "call-1" {
-		t.Fatalf("chat messages were shared with clone: %#v", chatReq.Messages)
-	}
-	if got := chatReq.Tools[0]["type"]; got != "function" {
-		t.Fatalf("chat tool type = %v, want function", got)
-	}
-	if chatReq.StreamOptions.IncludeUsage {
-		t.Fatal("chat StreamOptions shared with clone")
-	}
-	if chatReq.Reasoning.Effort != "low" {
-		t.Fatalf("chat Reasoning effort = %q, want low", chatReq.Reasoning.Effort)
-	}
+	require.Equal(t, "user", chatReq.Messages[0].Role)
+	require.Equal(t, "call-1", chatReq.Messages[0].ToolCalls[0].ID, "chat messages were shared with clone: %#v", chatReq.Messages)
+	got := chatReq.Tools[0]["type"]
+	require.Equal(t, "function", got)
+	require.False(t, chatReq.StreamOptions.IncludeUsage)
+	require.Equal(t, "low", chatReq.Reasoning.Effort)
 
 	responsesReq := &core.ResponsesRequest{
 		Model:         "alias",
@@ -132,19 +119,12 @@ func TestCloneRequestsForSelectorCopiesMutableFields(t *testing.T) {
 	responsesClone.Metadata["client"] = "clone"
 	responsesClone.StreamOptions.IncludeUsage = true
 	responsesClone.Reasoning.Effort = "high"
+	got = responsesReq.Tools[0]["type"]
+	require.Equal(t, "function", got)
 
-	if got := responsesReq.Tools[0]["type"]; got != "function" {
-		t.Fatalf("responses tool type = %v, want function", got)
-	}
-	if got := responsesReq.Metadata["client"]; got != "original" {
-		t.Fatalf("responses metadata = %q, want original", got)
-	}
-	if responsesReq.StreamOptions.IncludeUsage {
-		t.Fatal("responses StreamOptions shared with clone")
-	}
-	if responsesReq.Reasoning.Effort != "low" {
-		t.Fatalf("responses Reasoning effort = %q, want low", responsesReq.Reasoning.Effort)
-	}
+	require.Equal(t, "original", responsesReq.Metadata["client"])
+	require.False(t, responsesReq.StreamOptions.IncludeUsage)
+	require.Equal(t, "low", responsesReq.Reasoning.Effort)
 }
 
 func TestShouldEnforceReturningUsageDataRequiresEnabledLogger(t *testing.T) {
@@ -157,60 +137,42 @@ func TestShouldEnforceReturningUsageDataRequiresEnabledLogger(t *testing.T) {
 		},
 	})
 
-	if orchestrator.ShouldEnforceReturningUsageData() {
-		t.Fatal("ShouldEnforceReturningUsageData() = true, want false when usage logging is disabled")
-	}
+	require.False(t, orchestrator.ShouldEnforceReturningUsageData())
 }
 
 func TestStreamResponsesRejectsNilRequest(t *testing.T) {
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: &providerTypeResolverStub{}})
 
 	_, err := orchestrator.StreamResponses(context.Background(), nil, nil)
-	if err == nil {
-		t.Fatal("StreamResponses() error = nil, want invalid request error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("gateway error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 }
 
 func TestDispatchChatCompletionRejectsEmptyProviderResponse(t *testing.T) {
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: &providerTypeResolverStub{}})
 
 	_, _, err := orchestrator.DispatchChatCompletion(context.Background(), nil, &core.ChatRequest{Model: "gpt-4o-mini"})
-	if err == nil {
-		t.Fatal("DispatchChatCompletion() error = nil, want provider error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
-		t.Fatalf("gateway error = (%s, %d), want provider 502", gatewayErr.Type, gatewayErr.HTTPStatusCode())
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+	require.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
 }
 
 func TestStreamResponsesRejectsEmptyProviderStream(t *testing.T) {
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: &providerTypeResolverStub{}})
 
 	_, err := orchestrator.StreamResponses(context.Background(), nil, &core.ResponsesRequest{Model: "gpt-4o-mini"})
-	if err == nil {
-		t.Fatal("StreamResponses() error = nil, want provider error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
-		t.Fatalf("gateway error = (%s, %d), want provider 502", gatewayErr.Type, gatewayErr.HTTPStatusCode())
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+	require.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
 }
 
 func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
@@ -244,20 +206,14 @@ func TestStreamResponsesFallsBackAfterEmptyPrimaryStream(t *testing.T) {
 	}
 
 	result, err := orchestrator.StreamResponses(context.Background(), workflow, &core.ResponsesRequest{Model: "primary"})
-	if err != nil {
-		t.Fatalf("StreamResponses() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer result.Stream.Close()
 
-	if !result.Meta.UsedFailover {
-		t.Fatal("UsedFailover = false, want true")
-	}
-	if result.Meta.FailoverModel != "openai/fallback" {
-		t.Fatalf("FailoverModel = %q, want openai/fallback", result.Meta.FailoverModel)
-	}
-	if got := strings.Join(provider.responseStreamCalls, ","); got != "primary,fallback" {
-		t.Fatalf("response stream calls = %q, want primary,fallback", got)
-	}
+	require.True(t, result.Meta.UsedFailover)
+	require.Equal(t, "openai/fallback", result.Meta.FailoverModel)
+	got := strings.Join(provider.responseStreamCalls, ",")
+	require.Equal(t, "primary,fallback", got)
 }
 
 type failoverResolverFunc func(*core.RequestModelResolution, core.Operation) []core.ModelSelector

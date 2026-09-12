@@ -2,11 +2,12 @@ package workflows
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The two migration cases below start from table shapes long-lived
@@ -17,7 +18,7 @@ import (
 func TestNewSQLStore_SkipsExistingScopeUserPathMigration(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE workflow_versions (
 				id TEXT PRIMARY KEY,
 				scope_provider TEXT,
@@ -31,20 +32,17 @@ func TestNewSQLStore_SkipsExistingScopeUserPathMigration(t *testing.T) {
 				workflow_payload `+sqlx.TypeJSON+` NOT NULL,
 				workflow_hash TEXT NOT NULL,
 				created_at `+sqlx.TypeInt64+` NOT NULL
-			)`); err != nil {
-			t.Fatalf("create workflow_versions table: %v", err)
-		}
-
-		if _, err := NewSQLStore(ctx, db); err != nil {
-			t.Fatalf("NewSQLStore() error = %v", err)
-		}
+			)`)
+		require.NoError(t, err)
+		_, err = NewSQLStore(ctx, db)
+		require.NoError(t, err)
 	})
 }
 
 func TestNewSQLStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE workflow_versions (
 				id TEXT PRIMARY KEY,
 				scope_provider TEXT,
@@ -57,14 +55,11 @@ func TestNewSQLStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 				workflow_payload `+sqlx.TypeJSON+` NOT NULL,
 				workflow_hash TEXT NOT NULL,
 				created_at `+sqlx.TypeInt64+` NOT NULL
-			)`); err != nil {
-			t.Fatalf("create workflow_versions table: %v", err)
-		}
+			)`)
+		require.NoError(t, err)
 
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore() error = %v", err)
-		}
+		require.NoError(t, err)
 
 		// Round-tripping a user-path scope proves the column arrived.
 		created, err := store.Create(ctx, CreateInput{
@@ -73,16 +68,11 @@ func TestNewSQLStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 			Payload:  testWorkflowPayload(),
 			Activate: true,
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.Scope.UserPath != "/team/alpha" {
-			t.Errorf("Scope.UserPath = %q, want /team/alpha", got.Scope.UserPath)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "/team/alpha", got.Scope.UserPath)
 	})
 }
 
@@ -90,36 +80,26 @@ func TestSQLStoreCreateAllocatesVersionsAndDeactivatesPrevious(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
 
 		first, err := store.Create(ctx, CreateInput{
 			Name: "first", Payload: testWorkflowPayload(), Activate: true,
 		})
-		if err != nil {
-			t.Fatalf("Create(first): %v", err)
-		}
+		require.NoError(t, err)
+
 		second, err := store.Create(ctx, CreateInput{
 			Name: "second", Payload: testWorkflowPayload(), Activate: true,
 		})
-		if err != nil {
-			t.Fatalf("Create(second): %v", err)
-		}
-
-		if first.Version != 1 || second.Version != 2 {
-			t.Errorf("versions = %d, %d; want 1, 2", first.Version, second.Version)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, 1, first.Version)
+		assert.Equal(t, 2, second.Version)
 
 		// Activating a new version must retire the previous one: the unique
 		// partial index allows only one active row per scope.
 		active, err := store.ListActive(ctx)
-		if err != nil {
-			t.Fatalf("ListActive: %v", err)
-		}
-		if len(active) != 1 || active[0].ID != second.ID {
-			t.Fatalf("active = %d rows, want only the second version", len(active))
-		}
+		require.NoError(t, err)
+		require.Len(t, active, 1)
+		require.Equal(t, second.ID, active[0].ID)
 	})
 }
 
@@ -127,31 +107,21 @@ func TestSQLStoreDeactivate(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
 
 		created, err := store.Create(ctx, CreateInput{
 			Name: "only", Payload: testWorkflowPayload(), Activate: true,
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		if err := store.Deactivate(ctx, created.ID); err != nil {
-			t.Fatalf("Deactivate: %v", err)
-		}
+		require.NoError(t, err)
+		err = store.Deactivate(ctx, created.ID)
+		require.NoError(t, err)
 		// Deactivating twice reports not-found rather than silently succeeding.
-		if err := store.Deactivate(ctx, created.ID); !errors.Is(err, ErrNotFound) {
-			t.Errorf("second Deactivate = %v, want ErrNotFound", err)
-		}
+		err = store.Deactivate(ctx, created.ID)
+		assert.ErrorIs(t, err, ErrNotFound)
 
 		active, err := store.ListActive(ctx)
-		if err != nil {
-			t.Fatalf("ListActive: %v", err)
-		}
-		if len(active) != 0 {
-			t.Errorf("active = %d rows, want 0", len(active))
-		}
+		require.NoError(t, err)
+		assert.Empty(t, active)
 	})
 }
 
@@ -159,9 +129,7 @@ func TestSQLStoreEnsureManagedDefaultGlobalIsIdempotent(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
 
 		input := CreateInput{
 			Name:        ManagedDefaultGlobalName,
@@ -171,30 +139,19 @@ func TestSQLStoreEnsureManagedDefaultGlobalIsIdempotent(t *testing.T) {
 			Activate:    true,
 		}
 		created, err := store.EnsureManagedDefaultGlobal(ctx, input, "hash-1")
-		if err != nil {
-			t.Fatalf("first EnsureManagedDefaultGlobal: %v", err)
-		}
-		if created == nil {
-			t.Fatal("first call published nothing, want a version")
-		}
+		require.NoError(t, err)
+		require.NotNil(t, created)
 
 		// Same hash: nothing new is published on the next start.
 		again, err := store.EnsureManagedDefaultGlobal(ctx, input, "hash-1")
-		if err != nil {
-			t.Fatalf("second EnsureManagedDefaultGlobal: %v", err)
-		}
-		if again != nil {
-			t.Errorf("second call published version %d, want no-op", again.Version)
-		}
+		require.NoError(t, err)
+		assert.Nil(t, again)
 
 		// A changed hash publishes a new version and retires the old one.
 		updated, err := store.EnsureManagedDefaultGlobal(ctx, input, "hash-2")
-		if err != nil {
-			t.Fatalf("third EnsureManagedDefaultGlobal: %v", err)
-		}
-		if updated == nil || updated.Version != 2 {
-			t.Fatalf("third call = %+v, want version 2", updated)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		require.Equal(t, 2, updated.Version)
 	})
 }
 
@@ -202,16 +159,12 @@ func TestSQLStoreEnsureManagedDefaultGlobalLeavesOperatorVersionAlone(t *testing
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
 
 		operator, err := store.Create(ctx, CreateInput{
 			Name: "operator authored", Payload: testWorkflowPayload(), Activate: true,
 		})
-		if err != nil {
-			t.Fatalf("Create: %v", err)
-		}
+		require.NoError(t, err)
 
 		published, err := store.EnsureManagedDefaultGlobal(ctx, CreateInput{
 			Name:        ManagedDefaultGlobalName,
@@ -220,20 +173,13 @@ func TestSQLStoreEnsureManagedDefaultGlobalLeavesOperatorVersionAlone(t *testing
 			Managed:     true,
 			Activate:    true,
 		}, "hash-1")
-		if err != nil {
-			t.Fatalf("EnsureManagedDefaultGlobal: %v", err)
-		}
-		if published != nil {
-			t.Errorf("published over an operator-authored version: %+v", published)
-		}
+		require.NoError(t, err)
+		assert.Nil(t, published)
 
 		active, err := store.ListActive(ctx)
-		if err != nil {
-			t.Fatalf("ListActive: %v", err)
-		}
-		if len(active) != 1 || active[0].ID != operator.ID {
-			t.Errorf("active version changed, want the operator's to survive")
-		}
+		require.NoError(t, err)
+		assert.Len(t, active, 1)
+		assert.Equal(t, operator.ID, active[0].ID)
 	})
 }
 
@@ -257,7 +203,7 @@ func TestNewSQLStoreConvertsTimestamptzCreatedAt(t *testing.T) {
 			t.Skip("timestamptz column only ever existed on PostgreSQL")
 		}
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE workflow_versions (
 				id TEXT PRIMARY KEY,
 				scope_provider TEXT,
@@ -272,9 +218,9 @@ func TestNewSQLStoreConvertsTimestamptzCreatedAt(t *testing.T) {
 				workflow_payload JSONB NOT NULL,
 				workflow_hash TEXT NOT NULL,
 				created_at TIMESTAMPTZ NOT NULL
-			)`); err != nil {
-			t.Fatalf("create legacy table: %v", err)
-		}
+			)`)
+		require.NoError(t, err)
+
 		// The fractional row is the interesting one: a plain
 		// EXTRACT(EPOCH ...)::bigint rounds, which would push .6 seconds a
 		// whole second into the future and disagree with the truncation every
@@ -290,30 +236,25 @@ func TestNewSQLStoreConvertsTimestamptzCreatedAt(t *testing.T) {
 			{"legacy-frac-down", "groq", 1700000000.4, 1700000000},
 		}
 		for _, row := range seeded {
-			if _, err := db.Exec(ctx, `
+			_, err := db.Exec(ctx, `
 				INSERT INTO workflow_versions (
 					id, scope_key, version, active, managed_default, name,
 					workflow_payload, workflow_hash, created_at
 				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, to_timestamp(?))
 			`, row.id, row.scope, 1, true, false, "legacy",
-				`{"schema_version":1}`, "hash-"+row.id, row.epoch); err != nil {
-				t.Fatalf("seed legacy row %s: %v", row.id, err)
-			}
+				`{"schema_version":1}`, "hash-"+row.id, row.epoch)
+			require.NoError(t, err, "seed legacy row %s: %v", row.id, err)
 		}
 
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		for _, row := range seeded {
 			got, err := store.Get(ctx, row.id)
-			if err != nil {
-				t.Fatalf("Get %s: %v", row.id, err)
-			}
+			require.NoError(t, err, "Get %s: %v", row.id, err)
+
 			// The instant must survive the conversion, not just the column type.
-			if got.CreatedAt.Unix() != row.wantSec {
-				t.Errorf("%s CreatedAt = %d, want %d", row.id, got.CreatedAt.Unix(), row.wantSec)
-			}
+			assert.Equal(t, row.wantSec, got.CreatedAt.Unix(), "%s CreatedAt", row.id)
 		}
 	})
 }
