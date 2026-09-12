@@ -32,7 +32,7 @@ func TestFromResponsesResponse(t *testing.T) {
 	require.Equal(t, "tool_calls", c.Choices[0].FinishReason)
 
 	parts := c.Choices[0].Message.Parts
-	assert.Len(t, parts, 4)
+	require.Len(t, parts, 4)
 	assert.Equal(t, pluginapi.PartReasoning, parts[0].Kind)
 	assert.Equal(t, "thinking", parts[0].Text)
 	assert.Equal(t, "hello", parts[1].Text)
@@ -102,7 +102,7 @@ func TestApplyToResponsesResponseReplaceWithoutMessageItem(t *testing.T) {
 
 	applied, err := ApplyToResponsesResponse(resp, c)
 	require.NoError(t, err)
-	assert.Len(t, applied.Output, 2)
+	require.Len(t, applied.Output, 2)
 	assert.Equal(t, "message", applied.Output[1].Type)
 	assert.Equal(t, "blocked", applied.Output[1].Content[0].Text)
 	assert.True(t, strings.HasPrefix(applied.Output[1].ID, "msg_"))
@@ -117,18 +117,18 @@ func TestCompletionToResponsesResponse(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, "m", resp.Model)
 	assert.NotEqual(t, int64(0), resp.CreatedAt, "envelope = %+v", resp)
-	assert.Len(t, resp.Output, 2)
+	require.Len(t, resp.Output, 2)
 	assert.Equal(t, "message", resp.Output[0].Type)
 	assert.Equal(t, "nope", resp.Output[0].Content[0].Text)
 	assert.Equal(t, "function_call", resp.Output[1].Type)
 	assert.Equal(t, `{"a":1}`, resp.Output[1].Arguments)
-	assert.NotNil(t, resp.Usage)
+	require.NotNil(t, resp.Usage)
 	assert.Equal(t, 0, resp.Usage.TotalTokens)
 	_, err := json.Marshal(resp)
 	assert.NoError(t, err)
 
 	empty := CompletionToResponsesResponse(nil, "m")
-	assert.Len(t, empty.Output, 1)
+	require.Len(t, empty.Output, 1)
 	assert.Equal(t, "message", empty.Output[0].Type)
 }
 

@@ -33,7 +33,7 @@ func TestFromChatResponse(t *testing.T) {
 	require.Len(t, c.Choices, 1)
 
 	parts := c.Choices[0].Message.Parts
-	assert.Len(t, parts, 3)
+	require.Len(t, parts, 3)
 	assert.Equal(t, pluginapi.PartReasoning, parts[0].Kind)
 	assert.Equal(t, "think", parts[0].Text)
 	assert.Equal(t, "hello world", parts[1].Text)
@@ -101,7 +101,7 @@ func TestCompletionToChatResponse(t *testing.T) {
 	assert.Equal(t, "chat.completion", resp.Object)
 	assert.Equal(t, "m", resp.Model)
 	assert.NotEqual(t, int64(0), resp.Created, "envelope = %+v", resp)
-	assert.Len(t, resp.Choices, 1)
+	require.Len(t, resp.Choices, 1)
 	assert.Equal(t, "nope", resp.Choices[0].Message.Content)
 	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
 	assert.Equal(t, "assistant", resp.Choices[0].Message.Role)

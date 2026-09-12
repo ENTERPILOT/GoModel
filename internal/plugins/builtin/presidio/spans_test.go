@@ -30,7 +30,7 @@ func TestByteSpans(t *testing.T) {
 	assert.Equal(t, "<DATE_TIME>ë 😀 <PERSON>", out)
 	// One offset per code point, allocated for the 9 runes, not the 13 bytes.
 	o := runeOffsets(text)
-	assert.Len(t, o, 9)
+	require.Len(t, o, 9)
 	assert.Equal(t, 9, cap(o))
 	assert.Equal(t, 5, o[4])
 	assert.Equal(t, 12, o[8])

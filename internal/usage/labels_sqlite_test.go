@@ -116,7 +116,7 @@ func TestSQLiteGetUsageByLabel(t *testing.T) {
 	assert.Equal(t, int64(150), alpha.InputTokens)
 	assert.Equal(t, int64(15), alpha.OutputTokens)
 	assert.Equal(t, int64(165), alpha.TotalTokens, "alpha aggregates = %+v, want requests 2, input 150, output 15, total 165", alpha)
-	assert.NotNil(t, alpha.TotalCost)
+	require.NotNil(t, alpha.TotalCost)
 	assert.Equal(t, 0.3, *alpha.TotalCost)
 
 	prod := result[1]
@@ -146,14 +146,14 @@ func TestSQLiteAggregatesRespectDataFilters(t *testing.T) {
 	// Model filter narrows the by-model breakdown to that model's rows.
 	models, err = reader.GetUsageByModel(ctx, UsageQueryParams{Model: "gpt-5"})
 	require.NoError(t, err)
-	assert.Len(t, models, 1)
+	require.Len(t, models, 1)
 	assert.Equal(t, "gpt-5", models[0].Model)
 	assert.Equal(t, int64(1100), models[0].InputTokens)
 
 	// Provider filter narrows the by-label breakdown to that provider's labels.
 	labels, err := reader.GetUsageByLabel(ctx, UsageQueryParams{Provider: "anthropic"})
 	require.NoError(t, err)
-	assert.Len(t, labels, 1)
+	require.Len(t, labels, 1)
 	assert.Equal(t, "alpha", labels[0].Label)
 	assert.Equal(t, 1, labels[0].Requests)
 }

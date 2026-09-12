@@ -268,7 +268,7 @@ func TestOnPromptAnonymizes(t *testing.T) {
 	req := a.requests[0]
 	assert.Equal(t, "en", req.Language)
 	assert.Equal(t, []string{"PERSON", "EMAIL_ADDRESS"}, req.Entities)
-	assert.NotNil(t, req.ScoreThreshold)
+	require.NotNil(t, req.ScoreThreshold)
 	assert.Equal(t, 0.3, *req.ScoreThreshold)
 	assert.Equal(t, []string{"ACME"}, req.AllowList)
 	assert.Equal(t, "test-request", req.CorrelationID)
