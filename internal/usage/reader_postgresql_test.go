@@ -88,7 +88,7 @@ func TestScanPostgreSQLUsageLogEntries_CarriesRewriteSavings(t *testing.T) {
 
 	saved := entries[0]
 	assert.Equal(t, int64(89), saved.RewriteTokensSaved)
-	assert.NotNil(t, saved.RewriteCostSaved)
+	require.NotNil(t, saved.RewriteCostSaved)
 	assert.Equal(t, cost, *saved.RewriteCostSaved)
 
 	plain := entries[1]

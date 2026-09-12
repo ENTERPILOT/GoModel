@@ -169,10 +169,10 @@ func TestApplyToResponsesResponseToolArguments(t *testing.T) {
 				msg = &applied.Output[i]
 			}
 		}
-		assert.NotNil(t, call)
+		require.NotNil(t, call)
 		assert.Equal(t, `{"a":2}`, call.Arguments)
-		assert.NotNil(t, msg)
-		assert.Len(t, msg.Content, 1)
+		require.NotNil(t, msg)
+		require.Len(t, msg.Content, 1)
 		assert.Equal(t, "[x]", msg.Content[0].Text, "%s first: %+v", first, applied.Output)
 	}
 }

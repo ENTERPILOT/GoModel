@@ -159,7 +159,7 @@ func TestNilHeadersAndValues(t *testing.T) {
 	d, err := p.OnResponse(context.Background(), x)
 	require.NoError(t, err)
 	require.Equal(t, pluginapi.ActionAllow, d.Action)
-	assert.NotNil(t, x.Headers)
+	require.NotNil(t, x.Headers)
 	assert.Equal(t, "1", x.Headers.Request.Get("X-A"))
 	assert.Equal(t, "2", x.Headers.Response.Get("X-B"))
 	assert.Equal(t, "3", x.Headers.Upstream.Get("X-C"))
