@@ -72,6 +72,6 @@ func TestClampTemperature_PositiveTemperature(t *testing.T) {
 	temp := 0.7
 	req := &core.ChatRequest{Model: "MiniMax-M3", Temperature: &temp}
 	result := clampTemperature(req)
-	require.Equal(t, req, result)
+	require.Same(t, req, result)
 	assert.Equal(t, 0.7, *result.Temperature)
 }

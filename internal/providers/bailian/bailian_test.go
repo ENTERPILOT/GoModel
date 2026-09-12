@@ -173,7 +173,7 @@ func TestAdaptBailianRequest_PreservesOtherFields(t *testing.T) {
 	}
 	r, err := adaptChatRequest(req)
 	require.NoError(t, err)
-	assert.NotEqual(t, req, r)
+	assert.NotSame(t, req, r)
 	assert.Equal(t, "qwen3-max", r.Model)
 	assert.Nil(t, r.MaxTokens)
 }
@@ -191,7 +191,7 @@ func TestAdaptBailianRequest_RespectsExistingMaxCompletionTokens(t *testing.T) {
 	}
 	r, err := adaptChatRequest(req)
 	require.NoError(t, err)
-	assert.NotEqual(t, req, r)
+	assert.NotSame(t, req, r)
 	assert.Nil(t, r.MaxTokens)
 
 	body, err := json.Marshal(r)

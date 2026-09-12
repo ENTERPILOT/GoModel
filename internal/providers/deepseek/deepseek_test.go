@@ -94,7 +94,7 @@ func TestAdaptChatRequest_DoesNotPadWithoutTools(t *testing.T) {
 
 	adapted, err := adaptChatRequest(req)
 	require.NoError(t, err)
-	assert.Equal(t, req, adapted)
+	assert.Same(t, req, adapted)
 	assert.Nil(t, adapted.Messages[0].ExtraFields.Lookup("reasoning_content"))
 }
 
