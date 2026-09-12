@@ -372,7 +372,7 @@ func TestStoreAfter_CacheableFollowerStoresAfterNonCacheableLeader(t *testing.T)
 		t.Fatalf("follower error: %v", err)
 	}
 	m.wg.Wait()
-	key := hashRequest("/v1/chat/completions", body, nil)
+	key := hashRequest("/v1/chat/completions", body, nil, "")
 	if cached, err := store.Get(context.Background(), key); err != nil || len(cached) == 0 {
 		t.Fatalf("cached follower response = %q, err=%v", cached, err)
 	}
@@ -426,8 +426,8 @@ func TestHashRequest_CanonicalizesJSONFormattingAndKeyOrder(t *testing.T) {
 		{name: "oversized number before duplicate names", first: `{"n":1e1000000,"model":"a","model":"b"}`, second: `{"n":1e1000000,"model":"b"}`, equal: false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			first := hashRequest("/v1/embeddings", []byte(tt.first), plan)
-			second := hashRequest("/v1/embeddings", []byte(tt.second), plan)
+			first := hashRequest("/v1/embeddings", []byte(tt.first), plan, "")
+			second := hashRequest("/v1/embeddings", []byte(tt.second), plan, "")
 			if got := first == second; got != tt.equal {
 				t.Fatalf("key equality = %v, want %v: %s / %s", got, tt.equal, first, second)
 			}
@@ -446,8 +446,8 @@ func TestHashRequest_DuplicateNamesDoNotCollideAfterTypedDecoding(t *testing.T) 
 		{path: "/v1/responses", duplicate: `{"model":"a","model":"b","input":[]}`, collapsed: `{"model":"b","input":[]}`},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			first := hashRequest(tt.path, []byte(tt.duplicate), plan)
-			second := hashRequest(tt.path, []byte(tt.collapsed), plan)
+			first := hashRequest(tt.path, []byte(tt.duplicate), plan, "")
+			second := hashRequest(tt.path, []byte(tt.collapsed), plan, "")
 			if first == second {
 				t.Fatal("duplicate-member request collided with its collapsed form")
 			}
@@ -463,13 +463,13 @@ func TestHashRequest_ResolvedModelChangesKey(t *testing.T) {
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-5-nano"},
 		},
-	})
+	}, "")
 	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
 		Resolution: &core.RequestModelResolution{
 			ResolvedSelector: core.ModelSelector{Provider: "anthropic", Model: "claude-opus-4-6"},
 		},
-	})
+	}, "")
 
 	if first == second {
 		t.Fatal("resolved model should affect cache key")
@@ -481,10 +481,10 @@ func TestHashRequest_ModeChangesKey(t *testing.T) {
 
 	first := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModeTranslated,
-	})
+	}, "")
 	second := hashRequest("/v1/chat/completions", body, &core.Workflow{
 		Mode: core.ExecutionModePassthrough,
-	})
+	}, "")
 
 	if first == second {
 		t.Fatal("execution mode should affect cache key")
@@ -502,8 +502,8 @@ func TestHashRequest_StreamIncludeUsageChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", withUsage, plan)
+	first := hashRequest("/v1/chat/completions", base, plan, "")
+	second := hashRequest("/v1/chat/completions", withUsage, plan, "")
 
 	if first == second {
 		t.Fatal("stream_options.include_usage should affect the exact cache key")
@@ -521,8 +521,8 @@ func TestHashRequest_StreamModeChangesKey(t *testing.T) {
 		},
 	}
 
-	first := hashRequest("/v1/chat/completions", base, plan)
-	second := hashRequest("/v1/chat/completions", streaming, plan)
+	first := hashRequest("/v1/chat/completions", base, plan, "")
+	second := hashRequest("/v1/chat/completions", streaming, plan, "")
 
 	if first == second {
 		t.Fatal("stream mode should affect the exact cache key")
@@ -605,6 +605,167 @@ func TestHandleRequest_SeparatesStreamingAndNonStreamingEntries(t *testing.T) {
 	}
 	if callCount != 2 {
 		t.Fatalf("non-streaming exact hit should not call handler again, got %d calls", callCount)
+	}
+}
+
+// driveChainedRequest drives HandleRequest with a guardrail chain identity on
+// the request context, the way the inference orchestrator does for a request
+// whose workflow declares guardrail steps.
+func driveChainedRequest(
+	t *testing.T,
+	mw *ResponseCacheMiddleware,
+	workflow *core.Workflow,
+	chainHash string,
+	body []byte,
+	next func(c *echo.Context) error,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := req.Context()
+	if workflow != nil {
+		ctx = core.WithWorkflow(ctx, workflow)
+	}
+	req = req.WithContext(core.WithGuardrailsHash(ctx, chainHash))
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := mw.HandleRequest(c, body, func() error { return next(c) }); err != nil {
+		t.Fatalf("HandleRequest: %v", err)
+	}
+	return rec
+}
+
+func TestHashRequest_GuardrailChainChangesKey(t *testing.T) {
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+	plan := resolvedWorkflow("openai", "gpt-4")
+
+	none := hashRequest("/v1/chat/completions", body, plan, "")
+	chainA := hashRequest("/v1/chat/completions", body, plan, "chain-a")
+	chainB := hashRequest("/v1/chat/completions", body, plan, "chain-b")
+
+	if none == chainA || chainA == chainB {
+		t.Fatalf("guardrail chain identity must change the exact cache key: %s / %s / %s", none, chainA, chainB)
+	}
+	if chainA != hashRequest("/v1/chat/completions", body, plan, "chain-a") {
+		t.Fatal("exact cache key must be stable for the same chain")
+	}
+}
+
+// A body cached under one guardrail chain must never be replayed to a request
+// whose response/stream chain differs: the replay skips the response phase, so
+// the entry is only valid for the chain that produced it.
+func TestHandleRequest_ExactCacheIsScopedToGuardrailChain(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}`)
+
+	calls := 0
+	next := func(c *echo.Context) error {
+		calls++
+		return c.JSON(http.StatusOK, map[string]string{"result": "unguarded"})
+	}
+
+	if got := driveChainedRequest(t, mw, workflow, "", body, next).Header().Get("X-Cache"); got != "" {
+		t.Fatalf("first request should miss, got X-Cache=%q", got)
+	}
+	mw.simple.wg.Wait()
+
+	// Same request, same (empty) chain: still a hit.
+	if got := driveChainedRequest(t, mw, workflow, "", body, next).Header().Get("X-Cache"); got != "HIT (exact)" {
+		t.Fatalf("unchanged chain should still hit, got X-Cache=%q", got)
+	}
+	if calls != 1 {
+		t.Fatalf("hit should not call the provider again, calls=%d", calls)
+	}
+
+	// A workflow that adds a response-phase guardrail must miss instead of
+	// receiving the body stored before the guardrail existed.
+	guarded := driveChainedRequest(t, mw, workflow, "response-redaction-chain", body, func(c *echo.Context) error {
+		calls++
+		return c.JSON(http.StatusOK, map[string]string{"result": "guarded"})
+	})
+	if got := guarded.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("changed guardrail chain must miss, got X-Cache=%q", got)
+	}
+	if !bytes.Contains(guarded.Body.Bytes(), []byte("guarded")) {
+		t.Fatalf("changed chain served a stale body: %s", guarded.Body.String())
+	}
+	if calls != 2 {
+		t.Fatalf("changed chain should run the full pipeline, calls=%d", calls)
+	}
+	mw.simple.wg.Wait()
+
+	// The guarded entry is its own entry and replays only to its own chain.
+	if got := driveChainedRequest(t, mw, workflow, "response-redaction-chain", body, next).Header().Get("X-Cache"); got != "HIT (exact)" {
+		t.Fatalf("second request on the guarded chain should hit, got X-Cache=%q", got)
+	}
+	if calls != 2 {
+		t.Fatalf("guarded hit should not call the provider again, calls=%d", calls)
+	}
+}
+
+// Two tenants sharing one cache but resolving different workflows must not
+// share entries when their guardrail chains differ, with no config change.
+func TestHandleRequest_ExactCacheIsolatesTenantsWithDifferentChains(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","messages":[{"role":"user","content":"tenant-xtalk"}]}`)
+
+	unguarded := driveChainedRequest(t, mw, workflow, "", body, func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"result": "ECHO"})
+	})
+	if got := unguarded.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("priming request should miss, got X-Cache=%q", got)
+	}
+	mw.simple.wg.Wait()
+
+	rec := driveChainedRequest(t, mw, workflow, "tenant-b-chain", body, func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"result": "GUARDED"})
+	})
+	if got := rec.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("a tenant with its own guardrail chain must not read another tenant's entry, got X-Cache=%q", got)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("GUARDED")) {
+		t.Fatalf("tenant with a response guardrail received an unguarded body: %s", rec.Body.String())
+	}
+}
+
+// A streaming reply cached under one stream chain must not replay to a request
+// whose stream guardrails differ; the SSE replay runs no stream phase.
+func TestHandleRequest_StreamReplayIsScopedToGuardrailChain(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	workflow := resolvedWorkflow("openai", "gpt-4")
+	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	rawStream := []byte(
+		"data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"sk-secret\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-stream\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n",
+	)
+	streamNext := func(c *echo.Context) error {
+		c.Response().Header().Set("Content-Type", "text/event-stream")
+		c.Response().WriteHeader(http.StatusOK)
+		_, err := c.Response().Write(rawStream)
+		return err
+	}
+
+	if got := driveChainedRequest(t, mw, workflow, "", body, streamNext).Header().Get("X-Cache"); got != "" {
+		t.Fatalf("first streaming request should miss, got X-Cache=%q", got)
+	}
+	mw.simple.wg.Wait()
+
+	if got := driveChainedRequest(t, mw, workflow, "", body, streamNext).Header().Get("X-Cache"); got != "HIT (exact)" {
+		t.Fatalf("same stream chain should replay, got X-Cache=%q", got)
+	}
+
+	if got := driveChainedRequest(t, mw, workflow, "stream-mask-chain", body, streamNext).Header().Get("X-Cache"); got != "" {
+		t.Fatalf("a new stream-phase guardrail must invalidate the cached replay, got X-Cache=%q", got)
 	}
 }
 

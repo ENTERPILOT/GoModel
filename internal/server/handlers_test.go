@@ -7365,3 +7365,181 @@ func TestHandleWithCache_ClassifiesStalledClientOnCachedStream(t *testing.T) {
 		t.Fatalf("cache_type = %q, want %q", entry.CacheType, auditlog.CacheTypeExact)
 	}
 }
+
+// guardrailChainWorkflow builds a resolved workflow whose policy carries the
+// given guardrail chain identity (plugins.Chains.CacheHash).
+func guardrailChainWorkflow(chainHash string) *core.Workflow {
+	return &core.Workflow{
+		Mode:         core.ExecutionModeTranslated,
+		ProviderType: "openai",
+		Resolution: &core.RequestModelResolution{
+			ResolvedSelector: core.ModelSelector{Provider: "openai", Model: "gpt-4o-mini"},
+		},
+		Policy: &core.ResolvedWorkflowPolicy{
+			VersionID:      "v-" + chainHash,
+			Features:       core.DefaultWorkflowFeatures(),
+			GuardrailsHash: chainHash,
+		},
+	}
+}
+
+// cacheWriteSignalStore reports each completed cache write so a test can wait
+// for the asynchronous store without shutting the middleware down.
+type cacheWriteSignalStore struct {
+	cache.Store
+	writes chan struct{}
+}
+
+func newCacheWriteSignalStore() *cacheWriteSignalStore {
+	return &cacheWriteSignalStore{Store: cache.NewMapStore(), writes: make(chan struct{}, 16)}
+}
+
+func (s *cacheWriteSignalStore) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	err := s.Store.Set(ctx, key, value, ttl)
+	select {
+	case s.writes <- struct{}{}:
+	default:
+	}
+	return err
+}
+
+func (s *cacheWriteSignalStore) waitForWrite(t *testing.T) {
+	t.Helper()
+	select {
+	case <-s.writes:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the response cache write")
+	}
+}
+
+// driveCachedChatRequest runs handleWithCache the way the translated service
+// does, with the workflow's guardrail chain identity on the request context.
+func driveCachedChatRequest(
+	t *testing.T,
+	s *translatedInferenceService,
+	orchestrator *gateway.InferenceOrchestrator,
+	workflow *core.Workflow,
+	req *core.ChatRequest,
+	body []byte,
+	dispatch func(*echo.Context, *core.ChatRequest, *core.Workflow) error,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	e := echo.New()
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	r = r.WithContext(orchestrator.WithCacheRequestContext(r.Context(), workflow))
+	c := e.NewContext(r, rec)
+	if err := handleWithCache(s, c, req, workflow, dispatch); err != nil {
+		t.Fatalf("handleWithCache: %v", err)
+	}
+	return rec
+}
+
+// TestHandleWithCache_ExactEntryIsScopedToGuardrailChain covers the policy
+// bypass where a cached body produced without a response guardrail was replayed
+// to a request whose workflow declares one. Cache hits skip dispatch, where the
+// response and stream chains run, so an entry may only serve a matching chain.
+func TestHandleWithCache_ExactEntryIsScopedToGuardrailChain(t *testing.T) {
+	store := newCacheWriteSignalStore()
+	mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	defer mw.Close()
+	s := &translatedInferenceService{responseCache: mw}
+	orchestrator := gateway.NewInferenceOrchestrator(gateway.InferenceConfig{})
+
+	req := &core.ChatRequest{Model: "gpt-4o-mini", Messages: []core.Message{{Role: "user", Content: "give me the key"}}}
+	body, err := marshalRequestBody(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	unguarded := guardrailChainWorkflow("")
+	redacting := guardrailChainWorkflow("response-redaction-chain")
+
+	dispatches := 0
+	raw := func(c *echo.Context, _ *core.ChatRequest, _ *core.Workflow) error {
+		dispatches++
+		return c.JSON(http.StatusOK, map[string]string{"answer": "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234"})
+	}
+
+	if got := driveCachedChatRequest(t, s, orchestrator, unguarded, req, body, raw).Header().Get("X-Cache"); got != "" {
+		t.Fatalf("priming request X-Cache = %q, want a miss", got)
+	}
+	store.waitForWrite(t)
+
+	// Same chain: still a hit, and dispatch is skipped.
+	hit := driveCachedChatRequest(t, s, orchestrator, unguarded, req, body, raw)
+	if got := hit.Header().Get("X-Cache"); got != "HIT (exact)" {
+		t.Fatalf("unchanged chain X-Cache = %q, want HIT (exact)", got)
+	}
+	if dispatches != 1 {
+		t.Fatalf("dispatches after the hit = %d, want 1", dispatches)
+	}
+
+	// A workflow with a response-phase redaction step must not be served the
+	// body stored under the unguarded chain.
+	guarded := driveCachedChatRequest(t, s, orchestrator, redacting, req, body, func(c *echo.Context, _ *core.ChatRequest, _ *core.Workflow) error {
+		dispatches++
+		return c.JSON(http.StatusOK, map[string]string{"answer": "[redacted]"})
+	})
+	if got := guarded.Header().Get("X-Cache"); got != "" {
+		t.Fatalf("changed chain X-Cache = %q, want a miss", got)
+	}
+	if dispatches != 2 {
+		t.Fatalf("changed chain must run dispatch, dispatches = %d", dispatches)
+	}
+	if strings.Contains(guarded.Body.String(), "sk-ABCDEFGHIJKLMNOPQRSTUVWX1234") {
+		t.Fatalf("response guardrail was bypassed by the cache: %s", guarded.Body.String())
+	}
+
+	// The guarded miss stores its own entry, which replays only to its chain.
+	store.waitForWrite(t)
+	replay := driveCachedChatRequest(t, s, orchestrator, redacting, req, body, raw)
+	if got := replay.Header().Get("X-Cache"); got != "HIT (exact)" {
+		t.Fatalf("second request on the guarded chain X-Cache = %q, want HIT (exact)", got)
+	}
+	if !strings.Contains(replay.Body.String(), "[redacted]") {
+		t.Fatalf("guarded chain replayed %s, want the guarded body", replay.Body.String())
+	}
+	if dispatches != 2 {
+		t.Fatalf("guarded hit should not dispatch again, dispatches = %d", dispatches)
+	}
+}
+
+// TestHandleWithCache_BlockedResponseIsNotServedFromCache covers a response
+// guardrail that blocks: the blocked response is never stored, so a repeat
+// request runs the chain again instead of replaying a would-be hit.
+func TestHandleWithCache_BlockedResponseIsNotServedFromCache(t *testing.T) {
+	store := cache.NewMapStore()
+	defer store.Close()
+	mw := responsecache.NewResponseCacheMiddlewareWithStore(store, time.Hour)
+	defer mw.Close()
+	s := &translatedInferenceService{responseCache: mw}
+	orchestrator := gateway.NewInferenceOrchestrator(gateway.InferenceConfig{})
+
+	req := &core.ChatRequest{Model: "gpt-4o-mini", Messages: []core.Message{{Role: "user", Content: "blocked"}}}
+	body, err := marshalRequestBody(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	workflow := guardrailChainWorkflow("response-block-chain")
+
+	dispatches := 0
+	blocking := func(c *echo.Context, _ *core.ChatRequest, _ *core.Workflow) error {
+		dispatches++
+		return c.JSON(http.StatusUnavailableForLegalReasons, map[string]string{"error": "blocked by guardrail"})
+	}
+
+	for i := range 2 {
+		rec := driveCachedChatRequest(t, s, orchestrator, workflow, req, body, blocking)
+		if got := rec.Header().Get("X-Cache"); got != "" {
+			t.Fatalf("request %d X-Cache = %q, want no cache hit for a blocked response", i+1, got)
+		}
+		if rec.Code != http.StatusUnavailableForLegalReasons {
+			t.Fatalf("request %d status = %d, want the guardrail block status", i+1, rec.Code)
+		}
+	}
+	if dispatches != 2 {
+		t.Fatalf("dispatches = %d, want the blocking chain to run on every request", dispatches)
+	}
+}
