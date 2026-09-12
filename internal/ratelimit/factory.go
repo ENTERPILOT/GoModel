@@ -111,10 +111,10 @@ func seedConfiguredRules(ctx context.Context, service *Service, cfg config.RateL
 				// model subjects are stored case-folded to match.
 				SubjectDisplay: strings.TrimSpace(subject),
 				PerChild:       perChild || limit.PerChild,
-				PeriodSeconds: seconds,
-				MaxRequests:   limit.MaxRequests,
-				MaxTokens:     limit.MaxTokens,
-				Source:        SourceConfig,
+				PeriodSeconds:  seconds,
+				MaxRequests:    limit.MaxRequests,
+				MaxTokens:      limit.MaxTokens,
+				Source:         SourceConfig,
 			})
 		}
 		return nil

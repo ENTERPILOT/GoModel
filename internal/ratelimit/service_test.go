@@ -191,6 +191,47 @@ func TestSeedConfiguredRulesCarriesPerChild(t *testing.T) {
 	}
 }
 
+// Provider and model subjects are matched case-insensitively, so configuration
+// seeds the folded subject as the key while keeping the configured spelling for
+// listings and breach messages.
+func TestSeedConfiguredRulesKeepsConfiguredSpelling(t *testing.T) {
+	store := &memStore{}
+	service, err := NewService(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewService() failed: %v", err)
+	}
+	limits := []config.RateLimitRuleConfig{{Period: "minute", MaxRequests: new(int64(10))}}
+	err = seedConfiguredRules(context.Background(), service, config.RateLimitsConfig{
+		Providers: []config.RateLimitProviderConfig{{Name: "mockA", Limits: limits}},
+		Models:    []config.RateLimitModelConfig{{Model: "GPT-4.1-Mini", Limits: limits}},
+	})
+	if err != nil {
+		t.Fatalf("seedConfiguredRules() failed: %v", err)
+	}
+
+	bySubject := make(map[string]Rule)
+	for _, rule := range service.Rules() {
+		bySubject[rule.Subject] = rule
+	}
+	if len(bySubject) != 2 {
+		t.Fatalf("seeded rules = %+v, want 2", service.Rules())
+	}
+	provider, ok := bySubject["mocka"]
+	if !ok {
+		t.Fatalf("seeded rules = %+v, want the folded provider subject", service.Rules())
+	}
+	if got := provider.DisplaySubject(); got != "mockA" {
+		t.Fatalf("provider DisplaySubject() = %q, want %q", got, "mockA")
+	}
+	model, ok := bySubject["gpt-4.1-mini"]
+	if !ok {
+		t.Fatalf("seeded rules = %+v, want the folded model subject", service.Rules())
+	}
+	if got := model.DisplaySubject(); got != "GPT-4.1-Mini" {
+		t.Fatalf("model DisplaySubject() = %q, want %q", got, "GPT-4.1-Mini")
+	}
+}
+
 // windowBase is aligned to every supported period, keeping sliding-window
 // math in tests exact.
 var windowBase = time.Unix(1_000_000_200, 0).UTC() // 1_000_000_200 % 600 == 0
