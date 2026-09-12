@@ -18,6 +18,14 @@ func echoRequest() *core.ResponsesRequest {
 	parallel := false
 	store := true
 	return &core.ResponsesRequest{
+		// Members the gateway does not model reach the echo through ExtraFields.
+		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
+			"frequency_penalty": json.RawMessage(`0.5`),
+			"presence_penalty":  json.RawMessage(`0.25`),
+			"max_tool_calls":    json.RawMessage(`4`),
+			"prompt_cache_key":  json.RawMessage(`"key-1"`),
+			"background":        json.RawMessage(`false`),
+		}),
 		Model:             "claude-haiku-4-5",
 		Input:             "hi",
 		Instructions:      "be terse",
@@ -53,7 +61,8 @@ func TestResponsesRequestEcho(t *testing.T) {
 			want: []string{
 				"instructions", "metadata", "tools", "tool_choice", "parallel_tool_calls",
 				"temperature", "top_p", "max_output_tokens", "store", "text", "reasoning",
-				"truncation", "user", "service_tier",
+				"truncation", "user", "service_tier", "frequency_penalty",
+				"presence_penalty", "max_tool_calls", "prompt_cache_key", "background",
 			},
 		},
 	}
@@ -80,6 +89,38 @@ func TestResponsesRequestEchoCanonicalizesTruncation(t *testing.T) {
 
 	if got := string(ResponsesRequestEcho(req)["truncation"]); got != `"disabled"` {
 		t.Fatalf("truncation = %s, want \"disabled\"", got)
+	}
+}
+
+// Members the gateway does not model are decoded onto ExtraFields, and the
+// ones OpenAI repeats on the Response object are echoed from there. Routing
+// hints and anything else the caller sent are not: OpenAI does not echo them.
+func TestResponsesRequestEchoFromDecodedExtraFields(t *testing.T) {
+	body := `{"model":"anthropic/claude-haiku-4-5","input":"hi","stream":false,` +
+		`"frequency_penalty":0.5,"presence_penalty":0.25,"max_tool_calls":4,` +
+		`"prompt_cache_key":"key-1","background":false,"x_client_trace":"t-1"}`
+	var req core.ResponsesRequest
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	echo := ResponsesRequestEcho(&req)
+	want := map[string]string{
+		"frequency_penalty": "0.5",
+		"presence_penalty":  "0.25",
+		"max_tool_calls":    "4",
+		"prompt_cache_key":  `"key-1"`,
+		"background":        "false",
+	}
+	for name, value := range want {
+		if got := string(echo[name]); got != value {
+			t.Errorf("echo[%q] = %s, want %s", name, got, value)
+		}
+	}
+	for _, name := range []string{"x_client_trace", "stream", "model", "input"} {
+		if _, ok := echo[name]; ok {
+			t.Errorf("echo[%q] = %s, want it absent", name, echo[name])
+		}
 	}
 }
 

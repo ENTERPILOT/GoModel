@@ -15,7 +15,22 @@ import (
 //
 // Only what the caller actually supplied is echoed: a default invented here
 // (parallel_tool_calls, store, truncation…) would describe OpenAI's behaviour,
-// not the translated provider's.
+// not the translated provider's. Members the gateway does not model are
+// carried on the request's ExtraFields and echoed through the allowlist below.
+// responsesEchoExtraMembers are Response members OpenAI repeats that the
+// gateway does not model on the request, so a caller-supplied value reaches
+// the echo only through ExtraFields. The list is an allowlist on purpose:
+// routing hints and transport members (provider, stream, …) also land in
+// ExtraFields or on the struct, and OpenAI does not put them on the Response
+// object.
+var responsesEchoExtraMembers = []string{
+	"background",
+	"frequency_penalty",
+	"max_tool_calls",
+	"presence_penalty",
+	"prompt_cache_key",
+}
+
 func ResponsesRequestEcho(req *core.ResponsesRequest) map[string]json.RawMessage {
 	if req == nil {
 		return nil
@@ -73,6 +88,11 @@ func ResponsesRequestEcho(req *core.ResponsesRequest) map[string]json.RawMessage
 	}
 	if req.ServiceTier != "" {
 		add("service_tier", req.ServiceTier)
+	}
+	for _, name := range responsesEchoExtraMembers {
+		if raw := req.ExtraFields.Lookup(name); len(raw) > 0 {
+			echo[name] = core.CloneRawJSON(raw)
+		}
 	}
 
 	if len(echo) == 0 {
