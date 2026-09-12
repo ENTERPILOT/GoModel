@@ -4,98 +4,70 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// sentMessages returns the messages array of the last recorded request.
+func sentMessages(t *testing.T, capture *providertest.Capture) []any {
+	t.Helper()
+	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
+	require.True(t, ok, "request body has no messages array")
+	return messages
+}
+
 func TestChatCompletion_RenamesLegacyReasoningContentOnAssistantMessages(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-vllm",
-			"created":1,
-			"model":"Qwen3.8-27B",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 	var req core.ChatRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"Qwen3.8-27B",
 		"messages":[
 			{"role":"user","content":"what is the median life-expectancy of a cat"},
 			{"role":"assistant","content":"12-15 years","reasoning_content":"the user wants a quick factual answer"},
 			{"role":"user","content":"and a dog's?"}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.ChatCompletion(context.Background(), &req); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	_, err = provider.ChatCompletion(context.Background(), &req)
+	require.NoError(t, err)
 
-	messages, _ := gotBody["messages"].([]any)
+	messages := sentMessages(t, capture)
+	require.Len(t, messages, 3)
 	assistantMsg, _ := messages[1].(map[string]any)
-	if assistantMsg["reasoning"] != "the user wants a quick factual answer" {
-		t.Fatalf("reasoning = %#v, want the replayed reasoning_content value", assistantMsg["reasoning"])
-	}
-	if _, present := assistantMsg["reasoning_content"]; present {
-		t.Fatal("reasoning_content should be renamed away, not duplicated alongside reasoning")
-	}
-	if req.Messages[1].ExtraFields.Lookup("reasoning") != nil {
-		t.Fatal("ChatCompletion() mutated the caller's request")
-	}
+	assert.Equal(t, "the user wants a quick factual answer", assistantMsg["reasoning"])
+	assert.NotContains(t, assistantMsg, "reasoning_content")
+	assert.Nil(t, req.Messages[1].ExtraFields.Lookup("reasoning"), "caller's request must not be mutated")
 }
 
 func TestChatCompletion_DoesNotOverrideExistingReasoningField(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-vllm",
-			"created":1,
-			"model":"Qwen3.8-27B",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 	var req core.ChatRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"Qwen3.8-27B",
 		"messages":[
 			{"role":"assistant","content":"12-15 years","reasoning":"current field","reasoning_content":"stale legacy value"}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	provider := NewWithHTTPClient("", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.ChatCompletion(context.Background(), &req); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	_, err = provider.ChatCompletion(context.Background(), &req)
+	require.NoError(t, err)
 
-	messages, _ := gotBody["messages"].([]any)
+	messages := sentMessages(t, capture)
+	require.Len(t, messages, 1)
 	assistantMsg, _ := messages[0].(map[string]any)
-	if assistantMsg["reasoning"] != "current field" {
-		t.Fatalf("reasoning = %#v, want the untouched current-field value", assistantMsg["reasoning"])
-	}
+	assert.Equal(t, "current field", assistantMsg["reasoning"])
 }
 
 func TestAdaptChatRequest_NoOpWithoutLegacyReasoningContent(t *testing.T) {
@@ -104,12 +76,8 @@ func TestAdaptChatRequest_NoOpWithoutLegacyReasoningContent(t *testing.T) {
 	}
 
 	adapted, err := adaptChatRequest(req)
-	if err != nil {
-		t.Fatalf("adaptChatRequest() error = %v", err)
-	}
-	if adapted != req {
-		t.Fatal("adaptChatRequest() copied a request it didn't need to change")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, req, adapted)
 }
 
 func TestAdaptChatRequest_IgnoresNonAssistantMessages(t *testing.T) {
@@ -121,22 +89,14 @@ func TestAdaptChatRequest_IgnoresNonAssistantMessages(t *testing.T) {
 	})
 
 	adapted, err := adaptChatRequest(req)
-	if err != nil {
-		t.Fatalf("adaptChatRequest() error = %v", err)
-	}
-	if adapted != req {
-		t.Fatal("adaptChatRequest() should not adapt non-assistant messages")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, req, adapted)
 }
 
 func TestAdaptChatRequest_NilRequest(t *testing.T) {
 	adapted, err := adaptChatRequest(nil)
-	if err != nil {
-		t.Fatalf("adaptChatRequest(nil) error = %v", err)
-	}
-	if adapted != nil {
-		t.Fatal("adaptChatRequest(nil) should return nil")
-	}
+	require.NoError(t, err)
+	assert.Nil(t, adapted)
 }
 
 // TestChatCompletion_AppliesAdaptChatRequestThroughStandardConstructor covers
@@ -145,46 +105,26 @@ func TestAdaptChatRequest_NilRequest(t *testing.T) {
 // provider via NewWithHTTPClient, which would not catch AdaptChatRequest
 // being wired into one constructor but not the other.
 func TestChatCompletion_AppliesAdaptChatRequestThroughStandardConstructor(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-vllm",
-			"created":1,
-			"model":"Qwen3.8-27B",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 	var req core.ChatRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"Qwen3.8-27B",
 		"messages":[
 			{"role":"assistant","content":"12-15 years","reasoning_content":"prior turn reasoning"}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	provider, ok := New(providers.ProviderConfig{BaseURL: server.URL}, providers.ProviderOptions{}).(*Provider)
-	if !ok {
-		t.Fatal("New() did not return a *Provider")
-	}
+	require.True(t, ok)
+	_, err = provider.ChatCompletion(context.Background(), &req)
+	require.NoError(t, err)
 
-	if _, err := provider.ChatCompletion(context.Background(), &req); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-
-	messages, _ := gotBody["messages"].([]any)
+	messages := sentMessages(t, capture)
+	require.Len(t, messages, 1)
 	assistantMsg, _ := messages[0].(map[string]any)
-	if assistantMsg["reasoning"] != "prior turn reasoning" {
-		t.Fatalf("reasoning = %#v, want AdaptChatRequest applied through New()", assistantMsg["reasoning"])
-	}
+	assert.Equal(t, "prior turn reasoning", assistantMsg["reasoning"])
 }
 
 // TestAdaptChatRequest_SkipsMalformedReasoningContentWithoutError documents
@@ -205,10 +145,6 @@ func TestAdaptChatRequest_SkipsMalformedReasoningContentWithoutError(t *testing.
 	})
 
 	adapted, err := adaptChatRequest(req)
-	if err != nil {
-		t.Fatalf("adaptChatRequest() error = %v, want nil (malformed value is silently skipped)", err)
-	}
-	if adapted != req {
-		t.Fatal("adaptChatRequest() should not have adapted a message whose reasoning_content failed to decode")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, req, adapted)
 }

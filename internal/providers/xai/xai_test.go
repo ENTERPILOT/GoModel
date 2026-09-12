@@ -2,37 +2,42 @@ package xai
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
-	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestNew(t *testing.T) {
-	apiKey := "test-api-key"
-	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
+const testAPIKey = "test-api-key"
 
-	if got := provider.keys.Primary(); got != apiKey {
-		t.Errorf("primary key = %q, want %q", got, apiKey)
-	}
-	if provider.compat == nil {
-		t.Error("compat should not be nil")
-	}
+// newTestProvider builds a provider pointed at baseURL with the default client.
+func newTestProvider(baseURL string) *Provider {
+	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+	provider.SetBaseURL(baseURL)
+	return provider
 }
 
-func TestNew_ReturnsProvider(t *testing.T) {
-	provider := New(providers.ProviderConfig{APIKey: "test-api-key"}, providers.ProviderOptions{})
+// statusServer answers every request with status and body, so a table can
+// drive success and error cases through the same recorder.
+func statusServer(t *testing.T, status int, body string) (string, *providertest.Capture) {
+	t.Helper()
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	})
+	return server.URL, capture
+}
 
-	if provider == nil {
-		t.Error("provider should not be nil")
-	}
+// blockUntilCancelled never answers, so a cancelled context is the only way out.
+func blockUntilCancelled(w http.ResponseWriter, r *http.Request) {
+	<-r.Context().Done()
+	w.WriteHeader(http.StatusRequestTimeout)
 }
 
 // customHeaderRoundTripper is a RoundTripper that injects a custom header
@@ -47,33 +52,11 @@ func (c *customHeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	return c.transport.RoundTrip(req)
 }
 
-func TestNewWithHTTPClient(t *testing.T) {
+func TestNewWithHTTPClient_UsesCustomClient(t *testing.T) {
 	const customHeaderKey = "X-Custom-Test-Header"
 	const customHeaderVal = "custom-test-value"
 
-	var receivedHeader string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Capture the custom header to verify custom client was used
-		receivedHeader = r.Header.Get(customHeaderKey)
-
-		// Return a valid chat completion response
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "grok-2",
-			"choices": [{
-				"index": 0,
-				"message": {"role": "assistant", "content": "Hello!"},
-				"finish_reason": "stop"
-			}],
-			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	// Create a custom HTTP client with a RoundTripper that injects a header
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 	customClient := &http.Client{
 		Transport: &customHeaderRoundTripper{
 			transport: http.DefaultTransport,
@@ -81,74 +64,22 @@ func TestNewWithHTTPClient(t *testing.T) {
 			headerVal: customHeaderVal,
 		},
 	}
-
-	// Create provider with custom HTTP client
-	provider := NewWithHTTPClient("test-api-key", customClient, llmclient.Hooks{})
-
-	// Verify provider is non-nil
-	if provider == nil {
-		t.Fatal("provider should not be nil")
-		return
-	}
-	if provider.compat == nil {
-		t.Fatal("provider.compat should not be nil")
-	}
-	if got := provider.keys.Primary(); got != "test-api-key" {
-		t.Errorf("primary key = %q, want %q", got, "test-api-key")
-	}
-
-	// Set base URL to our test server
+	provider := NewWithHTTPClient(testAPIKey, customClient, llmclient.Hooks{})
+	assert.Equal(t, testAPIKey, provider.keys.Primary())
 	provider.SetBaseURL(server.URL)
 
-	// Make a request to verify custom client is wired correctly
-	req := &core.ChatRequest{
-		Model: "grok-2",
-		Messages: []core.Message{
-			{Role: "user", Content: "Hello"},
-		},
-	}
-
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Verify response is valid (server was hit)
-	if resp == nil {
-		t.Fatal("response should not be nil")
-	}
-	if resp.ID != "chatcmpl-123" {
-		t.Errorf("response ID = %q, want %q", resp.ID, "chatcmpl-123")
-	}
-
-	// Verify the custom header was injected by our custom RoundTripper
-	if receivedHeader != customHeaderVal {
-		t.Errorf("custom header = %q, want %q (custom HTTP client not wired correctly)", receivedHeader, customHeaderVal)
-	}
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "chatcmpl-test", resp.ID)
+	assert.Equal(t, customHeaderVal, capture.Last(t).Header.Get(customHeaderKey))
 }
 
 func TestChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
-	var receivedConvID string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedConvID = r.Header.Get(grokConvIDHeader)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "grok-2",
-			"choices": [{
-				"index": 0,
-				"message": {"role": "assistant", "content": "Hello!"},
-				"finish_reason": "stop"
-			}],
-			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := newTestProvider(server.URL)
 
 	ctx := core.WithRequestSnapshot(context.Background(), core.NewRequestSnapshot(
 		http.MethodPost,
@@ -163,50 +94,22 @@ func TestChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
 		nil,
 	))
 	_, err := provider.ChatCompletion(ctx, &core.ChatRequest{
-		Model: "grok-2",
-		Messages: []core.Message{
-			{Role: "user", Content: "Hello"},
-		},
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if receivedConvID != "client-conv-123" {
-		t.Fatalf("%s = %q, want client-conv-123", grokConvIDHeader, receivedConvID)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "client-conv-123", capture.Last(t).Header.Get(grokConvIDHeader))
 }
 
 func TestChatCompletion_GeneratesStableXGrokConvIDWhenMissing(t *testing.T) {
-	var receivedConvIDs []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedConvIDs = append(receivedConvIDs, r.Header.Get(grokConvIDHeader))
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "grok-2",
-			"choices": [{
-				"index": 0,
-				"message": {"role": "assistant", "content": "Hello!"},
-				"finish_reason": "stop"
-			}],
-			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := newTestProvider(server.URL)
 
 	initialMessages := []core.Message{
 		{Role: "system", Content: "Reply with the requested marker only."},
 		{Role: "user", Content: "Use this fixed reference text for the cache anchor."},
 	}
-	req1 := &core.ChatRequest{
-		Model:    "grok-2",
-		Messages: initialMessages,
-	}
+	req1 := &core.ChatRequest{Model: "grok-2", Messages: initialMessages}
 	req2 := &core.ChatRequest{
 		Model: "grok-2",
 		Messages: append(append([]core.Message{}, initialMessages...),
@@ -214,38 +117,21 @@ func TestChatCompletion_GeneratesStableXGrokConvIDWhenMissing(t *testing.T) {
 			core.Message{Role: "user", Content: "Now reply with marker two."},
 		),
 	}
+	_, err := provider.ChatCompletion(context.Background(), req1)
+	require.NoError(t, err)
+	_, err = provider.ChatCompletion(context.Background(), req2)
+	require.NoError(t, err)
 
-	if _, err := provider.ChatCompletion(context.Background(), req1); err != nil {
-		t.Fatalf("first ChatCompletion() error = %v", err)
-	}
-	if _, err := provider.ChatCompletion(context.Background(), req2); err != nil {
-		t.Fatalf("second ChatCompletion() error = %v", err)
-	}
-	if len(receivedConvIDs) != 2 {
-		t.Fatalf("received %d requests, want 2", len(receivedConvIDs))
-	}
-	if receivedConvIDs[0] == "" {
-		t.Fatal("first generated x-grok-conv-id is empty")
-	}
-	if !strings.HasPrefix(receivedConvIDs[0], "gomodel-") {
-		t.Fatalf("generated x-grok-conv-id = %q, want gomodel-*", receivedConvIDs[0])
-	}
-	if receivedConvIDs[1] != receivedConvIDs[0] {
-		t.Fatalf("generated x-grok-conv-id changed across appended conversation: %q then %q", receivedConvIDs[0], receivedConvIDs[1])
-	}
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	first := requests[0].Header.Get(grokConvIDHeader)
+	assert.True(t, strings.HasPrefix(first, "gomodel-"), "generated x-grok-conv-id = %q, want gomodel-*", first)
+	assert.Equal(t, first, requests[1].Header.Get(grokConvIDHeader))
 }
 
 func TestStreamChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
-	var receivedConvID string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedConvID = r.Header.Get(grokConvIDHeader)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, capture := providertest.SSEServer(t, "data: [DONE]\n\n")
+	provider := newTestProvider(server.URL)
 
 	ctx := core.WithRequestSnapshot(context.Background(), core.NewRequestSnapshot(
 		http.MethodPost,
@@ -260,18 +146,12 @@ func TestStreamChatCompletion_ForwardsXGrokConvIDFromSnapshot(t *testing.T) {
 		nil,
 	))
 	body, err := provider.StreamChatCompletion(ctx, &core.ChatRequest{
-		Model: "grok-2",
-		Messages: []core.Message{
-			{Role: "user", Content: "Hello"},
-		},
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
 	})
-	if err != nil {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer func() { _ = body.Close() }()
-	if receivedConvID != "stream-conv-123" {
-		t.Fatalf("%s = %q, want stream-conv-123", grokConvIDHeader, receivedConvID)
-	}
+	assert.Equal(t, "stream-conv-123", capture.Last(t).Header.Get(grokConvIDHeader))
 }
 
 func TestChatCompletion(t *testing.T) {
@@ -304,29 +184,14 @@ func TestChatCompletion(t *testing.T) {
 					"total_tokens": 30
 				}
 			}`,
-			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ChatResponse) {
-				if resp.ID != "chatcmpl-123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "chatcmpl-123")
-				}
-				if resp.Model != "grok-2" {
-					t.Errorf("Model = %q, want %q", resp.Model, "grok-2")
-				}
-				if len(resp.Choices) != 1 {
-					t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))
-				}
-				if resp.Choices[0].Message.Content != "Hello! How can I help you today?" {
-					t.Errorf("Message content = %q, want %q", resp.Choices[0].Message.Content, "Hello! How can I help you today?")
-				}
-				if resp.Usage.PromptTokens != 10 {
-					t.Errorf("PromptTokens = %d, want 10", resp.Usage.PromptTokens)
-				}
-				if resp.Usage.CompletionTokens != 20 {
-					t.Errorf("CompletionTokens = %d, want 20", resp.Usage.CompletionTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "chatcmpl-123", resp.ID)
+				assert.Equal(t, "grok-2", resp.Model)
+				require.Len(t, resp.Choices, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Choices[0].Message.Content)
+				assert.Equal(t, 10, resp.Usage.PromptTokens)
+				assert.Equal(t, 20, resp.Usage.CompletionTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -351,55 +216,25 @@ func TestChatCompletion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
+			baseURL, capture := statusServer(t, tt.statusCode, tt.responseBody)
+			provider := newTestProvider(baseURL)
 
-				// Verify request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
+			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "grok-2",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
+			})
 
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
-
-			req := &core.ChatRequest{
-				Model: "grok-2",
-				Messages: []core.Message{
-					{Role: "user", Content: "Hello"},
-				},
-			}
-
-			resp, err := provider.ChatCompletion(context.Background(), req)
+			req := capture.Last(t)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "Bearer "+testAPIKey, req.Header.Get("Authorization"))
+			assert.Equal(t, "grok-2", req.JSON(t)["model"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
@@ -416,24 +251,8 @@ func TestResponsesDropsMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var body map[string]any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				raw, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Errorf("read body: %v", err)
-					return
-				}
-				if err := json.Unmarshal(raw, &body); err != nil {
-					t.Errorf("unmarshal body: %v", err)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed"}`))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"resp_1","object":"response","status":"completed"}`)
+			provider := newTestProvider(server.URL)
 
 			req := &core.ResponsesRequest{Model: "grok-4.3", Metadata: tt.metadata}
 			var err error
@@ -446,14 +265,10 @@ func TestResponsesDropsMetadata(t *testing.T) {
 			} else {
 				_, err = provider.Responses(context.Background(), req)
 			}
-			if err != nil {
-				t.Fatalf("responses: %v", err)
-			}
-			if _, ok := body["metadata"]; ok {
-				t.Errorf("outbound body carries metadata: %v", body["metadata"])
-			}
-			if len(tt.metadata) > 0 && req.Metadata == nil {
-				t.Error("caller request was mutated; metadata must survive for the client echo")
+			require.NoError(t, err)
+			assert.NotContains(t, capture.Last(t).JSON(t), "metadata")
+			if len(tt.metadata) > 0 {
+				assert.NotNil(t, req.Metadata, "caller request was mutated; metadata must survive for the client echo")
 			}
 		})
 	}
@@ -475,7 +290,6 @@ data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288
 
 data: [DONE]
 `,
-			expectedError: false,
 		},
 		{
 			name:          "API error",
@@ -487,68 +301,30 @@ data: [DONE]
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
+			baseURL, capture := statusServer(t, tt.statusCode, tt.responseBody)
+			provider := newTestProvider(baseURL)
 
-				// Verify stream is set in request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
+			body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "grok-2",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
+			})
 
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
-
-			req := &core.ChatRequest{
-				Model: "grok-2",
-				Messages: []core.Message{
-					{Role: "user", Content: "Hello"},
-				},
-			}
-
-			body, err := provider.StreamChatCompletion(context.Background(), req)
+			req := capture.Last(t)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "Bearer "+testAPIKey, req.Header.Get("Authorization"))
+			assert.Equal(t, true, req.JSON(t)["stream"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
-				defer func() { _ = body.Close() }()
-
-				// Read and verify the streaming response
-				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
-				if string(respBody) != tt.responseBody {
-					t.Errorf("response body = %q, want %q", string(respBody), tt.responseBody)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			require.NotNil(t, body)
+			defer func() { _ = body.Close() }()
+
+			respBody, err := io.ReadAll(body)
+			require.NoError(t, err)
+			assert.Equal(t, tt.responseBody, string(respBody))
 		})
 	}
 }
@@ -581,20 +357,11 @@ func TestListModels(t *testing.T) {
 					}
 				]
 			}`,
-			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ModelsResponse) {
-				if resp.Object != "list" {
-					t.Errorf("Object = %q, want %q", resp.Object, "list")
-				}
-				if len(resp.Data) != 2 {
-					t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
-				}
-				if resp.Data[0].ID != "grok-2" {
-					t.Errorf("Data[0].ID = %q, want %q", resp.Data[0].ID, "grok-2")
-				}
-				if resp.Data[0].OwnedBy != "xai" {
-					t.Errorf("Data[0].OwnedBy = %q, want %q", resp.Data[0].OwnedBy, "xai")
-				}
+				assert.Equal(t, "list", resp.Object)
+				require.Len(t, resp.Data, 2)
+				assert.Equal(t, "grok-2", resp.Data[0].ID)
+				assert.Equal(t, "xai", resp.Data[0].OwnedBy)
 			},
 		},
 		{
@@ -607,72 +374,38 @@ func TestListModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request method and path
-				if r.Method != http.MethodGet {
-					t.Errorf("Method = %q, want %q", r.Method, http.MethodGet)
-				}
-				if r.URL.Path != "/models" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/models")
-				}
-
-				// Verify authorization header
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			baseURL, capture := statusServer(t, tt.statusCode, tt.responseBody)
+			provider := newTestProvider(baseURL)
 
 			resp, err := provider.ListModels(context.Background())
 
+			req := capture.Last(t)
+			assert.Equal(t, http.MethodGet, req.Method)
+			assert.Equal(t, "/models", req.Path)
+			assert.Equal(t, "Bearer "+testAPIKey, req.Header.Get("Authorization"))
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
 
 func TestChatCompletionWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate a slow response
-		<-r.Context().Done()
-		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, _ := providertest.Server(t, blockUntilCancelled)
+	provider := newTestProvider(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	req := &core.ChatRequest{
-		Model: "grok-2",
-		Messages: []core.Message{
-			{Role: "user", Content: "Hello"},
-		},
-	}
-
-	_, err := provider.ChatCompletion(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	_, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "grok-2",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
+	})
+	assert.Error(t, err)
 }
 
 func TestResponses(t *testing.T) {
@@ -708,41 +441,18 @@ func TestResponses(t *testing.T) {
 					"total_tokens": 30
 				}
 			}`,
-			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ResponsesResponse) {
-				if resp.ID != "resp_123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "resp_123")
-				}
-				if resp.Object != "response" {
-					t.Errorf("Object = %q, want %q", resp.Object, "response")
-				}
-				if resp.Model != "grok-2" {
-					t.Errorf("Model = %q, want %q", resp.Model, "grok-2")
-				}
-				if resp.Status != "completed" {
-					t.Errorf("Status = %q, want %q", resp.Status, "completed")
-				}
-				if len(resp.Output) != 1 {
-					t.Fatalf("len(Output) = %d, want 1", len(resp.Output))
-				}
-				if len(resp.Output[0].Content) != 1 {
-					t.Fatalf("len(Output[0].Content) = %d, want 1", len(resp.Output[0].Content))
-				}
-				if resp.Output[0].Content[0].Text != "Hello! How can I help you today?" {
-					t.Errorf("Output text = %q, want %q", resp.Output[0].Content[0].Text, "Hello! How can I help you today?")
-				}
-				if resp.Usage == nil {
-					t.Fatal("Usage should not be nil")
-				}
-				if resp.Usage.InputTokens != 10 {
-					t.Errorf("InputTokens = %d, want 10", resp.Usage.InputTokens)
-				}
-				if resp.Usage.OutputTokens != 20 {
-					t.Errorf("OutputTokens = %d, want 20", resp.Usage.OutputTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "resp_123", resp.ID)
+				assert.Equal(t, "response", resp.Object)
+				assert.Equal(t, "grok-2", resp.Model)
+				assert.Equal(t, "completed", resp.Status)
+				require.Len(t, resp.Output, 1)
+				require.Len(t, resp.Output[0].Content, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Output[0].Content[0].Text)
+				require.NotNil(t, resp.Usage)
+				assert.Equal(t, 10, resp.Usage.InputTokens)
+				assert.Equal(t, 20, resp.Usage.OutputTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -767,58 +477,26 @@ func TestResponses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
+			baseURL, capture := statusServer(t, tt.statusCode, tt.responseBody)
+			provider := newTestProvider(baseURL)
 
-				// Verify request path
-				if r.URL.Path != "/responses" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/responses")
-				}
-
-				// Verify request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ResponsesRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
-
-			req := &core.ResponsesRequest{
+			resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 				Model: "grok-2",
 				Input: "Hello",
-			}
+			})
 
-			resp, err := provider.Responses(context.Background(), req)
+			req := capture.Last(t)
+			assert.Equal(t, "/responses", req.Path)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "Bearer "+testAPIKey, req.Header.Get("Authorization"))
+			assert.Equal(t, "grok-2", req.JSON(t)["model"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
@@ -846,29 +524,16 @@ data: {"type":"response.output_text.delta","delta":"!"}
 event: response.completed
 data: {"type":"response.completed","response":{"id":"resp_123","object":"response","status":"completed","model":"grok-2"}}
 `,
-			expectedError: false,
 			checkStream: func(t *testing.T, body io.ReadCloser) {
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
+				require.NotNil(t, body)
 				defer func() { _ = body.Close() }()
 
-				// Read and verify the streaming response
 				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
-
+				require.NoError(t, err)
 				responseStr := string(respBody)
-				if !strings.Contains(responseStr, "response.created") {
-					t.Error("response should contain response.created event")
-				}
-				if !strings.Contains(responseStr, "response.output_text.delta") {
-					t.Error("response should contain response.output_text.delta event")
-				}
-				if !strings.Contains(responseStr, "[DONE]") {
-					t.Error("response should end with [DONE]")
-				}
+				assert.Contains(t, responseStr, "response.created")
+				assert.Contains(t, responseStr, "response.output_text.delta")
+				assert.Contains(t, responseStr, "[DONE]")
 			},
 		},
 		{
@@ -887,161 +552,70 @@ data: {"type":"response.completed","response":{"id":"resp_123","object":"respons
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
+			baseURL, capture := statusServer(t, tt.statusCode, tt.responseBody)
+			provider := newTestProvider(baseURL)
 
-				// Verify request path
-				if r.URL.Path != "/responses" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/responses")
-				}
-
-				// Verify stream is set in request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ResponsesRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
-
-			req := &core.ResponsesRequest{
+			body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 				Model: "grok-2",
 				Input: "Hello",
-			}
+			})
 
-			body, err := provider.StreamResponses(context.Background(), req)
+			req := capture.Last(t)
+			assert.Equal(t, "/responses", req.Path)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "Bearer "+testAPIKey, req.Header.Get("Authorization"))
+			assert.Equal(t, true, req.JSON(t)["stream"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkStream != nil {
-					tt.checkStream(t, body)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkStream(t, body)
 		})
 	}
 }
 
 func TestResponsesWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate a slow response
-		<-r.Context().Done()
-		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, _ := providertest.Server(t, blockUntilCancelled)
+	provider := newTestProvider(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	req := &core.ResponsesRequest{
-		Model: "grok-2",
-		Input: "Hello",
-	}
-
-	_, err := provider.Responses(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	_, err := provider.Responses(ctx, &core.ResponsesRequest{Model: "grok-2", Input: "Hello"})
+	assert.Error(t, err)
 }
 
 func TestChatCompletion_MapsReasoningToXAIReasoningEffort(t *testing.T) {
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-xai",
-			"created":1677652288,
-			"model":"grok-4.5",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := newTestProvider(server.URL)
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:     "grok-4.5",
 		Messages:  []core.Message{{Role: "user", Content: "hi"}},
 		Reasoning: &core.Reasoning{Effort: "medium"},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if gotBody["reasoning"] != nil {
-		t.Fatalf("request body should not include nested reasoning, got %#v", gotBody["reasoning"])
-	}
-	if gotBody["reasoning_effort"] != "medium" {
-		t.Fatalf("reasoning_effort = %#v, want medium", gotBody["reasoning_effort"])
-	}
+	require.NoError(t, err)
+
+	sent := capture.Last(t).JSON(t)
+	assert.NotContains(t, sent, "reasoning")
+	assert.Equal(t, "medium", sent["reasoning_effort"])
 }
 
 func TestChatCompletion_OmitsReasoningEffortWhenReasoningAbsent(t *testing.T) {
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-xai",
-			"created":1677652288,
-			"model":"grok-4.5",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := newTestProvider(server.URL)
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "grok-4.5",
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if _, ok := gotBody["reasoning_effort"]; ok {
-		t.Fatalf("reasoning_effort should be absent, got %#v", gotBody["reasoning_effort"])
-	}
-	if _, ok := gotBody["reasoning"]; ok {
-		t.Fatalf("reasoning should be absent, got %#v", gotBody["reasoning"])
-	}
+	require.NoError(t, err)
+
+	sent := capture.Last(t).JSON(t)
+	assert.NotContains(t, sent, "reasoning_effort")
+	assert.NotContains(t, sent, "reasoning")
 }
 
 func TestNormalizeReasoningEffort(t *testing.T) {
@@ -1073,9 +647,7 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		{"grok-4.5", "custom-level", "custom-level"},
 	}
 	for _, tt := range tests {
-		if got := normalizeReasoningEffort(tt.model, tt.effort); got != tt.want {
-			t.Errorf("normalizeReasoningEffort(%q, %q) = %q, want %q", tt.model, tt.effort, got, tt.want)
-		}
+		assert.Equal(t, tt.want, normalizeReasoningEffort(tt.model, tt.effort), "normalizeReasoningEffort(%q, %q)", tt.model, tt.effort)
 	}
 }
 
@@ -1098,41 +670,23 @@ func TestChatCompletion_DropsReasoningEffortForModelsThatRejectIt(t *testing.T) 
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotBody map[string]any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-					http.Error(w, "decode error", http.StatusBadRequest)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"c1","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+			provider := newTestProvider(server.URL)
 
 			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:     tt.model,
 				Messages:  []core.Message{{Role: "user", Content: "hi"}},
 				Reasoning: &core.Reasoning{Effort: tt.effort},
 			})
-			if err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
-			if _, ok := gotBody["reasoning"]; ok {
-				t.Errorf("request body includes nested reasoning: %#v", gotBody["reasoning"])
-			}
-			got, ok := gotBody["reasoning_effort"]
+			require.NoError(t, err)
+
+			sent := capture.Last(t).JSON(t)
+			assert.NotContains(t, sent, "reasoning")
 			if tt.wantEffort == "" {
-				if ok {
-					t.Errorf("reasoning_effort = %#v, want absent", got)
-				}
+				assert.NotContains(t, sent, "reasoning_effort")
 				return
 			}
-			if got != tt.wantEffort {
-				t.Errorf("reasoning_effort = %#v, want %q", got, tt.wantEffort)
-			}
+			assert.Equal(t, tt.wantEffort, sent["reasoning_effort"])
 		})
 	}
 }
@@ -1140,34 +694,19 @@ func TestChatCompletion_DropsReasoningEffortForModelsThatRejectIt(t *testing.T) 
 func TestChatCompletion_DropsEmptyReasoningObject(t *testing.T) {
 	for _, effort := range []string{"", " \t "} {
 		t.Run("effort="+effort, func(t *testing.T) {
-			var gotBody map[string]any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-					http.Error(w, "decode error", http.StatusBadRequest)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"c1","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+			provider := newTestProvider(server.URL)
 
 			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:     "grok-4.5",
 				Messages:  []core.Message{{Role: "user", Content: "hi"}},
 				Reasoning: &core.Reasoning{Effort: effort},
 			})
-			if err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
-			if _, ok := gotBody["reasoning"]; ok {
-				t.Errorf("reasoning should be absent, got %#v", gotBody["reasoning"])
-			}
-			if _, ok := gotBody["reasoning_effort"]; ok {
-				t.Errorf("reasoning_effort should be absent, got %#v", gotBody["reasoning_effort"])
-			}
+			require.NoError(t, err)
+
+			sent := capture.Last(t).JSON(t)
+			assert.NotContains(t, sent, "reasoning")
+			assert.NotContains(t, sent, "reasoning_effort")
 		})
 	}
 }
