@@ -1387,7 +1387,7 @@ func TestChatCompletion_UsesIngressFrameForDecoding(t *testing.T) {
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.NotNil(t, env.CachedChatRequest())
-	require.Equal(t, provider.capturedChatReq, env.CachedChatRequest())
+	require.Same(t, provider.capturedChatReq, env.CachedChatRequest())
 }
 
 func TestChatCompletion_NormalizesSemanticSelectorHints(t *testing.T) {
@@ -1675,7 +1675,7 @@ func TestResponses_UsesIngressFrameForDecoding(t *testing.T) {
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.NotNil(t, env.CachedResponsesRequest())
-	require.Equal(t, provider.capturedResponsesReq, env.CachedResponsesRequest())
+	require.Same(t, provider.capturedResponsesReq, env.CachedResponsesRequest())
 }
 
 func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
@@ -1719,7 +1719,7 @@ func TestEmbeddings_UsesIngressFrameForDecoding(t *testing.T) {
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.NotNil(t, env.CachedEmbeddingRequest())
-	require.Equal(t, provider.capturedEmbeddingReq, env.CachedEmbeddingRequest())
+	require.Same(t, provider.capturedEmbeddingReq, env.CachedEmbeddingRequest())
 }
 
 func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
@@ -1775,7 +1775,7 @@ func TestBatches_UsesIngressFrameForDecoding(t *testing.T) {
 	env := core.GetWhiteBoxPrompt(c.Request().Context())
 	require.NotNil(t, env)
 	require.NotNil(t, env.CachedBatchRequest())
-	require.Equal(t, mock.capturedBatchReq, env.CachedBatchRequest())
+	require.Same(t, mock.capturedBatchReq, env.CachedBatchRequest())
 }
 
 func TestGetBatch_UsesSemanticEnvelopeRouteMetadata(t *testing.T) {
