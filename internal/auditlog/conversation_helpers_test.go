@@ -347,7 +347,7 @@ func TestBuildConversationThreadReturnsPartialOnDeadline(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.True(t, result.Truncated)
-		assert.Len(t, result.Entries, 1)
+		require.Len(t, result.Entries, 1)
 		assert.Equal(t, "log-2", result.Entries[0].ID)
 	})
 

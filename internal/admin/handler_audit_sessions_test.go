@@ -72,7 +72,7 @@ func TestAuditSessions_Success(t *testing.T) {
 	require.Equal(t, 2, result.Total)
 	require.Len(t, result.Sessions, 2)
 	assert.Equal(t, 6, result.Sessions[0].RequestCount)
-	assert.NotNil(t, result.Sessions[0].Latest)
+	require.NotNil(t, result.Sessions[0].Latest)
 	assert.Equal(t, "log-3", result.Sessions[0].Latest.ID)
 	assert.Equal(t, 1, result.Sessions[1].RequestCount, "singleton thread")
 }
