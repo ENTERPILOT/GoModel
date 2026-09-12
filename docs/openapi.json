@@ -11003,6 +11003,14 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "Which requests to count: uncached (default, provider-bound only), cached (local response-cache hits only), or all",
+            "name": "cache_mode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

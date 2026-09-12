@@ -322,6 +322,33 @@ func TestUsageStatusMasterKeyUsesHeaderPath(t *testing.T) {
 	}
 }
 
+func TestUsageStatusCacheMode(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   string
+	}{
+		{name: "absent leaves the reader default", target: "/v1/usage", want: ""},
+		{name: "cached", target: "/v1/usage?cache_mode=cached", want: "cached"},
+		{name: "all", target: "/v1/usage?cache_mode=all", want: "all"},
+		{name: "surrounding whitespace is trimmed", target: "/v1/usage?cache_mode=%20all%20", want: "all"},
+		{name: "unknown value reaches the reader, which defaults it", target: "/v1/usage?cache_mode=bogus", want: "bogus"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			summarizer := &fakeUsageSummarizer{summary: &usage.UsageSummary{}}
+			rec, _ := getUsageStatus(t, &Config{UsageSummarizer: summarizer}, tc.target, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if summarizer.gotParams.CacheMode != tc.want {
+				t.Fatalf("cache_mode = %q, want %q", summarizer.gotParams.CacheMode, tc.want)
+			}
+		})
+	}
+}
+
 func TestUsageStatusWithoutDependenciesReturnsEmptyStatus(t *testing.T) {
 	rec, body := getUsageStatus(t, &Config{}, "/v1/usage", nil)
 	if rec.Code != http.StatusOK {
