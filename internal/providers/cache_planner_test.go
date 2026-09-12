@@ -123,14 +123,14 @@ func TestCachePlannerHonorsMinimumAndClientDirective(t *testing.T) {
 	planner := &cachePlanner{enabled: true}
 	short := &core.ChatRequest{Messages: []core.Message{{Role: "system", Content: "short"}, {Role: "user", Content: "turn"}}}
 	got := planner.planChat(short, "openai", core.ModelSelector{Model: "gpt-5.6"})
-	require.Equal(t, short, got)
+	require.Same(t, short, got)
 
 	directed := &core.ChatRequest{
 		Messages:    []core.Message{{Role: "system", Content: strings.Repeat("x", 9000)}, {Role: "user", Content: "turn"}},
 		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"prompt_cache_key": json.RawMessage(`"client"`)}),
 	}
 	got = planner.planChat(directed, "openai", core.ModelSelector{Model: "gpt-5.6"})
-	require.Equal(t, directed, got)
+	require.Same(t, directed, got)
 }
 
 func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
@@ -188,7 +188,7 @@ func TestCachePlannerResponsesShapesAndCallerOwnership(t *testing.T) {
 		{Role: "user", Content: "short"}, {Role: "user", Content: "dynamic"},
 	}}
 	got = planner.planResponses(short, "openai", core.ModelSelector{Model: "gpt-5.6"})
-	require.Equal(t, short, got)
+	require.Same(t, short, got)
 }
 
 func TestCachePlannerFindsNestedClientDirective(t *testing.T) {
@@ -203,7 +203,7 @@ func TestCachePlannerFindsNestedClientDirective(t *testing.T) {
 		{Role: "user", Content: "turn"},
 	}}
 	got := (&cachePlanner{enabled: true}).planChat(req, "openai", core.ModelSelector{Model: "gpt-5.6"})
-	require.Equal(t, req, got)
+	require.Same(t, req, got)
 }
 
 func TestCachePlannerProviderCapabilityBoundaries(t *testing.T) {
@@ -214,7 +214,7 @@ func TestCachePlannerProviderCapabilityBoundaries(t *testing.T) {
 	planner := &cachePlanner{enabled: true}
 	for _, provider := range []string{"openrouter", "vertex", "unknown"} {
 		got := planner.planChat(req, provider, core.ModelSelector{Model: "gemini-2.5-pro"})
-		require.Equal(t, req, got, "provider %q unexpectedly received an automatic plan", provider)
+		require.Same(t, req, got, "provider %q unexpectedly received an automatic plan", provider)
 	}
 }
 
@@ -226,7 +226,7 @@ func TestCachePlannerSkipsUnsupportedResponsesModesBeforeCloning(t *testing.T) {
 	planner := &cachePlanner{enabled: true}
 	for _, provider := range []string{"bedrock", "gemini", "openrouter", "unknown"} {
 		got := planner.planResponses(req, provider, core.ModelSelector{Model: "model"})
-		require.Equal(t, req, got, "provider %q unexpectedly received a Responses plan", provider)
+		require.Same(t, req, got, "provider %q unexpectedly received a Responses plan", provider)
 	}
 }
 
@@ -261,9 +261,9 @@ func TestCachePlannerDoesNotAliasCallerContentOrExtras(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, plannedParts, 1)
 		require.NotEmpty(t, plannedParts[0].ExtraFields.Lookup("prompt_cache_breakpoint"), "planned content lacks breakpoint: %#v", planned.Messages[0].Content)
-		require.NotEqual(t, &parts[0], &plannedParts[0])
+		require.NotSame(t, &parts[0], &plannedParts[0])
 		require.True(t, parts[0].ExtraFields.IsEmpty())
-		require.NotEqual(t, &req.Messages[0], &planned.Messages[0])
+		require.NotSame(t, &req.Messages[0], &planned.Messages[0])
 		require.Empty(t, req.ExtraFields.Lookup("prompt_cache_key"))
 		require.NotEmpty(t, req.ExtraFields.Lookup("seed"))
 
@@ -297,10 +297,10 @@ func TestCachePlannerDoesNotAliasCallerContentOrExtras(t *testing.T) {
 		require.True(t, exists)
 		_, leaked := block["prompt_cache_breakpoint"]
 		require.False(t, leaked)
-		require.NotEqual(t, &blocks[0], &plannedBlocks[0])
+		require.NotSame(t, &blocks[0], &plannedBlocks[0])
 
 		original := req.Input.([]core.ResponsesInputElement)
-		require.NotEqual(t, &original[0], &items[0])
+		require.NotSame(t, &original[0], &items[0])
 	})
 
 	t.Run("responses typed map blocks", func(t *testing.T) {

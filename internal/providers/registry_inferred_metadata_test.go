@@ -94,13 +94,13 @@ func TestApplyInferredModelMetadata_ReplacementsProtocol(t *testing.T) {
 		assert.Equal(t, "embedding", next.Model.Metadata.Modes[0], "%s replacement metadata = %+v, want embedding modes", id, next.Model.Metadata)
 	}
 	got := replacements[fresh]
-	assert.Equal(t, providerModels["nomic-embed-text"], got)
+	assert.Same(t, providerModels["nomic-embed-text"], got)
 	got = // The chain must point from the ORIGINAL pre-enrichment pointer, not the
 		// intermediate clone, so callers fixing up r.models find their entry.
 		replacements[orig]
-	assert.Equal(t, providerModels["bge-m3"], got)
+	assert.Same(t, providerModels["bge-m3"], got)
 	assert.Nil(t, chat.Model.Metadata)
-	assert.Equal(t, chat, providerModels["some-chat-model"])
+	assert.Same(t, chat, providerModels["some-chat-model"])
 }
 
 // TestEnrichModels_RegistryDataWinsOverInference verifies that when the remote
