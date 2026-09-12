@@ -82,7 +82,10 @@ the final request sent upstream. Use `Cache-Control: no-cache` or
 [plugin](/advanced/plugins#decisions) can also keep one response out of both
 layers with `NoStore` on its decision, which a guardrail that restores
 request-specific data into the reply uses so the restored text is never
-replayed to another caller.
+replayed to another caller. A `background: true` request on
+[`/v1/responses`](/advanced/responses-api#background-responses) bypasses both
+layers as well: its `queued` body carries an id that belongs to one caller's
+response.
 
 For the full semantic-cache design and storage options, see
 [ADR-0006](/adr/0006-semantic-response-cache).
@@ -94,10 +97,19 @@ The exact cache hashes:
 - the request path
 - the resolved workflow context used for execution
   specifically execution mode, provider type, and resolved model
+- the guardrail chain the request resolves to, across the prompt, response and
+  stream phases
 - the final request body
 
 This means guardrails and workflows affect cache keys when they change the
 resolved workflow or the final body sent through execution.
+
+A cache hit replays the stored response without re-running the response and
+stream guardrail chains, so an entry is only ever served to a request whose
+chain matches the one that produced it. Editing, adding or removing a guardrail
+step — or a second workflow with a different chain — yields a miss instead of a
+reply those guardrails never saw. Changing guardrail configuration therefore
+invalidates the entries stored under the old chain.
 
 JSON object member order and insignificant whitespace are canonicalized before
 hashing. Requests that differ only in formatting therefore share one exact

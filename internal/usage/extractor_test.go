@@ -1015,7 +1015,7 @@ func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 	if unreported.CostsCalculationCaveat != caveatEmbeddingMissingUsage {
 		t.Fatalf("caveat = %q, want %q for a zero base rate with a priced tier", unreported.CostsCalculationCaveat, caveatEmbeddingMissingUsage)
 	}
-	if retained := retainedMissingUsageCaveat(caveatEmbeddingMissingUsage, nil, tiered); retained != caveatEmbeddingMissingUsage {
+	if retained := retainedMissingUsageCaveat(caveatEmbeddingMissingUsage, 0, nil, tiered); retained != caveatEmbeddingMissingUsage {
 		t.Fatalf("repricing retained %q, want the caveat kept for tiered token rates", retained)
 	}
 }
