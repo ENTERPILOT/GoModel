@@ -40,9 +40,9 @@ func TestInitialize_InfersEmbeddingModesForUnknownModels(t *testing.T) {
 		require.NotNil(t, info.Model.Metadata, "expected %s to have inferred metadata", id)
 
 		meta := info.Model.Metadata
-		assert.Len(t, meta.Modes, 1)
+		require.Len(t, meta.Modes, 1)
 		assert.Equal(t, "embedding", meta.Modes[0], "%s Modes = %v, want [embedding]", id, meta.Modes)
-		assert.Len(t, meta.Categories, 1)
+		require.Len(t, meta.Categories, 1)
 		assert.Equal(t, core.CategoryEmbedding, meta.Categories[0], "%s Categories = %v, want [embedding]", id, meta.Categories)
 	}
 
@@ -89,8 +89,8 @@ func TestApplyInferredModelMetadata_ReplacementsProtocol(t *testing.T) {
 
 	for _, id := range []string{"nomic-embed-text", "bge-m3"} {
 		next := providerModels[id]
-		assert.NotNil(t, next.Model.Metadata)
-		assert.Len(t, next.Model.Metadata.Modes, 1)
+		require.NotNil(t, next.Model.Metadata)
+		require.Len(t, next.Model.Metadata.Modes, 1)
 		assert.Equal(t, "embedding", next.Model.Metadata.Modes[0], "%s replacement metadata = %+v, want embedding modes", id, next.Model.Metadata)
 	}
 	got := replacements[fresh]
@@ -134,6 +134,6 @@ func TestEnrichModels_RegistryDataWinsOverInference(t *testing.T) {
 	info := registry.GetModel("umma/gte-large")
 	require.NotNil(t, info)
 	require.NotNil(t, info.Model.Metadata)
-	assert.Len(t, info.Model.Metadata.Modes, 1)
+	require.Len(t, info.Model.Metadata.Modes, 1)
 	assert.Equal(t, "chat", info.Model.Metadata.Modes[0])
 }

@@ -63,7 +63,7 @@ func TestRouterRealtimeTargetRoutesByModel(t *testing.T) {
 	target, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
 	require.NoError(t, err)
 	assert.Contains(t, target.URL, "model=gpt-realtime")
-	assert.NotNil(t, rt.lastReq)
+	require.NotNil(t, rt.lastReq)
 	assert.Equal(t, "gpt-realtime", rt.lastReq.Model)
 }
 
@@ -85,7 +85,7 @@ func TestRouterRealtimeTargetForwardsCallID(t *testing.T) {
 
 	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", CallID: "rtc_7"})
 	require.NoError(t, err)
-	assert.NotNil(t, rt.lastReq)
+	require.NotNil(t, rt.lastReq)
 	assert.Equal(t, "rtc_7", rt.lastReq.CallID)
 }
 
@@ -99,7 +99,7 @@ func TestRouterRealtimeTargetForwardsIntent(t *testing.T) {
 
 	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-4o-transcribe", Intent: "transcription"})
 	require.NoError(t, err)
-	assert.NotNil(t, rt.lastReq)
+	require.NotNil(t, rt.lastReq)
 	assert.Equal(t, "transcription", rt.lastReq.Intent)
 }
 
@@ -114,13 +114,13 @@ func TestRouterRealtimeCallTargetsForwardIntent(t *testing.T) {
 	req := &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: core.RealtimeIntentTranslation}
 	_, err := router.RealtimeCallTarget(context.Background(), req)
 	require.NoError(t, err)
-	assert.NotNil(t, rt.lastCallReq)
+	require.NotNil(t, rt.lastCallReq)
 	assert.Equal(t, core.RealtimeIntentTranslation, rt.lastCallReq.Intent)
 
 	rt.lastCallReq = nil
 	_, err = router.RealtimeClientSecretTarget(context.Background(), req)
 	require.NoError(t, err)
-	assert.NotNil(t, rt.lastCallReq)
+	require.NotNil(t, rt.lastCallReq)
 	assert.Equal(t, core.RealtimeIntentTranslation, rt.lastCallReq.Intent)
 }
 
@@ -133,7 +133,7 @@ func TestRouterRealtimeCallTargetRoutesByModel(t *testing.T) {
 	target, err := router.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
 	require.NoError(t, err)
 	assert.True(t, strings.HasSuffix(target.URL, "/realtime/calls"), "url = %q, want the calls endpoint", target.URL)
-	assert.NotNil(t, rt.lastCallReq)
+	require.NotNil(t, rt.lastCallReq)
 	assert.Equal(t, "gpt-realtime", rt.lastCallReq.Model)
 }
 

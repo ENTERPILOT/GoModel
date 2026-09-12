@@ -1384,7 +1384,7 @@ func TestConvertResponsesRequestToChat_DropsReplayedItemIDs(t *testing.T) {
 			require.Equal(t, "tool", tool.Role)
 			assert.Nil(t, assistant.ExtraFields.Lookup("id"))
 			assert.Nil(t, tool.ExtraFields.Lookup("id"))
-			assert.Len(t, assistant.ToolCalls, 1)
+			require.Len(t, assistant.ToolCalls, 1)
 			assert.Nil(t, assistant.ToolCalls[0].ExtraFields.Lookup("id"))
 			got := // Only the Responses-only members go; call ids and other unknown
 				// members still reach the provider.

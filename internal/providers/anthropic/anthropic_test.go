@@ -909,7 +909,7 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
 				assert.Equal(t, "claude-sonnet-4-5-20250929", req.Model)
-				assert.Len(t, req.Messages, 1)
+				require.Len(t, req.Messages, 1)
 				assert.Equal(t, "Hello", req.Messages[0].Content)
 				assert.Equal(t, 4096, req.MaxTokens)
 			},
@@ -939,7 +939,7 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				assert.NotNil(t, req.Temperature)
+				require.NotNil(t, req.Temperature)
 				assert.Equal(t, 0.7, *req.Temperature)
 				assert.Equal(t, 1024, req.MaxTokens)
 			},
@@ -1588,7 +1588,7 @@ func TestConvertToAnthropicRequest_ToolMessageWithImage(t *testing.T) {
 	assert.Equal(t, "text", inner[0].Type)
 	assert.Equal(t, "captured", inner[0].Text, "inner[0] = %+v, want text block", inner[0])
 	assert.Equal(t, "image", inner[1].Type)
-	assert.NotNil(t, inner[1].Source)
+	require.NotNil(t, inner[1].Source)
 	assert.Equal(t, "base64", inner[1].Source.Type)
 	assert.Equal(t, "image/png", inner[1].Source.MediaType)
 	assert.Equal(t, "aGVsbG8=", inner[1].Source.Data, "inner[1] = %+v, want base64 image block", inner[1])
@@ -1695,7 +1695,7 @@ func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, blocks, 4, "assistant content = %#v, want thinking, redacted_thinking, text, tool_use", req.Messages[1].Content)
 	assert.Equal(t, "thinking", blocks[0].Type)
-	assert.NotNil(t, blocks[0].Thinking)
+	require.NotNil(t, blocks[0].Thinking)
 	assert.Empty(t, *blocks[0].Thinking)
 	assert.Equal(t, "sig1", blocks[0].Signature, "blocks[0] = %+v", blocks[0])
 	assert.Equal(t, "redacted_thinking", blocks[1].Type)
@@ -3093,7 +3093,7 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
 				assert.Equal(t, "claude-sonnet-4-5-20250929", req.Model)
-				assert.Len(t, req.Messages, 1)
+				require.Len(t, req.Messages, 1)
 				assert.Equal(t, "user", req.Messages[0].Role)
 				assert.Equal(t, "Hello", req.Messages[0].Content)
 			},
@@ -3119,7 +3119,7 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				MaxOutputTokens: &maxTokens,
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				assert.NotNil(t, req.Temperature)
+				require.NotNil(t, req.Temperature)
 				assert.Equal(t, 0.7, *req.Temperature)
 
 				// Anthropic rejects both sampling parameters at once, so

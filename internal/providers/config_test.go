@@ -245,7 +245,7 @@ func TestBuildProviderConfig_PreservesFields(t *testing.T) {
 	assert.Equal(t, "us-central1", got.VertexLocation)
 	assert.Equal(t, "/secrets/vertex.json", got.ServiceAccountFile)
 	assert.Equal(t, "scope-a", got.GCPScope)
-	assert.Len(t, got.Models, 2)
+	require.Len(t, got.Models, 2)
 	assert.Equal(t, "gpt-4", got.Models[0])
 }
 
@@ -921,7 +921,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t
 		} else if spec.DefaultBaseURL != "" {
 			assert.Equal(t, spec.DefaultBaseURL, p.BaseURL, "%s BaseURL", name)
 		}
-		assert.Len(t, p.Models, 2)
+		require.Len(t, p.Models, 2)
 		assert.Equal(t, "model-a-"+providerType, p.Models[0].ID)
 		assert.Equal(t, "model-b-"+providerType, p.Models[1].ID, "%s Models", name)
 	}
@@ -1012,7 +1012,7 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	assert.Equal(t, "oracle-key", p.APIKey)
 	assert.Equal(t, "oracle", p.Type)
 	assert.Equal(t, "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1", p.BaseURL)
-	assert.Len(t, p.Models, 2)
+	require.Len(t, p.Models, 2)
 	assert.Equal(t, "openai.gpt-oss-120b", p.Models[0].ID)
 	assert.Equal(t, "xai.grok-3", p.Models[1].ID)
 }
@@ -1029,7 +1029,7 @@ func TestApplyProviderEnvVars_DiscoversSuffixedOracleModels(t *testing.T) {
 	assert.Equal(t, "oracle", p.Type)
 	assert.Equal(t, "oracle-key", p.APIKey)
 	assert.Equal(t, "https://oracle.example.com/v1", p.BaseURL)
-	assert.Len(t, p.Models, 2)
+	require.Len(t, p.Models, 2)
 	assert.Equal(t, "openai.gpt-oss-120b", p.Models[0].ID)
 	assert.Equal(t, "xai.grok-3", p.Models[1].ID)
 }
@@ -1476,7 +1476,7 @@ func TestApplyProviderEnvVars_ModelFilter(t *testing.T) {
 	require.True(t, exists)
 	assert.Equal(t, []string{"*:free", "*:nitro"}, p.ModelFilter.Include)
 	assert.Equal(t, []string{"*-preview:free"}, p.ModelFilter.Exclude)
-	assert.NotNil(t, p.ModelFilter.MaxPricePerMtok)
+	require.NotNil(t, p.ModelFilter.MaxPricePerMtok)
 	assert.Equal(t, float64(0), *p.ModelFilter.MaxPricePerMtok)
 }
 
@@ -1496,7 +1496,7 @@ func TestApplyProviderEnvVars_ModelFilterOverlaysYAMLPerRule(t *testing.T) {
 
 	filter := got["openrouter"].ModelFilter
 	assert.Equal(t, []string{"qwen/*"}, filter.Include, "Include preserved from YAML")
-	assert.NotNil(t, filter.MaxPricePerMtok)
+	require.NotNil(t, filter.MaxPricePerMtok)
 	assert.Equal(t, 0.5, *filter.MaxPricePerMtok)
 }
 

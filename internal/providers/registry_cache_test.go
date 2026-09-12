@@ -835,13 +835,13 @@ func TestCacheRoundTripKeepsProviderReportedMetadata(t *testing.T) {
 
 	meta := model.Metadata
 	require.NotNil(t, meta)
-	assert.NotNil(t, meta.ContextWindow)
+	require.NotNil(t, meta.ContextWindow)
 	assert.Equal(t, contextWindow, *meta.ContextWindow)
-	assert.NotNil(t, meta.MaxOutputTokens)
+	require.NotNil(t, meta.MaxOutputTokens)
 	assert.Equal(t, maxOutputTokens, *meta.MaxOutputTokens)
 	assert.True(t, meta.Capabilities["function_calling"])
 	assert.True(t, meta.Capabilities["reasoning"], "Capabilities = %v, want the provider-reported flags", meta.Capabilities)
-	assert.Len(t, meta.Modes, 2)
+	require.Len(t, meta.Modes, 2)
 	assert.Equal(t, "chat", meta.Modes[0])
 	assert.Equal(t, "responses", meta.Modes[1])
 	assert.Equal(t, "My Local gpt-oss", meta.DisplayName)

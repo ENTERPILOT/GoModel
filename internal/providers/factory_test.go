@@ -61,7 +61,7 @@ func TestProviderFactory_Register(t *testing.T) {
 	})
 
 	registered := factory.RegisteredTypes()
-	assert.Len(t, registered, 1)
+	require.Len(t, registered, 1)
 	assert.Equal(t, "test-provider", registered[0])
 }
 

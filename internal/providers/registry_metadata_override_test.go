@@ -58,7 +58,7 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 	require.NotNil(t, overridden.Model.Metadata)
 	got := overridden.Model.Metadata.DisplayName
 	assert.Equal(t, "GLM 4.7 Flash (local)", got)
-	assert.NotNil(t, overridden.Model.Metadata.ContextWindow)
+	require.NotNil(t, overridden.Model.Metadata.ContextWindow)
 	assert.Equal(t, 131072, *overridden.Model.Metadata.ContextWindow)
 	assert.True(t, overridden.Model.Metadata.Capabilities["tools"])
 	got = overridden.Model.Metadata.PricingSources["input_per_mtok"]
@@ -111,7 +111,7 @@ func TestInitialize_OverrideMergesOnRemoteEnrichment(t *testing.T) {
 	require.NotNil(t, info)
 	require.NotNil(t, info.Model.Metadata)
 	assert.Equal(t, "Remote Display", info.Model.Metadata.DisplayName)
-	assert.NotNil(t, info.Model.Metadata.ContextWindow)
+	require.NotNil(t, info.Model.Metadata.ContextWindow)
 	assert.Equal(t, 262144, *info.Model.Metadata.ContextWindow)
 }
 
@@ -397,9 +397,9 @@ func TestSetProviderMetadataOverrides_DeepClonesExternalInput(t *testing.T) {
 	require.NotNil(t, stored)
 	assert.Equal(t, "chat", stored.Modes[0], "stored Modes mutated via caller: %v", stored.Modes)
 	assert.True(t, stored.Capabilities["tools"])
-	assert.NotNil(t, stored.ContextWindow)
+	require.NotNil(t, stored.ContextWindow)
 	assert.Equal(t, 4096, *stored.ContextWindow)
-	assert.NotNil(t, stored.Pricing)
+	require.NotNil(t, stored.Pricing)
 	assert.Equal(t, "USD", stored.Pricing.Currency)
 }
 

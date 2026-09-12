@@ -36,7 +36,7 @@ func TestRouterCreateImage(t *testing.T) {
 	req := &core.ImageGenerationRequest{Model: "dall-e-3", Provider: "openai", Prompt: "a cat"}
 	resp, err := router.CreateImage(context.Background(), req)
 	require.NoError(t, err)
-	assert.Len(t, resp.Data, 1)
+	require.Len(t, resp.Data, 1)
 	assert.Equal(t, "https://img", resp.Data[0].URL, "response = %+v", resp)
 	assert.Equal(t, "openai", resp.Provider)
 	require.NotNil(t, imager.lastImageReq)
