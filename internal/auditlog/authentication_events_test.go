@@ -29,7 +29,7 @@ func TestAuthenticationEventRecorderWritesDurableAuditEntry(t *testing.T) {
 	require.Equal(t, "authentication_error", entry.ErrorType)
 	require.Equal(t, "login", entry.Data.EventType)
 	require.Equal(t, "group_denied", entry.Data.ErrorCode, "entry = %+v, data = %+v", entry, entry.Data)
-	require.Equal(t, time.UTC, entry.Timestamp.Location())
+	require.Same(t, time.UTC, entry.Timestamp.Location())
 	require.True(t, entry.Timestamp.Equal(timestamp), "timestamp = %v, want %v in UTC", entry.Timestamp, timestamp)
 }
 
