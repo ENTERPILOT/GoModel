@@ -1,7 +1,9 @@
 package echotest
 
 import (
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -40,4 +42,20 @@ func TestRequest_RawBodiesAndContentType(t *testing.T) {
 	c, _ = Get(t, "/x")
 	assert.Empty(t, c.Request().Header.Get(echo.HeaderContentType))
 	assert.Equal(t, http.NoBody, c.Request().Body)
+}
+
+func TestRequest_SendsRawBodyFormsVerbatim(t *testing.T) {
+	for name, body := range map[string]any{
+		"string": "plain text",
+		"bytes":  []byte("plain text"),
+		"reader": strings.NewReader("plain text"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _ := Post(t, "/x", body)
+			got, err := io.ReadAll(c.Request().Body)
+			require.NoError(t, err)
+			assert.Equal(t, "plain text", string(got))
+			assert.Equal(t, echo.MIMEApplicationJSON, c.Request().Header.Get(echo.HeaderContentType))
+		})
+	}
 }

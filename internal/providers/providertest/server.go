@@ -21,6 +21,9 @@ type Recorded struct {
 	Query  url.Values
 	Header http.Header
 	Body   []byte
+	// ReadErr is the error, if any, from reading the request body; Body then
+	// holds whatever arrived before it.
+	ReadErr error
 }
 
 // JSON decodes the recorded body as a JSON object.
@@ -53,7 +56,8 @@ func (c *Capture) All() []Recorded {
 	return append([]Recorded(nil), c.requests...)
 }
 
-// Last returns the most recent request, failing the test when none arrived.
+// Last returns the most recent request, failing the test when none arrived
+// or when its body could not be read in full.
 func (c *Capture) Last(t testing.TB) Recorded {
 	t.Helper()
 	c.mu.Lock()
@@ -61,20 +65,25 @@ func (c *Capture) Last(t testing.TB) Recorded {
 	if len(c.requests) == 0 {
 		t.Fatal("providertest: upstream received no requests")
 	}
-	return c.requests[len(c.requests)-1]
+	last := c.requests[len(c.requests)-1]
+	if last.ReadErr != nil {
+		t.Fatalf("providertest: reading upstream request body: %v", last.ReadErr)
+	}
+	return last
 }
 
 func (c *Capture) record(r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.requests = append(c.requests, Recorded{
-		Method: r.Method,
-		Path:   r.URL.Path,
-		Query:  r.URL.Query(),
-		Header: r.Header.Clone(),
-		Body:   body,
+		Method:  r.Method,
+		Path:    r.URL.Path,
+		Query:   r.URL.Query(),
+		Header:  r.Header.Clone(),
+		Body:    body,
+		ReadErr: err,
 	})
 }
 

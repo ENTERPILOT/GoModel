@@ -2,6 +2,7 @@ package providertest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -33,10 +34,12 @@ const ModelsJSON = `{"object":"list","data":[{"id":"` + Model + `","object":"mod
 // EmbeddingsJSON is a one-vector embeddings reply.
 const EmbeddingsJSON = `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]}],"model":"` + Model + `","usage":{"prompt_tokens":2,"total_tokens":2}}`
 
-// Model and Reply are the model ID and assistant text used by the fixtures.
+// Model, Prompt, and Reply are the model ID, user text, and assistant text
+// used by the fixtures and the contract requests.
 const (
-	Model = "test-model"
-	Reply = "hello"
+	Model  = "test-model"
+	Prompt = "hi"
+	Reply  = "hello"
 )
 
 // ChatCompatible describes a provider built on the shared OpenAI-compatible
@@ -98,21 +101,19 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		}
 	})
 
-	t.Run("chat completion", func(t *testing.T) {
+	t.Run("chat completion via registered factory", func(t *testing.T) {
 		server, capture := JSONServer(t, http.StatusOK, ChatCompletionJSON)
-		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
+		provider := p.Registration.New(providers.ProviderConfig{APIKey: apiKey, BaseURL: server.URL}, providers.ProviderOptions{})
 		resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 			Model:    Model,
-			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Messages: []core.Message{{Role: "user", Content: Prompt}},
 		})
 		if err != nil {
 			t.Fatalf("ChatCompletion() error = %v", err)
 		}
 		req := capture.Last(t)
 		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
-		if got := req.JSON(t)["model"]; got != Model {
-			t.Errorf("request model = %#v, want %q", got, Model)
-		}
+		assertChatRequest(t, req.JSON(t), false)
 		if resp.Model != Model || len(resp.Choices) != 1 || resp.Choices[0].Message.Content != Reply {
 			t.Errorf("unexpected response: %+v", resp)
 		}
@@ -123,7 +124,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
 		stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 			Model:    Model,
-			Messages: []core.Message{{Role: "user", Content: "hi"}},
+			Messages: []core.Message{{Role: "user", Content: Prompt}},
 		})
 		if err != nil {
 			t.Fatalf("StreamChatCompletion() error = %v", err)
@@ -135,12 +136,8 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		}
 		req := capture.Last(t)
 		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
-		if sent := req.JSON(t); sent["model"] != Model || sent["stream"] != true {
-			t.Errorf("stream request body = %#v, want model %q and stream=true", sent, Model)
-		}
-		if !strings.Contains(string(body), "data: [DONE]") {
-			t.Errorf("stream body = %q, want SSE terminator", body)
-		}
+		assertChatRequest(t, req.JSON(t), true)
+		assertStreamBody(t, body, Reply, "data: [DONE]")
 	})
 
 	t.Run("list models", func(t *testing.T) {
@@ -159,24 +156,43 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 	t.Run("responses translate to chat completions", func(t *testing.T) {
 		server, capture := JSONServer(t, http.StatusOK, ChatCompletionJSON)
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
-		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: Model, Input: "hi"})
+		resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: Model, Input: Prompt})
 		if err != nil {
 			t.Fatalf("Responses() error = %v", err)
 		}
 		req := capture.Last(t)
 		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
-		if got := req.JSON(t)["model"]; got != Model {
-			t.Errorf("request model = %#v, want %q", got, Model)
-		}
+		assertChatRequest(t, req.JSON(t), false)
 		if resp.Object != "response" || resp.Status != "completed" {
 			t.Errorf("response object/status = %q/%q, want response/completed", resp.Object, resp.Status)
 		}
+		if got := outputText(resp); got != Reply {
+			t.Errorf("response output text = %q, want %q", got, Reply)
+		}
+	})
+
+	t.Run("stream responses translate to chat completions", func(t *testing.T) {
+		server, capture := SSEServer(t, ChatChunkSSE)
+		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
+		stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: Model, Input: Prompt})
+		if err != nil {
+			t.Fatalf("StreamResponses() error = %v", err)
+		}
+		defer stream.Close()
+		body, err := io.ReadAll(stream)
+		if err != nil {
+			t.Fatalf("ReadAll() error = %v", err)
+		}
+		req := capture.Last(t)
+		assertUpstream(t, req, http.MethodPost, "/chat/completions", p.AuthHeader, wantAuth)
+		assertChatRequest(t, req.JSON(t), true)
+		assertStreamBody(t, body, "response.output_text.delta", Reply, "data: [DONE]")
 	})
 
 	t.Run("embeddings", func(t *testing.T) {
 		server, capture := JSONServer(t, http.StatusOK, EmbeddingsJSON)
 		provider := p.New(apiKey, server.URL, server.Client(), llmclient.Hooks{})
-		resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: Model, Input: "hi"})
+		resp, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: Model, Input: Prompt})
 		if !p.Embeddings {
 			AssertUnsupported(t, err)
 			if capture.Count() != 0 {
@@ -187,9 +203,20 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		if err != nil {
 			t.Fatalf("Embeddings() error = %v", err)
 		}
-		assertUpstream(t, capture.Last(t), http.MethodPost, "/embeddings", p.AuthHeader, wantAuth)
+		req := capture.Last(t)
+		assertUpstream(t, req, http.MethodPost, "/embeddings", p.AuthHeader, wantAuth)
+		if sent := req.JSON(t); sent["model"] != Model || sent["input"] != Prompt {
+			t.Errorf("embeddings request = %#v, want model %q and input %q", sent, Model, Prompt)
+		}
 		if len(resp.Data) != 1 {
-			t.Errorf("embeddings = %+v, want one vector", resp.Data)
+			t.Fatalf("embeddings = %+v, want one vector", resp.Data)
+		}
+		var vector []float64
+		if err := json.Unmarshal(resp.Data[0].Embedding, &vector); err != nil {
+			t.Fatalf("embedding vector %s: %v", resp.Data[0].Embedding, err)
+		}
+		if len(vector) != 2 || vector[0] != 0.1 || vector[1] != 0.2 {
+			t.Errorf("embedding vector = %v, want [0.1 0.2]", vector)
 		}
 	})
 }
@@ -227,6 +254,55 @@ func AssertNoNativeSurfaces(t testing.TB, provider any) {
 	if _, ok := provider.(core.AudioProvider); ok {
 		t.Error("provider should not implement core.AudioProvider")
 	}
+}
+
+// assertChatRequest checks a translated chat completions body: the model,
+// the stream flag, and that the user prompt survived translation.
+func assertChatRequest(t testing.TB, sent map[string]any, stream bool) {
+	t.Helper()
+	if sent["model"] != Model {
+		t.Errorf("request model = %#v, want %q", sent["model"], Model)
+	}
+	if stream && sent["stream"] != true {
+		t.Errorf("request stream = %#v, want true", sent["stream"])
+	}
+	messages, _ := sent["messages"].([]any)
+	found := false
+	for _, m := range messages {
+		msg, _ := m.(map[string]any)
+		if msg["role"] == "user" && msg["content"] == Prompt {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("request messages = %#v, want a user message %q", sent["messages"], Prompt)
+	}
+}
+
+// assertStreamBody checks that each expected fragment appears in the stream.
+func assertStreamBody(t testing.TB, body []byte, want ...string) {
+	t.Helper()
+	for _, fragment := range want {
+		if !strings.Contains(string(body), fragment) {
+			t.Errorf("stream body = %q, want %q", body, fragment)
+		}
+	}
+}
+
+// outputText concatenates the assistant output_text parts of a response.
+func outputText(resp *core.ResponsesResponse) string {
+	var text strings.Builder
+	for _, item := range resp.Output {
+		if item.Type != "message" {
+			continue
+		}
+		for _, part := range item.Content {
+			if part.Type == "output_text" {
+				text.WriteString(part.Text)
+			}
+		}
+	}
+	return text.String()
 }
 
 func assertUpstream(t testing.TB, req Recorded, method, path, authHeader, wantAuth string) {
