@@ -417,14 +417,36 @@ content.
 | `message` | No | `This request was blocked by policy` | Error message for `block`, audit note for `warn`. |
 | `block_status` | No | phase default | One HTTP status code between 400 and 599 for `block`, for example `403`. Empty means 400 when the prompt is blocked, 502 when the response is blocked. |
 | `respond_text` | No | `I can't help with that request.` | Assistant reply for `respond`. |
-| `on_unclear` | No | `warn` | When the judge reply cannot be parsed or was cut off by `max_tokens`: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
-| `max_tokens` | No | `256` | Completion cap for the judge call. |
+| `on_unclear` | No | `warn` | When the judge reply cannot be parsed, was cut off by `max_tokens`, or was spent entirely on reasoning: `allow`, `warn`, or `block` (applies `action`). A verdict counts only as a JSON object or a bare `allow` or `block`, never as a word inside a sentence. |
+| `max_tokens` | No | `2048` | Completion cap for the judge call. Unused tokens cost nothing; size it for the judge model's reasoning, not for the verdict. |
 | `temperature` | No | `0` | Sampling temperature for the judge call (0 to 2). |
 
 Identical text is judged once per request, so an instance that runs in both
 the prompt and the response phase does not double-charge for the same
 content. In the stream phase the whole stream is buffered and judged as a
 complete response.
+
+#### Sizing `max_tokens` for a reasoning judge
+
+A reasoning judge model spends its completion on thinking before it writes
+anything: with a cap that runs out first the judge returns no verdict, and the
+instance enforces nothing — it follows `on_unclear` instead, which by default
+only warns. The default cap of `2048` leaves room for that; unused tokens are
+never billed, so raise it further rather than trimming it when the judge model
+reasons a lot.
+
+A judge that reaches no verdict is recorded apart from a reply that was
+answered but could not be parsed:
+
+| Code | Meaning |
+| ---- | ------- |
+| `llm_judge_block` | The judge returned a block verdict; `action` applies. |
+| `llm_judge_no_verdict` | The reply was cut off (`finish_reason: length`) or was all reasoning. A warning naming the judge model and the cap is logged, and `on_unclear` applies. |
+| `llm_judge_unclear` | The judge answered, but the reply is not a verdict. `on_unclear` applies. |
+
+Check the gateway log for `judge returned no verdict` after configuring an
+instance, and set `on_unclear: block` for a policy that must hold even when the
+judge call fails.
 
 #### Example
 
