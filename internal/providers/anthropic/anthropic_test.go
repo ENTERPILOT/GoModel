@@ -1596,7 +1596,27 @@ func TestSanitizeAnthropicSchema(t *testing.T) {
 		{
 			name:  "drops numeric and array constraints",
 			input: `{"type":"object","properties":{"n":{"type":"integer","minimum":1,"maximum":9,"multipleOf":3},"a":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":2,"uniqueItems":true}},"required":["n","a"]}`,
-			want:  `{"type":"object","properties":{"n":{"type":"integer"},"a":{"type":"array","items":{"type":"string"}}},"required":["n","a"],"additionalProperties":false}`,
+			want:  `{"type":"object","properties":{"n":{"type":"integer"},"a":{"type":"array","items":{"type":"string"},"minItems":1}},"required":["n","a"],"additionalProperties":false}`,
+		},
+		{
+			name:  "keeps minItems 0 and 1 but drops other values",
+			input: `{"type":"object","properties":{"a":{"type":"array","items":{"type":"string"},"minItems":0},"b":{"type":"array","items":{"type":"string"},"minItems":1},"c":{"type":"array","items":{"type":"string"},"minItems":2}}}`,
+			want:  `{"type":"object","properties":{"a":{"type":"array","items":{"type":"string"},"minItems":0},"b":{"type":"array","items":{"type":"string"},"minItems":1},"c":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}`,
+		},
+		{
+			name:  "drops oneOf that cannot be merged with a sibling anyOf",
+			input: `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"number"}],"oneOf":[{"type":"string"},{"type":"boolean"}]}}}`,
+			want:  `{"type":"object","properties":{"v":{"anyOf":[{"type":"string"},{"type":"number"}]}},"additionalProperties":false}`,
+		},
+		{
+			name:  "closes every allOf branch and leaves the composition intact",
+			input: `{"allOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"]},{"type":"object","properties":{"b":{"type":"string","minLength":2}},"required":["b"]}]}`,
+			want:  `{"allOf":[{"type":"object","properties":{"a":{"type":"string"}},"required":["a"],"additionalProperties":false},{"type":"object","properties":{"b":{"type":"string"}},"required":["b"],"additionalProperties":false}]}`,
+		},
+		{
+			name:  "leaves optional properties out of required",
+			input: `{"type":"object","properties":{"city":{"type":"string"},"nickname":{"type":"string"}},"required":["city"]}`,
+			want:  `{"type":"object","properties":{"city":{"type":"string"},"nickname":{"type":"string"}},"required":["city"],"additionalProperties":false}`,
 		},
 		{
 			name:  "forces additionalProperties false on nested objects",

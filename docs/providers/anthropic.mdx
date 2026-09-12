@@ -179,15 +179,23 @@ unaffected: the JSON arrives as normal content deltas. Tools and
 Anthropic's schema compiler is stricter than OpenAI's, so GoModel adapts the
 schema before sending it:
 
-- every object schema gets the mandatory `"additionalProperties": false`
+- every object schema gets the mandatory `"additionalProperties": false`, on
+  each `allOf` branch too — Anthropic requires it and merges the branches itself
 - validation-only keywords Anthropic does not honor (`minimum`, `maximum`,
-  `multipleOf`, `minItems`, `maxItems`, `uniqueItems`, `minLength`,
-  `maxLength`, `propertyNames`, `not`, `if`/`then`/`else`, …) are dropped;
-  `pattern` is kept, because Anthropic does enforce it
-- `oneOf` is relaxed to `anyOf`, and unknown string `format` values are dropped
+  `multipleOf`, `maxItems`, `uniqueItems`, `minLength`, `maxLength`,
+  `propertyNames`, `not`, `if`/`then`/`else`, …) are dropped; `pattern` is kept,
+  because Anthropic does enforce it
+- `minItems` is kept when it is `0` or `1`, the only values Anthropic accepts,
+  and dropped otherwise
+- `oneOf` is relaxed to `anyOf`, and unknown string `format` values are dropped.
+  A schema carrying both `oneOf` and `anyOf` at the same level cannot be
+  expressed — Anthropic rejects the `allOf` that would hold the second one — so
+  `oneOf` is dropped and the loss is logged
+- `required` is left exactly as sent: Anthropic accepts optional properties, so
+  a property you left out of `required` stays optional
 
-Nested objects, arrays, `enum`, `const`, `anyOf`, and `$ref`/`$defs` are passed
-through unchanged.
+Nested objects, arrays, `enum`, `const`, `anyOf`, `allOf`, and `$ref`/`$defs`
+are passed through unchanged.
 
 <Note>
   `strict` is not forwarded — Anthropic always enforces the schema it is given.
@@ -195,6 +203,22 @@ through unchanged.
   above. Structured output is available on every Claude model GoModel can
   currently reach.
 </Note>
+
+### When the content is not schema-valid JSON
+
+The schema constrains what the model generates, not how the turn ends. Check
+the completion before parsing `message.content`:
+
+- `finish_reason: "length"` — the answer hit `max_tokens` and the JSON is cut
+  off mid-value. Raise `max_tokens` and retry.
+- `finish_reason: "tool_calls"` — the model called a tool instead of answering,
+  so `message.content` is empty.
+- `finish_reason: "refusal"` — Claude declined the request; GoModel passes
+  Anthropic's refusal stop reason through unchanged and there is no JSON to
+  parse.
+
+Only `finish_reason: "stop"` with non-empty content is worth handing to a JSON
+parser; treat anything else as an error rather than parsing it.
 
 ## Verbosity
 

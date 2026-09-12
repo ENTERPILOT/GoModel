@@ -103,7 +103,8 @@ func dropUnsupportedVerbosity(extraFields core.UnknownJSONFields) {
 // output compiler does not honor: most are rejected outright, and the string
 // length bounds are documented as unsupported and silently ignored. They are
 // validation-only constraints, so dropping them keeps the schema's shape
-// intact. "pattern" is absent on purpose — Anthropic does enforce it.
+// intact. "pattern" is absent on purpose — Anthropic does enforce it, and so is
+// "minItems", which Anthropic accepts for the values 0 and 1.
 var unsupportedSchemaKeywords = map[string]struct{}{
 	"$schema":               {},
 	"contains":              {},
@@ -120,7 +121,6 @@ var unsupportedSchemaKeywords = map[string]struct{}{
 	"maxProperties":         {},
 	"maximum":               {},
 	"minContains":           {},
-	"minItems":              {},
 	"minLength":             {},
 	"minProperties":         {},
 	"minimum":               {},
@@ -169,9 +169,20 @@ func sanitizeAnthropicSchema(schema map[string]any) map[string]any {
 		switch key {
 		case "oneOf":
 			// Anthropic rejects oneOf; anyOf expresses the same set of
-			// acceptable shapes for generation.
-			if _, hasAnyOf := schema["anyOf"]; !hasAnyOf {
-				out["anyOf"] = sanitizeSchemaList(value)
+			// acceptable shapes for generation. When the caller already sent
+			// anyOf there is nowhere to put the branches: Anthropic rejects an
+			// allOf sibling of anyOf ("For 'anyOf', 'allOf' is not supported"),
+			// so oneOf is dropped and the loss is logged.
+			if _, hasAnyOf := schema["anyOf"]; hasAnyOf {
+				slog.Warn("dropping response_format oneOf; Anthropic cannot combine it with a sibling anyOf")
+				continue
+			}
+			out["anyOf"] = sanitizeSchemaList(value)
+		case "minItems":
+			// Anthropic accepts minItems only as 0 or 1; any other value is a
+			// 400, so it is dropped like the other array bounds.
+			if n, ok := schemaNumber(value); ok && (n == 0 || n == 1) {
+				out[key] = value
 			}
 		case "format":
 			if name, ok := value.(string); ok {
@@ -206,6 +217,23 @@ func sanitizeAnthropicSchema(schema map[string]any) map[string]any {
 		out["additionalProperties"] = false
 	}
 	return out
+}
+
+// schemaNumber reads a JSON Schema numeric keyword, whichever numeric type the
+// decoder produced.
+func schemaNumber(value any) (float64, bool) {
+	switch n := value.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		parsed, err := n.Float64()
+		return parsed, err == nil
+	}
+	return 0, false
 }
 
 func sanitizeSchemaValue(value any) any {
