@@ -228,6 +228,10 @@ func (p *CompatibleProvider) StreamChatCompletion(ctx context.Context, req *core
 	if err != nil {
 		return nil, err
 	}
+	// Chat SSE is relayed byte for byte: the chunk payloads are the upstream's
+	// own, so the instance naming this package applies covers only the
+	// provider field GoModel authors. An upstream that self-reports a
+	// "provider" member in its chunks (OpenRouter-style) keeps its value.
 	return providers.EnsureChatCompletionSSE(stream), nil
 }
 
