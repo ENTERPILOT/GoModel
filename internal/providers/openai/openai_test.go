@@ -3,10 +3,8 @@ package openai
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -14,32 +12,62 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestNew(t *testing.T) {
-	apiKey := "test-api-key"
-	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
+const testAPIKey = "test-api-key"
 
-	if got := provider.keys.Primary(); got != apiKey {
-		t.Errorf("primary key = %q, want %q", got, apiKey)
-	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
-	}
+// responsesReplyJSON is a completed Responses API reply with one text output.
+const responsesReplyJSON = `{
+	"id": "resp_123",
+	"object": "response",
+	"created_at": 1677652288,
+	"model": "gpt-4o",
+	"status": "completed",
+	"output": [{
+		"id": "msg_123",
+		"type": "message",
+		"role": "assistant",
+		"status": "completed",
+		"content": [{"type": "output_text", "text": "Hello!"}]
+	}]
+}`
+
+// assertAuthorized checks that the recorded upstream request carried the test
+// API key as a bearer token.
+func assertAuthorized(t *testing.T, req providertest.Recorded) {
+	t.Helper()
+	assert.Equal(t, "Bearer "+testAPIKey, req.Header.Get("Authorization"))
 }
 
-func TestNew_ReturnsProvider(t *testing.T) {
-	apiKey := "test-api-key"
-	provider := New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{})
-
-	if provider == nil {
-		t.Error("provider should not be nil")
+// markMutated is a request mutator that tags every upstream request with a
+// header and a query parameter so tests can see the mutator ran.
+func markMutated(req *llmclient.Request) {
+	if req.Headers == nil {
+		req.Headers = make(http.Header)
 	}
+	req.Headers.Set("X-Test-Mutated", "yes")
+
+	endpoint, err := url.Parse(req.Endpoint)
+	if err != nil {
+		panic(err)
+	}
+	query := endpoint.Query()
+	query.Set("mutated", "1")
+	endpoint.RawQuery = query.Encode()
+	req.Endpoint = endpoint.String()
+}
+
+func TestNew(t *testing.T) {
+	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+	assert.Equal(t, testAPIKey, provider.keys.Primary())
+	assert.NotNil(t, provider.client, "nil http client should fall back to a default")
 }
 
 func TestNilRequests_ReturnInvalidRequestError(t *testing.T) {
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 
 	tests := []struct {
 		name string
@@ -91,45 +119,14 @@ func TestNilRequests_ReturnInvalidRequestError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Fatalf("unexpected panic: %v", r)
-				}
-			}()
-
-			err := tt.call()
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-
-			gatewayErr, ok := err.(*core.GatewayError)
-			if !ok {
-				t.Fatalf("error type = %T, want *core.GatewayError", err)
-			}
-			if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-				t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
-			}
+			var gatewayErr *core.GatewayError
+			require.ErrorAs(t, tt.call(), &gatewayErr)
+			assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 		})
 	}
 }
 
 func TestCompatibleProvider_FileHelpersApplyRequestMutator(t *testing.T) {
-	mutate := func(req *llmclient.Request) {
-		if req.Headers == nil {
-			req.Headers = make(http.Header)
-		}
-		req.Headers.Set("X-Test-Mutated", "yes")
-
-		endpoint, err := url.Parse(req.Endpoint)
-		if err != nil {
-			t.Fatalf("unexpected parse error: %v", err)
-		}
-		query := endpoint.Query()
-		query.Set("mutated", "1")
-		endpoint.RawQuery = query.Encode()
-		req.Endpoint = endpoint.String()
-	}
-
 	tests := []struct {
 		name string
 		call func(*CompatibleProvider) error
@@ -177,14 +174,8 @@ func TestCompatibleProvider_FileHelpersApplyRequestMutator(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotMutatedHeader string
-			var gotMutatedQuery string
-
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotMutatedHeader = r.Header.Get("X-Test-Mutated")
-				gotMutatedQuery = r.URL.Query().Get("mutated")
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
-
 				switch {
 				case r.Method == http.MethodPost && r.URL.Path == "/files":
 					_, _ = w.Write([]byte(`{"id":"file_123","object":"file","purpose":"batch"}`))
@@ -200,81 +191,48 @@ func TestCompatibleProvider_FileHelpersApplyRequestMutator(t *testing.T) {
 				default:
 					http.NotFound(w, r)
 				}
-			}))
-			defer server.Close()
+			})
 
-			provider := NewCompatibleProviderWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+			provider := NewCompatibleProviderWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
 				ProviderName: "test",
 				BaseURL:      server.URL,
 			})
-			provider.SetRequestMutator(mutate)
+			provider.SetRequestMutator(markMutated)
+			require.NoError(t, tt.call(provider))
 
-			if err := tt.call(provider); err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if gotMutatedHeader != "yes" {
-				t.Fatalf("X-Test-Mutated = %q, want yes", gotMutatedHeader)
-			}
-			if gotMutatedQuery != "1" {
-				t.Fatalf("mutated query = %q, want 1", gotMutatedQuery)
-			}
+			req := capture.Last(t)
+			assert.Equal(t, "yes", req.Header.Get("X-Test-Mutated"))
+			assert.Equal(t, "1", req.Query.Get("mutated"))
 		})
 	}
 }
 
 func TestCompatibleProvider_GetBatchResultsAppliesRequestMutator(t *testing.T) {
-	mutate := func(req *llmclient.Request) {
-		if req.Headers == nil {
-			req.Headers = make(http.Header)
-		}
-		req.Headers.Set("X-Test-Mutated", "yes")
-
-		endpoint, err := url.Parse(req.Endpoint)
-		if err != nil {
-			t.Fatalf("unexpected parse error: %v", err)
-		}
-		query := endpoint.Query()
-		query.Set("mutated", "1")
-		endpoint.RawQuery = query.Encode()
-		req.Endpoint = endpoint.String()
-	}
-
-	var seen []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.Path+"?"+r.URL.RawQuery+"|"+r.Header.Get("X-Test-Mutated"))
-		switch r.URL.Path {
-		case "/batches/batch_1":
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/batches/batch_1": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"batch_1","status":"completed","output_file_id":"file_1","endpoint":"/v1/chat/completions"}`))
-		case "/files/file_1/content":
+		},
+		"/files/file_1/content": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/jsonl")
 			_, _ = w.Write([]byte(`{"custom_id":"ok-1","response":{"status_code":200,"url":"/v1/chat/completions","body":{"id":"resp-1","model":"gpt-4o-mini"}}}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
+		},
+	})
 
-	provider := NewCompatibleProviderWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
+	provider := NewCompatibleProviderWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{}, CompatibleProviderConfig{
 		ProviderName: "test",
 		BaseURL:      server.URL,
 	})
-	provider.SetRequestMutator(mutate)
+	provider.SetRequestMutator(markMutated)
 
 	_, err := provider.GetBatchResults(context.Background(), "batch_1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(seen) != 2 {
-		t.Fatalf("saw %d requests, want 2", len(seen))
-	}
-	for _, request := range seen {
-		if !strings.Contains(request, "mutated=1") {
-			t.Fatalf("request = %q, want mutated query", request)
-		}
-		if !strings.HasSuffix(request, "|yes") {
-			t.Fatalf("request = %q, want mutated header", request)
-		}
+	require.NoError(t, err)
+
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	for _, req := range requests {
+		assert.Equal(t, "1", req.Query.Get("mutated"), "%s not mutated", req.Path)
+		assert.Equal(t, "yes", req.Header.Get("X-Test-Mutated"), "%s not mutated", req.Path)
 	}
 }
 
@@ -308,29 +266,14 @@ func TestChatCompletion(t *testing.T) {
 					"total_tokens": 30
 				}
 			}`,
-			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ChatResponse) {
-				if resp.ID != "chatcmpl-123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "chatcmpl-123")
-				}
-				if resp.Model != "gpt-4o" {
-					t.Errorf("Model = %q, want %q", resp.Model, "gpt-4o")
-				}
-				if len(resp.Choices) != 1 {
-					t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))
-				}
-				if resp.Choices[0].Message.Content != "Hello! How can I help you today?" {
-					t.Errorf("Message content = %q, want %q", resp.Choices[0].Message.Content, "Hello! How can I help you today?")
-				}
-				if resp.Usage.PromptTokens != 10 {
-					t.Errorf("PromptTokens = %d, want 10", resp.Usage.PromptTokens)
-				}
-				if resp.Usage.CompletionTokens != 20 {
-					t.Errorf("CompletionTokens = %d, want 20", resp.Usage.CompletionTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "chatcmpl-123", resp.ID)
+				assert.Equal(t, "gpt-4o", resp.Model)
+				require.Len(t, resp.Choices, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Choices[0].Message.Content)
+				assert.Equal(t, 10, resp.Usage.PromptTokens)
+				assert.Equal(t, 20, resp.Usage.CompletionTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -355,121 +298,36 @@ func TestChatCompletion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				// Verify request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
+			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
-			req := &core.ChatRequest{
-				Model: "gpt-4o",
-				Messages: []core.Message{
-					{Role: "user", Content: "Hello"},
-				},
-			}
+			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "gpt-4o",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
+			})
 
-			resp, err := provider.ChatCompletion(context.Background(), req)
+			req := capture.Last(t)
+			assertAuthorized(t, req)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "gpt-4o", req.JSON(t)["model"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
 
 func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		messages, ok := req["messages"].([]any)
-		if !ok || len(messages) != 1 {
-			t.Fatalf("messages = %#v, want single message", req["messages"])
-		}
-		message, ok := messages[0].(map[string]any)
-		if !ok {
-			t.Fatalf("message type = %T", messages[0])
-		}
-		content, ok := message["content"].([]any)
-		if !ok {
-			t.Fatalf("content type = %T, want []interface{}", message["content"])
-		}
-		if len(content) != 2 {
-			t.Fatalf("len(content) = %d, want 2", len(content))
-		}
-		second, ok := content[1].(map[string]any)
-		if !ok {
-			t.Fatalf("second part type = %T", content[1])
-		}
-		if second["type"] != "image_url" {
-			t.Fatalf("second part type = %v, want image_url", second["type"])
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "gpt-4o-mini",
-			"choices": [{
-				"index": 0,
-				"message": {
-					"role": "assistant",
-					"content": "ok"
-				},
-				"finish_reason": "stop"
-			}],
-			"usage": {
-				"prompt_tokens": 10,
-				"completion_tokens": 20,
-				"total_tokens": 30
-			}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
-	req := &core.ChatRequest{
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gpt-4o-mini",
 		Messages: []core.Message{
 			{
@@ -477,76 +335,37 @@ func TestChatCompletion_PreservesMultimodalContent(t *testing.T) {
 				Content: []core.ContentPart{
 					{Type: "text", Text: "Describe the image."},
 					{
-						Type: "image_url",
-						ImageURL: &core.ImageURLContent{
-							URL: "https://example.com/image.png",
-						},
+						Type:     "image_url",
+						ImageURL: &core.ImageURLContent{URL: "https://example.com/image.png"},
 					},
 				},
 			},
 		},
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, providertest.Reply, resp.Choices[0].Message.Content)
 
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Choices[0].Message.Content != "ok" {
-		t.Fatalf("response content = %q, want ok", resp.Choices[0].Message.Content)
-	}
+	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 1)
+	message, ok := messages[0].(map[string]any)
+	require.True(t, ok, "message type = %T", messages[0])
+	content, ok := message["content"].([]any)
+	require.True(t, ok, "content type = %T, want array", message["content"])
+	require.Len(t, content, 2)
+	second, ok := content[1].(map[string]any)
+	require.True(t, ok, "second part type = %T", content[1])
+	assert.Equal(t, "image_url", second["type"])
 }
 
 func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		responseFormat, ok := req["response_format"].(map[string]any)
-		if !ok {
-			t.Fatalf("response_format = %#v, want object", req["response_format"])
-		}
-		if responseFormat["type"] != "json_schema" {
-			t.Fatalf("response_format.type = %#v, want json_schema", responseFormat["type"])
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "gpt-5-mini",
-			"choices": [{
-				"index": 0,
-				"message": {
-					"role": "assistant",
-					"content": "ok"
-				},
-				"finish_reason": "stop"
-			}],
-			"usage": {
-				"prompt_tokens": 10,
-				"completion_tokens": 20,
-				"total_tokens": 30
-			}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
-	req := &core.ChatRequest{
-		Model: "gpt-5-mini",
-		Messages: []core.Message{
-			{Role: "user", Content: "Return JSON."},
-		},
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+		Model:    "gpt-5-mini",
+		Messages: []core.Message{{Role: "user", Content: "Return JSON."}},
 		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{
 				"type":"json_schema",
@@ -556,74 +375,22 @@ func TestChatCompletion_PreservesUnknownTopLevelFields(t *testing.T) {
 				}
 			}`),
 		}),
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, providertest.Reply, resp.Choices[0].Message.Content)
 
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Choices[0].Message.Content != "ok" {
-		t.Fatalf("response content = %q, want ok", resp.Choices[0].Message.Content)
-	}
+	sent := capture.Last(t).JSON(t)
+	responseFormat, ok := sent["response_format"].(map[string]any)
+	require.True(t, ok, "response_format = %#v, want object", sent["response_format"])
+	assert.Equal(t, "json_schema", responseFormat["type"])
 }
 
 func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		messages, ok := req["messages"].([]any)
-		if !ok || len(messages) != 1 {
-			t.Fatalf("messages = %#v, want []any len=1", req["messages"])
-		}
-		message, ok := messages[0].(map[string]any)
-		if !ok {
-			t.Fatalf("messages[0] = %#v, want object", messages[0])
-		}
-		if message["name"] != "alice" {
-			t.Fatalf("messages[0].name = %#v, want alice", message["name"])
-		}
-		content, ok := message["content"].([]any)
-		if !ok || len(content) != 1 {
-			t.Fatalf("messages[0].content = %#v, want []any len=1", message["content"])
-		}
-		part, ok := content[0].(map[string]any)
-		if !ok {
-			t.Fatalf("messages[0].content[0] = %#v, want object", content[0])
-		}
-		if _, ok := part["cache_control"].(map[string]any); !ok {
-			t.Fatalf("messages[0].content[0].cache_control = %#v, want object", part["cache_control"])
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "gpt-5-mini",
-			"choices": [{
-				"index": 0,
-				"message": {
-					"role": "assistant",
-					"content": "ok"
-				},
-				"finish_reason": "stop"
-			}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
-	req := &core.ChatRequest{
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gpt-5-mini",
 		Messages: []core.Message{
 			{
@@ -632,78 +399,37 @@ func TestChatCompletion_PreservesUnknownNestedFields(t *testing.T) {
 				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"name": json.RawMessage(`"alice"`)}),
 			},
 		},
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, providertest.Reply, resp.Choices[0].Message.Content)
 
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Choices[0].Message.Content != "ok" {
-		t.Fatalf("response content = %q, want ok", resp.Choices[0].Message.Content)
-	}
+	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
+	require.True(t, ok)
+	require.Len(t, messages, 1)
+	message, ok := messages[0].(map[string]any)
+	require.True(t, ok, "messages[0] = %#v, want object", messages[0])
+	assert.Equal(t, "alice", message["name"])
+	content, ok := message["content"].([]any)
+	require.True(t, ok)
+	require.Len(t, content, 1)
+	part, ok := content[0].(map[string]any)
+	require.True(t, ok, "messages[0].content[0] = %#v, want object", content[0])
+	_, ok = part["cache_control"].(map[string]any)
+	assert.True(t, ok, "messages[0].content[0].cache_control = %#v, want object", part["cache_control"])
 }
 
 func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		if _, exists := req["temperature"]; exists {
-			t.Fatalf("temperature should be removed for o-series models, got %#v", req["temperature"])
-		}
-		if req["max_completion_tokens"] != float64(128) {
-			t.Fatalf("max_completion_tokens = %#v, want 128", req["max_completion_tokens"])
-		}
-		responseFormat, ok := req["response_format"].(map[string]any)
-		if !ok {
-			t.Fatalf("response_format = %#v, want object", req["response_format"])
-		}
-		if responseFormat["type"] != "json_schema" {
-			t.Fatalf("response_format.type = %#v, want json_schema", responseFormat["type"])
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "o3-mini",
-			"choices": [{
-				"index": 0,
-				"message": {
-					"role": "assistant",
-					"content": "ok"
-				},
-				"finish_reason": "stop"
-			}],
-			"usage": {
-				"prompt_tokens": 10,
-				"completion_tokens": 20,
-				"total_tokens": 30
-			}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	maxTokens := 128
 	temperature := 0.7
-	req := &core.ChatRequest{
+	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:       "o3-mini",
 		Temperature: &temperature,
 		MaxTokens:   &maxTokens,
-		Messages: []core.Message{
-			{Role: "user", Content: "Return JSON."},
-		},
+		Messages:    []core.Message{{Role: "user", Content: "Return JSON."}},
 		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"response_format": json.RawMessage(`{
 				"type":"json_schema",
@@ -713,39 +439,31 @@ func TestChatCompletion_PreservesUnknownTopLevelFieldsForOSeries(t *testing.T) {
 				}
 			}`),
 		}),
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, providertest.Reply, resp.Choices[0].Message.Content)
 
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Choices[0].Message.Content != "ok" {
-		t.Fatalf("response content = %q, want ok", resp.Choices[0].Message.Content)
-	}
+	sent := capture.Last(t).JSON(t)
+	assert.NotContains(t, sent, "temperature", "temperature should be removed for o-series models")
+	assert.Equal(t, float64(128), sent["max_completion_tokens"])
+	responseFormat, ok := sent["response_format"].(map[string]any)
+	require.True(t, ok, "response_format = %#v, want object", sent["response_format"])
+	assert.Equal(t, "json_schema", responseFormat["type"])
 }
 
 func TestChatCompletion_OSeriesMarshalErrorReturnsInvalidRequest(t *testing.T) {
-	provider := NewWithHTTPClient("test-api-key", http.DefaultClient, llmclient.Hooks{})
+	provider := NewWithHTTPClient(testAPIKey, http.DefaultClient, llmclient.Hooks{})
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-		Model: "o3-mini",
-		Messages: []core.Message{
-			{Role: "user", Content: "hello"},
-		},
+		Model:    "o3-mini",
+		Messages: []core.Message{{Role: "user", Content: "hello"}},
 		ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{
 			"x_invalid": json.RawMessage(`{`),
 		}),
 	})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	gwErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T: %v", err, err)
-	}
-	if gwErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("Type = %q, want %q", gwErr.Type, core.ErrorTypeInvalidRequest)
-	}
+	var gwErr *core.GatewayError
+	require.ErrorAs(t, err, &gwErr)
+	assert.Equal(t, core.ErrorTypeInvalidRequest, gwErr.Type)
 }
 
 func TestStreamChatCompletion(t *testing.T) {
@@ -764,7 +482,6 @@ data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288
 
 data: [DONE]
 `,
-			expectedError: false,
 		},
 		{
 			name:          "API error",
@@ -776,68 +493,35 @@ data: [DONE]
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				// Verify stream is set in request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
-
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			})
+			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
-			req := &core.ChatRequest{
-				Model: "gpt-4o",
-				Messages: []core.Message{
-					{Role: "user", Content: "Hello"},
-				},
-			}
+			body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
+				Model:    "gpt-4o",
+				Messages: []core.Message{{Role: "user", Content: "Hello"}},
+			})
 
-			body, err := provider.StreamChatCompletion(context.Background(), req)
+			req := capture.Last(t)
+			assertAuthorized(t, req)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			stream, _ := req.JSON(t)["stream"].(bool)
+			assert.True(t, stream)
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
-				defer func() { _ = body.Close() }()
-
-				// Read and verify the streaming response
-				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
-				if string(respBody) != tt.responseBody {
-					t.Errorf("response body = %q, want %q", string(respBody), tt.responseBody)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			require.NotNil(t, body)
+			defer func() { _ = body.Close() }()
+
+			respBody, err := io.ReadAll(body)
+			require.NoError(t, err)
+			assert.Equal(t, tt.responseBody, string(respBody))
 		})
 	}
 }
@@ -856,34 +540,15 @@ func TestListModels(t *testing.T) {
 			responseBody: `{
 				"object": "list",
 				"data": [
-					{
-						"id": "gpt-4o",
-						"object": "model",
-						"created": 1687882411,
-						"owned_by": "openai"
-					},
-					{
-						"id": "gpt-4",
-						"object": "model",
-						"created": 1687882410,
-						"owned_by": "openai"
-					}
+					{"id": "gpt-4o", "object": "model", "created": 1687882411, "owned_by": "openai"},
+					{"id": "gpt-4", "object": "model", "created": 1687882410, "owned_by": "openai"}
 				]
 			}`,
-			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ModelsResponse) {
-				if resp.Object != "list" {
-					t.Errorf("Object = %q, want %q", resp.Object, "list")
-				}
-				if len(resp.Data) != 2 {
-					t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
-				}
-				if resp.Data[0].ID != "gpt-4o" {
-					t.Errorf("Data[0].ID = %q, want %q", resp.Data[0].ID, "gpt-4o")
-				}
-				if resp.Data[0].OwnedBy != "openai" {
-					t.Errorf("Data[0].OwnedBy = %q, want %q", resp.Data[0].OwnedBy, "openai")
-				}
+				assert.Equal(t, "list", resp.Object)
+				require.Len(t, resp.Data, 2)
+				assert.Equal(t, "gpt-4o", resp.Data[0].ID)
+				assert.Equal(t, "openai", resp.Data[0].OwnedBy)
 			},
 		},
 		{
@@ -896,72 +561,46 @@ func TestListModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request method and path
-				if r.Method != http.MethodGet {
-					t.Errorf("Method = %q, want %q", r.Method, http.MethodGet)
-				}
-				if r.URL.Path != "/models" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/models")
-				}
-
-				// Verify authorization header
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
+			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
 
+			req := capture.Last(t)
+			assertAuthorized(t, req)
+			assert.Equal(t, http.MethodGet, req.Method)
+			assert.Equal(t, "/models", req.Path)
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
 
-func TestChatCompletionWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate a slow response
+func TestCancelledContextReturnsError(t *testing.T) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	})
+	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
+	cancel()
 
-	req := &core.ChatRequest{
-		Model: "gpt-4o",
-		Messages: []core.Message{
-			{Role: "user", Content: "Hello"},
-		},
-	}
+	_, err := provider.ChatCompletion(ctx, &core.ChatRequest{
+		Model:    "gpt-4o",
+		Messages: []core.Message{{Role: "user", Content: "Hello"}},
+	})
+	assert.Error(t, err, "ChatCompletion")
 
-	_, err := provider.ChatCompletion(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	_, err = provider.Responses(ctx, &core.ResponsesRequest{Model: "gpt-4o", Input: "Hello"})
+	assert.Error(t, err, "Responses")
 }
 
 func TestResponses(t *testing.T) {
@@ -997,41 +636,18 @@ func TestResponses(t *testing.T) {
 					"total_tokens": 30
 				}
 			}`,
-			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ResponsesResponse) {
-				if resp.ID != "resp_123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "resp_123")
-				}
-				if resp.Object != "response" {
-					t.Errorf("Object = %q, want %q", resp.Object, "response")
-				}
-				if resp.Model != "gpt-4o" {
-					t.Errorf("Model = %q, want %q", resp.Model, "gpt-4o")
-				}
-				if resp.Status != "completed" {
-					t.Errorf("Status = %q, want %q", resp.Status, "completed")
-				}
-				if len(resp.Output) != 1 {
-					t.Fatalf("len(Output) = %d, want 1", len(resp.Output))
-				}
-				if len(resp.Output[0].Content) != 1 {
-					t.Fatalf("len(Output[0].Content) = %d, want 1", len(resp.Output[0].Content))
-				}
-				if resp.Output[0].Content[0].Text != "Hello! How can I help you today?" {
-					t.Errorf("Output text = %q, want %q", resp.Output[0].Content[0].Text, "Hello! How can I help you today?")
-				}
-				if resp.Usage == nil {
-					t.Fatal("Usage should not be nil")
-				}
-				if resp.Usage.InputTokens != 10 {
-					t.Errorf("InputTokens = %d, want 10", resp.Usage.InputTokens)
-				}
-				if resp.Usage.OutputTokens != 20 {
-					t.Errorf("OutputTokens = %d, want 20", resp.Usage.OutputTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "resp_123", resp.ID)
+				assert.Equal(t, "response", resp.Object)
+				assert.Equal(t, "gpt-4o", resp.Model)
+				assert.Equal(t, "completed", resp.Status)
+				require.Len(t, resp.Output, 1)
+				require.Len(t, resp.Output[0].Content, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Output[0].Content[0].Text)
+				require.NotNil(t, resp.Usage)
+				assert.Equal(t, 10, resp.Usage.InputTokens)
+				assert.Equal(t, 20, resp.Usage.OutputTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -1060,22 +676,14 @@ func TestResponses(t *testing.T) {
 				}]
 			}`,
 			checkResponse: func(t *testing.T, resp *core.ResponsesResponse) {
-				if len(resp.Output) != 1 || len(resp.Output[0].Content) != 1 {
-					t.Fatalf("unexpected output shape: %+v", resp.Output)
-				}
-
+				require.Len(t, resp.Output, 1)
+				require.Len(t, resp.Output[0].Content, 1)
 				annotations := resp.Output[0].Content[0].Annotations
-				if len(annotations) != 1 {
-					t.Fatalf("len(Annotations) = %d, want 1", len(annotations))
-				}
+				require.Len(t, annotations, 1)
 
 				var annotation map[string]any
-				if err := json.Unmarshal(annotations[0], &annotation); err != nil {
-					t.Fatalf("json.Unmarshal(annotation) error = %v", err)
-				}
-				if annotation["type"] != "url_citation" {
-					t.Fatalf("annotation.type = %#v, want url_citation", annotation["type"])
-				}
+				require.NoError(t, json.Unmarshal(annotations[0], &annotation))
+				assert.Equal(t, "url_citation", annotation["type"])
 			},
 		},
 		{
@@ -1100,85 +708,40 @@ func TestResponses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				// Verify request path
-				if r.URL.Path != "/responses" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/responses")
-				}
-
-				// Verify request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ResponsesRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
+			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
-			req := &core.ResponsesRequest{
-				Model: "gpt-4o",
-				Input: "Hello",
-			}
+			resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-4o", Input: "Hello"})
 
-			resp, err := provider.Responses(context.Background(), req)
+			req := capture.Last(t)
+			assertAuthorized(t, req)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "/responses", req.Path)
+			assert.Equal(t, "gpt-4o", req.JSON(t)["model"])
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkResponse(t, resp)
 		})
 	}
 }
 
 func TestResponsesUtilitiesForwardResponseContext(t *testing.T) {
-	var inputTokensBody map[string]any
-	var compactBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode request body: %v", err)
-		}
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/responses/input_tokens":
-			inputTokensBody = body
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/responses/input_tokens": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"object":"response.input_tokens","input_tokens":10}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/responses/compact":
-			compactBody = body
+		},
+		"/responses/compact": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction","output":[]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+		},
+	})
+	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	maxOutputTokens := 128
@@ -1219,175 +782,64 @@ func TestResponsesUtilitiesForwardResponseContext(t *testing.T) {
 			"custom": json.RawMessage(`"value"`),
 		}),
 	}
+	_, err := provider.CountResponseInputTokens(context.Background(), req)
+	require.NoError(t, err)
+	_, err = provider.CompactResponse(context.Background(), req)
+	require.NoError(t, err)
 
-	if _, err := provider.CountResponseInputTokens(context.Background(), req); err != nil {
-		t.Fatalf("CountResponseInputTokens() error = %v", err)
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	assert.Equal(t, "/responses/input_tokens", requests[0].Path)
+	assert.Equal(t, "/responses/compact", requests[1].Path)
+
+	kept := []string{
+		"tools", "tool_choice", "parallel_tool_calls", "temperature", "top_p", "top_logprobs",
+		"max_output_tokens", "metadata", "reasoning", "text", "include", "truncation", "store",
+		"previous_response_id", "conversation", "prompt", "prompt_cache_retention",
+		"context_management", "user", "service_tier", "safety_identifier", "custom",
 	}
-	if _, err := provider.CompactResponse(context.Background(), req); err != nil {
-		t.Fatalf("CompactResponse() error = %v", err)
-	}
-	for name, body := range map[string]map[string]any{
-		"input_tokens": inputTokensBody,
-		"compact":      compactBody,
-	} {
-		if body["model"] != "gpt-4o" || body["input"] != "hello" || body["instructions"] != "be brief" {
-			t.Fatalf("%s body kept fields = %+v, want model/input/instructions", name, body)
+	filtered := []string{"provider", "stream", "stream_options"}
+	for _, sent := range requests {
+		body := sent.JSON(t)
+		assert.Equal(t, "gpt-4o", body["model"], sent.Path)
+		assert.Equal(t, "hello", body["input"], sent.Path)
+		assert.Equal(t, "be brief", body["instructions"], sent.Path)
+		for _, field := range kept {
+			assert.Contains(t, body, field, "%s body missing %q", sent.Path, field)
 		}
-		for _, field := range []string{
-			"tools",
-			"tool_choice",
-			"parallel_tool_calls",
-			"temperature",
-			"top_p",
-			"top_logprobs",
-			"max_output_tokens",
-			"metadata",
-			"reasoning",
-			"text",
-			"include",
-			"truncation",
-			"store",
-			"previous_response_id",
-			"conversation",
-			"prompt",
-			"prompt_cache_retention",
-			"context_management",
-			"user",
-			"service_tier",
-			"safety_identifier",
-			"custom",
-		} {
-			if _, ok := body[field]; !ok {
-				t.Fatalf("%s body missing %q: %+v", name, field, body)
-			}
-		}
-		for _, field := range []string{"provider", "stream", "stream_options"} {
-			if _, ok := body[field]; ok {
-				t.Fatalf("%s body includes filtered field %q: %+v", name, field, body)
-			}
+		for _, field := range filtered {
+			assert.NotContains(t, body, field, "%s body includes filtered field %q", sent.Path, field)
 		}
 	}
 }
 
 func TestResponsesWithArrayInput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request body contains array input
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		// Verify input is an array
-		input, ok := req["input"].([]any)
-		if !ok {
-			t.Fatal("input should be an array")
-		}
-		if len(input) != 2 {
-			t.Errorf("len(input) = %d, want 2", len(input))
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "resp_123",
-			"object": "response",
-			"created_at": 1677652288,
-			"model": "gpt-4o",
-			"status": "completed",
-			"output": [{
-				"id": "msg_123",
-				"type": "message",
-				"role": "assistant",
-				"status": "completed",
-				"content": [{
-					"type": "output_text",
-					"text": "Hello!"
-				}]
-			}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+	server, capture := providertest.JSONServer(t, http.StatusOK, responsesReplyJSON)
+	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
-	req := &core.ResponsesRequest{
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: "gpt-4o",
 		Input: []any{
-			map[string]any{
-				"role":    "user",
-				"content": "Hello",
-			},
-			map[string]any{
-				"role":    "assistant",
-				"content": "Hi there!",
-			},
+			map[string]any{"role": "user", "content": "Hello"},
+			map[string]any{"role": "assistant", "content": "Hi there!"},
 		},
 		Instructions: "Be helpful",
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "resp_123", resp.ID)
 
-	resp, err := provider.Responses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if resp.ID != "resp_123" {
-		t.Errorf("ID = %q, want %q", resp.ID, "resp_123")
-	}
+	input, ok := capture.Last(t).JSON(t)["input"].([]any)
+	require.True(t, ok, "input should be forwarded as an array")
+	assert.Len(t, input, 2)
 }
 
 func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req map[string]any
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		input, ok := req["input"].([]any)
-		if !ok || len(input) != 1 {
-			t.Fatalf("input = %#v, want []any len=1", req["input"])
-		}
-		first, ok := input[0].(map[string]any)
-		if !ok {
-			t.Fatalf("input[0] = %#v, want object", input[0])
-		}
-		if _, ok := first["x_trace"].(map[string]any); !ok {
-			t.Fatalf("input[0].x_trace = %#v, want object", first["x_trace"])
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "resp_123",
-			"object": "response",
-			"created_at": 1677652288,
-			"model": "gpt-4o",
-			"status": "completed",
-			"output": [{
-				"id": "msg_123",
-				"type": "message",
-				"role": "assistant",
-				"status": "completed",
-				"content": [{
-					"type": "output_text",
-					"text": "Hello!"
-				}]
-			}]
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	server, capture := providertest.JSONServer(t, http.StatusOK, responsesReplyJSON)
+	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
-	req := &core.ResponsesRequest{
+	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: "gpt-4o",
 		Input: []core.ResponsesInputElement{
 			{
@@ -1397,15 +849,17 @@ func TestResponses_PreservesUnknownNestedFields(t *testing.T) {
 				ExtraFields: core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{"x_trace": json.RawMessage(`{"id":"trace-1"}`)}),
 			},
 		},
-	}
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "resp_123", resp.ID)
 
-	resp, err := provider.Responses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "resp_123" {
-		t.Errorf("ID = %q, want %q", resp.ID, "resp_123")
-	}
+	input, ok := capture.Last(t).JSON(t)["input"].([]any)
+	require.True(t, ok)
+	require.Len(t, input, 1)
+	first, ok := input[0].(map[string]any)
+	require.True(t, ok, "input[0] = %#v, want object", input[0])
+	_, ok = first["x_trace"].(map[string]any)
+	assert.True(t, ok, "input[0].x_trace = %#v, want object", first["x_trace"])
 }
 
 func TestStreamResponses(t *testing.T) {
@@ -1431,29 +885,15 @@ data: {"type":"response.output_text.delta","delta":"!"}
 event: response.completed
 data: {"type":"response.completed","response":{"id":"resp_123","object":"response","status":"completed","model":"gpt-4o"}}
 `,
-			expectedError: false,
 			checkStream: func(t *testing.T, body io.ReadCloser) {
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
+				require.NotNil(t, body)
 				defer func() { _ = body.Close() }()
 
-				// Read and verify the streaming response
 				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
-
-				responseStr := string(respBody)
-				if !strings.Contains(responseStr, "response.created") {
-					t.Error("response should contain response.created event")
-				}
-				if !strings.Contains(responseStr, "response.output_text.delta") {
-					t.Error("response should contain response.output_text.delta event")
-				}
-				if !strings.Contains(responseStr, "[DONE]") {
-					t.Error("response should end with [DONE]")
-				}
+				require.NoError(t, err)
+				assert.Contains(t, string(respBody), "response.created")
+				assert.Contains(t, string(respBody), "response.output_text.delta")
+				assert.Contains(t, string(respBody), "[DONE]")
 			},
 		},
 		{
@@ -1472,87 +912,29 @@ data: {"type":"response.completed","response":{"id":"resp_123","object":"respons
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				// Verify request path
-				if r.URL.Path != "/responses" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/responses")
-				}
-
-				// Verify stream is set in request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ResponsesRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
-
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
-
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			})
+			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
-			req := &core.ResponsesRequest{
-				Model: "gpt-4o",
-				Input: "Hello",
-			}
+			body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "gpt-4o", Input: "Hello"})
 
-			body, err := provider.StreamResponses(context.Background(), req)
+			req := capture.Last(t)
+			assertAuthorized(t, req)
+			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
+			assert.Equal(t, "/responses", req.Path)
+			stream, _ := req.JSON(t)["stream"].(bool)
+			assert.True(t, stream)
 
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkStream != nil {
-					tt.checkStream(t, body)
-				}
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			tt.checkStream(t, body)
 		})
-	}
-}
-
-func TestResponsesWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate a slow response
-		<-r.Context().Done()
-		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	req := &core.ResponsesRequest{
-		Model: "gpt-4o",
-		Input: "Hello",
-	}
-
-	_, err := provider.Responses(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
 	}
 }
 
@@ -1579,9 +961,7 @@ func TestIsOSeriesModel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			if got := isOSeriesModel(tt.model); got != tt.expected {
-				t.Errorf("isOSeriesModel(%q) = %v, want %v", tt.model, got, tt.expected)
-			}
+			assert.Equal(t, tt.expected, isOSeriesModel(tt.model))
 		})
 	}
 }
@@ -1609,511 +989,155 @@ func TestIsReasoningChatModel(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			if got := isReasoningChatModel(tt.model); got != tt.expected {
-				t.Errorf("isReasoningChatModel(%q) = %v, want %v", tt.model, got, tt.expected)
+			assert.Equal(t, tt.expected, isReasoningChatModel(tt.model))
+		})
+	}
+}
+
+// Reasoning models take max_completion_tokens and reject temperature; other
+// models receive max_tokens and temperature unchanged. Both the blocking and the
+// streaming chat paths apply the same mapping.
+func TestChatCompletion_AdaptsTokenParamsByModel(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     string
+		stream    bool
+		reasoning bool
+	}{
+		{name: "o-series", model: "o3-mini", reasoning: true},
+		{name: "gpt-5 family", model: "gpt-5-mini", reasoning: true},
+		{name: "non-reasoning passes max_tokens", model: "gpt-4o"},
+		{name: "o-series stream", model: "o4-mini", stream: true, reasoning: true},
+		{name: "gpt-5 stream", model: "gpt-5-nano", stream: true, reasoning: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			maxTokens := 1000
+			temperature := 0.7
+			req := &core.ChatRequest{
+				Model:       tt.model,
+				Messages:    []core.Message{{Role: "user", Content: "Hello"}},
+				MaxTokens:   &maxTokens,
+				Temperature: &temperature,
+			}
+
+			var sent map[string]any
+			if tt.stream {
+				srv, capture := providertest.SSEServer(t, providertest.ChatChunkSSE)
+				provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+				provider.SetBaseURL(srv.URL)
+
+				body, err := provider.StreamChatCompletion(context.Background(), req)
+				require.NoError(t, err)
+				defer func() { _ = body.Close() }()
+				respBody, err := io.ReadAll(body)
+				require.NoError(t, err)
+				assert.Equal(t, providertest.ChatChunkSSE, string(respBody))
+				sent = capture.Last(t).JSON(t)
+				stream, _ := sent["stream"].(bool)
+				assert.True(t, stream)
+			} else {
+				srv, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+				provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+				provider.SetBaseURL(srv.URL)
+
+				resp, err := provider.ChatCompletion(context.Background(), req)
+				require.NoError(t, err)
+				assert.Equal(t, providertest.Model, resp.Model)
+				sent = capture.Last(t).JSON(t)
+			}
+
+			if tt.reasoning {
+				assert.NotContains(t, sent, "max_tokens")
+				assert.NotContains(t, sent, "temperature")
+				assert.Equal(t, float64(maxTokens), sent["max_completion_tokens"])
+			} else {
+				assert.NotContains(t, sent, "max_completion_tokens")
+				assert.Equal(t, float64(maxTokens), sent["max_tokens"])
+				assert.Equal(t, temperature, sent["temperature"])
 			}
 		})
 	}
 }
 
-func TestChatCompletion_ReasoningModel_AdaptsParameters(t *testing.T) {
-	maxTokens := 1000
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(body, &raw); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		// max_tokens must NOT be present
-		if _, ok := raw["max_tokens"]; ok {
-			t.Error("reasoning model request should not contain max_tokens")
-		}
-
-		// max_completion_tokens must be present with the right value
-		mct, ok := raw["max_completion_tokens"]
-		if !ok {
-			t.Fatal("reasoning model request should contain max_completion_tokens")
-		}
-		if int(mct.(float64)) != maxTokens {
-			t.Errorf("max_completion_tokens = %v, want %d", mct, maxTokens)
-		}
-
-		// temperature must NOT be present
-		if _, ok := raw["temperature"]; ok {
-			t.Error("reasoning model request should not contain temperature")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-123",
-			"object": "chat.completion",
-			"model": "o3-mini",
-			"choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
-			"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	temp := 0.7
-	req := &core.ChatRequest{
-		Model:       "o3-mini",
-		Messages:    []core.Message{{Role: "user", Content: "Hello"}},
-		MaxTokens:   &maxTokens,
-		Temperature: &temp,
+// Tool definitions, tool_choice and parallel_tool_calls survive the
+// reasoning-model adaptation as well as the plain passthrough.
+func TestChatCompletion_PreservesToolConfiguration(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     string
+		reasoning bool
+	}{
+		{name: "non-reasoning model", model: "gpt-4o-mini"},
+		{name: "reasoning model", model: "o3-mini", reasoning: true},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{
+				"id": "chatcmpl-tools",
+				"object": "chat.completion",
+				"model": "`+tt.model+`",
+				"choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"}}]}, "finish_reason": "tool_calls"}],
+				"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
+			}`)
+			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
 
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Model != "o3-mini" {
-		t.Errorf("Model = %q, want %q", resp.Model, "o3-mini")
-	}
-}
-
-func TestChatCompletion_GPT5Model_AdaptsParameters(t *testing.T) {
-	maxTokens := 1000
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(body, &raw); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		if _, ok := raw["max_tokens"]; ok {
-			t.Error("gpt-5 request should not contain max_tokens")
-		}
-
-		mct, ok := raw["max_completion_tokens"]
-		if !ok {
-			t.Fatal("gpt-5 request should contain max_completion_tokens")
-		}
-		if int(mct.(float64)) != maxTokens {
-			t.Errorf("max_completion_tokens = %v, want %d", mct, maxTokens)
-		}
-
-		if _, ok := raw["temperature"]; ok {
-			t.Error("gpt-5 request should not contain temperature")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-gpt5",
-			"object": "chat.completion",
-			"model": "gpt-5-mini",
-			"choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
-			"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	temp := 0.7
-	req := &core.ChatRequest{
-		Model:       "gpt-5-mini",
-		Messages:    []core.Message{{Role: "user", Content: "Hello"}},
-		MaxTokens:   &maxTokens,
-		Temperature: &temp,
-	}
-
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Model != "gpt-5-mini" {
-		t.Errorf("Model = %q, want %q", resp.Model, "gpt-5-mini")
-	}
-}
-
-func TestChatCompletion_NonReasoningModel_PassesMaxTokens(t *testing.T) {
-	maxTokens := 1000
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(body, &raw); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		// max_tokens must be present
-		mt, ok := raw["max_tokens"]
-		if !ok {
-			t.Fatal("non-reasoning model request should contain max_tokens")
-		}
-		if int(mt.(float64)) != maxTokens {
-			t.Errorf("max_tokens = %v, want %d", mt, maxTokens)
-		}
-
-		// max_completion_tokens must NOT be present
-		if _, ok := raw["max_completion_tokens"]; ok {
-			t.Error("non-reasoning model request should not contain max_completion_tokens")
-		}
-
-		// temperature must be present
-		if _, ok := raw["temperature"]; !ok {
-			t.Error("non-reasoning model request should contain temperature")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-456",
-			"object": "chat.completion",
-			"model": "gpt-4o",
-			"choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
-			"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	temp := 0.7
-	req := &core.ChatRequest{
-		Model:       "gpt-4o",
-		Messages:    []core.Message{{Role: "user", Content: "Hello"}},
-		MaxTokens:   &maxTokens,
-		Temperature: &temp,
-	}
-
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Model != "gpt-4o" {
-		t.Errorf("Model = %q, want %q", resp.Model, "gpt-4o")
-	}
-}
-
-func TestChatCompletion_NonReasoningModel_PreservesToolConfiguration(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(body, &raw); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		tools, ok := raw["tools"].([]any)
-		if !ok || len(tools) != 1 {
-			t.Fatalf("tools = %#v, want one tool", raw["tools"])
-		}
-
-		toolChoice, ok := raw["tool_choice"].(map[string]any)
-		if !ok {
-			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
-		}
-		function, ok := toolChoice["function"].(map[string]any)
-		if !ok || function["name"] != "lookup_weather" {
-			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
-		}
-
-		parallelToolCalls, ok := raw["parallel_tool_calls"].(bool)
-		if !ok || parallelToolCalls {
-			t.Fatalf("parallel_tool_calls = %#v, want false", raw["parallel_tool_calls"])
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-tools",
-			"object": "chat.completion",
-			"model": "gpt-4o-mini",
-			"choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"}}]}, "finish_reason": "tool_calls"}],
-			"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	parallelToolCalls := false
-	req := &core.ChatRequest{
-		Model: "gpt-4o-mini",
-		Messages: []core.Message{
-			{Role: "user", Content: "What's the weather?"},
-		},
-		Tools: []map[string]any{
-			{
-				"type": "function",
-				"function": map[string]any{
-					"name":        "lookup_weather",
-					"description": "Get the weather for a city.",
-					"parameters": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"city": map[string]any{"type": "string"},
+			maxTokens := 256
+			parallelToolCalls := false
+			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+				Model:     tt.model,
+				Messages:  []core.Message{{Role: "user", Content: "What's the weather?"}},
+				MaxTokens: &maxTokens,
+				Tools: []map[string]any{
+					{
+						"type": "function",
+						"function": map[string]any{
+							"name":        "lookup_weather",
+							"description": "Get the weather for a city.",
+							"parameters": map[string]any{
+								"type":       "object",
+								"properties": map[string]any{"city": map[string]any{"type": "string"}},
+								"required":   []string{"city"},
+							},
 						},
-						"required": []string{"city"},
 					},
 				},
-			},
-		},
-		ToolChoice:        map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
-		ParallelToolCalls: &parallelToolCalls,
-	}
+				ToolChoice:        map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
+				ParallelToolCalls: &parallelToolCalls,
+			})
+			require.NoError(t, err)
+			require.Len(t, resp.Choices, 1)
+			assert.Equal(t, "tool_calls", resp.Choices[0].FinishReason)
+			require.Len(t, resp.Choices[0].Message.ToolCalls, 1)
+			assert.Equal(t, "lookup_weather", resp.Choices[0].Message.ToolCalls[0].Function.Name)
 
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Choices[0].FinishReason != "tool_calls" {
-		t.Fatalf("FinishReason = %q, want tool_calls", resp.Choices[0].FinishReason)
-	}
-	if len(resp.Choices[0].Message.ToolCalls) != 1 || resp.Choices[0].Message.ToolCalls[0].Function.Name != "lookup_weather" {
-		t.Fatalf("tool_calls = %+v, want lookup_weather", resp.Choices[0].Message.ToolCalls)
-	}
-}
-
-func TestStreamChatCompletion_ReasoningModel_AdaptsParameters(t *testing.T) {
-	maxTokens := 2000
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(body, &raw); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		// Must use max_completion_tokens, not max_tokens
-		if _, ok := raw["max_tokens"]; ok {
-			t.Error("streaming reasoning model request should not contain max_tokens")
-		}
-		mct, ok := raw["max_completion_tokens"]
-		if !ok {
-			t.Fatal("streaming reasoning model request should contain max_completion_tokens")
-		}
-		if int(mct.(float64)) != maxTokens {
-			t.Errorf("max_completion_tokens = %v, want %d", mct, maxTokens)
-		}
-
-		// stream must be true
-		if stream, ok := raw["stream"].(bool); !ok || !stream {
-			t.Error("stream should be true")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-123","object":"chat.completion.chunk","model":"o4-mini","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}
-
-data: [DONE]
-`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	req := &core.ChatRequest{
-		Model:     "o4-mini",
-		Messages:  []core.Message{{Role: "user", Content: "Hello"}},
-		MaxTokens: &maxTokens,
-	}
-
-	body, err := provider.StreamChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer func() { _ = body.Close() }()
-
-	respBody, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
-	if !strings.Contains(string(respBody), "o4-mini") {
-		t.Error("response should contain o4-mini model")
-	}
-}
-
-func TestStreamChatCompletion_GPT5Model_AdaptsParameters(t *testing.T) {
-	maxTokens := 2000
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(body, &raw); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		if _, ok := raw["max_tokens"]; ok {
-			t.Error("streaming gpt-5 request should not contain max_tokens")
-		}
-		if _, ok := raw["temperature"]; ok {
-			t.Error("streaming gpt-5 request should not contain temperature")
-		}
-		mct, ok := raw["max_completion_tokens"]
-		if !ok {
-			t.Fatal("streaming gpt-5 request should contain max_completion_tokens")
-		}
-		if int(mct.(float64)) != maxTokens {
-			t.Errorf("max_completion_tokens = %v, want %d", mct, maxTokens)
-		}
-
-		if stream, ok := raw["stream"].(bool); !ok || !stream {
-			t.Error("stream should be true")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-gpt5","object":"chat.completion.chunk","model":"gpt-5-nano","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}
-
-data: [DONE]
-`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	req := &core.ChatRequest{
-		Model:     "gpt-5-nano",
-		Messages:  []core.Message{{Role: "user", Content: "Hello"}},
-		MaxTokens: &maxTokens,
-	}
-
-	body, err := provider.StreamChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer func() { _ = body.Close() }()
-
-	respBody, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
-	if !strings.Contains(string(respBody), "gpt-5-nano") {
-		t.Error("response should contain gpt-5-nano model")
-	}
-}
-
-func TestChatCompletion_ReasoningModel_PreservesToolConfiguration(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var raw map[string]any
-		if err := json.Unmarshal(body, &raw); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		tools, ok := raw["tools"].([]any)
-		if !ok || len(tools) != 1 {
-			t.Fatalf("tools = %#v, want one tool", raw["tools"])
-		}
-
-		toolChoice, ok := raw["tool_choice"].(map[string]any)
-		if !ok {
-			t.Fatalf("tool_choice = %#v, want object", raw["tool_choice"])
-		}
-		function, ok := toolChoice["function"].(map[string]any)
-		if !ok || function["name"] != "lookup_weather" {
-			t.Fatalf("tool_choice.function = %#v, want lookup_weather", toolChoice["function"])
-		}
-
-		if _, ok := raw["max_tokens"]; ok {
-			t.Fatal("reasoning model request should not contain max_tokens")
-		}
-		if _, ok := raw["max_completion_tokens"]; !ok {
-			t.Fatal("reasoning model request should contain max_completion_tokens")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-tools-o3",
-			"object": "chat.completion",
-			"model": "o3-mini",
-			"choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"}}]}, "finish_reason": "tool_calls"}],
-			"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
-		}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
-
-	maxTokens := 256
-	req := &core.ChatRequest{
-		Model: "o3-mini",
-		Messages: []core.Message{
-			{Role: "user", Content: "What's the weather?"},
-		},
-		MaxTokens: &maxTokens,
-		Tools: []map[string]any{
-			{
-				"type": "function",
-				"function": map[string]any{
-					"name": "lookup_weather",
-					"parameters": map[string]any{
-						"type": "object",
-					},
-				},
-			},
-		},
-		ToolChoice: map[string]any{"type": "function", "function": map[string]any{"name": "lookup_weather"}},
-	}
-
-	resp, err := provider.ChatCompletion(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.Choices[0].FinishReason != "tool_calls" {
-		t.Fatalf("FinishReason = %q, want tool_calls", resp.Choices[0].FinishReason)
-	}
-	if len(resp.Choices[0].Message.ToolCalls) != 1 || resp.Choices[0].Message.ToolCalls[0].Function.Name != "lookup_weather" {
-		t.Fatalf("tool_calls = %+v, want lookup_weather", resp.Choices[0].Message.ToolCalls)
+			sent := capture.Last(t).JSON(t)
+			tools, ok := sent["tools"].([]any)
+			require.True(t, ok)
+			assert.Len(t, tools, 1)
+			toolChoice, ok := sent["tool_choice"].(map[string]any)
+			require.True(t, ok, "tool_choice = %#v, want object", sent["tool_choice"])
+			function, ok := toolChoice["function"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, "lookup_weather", function["name"])
+			parallel, ok := sent["parallel_tool_calls"].(bool)
+			require.True(t, ok, "parallel_tool_calls = %#v, want bool", sent["parallel_tool_calls"])
+			assert.False(t, parallel)
+			if tt.reasoning {
+				assert.NotContains(t, sent, "max_tokens")
+				assert.Equal(t, float64(maxTokens), sent["max_completion_tokens"])
+			} else {
+				assert.NotContains(t, sent, "max_completion_tokens")
+				assert.Equal(t, float64(maxTokens), sent["max_tokens"])
+			}
+		})
 	}
 }
 
 func TestPassthrough(t *testing.T) {
-	var gotPath string
-	var gotAuth string
-	var gotBeta string
-	var gotBody string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.RequestURI()
-		gotAuth = r.Header.Get("Authorization")
-		gotBeta = r.Header.Get("OpenAI-Beta")
-		body, _ := io.ReadAll(r.Body)
-		gotBody = string(body)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"error":"rate limited"}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
+	server, capture := providertest.JSONServer(t, http.StatusTooManyRequests, `{"error":"rate limited"}`)
+	provider := NewWithHTTPClient(testAPIKey, server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
@@ -2125,35 +1149,21 @@ func TestPassthrough(t *testing.T) {
 			"OpenAI-Beta":  {"responses=v1"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
 
-	if gotPath != "/responses?foo=bar" {
-		t.Fatalf("path = %q, want /responses?foo=bar", gotPath)
-	}
-	if gotAuth != "Bearer test-api-key" {
-		t.Fatalf("authorization = %q", gotAuth)
-	}
-	if gotBeta != "responses=v1" {
-		t.Fatalf("OpenAI-Beta = %q", gotBeta)
-	}
-	if gotBody != `{"model":"gpt-5-mini"}` {
-		t.Fatalf("body = %q", gotBody)
-	}
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429", resp.StatusCode)
-	}
+	req := capture.Last(t)
+	assert.Equal(t, http.MethodPost, req.Method)
+	assert.Equal(t, "/responses", req.Path)
+	assert.Equal(t, "bar", req.Query.Get("foo"))
+	assertAuthorized(t, req)
+	assert.Equal(t, "responses=v1", req.Header.Get("OpenAI-Beta"))
+	assert.Equal(t, `{"model":"gpt-5-mini"}`, string(req.Body))
+
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
-	if string(body) != `{"error":"rate limited"}` {
-		t.Fatalf("response body = %q", string(body))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, `{"error":"rate limited"}`, string(body))
 }
 
 func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
@@ -2173,16 +1183,8 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var raw map[string]any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-					t.Errorf("decode request: %v", err)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"c1","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
-			}))
-			defer server.Close()
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
+			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
 
 			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -2190,31 +1192,21 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 				Messages:  []core.Message{{Role: "user", Content: "hi"}},
 				Reasoning: tt.reasoning,
 			})
-			if err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
-			if _, ok := raw["reasoning"]; ok {
-				t.Errorf("request body includes nested reasoning: %v", raw["reasoning"])
-			}
-			got, ok := raw["reasoning_effort"]
+			require.NoError(t, err)
+
+			sent := capture.Last(t).JSON(t)
+			assert.NotContains(t, sent, "reasoning", "nested reasoning must not reach Chat Completions")
 			if tt.wantEffort == "" {
-				if ok {
-					t.Errorf("reasoning_effort = %v, want absent", got)
-				}
-			} else if got != tt.wantEffort {
-				t.Errorf("reasoning_effort = %v, want %q", got, tt.wantEffort)
+				assert.NotContains(t, sent, "reasoning_effort")
+			} else {
+				assert.Equal(t, tt.wantEffort, sent["reasoning_effort"])
 			}
 		})
 	}
 }
 
 func TestNew_AttributesErrorsToInstanceName(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"bad request","type":"invalid_request_error"}}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"bad request","type":"invalid_request_error"}}`)
 
 	provider := New(providers.ProviderConfig{Name: "openai-eu", Type: "openai", APIKey: "k", BaseURL: server.URL},
 		providers.ProviderOptions{Name: "openai-eu"})
@@ -2223,10 +1215,6 @@ func TestNew_AttributesErrorsToInstanceName(t *testing.T) {
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
 	var gwErr *core.GatewayError
-	if !errors.As(err, &gwErr) {
-		t.Fatalf("error = %v, want a gateway error", err)
-	}
-	if gwErr.Provider != "openai-eu" {
-		t.Fatalf("error provider = %q, want the instance name openai-eu", gwErr.Provider)
-	}
+	require.ErrorAs(t, err, &gwErr)
+	assert.Equal(t, "openai-eu", gwErr.Provider)
 }

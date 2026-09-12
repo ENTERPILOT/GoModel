@@ -6,6 +6,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modeldata"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestInitialize_AppliesConfigMetadataOverrides verifies that operator-supplied
@@ -32,9 +34,8 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 	// overrides are the only source of metadata.
 	raw := []byte(`{"version":1,"updated_at":"2025-01-01T00:00:00Z","providers":{},"models":{},"provider_models":{}}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 
 	registry.SetProviderMetadataOverrides("nippur", map[string]*core.ModelMetadata{
@@ -49,38 +50,25 @@ func TestInitialize_AppliesConfigMetadataOverrides(t *testing.T) {
 			},
 		},
 	})
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	overridden := registry.GetModel("nippur/GLM-4.7-Flash")
-	if overridden == nil || overridden.Model.Metadata == nil {
-		t.Fatal("expected nippur/GLM-4.7-Flash to have metadata after override")
-	}
-	if got := overridden.Model.Metadata.DisplayName; got != "GLM 4.7 Flash (local)" {
-		t.Errorf("DisplayName = %q, want GLM 4.7 Flash (local)", got)
-	}
-	if overridden.Model.Metadata.ContextWindow == nil || *overridden.Model.Metadata.ContextWindow != 131072 {
-		t.Errorf("ContextWindow = %v, want 131072", overridden.Model.Metadata.ContextWindow)
-	}
-	if !overridden.Model.Metadata.Capabilities["tools"] {
-		t.Errorf("Capabilities[tools] = false, want true")
-	}
-	if got := overridden.Model.Metadata.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
-		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
-	}
-	if got := overridden.Model.Metadata.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
-		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
-	}
+	require.NotNil(t, overridden)
+	require.NotNil(t, overridden.Model.Metadata)
+	got := overridden.Model.Metadata.DisplayName
+	assert.Equal(t, "GLM 4.7 Flash (local)", got)
+	assert.NotNil(t, overridden.Model.Metadata.ContextWindow)
+	assert.Equal(t, 131072, *overridden.Model.Metadata.ContextWindow)
+	assert.True(t, overridden.Model.Metadata.Capabilities["tools"])
+	got = overridden.Model.Metadata.PricingSources["input_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceConfigYAML, got)
+	got = overridden.Model.Metadata.PricingSources["output_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceConfigYAML, got)
 
 	untouched := registry.GetModel("nippur/Gemma4-31B")
-	if untouched == nil {
-		t.Fatal("expected Gemma4-31B to be registered")
-	}
-	if untouched.Model.Metadata != nil {
-		t.Errorf("expected nil metadata for non-overridden model, got %+v", untouched.Model.Metadata)
-	}
+	require.NotNil(t, untouched)
+	assert.Nil(t, untouched.Model.Metadata)
 }
 
 // TestInitialize_OverrideMergesOnRemoteEnrichment verifies field-wise merging:
@@ -108,30 +96,23 @@ func TestInitialize_OverrideMergesOnRemoteEnrichment(t *testing.T) {
 		"provider_models": {"openai/shared-model": {"model_ref": "shared-model", "enabled": true, "context_window": 99999}}
 	}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 
 	// Override only the context window; display name should come from the remote registry.
 	registry.SetProviderMetadataOverrides("openai-main", map[string]*core.ModelMetadata{
 		"shared-model": {ContextWindow: new(262144)},
 	})
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	info := registry.GetModel("openai-main/shared-model")
-	if info == nil || info.Model.Metadata == nil {
-		t.Fatal("expected metadata")
-	}
-	if info.Model.Metadata.DisplayName != "Remote Display" {
-		t.Errorf("DisplayName = %q, want Remote Display (remote preserved)", info.Model.Metadata.DisplayName)
-	}
-	if info.Model.Metadata.ContextWindow == nil || *info.Model.Metadata.ContextWindow != 262144 {
-		t.Errorf("ContextWindow = %v, want 262144 (override wins)", info.Model.Metadata.ContextWindow)
-	}
+	require.NotNil(t, info)
+	require.NotNil(t, info.Model.Metadata)
+	assert.Equal(t, "Remote Display", info.Model.Metadata.DisplayName)
+	assert.NotNil(t, info.Model.Metadata.ContextWindow)
+	assert.Equal(t, 262144, *info.Model.Metadata.ContextWindow)
 }
 
 func TestResolvePricingPrefersProviderSpecificMetadata(t *testing.T) {
@@ -160,9 +141,8 @@ func TestResolvePricingPrefersProviderSpecificMetadata(t *testing.T) {
 
 	raw := []byte(`{"version":1,"updated_at":"2025-01-01T00:00:00Z","providers":{},"models":{},"provider_models":{}}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 
 	primaryRate := 1.0
@@ -173,15 +153,13 @@ func TestResolvePricingPrefersProviderSpecificMetadata(t *testing.T) {
 	registry.SetProviderMetadataOverrides("openai-backup", map[string]*core.ModelMetadata{
 		"shared-model": {Pricing: &core.ModelPricing{InputPerMtok: &backupRate}},
 	})
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	pricing := registry.ResolvePricing("shared-model", "openai-backup")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != backupRate {
-		t.Fatalf("ResolvePricing(shared-model, openai-backup) = %+v, want backup pricing", pricing)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, backupRate, *pricing.InputPerMtok)
 }
 
 func TestResolvePricingPrefersProviderOwnedRawSlashMetadata(t *testing.T) {
@@ -211,9 +189,8 @@ func TestResolvePricingPrefersProviderOwnedRawSlashMetadata(t *testing.T) {
 
 	raw := []byte(`{"version":1,"updated_at":"2025-01-01T00:00:00Z","providers":{},"models":{},"provider_models":{}}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 
 	otherRate := 1.0
@@ -224,15 +201,13 @@ func TestResolvePricingPrefersProviderOwnedRawSlashMetadata(t *testing.T) {
 	registry.SetProviderMetadataOverrides("openrouter", map[string]*core.ModelMetadata{
 		"openrouter/free": {Pricing: &core.ModelPricing{InputPerMtok: &openRouterRate}},
 	})
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	err = registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	pricing := registry.ResolvePricing("openrouter/free", "openrouter")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != openRouterRate {
-		t.Fatalf("ResolvePricing(openrouter/free, openrouter) = %+v, want openrouter pricing", pricing)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, openRouterRate, *pricing.InputPerMtok)
 }
 
 func TestApplyConfigMetadataOverrides_MergesPricingSourcesPerField(t *testing.T) {
@@ -269,23 +244,18 @@ func TestApplyConfigMetadataOverrides_MergesPricingSourcesPerField(t *testing.T)
 	}
 
 	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, nil)
-	if applied != 1 {
-		t.Fatalf("applied = %d, want 1", applied)
-	}
+	require.Equal(t, 1, applied)
 
 	metadata := existing.Model.Metadata
-	if metadata.Pricing == nil || metadata.Pricing.InputPerMtok == nil || *metadata.Pricing.InputPerMtok != configInput {
-		t.Fatalf("InputPerMtok = %#v, want config override %v", metadata.Pricing, configInput)
-	}
-	if metadata.Pricing.OutputPerMtok == nil || *metadata.Pricing.OutputPerMtok != baseOutput {
-		t.Fatalf("OutputPerMtok = %#v, want registry value %v", metadata.Pricing.OutputPerMtok, baseOutput)
-	}
-	if got := metadata.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceConfigYAML {
-		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceConfigYAML)
-	}
-	if got := metadata.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
-		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
-	}
+	require.NotNil(t, metadata.Pricing)
+	require.NotNil(t, metadata.Pricing.InputPerMtok)
+	require.Equal(t, configInput, *metadata.Pricing.InputPerMtok)
+	require.NotNil(t, metadata.Pricing.OutputPerMtok)
+	require.Equal(t, baseOutput, *metadata.Pricing.OutputPerMtok)
+	got := metadata.PricingSources["input_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceConfigYAML, got)
+	got = metadata.PricingSources["output_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceModelRegistry, got)
 }
 
 // TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity verifies that
@@ -320,15 +290,10 @@ func TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity(t *testing.T)
 	}
 	replacements := make(map[*ModelInfo]*ModelInfo)
 	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, replacements)
-	if applied != 0 {
-		t.Errorf("applied = %d, want 0 for no-op merge", applied)
-	}
-	if got := modelsByProvider["nippur"]["same-model"]; got != existing {
-		t.Errorf("ModelInfo pointer changed on no-op merge: got %p, want %p", got, existing)
-	}
-	if len(replacements) != 0 {
-		t.Errorf("replacements = %v, want empty on no-op", replacements)
-	}
+	assert.Equal(t, 0, applied)
+	got := modelsByProvider["nippur"]["same-model"]
+	assert.Equal(t, existing, got)
+	assert.Empty(t, replacements)
 }
 
 // TestApplyConfigMetadataOverrides_NonNilEmptyReplacementsDoesNotPanic covers
@@ -348,16 +313,11 @@ func TestApplyConfigMetadataOverrides_NonNilEmptyReplacementsDoesNotPanic(t *tes
 	}
 	replacements := make(map[*ModelInfo]*ModelInfo) // non-nil, empty
 	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, replacements)
-	if applied != 1 {
-		t.Errorf("applied = %d, want 1", applied)
-	}
+	assert.Equal(t, 1, applied)
+
 	next := modelsByProvider["p"]["m"]
-	if next == existing {
-		t.Error("expected a replacement ModelInfo pointer, got original")
-	}
-	if replacements[existing] != next {
-		t.Errorf("replacements[existing] = %p, want %p", replacements[existing], next)
-	}
+	assert.NotSame(t, existing, next)
+	assert.Equal(t, next, replacements[existing])
 }
 
 // TestMetadataOverrideEmpty covers the reflect-based emptiness check so new
@@ -386,9 +346,8 @@ func TestMetadataOverrideEmpty(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := metadataOverrideEmpty(tc.in); got != tc.want {
-				t.Errorf("metadataOverrideEmpty(%+v) = %v, want %v", tc.in, got, tc.want)
-			}
+			got := metadataOverrideEmpty(tc.in)
+			assert.Equal(t, tc.want, got, "metadataOverrideEmpty(%+v)", tc.in)
 		})
 	}
 }
@@ -407,12 +366,8 @@ func TestApplyConfigMetadataOverrides_EmptyOverrideLeavesNilMetadataNil(t *testi
 		"p": {"m": {}}, // non-nil, all fields zero
 	}
 	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, nil)
-	if applied != 0 {
-		t.Errorf("applied = %d, want 0 for empty override", applied)
-	}
-	if existing.Model.Metadata != nil {
-		t.Errorf("Metadata = %+v, want nil (empty override should not publish)", existing.Model.Metadata)
-	}
+	assert.Equal(t, 0, applied)
+	assert.Nil(t, existing.Model.Metadata)
 }
 
 // TestSetProviderMetadataOverrides_DeepClonesExternalInput verifies that
@@ -439,21 +394,13 @@ func TestSetProviderMetadataOverrides_DeepClonesExternalInput(t *testing.T) {
 
 	snap := registry.snapshotConfigOverrides()
 	stored := snap["p"]["m"]
-	if stored == nil {
-		t.Fatal("expected stored override for p/m")
-	}
-	if stored.Modes[0] != "chat" {
-		t.Errorf("stored Modes mutated via caller: %v", stored.Modes)
-	}
-	if !stored.Capabilities["tools"] {
-		t.Error("stored Capabilities mutated via caller")
-	}
-	if stored.ContextWindow == nil || *stored.ContextWindow != 4096 {
-		t.Errorf("stored ContextWindow mutated via caller: %v", stored.ContextWindow)
-	}
-	if stored.Pricing == nil || stored.Pricing.Currency != "USD" {
-		t.Errorf("stored Pricing mutated via caller: %+v", stored.Pricing)
-	}
+	require.NotNil(t, stored)
+	assert.Equal(t, "chat", stored.Modes[0], "stored Modes mutated via caller: %v", stored.Modes)
+	assert.True(t, stored.Capabilities["tools"])
+	assert.NotNil(t, stored.ContextWindow)
+	assert.Equal(t, 4096, *stored.ContextWindow)
+	assert.NotNil(t, stored.Pricing)
+	assert.Equal(t, "USD", stored.Pricing.Currency)
 }
 
 // TestEnrichModels_KeepsProviderDiscoveredMetadataOverCatalog covers the local
@@ -481,9 +428,8 @@ func TestEnrichModels_KeepsProviderDiscoveredMetadataOverCatalog(t *testing.T) {
 		},
 	}
 	registry.RegisterProviderWithType(mock, "llamacpp")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	// The catalog knows the bare model ID and has no llamacpp entry at all.
 	raw := []byte(`{
@@ -498,28 +444,22 @@ func TestEnrichModels_KeepsProviderDiscoveredMetadataOverCatalog(t *testing.T) {
 		}
 	}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 	registry.EnrichModels()
 
 	info := registry.GetModel("gemma-3-4b-it")
-	if info == nil || info.Model.Metadata == nil {
-		t.Fatal("expected the model to stay registered with metadata")
-	}
+	require.NotNil(t, info)
+	require.NotNil(t, info.Model.Metadata)
+
 	meta := info.Model.Metadata
-	if meta.ContextWindow == nil || *meta.ContextWindow != runtimeContext {
-		t.Fatalf("ContextWindow = %v, want the server-reported %d", meta.ContextWindow, runtimeContext)
-	}
-	if !meta.Capabilities["vision"] {
-		t.Fatal("discovered vision capability was dropped by enrichment")
-	}
+	require.NotNil(t, meta.ContextWindow)
+	require.Equal(t, runtimeContext, *meta.ContextWindow)
+	require.True(t, meta.Capabilities["vision"])
+
 	// The catalog still fills in what the server never reports.
-	if meta.DisplayName != "Gemma 3 4B IT" {
-		t.Fatalf("DisplayName = %q, want the catalog's", meta.DisplayName)
-	}
-	if len(meta.Modes) != 1 || meta.Modes[0] != "chat" {
-		t.Fatalf("Modes = %v, want [chat] from the catalog", meta.Modes)
-	}
+	require.Equal(t, "Gemma 3 4B IT", meta.DisplayName)
+	require.Len(t, meta.Modes, 1)
+	require.Equal(t, "chat", meta.Modes[0])
 }

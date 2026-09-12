@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // A turn Anthropic cut at max_tokens is an incomplete response, not a
@@ -17,15 +19,10 @@ func TestConvertAnthropicResponseToResponses_MaxTokensIsIncomplete(t *testing.T)
 		Content:    []anthropicContent{{Type: "text", Text: "partial"}},
 	}, "claude-haiku-4-5")
 
-	if resp.Status != "incomplete" {
-		t.Fatalf("status = %q, want incomplete", resp.Status)
-	}
-	if resp.IncompleteDetails == nil || resp.IncompleteDetails.Reason != "max_output_tokens" {
-		t.Fatalf("incomplete_details = %+v, want reason max_output_tokens", resp.IncompleteDetails)
-	}
-	if resp.Output[0].Status != "incomplete" {
-		t.Fatalf("message item status = %q, want incomplete", resp.Output[0].Status)
-	}
+	assert.Equal(t, "incomplete", resp.Status)
+	require.NotNil(t, resp.IncompleteDetails)
+	assert.Equal(t, "max_output_tokens", resp.IncompleteDetails.Reason)
+	assert.Equal(t, "incomplete", resp.Output[0].Status)
 }
 
 func TestConvertAnthropicResponseToResponses_EndTurnCompletes(t *testing.T) {
@@ -35,9 +32,8 @@ func TestConvertAnthropicResponseToResponses_EndTurnCompletes(t *testing.T) {
 		Content:    []anthropicContent{{Type: "text", Text: "done"}},
 	}, "claude-haiku-4-5")
 
-	if resp.Status != "completed" || resp.IncompleteDetails != nil {
-		t.Fatalf("status = %q, incomplete_details = %+v, want a completed response", resp.Status, resp.IncompleteDetails)
-	}
+	assert.Equal(t, "completed", resp.Status)
+	assert.Nil(t, resp.IncompleteDetails)
 }
 
 // Cache reads and thinking tokens keep their OpenAI-shaped home; the
@@ -50,28 +46,21 @@ func TestBuildAnthropicResponsesUsage_NormalizesDetails(t *testing.T) {
 		CacheCreationInputTokens: 10,
 		OutputTokensDetails:      anthropicOutputTokensDetails{ThinkingTokens: 12},
 	})
-	if usage.PromptTokensDetails == nil || usage.PromptTokensDetails.CachedTokens != 40 {
-		t.Fatalf("input token details = %+v, want cached_tokens 40", usage.PromptTokensDetails)
-	}
-	if usage.CompletionTokensDetails == nil || usage.CompletionTokensDetails.ReasoningTokens != 12 {
-		t.Fatalf("output token details = %+v, want reasoning_tokens 12", usage.CompletionTokensDetails)
-	}
-	if usage.RawUsage["cache_creation_input_tokens"] != 10 {
-		t.Fatalf("RawUsage = %+v, want the Anthropic counts kept for usage records", usage.RawUsage)
-	}
+	require.NotNil(t, usage.PromptTokensDetails)
+	assert.Equal(t, 40, usage.PromptTokensDetails.CachedTokens)
+	require.NotNil(t, usage.CompletionTokensDetails)
+	assert.Equal(t, 12, usage.CompletionTokensDetails.ReasoningTokens)
+	assert.Equal(t, 10, usage.RawUsage["cache_creation_input_tokens"], "Anthropic counts must stay in RawUsage for usage records")
 
 	encoded, err := json.Marshal(usage)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire map[string]any
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	err = json.Unmarshal(encoded, &wire)
+	require.NoError(t, err)
+
 	for _, key := range []string{"cache_read_input_tokens", "cache_creation_input_tokens", "completion_reasoning_tokens"} {
-		if _, exists := wire[key]; exists {
-			t.Fatalf("usage payload %s carries %q, want the OpenAI Responses shape only", encoded, key)
-		}
+		assert.NotContains(t, wire, key, "usage payload must keep the OpenAI Responses shape only")
 	}
 }
 
@@ -98,16 +87,14 @@ data: {"type":"message_stop"}
 `
 	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-haiku-4-5")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	var response map[string]any
 	itemStatus := ""
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		switch event.Name {
 		case "response.completed":
-			t.Fatalf("truncated stream ended with response.completed: %s", raw)
+			require.Fail(t, "truncated stream ended with response.completed", "%s", raw)
 		case "response.incomplete":
 			response, _ = event.Payload["response"].(map[string]any)
 		case "response.output_item.done":
@@ -116,14 +103,9 @@ data: {"type":"message_stop"}
 			}
 		}
 	}
-	if response == nil {
-		t.Fatalf("expected response.incomplete terminal event: %s", raw)
-	}
+	require.NotNil(t, response)
+
 	details, _ := response["incomplete_details"].(map[string]any)
-	if details["reason"] != "max_output_tokens" {
-		t.Fatalf("incomplete_details = %#v, want reason max_output_tokens", response["incomplete_details"])
-	}
-	if itemStatus != "incomplete" {
-		t.Fatalf("message item status = %q, want incomplete", itemStatus)
-	}
+	assert.Equal(t, "max_output_tokens", details["reason"])
+	assert.Equal(t, "incomplete", itemStatus)
 }

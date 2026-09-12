@@ -4,14 +4,15 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 const testExtraContent = `{"google":{"thought_signature":"sig-1"}}`
@@ -144,17 +145,12 @@ func TestConvertChatRequestToGemini_ThoughtSignatures(t *testing.T) {
 				Model:    tt.model,
 				Messages: []core.Message{{Role: "user", Content: "Weather?"}, tt.message},
 			})
-			if err != nil {
-				t.Fatalf("convertChatRequestToGemini() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			parts := req.Contents[len(req.Contents)-1].Parts
-			if len(parts) != len(tt.wantSigs) {
-				t.Fatalf("parts = %d, want %d: %+v", len(parts), len(tt.wantSigs), parts)
-			}
+			require.Len(t, parts, len(tt.wantSigs), "parts = %+v", parts)
 			for i, want := range tt.wantSigs {
-				if got := parts[i].ThoughtSignature; got != want {
-					t.Errorf("part %d thoughtSignature = %q, want %q", i, got, want)
-				}
+				assert.Equal(t, want, parts[i].ThoughtSignature, "part %d", i)
 			}
 		})
 	}
@@ -162,43 +158,31 @@ func TestConvertChatRequestToGemini_ThoughtSignatures(t *testing.T) {
 
 func TestNativeChatResponse_ExposesThoughtSignatures(t *testing.T) {
 	var geminiResp geminiGenerateContentResponse
-	if err := json.Unmarshal([]byte(`{"candidates":[{"content":{"role":"model","parts":[
+	err := json.Unmarshal([]byte(`{"candidates":[{"content":{"role":"model","parts":[
 		{"text":"Let me check.","thoughtSignature":"sig-text"},
 		{"functionCall":{"id":"call_1","name":"lookup_weather","args":{"city":"Warsaw"}},"thoughtSignature":"sig-1"},
 		{"functionCall":{"id":"call_2","name":"lookup_weather","args":{"city":"Krakow"}}}
-	]},"finishReason":"STOP"}]}`), &geminiResp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	]},"finishReason":"STOP"}]}`), &geminiResp)
+	require.NoError(t, err)
 
 	resp, err := nativeChatResponse(&core.ChatRequest{Model: "gemini-3.5-flash"}, &geminiResp, "gemini")
-	if err != nil {
-		t.Fatalf("nativeChatResponse() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	encoded, err := json.Marshal(resp.Choices[0].Message)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire struct {
 		ExtraContent json.RawMessage `json:"extra_content"`
 		ToolCalls    []struct {
 			ExtraContent json.RawMessage `json:"extra_content"`
 		} `json:"tool_calls"`
 	}
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatalf("unmarshal wire message: %v", err)
-	}
-	if got := string(wire.ExtraContent); got != `{"google":{"thought_signature":"sig-text"}}` {
-		t.Fatalf("message extra_content = %s, want text signature", got)
-	}
-	if len(wire.ToolCalls) != 2 {
-		t.Fatalf("tool_calls = %d, want 2", len(wire.ToolCalls))
-	}
-	if got := string(wire.ToolCalls[0].ExtraContent); got != testExtraContent {
-		t.Fatalf("tool_calls[0].extra_content = %s, want %s", got, testExtraContent)
-	}
-	if got := string(wire.ToolCalls[1].ExtraContent); got != "" {
-		t.Fatalf("tool_calls[1].extra_content = %s, want absent", got)
-	}
+	err = json.Unmarshal(encoded, &wire)
+	require.NoError(t, err)
+	assert.Equal(t, `{"google":{"thought_signature":"sig-text"}}`, string(wire.ExtraContent))
+	require.Len(t, wire.ToolCalls, 2)
+	assert.Equal(t, testExtraContent, string(wire.ToolCalls[0].ExtraContent))
+	assert.Empty(t, string(wire.ToolCalls[1].ExtraContent))
 }
 
 // TestChatCompletion_NativeThoughtSignatureRoundTrip replays a Gemini tool
@@ -208,20 +192,18 @@ func TestNativeChatResponse_ExposesThoughtSignatures(t *testing.T) {
 func TestChatCompletion_NativeThoughtSignatureRoundTrip(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	var requests [][]byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		requests = append(requests, body)
+	// Declared up front so the handler can branch on the request count.
+	var capture *providertest.Capture
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		if len(requests) == 1 {
+		if capture.Count() == 1 {
 			_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[
 				{"functionCall":{"id":"call_1","name":"lookup_weather","args":{"city":"Warsaw"}},"thoughtSignature":"sig-1"}
 			]},"finishReason":"STOP"}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"Sunny."}]},"finishReason":"STOP"}]}`))
-	}))
-	defer server.Close()
+	})
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -230,61 +212,46 @@ func TestChatCompletion_NativeThoughtSignatureRoundTrip(t *testing.T) {
 		Model:    "gemini-3.5-flash",
 		Messages: []core.Message{{Role: "user", Content: "Weather?"}},
 	})
-	if err != nil {
-		t.Fatalf("first ChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// Serialize the assistant message the way it leaves the gateway and decode
 	// it the way the next request arrives.
 	encoded, err := json.Marshal(first.Choices[0].Message)
-	if err != nil {
-		t.Fatalf("marshal assistant message: %v", err)
-	}
-	var assistant core.Message
-	if err := json.Unmarshal(encoded, &assistant); err != nil {
-		t.Fatalf("unmarshal assistant message: %v", err)
-	}
+	require.NoError(t, err)
 
-	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+	var assistant core.Message
+	err = json.Unmarshal(encoded, &assistant)
+	require.NoError(t, err)
+	_, err = provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "gemini-3.5-flash",
 		Messages: []core.Message{
 			{Role: "user", Content: "Weather?"},
 			assistant,
 			{Role: "tool", ToolCallID: "call_1", Content: `{"result":"sunny"}`},
 		},
-	}); err != nil {
-		t.Fatalf("second ChatCompletion() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 
+	requests := capture.All()
+	require.Len(t, requests, 2)
 	var payload geminiGenerateContentRequest
-	if err := json.Unmarshal(requests[1], &payload); err != nil {
-		t.Fatalf("unmarshal second request: %v", err)
-	}
-	if len(payload.Contents) != 3 {
-		t.Fatalf("contents = %d, want 3", len(payload.Contents))
-	}
+	require.NoError(t, json.Unmarshal(requests[1].Body, &payload))
+	require.Len(t, payload.Contents, 3)
+
 	call := payload.Contents[1].Parts[0]
-	if call.FunctionCall == nil || call.FunctionCall.Name != "lookup_weather" {
-		t.Fatalf("model part = %+v, want functionCall", call)
-	}
-	if call.ThoughtSignature != "sig-1" {
-		t.Fatalf("thoughtSignature = %q, want sig-1", call.ThoughtSignature)
-	}
+	require.NotNil(t, call.FunctionCall, "model part = %+v, want functionCall", call)
+	assert.Equal(t, "lookup_weather", call.FunctionCall.Name)
+	assert.Equal(t, "sig-1", call.ThoughtSignature)
 }
 
 func TestStreamChatCompletion_NativeThoughtSignatures(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"lookup_weather","args":{"city":"Warsaw"}},"thoughtSignature":"sig-1"}]},"finishReason":"STOP"}]}
+	server, _ := providertest.SSEServer(t, `data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_1","name":"lookup_weather","args":{"city":"Warsaw"}},"thoughtSignature":"sig-1"}]},"finishReason":"STOP"}]}
 
 data: {"candidates":[{"content":{"role":"model","parts":[{"text":"","thoughtSignature":"sig-text"}]},"finishReason":"STOP"}]}
 
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -293,36 +260,27 @@ data: {"candidates":[{"content":{"role":"model","parts":[{"text":"","thoughtSign
 		Model:    "gemini-3.5-flash",
 		Messages: []core.Message{{Role: "user", Content: "Weather?"}},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	stream := string(raw)
-	if !strings.Contains(stream, `"tool_calls":[{"extra_content":{"google":{"thought_signature":"sig-1"}}`) {
-		t.Fatalf("stream lacks tool call extra_content: %s", stream)
-	}
-	if !strings.Contains(stream, `"delta":{"extra_content":{"google":{"thought_signature":"sig-text"}}}`) {
-		t.Fatalf("stream lacks text turn extra_content: %s", stream)
-	}
+	assert.Contains(t, stream, `"tool_calls":[{"extra_content":{"google":{"thought_signature":"sig-1"}}`)
+	assert.Contains(t, stream, `"delta":{"extra_content":{"google":{"thought_signature":"sig-text"}}}`)
 }
 
 func TestNativeChatResponse_ToolCallOnlyTurnHasNullContent(t *testing.T) {
 	var geminiResp geminiGenerateContentResponse
-	if err := json.Unmarshal([]byte(`{"candidates":[{"content":{"role":"model","parts":[
+	err := json.Unmarshal([]byte(`{"candidates":[{"content":{"role":"model","parts":[
 		{"functionCall":{"id":"call_1","name":"lookup_weather","args":{}}}
-	]},"finishReason":"STOP"}]}`), &geminiResp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	]},"finishReason":"STOP"}]}`), &geminiResp)
+	require.NoError(t, err)
+
 	resp, err := nativeChatResponse(&core.ChatRequest{Model: "gemini-3.5-flash"}, &geminiResp, "gemini")
-	if err != nil {
-		t.Fatalf("nativeChatResponse() error = %v", err)
-	}
-	if got := resp.Choices[0].Message.Content; got != nil {
-		t.Fatalf("content = %#v, want nil for a tool-call-only turn", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	assert.Nil(t, resp.Choices[0].Message.Content)
 }

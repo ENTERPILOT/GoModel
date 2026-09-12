@@ -2,15 +2,17 @@ package anthropic
 
 import (
 	"context"
-	"io"
+	"maps"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 // Anthropic counts tokens exactly through /v1/messages/count_tokens. The
@@ -19,16 +21,7 @@ import (
 // (max_tokens, stream, sampling) are left out, because Anthropic rejects
 // unknown fields rather than ignoring them.
 func TestCountMessagesTokens(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]json.RawMessage
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"input_tokens":2414}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"input_tokens":2414}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -37,39 +30,24 @@ func TestCountMessagesTokens(t *testing.T) {
 		"system":"be terse","messages":[{"role":"user","content":"hi"}],
 		"tools":[{"name":"t","input_schema":{"type":"object"}}],"tool_choice":{"type":"auto"},"thinking":{"type":"enabled","budget_tokens":1024}}`)
 	count, err := provider.CountMessagesTokens(context.Background(), "claude-haiku-4-5", body)
-	if err != nil {
-		t.Fatalf("CountMessagesTokens: %v", err)
-	}
-	if count != 2414 {
-		t.Errorf("count = %d, want 2414 from upstream", count)
-	}
-	if gotPath != "/messages/count_tokens" {
-		t.Errorf("path = %q, want /messages/count_tokens", gotPath)
-	}
-	if got := string(gotBody["model"]); got != `"claude-haiku-4-5"` {
-		t.Errorf("model = %s, want the resolved model", got)
-	}
-	keys := make([]string, 0, len(gotBody))
-	for k := range gotBody {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	want := []string{"messages", "model", "system", "thinking", "tool_choice", "tools"}
-	if !slices.Equal(keys, want) {
-		t.Errorf("forwarded fields = %v, want %v", keys, want)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 2414, count)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/messages/count_tokens", sent.Path)
+	var gotBody map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(sent.Body, &gotBody))
+	assert.Equal(t, `"claude-haiku-4-5"`, string(gotBody["model"]))
+
+	keys := slices.Sorted(maps.Keys(gotBody))
+	assert.Equal(t, []string{"messages", "model", "system", "thinking", "tool_choice", "tools"}, keys, "forwarded fields")
 }
 
 // An upstream failure is returned as an error so the caller can fall back.
 func TestCountMessagesTokens_UpstreamError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusBadRequest, `{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`)
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
-	if _, err := provider.CountMessagesTokens(context.Background(), "claude-haiku-4-5", []byte(`{"model":"m","messages":[]}`)); err == nil {
-		t.Fatal("expected an error from a 400 upstream")
-	}
+	_, err := provider.CountMessagesTokens(context.Background(), "claude-haiku-4-5", []byte(`{"model":"m","messages":[]}`))
+	require.Error(t, err)
 }

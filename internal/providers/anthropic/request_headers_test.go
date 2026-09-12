@@ -3,27 +3,17 @@ package anthropic
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
-	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func TestSetRequestHeaders_AddsHookHeadersToEveryRequest(t *testing.T) {
-	var (
-		mu  sync.Mutex
-		got http.Header
-	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		got = r.Header.Clone()
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 
 	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -38,18 +28,11 @@ func TestSetRequestHeaders_AddsHookHeadersToEveryRequest(t *testing.T) {
 		Model:    "claude-sonnet-4-6",
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if v := got.Values("X-Extra"); len(v) != 2 || v[0] != "from-hook" || v[1] != "second" {
-		t.Fatalf("X-Extra = %v, want [from-hook second]", v)
-	}
-	if v := got.Get("User-Agent"); v != "gomodel-test" {
-		t.Fatalf("User-Agent = %q, want gomodel-test (hook replaces the default)", v)
-	}
-	if got.Get("x-api-key") != "test-api-key" || got.Get("anthropic-version") == "" {
-		t.Fatalf("standard headers must survive the hook, got %v", got)
-	}
+	require.NoError(t, err)
+
+	got := capture.Last(t).Header
+	require.Equal(t, []string{"from-hook", "second"}, got.Values("X-Extra"))
+	require.Equal(t, "gomodel-test", got.Get("User-Agent"), "hook replaces the default User-Agent")
+	require.Equal(t, "test-api-key", got.Get("x-api-key"))
+	require.NotEmpty(t, got.Get("anthropic-version"), "standard headers must survive the hook, got %v", got)
 }

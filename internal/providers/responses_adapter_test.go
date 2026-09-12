@@ -3,15 +3,15 @@ package providers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"math"
 	"net/http"
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type capturingChatProvider struct {
@@ -36,24 +36,18 @@ func (p *capturingChatProvider) StreamChatCompletion(_ context.Context, req *cor
 func TestResponsesFunctionCallIDs(t *testing.T) {
 	t.Run("preserve explicit call id", func(t *testing.T) {
 		const callID = "call_123"
-		if got := ResponsesFunctionCallCallID(callID); got != callID {
-			t.Fatalf("ResponsesFunctionCallCallID(%q) = %q, want %q", callID, got, callID)
-		}
-		if got := ResponsesFunctionCallItemID(callID); got != "fc_"+callID {
-			t.Fatalf("ResponsesFunctionCallItemID(%q) = %q, want %q", callID, got, "fc_"+callID)
-		}
+		got := ResponsesFunctionCallCallID(callID)
+		require.Equal(t, callID, got)
+		got = ResponsesFunctionCallItemID(callID)
+		require.Equal(t, "fc_"+callID, got, "ResponsesFunctionCallItemID(%q)", callID)
 	})
 
 	t.Run("generate ids when empty", func(t *testing.T) {
 		callID := ResponsesFunctionCallCallID("  ")
-		if !strings.HasPrefix(callID, "call_") {
-			t.Fatalf("generated call id = %q, want prefix call_", callID)
-		}
+		require.True(t, strings.HasPrefix(callID, "call_"), "generated call id = %q, want prefix call_", callID)
 
 		itemID := ResponsesFunctionCallItemID("")
-		if !strings.HasPrefix(itemID, "fc_call_") {
-			t.Fatalf("generated item id = %q, want prefix fc_call_", itemID)
-		}
+		require.True(t, strings.HasPrefix(itemID, "fc_call_"), "generated item id = %q, want prefix fc_call_", itemID)
 	})
 }
 
@@ -64,9 +58,9 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 	mustResponsesRequest := func(data string) *core.ResponsesRequest {
 		t.Helper()
 		var req core.ResponsesRequest
-		if err := json.Unmarshal([]byte(data), &req); err != nil {
-			t.Fatalf("unmarshal responses request: %v", err)
-		}
+		err := json.Unmarshal([]byte(data), &req)
+		require.NoError(t, err)
+
 		return &req
 	}
 
@@ -83,18 +77,12 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				Input: "Hello",
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if req.Model != "test-model" {
-					t.Errorf("Model = %q, want test-model", req.Model)
-				}
-				if len(req.Messages) != 1 {
-					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-				}
-				if req.Messages[0].Role != "user" {
-					t.Errorf("Messages[0].Role = %q, want user", req.Messages[0].Role)
-				}
-				if got := core.ExtractTextContent(req.Messages[0].Content); got != "Hello" {
-					t.Errorf("Messages[0].Content = %q, want Hello", got)
-				}
+				assert.Equal(t, "test-model", req.Model)
+				require.Len(t, req.Messages, 1)
+				assert.Equal(t, "user", req.Messages[0].Role)
+				got := core.ExtractTextContent(req.Messages[0].Content)
+				assert.Equal(t, "Hello", got)
+
 			},
 		},
 		{
@@ -112,24 +100,18 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				ParallelToolCalls: new(false),
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if len(req.Messages) != 2 || req.Messages[0].Role != "system" {
-					t.Fatalf("unexpected messages: %+v", req.Messages)
-				}
-				if req.MaxTokens == nil || *req.MaxTokens != 1024 {
-					t.Fatalf("MaxTokens = %#v, want 1024", req.MaxTokens)
-				}
-				if req.Reasoning == nil || req.Reasoning.Effort != "high" {
-					t.Fatalf("Reasoning = %+v, want high", req.Reasoning)
-				}
-				if req.StreamOptions == nil || !req.StreamOptions.IncludeUsage {
-					t.Fatalf("StreamOptions = %+v, want include_usage=true", req.StreamOptions)
-				}
-				if len(req.Tools) != 1 || req.ToolChoice == nil {
-					t.Fatalf("tool configuration not preserved: %+v %+v", req.Tools, req.ToolChoice)
-				}
-				if req.ParallelToolCalls == nil || *req.ParallelToolCalls {
-					t.Fatalf("ParallelToolCalls = %#v, want false", req.ParallelToolCalls)
-				}
+				require.Len(t, req.Messages, 2)
+				require.Equal(t, "system", req.Messages[0].Role)
+				require.NotNil(t, req.MaxTokens)
+				require.Equal(t, 1024, *req.MaxTokens)
+				require.NotNil(t, req.Reasoning)
+				require.Equal(t, "high", req.Reasoning.Effort)
+				require.NotNil(t, req.StreamOptions)
+				require.True(t, req.StreamOptions.IncludeUsage)
+				require.Len(t, req.Tools, 1)
+				require.NotNil(t, req.ToolChoice)
+				require.NotNil(t, req.ParallelToolCalls)
+				require.False(t, *req.ParallelToolCalls)
 			},
 		},
 		{
@@ -156,35 +138,23 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if len(req.Tools) != 1 {
-					t.Fatalf("len(Tools) = %d, want 1", len(req.Tools))
-				}
+				require.Len(t, req.Tools, 1)
 
 				function, ok := req.Tools[0]["function"].(map[string]any)
-				if !ok {
-					t.Fatalf("Tools[0].function = %#v, want object", req.Tools[0]["function"])
-				}
-				if function["name"] != "lookup_weather" {
-					t.Fatalf("Tools[0].function.name = %#v, want lookup_weather", function["name"])
-				}
-				if _, ok := req.Tools[0]["name"]; ok {
-					t.Fatalf("Tools[0].name should be wrapped into function, got %+v", req.Tools[0])
-				}
+				require.True(t, ok, "Tools[0].function = %#v, want object", req.Tools[0]["function"])
+				require.Equal(t, "lookup_weather", function["name"])
+				_, ok = req.Tools[0]["name"]
+				require.False(t, ok, "Tools[0].name should be wrapped into function, got %+v", req.Tools[0])
 
 				toolChoice, ok := req.ToolChoice.(map[string]any)
-				if !ok {
-					t.Fatalf("ToolChoice = %#v, want object", req.ToolChoice)
-				}
+				require.True(t, ok, "ToolChoice = %#v, want object", req.ToolChoice)
+
 				selected, ok := toolChoice["function"].(map[string]any)
-				if !ok {
-					t.Fatalf("ToolChoice.function = %#v, want object", toolChoice["function"])
-				}
-				if selected["name"] != "lookup_weather" {
-					t.Fatalf("ToolChoice.function.name = %#v, want lookup_weather", selected["name"])
-				}
-				if _, ok := toolChoice["name"]; ok {
-					t.Fatalf("ToolChoice.name should be wrapped into function, got %+v", toolChoice)
-				}
+				require.True(t, ok, "ToolChoice.function = %#v, want object", toolChoice["function"])
+				require.Equal(t, "lookup_weather", selected["name"])
+				_, ok = toolChoice["name"]
+				require.False(t, ok, "ToolChoice.name should be wrapped into function, got %+v", toolChoice)
+
 			},
 		},
 		{
@@ -208,16 +178,14 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if len(req.Messages) != 1 {
-					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-				}
+				require.Len(t, req.Messages, 1)
+
 				parts, ok := req.Messages[0].Content.([]core.ContentPart)
-				if !ok {
-					t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart", req.Messages[0].Content)
-				}
-				if len(parts) != 2 || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/image.png" {
-					t.Fatalf("unexpected multimodal content: %+v", parts)
-				}
+				require.True(t, ok, "Messages[0].Content type = %T, want []core.ContentPart", req.Messages[0].Content)
+				require.Len(t, parts, 2)
+				require.NotNil(t, parts[1].ImageURL)
+				require.Equal(t, "https://example.com/image.png", parts[1].ImageURL.URL)
+
 			},
 		},
 		{
@@ -239,18 +207,13 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if len(req.Messages) != 2 {
-					t.Fatalf("len(Messages) = %d, want 2", len(req.Messages))
-				}
-				if len(req.Messages[0].ToolCalls) != 1 || req.Messages[0].ToolCalls[0].ID != "call_123" {
-					t.Fatalf("unexpected assistant tool_calls: %+v", req.Messages[0].ToolCalls)
-				}
-				if !req.Messages[0].ContentNull {
-					t.Fatal("assistant function_call history should preserve null content")
-				}
-				if req.Messages[1].Role != "tool" || req.Messages[1].ToolCallID != "call_123" {
-					t.Fatalf("unexpected tool result message: %+v", req.Messages[1])
-				}
+				require.Len(t, req.Messages, 2)
+				require.Len(t, req.Messages[0].ToolCalls, 1)
+				require.Equal(t, "call_123", req.Messages[0].ToolCalls[0].ID)
+				require.True(t, req.Messages[0].ContentNull)
+				require.Equal(t, "tool", req.Messages[1].Role)
+				require.Equal(t, "call_123", req.Messages[1].ToolCallID, "unexpected tool result message: %+v", req.Messages[1])
+
 			},
 		},
 		{
@@ -265,18 +228,13 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				}]
 			}`),
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if len(req.Messages) != 1 {
-					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-				}
-				if req.Messages[0].Role != "tool" || req.Messages[0].ToolCallID != "call_456" {
-					t.Fatalf("unexpected tool result message: %+v", req.Messages[0])
-				}
-				if got := req.Messages[0].Content; got != `{"temperature_c":21}` {
-					t.Fatalf("Content = %#v, want serialized object", got)
-				}
-				if req.Messages[0].ExtraFields.Lookup("x_meta") == nil {
-					t.Fatal("tool result extra missing")
-				}
+				require.Len(t, req.Messages, 1)
+				require.Equal(t, "tool", req.Messages[0].Role)
+				require.Equal(t, "call_456", req.Messages[0].ToolCallID, "unexpected tool result message: %+v", req.Messages[0])
+				got := req.Messages[0].Content
+				require.Equal(t, `{"temperature_c":21}`, got)
+				require.NotNil(t, req.Messages[0].ExtraFields.Lookup("x_meta"))
+
 			},
 		},
 		{
@@ -301,15 +259,11 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if len(req.Messages) != 1 {
-					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-				}
-				if got := core.ExtractTextContent(req.Messages[0].Content); got != "I'll check that for you." {
-					t.Fatalf("Messages[0].Content = %q, want assistant preamble", got)
-				}
-				if len(req.Messages[0].ToolCalls) != 1 {
-					t.Fatalf("len(Messages[0].ToolCalls) = %d, want 1", len(req.Messages[0].ToolCalls))
-				}
+				require.Len(t, req.Messages, 1)
+				got := core.ExtractTextContent(req.Messages[0].Content)
+				require.Equal(t, "I'll check that for you.", got)
+				require.Len(t, req.Messages[0].ToolCalls, 1)
+
 			},
 		},
 		{
@@ -335,19 +289,17 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *core.ChatRequest) {
-				if len(req.Messages) != 1 {
-					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-				}
+				require.Len(t, req.Messages, 1)
+
 				parts, ok := req.Messages[0].Content.([]core.ContentPart)
-				if !ok {
-					t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart", req.Messages[0].Content)
-				}
-				if len(parts) != 2 || parts[0].Text != "I'll check that for you." || parts[1].ImageURL == nil || parts[1].ImageURL.URL != "https://example.com/image.png" {
-					t.Fatalf("unexpected structured assistant content: %+v", parts)
-				}
-				if len(req.Messages[0].ToolCalls) != 1 || req.Messages[0].ToolCalls[0].ID != "call_123" {
-					t.Fatalf("unexpected assistant tool_calls: %+v", req.Messages[0].ToolCalls)
-				}
+				require.True(t, ok, "Messages[0].Content type = %T, want []core.ContentPart", req.Messages[0].Content)
+				require.Len(t, parts, 2)
+				require.Equal(t, "I'll check that for you.", parts[0].Text)
+				require.NotNil(t, parts[1].ImageURL)
+				require.Equal(t, "https://example.com/image.png", parts[1].ImageURL.URL)
+				require.Len(t, req.Messages[0].ToolCalls, 1)
+				require.Equal(t, "call_123", req.Messages[0].ToolCalls[0].ID)
+
 			},
 		},
 		{
@@ -379,14 +331,12 @@ func TestConvertResponsesRequestToChat(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := ConvertResponsesRequestToChat(tt.input)
 			if tt.expectErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
+				require.Error(t, err)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			tt.checkFn(t, result)
 		})
 	}
@@ -404,18 +354,11 @@ func TestConvertResponsesRequestToChat_MapsPortableAgentsSDKFields(t *testing.T)
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if chatReq.TopP == nil || *chatReq.TopP != 0.8 {
-		t.Fatalf("TopP = %#v, want 0.8", chatReq.TopP)
-	}
-	if chatReq.User != "tenant-123" {
-		t.Fatalf("User = %q, want tenant-123", chatReq.User)
-	}
-	if chatReq.ServiceTier != "flex" {
-		t.Fatalf("ServiceTier = %q, want flex", chatReq.ServiceTier)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, chatReq.TopP)
+	require.Equal(t, 0.8, *chatReq.TopP)
+	require.Equal(t, "tenant-123", chatReq.User)
+	require.Equal(t, "flex", chatReq.ServiceTier)
 }
 
 func TestConvertResponsesRequestToChat_AcceptsAnnotationOnlyInclude(t *testing.T) {
@@ -434,18 +377,11 @@ func TestConvertResponsesRequestToChat_AcceptsAnnotationOnlyInclude(t *testing.T
 			req := &core.ResponsesRequest{Model: "test-model", Input: "Hello", Include: tt.include}
 
 			chatReq, err := ConvertResponsesRequestToChat(req)
-			if err != nil {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-			}
-			if len(chatReq.Messages) != 1 || chatReq.Messages[0].Content != "Hello" {
-				t.Fatalf("Messages = %#v, want the single user message", chatReq.Messages)
-			}
-			if !chatReq.ExtraFields.IsEmpty() {
-				t.Fatalf("ExtraFields = %#v, want include dropped rather than forwarded", chatReq.ExtraFields)
-			}
-			if len(req.Include) != len(tt.include) {
-				t.Fatalf("req.Include = %#v, want the caller's request left unmutated", req.Include)
-			}
+			require.NoError(t, err)
+			require.Len(t, chatReq.Messages, 1)
+			require.Equal(t, "Hello", chatReq.Messages[0].Content)
+			require.True(t, chatReq.ExtraFields.IsEmpty(), "ExtraFields = %#v, want include dropped rather than forwarded", chatReq.ExtraFields)
+			require.Equal(t, len(tt.include), len(req.Include), "req.Include = %#v, want the caller's request left unmutated", req.Include)
 		})
 	}
 }
@@ -475,29 +411,20 @@ func TestConvertResponsesRequestToChat_TranslatesCodexRequest(t *testing.T) {
 }`
 
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(body), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err := json.Unmarshal([]byte(body), &req)
+	require.NoError(t, err)
 
 	chatReq, err := ConvertResponsesRequestToChat(&req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if len(chatReq.Messages) != 2 || chatReq.Messages[0].Role != "system" || chatReq.Messages[1].Role != "user" {
-		t.Fatalf("Messages = %#v, want instructions as system plus the user turn", chatReq.Messages)
-	}
-	if len(chatReq.Tools) != 1 {
-		t.Fatalf("Tools = %#v, want the shell function tool", chatReq.Tools)
-	}
-	if _, ok := chatReq.Tools[0]["function"]; !ok {
-		t.Fatalf("Tools[0] = %#v, want chat-shaped function member", chatReq.Tools[0])
-	}
-	if chatReq.Reasoning == nil || chatReq.Reasoning.Effort != "medium" {
-		t.Fatalf("Reasoning = %#v, want effort medium", chatReq.Reasoning)
-	}
-	if !chatReq.Stream {
-		t.Fatal("Stream = false, want true")
-	}
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 2)
+	require.Equal(t, "system", chatReq.Messages[0].Role)
+	require.Equal(t, "user", chatReq.Messages[1].Role)
+	require.Len(t, chatReq.Tools, 1)
+	_, ok := chatReq.Tools[0]["function"]
+	require.True(t, ok, "Tools[0] = %#v, want chat-shaped function member", chatReq.Tools[0])
+	require.NotNil(t, chatReq.Reasoning)
+	require.Equal(t, "medium", chatReq.Reasoning.Effort)
+	require.True(t, chatReq.Stream)
 }
 
 func TestConvertResponsesRequestToChat_RejectsOutputLogprobsInclude(t *testing.T) {
@@ -515,12 +442,8 @@ func TestConvertResponsesRequestToChat_RejectsOutputLogprobsInclude(t *testing.T
 			req := &core.ResponsesRequest{Model: "test-model", Input: "Hello", Include: tt.include}
 
 			_, err := ConvertResponsesRequestToChat(req)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), "include") {
-				t.Fatalf("error = %v, want mention %q", err, "include")
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "include")
 		})
 	}
 }
@@ -607,12 +530,8 @@ func TestConvertResponsesRequestToChat_NormalizesToolChoiceAliases(t *testing.T)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chatReq, err := ConvertResponsesRequestToChat(tt.req)
-			if err != nil {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-			}
-			if !reflect.DeepEqual(chatReq.ToolChoice, tt.want) {
-				t.Fatalf("ToolChoice = %#v, want %#v", chatReq.ToolChoice, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, chatReq.ToolChoice)
 		})
 	}
 }
@@ -643,12 +562,8 @@ func TestConvertResponsesRequestToChat_RejectsStatefulAgentsSDKFields(t *testing
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ConvertResponsesRequestToChat(tt.req)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("error = %v, want mention %q", err, tt.want)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
 		})
 	}
 }
@@ -678,19 +593,13 @@ func TestConvertResponsesRequestToChat_IgnoresUnsupportedTools(t *testing.T) {
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if len(chatReq.Tools) != 1 {
-		t.Fatalf("Tools = %#v, want only the function tool", chatReq.Tools)
-	}
+	require.NoError(t, err)
+	require.Len(t, chatReq.Tools, 1)
+
 	function, ok := chatReq.Tools[0]["function"].(map[string]any)
-	if !ok || function["name"] != "exec_command" {
-		t.Fatalf("Tools[0] = %#v, want exec_command function", chatReq.Tools[0])
-	}
-	if chatReq.ToolChoice != "auto" {
-		t.Fatalf("ToolChoice = %#v, want auto", chatReq.ToolChoice)
-	}
+	require.True(t, ok)
+	require.Equal(t, "exec_command", function["name"], "Tools[0] = %#v, want exec_command function", chatReq.Tools[0])
+	require.Equal(t, "auto", chatReq.ToolChoice)
 }
 
 func TestConvertResponsesRequestToChat_IgnoresOnlyUnsupportedToolsAndChoice(t *testing.T) {
@@ -707,18 +616,10 @@ func TestConvertResponsesRequestToChat_IgnoresOnlyUnsupportedToolsAndChoice(t *t
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if chatReq.Tools != nil {
-		t.Fatalf("Tools = %#v, want nil", chatReq.Tools)
-	}
-	if chatReq.ToolChoice != nil {
-		t.Fatalf("ToolChoice = %#v, want nil", chatReq.ToolChoice)
-	}
-	if chatReq.ParallelToolCalls != nil {
-		t.Fatalf("ParallelToolCalls = %#v, want nil", chatReq.ParallelToolCalls)
-	}
+	require.NoError(t, err)
+	require.Nil(t, chatReq.Tools)
+	require.Nil(t, chatReq.ToolChoice)
+	require.Nil(t, chatReq.ParallelToolCalls)
 }
 
 func TestConvertResponsesRequestToChat_DropsChoiceForOmittedNamespaceChild(t *testing.T) {
@@ -763,22 +664,15 @@ func TestConvertResponsesRequestToChat_DropsChoiceForOmittedNamespaceChild(t *te
 			}
 
 			chatReq, err := ConvertResponsesRequestToChat(req)
-			if err != nil {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-			}
-			if len(chatReq.Tools) != 1 {
-				t.Fatalf("Tools = %#v, want only exec_command", chatReq.Tools)
-			}
+			require.NoError(t, err)
+			require.Len(t, chatReq.Tools, 1)
+
 			function, ok := chatReq.Tools[0]["function"].(map[string]any)
-			if !ok || function["name"] != "exec_command" {
-				t.Fatalf("Tools[0] = %#v, want exec_command function", chatReq.Tools[0])
-			}
-			if (chatReq.ToolChoice != nil) != tt.wantChoice {
-				t.Fatalf("ToolChoice = %#v, want present %v", chatReq.ToolChoice, tt.wantChoice)
-			}
-			if chatReq.ParallelToolCalls == nil || !*chatReq.ParallelToolCalls {
-				t.Fatalf("ParallelToolCalls = %#v, want true", chatReq.ParallelToolCalls)
-			}
+			require.True(t, ok)
+			require.Equal(t, "exec_command", function["name"], "Tools[0] = %#v, want exec_command function", chatReq.Tools[0])
+			require.Equal(t, tt.wantChoice, chatReq.ToolChoice != nil, "ToolChoice = %#v, want present %v", chatReq.ToolChoice, tt.wantChoice)
+			require.NotNil(t, chatReq.ParallelToolCalls)
+			require.True(t, *chatReq.ParallelToolCalls)
 		})
 	}
 }
@@ -800,14 +694,11 @@ func TestConvertResponsesRequestToChat_MapsTextFormatToResponseFormat(t *testing
 		}
 
 		chatReq, err := ConvertResponsesRequestToChat(req)
-		if err != nil {
-			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-		}
+		require.NoError(t, err)
 
 		raw := chatReq.ExtraFields.Lookup("response_format")
-		if raw == nil {
-			t.Fatal("response_format missing from chat request extras")
-		}
+		require.NotNil(t, raw)
+
 		var responseFormat struct {
 			Type       string `json:"type"`
 			JSONSchema struct {
@@ -816,21 +707,14 @@ func TestConvertResponsesRequestToChat_MapsTextFormatToResponseFormat(t *testing
 				Schema map[string]any `json:"schema"`
 			} `json:"json_schema"`
 		}
-		if err := json.Unmarshal(raw, &responseFormat); err != nil {
-			t.Fatalf("json.Unmarshal(response_format) error = %v", err)
-		}
-		if responseFormat.Type != "json_schema" {
-			t.Fatalf("response_format.type = %q, want json_schema", responseFormat.Type)
-		}
-		if responseFormat.JSONSchema.Name != "weather" || !responseFormat.JSONSchema.Strict {
-			t.Fatalf("response_format.json_schema = %#v, want nested name/strict", responseFormat.JSONSchema)
-		}
-		if responseFormat.JSONSchema.Schema["type"] != "object" {
-			t.Fatalf("response_format.json_schema.schema = %#v, want nested schema", responseFormat.JSONSchema.Schema)
-		}
-		if verbosity := chatReq.ExtraFields.Lookup("verbosity"); string(verbosity) != `"low"` {
-			t.Fatalf("verbosity = %s, want \"low\"", verbosity)
-		}
+		err = json.Unmarshal(raw, &responseFormat)
+		require.NoError(t, err)
+		require.Equal(t, "json_schema", responseFormat.Type)
+		require.Equal(t, "weather", responseFormat.JSONSchema.Name)
+		require.True(t, responseFormat.JSONSchema.Strict, "response_format.json_schema = %#v, want nested name/strict", responseFormat.JSONSchema)
+		require.Equal(t, "object", responseFormat.JSONSchema.Schema["type"], "response_format.json_schema.schema = %#v, want nested schema", responseFormat.JSONSchema.Schema)
+		verbosity := chatReq.ExtraFields.Lookup("verbosity")
+		require.Equal(t, `"low"`, string(verbosity), "verbosity = %s, want \"low\"", verbosity)
 	})
 
 	t.Run("json_object passes through", func(t *testing.T) {
@@ -841,12 +725,9 @@ func TestConvertResponsesRequestToChat_MapsTextFormatToResponseFormat(t *testing
 		}
 
 		chatReq, err := ConvertResponsesRequestToChat(req)
-		if err != nil {
-			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-		}
-		if got := string(chatReq.ExtraFields.Lookup("response_format")); got != `{"type":"json_object"}` {
-			t.Fatalf("response_format = %s, want json_object", got)
-		}
+		require.NoError(t, err)
+		got := string(chatReq.ExtraFields.Lookup("response_format"))
+		require.Equal(t, `{"type":"json_object"}`, got)
 	})
 
 	t.Run("plain text produces no response_format", func(t *testing.T) {
@@ -857,61 +738,46 @@ func TestConvertResponsesRequestToChat_MapsTextFormatToResponseFormat(t *testing
 		}
 
 		chatReq, err := ConvertResponsesRequestToChat(req)
-		if err != nil {
-			t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-		}
-		if raw := chatReq.ExtraFields.Lookup("response_format"); raw != nil {
-			t.Fatalf("response_format = %s, want none for plain text", raw)
-		}
+		require.NoError(t, err)
+		raw := chatReq.ExtraFields.Lookup("response_format")
+		require.Nil(t, raw)
 	})
 }
 
 func TestConvertResponsesRequestToChat_RejectsUnknownInputItemTypes(t *testing.T) {
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"test-model",
 		"input":[{"type":"computer_call","id":"cc_123"}]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
-	_, err := ConvertResponsesRequestToChat(&req)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), `unsupported input item type "computer_call"`) {
-		t.Fatalf("error = %v, want unsupported computer_call item", err)
-	}
+	_, err = ConvertResponsesRequestToChat(&req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `unsupported input item type "computer_call"`)
 }
 
 // Reasoning from an ordinary assistant turn is accepted but omitted because
 // chat providers do not need it on the following user turn.
 func TestConvertResponsesRequestToChat_DropsReasoningWithoutToolCall(t *testing.T) {
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"test-model",
 		"input":[
 			{"type":"message","role":"user","content":"hello"},
 			{"type":"reasoning","id":"rs_123","summary":[{"type":"summary_text","text":"thinking..."}]},
 			{"type":"message","role":"assistant","content":"hi there"}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	chatReq, err := ConvertResponsesRequestToChat(&req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if len(chatReq.Messages) != 2 {
-		t.Fatalf("Messages = %#v, want exactly the user and assistant messages (reasoning dropped)", chatReq.Messages)
-	}
-	if chatReq.Messages[0].Role != "user" || chatReq.Messages[1].Role != "assistant" {
-		t.Fatalf("Messages = %#v, want [user, assistant]", chatReq.Messages)
-	}
-	if got := chatReq.Messages[1].ExtraFields.Lookup("reasoning_content"); got != nil {
-		t.Fatalf("reasoning_content = %s, want omitted without a tool call", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 2)
+	require.Equal(t, "user", chatReq.Messages[0].Role)
+	require.Equal(t, "assistant", chatReq.Messages[1].Role, "Messages = %#v, want [user, assistant]", chatReq.Messages)
+	got := chatReq.Messages[1].ExtraFields.Lookup("reasoning_content")
+	require.Nil(t, got)
 }
 
 // DeepSeek requires reasoning_content to be replayed on the assistant message
@@ -919,7 +785,7 @@ func TestConvertResponsesRequestToChat_DropsReasoningWithoutToolCall(t *testing.
 // the reasoning item and function-call item must be reassembled here.
 func TestConvertResponsesRequestToChat_ReplaysReasoningWithToolCall(t *testing.T) {
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"deepseek-v4-pro",
 		"input":[
 			{"type":"message","role":"user","content":"weather?"},
@@ -928,31 +794,24 @@ func TestConvertResponsesRequestToChat_ReplaysReasoningWithToolCall(t *testing.T
 			{"type":"function_call","call_id":"call_123","name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"},
 			{"type":"function_call_output","call_id":"call_123","output":"sunny"}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	chatReq, err := ConvertResponsesRequestToChat(&req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if len(chatReq.Messages) != 3 {
-		t.Fatalf("Messages = %#v, want user, assistant tool call, and tool result", chatReq.Messages)
-	}
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 3)
+
 	assistant := chatReq.Messages[1]
-	if assistant.Role != "assistant" || core.ExtractTextContent(assistant.Content) != "I'll check." || len(assistant.ToolCalls) != 1 {
-		t.Fatalf("assistant message = %#v, want merged text and tool call", assistant)
-	}
+	require.Equal(t, "assistant", assistant.Role)
+	require.Equal(t, "I'll check.", core.ExtractTextContent(assistant.Content))
+	require.Len(t, assistant.ToolCalls, 1, "assistant message = %#v, want merged text and tool call", assistant)
+
 	var reasoning string
-	if err := json.Unmarshal(assistant.ExtraFields.Lookup("reasoning_content"), &reasoning); err != nil {
-		t.Fatalf("reasoning_content decode error = %v", err)
-	}
-	if reasoning != "Need to check the weather." {
-		t.Fatalf("reasoning_content = %q", reasoning)
-	}
-	if chatReq.Messages[2].Role != "tool" || chatReq.Messages[2].ToolCallID != "call_123" {
-		t.Fatalf("tool message = %#v", chatReq.Messages[2])
-	}
+	err = json.Unmarshal(assistant.ExtraFields.Lookup("reasoning_content"), &reasoning)
+	require.NoError(t, err)
+	require.Equal(t, "Need to check the weather.", reasoning)
+	require.Equal(t, "tool", chatReq.Messages[2].Role)
+	require.Equal(t, "call_123", chatReq.Messages[2].ToolCallID, "tool message = %#v", chatReq.Messages[2])
 }
 
 func TestConvertResponsesRequestToChat_NormalizesDeveloperRole(t *testing.T) {
@@ -963,12 +822,9 @@ func TestConvertResponsesRequestToChat_NormalizesDeveloperRole(t *testing.T) {
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {
 			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{Model: "test-model", Input: input})
-			if err != nil {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-			}
-			if len(chatReq.Messages) != 1 || chatReq.Messages[0].Role != "system" {
-				t.Fatalf("Messages = %#v, want one system message", chatReq.Messages)
-			}
+			require.NoError(t, err)
+			require.Len(t, chatReq.Messages, 1)
+			require.Equal(t, "system", chatReq.Messages[0].Role)
 		})
 	}
 }
@@ -993,18 +849,10 @@ func TestConvertResponsesRequestToChat_DoesNotMergeAssistantMessagesWithExtraFie
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if len(chatReq.Messages) != 2 {
-		t.Fatalf("len(Messages) = %d, want 2", len(chatReq.Messages))
-	}
-	if chatReq.Messages[0].ExtraFields.Lookup("x_first") == nil {
-		t.Fatal("first assistant extra missing")
-	}
-	if chatReq.Messages[1].ExtraFields.Lookup("x_second") == nil {
-		t.Fatal("second assistant extra missing")
-	}
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 2)
+	require.NotNil(t, chatReq.Messages[0].ExtraFields.Lookup("x_first"))
+	require.NotNil(t, chatReq.Messages[1].ExtraFields.Lookup("x_second"))
 }
 
 func TestConvertResponsesRequestToChat_RejectsWhitespaceOnlyMediaFields(t *testing.T) {
@@ -1050,12 +898,8 @@ func TestConvertResponsesRequestToChat_RejectsWhitespaceOnlyMediaFields(t *testi
 				Model: "test-model",
 				Input: tt.input,
 			})
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), "unsupported content") {
-				t.Fatalf("error = %v, want unsupported content", err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "unsupported content")
 		})
 	}
 }
@@ -1086,27 +930,14 @@ func TestConvertResponsesRequestToChat_PreservesOpaqueExtras(t *testing.T) {
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-
-	if chatReq.ExtraFields.Lookup("response_format") == nil {
-		t.Fatal("response_format missing from chat request extras")
-	}
-	if len(chatReq.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(chatReq.Messages))
-	}
-	if chatReq.Messages[0].ExtraFields.Lookup("x_message_hint") == nil {
-		t.Fatal("message extra missing after conversion")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, chatReq.ExtraFields.Lookup("response_format"))
+	require.Len(t, chatReq.Messages, 1)
+	require.NotNil(t, chatReq.Messages[0].ExtraFields.Lookup("x_message_hint"))
 
 	parts, ok := chatReq.Messages[0].Content.([]core.ContentPart)
-	if !ok {
-		t.Fatalf("Messages[0].Content type = %T, want []core.ContentPart to preserve part extras", chatReq.Messages[0].Content)
-	}
-	if parts[0].ExtraFields.Lookup("cache_control") == nil {
-		t.Fatal("content part extra missing after conversion")
-	}
+	require.True(t, ok, "Messages[0].Content type = %T, want []core.ContentPart to preserve part extras", chatReq.Messages[0].Content)
+	require.NotNil(t, parts[0].ExtraFields.Lookup("cache_control"))
 }
 
 func TestConvertResponsesRequestToChat_PreservesUnknownMapFields(t *testing.T) {
@@ -1153,40 +984,23 @@ func TestConvertResponsesRequestToChat_PreservesUnknownMapFields(t *testing.T) {
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if len(chatReq.Messages) != 3 {
-		t.Fatalf("len(Messages) = %d, want 3", len(chatReq.Messages))
-	}
-	if len(chatReq.Messages[0].ToolCalls) != 1 {
-		t.Fatalf("len(Messages[0].ToolCalls) = %d, want 1", len(chatReq.Messages[0].ToolCalls))
-	}
-	if chatReq.Messages[0].ToolCalls[0].ExtraFields.Lookup("x_trace") == nil {
-		t.Fatal("tool_call extra missing after conversion")
-	}
-	if chatReq.Messages[1].ExtraFields.Lookup("x_meta") == nil {
-		t.Fatal("message extra missing after map conversion")
-	}
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 3)
+	require.Len(t, chatReq.Messages[0].ToolCalls, 1)
+	require.NotNil(t, chatReq.Messages[0].ToolCalls[0].ExtraFields.Lookup("x_trace"))
+	require.NotNil(t, chatReq.Messages[1].ExtraFields.Lookup("x_meta"))
 
 	parts, ok := chatReq.Messages[1].Content.([]core.ContentPart)
-	if !ok {
-		t.Fatalf("Messages[1].Content type = %T, want []core.ContentPart to preserve mapped text-part extras", chatReq.Messages[1].Content)
-	}
-	if parts[0].ExtraFields.Lookup("cache_control") == nil {
-		t.Fatal("mapped content part extra missing after conversion")
-	}
+	require.True(t, ok, "Messages[1].Content type = %T, want []core.ContentPart to preserve mapped text-part extras", chatReq.Messages[1].Content)
+	require.NotNil(t, parts[0].ExtraFields.Lookup("cache_control"))
 
 	multimodalParts, ok := chatReq.Messages[2].Content.([]core.ContentPart)
-	if !ok || len(multimodalParts) != 2 {
-		t.Fatalf("Messages[2].Content = %#v, want []core.ContentPart len=2", chatReq.Messages[2].Content)
-	}
-	if multimodalParts[0].ImageURL == nil || multimodalParts[0].ImageURL.ExtraFields.Lookup("x_nested") == nil {
-		t.Fatalf("image_url extra missing after map[string]string conversion: %+v", multimodalParts[0].ImageURL)
-	}
-	if multimodalParts[1].InputAudio == nil || multimodalParts[1].InputAudio.ExtraFields.Lookup("x_nested") == nil {
-		t.Fatalf("input_audio extra missing after map[string]string conversion: %+v", multimodalParts[1].InputAudio)
-	}
+	require.True(t, ok)
+	require.Len(t, multimodalParts, 2, "Messages[2].Content = %#v, want []core.ContentPart len=2", chatReq.Messages[2].Content)
+	require.NotNil(t, multimodalParts[0].ImageURL)
+	require.NotNil(t, multimodalParts[0].ImageURL.ExtraFields.Lookup("x_nested"))
+	require.NotNil(t, multimodalParts[1].InputAudio)
+	require.NotNil(t, multimodalParts[1].InputAudio.ExtraFields.Lookup("x_nested"))
 }
 
 func TestConvertResponsesRequestToChat_InputAudioDataURIWithoutFormat(t *testing.T) {
@@ -1208,16 +1022,14 @@ func TestConvertResponsesRequestToChat_InputAudioDataURIWithoutFormat(t *testing
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	parts, ok := chatReq.Messages[0].Content.([]core.ContentPart)
-	if !ok || len(parts) != 1 || parts[0].InputAudio == nil {
-		t.Fatalf("Messages[0].Content = %#v, want one input_audio part", chatReq.Messages[0].Content)
-	}
-	if parts[0].InputAudio.Data != dataURI || parts[0].InputAudio.Format != "" {
-		t.Fatalf("InputAudio = %+v, want data URI with empty format", parts[0].InputAudio)
-	}
+	require.True(t, ok)
+	require.Len(t, parts, 1)
+	require.NotNil(t, parts[0].InputAudio, "Messages[0].Content = %#v, want one input_audio part", chatReq.Messages[0].Content)
+	require.Equal(t, dataURI, parts[0].InputAudio.Data)
+	require.Empty(t, parts[0].InputAudio.Format, "InputAudio = %+v, want data URI with empty format", parts[0].InputAudio)
 }
 
 func TestConvertChatResponseToResponses(t *testing.T) {
@@ -1262,21 +1074,14 @@ func TestConvertChatResponseToResponses(t *testing.T) {
 
 	result := ConvertChatResponseToResponses(resp)
 
-	if len(result.Output) != 2 {
-		t.Fatalf("len(Output) = %d, want 2", len(result.Output))
-	}
-	if result.Output[0].Type != "message" || result.Output[1].Type != "function_call" {
-		t.Fatalf("unexpected output items: %+v", result.Output)
-	}
-	if result.Output[1].CallID != "call_123" {
-		t.Fatalf("Output[1].CallID = %q, want call_123", result.Output[1].CallID)
-	}
-	if result.Usage == nil || result.Usage.PromptTokensDetails == nil || result.Usage.CompletionTokensDetails == nil {
-		t.Fatalf("usage details not preserved: %+v", result.Usage)
-	}
-	if result.Usage.RawUsage["provider"] != "test" {
-		t.Fatalf("RawUsage = %+v, want provider=test", result.Usage.RawUsage)
-	}
+	require.Len(t, result.Output, 2)
+	require.Equal(t, "message", result.Output[0].Type)
+	require.Equal(t, "function_call", result.Output[1].Type, "unexpected output items: %+v", result.Output)
+	require.Equal(t, "call_123", result.Output[1].CallID)
+	require.NotNil(t, result.Usage)
+	require.NotNil(t, result.Usage.PromptTokensDetails)
+	require.NotNil(t, result.Usage.CompletionTokensDetails)
+	require.Equal(t, "test", result.Usage.RawUsage["provider"], "RawUsage = %+v, want provider=test", result.Usage.RawUsage)
 }
 
 func TestConvertChatResponseToResponses_PreservesRawReasoning(t *testing.T) {
@@ -1296,16 +1101,15 @@ func TestConvertChatResponseToResponses_PreservesRawReasoning(t *testing.T) {
 	}
 
 	result := ConvertChatResponseToResponses(resp)
-	if len(result.Output) != 2 || result.Output[0].Type != "reasoning" || result.Output[1].Type != "message" {
-		t.Fatalf("Output = %#v, want reasoning then message", result.Output)
-	}
+	require.Len(t, result.Output, 2)
+	require.Equal(t, "reasoning", result.Output[0].Type)
+	require.Equal(t, "message", result.Output[1].Type)
+
 	reasoning := result.Output[0]
-	if len(reasoning.Content) != 1 || reasoning.Content[0].Type != "reasoning_text" || reasoning.Content[0].Text != "raw trace" {
-		t.Fatalf("reasoning content = %#v", reasoning.Content)
-	}
-	if reasoning.ExtraFields.Lookup("summary") == nil {
-		t.Fatal("reasoning summary array missing")
-	}
+	require.Len(t, reasoning.Content, 1)
+	require.Equal(t, "reasoning_text", reasoning.Content[0].Type)
+	require.Equal(t, "raw trace", reasoning.Content[0].Text)
+	require.NotNil(t, reasoning.ExtraFields.Lookup("summary"))
 }
 
 func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *testing.T) {
@@ -1345,36 +1149,19 @@ func TestConvertChatResponseToResponses_PreservesStructuredAssistantContent(t *t
 
 	result := ConvertChatResponseToResponses(resp)
 
-	if len(result.Output) != 1 {
-		t.Fatalf("len(Output) = %d, want 1", len(result.Output))
-	}
-	if result.Output[0].Type != "message" {
-		t.Fatalf("Output[0].Type = %q, want message", result.Output[0].Type)
-	}
-	if len(result.Output[0].Content) != 3 {
-		t.Fatalf("len(Output[0].Content) = %d, want 3 structured content items", len(result.Output[0].Content))
-	}
-	if result.Output[0].Content[0].Type != "output_text" || result.Output[0].Content[0].Text != "Here is the result." {
-		t.Fatalf("unexpected text content item: %+v", result.Output[0].Content[0])
-	}
-	if result.Output[0].Content[1].Type != "input_image" {
-		t.Fatalf("expected preserved non-text content item, got %+v", result.Output[0].Content[1])
-	}
-	if result.Output[0].Content[1].ImageURL == nil || result.Output[0].Content[1].ImageURL.URL != "https://example.com/result.png" {
-		t.Fatalf("unexpected preserved image content item: %+v", result.Output[0].Content[1])
-	}
-	if result.Output[0].Content[1].ImageURL.ExtraFields.Lookup("x_image") == nil {
-		t.Fatalf("image extra missing after conversion: %+v", result.Output[0].Content[1].ImageURL)
-	}
-	if result.Output[0].Content[2].Type != "input_audio" {
-		t.Fatalf("expected preserved audio content item, got %+v", result.Output[0].Content[2])
-	}
-	if result.Output[0].Content[2].InputAudio == nil || result.Output[0].Content[2].InputAudio.Format != "wav" {
-		t.Fatalf("unexpected preserved audio content item: %+v", result.Output[0].Content[2])
-	}
-	if result.Output[0].Content[2].InputAudio.ExtraFields.Lookup("x_audio") == nil {
-		t.Fatalf("audio extra missing after conversion: %+v", result.Output[0].Content[2].InputAudio)
-	}
+	require.Len(t, result.Output, 1)
+	require.Equal(t, "message", result.Output[0].Type)
+	require.Len(t, result.Output[0].Content, 3)
+	require.Equal(t, "output_text", result.Output[0].Content[0].Type)
+	require.Equal(t, "Here is the result.", result.Output[0].Content[0].Text, "unexpected text content item: %+v", result.Output[0].Content[0])
+	require.Equal(t, "input_image", result.Output[0].Content[1].Type, "expected preserved non-text content item, got %+v", result.Output[0].Content[1])
+	require.NotNil(t, result.Output[0].Content[1].ImageURL)
+	require.Equal(t, "https://example.com/result.png", result.Output[0].Content[1].ImageURL.URL, "unexpected preserved image content item: %+v", result.Output[0].Content[1])
+	require.NotNil(t, result.Output[0].Content[1].ImageURL.ExtraFields.Lookup("x_image"), "image extra missing after conversion: %+v", result.Output[0].Content[1].ImageURL)
+	require.Equal(t, "input_audio", result.Output[0].Content[2].Type, "expected preserved audio content item, got %+v", result.Output[0].Content[2])
+	require.NotNil(t, result.Output[0].Content[2].InputAudio)
+	require.Equal(t, "wav", result.Output[0].Content[2].InputAudio.Format, "unexpected preserved audio content item: %+v", result.Output[0].Content[2])
+	require.NotNil(t, result.Output[0].Content[2].InputAudio.ExtraFields.Lookup("x_audio"), "audio extra missing after conversion: %+v", result.Output[0].Content[2].InputAudio)
 }
 
 func TestConvertResponsesRequestToChat_RejectsNonSerializableFunctionCallOutputMap(t *testing.T) {
@@ -1388,12 +1175,8 @@ func TestConvertResponsesRequestToChat_RejectsNonSerializableFunctionCallOutputM
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "function_call_output.output must be JSON-serializable") {
-		t.Fatalf("error = %v, want JSON-serializable validation error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "function_call_output.output must be JSON-serializable")
 }
 
 func TestExtractContentFromInput(t *testing.T) {
@@ -1421,9 +1204,8 @@ func TestExtractContentFromInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ExtractContentFromInput(tt.input); got != tt.expected {
-				t.Fatalf("ExtractContentFromInput(%v) = %q, want %q", tt.input, got, tt.expected)
-			}
+			got := ExtractContentFromInput(tt.input)
+			require.Equal(t, tt.expected, got, "ExtractContentFromInput(%v)", tt.input)
 		})
 	}
 }
@@ -1437,18 +1219,10 @@ func TestConvertResponsesRequestToChat_ClonesStreamOptions(t *testing.T) {
 	}
 
 	chatReq, err := ConvertResponsesRequestToChat(req)
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
-	if chatReq.StreamOptions == nil {
-		t.Fatal("StreamOptions = nil, want cloned value")
-	}
-	if chatReq.StreamOptions == req.StreamOptions {
-		t.Fatal("StreamOptions pointer was reused")
-	}
-	if chatReq.StreamOptions.IncludeUsage {
-		t.Fatalf("IncludeUsage = %v, want false", chatReq.StreamOptions.IncludeUsage)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, chatReq.StreamOptions)
+	require.NotSame(t, req.StreamOptions, chatReq.StreamOptions)
+	require.False(t, chatReq.StreamOptions.IncludeUsage)
 }
 
 func TestStreamResponsesViaChat_InjectsUsageWhenPolicyEnabled(t *testing.T) {
@@ -1464,28 +1238,17 @@ func TestStreamResponsesViaChat_InjectsUsageWhenPolicyEnabled(t *testing.T) {
 	ctx := core.WithEnforceReturningUsageData(context.Background(), true)
 
 	stream, err := StreamResponsesViaChat(ctx, provider, req, "gemini")
-	if err != nil {
-		t.Fatalf("StreamResponsesViaChat() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() {
 		_ = stream.Close()
 	}()
 
-	if provider.capturedReq == nil {
-		t.Fatal("capturedReq = nil")
-	}
-	if provider.capturedReq.StreamOptions == nil {
-		t.Fatal("captured StreamOptions = nil")
-	}
-	if !provider.capturedReq.StreamOptions.IncludeUsage {
-		t.Fatal("captured IncludeUsage = false, want true")
-	}
-	if req.StreamOptions == nil {
-		t.Fatal("original StreamOptions unexpectedly nil")
-	}
-	if req.StreamOptions.IncludeUsage {
-		t.Fatal("original request was mutated")
-	}
+	require.NotNil(t, provider.capturedReq)
+	require.NotNil(t, provider.capturedReq.StreamOptions)
+	require.True(t, provider.capturedReq.StreamOptions.IncludeUsage)
+	require.NotNil(t, req.StreamOptions)
+	require.False(t, req.StreamOptions.IncludeUsage)
 }
 
 func TestStreamResponsesViaChat_DoesNotInjectUsageWhenPolicyDisabled(t *testing.T) {
@@ -1499,19 +1262,14 @@ func TestStreamResponsesViaChat_DoesNotInjectUsageWhenPolicyDisabled(t *testing.
 	}
 
 	stream, err := StreamResponsesViaChat(context.Background(), provider, req, "gemini")
-	if err != nil {
-		t.Fatalf("StreamResponsesViaChat() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() {
 		_ = stream.Close()
 	}()
 
-	if provider.capturedReq == nil {
-		t.Fatal("capturedReq = nil")
-	}
-	if provider.capturedReq.StreamOptions != nil {
-		t.Fatalf("captured StreamOptions = %+v, want nil", provider.capturedReq.StreamOptions)
-	}
+	require.NotNil(t, provider.capturedReq)
+	require.Nil(t, provider.capturedReq.StreamOptions)
 }
 
 func TestResponsesViaChatRejectsEmptyChatResponse(t *testing.T) {
@@ -1532,14 +1290,13 @@ func TestResponsesViaChatRejectsEmptyChatResponse(t *testing.T) {
 			provider := &capturingChatProvider{chatResp: tt.chatResp}
 
 			resp, err := ResponsesViaChat(context.Background(), provider, &core.ResponsesRequest{Model: "m", Input: "hi"}, "groq")
+			require.Nil(t, resp)
 
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
-				t.Fatalf("ResponsesViaChat() = %+v, %v; want 502 provider error", resp, err)
-			}
-			if gatewayErr.Message != tt.wantMessage || gatewayErr.Provider != "groq" {
-				t.Fatalf("error = %q from %q, want %q from groq", gatewayErr.Message, gatewayErr.Provider, tt.wantMessage)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
+			assert.Equal(t, tt.wantMessage, gatewayErr.Message)
+			assert.Equal(t, "groq", gatewayErr.Provider)
 		})
 	}
 }
@@ -1575,20 +1332,15 @@ func TestConvertResponsesRequestToChat_DropsResponsesOnlyTextMembers(t *testing.
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{Model: "test-model", Input: tt.input})
-			if err != nil {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			parts, ok := chatReq.Messages[0].Content.([]core.ContentPart)
-			if !ok {
-				t.Fatalf("Content type = %T, want []core.ContentPart", chatReq.Messages[0].Content)
-			}
+			require.True(t, ok, "Content type = %T, want []core.ContentPart", chatReq.Messages[0].Content)
+
 			extras := parts[0].ExtraFields
-			if extras.Lookup("annotations") != nil || extras.Lookup("logprobs") != nil {
-				t.Fatalf("Responses-only members forwarded to chat: %+v", parts[0])
-			}
-			if extras.Lookup("cache_control") == nil {
-				t.Fatal("cache_control dropped from the text part")
-			}
+			require.Nil(t, extras.Lookup("annotations"))
+			require.Nil(t, extras.Lookup("logprobs"), "Responses-only members forwarded to chat: %+v", parts[0])
+			require.NotNil(t, extras.Lookup("cache_control"))
 		})
 	}
 }
@@ -1607,13 +1359,12 @@ func TestConvertResponsesRequestToChat_DropsReplayedItemIDs(t *testing.T) {
 	]`
 
 	var typed []core.ResponsesInputElement
-	if err := json.Unmarshal([]byte(replay), &typed); err != nil {
-		t.Fatalf("unmarshal typed input: %v", err)
-	}
+	err := json.Unmarshal([]byte(replay), &typed)
+	require.NoError(t, err)
+
 	var maps []any
-	if err := json.Unmarshal([]byte(replay), &maps); err != nil {
-		t.Fatalf("unmarshal map input: %v", err)
-	}
+	err = json.Unmarshal([]byte(replay), &maps)
+	require.NoError(t, err)
 
 	tests := []struct {
 		name  string
@@ -1625,41 +1376,24 @@ func TestConvertResponsesRequestToChat_DropsReplayedItemIDs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chatReq, err := ConvertResponsesRequestToChat(&core.ResponsesRequest{Model: "test-model", Input: tt.input})
-			if err != nil {
-				t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-			}
-			if len(chatReq.Messages) != 2 {
-				t.Fatalf("messages = %d, want 2: %+v", len(chatReq.Messages), chatReq.Messages)
-			}
+			require.NoError(t, err)
+			require.Len(t, chatReq.Messages, 2)
 
 			assistant, tool := chatReq.Messages[0], chatReq.Messages[1]
-			if assistant.Role != "assistant" || tool.Role != "tool" {
-				t.Fatalf("roles = %q, %q; want assistant, tool", assistant.Role, tool.Role)
-			}
-			if assistant.ExtraFields.Lookup("id") != nil {
-				t.Errorf("assistant message kept id: %s", assistant.ExtraFields.Lookup("id"))
-			}
-			if tool.ExtraFields.Lookup("id") != nil {
-				t.Errorf("tool message kept id: %s", tool.ExtraFields.Lookup("id"))
-			}
-			if len(assistant.ToolCalls) != 1 || assistant.ToolCalls[0].ExtraFields.Lookup("id") != nil {
-				t.Errorf("tool call kept id: %+v", assistant.ToolCalls)
-			}
-
-			// Only the Responses-only members go; call ids and other unknown
-			// members still reach the provider.
-			if got := assistant.ToolCalls[0].ID; got != "call_1" {
-				t.Errorf("tool call id = %q, want call_1", got)
-			}
-			if got := tool.ToolCallID; got != "call_1" {
-				t.Errorf("tool_call_id = %q, want call_1", got)
-			}
-			if assistant.ExtraFields.Lookup("cache_control") == nil {
-				t.Error("cache_control dropped from the assistant message")
-			}
-			if tool.ExtraFields.Lookup("cache_control") == nil {
-				t.Error("cache_control dropped from the tool message")
-			}
+			require.Equal(t, "assistant", assistant.Role)
+			require.Equal(t, "tool", tool.Role)
+			assert.Nil(t, assistant.ExtraFields.Lookup("id"))
+			assert.Nil(t, tool.ExtraFields.Lookup("id"))
+			assert.Len(t, assistant.ToolCalls, 1)
+			assert.Nil(t, assistant.ToolCalls[0].ExtraFields.Lookup("id"))
+			got := // Only the Responses-only members go; call ids and other unknown
+				// members still reach the provider.
+				assistant.ToolCalls[0].ID
+			assert.Equal(t, "call_1", got)
+			got = tool.ToolCallID
+			assert.Equal(t, "call_1", got)
+			assert.NotNil(t, assistant.ExtraFields.Lookup("cache_control"))
+			assert.NotNil(t, tool.ExtraFields.Lookup("cache_control"))
 		})
 	}
 }

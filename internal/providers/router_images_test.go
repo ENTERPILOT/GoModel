@@ -3,10 +3,11 @@ package providers
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockImageProvider struct {
@@ -34,24 +35,14 @@ func TestRouterCreateImage(t *testing.T) {
 
 	req := &core.ImageGenerationRequest{Model: "dall-e-3", Provider: "openai", Prompt: "a cat"}
 	resp, err := router.CreateImage(context.Background(), req)
-	if err != nil {
-		t.Fatalf("CreateImage() error = %v", err)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].URL != "https://img" {
-		t.Errorf("response = %+v", resp)
-	}
-	if resp.Provider != "openai" {
-		t.Errorf("response provider = %q, want openai stamped", resp.Provider)
-	}
-	if imager.lastImageReq == nil {
-		t.Fatal("image provider was not called")
-	}
-	if imager.lastImageReq.Model != "dall-e-3" || imager.lastImageReq.Provider != "" {
-		t.Errorf("forwarded selector = %q/%q, want provider metadata stripped", imager.lastImageReq.Provider, imager.lastImageReq.Model)
-	}
-	if req.Provider != "openai" {
-		t.Errorf("caller's request was mutated: provider = %q", req.Provider)
-	}
+	require.NoError(t, err)
+	assert.Len(t, resp.Data, 1)
+	assert.Equal(t, "https://img", resp.Data[0].URL, "response = %+v", resp)
+	assert.Equal(t, "openai", resp.Provider)
+	require.NotNil(t, imager.lastImageReq)
+	assert.Equal(t, "dall-e-3", imager.lastImageReq.Model)
+	assert.Empty(t, imager.lastImageReq.Provider)
+	assert.Equal(t, "openai", req.Provider)
 }
 
 func TestRouterCreateImage_Errors(t *testing.T) {
@@ -102,20 +93,16 @@ func TestRouterCreateImage_Errors(t *testing.T) {
 				lookup.addModel(tt.model, tt.provider, tt.providerType)
 			}
 			router, err := NewRouter(lookup)
-			if err != nil {
-				t.Fatalf("NewRouter() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			_, err = router.CreateImage(context.Background(), tt.req)
 			if tt.wantIs != nil {
-				if !errors.Is(err, tt.wantIs) {
-					t.Fatalf("CreateImage() error = %v, want %v", err, tt.wantIs)
-				}
+				require.ErrorIs(t, err, tt.wantIs)
+
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("CreateImage() error = %v, want message containing %q", err, tt.wantError)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantError)
 		})
 	}
 }

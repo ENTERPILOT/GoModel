@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockTokenCountingProvider struct {
@@ -35,17 +37,12 @@ func TestRouterCountMessagesTokens(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	got, err := router.CountMessagesTokens(context.Background(), "anthropic/claude-haiku-4-5", []byte(`{"messages":[]}`))
-	if err != nil {
-		t.Fatalf("CountMessagesTokens: %v", err)
-	}
-	if got != 321 || counter.lastModel != "claude-haiku-4-5" {
-		t.Errorf("count = %d via model %q, want 321 via the bare model", got, counter.lastModel)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 321, got)
+	assert.Equal(t, "claude-haiku-4-5", counter.lastModel)
 
 	_, err = router.CountMessagesTokens(context.Background(), "openai/gpt-5-mini", []byte(`{"messages":[]}`))
-	if !errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
-		t.Errorf("err = %v, want ErrMessagesTokenCountUnsupported for a provider without the endpoint", err)
-	}
+	assert.ErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
 }
 
 // A failure from the counting provider reaches the caller unchanged, so the
@@ -58,10 +55,6 @@ func TestRouterCountMessagesTokens_PropagatesProviderError(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.CountMessagesTokens(context.Background(), "anthropic/claude-haiku-4-5", []byte(`{"messages":[]}`))
-	if !errors.Is(err, upstream) {
-		t.Fatalf("err = %v, want the provider's error propagated", err)
-	}
-	if errors.Is(err, core.ErrMessagesTokenCountUnsupported) {
-		t.Fatal("an upstream failure must not read as an unsupported provider")
-	}
+	require.ErrorIs(t, err, upstream)
+	require.False(t, errors.Is(err, core.ErrMessagesTokenCountUnsupported))
 }

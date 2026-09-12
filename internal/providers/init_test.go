@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -19,6 +18,7 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/cache/modelcache"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type mockInitCache struct {
@@ -65,23 +65,16 @@ func TestInitResultClose_IsIdempotentAndConcurrentSafe(t *testing.T) {
 	close(errs)
 
 	for err := range errs {
-		if !errors.Is(err, cacheErr) {
-			t.Fatalf("Close() error = %v, want %v", err, cacheErr)
-		}
+		require.ErrorIs(t, err, cacheErr)
 	}
-	if stopCalls.Load() != 1 {
-		t.Fatalf("stopRefresh called %d times, want 1", stopCalls.Load())
-	}
-	if cache.closeCalls.Load() != 1 {
-		t.Fatalf("cache.Close called %d times, want 1", cache.closeCalls.Load())
-	}
+	require.Equal(t, int32(1), stopCalls.Load())
+	require.Equal(t, int32(1), cache.closeCalls.Load())
 }
 
 func TestInitResultClose_NilReceiver(t *testing.T) {
 	var result *InitResult
-	if err := result.Close(); err != nil {
-		t.Fatalf("Close() error = %v, want nil", err)
-	}
+	err := result.Close()
+	require.NoError(t, err)
 }
 
 type initTestProvider struct {
@@ -161,19 +154,13 @@ func TestInit_AllowsStartupWhenProviderIsUnavailable(t *testing.T) {
 			},
 		},
 	}, factory)
-	if err != nil {
-		t.Fatalf("Init() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		_ = result.Close()
 	})
-
-	if got := result.Registry.ProviderCount(); got != 1 {
-		t.Fatalf("ProviderCount() = %d, want 1", got)
-	}
-	if got := result.Registry.ProviderByType("test"); got != provider {
-		t.Fatal("ProviderByType(test) = nil or wrong provider, want registered unavailable provider")
-	}
+	require.Equal(t, 1, result.Registry.ProviderCount())
+	require.Same(t, provider, result.Registry.ProviderByType("test"), "unavailable provider should still be registered")
 }
 
 // TestInit_SucceedsWithNoProvidersConfigured verifies GoModel can boot with
@@ -197,22 +184,16 @@ func TestInit_SucceedsWithNoProvidersConfigured(t *testing.T) {
 		},
 		RawProviders: map[string]config.RawProviderConfig{},
 	}, factory)
-	if err != nil {
-		t.Fatalf("Init() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		_ = result.Close()
 	})
-
-	if got := result.Registry.ProviderCount(); got != 0 {
-		t.Fatalf("ProviderCount() = %d, want 0", got)
-	}
-	if got := result.Registry.ModelCount(); got != 0 {
-		t.Fatalf("ModelCount() = %d, want 0", got)
-	}
-	if result.Router == nil {
-		t.Fatal("Router = nil, want a usable (empty) router")
-	}
+	got := result.Registry.ProviderCount()
+	require.Equal(t, 0, got)
+	got = result.Registry.ModelCount()
+	require.Equal(t, 0, got)
+	require.NotNil(t, result.Router)
 }
 
 func TestInit_NormalizesNilContext(t *testing.T) {
@@ -221,9 +202,8 @@ func TestInit_NormalizesNilContext(t *testing.T) {
 	}
 
 	cacheDir, err := os.MkdirTemp("", "gomodel-init-nil-context-*")
-	if err != nil {
-		t.Fatalf("os.MkdirTemp() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		_ = os.RemoveAll(cacheDir)
 	})
@@ -277,9 +257,8 @@ func TestInit_NormalizesNilContext(t *testing.T) {
 			},
 		},
 	}, factory)
-	if err != nil {
-		t.Fatalf("Init() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
+
 	defer func() {
 		_ = result.Close()
 	}()
@@ -303,15 +282,11 @@ func TestInit_NormalizesNilContext(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if !result.Registry.IsInitialized() {
-		t.Fatal("expected Init(nil, ...) to complete background registry initialization")
-	}
-	if _, err := os.Stat(cacheFile); err != nil {
-		t.Fatalf("expected Init(nil, ...) to persist the cache file, stat error = %v", err)
-	}
-	if _, err := os.Stat(cacheFile + ".tmp"); !os.IsNotExist(err) {
-		t.Fatalf("expected no in-progress cache temp file, stat error = %v", err)
-	}
+	require.True(t, result.Registry.IsInitialized())
+	_, err = os.Stat(cacheFile)
+	require.NoError(t, err)
+	_, err = os.Stat(cacheFile + ".tmp")
+	require.True(t, os.IsNotExist(err))
 }
 
 const unreachableRedisURL = "redis://127.0.0.1:1"
@@ -326,14 +301,11 @@ func TestInitCache_FallsBackToLocalWhenRedisUnreachable(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("initCache() error = %v, want nil (degraded local fallback)", err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
+	require.NoError(t, err)
 
-	if _, ok := c.(*modelcache.LocalCache); !ok {
-		t.Fatalf("initCache() type = %T, want *modelcache.LocalCache", c)
-	}
+	t.Cleanup(func() { _ = c.Close() })
+	_, ok := c.(*modelcache.LocalCache)
+	require.True(t, ok, "initCache() type = %T, want *modelcache.LocalCache", c)
 
 	ctx := t.Context()
 	want := &modelcache.ModelCache{
@@ -341,16 +313,13 @@ func TestInitCache_FallsBackToLocalWhenRedisUnreachable(t *testing.T) {
 			"test": {ProviderType: "test", OwnedBy: "test"},
 		},
 	}
-	if err := c.Set(ctx, want); err != nil {
-		t.Fatalf("Set() error = %v", err)
-	}
+	err = c.Set(ctx, want)
+	require.NoError(t, err)
+
 	got, err := c.Get(ctx)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	if got == nil || got.Providers["test"].ProviderType != "test" {
-		t.Fatalf("Get() = %+v, want local cache to round-trip in degraded mode", got)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, "test", got.Providers["test"].ProviderType)
 }
 
 func TestInitCache_FailsWhenRedisUnreachableAndNoLocal(t *testing.T) {
@@ -365,12 +334,8 @@ func TestInitCache_FailsWhenRedisUnreachableAndNoLocal(t *testing.T) {
 		_ = c.Close()
 		t.Fatal("initCache() cache != nil, want nil when redis is the only backend and is unreachable")
 	}
-	if err == nil {
-		t.Fatal("initCache() error = nil, want redis connection error")
-	}
-	if !strings.Contains(err.Error(), "failed to connect to redis") {
-		t.Fatalf("initCache() error = %v, want failed to connect to redis", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to connect to redis")
 }
 
 func TestInit_SucceedsWhenRedisUnreachableAndLocalConfigured(t *testing.T) {
@@ -386,16 +351,12 @@ func TestInit_SucceedsWhenRedisUnreachableAndLocalConfigured(t *testing.T) {
 		},
 		RawProviders: map[string]config.RawProviderConfig{},
 	}, NewProviderFactory())
-	if err != nil {
-		t.Fatalf("Init() error = %v, want nil in degraded mode", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = result.Close() })
-	if result.Router == nil {
-		t.Fatal("Router = nil, want a usable router after redis fallback")
-	}
-	if _, ok := result.Cache.(*modelcache.LocalCache); !ok {
-		t.Fatalf("Cache type = %T, want *modelcache.LocalCache", result.Cache)
-	}
+	require.NotNil(t, result.Router)
+	_, ok := result.Cache.(*modelcache.LocalCache)
+	require.True(t, ok, "Cache type = %T, want *modelcache.LocalCache", result.Cache)
 }
 
 func TestInitializeProviders_UnavailableProviderCanRefreshLater(t *testing.T) {
@@ -417,16 +378,9 @@ func TestInitializeProviders_UnavailableProviderCanRefreshLater(t *testing.T) {
 	count, err := initializeProviders(ctx, map[string]ProviderConfig{
 		"test": {Type: "test", APIKey: "sk-test"},
 	}, factory, registry)
-	if err != nil {
-		t.Fatalf("initializeProviders() error = %v, want nil", err)
-	}
-	if count != 1 {
-		t.Fatalf("initializeProviders() count = %d, want 1", count)
-	}
-
-	if err := registry.Refresh(ctx); err == nil {
-		t.Fatal("Refresh() error = nil, want startup failure while provider models are unavailable")
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.Error(t, registry.Refresh(ctx))
 
 	provider.listModelsErr = nil
 	provider.modelsResponse = &core.ModelsResponse{
@@ -435,13 +389,9 @@ func TestInitializeProviders_UnavailableProviderCanRefreshLater(t *testing.T) {
 			{ID: "later-model", Object: "model", OwnedBy: "test"},
 		},
 	}
-
-	if err := registry.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh() after recovery error = %v, want nil", err)
-	}
-	if !registry.Supports("later-model") {
-		t.Fatal("expected later-model to be discoverable after refresh")
-	}
+	err = registry.Refresh(ctx)
+	require.NoError(t, err)
+	require.True(t, registry.Supports("later-model"))
 }
 
 func TestInitializeProviders_AvailabilityCheckUsesCallerContext(t *testing.T) {
@@ -468,15 +418,9 @@ func TestInitializeProviders_AvailabilityCheckUsesCallerContext(t *testing.T) {
 	count, err := initializeProviders(ctx, map[string]ProviderConfig{
 		"test": {Type: "test", APIKey: "sk-test"},
 	}, factory, registry)
-	if err != nil {
-		t.Fatalf("initializeProviders() error = %v, want nil", err)
-	}
-	if count != 1 {
-		t.Fatalf("initializeProviders() count = %d, want 1", count)
-	}
-	if !errors.Is(checkErr, context.Canceled) {
-		t.Fatalf("CheckAvailability() context error = %v, want %v", checkErr, context.Canceled)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+	require.ErrorIs(t, checkErr, context.Canceled)
 }
 
 func TestInitializeProviders_ParallelizesProbesAndRegistersDeterministically(t *testing.T) {
@@ -534,28 +478,20 @@ func TestInitializeProviders_ParallelizesProbesAndRegistersDeterministically(t *
 
 	select {
 	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("initializeProviders() error = %v, want nil", got.err)
-		}
-		if got.count != providerCount {
-			t.Fatalf("initializeProviders() count = %d, want %d", got.count, providerCount)
-		}
+		require.NoError(t, got.err)
+		require.Equal(t, providerCount, got.count)
+
 	case <-time.After(time.Second):
 		t.Fatal("initializeProviders() did not finish")
 	}
-
-	if got := registry.providerNames[registry.providers[0]]; got != "alpha" {
-		t.Fatalf("first registered provider = %q, want alpha", got)
-	}
-	if got := registry.providerNames[registry.providers[1]]; got != "beta" {
-		t.Fatalf("second registered provider = %q, want beta", got)
-	}
-	if got := registry.providerNames[registry.providers[2]]; got != "gamma" {
-		t.Fatalf("third registered provider = %q, want gamma", got)
-	}
-	if got := registry.providerRuntime["beta"].lastAvailabilityError; got != "beta unavailable" {
-		t.Fatalf("beta availability error = %q, want beta unavailable", got)
-	}
+	got := registry.providerNames[registry.providers[0]]
+	require.Equal(t, "alpha", got)
+	got = registry.providerNames[registry.providers[1]]
+	require.Equal(t, "beta", got)
+	got = registry.providerNames[registry.providers[2]]
+	require.Equal(t, "gamma", got)
+	got = registry.providerRuntime["beta"].lastAvailabilityError
+	require.Equal(t, "beta unavailable", got)
 }
 
 func TestInitializeProviders_DoesNotLaunchUnboundedWorkers(t *testing.T) {
@@ -614,7 +550,5 @@ func TestInitializeProviders_DoesNotLaunchUnboundedWorkers(t *testing.T) {
 		t.Fatal("initializeProviders did not finish")
 	}
 
-	if len(started) != providerCount-maxWorkers {
-		t.Fatalf("started channel retained %d providers, want %d", len(started), providerCount-maxWorkers)
-	}
+	require.Equal(t, providerCount-maxWorkers, len(started))
 }

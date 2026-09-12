@@ -3,7 +3,6 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,29 +15,10 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestNew(t *testing.T) {
-	apiKey := "test-api-key"
-	// Use NewWithHTTPClient to get concrete type for internal testing
-	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
-
-	if got := provider.keys.Primary(); got != apiKey {
-		t.Errorf("primary key = %q, want %q", got, apiKey)
-	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
-	}
-}
-
-func TestNew_ReturnsProvider(t *testing.T) {
-	apiKey := "test-api-key"
-	provider := New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{})
-
-	if provider == nil {
-		t.Error("provider should not be nil")
-	}
-}
 
 func TestStreamConverter_DrainsBufferedDoneMessage(t *testing.T) {
 	stream := newStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
@@ -55,14 +35,10 @@ func TestStreamConverter_DrainsBufferedDoneMessage(t *testing.T) {
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
-			t.Fatalf("Read() error = %v", err)
-		}
+		require.NoError(t, err)
 	}
 
-	if out.String() != "data: [DONE]\n\n" {
-		t.Fatalf("stream output = %q, want %q", out.String(), "data: [DONE]\\n\\n")
-	}
+	require.Equal(t, "data: [DONE]\n\n", out.String())
 }
 
 func TestSetBatchResultEndpoints_PreservesOlderBatches(t *testing.T) {
@@ -76,19 +52,13 @@ func TestSetBatchResultEndpoints_PreservesOlderBatches(t *testing.T) {
 			"req-1": "/v1/chat/completions",
 		})
 	}
-
-	if got := provider.getBatchResultEndpoints("batch-0"); got == nil {
-		t.Fatal("batch-0 should still be present")
-	}
-	if got := provider.getBatchResultEndpoints("batch-1"); got == nil {
-		t.Fatal("batch-1 should still be present")
-	}
-	if got := provider.getBatchResultEndpoints("batch-1024"); got == nil {
-		t.Fatal("newest batch should still be present")
-	}
-	if got := len(provider.batchResultEndpoints); got != 1025 {
-		t.Fatalf("len(batchResultEndpoints) = %d, want 1025", got)
-	}
+	got := provider.getBatchResultEndpoints("batch-0")
+	require.NotNil(t, got)
+	got = provider.getBatchResultEndpoints("batch-1")
+	require.NotNil(t, got)
+	got = provider.getBatchResultEndpoints("batch-1024")
+	require.NotNil(t, got)
+	require.Len(t, provider.batchResultEndpoints, 1025)
 }
 
 func TestSetBatchResultEndpoints_OverwritesExistingBatch(t *testing.T) {
@@ -104,31 +74,16 @@ func TestSetBatchResultEndpoints_OverwritesExistingBatch(t *testing.T) {
 	})
 
 	refreshed := provider.getBatchResultEndpoints("batch-0")
-	if refreshed == nil {
-		t.Fatal("batch-0 should still be present after refresh")
-	}
-	if refreshed["req-1"] != "/v1/responses" {
-		t.Fatalf("batch-0 endpoint = %q, want /v1/responses", refreshed["req-1"])
-	}
-	if got := len(provider.batchResultEndpoints); got != 1 {
-		t.Fatalf("len(batchResultEndpoints) = %d, want 1", got)
-	}
+	require.NotNil(t, refreshed)
+	assert.Equal(t, "/v1/responses", refreshed["req-1"])
+	assert.Len(t, provider.batchResultEndpoints, 1)
 }
 
 func TestGetBatchResults(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/messages/batches/batch_1/results" {
-			http.NotFound(w, r)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(
-			`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}` + "\n" +
-				`{"custom_id":"err-1","result":{"type":"errored","error":{"type":"invalid_request_error","message":"bad request"}}}`,
-		))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK,
+		`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`+"\n"+
+			`{"custom_id":"err-1","result":{"type":"errored","error":{"type":"invalid_request_error","message":"bad request"}}}`,
+	)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -138,36 +93,20 @@ func TestGetBatchResults(t *testing.T) {
 	})
 
 	resp, err := provider.GetBatchResults(context.Background(), "batch_1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.BatchID != "batch_1" {
-		t.Fatalf("BatchID = %q, want %q", resp.BatchID, "batch_1")
-	}
-	if len(resp.Data) != 2 {
-		t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
-	}
-	if resp.Data[0].URL != "/v1/responses" || resp.Data[0].StatusCode != http.StatusOK {
-		t.Fatalf("unexpected first row: %+v", resp.Data[0])
-	}
-	if resp.Data[1].Error == nil || resp.Data[1].Error.Message != "bad request" {
-		t.Fatalf("unexpected error row: %+v", resp.Data[1])
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "/messages/batches/batch_1/results", capture.Last(t).Path)
+	require.Equal(t, "batch_1", resp.BatchID)
+	require.Len(t, resp.Data, 2)
+	require.Equal(t, "/v1/responses", resp.Data[0].URL)
+	require.Equal(t, http.StatusOK, resp.Data[0].StatusCode, "unexpected first row: %+v", resp.Data[0])
+	require.NotNil(t, resp.Data[1].Error)
+	require.Equal(t, "bad request", resp.Data[1].Error.Message, "unexpected error row: %+v", resp.Data[1])
 }
 
 func TestGetBatchResultsWithHints(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/messages/batches/batch_1/results" {
-			http.NotFound(w, r)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(
-			`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
-		))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK,
+		`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
+	)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -175,30 +114,16 @@ func TestGetBatchResultsWithHints(t *testing.T) {
 	resp, err := provider.GetBatchResultsWithHints(context.Background(), "batch_1", map[string]string{
 		"ok-1": "/v1/responses",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("len(Data) = %d, want 1", len(resp.Data))
-	}
-	if resp.Data[0].URL != "/v1/responses" {
-		t.Fatalf("URL = %q, want /v1/responses", resp.Data[0].URL)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "/messages/batches/batch_1/results", capture.Last(t).Path)
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "/v1/responses", resp.Data[0].URL)
 }
 
 func TestGetBatchResultsWithHints_ExplicitEmptyHintsDoNotUseTransientHints(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/messages/batches/batch_1/results" {
-			http.NotFound(w, r)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(
-			`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
-		))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK,
+		`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
+	)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -207,15 +132,10 @@ func TestGetBatchResultsWithHints_ExplicitEmptyHintsDoNotUseTransientHints(t *te
 	})
 
 	resp, err := provider.GetBatchResultsWithHints(context.Background(), "batch_1", map[string]string{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("len(Data) = %d, want 1", len(resp.Data))
-	}
-	if resp.Data[0].URL != "/v1/chat/completions" {
-		t.Fatalf("URL = %q, want /v1/chat/completions", resp.Data[0].URL)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "/messages/batches/batch_1/results", capture.Last(t).Path)
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "/v1/chat/completions", resp.Data[0].URL)
 }
 
 func TestClearBatchResultHints(t *testing.T) {
@@ -228,9 +148,8 @@ func TestClearBatchResultHints(t *testing.T) {
 	}
 
 	provider.ClearBatchResultHints("batch_1")
-	if got := provider.getBatchResultEndpoints("batch_1"); got != nil {
-		t.Fatalf("batch_1 hints should be cleared, got %#v", got)
-	}
+	got := provider.getBatchResultEndpoints("batch_1")
+	require.Nil(t, got)
 }
 
 func TestChatCompletion(t *testing.T) {
@@ -261,27 +180,13 @@ func TestChatCompletion(t *testing.T) {
 			}`,
 			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ChatResponse) {
-				if resp.ID != "msg_123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "msg_123")
-				}
-				if resp.Model != "claude-sonnet-4-5-20250929" {
-					t.Errorf("Model = %q, want %q", resp.Model, "claude-sonnet-4-5-20250929")
-				}
-				if len(resp.Choices) != 1 {
-					t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))
-				}
-				if resp.Choices[0].Message.Content != "Hello! How can I help you today?" {
-					t.Errorf("Message content = %q, want %q", resp.Choices[0].Message.Content, "Hello! How can I help you today?")
-				}
-				if resp.Usage.PromptTokens != 10 {
-					t.Errorf("PromptTokens = %d, want 10", resp.Usage.PromptTokens)
-				}
-				if resp.Usage.CompletionTokens != 20 {
-					t.Errorf("CompletionTokens = %d, want 20", resp.Usage.CompletionTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "msg_123", resp.ID)
+				assert.Equal(t, "claude-sonnet-4-5-20250929", resp.Model)
+				require.Len(t, resp.Choices, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Choices[0].Message.Content)
+				assert.Equal(t, 10, resp.Usage.PromptTokens)
+				assert.Equal(t, 20, resp.Usage.CompletionTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -300,12 +205,8 @@ func TestChatCompletion(t *testing.T) {
 			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ChatResponse) {
 				choice := resp.Choices[0]
-				if choice.FinishReason != "stop" {
-					t.Errorf("FinishReason = %q, want stop", choice.FinishReason)
-				}
-				if choice.StopSequence != "7" {
-					t.Errorf("StopSequence = %q, want 7", choice.StopSequence)
-				}
+				assert.Equal(t, "stop", choice.FinishReason)
+				assert.Equal(t, "7", choice.StopSequence)
 			},
 		},
 		{
@@ -336,38 +237,7 @@ func TestChatCompletion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				apiKey := r.Header.Get("x-api-key")
-				if apiKey == "" {
-					t.Error("x-api-key header should not be empty")
-				}
-				if r.Header.Get("anthropic-version") != anthropicAPIVersion {
-					t.Errorf("anthropic-version = %q, want %q", r.Header.Get("anthropic-version"), anthropicAPIVersion)
-				}
-
-				// Verify request path
-				if r.URL.Path != "/messages" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/messages")
-				}
-
-				// Verify request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req anthropicRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
@@ -381,17 +251,21 @@ func TestChatCompletion(t *testing.T) {
 
 			resp, err := provider.ChatCompletion(context.Background(), req)
 
+			sent := capture.Last(t)
+			assert.Equal(t, "/messages", sent.Path)
+			assert.Equal(t, "application/json", sent.Header.Get("Content-Type"))
+			assert.NotEmpty(t, sent.Header.Get("x-api-key"))
+			assert.Equal(t, anthropicAPIVersion, sent.Header.Get("anthropic-version"))
+			var anthropicReq anthropicRequest
+			require.NoError(t, json.Unmarshal(sent.Body, &anthropicReq))
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.checkResponse != nil {
+				tt.checkResponse(t, resp)
 			}
 		})
 	}
@@ -431,28 +305,19 @@ data: {"type":"message_stop"}
 `,
 			expectedError: false,
 			checkStream: func(t *testing.T, body io.ReadCloser) {
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
+				require.NotNil(t, body)
+
 				defer func() { _ = body.Close() }()
 
 				// Read and verify the streaming response
 				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
+				require.NoError(t, err)
 
 				// The response should be converted to OpenAI format
 				responseStr := string(respBody)
-				if !strings.Contains(responseStr, "data:") {
-					t.Error("response should contain SSE data")
-				}
-				if !strings.Contains(responseStr, `"role":"assistant"`) {
-					t.Error("response should include assistant role delta")
-				}
-				if !strings.Contains(responseStr, "[DONE]") {
-					t.Error("response should end with [DONE]")
-				}
+				assert.Contains(t, responseStr, "data:")
+				assert.Contains(t, responseStr, `"role":"assistant"`)
+				assert.Contains(t, responseStr, "[DONE]")
 			},
 		},
 		{
@@ -480,16 +345,11 @@ data: {"type":"message_stop"}
 			checkStream: func(t *testing.T, body io.ReadCloser) {
 				defer func() { _ = body.Close() }()
 				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
+				require.NoError(t, err)
+
 				responseStr := string(respBody)
-				if !strings.Contains(responseStr, `"stop_sequence":"7"`) {
-					t.Errorf("chunk stream should carry the matched stop sequence, got: %s", responseStr)
-				}
-				if !strings.Contains(responseStr, `"finish_reason":"stop"`) {
-					t.Errorf("finish_reason should stay OpenAI-conservative \"stop\", got: %s", responseStr)
-				}
+				assert.Contains(t, responseStr, `"stop_sequence":"7"`)
+				assert.Contains(t, responseStr, `"finish_reason":"stop"`)
 			},
 		},
 		{
@@ -508,33 +368,10 @@ data: {"type":"message_stop"}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				apiKey := r.Header.Get("x-api-key")
-				if apiKey == "" {
-					t.Error("x-api-key header should not be empty")
-				}
-
-				// Verify stream is set in request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req anthropicRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
-
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+				_, _ = io.WriteString(w, tt.responseBody)
+			})
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
@@ -548,26 +385,27 @@ data: {"type":"message_stop"}
 
 			body, err := provider.StreamChatCompletion(context.Background(), req)
 
+			sent := capture.Last(t)
+			assert.Equal(t, "application/json", sent.Header.Get("Content-Type"))
+			assert.NotEmpty(t, sent.Header.Get("x-api-key"))
+			var anthropicReq anthropicRequest
+			require.NoError(t, json.Unmarshal(sent.Body, &anthropicReq))
+			assert.True(t, anthropicReq.Stream)
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkStream != nil {
-					tt.checkStream(t, body)
-				}
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.checkStream != nil {
+				tt.checkStream(t, body)
 			}
 		})
 	}
 }
 
 func TestStreamChatCompletion_MergesUsageFromMessageStart(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":6}}}
 
 event: content_block_start
@@ -581,9 +419,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -594,35 +430,22 @@ data: {"type":"message_stop"}
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	responseStr := string(raw)
-	if !strings.Contains(responseStr, `"prompt_tokens":10`) {
-		t.Fatalf("expected prompt_tokens in streamed usage, got %q", responseStr)
-	}
-	if !strings.Contains(responseStr, `"completion_tokens":2`) {
-		t.Fatalf("expected completion_tokens in streamed usage, got %q", responseStr)
-	}
-	if !strings.Contains(responseStr, `"total_tokens":12`) {
-		t.Fatalf("expected total_tokens in streamed usage, got %q", responseStr)
-	}
-	if !strings.Contains(responseStr, `"cache_read_input_tokens":6`) {
-		t.Fatalf("expected cache_read_input_tokens in streamed usage, got %q", responseStr)
-	}
+	require.Contains(t, responseStr, `"prompt_tokens":10`)
+	require.Contains(t, responseStr, `"completion_tokens":2`)
+	require.Contains(t, responseStr, `"total_tokens":12`)
+	require.Contains(t, responseStr, `"cache_read_input_tokens":6`)
 }
 
 func TestStreamChatCompletion_WithToolCalls(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -642,9 +465,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -663,15 +484,12 @@ data: {"type":"message_stop"}
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	foundToolStart := false
@@ -718,21 +536,13 @@ data: {"type":"message_stop"}
 		}
 	}
 
-	if !foundToolStart {
-		t.Fatal("expected a streaming tool call header chunk")
-	}
-	if argumentDeltas.String() != `{"city":"Warsaw"}` {
-		t.Fatalf("streamed tool call arguments = %q, want %q", argumentDeltas.String(), `{"city":"Warsaw"}`)
-	}
-	if !foundFinish {
-		t.Fatal("expected a final tool_calls finish_reason chunk")
-	}
+	require.True(t, foundToolStart)
+	require.Equal(t, `{"city":"Warsaw"}`, argumentDeltas.String())
+	require.True(t, foundFinish)
 }
 
 func TestStreamChatCompletion_WithEmptyToolArguments(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -746,9 +556,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -767,15 +575,12 @@ data: {"type":"message_stop"}
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	foundToolCall := false
@@ -808,18 +613,12 @@ data: {"type":"message_stop"}
 		}
 	}
 
-	if !foundToolCall {
-		t.Fatal("expected streamed tool call with {} arguments for zero-arg tool")
-	}
-	if !foundFinish {
-		t.Fatal("expected a final tool_calls finish_reason chunk")
-	}
+	require.True(t, foundToolCall)
+	require.True(t, foundFinish)
 }
 
 func TestStreamChatCompletion_ToolUseWithoutToolChunksKeepsRawFinishReason(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: message_delta
@@ -827,9 +626,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"outpu
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -840,20 +637,15 @@ data: {"type":"message_stop"}
 			{Role: "user", Content: "call tool"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
-	if len(events) == 0 {
-		t.Fatal("expected at least one SSE event")
-	}
+	require.NotEmpty(t, events)
 
 	foundTerminalChunk := false
 	for _, event := range events {
@@ -871,27 +663,21 @@ data: {"type":"message_stop"}
 		}
 
 		delta, _ := choice["delta"].(map[string]any)
-		if _, ok := delta["tool_calls"]; ok {
-			t.Fatalf("did not expect tool_calls in malformed stream fallback, got %#v", delta["tool_calls"])
-		}
+		_, ok = delta["tool_calls"]
+		require.False(t, ok, "did not expect tool_calls in malformed stream fallback, got %#v", delta["tool_calls"])
+
 		if choice["finish_reason"] == nil {
 			continue
 		}
 		foundTerminalChunk = true
-		if choice["finish_reason"] != "tool_use" {
-			t.Fatalf("finish_reason = %#v, want %q", choice["finish_reason"], "tool_use")
-		}
+		require.Equal(t, "tool_use", choice["finish_reason"])
 	}
 
-	if !foundTerminalChunk {
-		t.Fatal("expected a terminal chat completion chunk")
-	}
+	require.True(t, foundTerminalChunk)
 }
 
 func TestStreamChatCompletion_MalformedEventReturnsError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -902,9 +688,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 
 event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -915,32 +699,19 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err == nil {
-		t.Fatal("expected malformed stream error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusBadGateway {
-		t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusBadGateway)
-	}
-	if !strings.Contains(gatewayErr.Message, "failed to decode anthropic stream event") {
-		t.Fatalf("message = %q, want decode failure", gatewayErr.Message)
-	}
-	if !strings.Contains(string(raw), `"content":"Hello"`) {
-		t.Fatalf("expected stream to include prior converted chunk, got %q", string(raw))
-	}
-	if strings.Contains(string(raw), "[DONE]") {
-		t.Fatalf("did not expect [DONE] after malformed event, got %q", string(raw))
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusBadGateway, gatewayErr.StatusCode)
+	require.Contains(t, gatewayErr.Message, "failed to decode anthropic stream event")
+	require.Contains(t, string(raw), `"content":"Hello"`)
+	require.NotContains(t, string(raw), "[DONE]", "no [DONE] after a malformed event")
 }
 
 type testSSEEvent struct {
@@ -977,9 +748,8 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 		}
 
 		var payload map[string]any
-		if err := json.Unmarshal([]byte(data), &payload); err != nil {
-			t.Fatalf("failed to unmarshal SSE payload %q: %v", data, err)
-		}
+		err := json.Unmarshal([]byte(data), &payload)
+		require.NoError(t, err, "failed to unmarshal SSE payload %q: %v", data, err)
 
 		events = append(events, testSSEEvent{
 			Name:    currentEventName,
@@ -992,75 +762,38 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 }
 
 func TestListModels(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request path and method
-		if r.URL.Path != "/models" {
-			t.Errorf("Path = %q, want %q", r.URL.Path, "/models")
-		}
-		if r.Method != http.MethodGet {
-			t.Errorf("Method = %q, want %q", r.Method, http.MethodGet)
-		}
-
-		// Verify required headers
-		apiKey := r.Header.Get("x-api-key")
-		if apiKey == "" {
-			t.Error("x-api-key header should not be empty")
-		}
-		if r.Header.Get("anthropic-version") != anthropicAPIVersion {
-			t.Errorf("anthropic-version = %q, want %q", r.Header.Get("anthropic-version"), anthropicAPIVersion)
-		}
-
-		// Verify limit query param (passed in URL)
-		if limit := r.URL.Query().Get("limit"); limit != "1000" {
-			t.Errorf("limit query param = %q, want %q", limit, "1000")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"data": [
-				{"id": "claude-sonnet-4-5-20250929", "type": "model", "created_at": "2025-09-29T00:00:00Z", "display_name": "Claude Sonnet 4.5"},
-				{"id": "claude-opus-4-5-20251101", "type": "model", "created_at": "2025-11-01T00:00:00Z", "display_name": "Claude Opus 4.5"},
-				{"id": "claude-3-haiku-20240307", "type": "model", "created_at": "2024-03-07T00:00:00Z", "display_name": "Claude 3 Haiku"}
-			],
-			"has_more": false
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"data": [
+			{"id": "claude-sonnet-4-5-20250929", "type": "model", "created_at": "2025-09-29T00:00:00Z", "display_name": "Claude Sonnet 4.5"},
+			{"id": "claude-opus-4-5-20251101", "type": "model", "created_at": "2025-11-01T00:00:00Z", "display_name": "Claude Opus 4.5"},
+			{"id": "claude-3-haiku-20240307", "type": "model", "created_at": "2024-03-07T00:00:00Z", "display_name": "Claude 3 Haiku"}
+		],
+		"has_more": false
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	resp, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	sent := capture.Last(t)
+	assert.Equal(t, http.MethodGet, sent.Method)
+	assert.Equal(t, "/models", sent.Path)
+	assert.Equal(t, "1000", sent.Query.Get("limit"))
+	assert.NotEmpty(t, sent.Header.Get("x-api-key"))
+	assert.Equal(t, anthropicAPIVersion, sent.Header.Get("anthropic-version"))
 
-	if resp.Object != "list" {
-		t.Errorf("Object = %q, want %q", resp.Object, "list")
-	}
-
-	if len(resp.Data) != 3 {
-		t.Errorf("len(Data) = %d, want 3", len(resp.Data))
-	}
+	assert.Equal(t, "list", resp.Object)
+	assert.Len(t, resp.Data, 3)
 
 	// Verify that all models have the correct fields
 	for _, model := range resp.Data {
-		if model.ID == "" {
-			t.Error("Model ID should not be empty")
-		}
-		if !strings.HasPrefix(model.ID, "claude-") {
-			t.Errorf("Model ID %q should start with 'claude-'", model.ID)
-		}
-		if model.Object != "model" {
-			t.Errorf("Model.Object = %q, want %q", model.Object, "model")
-		}
-		if model.OwnedBy != "anthropic" {
-			t.Errorf("Model.OwnedBy = %q, want %q", model.OwnedBy, "anthropic")
-		}
-		if model.Created == 0 {
-			t.Error("Model.Created should not be zero")
-		}
+		assert.NotEmpty(t, model.ID)
+		assert.True(t, strings.HasPrefix(model.ID, "claude-"), "Model ID %q should start with 'claude-'", model.ID)
+		assert.Equal(t, "model", model.Object)
+		assert.Equal(t, "anthropic", model.OwnedBy)
+		assert.NotZero(t, model.Created)
 	}
 
 	// Verify expected models are present
@@ -1077,9 +810,7 @@ func TestListModels(t *testing.T) {
 	}
 
 	for model, found := range expectedModels {
-		if !found {
-			t.Errorf("Expected model %q not found in response", model)
-		}
+		assert.True(t, found, "expected model %q in list", model)
 	}
 
 	// Verify created timestamps are parsed correctly
@@ -1087,27 +818,19 @@ func TestListModels(t *testing.T) {
 		if model.ID == "claude-sonnet-4-5-20250929" {
 			// 2025-09-29T00:00:00Z in Unix
 			expected := int64(1759104000)
-			if model.Created != expected {
-				t.Errorf("Created for claude-sonnet-4-5-20250929 = %d, want %d", model.Created, expected)
-			}
+			assert.Equal(t, expected, model.Created)
 		}
 	}
 }
 
 func TestListModels_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"type": "error", "error": {"type": "authentication_error", "message": "Invalid API key"}}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusUnauthorized, `{"type": "error", "error": {"type": "authentication_error", "message": "Invalid API key"}}`)
 
 	provider := NewWithHTTPClient("invalid-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
 
 	_, err := provider.ListModels(context.Background())
-	if err == nil {
-		t.Error("expected error, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestParseCreatedAt(t *testing.T) {
@@ -1131,28 +854,22 @@ func TestParseCreatedAt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := parseCreatedAt(tt.input)
-			if got != tt.wantTime {
-				t.Errorf("parseCreatedAt(%q) = %d, want %d", tt.input, got, tt.wantTime)
-			}
+			assert.Equal(t, tt.wantTime, got)
 		})
 	}
 }
 
 func TestParseCreatedAt_InvalidFormat(t *testing.T) {
 	// For invalid format, it should return current time (non-zero)
-	got := parseCreatedAt("invalid-date")
-	if got == 0 {
-		t.Error("parseCreatedAt with invalid format should return non-zero (current time)")
-	}
+	assert.NotZero(t, parseCreatedAt("invalid-date"))
 }
 
 func TestChatCompletionWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		// Simulate a slow response
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
+	})
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -1168,9 +885,7 @@ func TestChatCompletionWithContext(t *testing.T) {
 	}
 
 	_, err := provider.ChatCompletion(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestConvertToAnthropicRequest(t *testing.T) {
@@ -1193,18 +908,10 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if req.Model != "claude-sonnet-4-5-20250929" {
-					t.Errorf("Model = %q, want %q", req.Model, "claude-sonnet-4-5-20250929")
-				}
-				if len(req.Messages) != 1 {
-					t.Errorf("len(Messages) = %d, want 1", len(req.Messages))
-				}
-				if req.Messages[0].Content != "Hello" {
-					t.Errorf("Message content = %q, want %q", req.Messages[0].Content, "Hello")
-				}
-				if req.MaxTokens != 4096 {
-					t.Errorf("MaxTokens = %d, want 4096", req.MaxTokens)
-				}
+				assert.Equal(t, "claude-sonnet-4-5-20250929", req.Model)
+				assert.Len(t, req.Messages, 1)
+				assert.Equal(t, "Hello", req.Messages[0].Content)
+				assert.Equal(t, 4096, req.MaxTokens)
 			},
 		},
 		{
@@ -1217,12 +924,8 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if req.System != "You are a helpful assistant" {
-					t.Errorf("System = %q, want %q", req.System, "You are a helpful assistant")
-				}
-				if len(req.Messages) != 1 {
-					t.Errorf("len(Messages) = %d, want 1 (system should be extracted)", len(req.Messages))
-				}
+				assert.Equal(t, "You are a helpful assistant", req.System)
+				assert.Len(t, req.Messages, 1)
 			},
 		},
 		{
@@ -1236,12 +939,9 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if req.Temperature == nil || *req.Temperature != 0.7 {
-					t.Errorf("Temperature = %v, want 0.7", req.Temperature)
-				}
-				if req.MaxTokens != 1024 {
-					t.Errorf("MaxTokens = %d, want 1024", req.MaxTokens)
-				}
+				assert.NotNil(t, req.Temperature)
+				assert.Equal(t, 0.7, *req.Temperature)
+				assert.Equal(t, 1024, req.MaxTokens)
 			},
 		},
 		{
@@ -1271,15 +971,11 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if len(req.Tools) != 1 {
-					t.Fatalf("len(Tools) = %d, want 1", len(req.Tools))
-				}
-				if req.Tools[0].Name != "lookup_weather" {
-					t.Fatalf("tool name = %q, want lookup_weather", req.Tools[0].Name)
-				}
-				if req.ToolChoice == nil || req.ToolChoice.Type != "tool" || req.ToolChoice.Name != "lookup_weather" {
-					t.Fatalf("tool choice = %+v, want named tool choice", req.ToolChoice)
-				}
+				require.Len(t, req.Tools, 1)
+				require.Equal(t, "lookup_weather", req.Tools[0].Name)
+				require.NotNil(t, req.ToolChoice)
+				require.Equal(t, "tool", req.ToolChoice.Type)
+				require.Equal(t, "lookup_weather", req.ToolChoice.Name)
 			},
 		},
 		{
@@ -1303,15 +999,10 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				}
 			}(),
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if req.ToolChoice == nil {
-					t.Fatal("ToolChoice should not be nil when parallel_tool_calls=false")
-				}
-				if req.ToolChoice.Type != "auto" {
-					t.Fatalf("tool choice type = %q, want auto", req.ToolChoice.Type)
-				}
-				if req.ToolChoice.DisableParallelToolUse == nil || !*req.ToolChoice.DisableParallelToolUse {
-					t.Fatalf("disable_parallel_tool_use = %#v, want true", req.ToolChoice.DisableParallelToolUse)
-				}
+				require.NotNil(t, req.ToolChoice)
+				require.Equal(t, "auto", req.ToolChoice.Type)
+				require.NotNil(t, req.ToolChoice.DisableParallelToolUse)
+				require.True(t, *req.ToolChoice.DisableParallelToolUse)
 			},
 		},
 		{
@@ -1336,28 +1027,22 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if len(req.Messages) != 2 {
-					t.Fatalf("len(Messages) = %d, want 2", len(req.Messages))
-				}
+				require.Len(t, req.Messages, 2)
 
 				assistantBlocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
-				if !ok || len(assistantBlocks) != 1 {
-					t.Fatalf("assistant content = %#v, want one tool_use block", req.Messages[0].Content)
-				}
-				if assistantBlocks[0].Type != "tool_use" || assistantBlocks[0].Name != "lookup_weather" || assistantBlocks[0].ID != "call_123" {
-					t.Fatalf("assistant tool block = %+v, want lookup_weather/call_123", assistantBlocks[0])
-				}
+				require.True(t, ok)
+				require.Len(t, assistantBlocks, 1, "assistant content = %#v, want one tool_use block", req.Messages[0].Content)
+				require.Equal(t, "tool_use", assistantBlocks[0].Type)
+				require.Equal(t, "lookup_weather", assistantBlocks[0].Name)
+				require.Equal(t, "call_123", assistantBlocks[0].ID, "assistant tool block = %+v, want lookup_weather/call_123", assistantBlocks[0])
 
 				toolBlocks, ok := req.Messages[1].Content.([]anthropicContentBlock)
-				if !ok || len(toolBlocks) != 1 {
-					t.Fatalf("tool content = %#v, want one tool_result block", req.Messages[1].Content)
-				}
-				if req.Messages[1].Role != "user" {
-					t.Fatalf("tool role = %q, want user", req.Messages[1].Role)
-				}
-				if toolBlocks[0].Type != "tool_result" || toolBlocks[0].ToolUseID != "call_123" || toolBlocks[0].Content != `{"temperature_c":21}` {
-					t.Fatalf("tool result block = %+v, want call_123 payload", toolBlocks[0])
-				}
+				require.True(t, ok)
+				require.Len(t, toolBlocks, 1, "tool content = %#v, want one tool_result block", req.Messages[1].Content)
+				require.Equal(t, "user", req.Messages[1].Role)
+				require.Equal(t, "tool_result", toolBlocks[0].Type)
+				require.Equal(t, "call_123", toolBlocks[0].ToolUseID)
+				require.Equal(t, `{"temperature_c":21}`, toolBlocks[0].Content, "tool result block = %+v, want call_123 payload", toolBlocks[0])
 			},
 		},
 	}
@@ -1365,9 +1050,8 @@ func TestConvertToAnthropicRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := convertToAnthropicRequest(tt.input)
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			tt.checkFn(t, result)
 		})
 	}
@@ -1394,12 +1078,8 @@ func TestConvertToAnthropicRequest_MapsStopSequences(t *testing.T) {
 				}),
 			}
 			result, err := convertToAnthropicRequest(req)
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v", err)
-			}
-			if !slices.Equal(result.StopSequences, tt.want) {
-				t.Errorf("StopSequences = %v, want %v", result.StopSequences, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, result.StopSequences)
 		})
 	}
 }
@@ -1431,22 +1111,13 @@ func TestConvertToAnthropicRequest_RejectsUnsupportedChatExtras(t *testing.T) {
 					tt.field: tt.value,
 				}),
 			})
-			if err == nil {
-				t.Fatal("expected invalid request error, got nil")
-			}
+			require.Error(t, err)
+
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) {
-				t.Fatalf("error = %T, want *core.GatewayError", err)
-			}
-			if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-				t.Fatalf("error type = %q, want %q", gatewayErr.Type, core.ErrorTypeInvalidRequest)
-			}
-			if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-				t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-			}
-			if !strings.Contains(gatewayErr.Message, tt.field) {
-				t.Fatalf("error message = %q, want mention %q", gatewayErr.Message, tt.field)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+			require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+			require.Contains(t, gatewayErr.Message, tt.field)
 		})
 	}
 }
@@ -1483,9 +1154,7 @@ func TestConvertToAnthropicRequest_IgnoresNoopChatExtras(t *testing.T) {
 					tt.field: tt.value,
 				}),
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v, want nil", err)
-			}
+			require.NoError(t, err)
 		})
 	}
 }
@@ -1497,12 +1166,9 @@ func TestConvertToAnthropicRequest_PreservesTopP(t *testing.T) {
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 		TopP:     &topP,
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.TopP == nil || *result.TopP != 0.2 {
-		t.Fatalf("TopP = %#v, want 0.2", result.TopP)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.TopP)
+	require.Equal(t, 0.2, *result.TopP)
 }
 
 func TestConvertToAnthropicRequest_TopPFromExtraFields(t *testing.T) {
@@ -1513,12 +1179,9 @@ func TestConvertToAnthropicRequest_TopPFromExtraFields(t *testing.T) {
 			"top_p": json.RawMessage("0.3"),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.TopP == nil || *result.TopP != 0.3 {
-		t.Fatalf("TopP = %#v, want 0.3", result.TopP)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.TopP)
+	require.Equal(t, 0.3, *result.TopP)
 }
 
 func TestConvertToAnthropicRequest_TypedTopPWinsOverExtraFields(t *testing.T) {
@@ -1531,12 +1194,9 @@ func TestConvertToAnthropicRequest_TypedTopPWinsOverExtraFields(t *testing.T) {
 			"top_p": json.RawMessage("0.9"),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.TopP == nil || *result.TopP != 0.2 {
-		t.Fatalf("TopP = %#v, want typed value 0.2", result.TopP)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.TopP)
+	require.Equal(t, 0.2, *result.TopP)
 }
 
 func TestConvertToAnthropicRequest_ReasoningEffortFromExtraFields(t *testing.T) {
@@ -1547,15 +1207,11 @@ func TestConvertToAnthropicRequest_ReasoningEffortFromExtraFields(t *testing.T) 
 			"reasoning_effort": json.RawMessage(`"high"`),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.Thinking == nil || result.Thinking.Type != "adaptive" {
-		t.Fatalf("Thinking = %#v, want adaptive", result.Thinking)
-	}
-	if result.OutputConfig == nil || result.OutputConfig.Effort != "high" {
-		t.Fatalf("OutputConfig = %#v, want effort high", result.OutputConfig)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.Thinking)
+	require.Equal(t, "adaptive", result.Thinking.Type)
+	require.NotNil(t, result.OutputConfig)
+	require.Equal(t, "high", result.OutputConfig.Effort)
 }
 
 func TestConvertToAnthropicRequest_ReasoningObjectWinsOverReasoningEffort(t *testing.T) {
@@ -1567,12 +1223,9 @@ func TestConvertToAnthropicRequest_ReasoningObjectWinsOverReasoningEffort(t *tes
 			"reasoning_effort": json.RawMessage(`"max"`),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.OutputConfig == nil || result.OutputConfig.Effort != "low" {
-		t.Fatalf("OutputConfig = %#v, want object-form effort low", result.OutputConfig)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.OutputConfig)
+	require.Equal(t, "low", result.OutputConfig.Effort)
 }
 
 func TestConvertToAnthropicRequest_EmptyReasoningObjectFallsBackToReasoningEffort(t *testing.T) {
@@ -1584,12 +1237,9 @@ func TestConvertToAnthropicRequest_EmptyReasoningObjectFallsBackToReasoningEffor
 			"reasoning_effort": json.RawMessage(`"high"`),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.OutputConfig == nil || result.OutputConfig.Effort != "high" {
-		t.Fatalf("OutputConfig = %#v, want string-form effort high", result.OutputConfig)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.OutputConfig)
+	require.Equal(t, "high", result.OutputConfig.Effort)
 }
 
 func TestResolveAnthropicReasoningEffort_NormalizesSpelling(t *testing.T) {
@@ -1630,9 +1280,8 @@ func TestResolveAnthropicReasoningEffort_NormalizesSpelling(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveAnthropicReasoningEffort(tt.req); got != tt.want {
-				t.Fatalf("resolveAnthropicReasoningEffort() = %q, want %q", got, tt.want)
-			}
+			got := resolveAnthropicReasoningEffort(tt.req)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -1656,19 +1305,12 @@ func TestConvertToAnthropicRequest_InvalidToolArguments(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestConvertToAnthropicRequest_RejectsTrailingToolArgumentContent(t *testing.T) {
@@ -1690,22 +1332,16 @@ func TestConvertToAnthropicRequest_RejectsTrailingToolArgumentContent(t *testing
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
-	if !strings.Contains(gatewayErr.Message, "invalid character") && !strings.Contains(gatewayErr.Message, "exactly one JSON object") {
-		t.Fatalf("error message = %q, want trailing content validation", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+
+	assert.True(t,
+		strings.Contains(gatewayErr.Message, "invalid character") || strings.Contains(gatewayErr.Message, "exactly one JSON object"),
+		"error message = %q, want trailing content validation", gatewayErr.Message)
 }
 
 func TestConvertToAnthropicRequest_InvalidToolDefinition(t *testing.T) {
@@ -1724,19 +1360,12 @@ func TestConvertToAnthropicRequest_InvalidToolDefinition(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
@@ -1777,15 +1406,10 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 			},
 			wantLen: 1,
 			checkFn: func(t *testing.T, tools []anthropicTool) {
-				if tools[0].Name != "lookup_weather" {
-					t.Fatalf("Name = %q, want lookup_weather", tools[0].Name)
-				}
-				if tools[0].Description != "Get weather for a city" {
-					t.Fatalf("Description = %q, want tool description", tools[0].Description)
-				}
-				if schemaType, _ := tools[0].InputSchema["type"].(string); schemaType != "object" {
-					t.Fatalf("InputSchema.type = %q, want object", schemaType)
-				}
+				require.Equal(t, "lookup_weather", tools[0].Name)
+				require.Equal(t, "Get weather for a city", tools[0].Description)
+				schemaType, _ := tools[0].InputSchema["type"].(string)
+				require.Equal(t, "object", schemaType)
 			},
 		},
 		{
@@ -1800,12 +1424,10 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 			},
 			wantLen: 1,
 			checkFn: func(t *testing.T, tools []anthropicTool) {
-				if schemaType, _ := tools[0].InputSchema["type"].(string); schemaType != "object" {
-					t.Fatalf("InputSchema.type = %q, want object", schemaType)
-				}
-				if _, ok := tools[0].InputSchema["properties"].(map[string]any); !ok {
-					t.Fatalf("InputSchema.properties = %#v, want object map", tools[0].InputSchema["properties"])
-				}
+				schemaType, _ := tools[0].InputSchema["type"].(string)
+				require.Equal(t, "object", schemaType)
+				_, ok := tools[0].InputSchema["properties"].(map[string]any)
+				require.True(t, ok, "InputSchema.properties = %#v, want object map", tools[0].InputSchema["properties"])
 			},
 		},
 		{
@@ -1872,34 +1494,25 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := convertOpenAIToolsToAnthropic(tt.tools)
 			if tt.wantError {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
+				require.Error(t, err)
+
 				var gatewayErr *core.GatewayError
-				if !errors.As(err, &gatewayErr) {
-					t.Fatalf("error = %T, want *core.GatewayError", err)
-				}
-				if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-					t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-				}
-				if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-					t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-				}
+				require.ErrorAs(t, err, &gatewayErr)
+				require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+				require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
+
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("convertOpenAIToolsToAnthropic() error = %v, want nil", err)
-			}
+			require.NoError(t, err)
+
 			if tt.wantNil {
-				if result != nil {
-					t.Fatalf("result = %#v, want nil", result)
-				}
+				require.Nil(t, result)
+
 				return
 			}
-			if len(result) != tt.wantLen {
-				t.Fatalf("len(result) = %d, want %d", len(result), tt.wantLen)
-			}
+			require.Equal(t, tt.wantLen, len(result))
+
 			if tt.checkFn != nil {
 				tt.checkFn(t, result)
 			}
@@ -1926,19 +1539,12 @@ func TestConvertToAnthropicRequest_InvalidToolChoice(t *testing.T) {
 			"function": map[string]any{},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestConvertToAnthropicRequest_ToolMessageRequiresToolCallID(t *testing.T) {
@@ -1948,19 +1554,12 @@ func TestConvertToAnthropicRequest_ToolMessageRequiresToolCallID(t *testing.T) {
 			{Role: "tool", Content: `{"temperature_c":21}`},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestConvertToAnthropicRequest_ToolMessageWithImage(t *testing.T) {
@@ -1973,26 +1572,26 @@ func TestConvertToAnthropicRequest_ToolMessageWithImage(t *testing.T) {
 			}},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest: %v", err)
-	}
-	if len(req.Messages) != 1 || req.Messages[0].Role != "user" {
-		t.Fatalf("messages = %+v, want one user message", req.Messages)
-	}
+	require.NoError(t, err)
+	require.Len(t, req.Messages, 1)
+	require.Equal(t, "user", req.Messages[0].Role)
+
 	toolBlocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
-	if !ok || len(toolBlocks) != 1 || toolBlocks[0].Type != "tool_result" || toolBlocks[0].ToolUseID != "call_123" {
-		t.Fatalf("content = %#v, want one tool_result block", req.Messages[0].Content)
-	}
+	require.True(t, ok)
+	require.Len(t, toolBlocks, 1)
+	require.Equal(t, "tool_result", toolBlocks[0].Type)
+	require.Equal(t, "call_123", toolBlocks[0].ToolUseID, "content = %#v, want one tool_result block", req.Messages[0].Content)
+
 	inner, ok := toolBlocks[0].Content.([]anthropicContentBlock)
-	if !ok || len(inner) != 2 {
-		t.Fatalf("tool_result content = %#v, want text and image blocks", toolBlocks[0].Content)
-	}
-	if inner[0].Type != "text" || inner[0].Text != "captured" {
-		t.Errorf("inner[0] = %+v, want text block", inner[0])
-	}
-	if inner[1].Type != "image" || inner[1].Source == nil || inner[1].Source.Type != "base64" || inner[1].Source.MediaType != "image/png" || inner[1].Source.Data != "aGVsbG8=" {
-		t.Errorf("inner[1] = %+v, want base64 image block", inner[1])
-	}
+	require.True(t, ok)
+	require.Len(t, inner, 2, "tool_result content = %#v, want text and image blocks", toolBlocks[0].Content)
+	assert.Equal(t, "text", inner[0].Type)
+	assert.Equal(t, "captured", inner[0].Text, "inner[0] = %+v, want text block", inner[0])
+	assert.Equal(t, "image", inner[1].Type)
+	assert.NotNil(t, inner[1].Source)
+	assert.Equal(t, "base64", inner[1].Source.Type)
+	assert.Equal(t, "image/png", inner[1].Source.MediaType)
+	assert.Equal(t, "aGVsbG8=", inner[1].Source.Data, "inner[1] = %+v, want base64 image block", inner[1])
 }
 
 func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
@@ -2017,19 +1616,15 @@ func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
 					{Type: "file", File: &file},
 				}}},
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest: %v", err)
-			}
+			require.NoError(t, err)
+
 			blocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
-			if !ok || len(blocks) != 2 || blocks[1].Type != "document" || blocks[1].Source == nil {
-				t.Fatalf("content = %#v, want text + document blocks", req.Messages[0].Content)
-			}
-			if *blocks[1].Source != tc.want {
-				t.Errorf("source = %+v, want %+v", *blocks[1].Source, tc.want)
-			}
-			if blocks[1].Title != tc.file.Filename {
-				t.Errorf("title = %q, want %q", blocks[1].Title, tc.file.Filename)
-			}
+			require.True(t, ok)
+			require.Len(t, blocks, 2)
+			require.Equal(t, "document", blocks[1].Type)
+			require.NotNil(t, blocks[1].Source)
+			assert.Equal(t, tc.want, *blocks[1].Source)
+			assert.Equal(t, tc.file.Filename, blocks[1].Title)
 		})
 	}
 
@@ -2039,9 +1634,7 @@ func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
 			{Type: "file", File: &core.FileContent{FileData: "data:image/png;base64,aGVsbG8="}},
 		}}},
 	})
-	if err == nil {
-		t.Error("expected error for unsupported document media type")
-	}
+	assert.Error(t, err)
 
 	for _, file := range []core.FileContent{
 		{FileURL: "ftp://example.com/a.pdf"},
@@ -2053,9 +1646,9 @@ func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
 			Model:    "claude-sonnet-4-5-20250929",
 			Messages: []core.Message{{Role: "user", Content: []core.ContentPart{{Type: "file", File: &file}}}},
 		})
-		if gatewayErr, ok := err.(*core.GatewayError); !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
-			t.Errorf("file %+v: error = %v, want invalid_request_error", file, err)
-		}
+		gatewayErr, ok := err.(*core.GatewayError)
+		assert.True(t, ok)
+		assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type, "file %+v: error = %v, want invalid_request_error", file, err)
 	}
 }
 
@@ -2071,17 +1664,13 @@ func TestConvertToAnthropicRequest_ToolMessageIsError(t *testing.T) {
 			})},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest: %v", err)
-	}
+	require.NoError(t, err)
+
 	first := req.Messages[0].Content.([]anthropicContentBlock)[0]
 	second := req.Messages[1].Content.([]anthropicContentBlock)[0]
-	if !first.IsError || first.Content != "boom" {
-		t.Errorf("first tool_result = %+v, want is_error", first)
-	}
-	if second.IsError {
-		t.Errorf("second tool_result = %+v, want no is_error", second)
-	}
+	assert.True(t, first.IsError)
+	assert.Equal(t, "boom", first.Content, "first tool_result = %+v, want is_error", first)
+	assert.False(t, second.IsError, "second tool_result = %+v, want no is_error", second)
 }
 
 func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
@@ -2100,29 +1689,23 @@ func TestConvertToAnthropicRequest_ReplaysThinkingBlocks(t *testing.T) {
 			{Role: "tool", ToolCallID: "tu_1", Content: "result"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest: %v", err)
-	}
+	require.NoError(t, err)
+
 	blocks, ok := req.Messages[1].Content.([]anthropicContentBlock)
-	if !ok || len(blocks) != 4 {
-		t.Fatalf("assistant content = %#v, want thinking, redacted_thinking, text, tool_use", req.Messages[1].Content)
-	}
-	if blocks[0].Type != "thinking" || blocks[0].Thinking == nil || *blocks[0].Thinking != "" || blocks[0].Signature != "sig1" {
-		t.Errorf("blocks[0] = %+v", blocks[0])
-	}
-	if blocks[1].Type != "redacted_thinking" || blocks[1].Data != "opaque" {
-		t.Errorf("blocks[1] = %+v", blocks[1])
-	}
-	if blocks[2].Type != "text" || blocks[3].Type != "tool_use" {
-		t.Errorf("blocks[2:] = %+v", blocks[2:])
-	}
+	require.True(t, ok)
+	require.Len(t, blocks, 4, "assistant content = %#v, want thinking, redacted_thinking, text, tool_use", req.Messages[1].Content)
+	assert.Equal(t, "thinking", blocks[0].Type)
+	assert.NotNil(t, blocks[0].Thinking)
+	assert.Empty(t, *blocks[0].Thinking)
+	assert.Equal(t, "sig1", blocks[0].Signature, "blocks[0] = %+v", blocks[0])
+	assert.Equal(t, "redacted_thinking", blocks[1].Type)
+	assert.Equal(t, "opaque", blocks[1].Data, "blocks[1] = %+v", blocks[1])
+	assert.Equal(t, "text", blocks[2].Type)
+	assert.Equal(t, "tool_use", blocks[3].Type, "blocks[2:] = %+v", blocks[2:])
+
 	encoded, err := json.Marshal(blocks[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(encoded) != `{"type":"thinking","thinking":"","signature":"sig1"}` {
-		t.Errorf("encoded thinking block = %s, want empty thinking text kept", encoded)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, `{"type":"thinking","thinking":"","signature":"sig1"}`, string(encoded), "encoded thinking block = %s, want empty thinking text kept", encoded)
 }
 
 // Reasoning another provider produced reaches Anthropic as a thinking block
@@ -2173,9 +1756,8 @@ func TestConvertToAnthropicRequest_DropsUnsignedThinkingBlocks(t *testing.T) {
 					{Role: "user", Content: "and now?"},
 				},
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest: %v", err)
-			}
+			require.NoError(t, err)
+
 			var got []string
 			switch content := req.Messages[1].Content.(type) {
 			case []anthropicContentBlock:
@@ -2185,9 +1767,7 @@ func TestConvertToAnthropicRequest_DropsUnsignedThinkingBlocks(t *testing.T) {
 			case string:
 				got = []string{"text"}
 			}
-			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
-				t.Errorf("assistant blocks = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "assistant block types")
 		})
 	}
 }
@@ -2202,9 +1782,9 @@ func TestConvertToAnthropicRequest_RejectsMalformedAnthropicExtraContent(t *test
 			})},
 		},
 	})
-	if gatewayErr, ok := err.(*core.GatewayError); !ok || gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error = %v, want invalid_request_error", err)
-	}
+	gatewayErr, ok := err.(*core.GatewayError)
+	require.True(t, ok)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 }
 
 func TestConvertToAnthropicRequest_ToolChoiceRequiresTools(t *testing.T) {
@@ -2215,19 +1795,12 @@ func TestConvertToAnthropicRequest_ToolChoiceRequiresTools(t *testing.T) {
 		},
 		ToolChoice: "auto",
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestConvertToAnthropicRequest_ToolArgumentsMustBeJSONObject(t *testing.T) {
@@ -2249,12 +1822,8 @@ func TestConvertToAnthropicRequest_ToolArgumentsMustBeJSONObject(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
-	if !strings.Contains(err.Error(), "tool arguments must be a JSON object") {
-		t.Fatalf("error = %v, want JSON object validation", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tool arguments must be a JSON object")
 }
 
 func TestConvertToAnthropicRequest_NormalizesToolCallIDAndName(t *testing.T) {
@@ -2276,20 +1845,13 @@ func TestConvertToAnthropicRequest_NormalizesToolCallIDAndName(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
 
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok || len(blocks) != 1 {
-		t.Fatalf("content = %#v, want one tool_use block", result.Messages[0].Content)
-	}
-	if blocks[0].Name != "lookup_weather" {
-		t.Fatalf("tool name = %q, want lookup_weather", blocks[0].Name)
-	}
-	if blocks[0].ID == "" {
-		t.Fatal("tool id should not be empty")
-	}
+	require.True(t, ok)
+	require.Len(t, blocks, 1, "content = %#v, want one tool_use block", result.Messages[0].Content)
+	require.Equal(t, "lookup_weather", blocks[0].Name)
+	require.NotEmpty(t, blocks[0].ID)
 }
 
 func TestConvertToAnthropicRequest_NormalizesToolResultID(t *testing.T) {
@@ -2299,36 +1861,24 @@ func TestConvertToAnthropicRequest_NormalizesToolResultID(t *testing.T) {
 			{Role: "tool", ToolCallID: "  call_123  ", Content: `{"temperature_c":21}`},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
 
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok || len(blocks) != 1 {
-		t.Fatalf("content = %#v, want one tool_result block", result.Messages[0].Content)
-	}
-	if blocks[0].ToolUseID != "call_123" {
-		t.Fatalf("ToolUseID = %q, want call_123", blocks[0].ToolUseID)
-	}
+	require.True(t, ok)
+	require.Len(t, blocks, 1, "content = %#v, want one tool_result block", result.Messages[0].Content)
+	require.Equal(t, "call_123", blocks[0].ToolUseID)
 }
 
 func TestParseToolCallArguments_UsesJSONNumber(t *testing.T) {
 	parsed, err := parseToolCallArguments(`{"value":9007199254740993}`)
-	if err != nil {
-		t.Fatalf("parseToolCallArguments() error = %v, want nil", err)
-	}
+	require.NoError(t, err)
 
 	obj, ok := parsed.(map[string]any)
-	if !ok {
-		t.Fatalf("parsed = %T, want map[string]any", parsed)
-	}
+	require.True(t, ok, "parsed = %T, want map[string]any", parsed)
+
 	num, ok := obj["value"].(json.Number)
-	if !ok {
-		t.Fatalf("value = %T, want json.Number", obj["value"])
-	}
-	if string(num) != "9007199254740993" {
-		t.Fatalf("value = %q, want exact integer string", string(num))
-	}
+	require.True(t, ok, "value = %T, want json.Number", obj["value"])
+	require.Equal(t, "9007199254740993", string(num))
 }
 
 func TestConvertFromAnthropicResponse(t *testing.T) {
@@ -2349,36 +1899,16 @@ func TestConvertFromAnthropicResponse(t *testing.T) {
 
 	result := convertFromAnthropicResponse(resp)
 
-	if result.ID != "msg_123" {
-		t.Errorf("ID = %q, want %q", result.ID, "msg_123")
-	}
-	if result.Object != "chat.completion" {
-		t.Errorf("Object = %q, want %q", result.Object, "chat.completion")
-	}
-	if result.Model != "claude-sonnet-4-5-20250929" {
-		t.Errorf("Model = %q, want %q", result.Model, "claude-sonnet-4-5-20250929")
-	}
-	if len(result.Choices) != 1 {
-		t.Fatalf("len(Choices) = %d, want 1", len(result.Choices))
-	}
-	if result.Choices[0].Message.Content != "Hello! How can I help you today?" {
-		t.Errorf("Message content = %q, want %q", result.Choices[0].Message.Content, "Hello! How can I help you today?")
-	}
-	if result.Choices[0].Message.Role != "assistant" {
-		t.Errorf("Message role = %q, want %q", result.Choices[0].Message.Role, "assistant")
-	}
-	if result.Choices[0].FinishReason != "stop" {
-		t.Errorf("FinishReason = %q, want %q", result.Choices[0].FinishReason, "stop")
-	}
-	if result.Usage.PromptTokens != 10 {
-		t.Errorf("PromptTokens = %d, want 10", result.Usage.PromptTokens)
-	}
-	if result.Usage.CompletionTokens != 20 {
-		t.Errorf("CompletionTokens = %d, want 20", result.Usage.CompletionTokens)
-	}
-	if result.Usage.TotalTokens != 30 {
-		t.Errorf("TotalTokens = %d, want 30", result.Usage.TotalTokens)
-	}
+	assert.Equal(t, "msg_123", result.ID)
+	assert.Equal(t, "chat.completion", result.Object)
+	assert.Equal(t, "claude-sonnet-4-5-20250929", result.Model)
+	require.Len(t, result.Choices, 1)
+	assert.Equal(t, "Hello! How can I help you today?", result.Choices[0].Message.Content)
+	assert.Equal(t, "assistant", result.Choices[0].Message.Role)
+	assert.Equal(t, "stop", result.Choices[0].FinishReason)
+	assert.Equal(t, 10, result.Usage.PromptTokens)
+	assert.Equal(t, 20, result.Usage.CompletionTokens)
+	assert.Equal(t, 30, result.Usage.TotalTokens)
 }
 
 func TestConvertFromAnthropicResponse_WithToolUseStopReason(t *testing.T) {
@@ -2404,24 +1934,12 @@ func TestConvertFromAnthropicResponse_WithToolUseStopReason(t *testing.T) {
 
 	result := convertFromAnthropicResponse(resp)
 
-	if len(result.Choices) != 1 {
-		t.Fatalf("len(Choices) = %d, want 1", len(result.Choices))
-	}
-	if result.Choices[0].FinishReason != "tool_calls" {
-		t.Fatalf("FinishReason = %q, want tool_calls", result.Choices[0].FinishReason)
-	}
-	if len(result.Choices[0].Message.ToolCalls) != 1 {
-		t.Fatalf("len(ToolCalls) = %d, want 1", len(result.Choices[0].Message.ToolCalls))
-	}
-	if result.Choices[0].Message.ToolCalls[0].ID != "toolu_123" {
-		t.Fatalf("ToolCalls[0].ID = %q, want toolu_123", result.Choices[0].Message.ToolCalls[0].ID)
-	}
-	if result.Choices[0].Message.ToolCalls[0].Function.Name != "lookup_weather" {
-		t.Fatalf("ToolCalls[0].Function.Name = %q, want lookup_weather", result.Choices[0].Message.ToolCalls[0].Function.Name)
-	}
-	if result.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"city":"Warsaw"}` {
-		t.Fatalf("ToolCalls[0].Function.Arguments = %q, want canonical JSON", result.Choices[0].Message.ToolCalls[0].Function.Arguments)
-	}
+	require.Len(t, result.Choices, 1)
+	require.Equal(t, "tool_calls", result.Choices[0].FinishReason)
+	require.Len(t, result.Choices[0].Message.ToolCalls, 1)
+	require.Equal(t, "toolu_123", result.Choices[0].Message.ToolCalls[0].ID)
+	require.Equal(t, "lookup_weather", result.Choices[0].Message.ToolCalls[0].Function.Name)
+	require.Equal(t, `{"city":"Warsaw"}`, result.Choices[0].Message.ToolCalls[0].Function.Arguments)
 }
 
 func TestNormalizeAnthropicStopReason(t *testing.T) {
@@ -2440,9 +1958,8 @@ func TestNormalizeAnthropicStopReason(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeAnthropicStopReason(tt.in); got != tt.want {
-				t.Fatalf("normalizeAnthropicStopReason(%q) = %q, want %q", tt.in, got, tt.want)
-			}
+			got := normalizeAnthropicStopReason(tt.in)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -2467,15 +1984,9 @@ func TestConvertFromAnthropicResponse_WithCacheFields(t *testing.T) {
 
 	result := convertFromAnthropicResponse(resp)
 
-	if result.Usage.RawUsage == nil {
-		t.Fatal("expected RawUsage to be set")
-	}
-	if result.Usage.RawUsage["cache_creation_input_tokens"] != 50 {
-		t.Errorf("RawUsage[cache_creation_input_tokens] = %v, want 50", result.Usage.RawUsage["cache_creation_input_tokens"])
-	}
-	if result.Usage.RawUsage["cache_read_input_tokens"] != 30 {
-		t.Errorf("RawUsage[cache_read_input_tokens] = %v, want 30", result.Usage.RawUsage["cache_read_input_tokens"])
-	}
+	require.NotNil(t, result.Usage.RawUsage)
+	assert.Equal(t, 50, result.Usage.RawUsage["cache_creation_input_tokens"])
+	assert.Equal(t, 30, result.Usage.RawUsage["cache_read_input_tokens"])
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
@@ -2504,18 +2015,15 @@ func TestConvertFromAnthropicResponse_WithThinkingTokens(t *testing.T) {
 		}
 	}`
 			var resp anthropicResponse
-			if err := json.Unmarshal([]byte(body), &resp); err != nil {
-				t.Fatalf("json.Unmarshal() error = %v", err)
-			}
+			err := json.Unmarshal([]byte(body), &resp)
+			require.NoError(t, err)
 
 			result := convertFromAnthropicResponse(&resp)
 			got, present := result.Usage.RawUsage["completion_reasoning_tokens"]
 
-			if present != tt.wantPresent {
-				t.Fatalf("completion_reasoning_tokens presence = %v, want %v", present, tt.wantPresent)
-			}
-			if tt.wantPresent && got != tt.thinkingTokens {
-				t.Errorf("RawUsage[completion_reasoning_tokens] = %v, want %d", got, tt.thinkingTokens)
+			require.Equal(t, tt.wantPresent, present)
+			if tt.wantPresent {
+				assert.Equal(t, tt.thinkingTokens, got, "RawUsage[completion_reasoning_tokens]")
 			}
 		})
 	}
@@ -2527,21 +2035,16 @@ func TestMergeAnthropicUsage_WithThinkingTokens(t *testing.T) {
 		OutputTokensDetails: anthropicOutputTokensDetails{ThinkingTokens: 27},
 	}
 
-	if !mergeAnthropicUsage(&dst, &src) {
-		t.Fatal("mergeAnthropicUsage() = false, want true")
-	}
-	if dst.OutputTokensDetails.ThinkingTokens != 27 {
-		t.Fatalf("ThinkingTokens = %d, want 27", dst.OutputTokensDetails.ThinkingTokens)
-	}
+	require.True(t, mergeAnthropicUsage(&dst, &src))
+	require.Equal(t, 27, dst.OutputTokensDetails.ThinkingTokens)
 
 	chatDetails, ok := anthropicChatUsagePayload(&dst)["completion_tokens_details"].(map[string]any)
-	if !ok || chatDetails["reasoning_tokens"] != 27 {
-		t.Fatalf("chat completion token details = %#v, want reasoning_tokens=27", chatDetails)
-	}
+	require.True(t, ok)
+	require.Equal(t, 27, chatDetails["reasoning_tokens"])
+
 	responseDetails, ok := anthropicResponsesUsagePayload(&dst)["output_tokens_details"].(map[string]any)
-	if !ok || responseDetails["reasoning_tokens"] != 27 {
-		t.Fatalf("response output token details = %#v, want reasoning_tokens=27", responseDetails)
-	}
+	require.True(t, ok)
+	require.Equal(t, 27, responseDetails["reasoning_tokens"])
 }
 
 func TestConvertFromAnthropicResponse_NoCacheFields(t *testing.T) {
@@ -2562,9 +2065,7 @@ func TestConvertFromAnthropicResponse_NoCacheFields(t *testing.T) {
 
 	result := convertFromAnthropicResponse(resp)
 
-	if result.Usage.RawUsage != nil {
-		t.Errorf("expected RawUsage to be nil when no cache fields, got %v", result.Usage.RawUsage)
-	}
+	assert.Nil(t, result.Usage.RawUsage)
 }
 
 func TestConvertAnthropicResponseToResponses_WithCacheFields(t *testing.T) {
@@ -2587,18 +2088,10 @@ func TestConvertAnthropicResponseToResponses_WithCacheFields(t *testing.T) {
 
 	result := convertAnthropicResponseToResponses(resp, "claude-sonnet-4-5-20250929")
 
-	if result.Usage == nil {
-		t.Fatal("Usage should not be nil")
-	}
-	if result.Usage.RawUsage == nil {
-		t.Fatal("expected RawUsage to be set")
-	}
-	if result.Usage.RawUsage["cache_creation_input_tokens"] != 40 {
-		t.Errorf("RawUsage[cache_creation_input_tokens] = %v, want 40", result.Usage.RawUsage["cache_creation_input_tokens"])
-	}
-	if result.Usage.RawUsage["cache_read_input_tokens"] != 60 {
-		t.Errorf("RawUsage[cache_read_input_tokens] = %v, want 60", result.Usage.RawUsage["cache_read_input_tokens"])
-	}
+	require.NotNil(t, result.Usage)
+	require.NotNil(t, result.Usage.RawUsage)
+	assert.Equal(t, 40, result.Usage.RawUsage["cache_creation_input_tokens"])
+	assert.Equal(t, 60, result.Usage.RawUsage["cache_read_input_tokens"])
 }
 
 func TestConvertFromAnthropicResponse_WithThinkingBlocks(t *testing.T) {
@@ -2640,15 +2133,9 @@ func TestConvertFromAnthropicResponse_WithThinkingBlocks(t *testing.T) {
 
 			result := convertFromAnthropicResponse(resp)
 
-			if len(result.Choices) == 0 {
-				t.Fatalf("expected at least 1 choice, got 0")
-			}
-			if result.Choices[0].Message.Content != tt.expectedText {
-				t.Errorf("expected %q, got %q", tt.expectedText, result.Choices[0].Message.Content)
-			}
-			if result.Usage.CompletionTokens != 40 {
-				t.Errorf("CompletionTokens = %d, want 40", result.Usage.CompletionTokens)
-			}
+			require.NotEmpty(t, result.Choices)
+			assert.Equal(t, tt.expectedText, result.Choices[0].Message.Content)
+			assert.Equal(t, 40, result.Usage.CompletionTokens)
 		})
 	}
 }
@@ -2729,9 +2216,7 @@ func TestExtractTextContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := extractTextContent(tt.blocks)
-			if result != tt.expected {
-				t.Errorf("extractTextContent() = %q, want %q", result, tt.expected)
-			}
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -2764,39 +2249,17 @@ func TestResponses(t *testing.T) {
 			}`,
 			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ResponsesResponse) {
-				if resp.ID != "msg_123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "msg_123")
-				}
-				if resp.Object != "response" {
-					t.Errorf("Object = %q, want %q", resp.Object, "response")
-				}
-				if resp.Model != "claude-sonnet-4-5-20250929" {
-					t.Errorf("Model = %q, want %q", resp.Model, "claude-sonnet-4-5-20250929")
-				}
-				if resp.Status != "completed" {
-					t.Errorf("Status = %q, want %q", resp.Status, "completed")
-				}
-				if len(resp.Output) != 1 {
-					t.Fatalf("len(Output) = %d, want 1", len(resp.Output))
-				}
-				if len(resp.Output[0].Content) != 1 {
-					t.Fatalf("len(Output[0].Content) = %d, want 1", len(resp.Output[0].Content))
-				}
-				if resp.Output[0].Content[0].Text != "Hello! How can I help you today?" {
-					t.Errorf("Output text = %q, want %q", resp.Output[0].Content[0].Text, "Hello! How can I help you today?")
-				}
-				if resp.Usage == nil {
-					t.Fatal("Usage should not be nil")
-				}
-				if resp.Usage.InputTokens != 10 {
-					t.Errorf("InputTokens = %d, want 10", resp.Usage.InputTokens)
-				}
-				if resp.Usage.OutputTokens != 20 {
-					t.Errorf("OutputTokens = %d, want 20", resp.Usage.OutputTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "msg_123", resp.ID)
+				assert.Equal(t, "response", resp.Object)
+				assert.Equal(t, "claude-sonnet-4-5-20250929", resp.Model)
+				assert.Equal(t, "completed", resp.Status)
+				require.Len(t, resp.Output, 1)
+				require.Len(t, resp.Output[0].Content, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Output[0].Content[0].Text)
+				require.NotNil(t, resp.Usage)
+				assert.Equal(t, 10, resp.Usage.InputTokens)
+				assert.Equal(t, 20, resp.Usage.OutputTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -2821,38 +2284,7 @@ func TestResponses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				apiKey := r.Header.Get("x-api-key")
-				if apiKey == "" {
-					t.Error("x-api-key header should not be empty")
-				}
-				if r.Header.Get("anthropic-version") != anthropicAPIVersion {
-					t.Errorf("anthropic-version = %q, want %q", r.Header.Get("anthropic-version"), anthropicAPIVersion)
-				}
-
-				// Verify request path (Anthropic uses /messages)
-				if r.URL.Path != "/messages" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/messages")
-				}
-
-				// Verify request body is converted to Anthropic format
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req anthropicRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
@@ -2864,64 +2296,36 @@ func TestResponses(t *testing.T) {
 
 			resp, err := provider.Responses(context.Background(), req)
 
+			sent := capture.Last(t)
+			assert.Equal(t, "/messages", sent.Path)
+			assert.Equal(t, "application/json", sent.Header.Get("Content-Type"))
+			assert.NotEmpty(t, sent.Header.Get("x-api-key"))
+			assert.Equal(t, anthropicAPIVersion, sent.Header.Get("anthropic-version"))
+			var anthropicReq anthropicRequest
+			require.NoError(t, json.Unmarshal(sent.Body, &anthropicReq))
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.checkResponse != nil {
+				tt.checkResponse(t, resp)
 			}
 		})
 	}
 }
 
 func TestResponsesWithArrayInput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify request body is converted to Anthropic format
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req anthropicRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		// Verify messages are properly converted
-		if len(req.Messages) != 2 {
-			t.Errorf("len(Messages) = %d, want 2", len(req.Messages))
-		}
-		if req.Messages[0].Role != "user" {
-			t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, "user")
-		}
-		if req.Messages[0].Content != "Hello" {
-			t.Errorf("Messages[0].Content = %q, want %q", req.Messages[0].Content, "Hello")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "msg_123",
-			"type": "message",
-			"role": "assistant",
-			"model": "claude-sonnet-4-5-20250929",
-			"content": [{
-				"type": "text",
-				"text": "Hello!"
-			}],
-			"stop_reason": "end_turn",
-			"usage": {
-				"input_tokens": 10,
-				"output_tokens": 5
-			}
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"id": "msg_123",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-sonnet-4-5-20250929",
+		"content": [{"type": "text", "text": "Hello!"}],
+		"stop_reason": "end_turn",
+		"usage": {"input_tokens": 10, "output_tokens": 5}
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -2942,50 +2346,26 @@ func TestResponsesWithArrayInput(t *testing.T) {
 	}
 
 	resp, err := provider.Responses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "msg_123", resp.ID)
 
-	if resp.ID != "msg_123" {
-		t.Errorf("ID = %q, want %q", resp.ID, "msg_123")
-	}
+	var sent anthropicRequest
+	require.NoError(t, json.Unmarshal(capture.Last(t).Body, &sent))
+	require.Len(t, sent.Messages, 2)
+	assert.Equal(t, "user", sent.Messages[0].Role)
+	assert.Equal(t, "Hello", sent.Messages[0].Content)
 }
 
 func TestResponsesWithInstructions(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-
-		var req anthropicRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-
-		// Verify system instruction is set
-		if req.System != "You are a helpful assistant" {
-			t.Errorf("System = %q, want %q", req.System, "You are a helpful assistant")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "msg_123",
-			"type": "message",
-			"role": "assistant",
-			"model": "claude-sonnet-4-5-20250929",
-			"content": [{
-				"type": "text",
-				"text": "Hello!"
-			}],
-			"stop_reason": "end_turn",
-			"usage": {
-				"input_tokens": 10,
-				"output_tokens": 5
-			}
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"id": "msg_123",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-sonnet-4-5-20250929",
+		"content": [{"type": "text", "text": "Hello!"}],
+		"stop_reason": "end_turn",
+		"usage": {"input_tokens": 10, "output_tokens": 5}
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -2997,9 +2377,11 @@ func TestResponsesWithInstructions(t *testing.T) {
 	}
 
 	_, err := provider.Responses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
+	var sent anthropicRequest
+	require.NoError(t, json.Unmarshal(capture.Last(t).Body, &sent))
+	assert.Equal(t, "You are a helpful assistant", sent.System)
 }
 
 func TestStreamResponses(t *testing.T) {
@@ -3036,28 +2418,19 @@ data: {"type":"message_stop"}
 `,
 			expectedError: false,
 			checkStream: func(t *testing.T, body io.ReadCloser) {
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
+				require.NotNil(t, body)
+
 				defer func() { _ = body.Close() }()
 
 				// Read and verify the streaming response
 				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
+				require.NoError(t, err)
 
 				// The response should be converted to Responses API format
 				responseStr := string(respBody)
-				if !strings.Contains(responseStr, "response.created") {
-					t.Error("response should contain response.created event")
-				}
-				if !strings.Contains(responseStr, "response.output_text.delta") {
-					t.Error("response should contain response.output_text.delta event")
-				}
-				if !strings.Contains(responseStr, "[DONE]") {
-					t.Error("response should end with [DONE]")
-				}
+				assert.Contains(t, responseStr, "response.created")
+				assert.Contains(t, responseStr, "response.output_text.delta")
+				assert.Contains(t, responseStr, "[DONE]")
 			},
 		},
 		{
@@ -3076,33 +2449,10 @@ data: {"type":"message_stop"}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Verify request headers
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				apiKey := r.Header.Get("x-api-key")
-				if apiKey == "" {
-					t.Error("x-api-key header should not be empty")
-				}
-
-				// Verify stream is set in request body
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req anthropicRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
-
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+				_, _ = io.WriteString(w, tt.responseBody)
+			})
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
@@ -3114,26 +2464,27 @@ data: {"type":"message_stop"}
 
 			body, err := provider.StreamResponses(context.Background(), req)
 
+			sent := capture.Last(t)
+			assert.Equal(t, "application/json", sent.Header.Get("Content-Type"))
+			assert.NotEmpty(t, sent.Header.Get("x-api-key"))
+			var anthropicReq anthropicRequest
+			require.NoError(t, json.Unmarshal(sent.Body, &anthropicReq))
+			assert.True(t, anthropicReq.Stream)
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkStream != nil {
-					tt.checkStream(t, body)
-				}
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.checkStream != nil {
+				tt.checkStream(t, body)
 			}
 		})
 	}
 }
 
 func TestStreamResponses_MergesUsageFromMessageStart(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":4}}}
 
 event: content_block_start
@@ -3147,9 +2498,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3158,38 +2507,23 @@ data: {"type":"message_stop"}
 		Model: "claude-sonnet-4-5-20250929",
 		Input: "Hello",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	responseStr := string(raw)
-	if !strings.Contains(responseStr, `"type":"response.completed"`) {
-		t.Fatalf("expected response.completed event, got %q", responseStr)
-	}
-	if !strings.Contains(responseStr, `"input_tokens":10`) {
-		t.Fatalf("expected input_tokens in response.completed usage, got %q", responseStr)
-	}
-	if !strings.Contains(responseStr, `"output_tokens":2`) {
-		t.Fatalf("expected output_tokens in response.completed usage, got %q", responseStr)
-	}
-	if !strings.Contains(responseStr, `"total_tokens":12`) {
-		t.Fatalf("expected total_tokens in response.completed usage, got %q", responseStr)
-	}
-	if !strings.Contains(responseStr, `"cache_creation_input_tokens":4`) {
-		t.Fatalf("expected cache_creation_input_tokens in response.completed usage, got %q", responseStr)
-	}
+	require.Contains(t, responseStr, `"type":"response.completed"`)
+	require.Contains(t, responseStr, `"input_tokens":10`)
+	require.Contains(t, responseStr, `"output_tokens":2`)
+	require.Contains(t, responseStr, `"total_tokens":12`)
+	require.Contains(t, responseStr, `"cache_creation_input_tokens":4`)
 }
 
 func TestStreamResponses_WithToolCalls(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -3218,9 +2552,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3237,15 +2569,12 @@ data: {"type":"message_stop"}
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	foundAdded := false
@@ -3292,27 +2621,13 @@ data: {"type":"message_stop"}
 		}
 	}
 
-	if !foundAdded {
-		t.Fatal("expected response.output_item.added for function_call")
-	}
-	if !foundAssistantAdded {
-		t.Fatal("expected assistant message response.output_item.added at output_index 0")
-	}
-	if !foundAssistantDone {
-		t.Fatal("expected assistant message response.output_item.done at output_index 0")
-	}
-	if !foundTextDelta {
-		t.Fatal("expected response.output_text.delta for assistant preamble")
-	}
-	if argumentsDelta.String() != `{"city":"Warsaw"}` {
-		t.Fatalf("streamed response.function_call_arguments.delta = %q, want %q", argumentsDelta.String(), `{"city":"Warsaw"}`)
-	}
-	if !foundArgumentsDone {
-		t.Fatal("expected response.function_call_arguments.done for function_call")
-	}
-	if !foundItemDone {
-		t.Fatal("expected response.output_item.done for function_call")
-	}
+	require.True(t, foundAdded)
+	require.True(t, foundAssistantAdded)
+	require.True(t, foundAssistantDone)
+	require.True(t, foundTextDelta)
+	require.Equal(t, `{"city":"Warsaw"}`, argumentsDelta.String())
+	require.True(t, foundArgumentsDone)
+	require.True(t, foundItemDone)
 }
 
 // TestStreamResponses_CompletedIncludesOutput verifies the terminal
@@ -3320,9 +2635,7 @@ data: {"type":"message_stop"}
 // then function_call), matching OpenAI's native behavior — strict SDK clients
 // index into response.output.
 func TestStreamResponses_CompletedIncludesOutput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -3348,9 +2661,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3359,15 +2670,12 @@ data: {"type":"message_stop"}
 		Model: "claude-sonnet-4-5-20250929",
 		Input: "What's the weather?",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	var output []any
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -3378,29 +2686,25 @@ data: {"type":"message_stop"}
 		output, _ = response["output"].([]any)
 	}
 
-	if len(output) != 2 {
-		t.Fatalf("response.completed output has %d items, want 2: %#v", len(output), output)
-	}
+	require.Len(t, output, 2)
 
 	message, _ := output[0].(map[string]any)
-	if message["type"] != "message" || message["role"] != "assistant" || message["status"] != "completed" {
-		t.Fatalf("output[0] = %#v, want completed assistant message", message)
-	}
+	require.Equal(t, "message", message["type"])
+	require.Equal(t, "assistant", message["role"])
+	require.Equal(t, "completed", message["status"], "output[0] = %#v, want completed assistant message", message)
+
 	messageContent, _ := message["content"].([]any)
-	if len(messageContent) != 1 {
-		t.Fatalf("message content = %#v, want one output_text part", message["content"])
-	}
-	if part, _ := messageContent[0].(map[string]any); part["type"] != "output_text" || part["text"] != "I'll check that for you." {
-		t.Fatalf("message part = %#v, want output_text %q", messageContent[0], "I'll check that for you.")
-	}
+	require.Len(t, messageContent, 1, "message content = %#v, want one output_text part", message["content"])
+	part, _ := messageContent[0].(map[string]any)
+	require.Equal(t, "output_text", part["type"])
+	require.Equal(t, "I'll check that for you.", part["text"], "message part = %#v", messageContent[0])
 
 	toolCall, _ := output[1].(map[string]any)
-	if toolCall["type"] != "function_call" || toolCall["status"] != "completed" {
-		t.Fatalf("output[1] = %#v, want completed function_call", toolCall)
-	}
-	if toolCall["call_id"] != "toolu_123" || toolCall["name"] != "lookup_weather" || toolCall["arguments"] != `{"city":"Warsaw"}` {
-		t.Fatalf("function_call = %#v, want toolu_123 lookup_weather with recorded arguments", toolCall)
-	}
+	require.Equal(t, "function_call", toolCall["type"])
+	require.Equal(t, "completed", toolCall["status"], "output[1] = %#v, want completed function_call", toolCall)
+	require.Equal(t, "toolu_123", toolCall["call_id"])
+	require.Equal(t, "lookup_weather", toolCall["name"])
+	require.Equal(t, `{"city":"Warsaw"}`, toolCall["arguments"], "function_call = %#v, want toolu_123 lookup_weather with recorded arguments", toolCall)
 }
 
 // TestStreamResponses_TruncatedToolCallFinalizedAtEOF covers an upstream stream
@@ -3408,9 +2712,7 @@ data: {"type":"message_stop"}
 // must close the tool call with status "incomplete" and end the stream with
 // response.incomplete instead of fabricating completion.
 func TestStreamResponses_TruncatedToolCallFinalizedAtEOF(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -3418,9 +2720,7 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use"
 
 event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"War"}}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3429,15 +2729,12 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta"
 		Model: "claude-sonnet-4-5-20250929",
 		Input: "What's the weather?",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	foundArgumentsDone := false
 	itemDoneStatus := ""
@@ -3462,33 +2759,23 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta"
 		}
 	}
 
-	if foundCompleted {
-		t.Fatal("truncated stream must not end with response.completed")
-	}
-	if response == nil {
-		t.Fatal("expected response.incomplete terminal event on truncated stream")
-	}
-	if !foundArgumentsDone {
-		t.Fatal("expected response.function_call_arguments.done before the terminal event on truncated stream")
-	}
-	if itemDoneStatus != "incomplete" {
-		t.Fatalf("function_call output_item.done status = %q, want %q", itemDoneStatus, "incomplete")
-	}
-	if response["status"] != "incomplete" {
-		t.Fatalf("response.status = %v, want incomplete", response["status"])
-	}
+	require.False(t, foundCompleted)
+	require.NotNil(t, response)
+	require.True(t, foundArgumentsDone)
+	require.Equal(t, "incomplete", itemDoneStatus)
+	require.Equal(t, "incomplete", response["status"])
+
 	details, _ := response["incomplete_details"].(map[string]any)
-	if details["reason"] != "interrupted" {
-		t.Fatalf("incomplete_details = %#v, want reason interrupted", response["incomplete_details"])
-	}
+	require.Equal(t, "interrupted", details["reason"], "incomplete_details = %#v, want reason interrupted", response["incomplete_details"])
+
 	output, _ := response["output"].([]any)
-	if len(output) != 1 {
-		t.Fatalf("response.incomplete output has %d items, want 1: %#v", len(output), output)
-	}
+	require.Len(t, output, 1)
+
 	toolCall, _ := output[0].(map[string]any)
-	if toolCall["type"] != "function_call" || toolCall["call_id"] != "toolu_123" || toolCall["status"] != "incomplete" || toolCall["arguments"] != `{"city":"War` {
-		t.Fatalf("output[0] = %#v, want incomplete function_call with accumulated arguments", toolCall)
-	}
+	require.Equal(t, "function_call", toolCall["type"])
+	require.Equal(t, "toolu_123", toolCall["call_id"])
+	require.Equal(t, "incomplete", toolCall["status"])
+	require.Equal(t, `{"city":"War`, toolCall["arguments"], "output[0] = %#v, want incomplete function_call with accumulated arguments", toolCall)
 }
 
 // failingReadCloser returns its data on the first read and the configured
@@ -3529,9 +2816,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 
 	converter := newResponsesStreamConverter(reader, "claude-sonnet-4-5-20250929")
 	raw, err := io.ReadAll(converter)
-	if err != io.ErrUnexpectedEOF {
-		t.Fatalf("ReadAll() error = %v, want io.ErrUnexpectedEOF surfaced after terminal events", err)
-	}
+	require.Equal(t, io.ErrUnexpectedEOF, err)
 
 	var response map[string]any
 	sawDone := false
@@ -3545,15 +2830,9 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 		}
 	}
 
-	if response == nil {
-		t.Fatal("expected response.incomplete terminal event before the read error")
-	}
-	if !sawDone {
-		t.Fatal("expected trailing [DONE] before the read error")
-	}
-	if response["status"] != "incomplete" {
-		t.Fatalf("response.status = %v, want incomplete", response["status"])
-	}
+	require.NotNil(t, response)
+	require.True(t, sawDone)
+	require.Equal(t, "incomplete", response["status"])
 }
 
 // TestStreamResponses_StopReasonWithoutMessageStopCompletes covers a stream cut
@@ -3561,9 +2840,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 // Anthropic finished generating, so the stream must still end with
 // response.completed.
 func TestStreamResponses_StopReasonWithoutMessageStopCompletes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -3577,9 +2854,7 @@ data: {"type":"content_block_stop","index":0}
 
 event: message_delta
 data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3588,15 +2863,12 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 		Model: "claude-sonnet-4-5-20250929",
 		Input: "Hello",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	var response map[string]any
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -3606,12 +2878,8 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 		response, _ = event.Payload["response"].(map[string]any)
 	}
 
-	if response == nil {
-		t.Fatal("expected response.completed when the stream ends after a stop_reason without message_stop")
-	}
-	if response["status"] != "completed" {
-		t.Fatalf("response.status = %v, want completed", response["status"])
-	}
+	require.NotNil(t, response)
+	require.Equal(t, "completed", response["status"])
 }
 
 // TestStreamResponses_ToolCallBeforeTextKeepsOutputOrder covers a tool_use
@@ -3619,9 +2887,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 // next free output index (not collide with the tool call at index 0) and the
 // terminal output must preserve stream order.
 func TestStreamResponses_ToolCallBeforeTextKeepsOutputOrder(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -3644,9 +2910,7 @@ data: {"type":"content_block_stop","index":1}
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3655,15 +2919,12 @@ data: {"type":"message_stop"}
 		Model: "claude-sonnet-4-5-20250929",
 		Input: "What's the weather?",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	addedIndexes := make(map[string]float64)
 	var output []any
@@ -3682,23 +2943,18 @@ data: {"type":"message_stop"}
 		}
 	}
 
-	if addedIndexes["function_call"] != 0 || addedIndexes["message"] != 1 {
-		t.Fatalf("output indexes = %#v, want function_call at 0 and message at 1", addedIndexes)
-	}
-	if len(output) != 2 {
-		t.Fatalf("response.completed output has %d items, want 2: %#v", len(output), output)
-	}
+	require.Equal(t, float64(0), addedIndexes["function_call"])
+	require.Equal(t, float64(1), addedIndexes["message"], "output indexes = %#v, want function_call at 0 and message at 1", addedIndexes)
+	require.Len(t, output, 2)
+
 	first, _ := output[0].(map[string]any)
 	second, _ := output[1].(map[string]any)
-	if first["type"] != "function_call" || second["type"] != "message" {
-		t.Fatalf("output order = [%v, %v], want [function_call, message]", first["type"], second["type"])
-	}
+	require.Equal(t, "function_call", first["type"])
+	require.Equal(t, "message", second["type"])
 }
 
 func TestStreamResponses_WithEmptyToolArguments(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -3712,9 +2968,7 @@ data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input
 
 event: message_stop
 data: {"type":"message_stop"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3731,15 +2985,12 @@ data: {"type":"message_stop"}
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	foundAdded := false
@@ -3762,18 +3013,12 @@ data: {"type":"message_stop"}
 		}
 	}
 
-	if !foundAdded {
-		t.Fatal("expected response.output_item.added with {} arguments")
-	}
-	if !foundDone {
-		t.Fatal("expected response.function_call_arguments.done with {} arguments")
-	}
+	require.True(t, foundAdded)
+	require.True(t, foundDone)
 }
 
 func TestStreamResponses_MalformedEventReturnsError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`event: message_start
+	server, _ := providertest.SSEServer(t, `event: message_start
 data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[],"stop_reason":null,"usage":{"input_tokens":10,"output_tokens":0}}}
 
 event: content_block_start
@@ -3784,9 +3029,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 
 event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3795,41 +3038,27 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 		Model: "claude-sonnet-4-5-20250929",
 		Input: "Hello",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err == nil {
-		t.Fatal("expected malformed stream error")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusBadGateway {
-		t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusBadGateway)
-	}
-	if !strings.Contains(gatewayErr.Message, "failed to decode anthropic stream event") {
-		t.Fatalf("message = %q, want decode failure", gatewayErr.Message)
-	}
-	if !strings.Contains(string(raw), "response.created") {
-		t.Fatalf("expected stream to include prior response.created event, got %q", string(raw))
-	}
-	if strings.Contains(string(raw), "[DONE]") {
-		t.Fatalf("did not expect [DONE] after malformed event, got %q", string(raw))
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusBadGateway, gatewayErr.StatusCode)
+	require.Contains(t, gatewayErr.Message, "failed to decode anthropic stream event")
+	require.Contains(t, string(raw), "response.created")
+	require.NotContains(t, string(raw), "[DONE]", "no [DONE] after a malformed event")
 }
 
 func TestResponsesWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		// Simulate a slow response
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
+	})
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -3843,9 +3072,7 @@ func TestResponsesWithContext(t *testing.T) {
 	}
 
 	_, err := provider.Responses(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestConvertResponsesRequestToAnthropic(t *testing.T) {
@@ -3865,18 +3092,10 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				Input: "Hello",
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if req.Model != "claude-sonnet-4-5-20250929" {
-					t.Errorf("Model = %q, want %q", req.Model, "claude-sonnet-4-5-20250929")
-				}
-				if len(req.Messages) != 1 {
-					t.Errorf("len(Messages) = %d, want 1", len(req.Messages))
-				}
-				if req.Messages[0].Role != "user" {
-					t.Errorf("Messages[0].Role = %q, want %q", req.Messages[0].Role, "user")
-				}
-				if req.Messages[0].Content != "Hello" {
-					t.Errorf("Messages[0].Content = %q, want %q", req.Messages[0].Content, "Hello")
-				}
+				assert.Equal(t, "claude-sonnet-4-5-20250929", req.Model)
+				assert.Len(t, req.Messages, 1)
+				assert.Equal(t, "user", req.Messages[0].Role)
+				assert.Equal(t, "Hello", req.Messages[0].Content)
 			},
 		},
 		{
@@ -3887,9 +3106,7 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				Instructions: "Be helpful",
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if req.System != "Be helpful" {
-					t.Errorf("System = %q, want %q", req.System, "Be helpful")
-				}
+				assert.Equal(t, "Be helpful", req.System)
 			},
 		},
 		{
@@ -3902,17 +3119,13 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				MaxOutputTokens: &maxTokens,
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if req.Temperature == nil || *req.Temperature != 0.7 {
-					t.Errorf("Temperature = %v, want 0.7", req.Temperature)
-				}
+				assert.NotNil(t, req.Temperature)
+				assert.Equal(t, 0.7, *req.Temperature)
+
 				// Anthropic rejects both sampling parameters at once, so
 				// top_p is dropped in favour of temperature.
-				if req.TopP != nil {
-					t.Errorf("TopP = %v, want nil", *req.TopP)
-				}
-				if req.MaxTokens != 1024 {
-					t.Errorf("MaxTokens = %d, want 1024", req.MaxTokens)
-				}
+				assert.Nil(t, req.TopP)
+				assert.Equal(t, 1024, req.MaxTokens)
 			},
 		},
 		{
@@ -3936,12 +3149,8 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if len(req.Messages) != 1 {
-					t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-				}
-				if req.Messages[0].Content != "Hello World" {
-					t.Errorf("Messages[0].Content = %q, want %q", req.Messages[0].Content, "Hello World")
-				}
+				require.Len(t, req.Messages, 1)
+				assert.Equal(t, "Hello World", req.Messages[0].Content)
 			},
 		},
 		{
@@ -3964,15 +3173,10 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				}
 			}(),
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if len(req.Tools) != 1 {
-					t.Fatalf("len(Tools) = %d, want 1", len(req.Tools))
-				}
-				if req.ToolChoice == nil {
-					t.Fatal("ToolChoice should not be nil")
-				}
-				if req.ToolChoice.DisableParallelToolUse == nil || !*req.ToolChoice.DisableParallelToolUse {
-					t.Fatalf("disable_parallel_tool_use = %#v, want true", req.ToolChoice.DisableParallelToolUse)
-				}
+				require.Len(t, req.Tools, 1)
+				require.NotNil(t, req.ToolChoice)
+				require.NotNil(t, req.ToolChoice.DisableParallelToolUse)
+				require.True(t, *req.ToolChoice.DisableParallelToolUse)
 			},
 		},
 		{
@@ -3994,28 +3198,22 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 				},
 			},
 			checkFn: func(t *testing.T, req *anthropicRequest) {
-				if len(req.Messages) != 2 {
-					t.Fatalf("len(Messages) = %d, want 2", len(req.Messages))
-				}
+				require.Len(t, req.Messages, 2)
 
 				assistantBlocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
-				if !ok || len(assistantBlocks) != 1 {
-					t.Fatalf("assistant content = %#v, want one tool_use block", req.Messages[0].Content)
-				}
-				if assistantBlocks[0].Type != "tool_use" || assistantBlocks[0].ID != "call_123" || assistantBlocks[0].Name != "lookup_weather" {
-					t.Fatalf("assistant tool block = %+v, want lookup_weather/call_123", assistantBlocks[0])
-				}
+				require.True(t, ok)
+				require.Len(t, assistantBlocks, 1, "assistant content = %#v, want one tool_use block", req.Messages[0].Content)
+				require.Equal(t, "tool_use", assistantBlocks[0].Type)
+				require.Equal(t, "call_123", assistantBlocks[0].ID)
+				require.Equal(t, "lookup_weather", assistantBlocks[0].Name, "assistant tool block = %+v, want lookup_weather/call_123", assistantBlocks[0])
 
 				toolBlocks, ok := req.Messages[1].Content.([]anthropicContentBlock)
-				if !ok || len(toolBlocks) != 1 {
-					t.Fatalf("tool content = %#v, want one tool_result block", req.Messages[1].Content)
-				}
-				if req.Messages[1].Role != "user" {
-					t.Fatalf("tool role = %q, want user", req.Messages[1].Role)
-				}
-				if toolBlocks[0].Type != "tool_result" || toolBlocks[0].ToolUseID != "call_123" || toolBlocks[0].Content != `{"temperature_c":21}` {
-					t.Fatalf("tool result block = %+v, want call_123 payload", toolBlocks[0])
-				}
+				require.True(t, ok)
+				require.Len(t, toolBlocks, 1, "tool content = %#v, want one tool_result block", req.Messages[1].Content)
+				require.Equal(t, "user", req.Messages[1].Role)
+				require.Equal(t, "tool_result", toolBlocks[0].Type)
+				require.Equal(t, "call_123", toolBlocks[0].ToolUseID)
+				require.Equal(t, `{"temperature_c":21}`, toolBlocks[0].Content, "tool result block = %+v, want call_123 payload", toolBlocks[0])
 			},
 		},
 	}
@@ -4023,9 +3221,8 @@ func TestConvertResponsesRequestToAnthropic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := convertResponsesRequestToAnthropic(tt.input)
-			if err != nil {
-				t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			tt.checkFn(t, result)
 		})
 	}
@@ -4043,19 +3240,12 @@ func TestConvertResponsesRequestToAnthropic_InvalidToolArguments(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestConvertResponsesRequestToAnthropic_RejectsTrailingToolArgumentContent(t *testing.T) {
@@ -4070,19 +3260,12 @@ func TestConvertResponsesRequestToAnthropic_RejectsTrailingToolArgumentContent(t
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestConvertResponsesRequestToAnthropic_ToolChoiceRequiresTools(t *testing.T) {
@@ -4091,19 +3274,12 @@ func TestConvertResponsesRequestToAnthropic_ToolChoiceRequiresTools(t *testing.T
 		Input:      "Hello",
 		ToolChoice: "auto",
 	})
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("HTTPStatusCode() = %d, want %d", gatewayErr.HTTPStatusCode(), http.StatusBadRequest)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }
 
 func TestBuildAnthropicBatchCreateRequest_PreservesGatewayErrorDetails(t *testing.T) {
@@ -4121,19 +3297,12 @@ func TestBuildAnthropicBatchCreateRequest_PreservesGatewayErrorDetails(t *testin
 	}
 
 	_, _, err := buildAnthropicBatchCreateRequest(req)
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if gatewayErr.Message != "batch item 0: tool_choice requires at least one tool" {
-		t.Fatalf("error message = %q", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Equal(t, "batch item 0: tool_choice requires at least one tool", gatewayErr.Message)
 }
 
 func TestBuildAnthropicBatchCreateRequest_PrefixesToolArgumentErrors(t *testing.T) {
@@ -4160,19 +3329,12 @@ func TestBuildAnthropicBatchCreateRequest_PrefixesToolArgumentErrors(t *testing.
 	}
 
 	_, _, err := buildAnthropicBatchCreateRequest(req)
-	if err == nil {
-		t.Fatal("expected invalid request error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if !strings.HasPrefix(gatewayErr.Message, "batch item 0: ") {
-		t.Fatalf("error message = %q, want batch item prefix", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.True(t, strings.HasPrefix(gatewayErr.Message, "batch item 0: "), "error message = %q", gatewayErr.Message)
 }
 
 func TestBuildAnthropicBatchCreateRequest_NormalizesFullURLResponsesEndpoint(t *testing.T) {
@@ -4191,22 +3353,11 @@ func TestBuildAnthropicBatchCreateRequest_NormalizesFullURLResponsesEndpoint(t *
 	}
 
 	anthropicReq, endpointByCustomID, err := buildAnthropicBatchCreateRequest(req)
-	if err != nil {
-		t.Fatalf("buildAnthropicBatchCreateRequest() error = %v", err)
-	}
-	if anthropicReq == nil {
-		t.Fatal("anthropicReq = nil")
-		return
-	}
-	if len(anthropicReq.Requests) != 1 {
-		t.Fatalf("len(Requests) = %d, want 1", len(anthropicReq.Requests))
-	}
-	if anthropicReq.Requests[0].Params.Stream {
-		t.Fatal("Params.Stream = true, want false")
-	}
-	if got := endpointByCustomID["resp-1"]; got != "/v1/responses" {
-		t.Fatalf("endpointByCustomID[resp-1] = %q, want /v1/responses", got)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, anthropicReq)
+	require.Len(t, anthropicReq.Requests, 1)
+	assert.False(t, anthropicReq.Requests[0].Params.Stream)
+	assert.Equal(t, "/v1/responses", endpointByCustomID["resp-1"])
 }
 
 func TestBuildAnthropicBatchCreateRequest_RejectsDuplicateCustomIDs(t *testing.T) {
@@ -4234,19 +3385,12 @@ func TestBuildAnthropicBatchCreateRequest_RejectsDuplicateCustomIDs(t *testing.T
 	}
 
 	_, _, err := buildAnthropicBatchCreateRequest(req)
-	if err == nil {
-		t.Fatal("expected error for duplicate custom_id")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if !strings.Contains(gatewayErr.Message, `duplicate custom_id "dup-1"`) {
-		t.Fatalf("error message = %q, want duplicate custom_id", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	require.Contains(t, gatewayErr.Message, `duplicate custom_id "dup-1"`)
 }
 
 func TestConvertDecodedBatchItemToAnthropic_ResponsesUsesSharedSemanticTranslator(t *testing.T) {
@@ -4266,24 +3410,12 @@ func TestConvertDecodedBatchItemToAnthropic_ResponsesUsesSharedSemanticTranslato
 	}
 
 	result, err := convertDecodedBatchItemToAnthropic(decoded)
-	if err != nil {
-		t.Fatalf("convertDecodedBatchItemToAnthropic() error = %v", err)
-	}
-	if result.System != "Be helpful" {
-		t.Fatalf("System = %q, want Be helpful", result.System)
-	}
-	if result.Stream {
-		t.Fatal("Stream = true, want false")
-	}
-	if len(result.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
-	}
-	if result.Messages[0].Role != "user" {
-		t.Fatalf("Messages[0].Role = %q, want user", result.Messages[0].Role)
-	}
-	if result.Messages[0].Content != "Hello" {
-		t.Fatalf("Messages[0].Content = %#v, want Hello", result.Messages[0].Content)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "Be helpful", result.System)
+	require.False(t, result.Stream)
+	require.Len(t, result.Messages, 1)
+	require.Equal(t, "user", result.Messages[0].Role)
+	require.Equal(t, "Hello", result.Messages[0].Content)
 }
 
 func TestConvertDecodedBatchItemToAnthropic_RejectsStreaming(t *testing.T) {
@@ -4303,12 +3435,8 @@ func TestConvertDecodedBatchItemToAnthropic_RejectsStreaming(t *testing.T) {
 	}
 
 	_, err := convertDecodedBatchItemToAnthropic(decoded)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "streaming is not supported for native batch") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "streaming is not supported for native batch")
 }
 
 func TestConvertDecodedBatchItemToAnthropic_RejectsEmbeddings(t *testing.T) {
@@ -4322,12 +3450,8 @@ func TestConvertDecodedBatchItemToAnthropic_RejectsEmbeddings(t *testing.T) {
 	}
 
 	_, err := convertDecodedBatchItemToAnthropic(decoded)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "anthropic does not support native embedding batches") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "anthropic does not support native embedding batches")
 }
 
 func TestConvertAnthropicResponseToResponses(t *testing.T) {
@@ -4348,45 +3472,19 @@ func TestConvertAnthropicResponseToResponses(t *testing.T) {
 
 	result := convertAnthropicResponseToResponses(resp, "claude-sonnet-4-5-20250929")
 
-	if result.ID != "msg_123" {
-		t.Errorf("ID = %q, want %q", result.ID, "msg_123")
-	}
-	if result.Object != "response" {
-		t.Errorf("Object = %q, want %q", result.Object, "response")
-	}
-	if result.Model != "claude-sonnet-4-5-20250929" {
-		t.Errorf("Model = %q, want %q", result.Model, "claude-sonnet-4-5-20250929")
-	}
-	if result.Status != "completed" {
-		t.Errorf("Status = %q, want %q", result.Status, "completed")
-	}
-	if len(result.Output) != 1 {
-		t.Fatalf("len(Output) = %d, want 1", len(result.Output))
-	}
-	if result.Output[0].Type != "message" {
-		t.Errorf("Output[0].Type = %q, want %q", result.Output[0].Type, "message")
-	}
-	if result.Output[0].Role != "assistant" {
-		t.Errorf("Output[0].Role = %q, want %q", result.Output[0].Role, "assistant")
-	}
-	if len(result.Output[0].Content) != 1 {
-		t.Fatalf("len(Output[0].Content) = %d, want 1", len(result.Output[0].Content))
-	}
-	if result.Output[0].Content[0].Text != "Hello! How can I help you today?" {
-		t.Errorf("Content text = %q, want %q", result.Output[0].Content[0].Text, "Hello! How can I help you today?")
-	}
-	if result.Usage == nil {
-		t.Fatal("Usage should not be nil")
-	}
-	if result.Usage.InputTokens != 10 {
-		t.Errorf("InputTokens = %d, want 10", result.Usage.InputTokens)
-	}
-	if result.Usage.OutputTokens != 20 {
-		t.Errorf("OutputTokens = %d, want 20", result.Usage.OutputTokens)
-	}
-	if result.Usage.TotalTokens != 30 {
-		t.Errorf("TotalTokens = %d, want 30", result.Usage.TotalTokens)
-	}
+	assert.Equal(t, "msg_123", result.ID)
+	assert.Equal(t, "response", result.Object)
+	assert.Equal(t, "claude-sonnet-4-5-20250929", result.Model)
+	assert.Equal(t, "completed", result.Status)
+	require.Len(t, result.Output, 1)
+	assert.Equal(t, "message", result.Output[0].Type)
+	assert.Equal(t, "assistant", result.Output[0].Role)
+	require.Len(t, result.Output[0].Content, 1)
+	assert.Equal(t, "Hello! How can I help you today?", result.Output[0].Content[0].Text)
+	require.NotNil(t, result.Usage)
+	assert.Equal(t, 10, result.Usage.InputTokens)
+	assert.Equal(t, 20, result.Usage.OutputTokens)
+	assert.Equal(t, 30, result.Usage.TotalTokens)
 }
 
 func TestConvertAnthropicResponseToResponses_WithToolUse(t *testing.T) {
@@ -4413,27 +3511,13 @@ func TestConvertAnthropicResponseToResponses_WithToolUse(t *testing.T) {
 
 	result := convertAnthropicResponseToResponses(resp, "claude-sonnet-4-5-20250929")
 
-	if len(result.Output) != 2 {
-		t.Fatalf("len(Output) = %d, want 2", len(result.Output))
-	}
-	if result.Output[0].Type != "message" {
-		t.Fatalf("Output[0].Type = %q, want message", result.Output[0].Type)
-	}
-	if result.Output[0].Content[0].Text != "I'll check that for you." {
-		t.Fatalf("Output[0].Content[0].Text = %q, want tool preamble", result.Output[0].Content[0].Text)
-	}
-	if result.Output[1].Type != "function_call" {
-		t.Fatalf("Output[1].Type = %q, want function_call", result.Output[1].Type)
-	}
-	if result.Output[1].CallID != "toolu_123" {
-		t.Fatalf("Output[1].CallID = %q, want toolu_123", result.Output[1].CallID)
-	}
-	if result.Output[1].Name != "lookup_weather" {
-		t.Fatalf("Output[1].Name = %q, want lookup_weather", result.Output[1].Name)
-	}
-	if result.Output[1].Arguments != `{"city":"Warsaw"}` {
-		t.Fatalf("Output[1].Arguments = %q, want canonical JSON", result.Output[1].Arguments)
-	}
+	require.Len(t, result.Output, 2)
+	require.Equal(t, "message", result.Output[0].Type)
+	require.Equal(t, "I'll check that for you.", result.Output[0].Content[0].Text)
+	require.Equal(t, "function_call", result.Output[1].Type)
+	require.Equal(t, "toolu_123", result.Output[1].CallID)
+	require.Equal(t, "lookup_weather", result.Output[1].Name)
+	require.Equal(t, `{"city":"Warsaw"}`, result.Output[1].Arguments)
 }
 
 func TestConvertAnthropicResponseToResponses_WithThinkingBlocks(t *testing.T) {
@@ -4492,25 +3576,15 @@ func TestConvertAnthropicResponseToResponses_WithThinkingBlocks(t *testing.T) {
 			// A thinking block always produces a leading reasoning item: it
 			// carries the signature the next turn has to replay, even when the
 			// model left the thinking text empty.
-			if len(result.Output) != 2 {
-				t.Fatalf("len(Output) = %d, want a reasoning item and a message", len(result.Output))
-			}
+			require.Len(t, result.Output, 2)
+
 			reasoning, message := result.Output[0], result.Output[1]
-			if reasoning.Type != "reasoning" {
-				t.Fatalf("Output[0].Type = %q, want reasoning", reasoning.Type)
-			}
-			if raw := reasoning.ExtraFields.Lookup(core.ExtraContentField); string(raw) != tt.wantReplay {
-				t.Errorf("reasoning replay state = %s, want %s", raw, tt.wantReplay)
-			}
-			if len(message.Content) == 0 {
-				t.Fatalf("len(Output[1].Content) = 0, want at least 1")
-			}
-			if message.Content[0].Text != tt.expectedText {
-				t.Errorf("expected %q, got %q", tt.expectedText, message.Content[0].Text)
-			}
-			if result.Usage.OutputTokens != 50 {
-				t.Errorf("OutputTokens = %d, want 50", result.Usage.OutputTokens)
-			}
+			require.Equal(t, "reasoning", reasoning.Type)
+			raw := reasoning.ExtraFields.Lookup(core.ExtraContentField)
+			assert.Equal(t, tt.wantReplay, string(raw))
+			require.NotEmpty(t, message.Content)
+			assert.Equal(t, tt.expectedText, message.Content[0].Text)
+			assert.Equal(t, 50, result.Usage.OutputTokens)
 		})
 	}
 }
@@ -4747,52 +3821,32 @@ func TestConvertToAnthropicRequest_ReasoningEffort(t *testing.T) {
 			}
 
 			result, err := convertToAnthropicRequest(req)
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			if tt.expectedThinkType == "" {
-				if result.Thinking != nil {
-					t.Errorf("Thinking should be nil but got %+v", result.Thinking)
-				}
-				if result.OutputConfig != nil {
-					t.Errorf("OutputConfig should be nil but got %+v", result.OutputConfig)
-				}
+				assert.Nil(t, result.Thinking)
+				assert.Nil(t, result.OutputConfig)
+
 			} else {
-				if result.Thinking == nil {
-					t.Fatal("Thinking should not be nil")
-				}
-				if result.Thinking.Type != tt.expectedThinkType {
-					t.Errorf("Thinking.Type = %q, want %q", result.Thinking.Type, tt.expectedThinkType)
-				}
+				require.NotNil(t, result.Thinking)
+				assert.Equal(t, tt.expectedThinkType, result.Thinking.Type)
+
 				if tt.expectedThinkType == "enabled" {
-					if result.Thinking.BudgetTokens != tt.expectedBudget {
-						t.Errorf("BudgetTokens = %d, want %d", result.Thinking.BudgetTokens, tt.expectedBudget)
-					}
+					assert.Equal(t, tt.expectedBudget, result.Thinking.BudgetTokens)
 				}
 				if tt.expectedThinkType == "adaptive" {
-					if result.OutputConfig == nil {
-						t.Fatal("OutputConfig should not be nil for adaptive thinking")
-					}
-					if result.OutputConfig.Effort != tt.expectedEffort {
-						t.Errorf("OutputConfig.Effort = %q, want %q", result.OutputConfig.Effort, tt.expectedEffort)
-					}
+					require.NotNil(t, result.OutputConfig)
+					assert.Equal(t, tt.expectedEffort, result.OutputConfig.Effort)
 				}
 			}
 
-			if result.MaxTokens != tt.expectedMaxTokens {
-				t.Errorf("MaxTokens = %d, want %d", result.MaxTokens, tt.expectedMaxTokens)
-			}
+			assert.Equal(t, tt.expectedMaxTokens, result.MaxTokens)
 
-			if tt.expectNilTemp && result.Temperature != nil {
-				t.Errorf("Temperature should be nil but is %v", *result.Temperature)
+			if tt.expectNilTemp {
+				assert.Nil(t, result.Temperature)
 			}
 			if tt.expectedTemp != nil {
-				if result.Temperature == nil {
-					t.Errorf("Temperature should be %v but is nil", *tt.expectedTemp)
-				} else if *result.Temperature != *tt.expectedTemp {
-					t.Errorf("Temperature = %v, want %v", *result.Temperature, *tt.expectedTemp)
-				}
+				assert.Equal(t, tt.expectedTemp, result.Temperature)
 			}
 		})
 	}
@@ -4973,45 +4027,29 @@ func TestConvertResponsesRequestToAnthropic_ReasoningEffort(t *testing.T) {
 			}
 
 			result, err := convertResponsesRequestToAnthropic(req)
-			if err != nil {
-				t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			if tt.expectedThinkType == "" {
-				if result.Thinking != nil {
-					t.Errorf("Thinking should be nil but got %+v", result.Thinking)
-				}
-				if result.OutputConfig != nil {
-					t.Errorf("OutputConfig should be nil but got %+v", result.OutputConfig)
-				}
+				assert.Nil(t, result.Thinking)
+				assert.Nil(t, result.OutputConfig)
+
 			} else {
-				if result.Thinking == nil {
-					t.Fatal("Thinking should not be nil")
-				}
-				if result.Thinking.Type != tt.expectedThinkType {
-					t.Errorf("Thinking.Type = %q, want %q", result.Thinking.Type, tt.expectedThinkType)
-				}
+				require.NotNil(t, result.Thinking)
+				assert.Equal(t, tt.expectedThinkType, result.Thinking.Type)
+
 				if tt.expectedThinkType == "enabled" {
-					if result.Thinking.BudgetTokens != tt.expectedBudget {
-						t.Errorf("BudgetTokens = %d, want %d", result.Thinking.BudgetTokens, tt.expectedBudget)
-					}
+					assert.Equal(t, tt.expectedBudget, result.Thinking.BudgetTokens)
 				}
 				if tt.expectedThinkType == "adaptive" {
-					if result.OutputConfig == nil {
-						t.Fatal("OutputConfig should not be nil for adaptive thinking")
-					}
-					if result.OutputConfig.Effort != tt.expectedEffort {
-						t.Errorf("OutputConfig.Effort = %q, want %q", result.OutputConfig.Effort, tt.expectedEffort)
-					}
+					require.NotNil(t, result.OutputConfig)
+					assert.Equal(t, tt.expectedEffort, result.OutputConfig.Effort)
 				}
 			}
 
-			if result.MaxTokens != tt.expectedMaxTokens {
-				t.Errorf("MaxTokens = %d, want %d", result.MaxTokens, tt.expectedMaxTokens)
-			}
+			assert.Equal(t, tt.expectedMaxTokens, result.MaxTokens)
 
-			if tt.expectNilTemp && result.Temperature != nil {
-				t.Errorf("Temperature should be nil but is %v", *result.Temperature)
+			if tt.expectNilTemp {
+				assert.Nil(t, result.Temperature)
 			}
 		})
 	}
@@ -5058,9 +4096,8 @@ func TestIsAdaptiveThinkingModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
-			if got := isAdaptiveThinkingModel(tt.model); got != tt.expected {
-				t.Errorf("isAdaptiveThinkingModel(%q) = %v, want %v", tt.model, got, tt.expected)
-			}
+			got := isAdaptiveThinkingModel(tt.model)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -5085,26 +4122,18 @@ func TestConvertToAnthropicRequest_MultimodalImageContent(t *testing.T) {
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if len(result.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
 
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok {
-		t.Fatalf("message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
-	}
-	if len(blocks) != 2 {
-		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
-	}
-	if blocks[0].Type != "text" || blocks[0].Text != "Describe the image." {
-		t.Fatalf("unexpected first block: %+v", blocks[0])
-	}
-	if blocks[1].Type != "image" || blocks[1].Source == nil || blocks[1].Source.MediaType != "image/png" || blocks[1].Source.Data != "ZmFrZQ==" {
-		t.Fatalf("unexpected second block: %+v", blocks[1])
-	}
+	require.True(t, ok, "message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
+	require.Len(t, blocks, 2)
+	require.Equal(t, "text", blocks[0].Type)
+	require.Equal(t, "Describe the image.", blocks[0].Text, "unexpected first block: %+v", blocks[0])
+	require.Equal(t, "image", blocks[1].Type)
+	require.NotNil(t, blocks[1].Source)
+	require.Equal(t, "image/png", blocks[1].Source.MediaType)
+	require.Equal(t, "ZmFrZQ==", blocks[1].Source.Data, "unexpected second block: %+v", blocks[1])
 }
 
 func TestConvertToAnthropicRequest_PreservesCacheControlOnContentBlocks(t *testing.T) {
@@ -5136,30 +4165,20 @@ func TestConvertToAnthropicRequest_PreservesCacheControlOnContentBlocks(t *testi
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok {
-		t.Fatalf("message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
-	}
-	if len(blocks) != 2 {
-		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
-	}
+	require.True(t, ok, "message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
+	require.Len(t, blocks, 2)
+
 	for i, block := range blocks {
-		if string(block.CacheControl) != `{"type":"ephemeral"}` {
-			t.Fatalf("blocks[%d].CacheControl = %s, want ephemeral cache_control", i, block.CacheControl)
-		}
+		require.Equal(t, `{"type":"ephemeral"}`, string(block.CacheControl), "blocks[%d]", i)
 	}
 
 	body, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-	if got := strings.Count(string(body), `"cache_control":{"type":"ephemeral"}`); got != 2 {
-		t.Fatalf("marshaled request has %d cache_control blocks, want 2: %s", got, body)
-	}
+	require.NoError(t, err)
+	got := strings.Count(string(body), `"cache_control":{"type":"ephemeral"}`)
+	require.Equal(t, 2, got, "cache_control blocks in %s", body)
 }
 
 func TestConvertToAnthropicRequest_PreservesCacheControlOnSystemBlocks(t *testing.T) {
@@ -5183,23 +4202,14 @@ func TestConvertToAnthropicRequest_PreservesCacheControlOnSystemBlocks(t *testin
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	blocks, ok := result.System.([]anthropicContentBlock)
-	if !ok {
-		t.Fatalf("System type = %T, want []anthropicContentBlock", result.System)
-	}
-	if len(blocks) != 1 {
-		t.Fatalf("len(System blocks) = %d, want 1", len(blocks))
-	}
-	if blocks[0].Type != "text" || blocks[0].Text != "Reusable system prefix." {
-		t.Fatalf("unexpected system block: %+v", blocks[0])
-	}
-	if string(blocks[0].CacheControl) != `{"type":"ephemeral"}` {
-		t.Fatalf("System[0].CacheControl = %s, want ephemeral cache_control", blocks[0].CacheControl)
-	}
+	require.True(t, ok, "System type = %T, want []anthropicContentBlock", result.System)
+	require.Len(t, blocks, 1)
+	require.Equal(t, "text", blocks[0].Type)
+	require.Equal(t, "Reusable system prefix.", blocks[0].Text, "unexpected system block: %+v", blocks[0])
+	require.Equal(t, `{"type":"ephemeral"}`, string(blocks[0].CacheControl), "System[0].CacheControl = %s, want ephemeral cache_control", blocks[0].CacheControl)
 }
 
 func TestConvertToAnthropicRequest_PreservesCacheControlOnRequestToolsAndToolHistory(t *testing.T) {
@@ -5223,24 +4233,21 @@ func TestConvertToAnthropicRequest_PreservesCacheControlOnRequestToolsAndToolHis
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	want := `{"type":"ephemeral"}`
-	if got := string(result.CacheControl); got != want {
-		t.Errorf("request CacheControl = %s, want %s", got, want)
-	}
-	if got := string(result.Tools[0].CacheControl); got != want {
-		t.Errorf("tool CacheControl = %s, want %s", got, want)
-	}
+	got := string(result.CacheControl)
+	assert.Equal(t, want, got)
+	got = string(result.Tools[0].CacheControl)
+	assert.Equal(t, want, got)
+
 	assistantBlocks := result.Messages[0].Content.([]anthropicContentBlock)
-	if got := string(assistantBlocks[0].CacheControl); got != want {
-		t.Errorf("tool_use CacheControl = %s, want %s", got, want)
-	}
+	got = string(assistantBlocks[0].CacheControl)
+	assert.Equal(t, want, got)
+
 	toolBlocks := result.Messages[1].Content.([]anthropicContentBlock)
-	if got := string(toolBlocks[0].CacheControl); got != want {
-		t.Errorf("tool_result CacheControl = %s, want %s", got, want)
-	}
+	got = string(toolBlocks[0].CacheControl)
+	assert.Equal(t, want, got)
 }
 
 func TestConvertToAnthropicRequest_PreservesFunctionLevelToolCallCacheControl(t *testing.T) {
@@ -5261,13 +4268,11 @@ func TestConvertToAnthropicRequest_PreservesFunctionLevelToolCallCacheControl(t 
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	blocks := result.Messages[0].Content.([]anthropicContentBlock)
-	if got := string(blocks[0].CacheControl); got != `{"type":"ephemeral"}` {
-		t.Fatalf("tool_use CacheControl = %s, want function-level cache_control", got)
-	}
+	got := string(blocks[0].CacheControl)
+	require.Equal(t, `{"type":"ephemeral"}`, got)
 }
 
 func TestConvertToAnthropicRequest_PreservesAllSystemMessages(t *testing.T) {
@@ -5281,22 +4286,14 @@ func TestConvertToAnthropicRequest_PreservesAllSystemMessages(t *testing.T) {
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.System != "first system\n\nsecond system" {
-		t.Fatalf("System = %q, want merged system text", result.System)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "first system\n\nsecond system", result.System)
 }
 
 func TestConvertToAnthropicRequest_RejectsNilRequest(t *testing.T) {
 	_, err := convertToAnthropicRequest(nil)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "anthropic chat request is required") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "anthropic chat request is required")
 }
 
 func TestConvertToAnthropicRequest_MultimodalImageContent_DataURLWithExtraMetadata(t *testing.T) {
@@ -5318,16 +4315,15 @@ func TestConvertToAnthropicRequest_MultimodalImageContent_DataURLWithExtraMetada
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok || len(blocks) != 1 || blocks[0].Source == nil {
-		t.Fatalf("unexpected image block: %#v", result.Messages[0].Content)
-	}
-	if blocks[0].Source.Type != "base64" || blocks[0].Source.MediaType != "image/png" || blocks[0].Source.Data != "ZmFrZQ==" {
-		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
-	}
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	require.NotNil(t, blocks[0].Source, "unexpected image block: %#v", result.Messages[0].Content)
+	require.Equal(t, "base64", blocks[0].Source.Type)
+	require.Equal(t, "image/png", blocks[0].Source.MediaType)
+	require.Equal(t, "ZmFrZQ==", blocks[0].Source.Data, "unexpected image source: %+v", blocks[0].Source)
 }
 
 func TestConvertToAnthropicRequest_RejectsInputAudio(t *testing.T) {
@@ -5350,12 +4346,8 @@ func TestConvertToAnthropicRequest_RejectsInputAudio(t *testing.T) {
 	}
 
 	_, err := convertToAnthropicRequest(req)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "input_audio") {
-		t.Fatalf("expected input_audio error, got %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "input_audio")
 }
 
 func TestConvertToAnthropicRequest_MultimodalRemoteImageContent(t *testing.T) {
@@ -5378,29 +4370,18 @@ func TestConvertToAnthropicRequest_MultimodalRemoteImageContent(t *testing.T) {
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if len(result.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
 
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok {
-		t.Fatalf("message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
-	}
-	if len(blocks) != 1 {
-		t.Fatalf("len(blocks) = %d, want 1", len(blocks))
-	}
-	if blocks[0].Type != "image" || blocks[0].Source == nil {
-		t.Fatalf("unexpected image block: %+v", blocks[0])
-	}
-	if blocks[0].Source.Type != "url" || blocks[0].Source.URL != "https://example.com/image.png" {
-		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
-	}
-	if blocks[0].Source.Data != "" || blocks[0].Source.MediaType != "" {
-		t.Fatalf("expected url source without data/media_type, got %+v", blocks[0].Source)
-	}
+	require.True(t, ok, "message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
+	require.Len(t, blocks, 1)
+	require.Equal(t, "image", blocks[0].Type)
+	require.NotNil(t, blocks[0].Source, "unexpected image block: %+v", blocks[0])
+	require.Equal(t, "url", blocks[0].Source.Type)
+	require.Equal(t, "https://example.com/image.png", blocks[0].Source.URL, "unexpected image source: %+v", blocks[0].Source)
+	require.Empty(t, blocks[0].Source.Data)
+	require.Empty(t, blocks[0].Source.MediaType, "url source must omit media_type: %+v", blocks[0].Source)
 }
 
 func TestConvertToAnthropicRequest_AllowsRemoteImageWithoutMediaType(t *testing.T) {
@@ -5422,19 +4403,15 @@ func TestConvertToAnthropicRequest_AllowsRemoteImageWithoutMediaType(t *testing.
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok || len(blocks) != 1 || blocks[0].Source == nil {
-		t.Fatalf("unexpected image block: %#v", result.Messages[0].Content)
-	}
-	if blocks[0].Source.Type != "url" || blocks[0].Source.URL != "https://example.com/image.png" {
-		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
-	}
-	if blocks[0].Source.MediaType != "" {
-		t.Fatalf("expected media_type to be omitted for url source, got %+v", blocks[0].Source)
-	}
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	require.NotNil(t, blocks[0].Source, "unexpected image block: %#v", result.Messages[0].Content)
+	require.Equal(t, "url", blocks[0].Source.Type)
+	require.Equal(t, "https://example.com/image.png", blocks[0].Source.URL, "unexpected image source: %+v", blocks[0].Source)
+	require.Empty(t, blocks[0].Source.MediaType, "url source must omit media_type: %+v", blocks[0].Source)
 }
 
 func TestConvertToAnthropicRequest_IgnoresRemoteImageMediaTypeHint(t *testing.T) {
@@ -5457,19 +4434,15 @@ func TestConvertToAnthropicRequest_IgnoresRemoteImageMediaTypeHint(t *testing.T)
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok || len(blocks) != 1 || blocks[0].Source == nil {
-		t.Fatalf("unexpected image block: %#v", result.Messages[0].Content)
-	}
-	if blocks[0].Source.Type != "url" || blocks[0].Source.URL != "https://example.com/image.svg" {
-		t.Fatalf("unexpected image source: %+v", blocks[0].Source)
-	}
-	if blocks[0].Source.MediaType != "" {
-		t.Fatalf("expected media_type to be omitted for url source, got %+v", blocks[0].Source)
-	}
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	require.NotNil(t, blocks[0].Source, "unexpected image block: %#v", result.Messages[0].Content)
+	require.Equal(t, "url", blocks[0].Source.Type)
+	require.Equal(t, "https://example.com/image.svg", blocks[0].Source.URL, "unexpected image source: %+v", blocks[0].Source)
+	require.Empty(t, blocks[0].Source.MediaType, "url source must omit media_type: %+v", blocks[0].Source)
 }
 
 func TestConvertToAnthropicRequest_RejectsInvalidRemoteImageURLs(t *testing.T) {
@@ -5499,12 +4472,8 @@ func TestConvertToAnthropicRequest_RejectsInvalidRemoteImageURLs(t *testing.T) {
 			}
 
 			_, err := convertToAnthropicRequest(req)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), "anthropic chat image_url must be a data: URL or http/https URL") {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "anthropic chat image_url must be a data: URL or http/https URL")
 		})
 	}
 }
@@ -5554,12 +4523,8 @@ func TestConvertResponsesRequestToAnthropic_RejectsInvalidInputItems(t *testing.
 				Model: "claude-sonnet-4-5-20250929",
 				Input: tt.input,
 			})
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), "invalid responses input item") {
-				t.Fatalf("expected invalid responses input item error, got %v", err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid responses input item")
 		})
 	}
 }
@@ -5569,12 +4534,8 @@ func TestConvertResponsesRequestToAnthropic_RejectsUnsupportedInputType(t *testi
 		Model: "claude-sonnet-4-5-20250929",
 		Input: 123,
 	})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "invalid responses input: unsupported type") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid responses input: unsupported type")
 }
 
 func TestConvertResponsesRequestToAnthropic_TrimsRoleBeforeAppend(t *testing.T) {
@@ -5587,15 +4548,9 @@ func TestConvertResponsesRequestToAnthropic_TrimsRoleBeforeAppend(t *testing.T) 
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
-	}
-	if len(req.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-	}
-	if req.Messages[0].Role != "user" {
-		t.Fatalf("Messages[0].Role = %q, want user", req.Messages[0].Role)
-	}
+	require.NoError(t, err)
+	require.Len(t, req.Messages, 1)
+	require.Equal(t, "user", req.Messages[0].Role)
 }
 
 func TestConvertResponsesRequestToAnthropic_PreservesAllSystemMessages(t *testing.T) {
@@ -5613,22 +4568,14 @@ func TestConvertResponsesRequestToAnthropic_PreservesAllSystemMessages(t *testin
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
-	}
-	if req.System != "instruction system\n\ninput system" {
-		t.Fatalf("System = %q, want merged system text", req.System)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "instruction system\n\ninput system", req.System)
 }
 
 func TestConvertResponsesRequestToAnthropic_RejectsNilRequest(t *testing.T) {
 	_, err := convertResponsesRequestToAnthropic(nil)
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "anthropic responses request is required") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "anthropic responses request is required")
 }
 
 func TestConvertResponsesRequestToAnthropic_TypedInputPromotesSystemRole(t *testing.T) {
@@ -5647,21 +4594,11 @@ func TestConvertResponsesRequestToAnthropic_TypedInputPromotesSystemRole(t *test
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
-	}
-	if req.System != "be concise" {
-		t.Fatalf("System = %q, want be concise", req.System)
-	}
-	if len(req.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-	}
-	if req.Messages[0].Role != "user" {
-		t.Fatalf("Messages[0].Role = %q, want user", req.Messages[0].Role)
-	}
-	if req.Messages[0].Content != "hello" {
-		t.Fatalf("Messages[0].Content = %#v, want hello", req.Messages[0].Content)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "be concise", req.System)
+	require.Len(t, req.Messages, 1)
+	require.Equal(t, "user", req.Messages[0].Role)
+	require.Equal(t, "hello", req.Messages[0].Content)
 }
 
 func TestConvertResponsesRequestToAnthropic_PreservesMultimodalImageInput(t *testing.T) {
@@ -5685,29 +4622,19 @@ func TestConvertResponsesRequestToAnthropic_PreservesMultimodalImageInput(t *tes
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
-	}
-	if len(req.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-	}
+	require.NoError(t, err)
+	require.Len(t, req.Messages, 1)
 
 	blocks, ok := req.Messages[0].Content.([]anthropicContentBlock)
-	if !ok {
-		t.Fatalf("Messages[0].Content = %#v, want []anthropicContentBlock", req.Messages[0].Content)
-	}
-	if len(blocks) != 2 {
-		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
-	}
-	if blocks[0].Type != "text" || blocks[0].Text != "Describe the image." {
-		t.Fatalf("unexpected text block: %+v", blocks[0])
-	}
-	if blocks[1].Type != "image" || blocks[1].Source == nil {
-		t.Fatalf("unexpected image block: %+v", blocks[1])
-	}
-	if blocks[1].Source.Type != "base64" || blocks[1].Source.MediaType != "image/png" || blocks[1].Source.Data != "ZmFrZQ==" {
-		t.Fatalf("unexpected image source: %+v", blocks[1].Source)
-	}
+	require.True(t, ok, "Messages[0].Content = %#v, want []anthropicContentBlock", req.Messages[0].Content)
+	require.Len(t, blocks, 2)
+	require.Equal(t, "text", blocks[0].Type)
+	require.Equal(t, "Describe the image.", blocks[0].Text, "unexpected text block: %+v", blocks[0])
+	require.Equal(t, "image", blocks[1].Type)
+	require.NotNil(t, blocks[1].Source, "unexpected image block: %+v", blocks[1])
+	require.Equal(t, "base64", blocks[1].Source.Type)
+	require.Equal(t, "image/png", blocks[1].Source.MediaType)
+	require.Equal(t, "ZmFrZQ==", blocks[1].Source.Data, "unexpected image source: %+v", blocks[1].Source)
 }
 
 func TestConvertResponsesRequestToAnthropic_ToolRoleRequiresToolCallID(t *testing.T) {
@@ -5720,12 +4647,8 @@ func TestConvertResponsesRequestToAnthropic_ToolRoleRequiresToolCallID(t *testin
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "tool message is missing tool_call_id") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tool message is missing tool_call_id")
 }
 
 func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
@@ -5734,20 +4657,12 @@ func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
 		Model: "text-embedding-3-small",
 		Input: "hello",
 	})
-	if err == nil {
-		t.Fatal("expected error from Anthropic Embeddings, got nil")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T: %v", err, err)
-	}
-	if gatewayErr.HTTPStatusCode() != 400 {
-		t.Errorf("expected HTTP 400, got %d", gatewayErr.HTTPStatusCode())
-	}
-	if !strings.Contains(err.Error(), "anthropic does not support embeddings") {
-		t.Errorf("expected message about anthropic not supporting embeddings, got: %s", err.Error())
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, 400, gatewayErr.HTTPStatusCode())
+	assert.Contains(t, err.Error(), "anthropic does not support embeddings")
 }
 
 func TestConvertToAnthropicRequest_NormalizesInputTextType(t *testing.T) {
@@ -5765,50 +4680,22 @@ func TestConvertToAnthropicRequest_NormalizesInputTextType(t *testing.T) {
 	}
 
 	result, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if len(result.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(result.Messages))
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Messages, 1)
 
 	blocks, ok := result.Messages[0].Content.([]anthropicContentBlock)
-	if !ok {
-		t.Fatalf("message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
-	}
-	if len(blocks) != 2 {
-		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
-	}
+	require.True(t, ok, "message content type = %T, want []anthropicContentBlock", result.Messages[0].Content)
+	require.Len(t, blocks, 2)
+
 	for i, block := range blocks {
-		if block.Type != "text" {
-			t.Errorf("blocks[%d].Type = %q, want \"text\"", i, block.Type)
-		}
+		assert.Equal(t, "text", block.Type, "blocks[%d]", i)
 	}
-	if blocks[0].Text != "First part." {
-		t.Errorf("blocks[0].Text = %q, want \"First part.\"", blocks[0].Text)
-	}
-	if blocks[1].Text != "Second part." {
-		t.Errorf("blocks[1].Text = %q, want \"Second part.\"", blocks[1].Text)
-	}
+	assert.Equal(t, "First part.", blocks[0].Text)
+	assert.Equal(t, "Second part.", blocks[1].Text)
 }
 
 func TestPassthrough(t *testing.T) {
-	var gotPath string
-	var gotAPIKey string
-	var gotVersion string
-	var gotBody string
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.RequestURI()
-		gotAPIKey = r.Header.Get("x-api-key")
-		gotVersion = r.Header.Get("anthropic-version")
-		body, _ := io.ReadAll(r.Body)
-		gotBody = string(body)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"bad request"}}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"bad request"}}`)
 
 	provider := NewWithHTTPClient("test-api-key", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -5822,35 +4709,23 @@ func TestPassthrough(t *testing.T) {
 			"anthropic-version": {"2024-10-22"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
-	if gotPath != "/messages" {
-		t.Fatalf("path = %q, want /messages", gotPath)
-	}
-	if gotAPIKey != "test-api-key" {
-		t.Fatalf("x-api-key = %q", gotAPIKey)
-	}
-	if gotVersion != "2024-10-22" {
-		t.Fatalf("anthropic-version = %q", gotVersion)
-	}
-	if gotBody != `{"model":"claude-sonnet-4-5"}` {
-		t.Fatalf("body = %q", gotBody)
-	}
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
+	sent := capture.Last(t)
+	assert.Equal(t, "/messages", sent.Path)
+	assert.Empty(t, sent.Query)
+	assert.Equal(t, "test-api-key", sent.Header.Get("x-api-key"))
+	assert.Equal(t, "2024-10-22", sent.Header.Get("anthropic-version"))
+	assert.Equal(t, `{"model":"claude-sonnet-4-5"}`, string(sent.Body))
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
 	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
-	if string(body) != `{"error":{"message":"bad request"}}` {
-		t.Fatalf("response body = %q", string(body))
-	}
+	require.NoError(t, err)
+	require.Equal(t, `{"error":{"message":"bad request"}}`, string(body))
 }
 
 func TestSetHeadersOAuthToken(t *testing.T) {
@@ -5878,19 +4753,14 @@ func TestSetHeadersOAuthToken(t *testing.T) {
 			p := &Provider{keys: providers.NewKeyring(tt.key)}
 			req := httptest.NewRequest(http.MethodPost, "/messages", nil)
 			p.setHeaders(req)
-
-			if got := req.Header.Get("x-api-key"); got != tt.wantAPIKey {
-				t.Errorf("x-api-key = %q, want %q", got, tt.wantAPIKey)
-			}
-			if got := req.Header.Get("Authorization"); got != tt.wantAuth {
-				t.Errorf("Authorization = %q, want %q", got, tt.wantAuth)
-			}
-			if got := req.Header.Get(anthropicBetaHeader); got != tt.wantBeta {
-				t.Errorf("anthropic-beta = %q, want %q", got, tt.wantBeta)
-			}
-			if got := req.Header.Get("anthropic-version"); got != anthropicAPIVersion {
-				t.Errorf("anthropic-version = %q, want %q", got, anthropicAPIVersion)
-			}
+			got := req.Header.Get("x-api-key")
+			assert.Equal(t, tt.wantAPIKey, got)
+			got = req.Header.Get("Authorization")
+			assert.Equal(t, tt.wantAuth, got)
+			got = req.Header.Get(anthropicBetaHeader)
+			assert.Equal(t, tt.wantBeta, got)
+			got = req.Header.Get("anthropic-version")
+			assert.Equal(t, anthropicAPIVersion, got)
 		})
 	}
 }
@@ -5918,16 +4788,7 @@ func TestPassthroughOAuthToken(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotAuth, gotAPIKey string
-			var gotBeta []string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotAuth = r.Header.Get("Authorization")
-				gotAPIKey = r.Header.Get("x-api-key")
-				gotBeta = r.Header.Values(anthropicBetaHeader)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{}`))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
 			provider := NewWithHTTPClient("sk-ant-oat01-abc", server.Client(), llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
@@ -5942,27 +4803,16 @@ func TestPassthroughOAuthToken(t *testing.T) {
 				Body:     io.NopCloser(strings.NewReader(`{"model":"claude-sonnet-5"}`)),
 				Headers:  headers,
 			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
+
 			defer func() {
 				_ = resp.Body.Close()
 			}()
 
-			if gotAuth != "Bearer sk-ant-oat01-abc" {
-				t.Errorf("Authorization = %q, want Bearer token", gotAuth)
-			}
-			if gotAPIKey != "" {
-				t.Errorf("x-api-key = %q, want empty", gotAPIKey)
-			}
-			if len(gotBeta) != len(tt.wantBeta) {
-				t.Fatalf("anthropic-beta values = %v, want %v", gotBeta, tt.wantBeta)
-			}
-			for i := range gotBeta {
-				if gotBeta[i] != tt.wantBeta[i] {
-					t.Errorf("anthropic-beta[%d] = %q, want %q", i, gotBeta[i], tt.wantBeta[i])
-				}
-			}
+			sent := capture.Last(t).Header
+			assert.Equal(t, "Bearer sk-ant-oat01-abc", sent.Get("Authorization"))
+			assert.Empty(t, sent.Get("x-api-key"))
+			assert.Equal(t, tt.wantBeta, sent.Values(anthropicBetaHeader))
 		})
 	}
 }
@@ -5971,22 +4821,7 @@ func TestPassthroughOAuthToken(t *testing.T) {
 // self-consistent: the oauth beta merge and the auth header always describe
 // the credential actually dispatched.
 func TestPassthroughMixedKeyringConsistency(t *testing.T) {
-	type observed struct {
-		auth   string
-		apiKey string
-		beta   string
-	}
-	var got []observed
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = append(got, observed{
-			auth:   r.Header.Get("Authorization"),
-			apiKey: r.Header.Get("x-api-key"),
-			beta:   strings.Join(r.Header.Values(anthropicBetaHeader), ","),
-		})
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
 	p := &Provider{
 		keys:                 providers.NewKeyring("sk-ant-oat01-a", "sk-ant-api03-b"),
@@ -6004,36 +4839,30 @@ func TestPassthroughMixedKeyringConsistency(t *testing.T) {
 			Body:     io.NopCloser(strings.NewReader(`{"model":"claude-sonnet-5"}`)),
 			Headers:  headers,
 		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		require.NoError(t, err)
+
 		_ = resp.Body.Close()
 	}
 
 	sawOAuth, sawAPIKey := false, false
-	for i, o := range got {
-		hasOAuthBeta := strings.Contains(o.beta, oauthBetaFlag)
+	for i, sent := range capture.All() {
+		auth := sent.Header.Get("Authorization")
+		apiKey := sent.Header.Get("x-api-key")
+		beta := strings.Join(sent.Header.Values(anthropicBetaHeader), ",")
 		switch {
-		case o.auth != "":
+		case auth != "":
 			sawOAuth = true
-			if o.apiKey != "" {
-				t.Errorf("request %d: both Authorization and x-api-key set", i)
-			}
-			if !hasOAuthBeta {
-				t.Errorf("request %d: OAuth credential without oauth beta (beta = %q)", i, o.beta)
-			}
-		case o.apiKey != "":
+			assert.Empty(t, apiKey, "request %d: both Authorization and x-api-key set", i)
+			assert.Contains(t, beta, oauthBetaFlag, "request %d: OAuth credential without oauth beta", i)
+		case apiKey != "":
 			sawAPIKey = true
-			if hasOAuthBeta {
-				t.Errorf("request %d: API key with oauth beta (beta = %q)", i, o.beta)
-			}
+			assert.NotContains(t, beta, oauthBetaFlag, "request %d: API key with oauth beta", i)
 		default:
-			t.Errorf("request %d: no credential sent", i)
+			assert.Fail(t, "no credential sent", "request %d", i)
 		}
 	}
-	if !sawOAuth || !sawAPIKey {
-		t.Fatalf("rotation did not cover both credentials (oauth=%v apiKey=%v)", sawOAuth, sawAPIKey)
-	}
+	require.True(t, sawOAuth)
+	require.True(t, sawAPIKey)
 }
 
 func TestResolveDefaultMaxTokens(t *testing.T) {
@@ -6052,9 +4881,8 @@ func TestResolveDefaultMaxTokens(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(defaultMaxTokensEnvVar, tt.env)
-			if got := resolveDefaultMaxTokens(); got != tt.want {
-				t.Errorf("resolveDefaultMaxTokens() = %d, want %d", got, tt.want)
-			}
+			got := resolveDefaultMaxTokens()
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -6068,12 +4896,8 @@ func TestConvertToAnthropicRequest_HonoursDefaultMaxTokensEnv(t *testing.T) {
 		},
 	}
 	got, err := convertToAnthropicRequest(req)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest returned error: %v", err)
-	}
-	if got.MaxTokens != 32768 {
-		t.Errorf("MaxTokens = %d, want 32768", got.MaxTokens)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 32768, got.MaxTokens)
 }
 
 func TestConvertToAnthropicRequestSystemRoleMessages(t *testing.T) {
@@ -6095,28 +4919,16 @@ func TestConvertToAnthropicRequestSystemRoleMessages(t *testing.T) {
 			Model:    "claude-fable-5",
 			Messages: messages,
 		})
-		if err != nil {
-			t.Fatalf("convertToAnthropicRequest() error = %v", err)
-		}
-		if out.System != "leading instructions" {
-			t.Fatalf("System = %#v, want only the leading instructions", out.System)
-		}
-		if len(out.Messages) != 4 {
-			t.Fatalf("len(Messages) = %d, want 4 (user, assistant, system, user)", len(out.Messages))
-		}
-		if out.Messages[2].Role != "system" {
-			t.Fatalf("Messages[2].Role = %q, want system", out.Messages[2].Role)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "leading instructions", out.System)
+		require.Len(t, out.Messages, 4)
+		require.Equal(t, "system", out.Messages[2].Role)
+
 		blocks, ok := out.Messages[2].Content.([]anthropicContentBlock)
-		if !ok || len(blocks) != 1 {
-			t.Fatalf("Messages[2].Content = %#v, want one text block", out.Messages[2].Content)
-		}
-		if blocks[0].Text != "mid-conversation reminder" {
-			t.Fatalf("system block text = %q", blocks[0].Text)
-		}
-		if string(blocks[0].CacheControl) != `{"type":"ephemeral"}` {
-			t.Fatalf("system block cache_control = %q, want ephemeral marker", blocks[0].CacheControl)
-		}
+		require.True(t, ok)
+		require.Len(t, blocks, 1, "Messages[2].Content = %#v, want one text block", out.Messages[2].Content)
+		require.Equal(t, "mid-conversation reminder", blocks[0].Text)
+		require.Equal(t, `{"type":"ephemeral"}`, string(blocks[0].CacheControl), "system block cache_control = %q, want ephemeral marker", blocks[0].CacheControl)
 	})
 
 	t.Run("legacy model hoists mid-conversation system into the system prompt", func(t *testing.T) {
@@ -6124,19 +4936,14 @@ func TestConvertToAnthropicRequestSystemRoleMessages(t *testing.T) {
 			Model:    "claude-sonnet-4-5-20250929",
 			Messages: messages,
 		})
-		if err != nil {
-			t.Fatalf("convertToAnthropicRequest() error = %v", err)
-		}
-		if len(out.Messages) != 3 {
-			t.Fatalf("len(Messages) = %d, want 3 (user, assistant, user)", len(out.Messages))
-		}
+		require.NoError(t, err)
+		require.Len(t, out.Messages, 3)
+
 		blocks, ok := out.System.([]anthropicContentBlock)
-		if !ok || len(blocks) != 2 {
-			t.Fatalf("System = %#v, want leading + hoisted blocks", out.System)
-		}
-		if blocks[1].Text != "mid-conversation reminder" || string(blocks[1].CacheControl) != `{"type":"ephemeral"}` {
-			t.Fatalf("hoisted block = %+v, want reminder with cache_control", blocks[1])
-		}
+		require.True(t, ok)
+		require.Len(t, blocks, 2)
+		require.Equal(t, "mid-conversation reminder", blocks[1].Text)
+		require.Equal(t, `{"type":"ephemeral"}`, string(blocks[1].CacheControl), "hoisted block = %+v, want reminder with cache_control", blocks[1])
 	})
 }
 
@@ -6152,9 +4959,8 @@ func TestSupportsSystemRoleMessages(t *testing.T) {
 		"claude-haiku-4-5-20251001":  false,
 		"claude-3-5-haiku-20241022":  false,
 	} {
-		if got := supportsSystemRoleMessages(model); got != want {
-			t.Errorf("supportsSystemRoleMessages(%q) = %v, want %v", model, got, want)
-		}
+		got := supportsSystemRoleMessages(model)
+		assert.Equal(t, want, got)
 	}
 }
 
@@ -6176,32 +4982,26 @@ func TestMessagesCacheBreakpointsSurviveTranslation(t *testing.T) {
 			{"role":"system","content":[{"type":"text","text":"reminder","cache_control":{"type":"ephemeral"}}]}
 		]
 	}`))
-	if err != nil {
-		t.Fatalf("DecodeMessagesRequest: %v", err)
-	}
+	require.NoError(t, err)
+
 	chat, err := anthropicapi.ToChatRequest(decoded)
-	if err != nil {
-		t.Fatalf("ToChatRequest: %v", err)
-	}
+	require.NoError(t, err)
+
 	out, err := convertToAnthropicRequest(chat)
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest: %v", err)
-	}
+	require.NoError(t, err)
+
 	wire, err := json.Marshal(out)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if got := strings.Count(string(wire), "cache_control"); got != 2 {
-		t.Fatalf("wire body carries %d cache_control markers, want 2: %s", got, wire)
-	}
+	require.NoError(t, err)
+	got := strings.Count(string(wire), "cache_control")
+	require.Equal(t, 2, got, "cache_control markers in %s", wire)
+
 	last := out.Messages[len(out.Messages)-1]
-	if last.Role != "system" {
-		t.Fatalf("last wire message role = %q, want the trailing system reminder", last.Role)
-	}
+	require.Equal(t, "system", last.Role)
+
 	blocks, ok := last.Content.([]anthropicContentBlock)
-	if !ok || len(blocks) != 1 || len(blocks[0].CacheControl) == 0 {
-		t.Fatalf("trailing system message = %#v, want one block with cache_control", last.Content)
-	}
+	require.True(t, ok)
+	require.Len(t, blocks, 1)
+	require.NotEmpty(t, blocks[0].CacheControl, "trailing system message = %#v, want one block with cache_control", last.Content)
 }
 
 func TestRejectsSamplingParameters(t *testing.T) {
@@ -6220,9 +5020,8 @@ func TestRejectsSamplingParameters(t *testing.T) {
 		"claude-opus-4-75":           false,
 		"":                           false,
 	} {
-		if got := rejectsSamplingParameters(model); got != want {
-			t.Errorf("rejectsSamplingParameters(%q) = %v, want %v", model, got, want)
-		}
+		got := rejectsSamplingParameters(model)
+		assert.Equal(t, want, got)
 	}
 }
 
@@ -6270,24 +5069,11 @@ func TestConvertToAnthropicRequestDropsConflictingSamplingParameter(t *testing.T
 				Temperature: tt.temperature,
 				TopP:        tt.topP,
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest: %v", err)
-			}
-			if !equalFloatPtr(out.Temperature, tt.wantTemp) {
-				t.Errorf("temperature = %v, want %v", out.Temperature, tt.wantTemp)
-			}
-			if !equalFloatPtr(out.TopP, tt.wantTopP) {
-				t.Errorf("top_p = %v, want %v", out.TopP, tt.wantTopP)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantTemp, out.Temperature)
+			assert.Equal(t, tt.wantTopP, out.TopP)
 		})
 	}
-}
-
-func equalFloatPtr(got, want *float64) bool {
-	if got == nil || want == nil {
-		return got == nil && want == nil
-	}
-	return *got == *want
 }
 
 func TestRejectsForcedToolChoice(t *testing.T) {
@@ -6301,9 +5087,8 @@ func TestRejectsForcedToolChoice(t *testing.T) {
 		"claude-opus-5":             false,
 		"claude-sonnet-4-6":         false,
 	} {
-		if got := rejectsForcedToolChoice(model); got != want {
-			t.Errorf("rejectsForcedToolChoice(%q) = %v, want %v", model, got, want)
-		}
+		got := rejectsForcedToolChoice(model)
+		assert.Equal(t, want, got)
 	}
 }
 
@@ -6329,18 +5114,17 @@ func TestConvertToAnthropicRequest_DropsSamplingForModelsThatRejectIt(t *testing
 				TopP:        &topP,
 				Messages:    []core.Message{{Role: "user", Content: "Hello"}},
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			if tt.wantKept {
-				if out.Temperature == nil || *out.Temperature != temp || out.TopP != nil {
-					t.Fatalf("Temperature = %v, TopP = %v, want %v and nil", out.Temperature, out.TopP, temp)
-				}
+				require.NotNil(t, out.Temperature)
+				require.Equal(t, temp, *out.Temperature)
+				require.Nil(t, out.TopP)
+
 				return
 			}
-			if out.Temperature != nil || out.TopP != nil {
-				t.Fatalf("Temperature = %v, TopP = %v, want both dropped", out.Temperature, out.TopP)
-			}
+			require.Nil(t, out.Temperature)
+			require.Nil(t, out.TopP)
 		})
 	}
 }
@@ -6422,22 +5206,16 @@ func TestConvertToAnthropicRequest_RelaxesForcedToolChoice(t *testing.T) {
 				ParallelToolCalls: tt.parallel,
 				Messages:          messages,
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v", err)
-			}
-			if out.ToolChoice == nil {
-				t.Fatalf("ToolChoice = nil, want type %q", tt.wantType)
-			}
-			if out.ToolChoice.Type != tt.wantType || out.ToolChoice.Name != tt.wantName {
-				t.Fatalf("ToolChoice = %+v, want type %q name %q", out.ToolChoice, tt.wantType, tt.wantName)
-			}
-			if tt.parallel != nil && (out.ToolChoice.DisableParallelToolUse == nil || !*out.ToolChoice.DisableParallelToolUse) {
-				t.Fatalf("DisableParallelToolUse = %v, want true", out.ToolChoice.DisableParallelToolUse)
+			require.NoError(t, err)
+			require.NotNil(t, out.ToolChoice)
+			assert.Equal(t, tt.wantType, out.ToolChoice.Type)
+			assert.Equal(t, tt.wantName, out.ToolChoice.Name)
+			if tt.parallel != nil {
+				require.NotNil(t, out.ToolChoice.DisableParallelToolUse)
+				assert.True(t, *out.ToolChoice.DisableParallelToolUse)
 			}
 			gotSystem, _ := out.System.(string)
-			if gotSystem != tt.wantInstruction {
-				t.Fatalf("System = %q, want %q", gotSystem, tt.wantInstruction)
-			}
+			assert.Equal(t, tt.wantInstruction, gotSystem)
 		})
 	}
 }
@@ -6450,9 +5228,8 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingForDatedFableAndMythos(t *tes
 				Reasoning: &core.Reasoning{Effort: "high"},
 				Messages:  []core.Message{{Role: "user", Content: "Hello"}},
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			assertAdaptiveHighEffort(t, out)
 		})
 		t.Run("responses "+model, func(t *testing.T) {
@@ -6461,9 +5238,8 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingForDatedFableAndMythos(t *tes
 				Input:     "Hello",
 				Reasoning: &core.Reasoning{Effort: "high"},
 			})
-			if err != nil {
-				t.Fatalf("convertResponsesRequestToAnthropic() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			assertAdaptiveHighEffort(t, out)
 		})
 	}
@@ -6471,12 +5247,11 @@ func TestConvertToAnthropicRequest_AdaptiveThinkingForDatedFableAndMythos(t *tes
 
 func assertAdaptiveHighEffort(t *testing.T, out *anthropicRequest) {
 	t.Helper()
-	if out.Thinking == nil || out.Thinking.Type != "adaptive" || out.Thinking.BudgetTokens != 0 {
-		t.Fatalf("Thinking = %+v, want adaptive without budget_tokens", out.Thinking)
-	}
-	if out.OutputConfig == nil || out.OutputConfig.Effort != "high" {
-		t.Fatalf("OutputConfig = %+v, want effort high", out.OutputConfig)
-	}
+	require.NotNil(t, out.Thinking)
+	require.Equal(t, "adaptive", out.Thinking.Type)
+	require.Equal(t, 0, out.Thinking.BudgetTokens)
+	require.NotNil(t, out.OutputConfig)
+	require.Equal(t, "high", out.OutputConfig.Effort)
 }
 
 // chatStreamDeltas converts an Anthropic SSE stream and returns the delta
@@ -6487,9 +5262,8 @@ func chatStreamDeltas(t *testing.T, anthropicSSE string) []map[string]any {
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
+	require.NoError(t, err)
+
 	deltas := []map[string]any{}
 	for line := range strings.SplitSeq(string(out), "\n") {
 		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
@@ -6501,9 +5275,9 @@ func chatStreamDeltas(t *testing.T, anthropicSSE string) []map[string]any {
 				Delta map[string]any `json:"delta"`
 			} `json:"choices"`
 		}
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			t.Fatalf("unmarshal chunk %q: %v", data, err)
-		}
+		err := json.Unmarshal([]byte(data), &chunk)
+		require.NoError(t, err, "unmarshal chunk %q: %v", data, err)
+
 		for _, choice := range chunk.Choices {
 			deltas = append(deltas, choice.Delta)
 		}
@@ -6565,9 +5339,8 @@ data: {"type":"message_stop"}
 `
 	deltas := chatStreamDeltas(t, sse)
 	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"Let me think.","type":"thinking"}]}}`
-	if got := lastExtraContent(deltas); got != want {
-		t.Fatalf("extra_content = %s, want %s", got, want)
-	}
+	got := lastExtraContent(deltas)
+	require.Equal(t, want, got)
 
 	// The signature must not arrive after the text has been streamed: a client
 	// closing the thinking block on the first text delta would drop it.
@@ -6580,9 +5353,9 @@ data: {"type":"message_stop"}
 			textAt = i
 		}
 	}
-	if extraAt < 0 || textAt < 0 || extraAt > textAt {
-		t.Errorf("extra_content at %d, first content at %d; want the thinking block completed first", extraAt, textAt)
-	}
+	assert.GreaterOrEqual(t, extraAt, 0)
+	assert.GreaterOrEqual(t, textAt, 0)
+	assert.LessOrEqual(t, extraAt, textAt)
 }
 
 // A redacted thinking block arrives whole on content_block_start and has no
@@ -6604,9 +5377,8 @@ event: message_stop
 data: {"type":"message_stop"}
 `
 	want := `{"anthropic":{"thinking_blocks":[{"data":"opaque","type":"redacted_thinking"}]}}`
-	if got := lastExtraContent(chatStreamDeltas(t, sse)); got != want {
-		t.Fatalf("extra_content = %s, want %s", got, want)
-	}
+	got := lastExtraContent(chatStreamDeltas(t, sse))
+	require.Equal(t, want, got)
 }
 
 // A stream without thinking must stay byte-identical to what it was before:
@@ -6630,9 +5402,8 @@ data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"outpu
 event: message_stop
 data: {"type":"message_stop"}
 `
-	if got := lastExtraContent(chatStreamDeltas(t, sse)); got != "" {
-		t.Fatalf("extra_content = %s, want none for a stream with no thinking", got)
-	}
+	got := lastExtraContent(chatStreamDeltas(t, sse))
+	require.Empty(t, got)
 }
 
 // responsesStreamEvents converts an Anthropic SSE stream to the Responses
@@ -6643,9 +5414,8 @@ func responsesStreamEvents(t *testing.T, anthropicSSE string) []map[string]any {
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := []map[string]any{}
 	for line := range strings.SplitSeq(string(out), "\n") {
 		data, ok := strings.CutPrefix(strings.TrimSpace(line), "data: ")
@@ -6653,9 +5423,9 @@ func responsesStreamEvents(t *testing.T, anthropicSSE string) []map[string]any {
 			continue
 		}
 		var event map[string]any
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			t.Fatalf("unmarshal event %q: %v", data, err)
-		}
+		err := json.Unmarshal([]byte(data), &event)
+		require.NoError(t, err, "unmarshal event %q: %v", data, err)
+
 		events = append(events, event)
 	}
 	return events
@@ -6717,27 +5487,21 @@ func TestStreamResponses_ThinkingBecomesReasoningItem(t *testing.T) {
 			}
 		}
 	}
-	if strings.Join(deltas, "") != "Let me think." {
-		t.Errorf("reasoning deltas = %q, want the thinking text", strings.Join(deltas, ""))
-	}
-	if reasoningAdded < 0 {
-		t.Fatal("no reasoning output item was added")
-	}
-	if messageAdded >= 0 && reasoningAdded > messageAdded {
-		t.Errorf("reasoning item added at %d, message at %d; reasoning must claim the first slot", reasoningAdded, messageAdded)
+	assert.Equal(t, "Let me think.", strings.Join(deltas, ""))
+	require.GreaterOrEqual(t, reasoningAdded, 0)
+
+	if messageAdded >= 0 {
+		assert.LessOrEqual(t, reasoningAdded, messageAdded, "reasoning must claim the first output slot")
 	}
 
 	final := events[len(events)-1]
 	output := final["response"].(map[string]any)["output"].([]any)
 	reasoning := output[0].(map[string]any)
-	if reasoning["type"] != "reasoning" {
-		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
-	}
+	require.Equal(t, "reasoning", reasoning["type"])
+
 	extra, _ := json.Marshal(reasoning["extra_content"])
 	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"Let me think.","type":"thinking"}]}}`
-	if string(extra) != want {
-		t.Errorf("reasoning extra_content = %s, want %s", extra, want)
-	}
+	assert.Equal(t, want, string(extra))
 }
 
 // A stream with no thinking must gain no reasoning item.
@@ -6761,11 +5525,10 @@ event: message_stop
 data: {"type":"message_stop"}
 `
 	for _, event := range responsesStreamEvents(t, sse) {
-		if strings.HasPrefix(event["type"].(string), "response.reasoning") {
-			t.Errorf("unexpected reasoning event %v", event["type"])
-		}
-		if added, ok := event["item"].(map[string]any); ok && added["type"] == "reasoning" {
-			t.Error("a stream without thinking must not produce a reasoning item")
+		assert.False(t, strings.HasPrefix(event["type"].(string), "response.reasoning"), "unexpected reasoning event %v", event["type"])
+
+		if added, ok := event["item"].(map[string]any); ok {
+			assert.NotEqual(t, "reasoning", added["type"], "a stream without thinking must not produce a reasoning item")
 		}
 	}
 }
@@ -6813,25 +5576,20 @@ data: {"type":"message_stop"}
 			done = true
 		}
 	}
-	if !added || !done {
-		t.Errorf("reasoning item added=%v done=%v, want both", added, done)
-	}
+	assert.True(t, added)
+	assert.True(t, done)
 
 	final := events[len(events)-1]
 	output := final["response"].(map[string]any)["output"].([]any)
 	reasoning := output[0].(map[string]any)
-	if reasoning["type"] != "reasoning" {
-		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
-	}
+	require.Equal(t, "reasoning", reasoning["type"])
+
 	extra, _ := json.Marshal(reasoning["extra_content"])
 	want := `{"anthropic":{"thinking_blocks":[{"data":"opaque","type":"redacted_thinking"}]}}`
-	if string(extra) != want {
-		t.Errorf("reasoning extra_content = %s, want %s", extra, want)
-	}
+	assert.Equal(t, want, string(extra))
+
 	// The message still follows it, and the redacted item contributes no text.
-	if output[1].(map[string]any)["type"] != "message" {
-		t.Errorf("final output[1] = %v, want the assistant message", output[1])
-	}
+	assert.Equal(t, "message", output[1].(map[string]any)["type"], "final output[1] = %v, want the assistant message", output[1])
 }
 
 // A tool_use-only Anthropic turn has no text, so the Responses output must be
@@ -6851,9 +5609,8 @@ func TestConvertAnthropicResponseToResponses_ToolUseOnlyHasNoEmptyMessage(t *tes
 		StopReason: "tool_use",
 	}
 	result := convertAnthropicResponseToResponses(resp, "claude-sonnet-4-5")
-	if len(result.Output) != 1 || result.Output[0].Type != "function_call" {
-		t.Fatalf("Output = %+v, want the function_call alone", result.Output)
-	}
+	require.Len(t, result.Output, 1)
+	require.Equal(t, "function_call", result.Output[0].Type)
 }
 
 // interleavedThinkingSSE is a single message with two thinking blocks: with
@@ -6926,14 +5683,7 @@ func TestStreamChatCompletion_TwoThinkingBlocks(t *testing.T) {
 		`{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"First.","type":"thinking"}]}}`,
 		`{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"First.","type":"thinking"},{"signature":"sig-2","thinking":"Second.","type":"thinking"}]}}`,
 	}
-	if len(published) != len(want) {
-		t.Fatalf("extra_content published %d times: %v, want %d", len(published), published, len(want))
-	}
-	for i := range want {
-		if published[i] != want[i] {
-			t.Errorf("publication %d = %s, want %s", i, published[i], want[i])
-		}
-	}
+	require.Equal(t, want, published, "extra_content publications")
 }
 
 // A Responses stream has one reasoning item, and its output_item.done cannot
@@ -6958,27 +5708,19 @@ func TestStreamResponses_ThinkingAfterTextKeepsStreamValid(t *testing.T) {
 			}
 		}
 	}
-	if !reasoningDone {
-		t.Fatal("reasoning item was never closed")
-	}
-	if len(lateDeltas) > 0 {
-		t.Errorf("reasoning deltas %v were emitted after the item closed", lateDeltas)
-	}
+	require.True(t, reasoningDone)
+	assert.Empty(t, lateDeltas)
 
 	final := events[len(events)-1]
 	output := final["response"].(map[string]any)["output"].([]any)
 	reasoning := output[0].(map[string]any)
-	if reasoning["type"] != "reasoning" {
-		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
-	}
+	require.Equal(t, "reasoning", reasoning["type"])
+
 	extra, _ := json.Marshal(reasoning["extra_content"])
 	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"First.","type":"thinking"},{"signature":"sig-2","thinking":"Second.","type":"thinking"}]}}`
-	if string(extra) != want {
-		t.Errorf("terminal reasoning extra_content = %s, want both blocks", extra)
-	}
-	if got := output[len(output)-1].(map[string]any)["type"]; got != "function_call" {
-		t.Errorf("final output ends with %v, want the function_call", got)
-	}
+	assert.Equal(t, want, string(extra))
+	got := output[len(output)-1].(map[string]any)["type"]
+	assert.Equal(t, "function_call", got)
 }
 
 // A signature is the last delta of a thinking block, so a stream cut between
@@ -7000,19 +5742,15 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta",
 `
 	events := responsesStreamEvents(t, sse)
 	final := events[len(events)-1]
-	if final["type"] != "response.incomplete" {
-		t.Fatalf("final event = %v, want response.incomplete", final["type"])
-	}
+	require.Equal(t, "response.incomplete", final["type"])
+
 	output := final["response"].(map[string]any)["output"].([]any)
 	reasoning := output[0].(map[string]any)
-	if reasoning["type"] != "reasoning" {
-		t.Fatalf("final output[0] = %v, want the reasoning item", reasoning["type"])
-	}
+	require.Equal(t, "reasoning", reasoning["type"])
+
 	extra, _ := json.Marshal(reasoning["extra_content"])
 	want := `{"anthropic":{"thinking_blocks":[{"signature":"sig-1","thinking":"Let me think.","type":"thinking"}]}}`
-	if string(extra) != want {
-		t.Errorf("interrupted reasoning extra_content = %s, want the signed block", extra)
-	}
+	assert.Equal(t, want, string(extra))
 }
 
 // TestStreamResponses_NormalizedTextStream pins the streamed text lifecycle to
@@ -7044,9 +5782,8 @@ data: {"type":"message_stop"}
 `
 	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := parseTestSSEEvents(t, string(raw))
 
 	want := []string{
@@ -7071,39 +5808,33 @@ data: {"type":"message_stop"}
 		}
 		got = append(got, event.Name)
 		seq, ok := event.Payload["sequence_number"].(float64)
-		if !ok || int(seq) != next {
-			t.Fatalf("event %s sequence_number = %#v, want %d", event.Name, event.Payload["sequence_number"], next)
-		}
+		require.True(t, ok)
+		require.Equal(t, next, int(seq), "event %s sequence_number", event.Name)
+
 		next++
 	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("event order = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got, "event order")
 
 	item, _ := events[2].Payload["item"].(map[string]any)
 	itemID, _ := item["id"].(string)
-	if itemID == "" {
-		t.Fatalf("output_item.added item has no id: %v", item)
-	}
+	require.NotEmpty(t, itemID, "output_item.added item has no id: %v", item)
+
 	for _, event := range events[3:8] {
-		if event.Payload["item_id"] != itemID || event.Payload["output_index"] != float64(0) || event.Payload["content_index"] != float64(0) {
-			t.Fatalf("%s is not addressed to item %q part 0: %v", event.Name, itemID, event.Payload)
-		}
+		require.Equal(t, itemID, event.Payload["item_id"])
+		require.Equal(t, float64(0), event.Payload["output_index"])
+		require.Equal(t, float64(0), event.Payload["content_index"], "%s is not addressed to item %q part 0: %v", event.Name, itemID, event.Payload)
 	}
-	if events[6].Payload["text"] != "Hello world" {
-		t.Fatalf("output_text.done text = %#v, want %q", events[6].Payload["text"], "Hello world")
-	}
+	require.Equal(t, "Hello world", events[6].Payload["text"])
+
 	part, _ := events[7].Payload["part"].(map[string]any)
-	if part["type"] != "output_text" || part["text"] != "Hello world" {
-		t.Fatalf("content_part.done part = %#v, want full output_text", part)
-	}
+	require.Equal(t, "output_text", part["type"])
+	require.Equal(t, "Hello world", part["text"], "content_part.done part = %#v, want full output_text", part)
+
 	inProgress, _ := events[1].Payload["response"].(map[string]any)
-	if inProgress["status"] != "in_progress" {
-		t.Fatalf("response.in_progress status = %#v", inProgress["status"])
-	}
-	if output, ok := inProgress["output"].([]any); !ok || len(output) != 0 {
-		t.Fatalf("response.in_progress output = %#v, want empty array", inProgress["output"])
-	}
+	require.Equal(t, "in_progress", inProgress["status"])
+	output, ok := inProgress["output"].([]any)
+	require.True(t, ok)
+	require.Empty(t, output)
 }
 
 // TestStreamResponses_NormalizedThinkingToolStream keeps the sequence numbers
@@ -7143,30 +5874,29 @@ data: {"type":"message_stop"}
 `
 	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := parseTestSSEEvents(t, string(raw))
-	if len(events) < 3 || events[0].Name != "response.created" || events[1].Name != "response.in_progress" {
-		t.Fatalf("stream must open with response.created and response.in_progress, got %v", events)
-	}
+	require.GreaterOrEqual(t, len(events), 3)
+	require.Equal(t, "response.created", events[0].Name)
+	require.Equal(t, "response.in_progress", events[1].Name, "stream must open with response.created and response.in_progress, got %v", events)
+
 	next := 0
 	for _, event := range events {
 		if event.Done {
 			continue
 		}
-		if strings.HasPrefix(event.Name, "response.content_part.") || strings.HasPrefix(event.Name, "response.output_text.") {
-			t.Fatalf("unexpected %s on a turn without a message item", event.Name)
-		}
+		require.False(t, strings.HasPrefix(event.Name, "response.content_part."))
+		require.False(t, strings.HasPrefix(event.Name, "response.output_text."), "unexpected %s on a turn without a message item", event.Name)
+
 		seq, ok := event.Payload["sequence_number"].(float64)
-		if !ok || int(seq) != next {
-			t.Fatalf("event %s sequence_number = %#v, want %d", event.Name, event.Payload["sequence_number"], next)
-		}
+		require.True(t, ok)
+		require.Equal(t, next, int(seq), "event %s sequence_number", event.Name)
+
 		next++
 	}
-	if last := events[len(events)-2]; last.Name != "response.completed" {
-		t.Fatalf("terminal event = %s, want response.completed", last.Name)
-	}
+	last := events[len(events)-2]
+	require.Equal(t, "response.completed", last.Name)
 }
 
 // TestStreamResponses_CutBeforeMessageStartStillOpens covers an upstream body
@@ -7176,9 +5906,8 @@ data: {"type":"message_stop"}
 func TestStreamResponses_CutBeforeMessageStartStillOpens(t *testing.T) {
 	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := parseTestSSEEvents(t, string(raw))
 	want := []string{"response.created", "response.in_progress", "response.incomplete", "[DONE]"}
 	got := make([]string, 0, len(events))
@@ -7188,11 +5917,9 @@ func TestStreamResponses_CutBeforeMessageStartStillOpens(t *testing.T) {
 			continue
 		}
 		got = append(got, event.Name)
-		if seq, ok := event.Payload["sequence_number"].(float64); !ok || int(seq) != i {
-			t.Fatalf("event %s sequence_number = %#v, want %d", event.Name, event.Payload["sequence_number"], i)
-		}
+		seq, ok := event.Payload["sequence_number"].(float64)
+		require.True(t, ok)
+		require.Equal(t, i, int(seq), "event %s sequence_number", event.Name)
 	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("event order = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got, "event order")
 }

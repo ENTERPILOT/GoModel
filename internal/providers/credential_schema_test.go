@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // schemaTestFactory registers one provider type per DiscoveryConfig under test.
@@ -67,25 +69,18 @@ func TestCredentialSchemas_DerivesTheFormFromDiscoveryFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			schema := credentialSchema("under-test", tt.spec)
+			got := fieldNames(schema)
+			require.True(t, equalStrings(got, tt.fields), "fields = %v, want %v", got, tt.fields)
+			assert.Equal(t, tt.spec.DefaultBaseURL, schema.DefaultBaseURL)
 
-			if got := fieldNames(schema); !equalStrings(got, tt.fields) {
-				t.Fatalf("fields = %v, want %v", got, tt.fields)
-			}
-			if schema.DefaultBaseURL != tt.spec.DefaultBaseURL {
-				t.Errorf("DefaultBaseURL = %q, want %q", schema.DefaultBaseURL, tt.spec.DefaultBaseURL)
-			}
 			for _, field := range schema.Fields {
-				if want := slices.Contains(tt.required, field.Name); field.Required != want {
-					t.Errorf("%s.Required = %v, want %v", field.Name, field.Required, want)
-				}
-				if want := slices.Contains(tt.advanced, field.Name); field.Advanced != want {
-					t.Errorf("%s.Advanced = %v, want %v", field.Name, field.Advanced, want)
-				}
+				want := slices.Contains(tt.required, field.Name)
+				assert.Equal(t, want, field.Required)
+				want = slices.Contains(tt.advanced, field.Name)
+				assert.Equal(t, want, field.Advanced)
 			}
 			// A plain provider type is offered none of Google's auth fields.
-			if schema.Accepts(CredentialFieldVertexProject) {
-				t.Error("Accepts(vertex_project) = true, want false")
-			}
+			assert.False(t, schema.Accepts(CredentialFieldVertexProject))
 		})
 	}
 }
@@ -103,9 +98,8 @@ func TestCredentialSchemas_CoversEveryTypeInOrder(t *testing.T) {
 	for _, schema := range factory.CredentialSchemas() {
 		types = append(types, schema.Type)
 	}
-	if want := []string{"endpoint", "keyed", "keyless"}; !equalStrings(types, want) {
-		t.Errorf("schema types = %v, want %v", types, want)
-	}
+	want := []string{"endpoint", "keyed", "keyless"}
+	assert.True(t, equalStrings(types, want), "schema types = %v, want %v", types, want)
 }
 
 func TestCredentialSchemas_UsesTheRegistrationsDeclaredForm(t *testing.T) {
@@ -120,15 +114,10 @@ func TestCredentialSchemas_UsesTheRegistrationsDeclaredForm(t *testing.T) {
 	})
 
 	schema := factory.CredentialSchemas()[0]
-	if got, want := fieldNames(schema), []string{"auth_type", "vertex_project", "base_url", "models"}; !equalStrings(got, want) {
-		t.Fatalf("fields = %v, want %v (declared order, models appended)", got, want)
-	}
+	require.Equal(t, []string{"auth_type", "vertex_project", "base_url", "models"}, fieldNames(schema), "declared order, models appended")
 	// A type that authenticates another way must not offer an API key field.
-	if schema.Accepts(CredentialFieldAPIKeys) {
-		t.Error("Accepts(api_keys) = true for a declared keyless form, want false")
-	}
+	assert.False(t, schema.Accepts(CredentialFieldAPIKeys))
+
 	authType, _ := schema.Field(CredentialFieldAuthType)
-	if len(authType.Options) != 2 {
-		t.Errorf("auth_type.Options = %v, want the two declared values", authType.Options)
-	}
+	assert.Len(t, authType.Options, 2)
 }
