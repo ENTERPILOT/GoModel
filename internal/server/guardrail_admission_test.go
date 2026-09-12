@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/budget"
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -163,6 +164,8 @@ func TestPassthroughRefusesWhenGuardrailsApply(t *testing.T) {
 	tests := []struct {
 		name            string
 		chains          *plugins.Chains
+		configured      bool
+		info            *core.PassthroughRouteInfo
 		allowUnguarded  bool
 		wantRefused     bool
 		wantErrContains string
@@ -170,19 +173,51 @@ func TestPassthroughRefusesWhenGuardrailsApply(t *testing.T) {
 		{name: "guardrail workflow refuses", chains: chains, wantRefused: true, wantErrContains: "passthrough_guardrails_unsupported"},
 		{name: "opt-out allows", chains: chains, allowUnguarded: true},
 		{name: "no chains allows", chains: nil},
+		// The workflow is matched on the model read from the provider-native
+		// body. A body the gateway cannot parse leaves it empty, so a
+		// model-scoped guardrail workflow is never matched: refuse rather than
+		// let an unreadable body escape the policy.
+		{
+			name:            "opaque model on an inference call refuses",
+			configured:      true,
+			info:            &core.PassthroughRouteInfo{GenAIOperation: "chat"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
+		{
+			name:       "opaque model on a non-inference call allows",
+			configured: true,
+			info:       &core.PassthroughRouteInfo{},
+		},
+		// Listing models or managing files runs no guardrail even on /v1, so
+		// passthrough takes nothing away.
+		{
+			name:   "non-inference route allows even with a matching chain",
+			chains: chains,
+			info:   &core.PassthroughRouteInfo{Model: "gpt-4.1-mini"},
+		},
+		{
+			name:       "known model with no matching workflow allows",
+			configured: true,
+			info:       &core.PassthroughRouteInfo{GenAIOperation: "chat", Model: "gpt-4.1-mini"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			info := tt.info
+			if info == nil {
+				info = &core.PassthroughRouteInfo{GenAIOperation: "chat", Model: "gpt-4.1-mini"}
+			}
 			svc := &passthroughService{
-				pluginChains:              staticChainsResolver{chains: tt.chains},
+				pluginChains:              staticChainsResolver{chains: tt.chains, configured: tt.configured},
 				allowUnguardedPassthrough: tt.allowUnguarded,
 			}
 			e := echo.New()
 			req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/chat/completions", nil)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
-			if got := svc.guardrailWorkflowApplies(c); got != tt.wantRefused {
+			if got := svc.guardrailWorkflowApplies(c, info); got != tt.wantRefused {
 				t.Fatalf("guardrailWorkflowApplies() = %v, want %v", got, tt.wantRefused)
 			}
 			if !tt.wantRefused {

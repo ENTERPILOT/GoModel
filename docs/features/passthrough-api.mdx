@@ -94,7 +94,12 @@ request whenever a guardrail workflow applies to the caller:
 }
 ```
 
-The request is answered with `403`. Route that traffic through the
+The request is answered with `403`. A passthrough workflow is matched on the
+model read from the provider-native body, and that read is best effort, so an
+inference call whose model GoModel cannot read is refused whenever *any*
+guardrail is configured — an unreadable body must not be a way around a policy.
+
+Route that traffic through the
 OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/responses`,
 `/v1/messages`), which do run the chains, or choose one of:
 

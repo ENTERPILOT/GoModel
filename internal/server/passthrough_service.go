@@ -1,6 +1,8 @@
 package server
 
 import (
+	"strings"
+
 	"github.com/labstack/echo/v5"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
@@ -37,15 +39,46 @@ func guardrailsBypassedError(providerType string) error {
 	).WithCode("passthrough_guardrails_unsupported")
 }
 
-// guardrailWorkflowApplies reports whether the request's matched workflow runs
-// any guardrail chain.
-func (s *passthroughService) guardrailWorkflowApplies(c *echo.Context) bool {
-	if s.allowUnguardedPassthrough || s.pluginChains == nil {
+// guardrailPresenceResolver reports whether the gateway configures any
+// guardrail chain at all. Implemented by the workflows service.
+type guardrailPresenceResolver interface {
+	HasGuardrailChains() bool
+}
+
+// guardrailWorkflowApplies reports whether a guardrail chain applies, or may
+// apply, to this passthrough request.
+//
+// The workflow of a passthrough request is matched on the model read from its
+// provider-native body, and that read is best effort: a body the gateway
+// cannot parse (an unknown dialect, a chunked or oversized payload) leaves the
+// model empty, and a model-scoped guardrail workflow is then never matched.
+// So when the model is unknown on an inference call, any guardrail anywhere in
+// the configuration counts as applying — the caller controls the body, and a
+// policy must not be escapable by making it unreadable.
+func (s *passthroughService) guardrailWorkflowApplies(c *echo.Context, info *core.PassthroughRouteInfo) bool {
+	if s.allowUnguardedPassthrough || s.pluginChains == nil || info == nil {
+		return false
+	}
+	// Guardrails only ever run on text inference, so only those routes can
+	// lose a policy by being called through passthrough. Listing models or
+	// managing files is unaffected and keeps working.
+	if strings.TrimSpace(info.GenAIOperation) != genAIOperationChat {
 		return false
 	}
 	chains := s.pluginChains.ChainsForContext(c.Request().Context())
-	return chains != nil && (!chains.Prompt.Empty() || !chains.Response.Empty() || !chains.Stream.Empty())
+	if chains != nil && (!chains.Prompt.Empty() || !chains.Response.Empty() || !chains.Stream.Empty()) {
+		return true
+	}
+	if strings.TrimSpace(info.Model) != "" {
+		return false
+	}
+	presence, ok := s.pluginChains.(guardrailPresenceResolver)
+	return ok && presence.HasGuardrailChains()
 }
+
+// genAIOperationChat is the GenAI operation passthrough route semantics give
+// text inference endpoints (chat completions, responses, Anthropic messages).
+const genAIOperationChat = "chat"
 
 func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	passthroughProvider, ok := s.provider.(core.RoutablePassthrough)
@@ -67,7 +100,7 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 			}
 		}
 	}
-	if s.guardrailWorkflowApplies(c) {
+	if s.guardrailWorkflowApplies(c, info) {
 		return handleError(c, guardrailsBypassedError(providerType))
 	}
 	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRoute{provider: info.ProviderName, model: info.Model})
