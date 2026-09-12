@@ -400,6 +400,7 @@ func convertToAnthropicRequest(req *core.ChatRequest) (*anthropicRequest, error)
 	}
 
 	dropUnsupportedSamplingParameters(anthropicReq)
+	dropConflictingSamplingParameter(anthropicReq)
 
 	if effort := resolveAnthropicReasoningEffort(req); effort != "" {
 		applyReasoning(anthropicReq, req.Model, effort)
@@ -489,6 +490,23 @@ func dropUnsupportedSamplingParameters(req *anthropicRequest) {
 	}
 	slog.Warn("dropping sampling parameters the model does not accept", attrs...)
 	req.Temperature = nil
+	req.TopP = nil
+}
+
+// dropConflictingSamplingParameter drops top_p when the caller sent both
+// temperature and top_p. Anthropic documents the two as mutually exclusive
+// ("we generally recommend altering temperature or top_p, but not both") and
+// every current model answers a request carrying both with a 400
+// ("`temperature` and `top_p` cannot both be specified for this model"), so an
+// OpenAI SDK that fills in both defaults could not reach Anthropic at all.
+// temperature is kept because it is the parameter OpenAI clients actually vary
+// and the one Anthropic's own guidance treats as primary.
+func dropConflictingSamplingParameter(req *anthropicRequest) {
+	if req.Temperature == nil || req.TopP == nil {
+		return
+	}
+	slog.Warn("dropping top_p; Anthropic accepts only one of temperature and top_p",
+		"model", req.Model, "temperature", *req.Temperature, "top_p", *req.TopP)
 	req.TopP = nil
 }
 

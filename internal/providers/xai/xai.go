@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -249,9 +250,27 @@ func (p *Provider) ListModels(ctx context.Context) (*core.ModelsResponse, error)
 	return p.compat.ListModels(ctx)
 }
 
+// adaptResponsesRequest drops Responses members xAI's native /responses
+// endpoint refuses. xAI answers a request carrying "metadata" with
+// 400 "Argument not supported: metadata", even though it is a standard
+// OpenAI Responses member; it is a caller-side label that does not affect
+// generation, so dropping it is preferable to relaying an error the client
+// cannot act on. The caller's request is left untouched so the gateway can
+// still echo the member back to the client.
+func adaptResponsesRequest(req *core.ResponsesRequest) *core.ResponsesRequest {
+	if req == nil || len(req.Metadata) == 0 {
+		return req
+	}
+	slog.Warn("dropping metadata; xai rejects the member on /responses",
+		"model", req.Model, "keys", len(req.Metadata))
+	adapted := *req
+	adapted.Metadata = nil
+	return &adapted
+}
+
 // Responses sends a Responses API request to xAI's native /responses endpoint.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return p.compat.Responses(ctx, req)
+	return p.compat.Responses(ctx, adaptResponsesRequest(req))
 }
 
 // StreamResponses returns a normalized streaming Responses API body.
@@ -260,7 +279,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 // synthesize a terminal `data: [DONE]` marker on completed streams. Callers
 // remain responsible for closing the returned stream.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return p.compat.StreamResponses(ctx, req)
+	return p.compat.StreamResponses(ctx, adaptResponsesRequest(req))
 }
 
 // Embeddings sends an embeddings request to xAI

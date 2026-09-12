@@ -210,6 +210,32 @@ support, not every individual model capability exposed by an upstream provider.
   `VERTEX_PROJECT` / `VERTEX_LOCATION`. `VERTEX_AUTH_TYPE` defaults to
   Application Default Credentials (`gcp_adc`).
 
+## What GoModel normalizes in responses
+
+GoModel returns one shape per field no matter which provider answered, and
+forwards everything else exactly as the provider sent it.
+
+- **Reasoning text** comes back as `reasoning_content`, on
+  `choices[].message` and on streamed `choices[].delta`. Groq returns it as
+  `reasoning`; GoModel renames it, so the same client code reads the chain of
+  thought from Groq, DeepSeek, Anthropic, Cohere and vLLM alike.
+- **Vendor members are not stripped.** Groq's `x_groq` and its
+  `queue_time` / `prompt_time` / `completion_time` usage timings, and
+  DeepSeek's `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`, reach the
+  client untouched — that passthrough is how you get at provider-native extras
+  without waiting for a GoModel release. Read cache hits from the portable
+  `usage.prompt_tokens_details.cached_tokens` if you want provider-independent
+  code. See [ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md).
+- **Streams carry a final `usage` even if you did not ask for it.** With usage
+  tracking on, GoModel adds `stream_options.include_usage` to every streaming
+  request so it can price the call, and the provider's usage chunk is relayed
+  as-is; OpenAI's own API omits usage unless the client asks. Most providers
+  send it as a separate trailing chunk with an empty `choices` array, DeepSeek
+  attaches it to its last content chunk. Ignore the member, or set
+  `ENFORCE_RETURNING_USAGE_DATA=false` to stop GoModel asking for it — at the
+  cost of usage records for streamed requests on providers that only report
+  usage when asked.
+
 ## Why some providers have dedicated pages
 
 These are the providers most users hit friction on:

@@ -63,3 +63,11 @@ tokens are often billed at the uncached price.
   messages — cache affinity works with no client change.
 - **Responses API:** pass `prompt_cache_key` in the request body; GoModel
   forwards it verbatim.
+
+## `metadata` on the Responses API
+
+xAI's native `/responses` endpoint rejects the standard OpenAI `metadata`
+member with `400 "Argument not supported: metadata"`. GoModel drops it from
+the outbound request (logging that it did) instead of relaying the error, so
+clients that tag every request with metadata keep working. The member is only
+removed on the way to xAI; nothing else about the request changes.

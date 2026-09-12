@@ -404,6 +404,61 @@ func TestChatCompletion(t *testing.T) {
 	}
 }
 
+func TestResponsesDropsMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]string
+		stream   bool
+	}{
+		{name: "non-streaming drops metadata", metadata: map[string]string{"team": "alpha"}},
+		{name: "streaming drops metadata", metadata: map[string]string{"team": "alpha"}, stream: true},
+		{name: "no metadata is a no-op", metadata: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read body: %v", err)
+					return
+				}
+				if err := json.Unmarshal(raw, &body); err != nil {
+					t.Errorf("unmarshal body: %v", err)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed"}`))
+			}))
+			defer server.Close()
+
+			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
+			provider.SetBaseURL(server.URL)
+
+			req := &core.ResponsesRequest{Model: "grok-4.3", Metadata: tt.metadata}
+			var err error
+			if tt.stream {
+				var stream io.ReadCloser
+				stream, err = provider.StreamResponses(context.Background(), req)
+				if stream != nil {
+					_ = stream.Close()
+				}
+			} else {
+				_, err = provider.Responses(context.Background(), req)
+			}
+			if err != nil {
+				t.Fatalf("responses: %v", err)
+			}
+			if _, ok := body["metadata"]; ok {
+				t.Errorf("outbound body carries metadata: %v", body["metadata"])
+			}
+			if len(tt.metadata) > 0 && req.Metadata == nil {
+				t.Error("caller request was mutated; metadata must survive for the client echo")
+			}
+		})
+	}
+}
+
 func TestStreamChatCompletion(t *testing.T) {
 	tests := []struct {
 		name          string
