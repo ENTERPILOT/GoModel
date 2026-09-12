@@ -60,15 +60,15 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
 	}
-	if s.guardrailWorkflowApplies(c) {
-		return handleError(c, guardrailsBypassedError(providerType))
-	}
 	if s.modelAuthorizer != nil {
 		if selector, ok := passthroughAccessSelector(s.provider, info); ok {
 			if err := s.modelAuthorizer.ValidateModelAccess(c.Request().Context(), selector); err != nil {
 				return handleError(c, err)
 			}
 		}
+	}
+	if s.guardrailWorkflowApplies(c) {
+		return handleError(c, guardrailsBypassedError(providerType))
 	}
 	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRoute{provider: info.ProviderName, model: info.Model})
 	if err != nil {
