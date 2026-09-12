@@ -231,7 +231,11 @@ precedence.
 
 <Note>
   Response cache hits can return before budget enforcement. If a cached response
-  exists, GoModel can serve it without spending additional provider cost.
+  exists, GoModel can serve it without spending additional provider cost. A
+  request that runs a prompt-phase [guardrail](/advanced/guardrails) is the
+  exception: the chain can spend provider money (`llm_judge`) and can answer the
+  request itself, so the budget is checked before it runs, and a cache hit on
+  such a request is checked too.
 </Note>
 
 ## Reset windows

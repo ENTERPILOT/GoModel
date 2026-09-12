@@ -69,11 +69,10 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 
 	s.observeLiveProviderAttempts(c, workflow)
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker, rateLimitRouteFromWorkflow(workflow))
+	adm, err := admitOnce(c, s.rateLimiter, s.budgetChecker, s.admissionRoute(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer adm.release()
 	ctx := adm.dispatchContext(c.Request().Context())
 
 	providerName := ""

@@ -18,6 +18,33 @@ type passthroughService struct {
 	pricingResolver              usage.PricingResolver
 	normalizePassthroughV1Prefix bool
 	enabledPassthroughProviders  map[string]struct{}
+	pluginChains                 PluginChainsResolver
+	allowUnguardedPassthrough    bool
+}
+
+// guardrailsBypassedError reports a passthrough request that a guardrail
+// workflow applies to. Passthrough forwards the caller's provider-native body
+// and relays the provider's answer untouched, so no guardrail chain can run
+// over them; serving the request anyway would silently drop a policy the
+// operator configured. Refusing is the fail-safe default; set
+// server.allow_unguarded_passthrough (ALLOW_UNGUARDED_PASSTHROUGH=true) to
+// accept the gap, or scope the workflow so it does not match these callers.
+func guardrailsBypassedError(providerType string) error {
+	return core.NewPermissionError(
+		"provider passthrough cannot run guardrails, and a guardrail workflow applies to this request; " +
+			"call the OpenAI-compatible endpoints (/v1/chat/completions, /v1/responses, /v1/messages) instead, " +
+			"or set server.allow_unguarded_passthrough to allow unguarded passthrough for " + providerType,
+	).WithCode("passthrough_guardrails_unsupported")
+}
+
+// guardrailWorkflowApplies reports whether the request's matched workflow runs
+// any guardrail chain.
+func (s *passthroughService) guardrailWorkflowApplies(c *echo.Context) bool {
+	if s.allowUnguardedPassthrough || s.pluginChains == nil {
+		return false
+	}
+	chains := s.pluginChains.ChainsForContext(c.Request().Context())
+	return chains != nil && (!chains.Prompt.Empty() || !chains.Response.Empty() || !chains.Stream.Empty())
 }
 
 func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
@@ -32,6 +59,9 @@ func (s *passthroughService) ProviderPassthrough(c *echo.Context) error {
 	}
 	if !isEnabledPassthroughProvider(providerType, s.enabledPassthroughProviders) {
 		return handleError(c, s.unsupportedPassthroughProviderError(providerType))
+	}
+	if s.guardrailWorkflowApplies(c) {
+		return handleError(c, guardrailsBypassedError(providerType))
 	}
 	if s.modelAuthorizer != nil {
 		if selector, ok := passthroughAccessSelector(s.provider, info); ok {

@@ -120,12 +120,10 @@ func (s *translatedInferenceService) dispatchChatCompletion(c *echo.Context, req
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
-		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
+	adm, err := admitOnce(c, s.rateLimiter, s.budgetChecker, s.admissionRoute(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer adm.release()
 	ctx = adm.dispatchContext(ctx)
 
 	feedbackEnabled := hasResponseFeedbackObservers(c)
@@ -202,8 +200,9 @@ func handleTranslatedJSON[Req any](
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
 	}
+	defer releaseAdmission(c)
 
-	ctx, preparedReq, workflow, err := prepare(s, promptEditCaptureContext(c, s.logger), req, translatedRequestMeta(c))
+	ctx, preparedReq, workflow, err := prepare(s, promptEditCaptureContext(c, s.logger), req, s.guardedRequestMeta(c))
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
@@ -355,12 +354,10 @@ func (s *translatedInferenceService) dispatchResponses(c *echo.Context, req *cor
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
-		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
+	adm, err := admitOnce(c, s.rateLimiter, s.budgetChecker, s.admissionRoute(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer adm.release()
 	ctx = adm.dispatchContext(ctx)
 
 	if req.Stream {
@@ -609,6 +606,49 @@ func translatedRequestMeta(c *echo.Context) gateway.RequestMeta {
 		Endpoint:  core.DescribeEndpoint(c.Request().Method, c.Request().URL.Path),
 		Workflow:  core.GetWorkflow(c.Request().Context()),
 	}
+}
+
+// guardedRequestMeta is the request meta for translated inference, with
+// admission wired to run before the prompt phase. A gateway with no plugin
+// chains runs no guardrails, so it keeps the plain meta and takes on no
+// per-request closure.
+func (s *translatedInferenceService) guardedRequestMeta(c *echo.Context) gateway.RequestMeta {
+	meta := translatedRequestMeta(c)
+	if s.pluginChains != nil {
+		meta.Admit = s.admitBeforePromptPhase(c)
+	}
+	return meta
+}
+
+// admitBeforePromptPhase admits the request as soon as its route is resolved,
+// before the prompt-phase guardrail chain runs. A prompt guardrail can spend
+// provider money on the gateway's behalf (an llm_judge step issues its own
+// inference) and can end the request itself with a block or a synthesized
+// answer, which used to return before admission ever ran: a chain-answered
+// request consumed no rate-limit token and passed no budget check, while still
+// paying for the judge call.
+//
+// It admits only when the request actually runs a prompt chain. Without one
+// nothing is spent or decided before dispatch, and admitting here would also
+// count response-cache hits, which are deliberately served before enforcement
+// (docs/features/rate-limits.mdx, docs/features/budgets.mdx). A request that
+// runs a prompt chain reaches the cache only after the chain has already been
+// paid for, so counting its hits is the consistent choice.
+func (s *translatedInferenceService) admitBeforePromptPhase(c *echo.Context) func(context.Context, *core.Workflow) error {
+	return func(ctx context.Context, workflow *core.Workflow) error {
+		chains := s.pluginChainsFor(ctx)
+		if chains == nil || chains.Prompt.Empty() {
+			return nil
+		}
+		_, err := admitOnce(c, s.rateLimiter, s.budgetChecker, s.admissionRoute(workflow))
+		return err
+	}
+}
+
+// admissionRoute names the resolved route a translated request is admitted
+// against, including how many failover targets could relieve a saturated one.
+func (s *translatedInferenceService) admissionRoute(workflow *core.Workflow) rateLimitRoute {
+	return rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow)))
 }
 
 func attachPreparedWorkflow(c *echo.Context, ctx context.Context, workflow *core.Workflow) {

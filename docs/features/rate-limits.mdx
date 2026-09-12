@@ -223,7 +223,15 @@ Details worth knowing:
 - Token usage is counted after each response completes (streams included).
   One request can overshoot a token window before the counter catches up —
   the same behavior as other gateways that count tokens from responses.
-- Response-cache hits are served before enforcement and count nothing.
+- Response-cache hits are served before enforcement and count nothing — unless
+  the request runs a prompt-phase [guardrail](/advanced/guardrails), which is
+  enforced against first (see below), so its hits count.
+- A request a prompt-phase guardrail blocks or answers counts like any other:
+  enforcement runs before the chain, so a guardrail decision is never a free
+  request and an over-limit request never pays for an `llm_judge` call.
+- Passthrough (`/p/{provider}/...`) is rate limited like every other route,
+  but runs no guardrails; by default such a request is refused when a guardrail
+  workflow applies to the caller.
 - A realtime session counts as one request and holds one concurrency slot for
   the whole session. A batch submission counts as one request and holds no
   concurrency slot.

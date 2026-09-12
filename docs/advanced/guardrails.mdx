@@ -38,6 +38,19 @@ Guardrails work across all text-based endpoints:
   system and are not covered here.
 </Note>
 
+<Warning>
+  Guardrails do **not** run on the provider-native passthrough routes
+  (`/p/{provider}/...`). Those forward the caller's provider-native body and
+  relay the provider's answer untouched, so no chain can read or edit them. By
+  default GoModel therefore refuses a passthrough request whenever a guardrail
+  workflow applies to the caller, with `403 passthrough_guardrails_unsupported`
+  — the policy is never silently dropped. Set
+  `server.allow_unguarded_passthrough: true`
+  (`ALLOW_UNGUARDED_PASSTHROUGH=true`) to accept the gap, or scope the workflow
+  so it does not match those callers. See
+  [Passthrough API](/features/passthrough-api).
+</Warning>
+
 ## Quick Start
 
 Add a `guardrails` section to your `config/config.yaml`:
@@ -138,6 +151,27 @@ one editor per order, and any number of non-editing checks (`llm_judge`,
 `header_edit`) next to it. When several guardrails at one order decide
 differently, the most severe decision wins: `block` > `respond` > `warn` >
 `allow`.
+
+## Guardrails, rate limits, and budgets
+
+A prompt-phase guardrail can end the request itself (`block`) or answer it
+(`respond`), and an `llm_judge` step spends real provider money
+deciding that. So on a request that runs a prompt chain, rate limits and
+budgets are enforced **before** the chain:
+
+- A request over its rate limit or budget is refused with `429` without the
+  chain running, so a judge call is never made for a request the gateway will
+  not serve.
+- A request the chain blocks or answers still consumes its rate-limit token and
+  still had to pass the budget check — the decision is not a free request.
+- Because enforcement moves ahead of the cache lookup for these requests, a
+  response-cache hit on a request that runs a prompt chain counts too. Without
+  a prompt chain, cache hits stay free (see
+  [Rate limits](/features/rate-limits) and [Budgets](/features/budgets)).
+
+The judge's own inference is logged as its own usage entry under
+`<user_path>/guardrails/<instance>`, so its cost is attributed to the caller
+that triggered it.
 
 ## Configuration
 
