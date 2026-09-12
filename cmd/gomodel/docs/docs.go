@@ -8807,7 +8807,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "signature": {
-                    "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it.",
+                    "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it. Every\nthinking block carries the member, as the Anthropic schema requires;\nreasoning from a provider that does not sign its output is rendered with\nan empty signature. Hence the pointer: only a thinking block has one.",
                     "type": "string"
                 },
                 "text": {

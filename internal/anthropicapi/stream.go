@@ -241,14 +241,14 @@ func (sc *streamConverter) handleThinkingReplay(raw json.RawMessage) {
 			sc.openBlock("redacted_thinking", map[string]any{"type": "redacted_thinking", "data": block.Data})
 			sc.closeBlock()
 		default:
-			if block.Signature == "" {
+			if block.Signature == nil || *block.Signature == "" {
 				continue
 			}
 			sc.ensureBlock("thinking")
 			sc.emit("content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": sc.curIndex,
-				"delta": map[string]any{"type": "signature_delta", "signature": block.Signature},
+				"delta": map[string]any{"type": "signature_delta", "signature": *block.Signature},
 			})
 			sc.closeBlock()
 		}
@@ -293,6 +293,10 @@ func (sc *streamConverter) ensureBlock(blockType string) {
 	contentBlock := map[string]any{"type": blockType}
 	if blockType == "thinking" {
 		contentBlock["thinking"] = ""
+		// Anthropic opens a thinking block with an empty signature and fills it
+		// with a signature_delta; a provider that never signs its reasoning
+		// simply leaves it empty, so the block still matches the schema.
+		contentBlock["signature"] = ""
 	} else {
 		contentBlock["text"] = ""
 	}
