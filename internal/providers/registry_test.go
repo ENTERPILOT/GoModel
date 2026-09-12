@@ -2149,7 +2149,7 @@ func TestRefreshModelList_ConditionalFetch(t *testing.T) {
 	listAfter := registry.modelList
 	etagAfter := registry.modelListETag
 	registry.mu.RUnlock()
-	require.Equal(t, listBefore, listAfter)
+	require.Same(t, listBefore, listAfter)
 	require.Equal(t, etag, etagAfter)
 }
 

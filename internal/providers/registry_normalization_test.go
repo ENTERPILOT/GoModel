@@ -269,7 +269,7 @@ func TestRegistryKeepsFirstDuplicateDiscoveredModel(t *testing.T) {
 	bare := registry.GetModel("foo")
 	require.NotNil(t, qualified)
 	require.NotNil(t, bare)
-	require.Equal(t, bare, qualified)
+	require.Same(t, bare, qualified)
 	require.Equal(t, "first", qualified.Model.OwnedBy)
 	require.Equal(t, int64(1), qualified.Model.Created, "kept record = %+v, want the first listed (owned_by first, created 1)", qualified.Model)
 }

@@ -886,7 +886,7 @@ func TestAdaptAnthropicCacheControl_PreservesSupportedProviders(t *testing.T) {
 	})}
 	for _, providerType := range []string{"anthropic", "openrouter"} {
 		got := adaptAnthropicCacheControl(req, providerType)
-		assert.Equal(t, req, got, "provider %q cloned or changed supported cache metadata", providerType)
+		assert.Same(t, req, got, "provider %q cloned or changed supported cache metadata", providerType)
 	}
 }
 
@@ -943,7 +943,7 @@ func TestAdaptExtraContent_ReturnsRequestWithoutExtraContent(t *testing.T) {
 		}), ToolCalls: []core.ToolCall{{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"}}}},
 	}}
 	got := adaptExtraContent(req, "openai")
-	assert.Equal(t, req, got)
+	assert.Same(t, req, got)
 
 	own := &core.ChatRequest{Messages: []core.Message{
 		{Role: "assistant", ContentNull: true, ToolCalls: []core.ToolCall{{ID: "c1", Type: "function", Function: core.FunctionCall{Name: "f", Arguments: "{}"},
@@ -952,7 +952,7 @@ func TestAdaptExtraContent_ReturnsRequestWithoutExtraContent(t *testing.T) {
 			})}}},
 	}}
 	got = adaptExtraContent(own, "gemini")
-	assert.Equal(t, own, got)
+	assert.Same(t, own, got)
 	got = adaptExtraContent(nil, "openai")
 	assert.Nil(t, got)
 }
@@ -1007,7 +1007,7 @@ func TestAdaptResponsesExtraContent_KeepsOwnVendorOnly(t *testing.T) {
 	} {
 		req := &core.ResponsesRequest{Model: "m", Input: input}
 		got := adaptResponsesExtraContent(req, "gemini")
-		assert.Equal(t, req, got, "%s input must be returned as-is", name)
+		assert.Same(t, req, got, "%s input must be returned as-is", name)
 	}
 }
 
@@ -1053,7 +1053,7 @@ func TestAdaptBatchRequest_StripsForeignExtraContentFromOrdinaryBatches(t *testi
 	own := &core.BatchRequest{Endpoint: request.Endpoint, Requests: []core.BatchRequestItem{request.Requests[0], request.Requests[1], request.Requests[3], request.Requests[4]}}
 	got, err := adaptBatchRequest(context.Background(), own, "gemini")
 	assert.NoError(t, err)
-	assert.Equal(t, own, got)
+	assert.Same(t, own, got)
 }
 
 func TestForwardChatRequest_DropsForeignExtraContentForEveryDialect(t *testing.T) {
@@ -1845,7 +1845,7 @@ func TestAdaptAnthropicBatchCacheControl_StripsAnthropicOnlyMessageFieldsForOpen
 	ctx := core.WithRequestDialect(context.Background(), core.RequestDialectAnthropicMessages)
 	got, err := adaptBatchRequest(ctx, request, "anthropic")
 	require.NoError(t, err)
-	require.Equal(t, request, got)
+	require.Same(t, request, got)
 
 	adapted, err := adaptBatchRequest(ctx, request, "openrouter")
 	require.NoError(t, err)

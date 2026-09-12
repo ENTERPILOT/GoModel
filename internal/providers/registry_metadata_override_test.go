@@ -292,7 +292,7 @@ func TestApplyConfigMetadataOverrides_NoOpPreservesPointerIdentity(t *testing.T)
 	applied := applyConfigMetadataOverrides(overrides, modelsByProvider, replacements)
 	assert.Equal(t, 0, applied)
 	got := modelsByProvider["nippur"]["same-model"]
-	assert.Equal(t, existing, got)
+	assert.Same(t, existing, got)
 	assert.Empty(t, replacements)
 }
 
@@ -317,7 +317,7 @@ func TestApplyConfigMetadataOverrides_NonNilEmptyReplacementsDoesNotPanic(t *tes
 
 	next := modelsByProvider["p"]["m"]
 	assert.NotSame(t, existing, next)
-	assert.Equal(t, next, replacements[existing])
+	assert.Same(t, next, replacements[existing])
 }
 
 // TestMetadataOverrideEmpty covers the reflect-based emptiness check so new
