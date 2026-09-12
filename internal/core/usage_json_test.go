@@ -148,7 +148,12 @@ func TestResponsesUsageMarshalJSON_UsesResponsesDetailFieldNames(t *testing.T) {
 	if outputDetails["reasoning_tokens"] != float64(7) {
 		t.Fatalf("output_tokens_details.reasoning_tokens = %#v, want 7", outputDetails["reasoning_tokens"])
 	}
-	if payload["cache_read_input_tokens"] != float64(98) {
-		t.Fatalf("cache_read_input_tokens = %#v, want 98", payload["cache_read_input_tokens"])
+	// The Responses usage object is closed: provider-named members stay in
+	// RawUsage for usage records and cost calculation.
+	if _, exists := payload["cache_read_input_tokens"]; exists {
+		t.Fatalf("did not expect cache_read_input_tokens in marshaled responses payload: %s", string(body))
+	}
+	if _, exists := payload["raw_usage"]; exists {
+		t.Fatalf("did not expect raw_usage in marshaled responses payload: %s", string(body))
 	}
 }

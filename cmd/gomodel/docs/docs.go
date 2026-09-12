@@ -10842,6 +10842,14 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ResponsesIncompleteDetails": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "core.ResponsesOutputItem": {
             "type": "object",
             "properties": {
@@ -10990,6 +10998,14 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "incomplete_details": {
+                    "description": "IncompleteDetails explains a status of \"incomplete\": the model hit\nmax_output_tokens, was stopped by a content filter, or the upstream\nstream was interrupted.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ResponsesIncompleteDetails"
+                        }
+                    ]
+                },
                 "model": {
                     "type": "string"
                 },
@@ -11011,7 +11027,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "description": "\"completed\", \"failed\", \"in_progress\"",
+                    "description": "\"completed\", \"incomplete\", \"failed\", \"in_progress\"",
                     "type": "string"
                 },
                 "usage": {
