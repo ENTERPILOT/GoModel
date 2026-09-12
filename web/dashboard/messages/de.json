@@ -1462,6 +1462,7 @@
   "models_price_batch_output": "Batch-Ausgabe $/MTok",
   "models_price_audio_input": "Audio-Eingabe $/MTok",
   "models_price_audio_output": "Audio-Ausgabe $/MTok",
+  "models_price_output_image_per_mtok": "Bildausgabe $/MTok",
   "models_price_per_image": "$/Bild",
   "models_price_input_image": "Eingabe $/Bild",
   "models_price_input_second": "Eingabe $/Sekunde",
