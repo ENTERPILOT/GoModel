@@ -1,6 +1,10 @@
 package responsecache
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestValidateCacheableSSE(t *testing.T) {
 	t.Parallel()
@@ -114,9 +118,8 @@ func TestValidateCacheableSSE(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := validateCacheableSSE(tt.raw); got != tt.want {
-				t.Fatalf("validateCacheableSSE() = %v, want %v", got, tt.want)
-			}
+			got := validateCacheableSSE(tt.raw)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

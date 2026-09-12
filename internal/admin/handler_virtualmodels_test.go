@@ -1,9 +1,7 @@
 package admin
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,9 +9,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/virtualmodels"
 )
 
@@ -138,12 +138,10 @@ func (c *vmTestCatalog) ProviderNames() []string {
 func newVMService(t *testing.T, catalog *vmTestCatalog, store virtualmodels.Store, defaultEnabled bool) *virtualmodels.Service {
 	t.Helper()
 	service, err := virtualmodels.NewService(store, catalog, defaultEnabled)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return service
 }
 
@@ -170,235 +168,138 @@ func TestListVirtualModels_RedirectAndPolicy(t *testing.T) {
 		redirectVM("smart", "openai/gpt-4o", true),
 		virtualmodels.VirtualModel{Source: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", UserPaths: []string{"/team"}, Enabled: true},
 	)
-	c, rec := newHandlerContext("/admin/virtual-models")
+	c, rec := echotest.Get(t, "/admin/virtual-models")
+	err := h.ListVirtualModels(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
 
-	if err := h.ListVirtualModels(c); err != nil {
-		t.Fatalf("ListVirtualModels() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
+	body := echotest.Decode[[]virtualmodels.View](t, rec)
+	require.Len(t, body, 2)
 
-	var body []virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 2 {
-		t.Fatalf("len(body) = %d, want 2 (%#v)", len(body), body)
-	}
 	kinds := map[string]virtualmodels.View{}
 	for _, v := range body {
 		kinds[v.Source] = v
 	}
-	if got := kinds["smart"]; got.Kind != virtualmodels.KindRedirect || !got.Valid {
-		t.Fatalf("smart view = %#v, want valid redirect", got)
-	}
-	if got := kinds["openai/gpt-4o"]; got.Kind != virtualmodels.KindPolicy {
-		t.Fatalf("policy view = %#v, want policy", got)
-	}
+	assert.Equal(t, virtualmodels.KindRedirect, kinds["smart"].Kind)
+	assert.True(t, kinds["smart"].Valid)
+	assert.Equal(t, virtualmodels.KindPolicy, kinds["openai/gpt-4o"].Kind)
 }
 
 func TestVirtualModelEndpointsReturn503WhenUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
-	e := echo.New()
 
 	assertUnavailable := func(name string, err error, rec *httptest.ResponseRecorder) {
 		t.Helper()
-		if err != nil {
-			t.Fatalf("%s error = %v", name, err)
-		}
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("%s status = %d, want 503", name, rec.Code)
-		}
-		var body map[string]map[string]any
-		if decodeErr := json.Unmarshal(rec.Body.Bytes(), &body); decodeErr != nil {
-			t.Fatalf("%s decode error = %v", name, decodeErr)
-		}
-		if got := body["error"]["code"]; got != "feature_unavailable" {
-			t.Fatalf("%s error code = %v, want feature_unavailable", name, got)
-		}
+		require.NoError(t, err)
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code, name)
+		body := echotest.Decode[map[string]map[string]any](t, rec)
+		assert.Equal(t, "feature_unavailable", body["error"]["code"], name)
 	}
 
-	listCtx, listRec := newHandlerContext("/admin/virtual-models")
+	listCtx, listRec := echotest.Get(t, "/admin/virtual-models")
 	assertUnavailable("ListVirtualModels", h.ListVirtualModels(listCtx), listRec)
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","target_model":"openai/gpt-4o"}`))
-	putReq.Header.Set("Content-Type", "application/json")
-	putRec := httptest.NewRecorder()
-	assertUnavailable("UpsertVirtualModel", h.UpsertVirtualModel(e.NewContext(putReq, putRec)), putRec)
+	putCtx, putRec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","target_model":"openai/gpt-4o"}`)
+	assertUnavailable("UpsertVirtualModel", h.UpsertVirtualModel(putCtx), putRec)
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart"}`))
-	deleteReq.Header.Set("Content-Type", "application/json")
-	deleteRec := httptest.NewRecorder()
-	assertUnavailable("DeleteVirtualModel", h.DeleteVirtualModel(e.NewContext(deleteReq, deleteRec)), deleteRec)
+	deleteCtx, deleteRec := echotest.Request(t, http.MethodDelete, "/admin/virtual-models", `{"source":"smart"}`)
+	assertUnavailable("DeleteVirtualModel", h.DeleteVirtualModel(deleteCtx), deleteRec)
 }
 
 func TestUpsertAndDeleteRedirectVirtualModel(t *testing.T) {
 	h := newVMHandler(t)
-	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","target_model":"openai/gpt-4o","description":"primary"}`))
-	putReq.Header.Set("Content-Type", "application/json")
-	putRec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(putReq, putRec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if putRec.Code != http.StatusOK {
-		t.Fatalf("put status = %d, want 200 body=%s", putRec.Code, putRec.Body.String())
-	}
-	var view virtualmodels.View
-	if err := json.Unmarshal(putRec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode upsert response: %v", err)
-	}
-	if view.Source != "smart" || view.Kind != virtualmodels.KindRedirect {
-		t.Fatalf("view = %#v, want redirect smart", view)
-	}
+	putCtx, putRec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","target_model":"openai/gpt-4o","description":"primary"}`)
+	err := h.UpsertVirtualModel(putCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, putRec.Code, putRec.Body.String())
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart"}`))
-	deleteReq.Header.Set("Content-Type", "application/json")
-	deleteRec := httptest.NewRecorder()
-	if err := h.DeleteVirtualModel(e.NewContext(deleteReq, deleteRec)); err != nil {
-		t.Fatalf("DeleteVirtualModel() error = %v", err)
-	}
-	if deleteRec.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want 204", deleteRec.Code)
-	}
+	view := echotest.Decode[virtualmodels.View](t, putRec)
+	assert.Equal(t, "smart", view.Source)
+	assert.Equal(t, virtualmodels.KindRedirect, view.Kind)
+
+	deleteCtx, deleteRec := echotest.Request(t, http.MethodDelete, "/admin/virtual-models", `{"source":"smart"}`)
+	err = h.DeleteVirtualModel(deleteCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, deleteRec.Code)
 }
 
 func TestUpsertVirtualModelRemovesRedirectAndPreservesPolicyFields(t *testing.T) {
 	h := newVMHandler(t)
-	e := echo.New()
 
-	putBody := `{"source":"gpt-4o","target_model":"openai/gpt-4o","description":"Team model","user_paths":["/team"],"enabled":true}`
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(putBody))
-	putReq.Header.Set("Content-Type", "application/json")
-	putRec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(putReq, putRec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
+	putCtx, _ := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"gpt-4o","target_model":"openai/gpt-4o","description":"Team model","user_paths":["/team"],"enabled":true}`)
+	err := h.UpsertVirtualModel(putCtx)
+	require.NoError(t, err)
 
-	policyBody := `{"source":"gpt-4o","description":"Team model","user_paths":["/team"],"enabled":true}`
-	policyReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(policyBody))
-	policyReq.Header.Set("Content-Type", "application/json")
-	policyRec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(policyReq, policyRec)); err != nil {
-		t.Fatalf("UpsertVirtualModel(policy) error = %v", err)
-	}
-	if policyRec.Code != http.StatusOK {
-		t.Fatalf("policy status = %d, want 200 body=%s", policyRec.Code, policyRec.Body.String())
-	}
+	policyCtx, policyRec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"gpt-4o","description":"Team model","user_paths":["/team"],"enabled":true}`)
+	err = h.UpsertVirtualModel(policyCtx)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, policyRec.Code, policyRec.Body.String())
 
 	vm, ok := h.virtualModels.Get("gpt-4o")
-	if !ok {
-		t.Fatal("policy replacement removed the virtual model")
-	}
-	if vm.IsRedirect() {
-		t.Fatalf("policy replacement left targets %#v", vm.Targets)
-	}
-	if vm.Description != "Team model" || !vm.Enabled {
-		t.Fatalf("policy replacement changed fields: %#v", vm)
-	}
-	if len(vm.UserPaths) != 1 || vm.UserPaths[0] != "/team" {
-		t.Fatalf("policy replacement user paths = %#v, want [/team]", vm.UserPaths)
-	}
+	require.True(t, ok)
+	assert.False(t, vm.IsRedirect(), "policy replacement left targets %#v", vm.Targets)
+	assert.Equal(t, "Team model", vm.Description)
+	assert.True(t, vm.Enabled)
+	assert.Equal(t, []string{"/team"}, vm.UserPaths)
 }
 
 func TestUpsertVirtualModelEmptyEditDropsNoopRecord(t *testing.T) {
 	h := newVMHandler(t, redirectVM("gpt-4o", "openai/gpt-4o", true))
-	e := echo.New()
 
-	putBody := `{"source":"gpt-4o","enabled":true}`
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(putBody))
-	putReq.Header.Set("Content-Type", "application/json")
-	putRec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(putReq, putRec)); err != nil {
-		t.Fatalf("UpsertVirtualModel(empty edit) error = %v", err)
-	}
-	if putRec.Code != http.StatusNoContent {
-		t.Fatalf("put status = %d, want 204 body=%s", putRec.Code, putRec.Body.String())
-	}
-	if _, ok := h.virtualModels.Get("gpt-4o"); ok {
-		t.Fatal("empty edit retained a no-op virtual model")
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"gpt-4o","enabled":true}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	_, ok := h.virtualModels.Get("gpt-4o")
+	assert.False(t, ok)
 }
 
 func TestUpsertVirtualModelRenamesViaOldSource(t *testing.T) {
 	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", false))
-	e := echo.New()
 
-	body := `{"source":"smarter","old_source":"smart","target_model":"openai/gpt-4o"}`
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel(rename) error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("rename status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	var view virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode rename response: %v", err)
-	}
-	if view.Source != "smarter" || view.Kind != virtualmodels.KindRedirect {
-		t.Fatalf("view = %#v, want redirect smarter", view)
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smarter","old_source":"smart","target_model":"openai/gpt-4o"}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	view := echotest.Decode[virtualmodels.View](t, rec)
+	assert.Equal(t, "smarter", view.Source)
+	assert.Equal(t, virtualmodels.KindRedirect, view.Kind)
 	// The omitted enabled flag is carried over from the old row (disabled).
-	if view.Enabled {
-		t.Fatalf("rename flipped a disabled redirect to enabled: %#v", view)
-	}
+	assert.False(t, view.Enabled, "rename flipped a disabled redirect to enabled")
+
 	// The old source no longer exists.
-	if _, ok := h.virtualModels.Get("smart"); ok {
-		t.Fatalf("old source still present after rename")
-	}
+	_, ok := h.virtualModels.Get("smart")
+	assert.False(t, ok)
 }
 
 func TestUpsertVirtualModelRejectsRenameOntoExisting(t *testing.T) {
 	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", true), redirectVM("taken", "openai/gpt-4o", true))
-	e := echo.New()
 
-	body := `{"source":"taken","old_source":"smart","target_model":"openai/gpt-4o"}`
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel(rename conflict) error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("rename conflict status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"taken","old_source":"smart","target_model":"openai/gpt-4o"}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+
 	// Both rows survive the rejected rename.
-	if _, ok := h.virtualModels.Get("smart"); !ok {
-		t.Fatalf("source smart was lost after a rejected rename")
-	}
-	if _, ok := h.virtualModels.Get("taken"); !ok {
-		t.Fatalf("source taken was lost after a rejected rename")
-	}
+	_, ok := h.virtualModels.Get("smart")
+	assert.True(t, ok)
+	_, ok = h.virtualModels.Get("taken")
+	assert.True(t, ok)
 }
 
 func TestUpsertPolicyVirtualModelAcceptsEmptyUserPaths(t *testing.T) {
 	h := newVMHandler(t)
-	e := echo.New()
 
-	putReq := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"openai/gpt-4o","enabled":false}`))
-	putReq.Header.Set("Content-Type", "application/json")
-	putRec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(putReq, putRec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if putRec.Code != http.StatusOK {
-		t.Fatalf("put status = %d, want 200 body=%s", putRec.Code, putRec.Body.String())
-	}
-	var view virtualmodels.View
-	if err := json.Unmarshal(putRec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode upsert response: %v", err)
-	}
-	if view.Kind != virtualmodels.KindPolicy {
-		t.Fatalf("view.Kind = %q, want policy", view.Kind)
-	}
-	if view.Enabled {
-		t.Fatalf("view.Enabled = true, want false (disabled policy)")
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"openai/gpt-4o","enabled":false}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	view := echotest.Decode[virtualmodels.View](t, rec)
+	assert.Equal(t, virtualmodels.KindPolicy, view.Kind)
+	assert.False(t, view.Enabled)
 }
 
 func TestUpsertVirtualModelValidatesSlowdown(t *testing.T) {
@@ -417,28 +318,19 @@ func TestUpsertVirtualModelValidatesSlowdown(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newVMHandler(t)
-			e := echo.New()
 			body := fmt.Sprintf(`{"source":"slow","target_model":"openai/gpt-4o","slowdown":%v}`, tt.slowdown)
-			req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-				t.Fatalf("UpsertVirtualModel() error = %v", err)
-			}
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d body=%s", rec.Code, tt.wantStatus, rec.Body.String())
-			}
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", body)
+			err := h.UpsertVirtualModel(c)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+
 			if tt.wantStatus != http.StatusOK {
 				return
 			}
 
-			var view virtualmodels.View
-			if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-				t.Fatalf("decode response: %v", err)
-			}
-			if view.Slowdown == nil || *view.Slowdown != tt.slowdown {
-				t.Fatalf("view.Slowdown = %v, want %v", view.Slowdown, tt.slowdown)
-			}
+			view := echotest.Decode[virtualmodels.View](t, rec)
+			require.NotNil(t, view.Slowdown)
+			assert.InDelta(t, tt.slowdown, *view.Slowdown, 0)
 		})
 	}
 }
@@ -451,31 +343,16 @@ func TestUpsertRedirectVirtualModelReplacesAccessPolicy(t *testing.T) {
 		UserPaths:    []string{"/team"},
 		Enabled:      true,
 	})
-	e := echo.New()
 
-	body := `{"source":"openai/gpt-4o","target_model":"openai/gpt-4o-mini","description":"fallback","enabled":true}`
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel(policy to redirect) error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	var view virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if view.Kind != virtualmodels.KindRedirect || len(view.Targets) != 1 {
-		t.Fatalf("view = %#v, want one-target redirect", view)
-	}
-	if len(view.UserPaths) != 0 {
-		t.Fatalf("view.UserPaths = %v, want none after full replacement", view.UserPaths)
-	}
-	if got := view.Targets[0]; got.Provider != "" || got.Model != "openai/gpt-4o-mini" {
-		t.Fatalf("target = %+v, want the bare name openai/gpt-4o-mini", got)
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"openai/gpt-4o","target_model":"openai/gpt-4o-mini","description":"fallback","enabled":true}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	view := echotest.Decode[virtualmodels.View](t, rec)
+	assert.Equal(t, virtualmodels.KindRedirect, view.Kind)
+	assert.Empty(t, view.UserPaths)
+	assert.Equal(t, []virtualmodels.Target{{Model: "openai/gpt-4o-mini"}}, view.Targets, "target must keep the bare name")
 }
 
 // A target written as one name is kept by name, so it may chain to a virtual
@@ -483,64 +360,33 @@ func TestUpsertRedirectVirtualModelReplacesAccessPolicy(t *testing.T) {
 // model and is validated as such.
 func TestUpsertVirtualModelBareTargetChainsToSlashNamedVirtualModel(t *testing.T) {
 	h := newVMHandler(t, redirectVM("team/cheap", "openai/gpt-4o", true))
-	e := echo.New()
 
-	body := `{"source":"outer","target_model":"team/cheap","enabled":true}`
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel(outer) error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	var view virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(view.Targets) != 1 || view.Targets[0].Provider != "" || view.Targets[0].Model != "team/cheap" {
-		t.Fatalf("targets = %+v, want the bare name team/cheap", view.Targets)
-	}
-	if view.ResolvedModel != "openai/gpt-4o" {
-		t.Fatalf("resolved_model = %q, want the chained virtual model's target", view.ResolvedModel)
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"outer","target_model":"team/cheap","enabled":true}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	body = `{"source":"pinned","targets":[{"provider":"team","model":"cheap"}],"enabled":true}`
-	req = httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel(pinned) error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for an explicit provider that does not exist body=%s", rec.Code, rec.Body.String())
-	}
+	view := echotest.Decode[virtualmodels.View](t, rec)
+	assert.Equal(t, []virtualmodels.Target{{Model: "team/cheap"}}, view.Targets)
+	assert.Equal(t, "openai/gpt-4o", view.ResolvedModel)
+
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"pinned","targets":[{"provider":"team","model":"cheap"}],"enabled":true}`)
+	err = h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "an explicit provider that does not exist must be rejected: %s", rec.Body.String())
 }
 
 func TestUpsertVirtualModelPreservesEnabledWhenOmitted(t *testing.T) {
 	h := newVMHandler(t, redirectVM("smart", "openai/gpt-4o", false))
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","target_model":"openai/gpt-4o","description":"after"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	var view virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if view.Enabled {
-		t.Fatalf("enabled = true, want false (preserved)")
-	}
-	if view.Description != "after" {
-		t.Fatalf("description = %q, want after", view.Description)
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","target_model":"openai/gpt-4o","description":"after"}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	view := echotest.Decode[virtualmodels.View](t, rec)
+	assert.False(t, view.Enabled)
+	assert.Equal(t, "after", view.Description)
 }
 
 func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
@@ -549,73 +395,39 @@ func TestUpsertVirtualModelLoadBalanced(t *testing.T) {
 	catalog.add("groq/llama", "groq")
 	service := newVMService(t, catalog, newVMTestStore(), true)
 	h := NewHandler(nil, nil, WithVirtualModels(service))
-	e := echo.New()
 
-	body := `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama","weight":2}]}`
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama","weight":2}]}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	var view virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if view.Kind != virtualmodels.KindRedirect {
-		t.Fatalf("kind = %q, want redirect", view.Kind)
-	}
-	if len(view.Targets) != 2 {
-		t.Fatalf("targets = %d, want 2 (%#v)", len(view.Targets), view.Targets)
-	}
-	if view.Strategy != virtualmodels.StrategyCost {
-		t.Fatalf("strategy = %q, want cost", view.Strategy)
-	}
-	if view.Targets[1].Weight != 2 {
-		t.Fatalf("target[1] weight = %v, want 2", view.Targets[1].Weight)
-	}
+	view := echotest.Decode[virtualmodels.View](t, rec)
+	assert.Equal(t, virtualmodels.KindRedirect, view.Kind)
+	assert.Equal(t, virtualmodels.StrategyCost, view.Strategy)
+	require.Len(t, view.Targets, 2)
+	assert.InDelta(t, 2, view.Targets[1].Weight, 0)
 }
 
 func TestUpsertVirtualModelRejectsBlankTargets(t *testing.T) {
 	h := newVMHandler(t)
-	e := echo.New()
 
 	// A targets list whose only entry has an empty model must not be silently
 	// demoted to an access policy.
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","targets":[{"model":"  "}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
-	if !containsString(rec.Body.String(), "invalid_request_error") {
-		t.Fatalf("body = %s, want invalid_request_error", rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","targets":[{"model":"  "}]}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
 func TestUpsertVirtualModelReturns400OnValidationError(t *testing.T) {
 	h := newVMHandler(t)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","target_model":"openai/missing"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
-	if !containsString(rec.Body.String(), "invalid_request_error") {
-		t.Fatalf("body = %s, want invalid_request_error", rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","target_model":"openai/missing"}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "invalid_request_error")
 }
 
 func TestUpsertVirtualModelBubblesProviderErrorOnStoreFailure(t *testing.T) {
@@ -623,32 +435,20 @@ func TestUpsertVirtualModelBubblesProviderErrorOnStoreFailure(t *testing.T) {
 	catalog.add("openai/gpt-4o", "openai")
 	service := newVMService(t, catalog, &failingVMStore{upsertErr: errors.New("disk full")}, true)
 	h := NewHandler(nil, nil, WithVirtualModels(service))
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(`{"source":"smart","target_model":"openai/gpt-4o"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("UpsertVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", `{"source":"smart","target_model":"openai/gpt-4o"}`)
+	err := h.UpsertVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
 }
 
 func TestDeleteVirtualModelNotFound(t *testing.T) {
 	h := newVMHandler(t)
-	e := echo.New()
 
-	req := httptest.NewRequest(http.MethodDelete, "/admin/virtual-models", bytes.NewBufferString(`{"source":"missing"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := h.DeleteVirtualModel(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("DeleteVirtualModel() error = %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodDelete, "/admin/virtual-models", `{"source":"missing"}`)
+	err := h.DeleteVirtualModel(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 }
 
 // TestUpsertVirtualModelTargetOrderRoundTrips pins the contract the
@@ -662,32 +462,21 @@ func TestUpsertVirtualModelTargetOrderRoundTrips(t *testing.T) {
 	catalog.add("anthropic/claude-haiku", "anthropic")
 	service := newVMService(t, catalog, newVMTestStore(redirectVM("smart", "openai/gpt-4o", true)), true)
 	h := NewHandler(nil, nil, WithVirtualModels(service))
-	e := echo.New()
 
 	put := func(body string) {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPut, "/admin/virtual-models", bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		if err := h.UpsertVirtualModel(e.NewContext(req, rec)); err != nil {
-			t.Fatalf("UpsertVirtualModel() error = %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("put status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-		}
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/virtual-models", body)
+		err := h.UpsertVirtualModel(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	}
 
 	// Initial order: gpt-4o is the failover primary.
 	put(`{"source":"smart","strategy":"failover","targets":[{"model":"openai/gpt-4o"},{"model":"openai/gpt-4o-mini"},{"model":"anthropic/claude-haiku"}]}`)
 
 	vm, ok := service.Get("smart")
-	if !ok {
-		t.Fatal("stored virtual model missing after initial put")
-	}
-	want := []string{"openai/gpt-4o", "openai/gpt-4o-mini", "anthropic/claude-haiku"}
-	if !slices.Equal(qualifiedTargetNames(vm.Targets), want) {
-		t.Fatalf("stored order = %v, want %v", vm.Targets, want)
-	}
+	require.True(t, ok)
+	assert.Equal(t, []string{"openai/gpt-4o", "openai/gpt-4o-mini", "anthropic/claude-haiku"}, qualifiedTargetNames(vm.Targets))
 
 	// Reorder save: what the editor sends after dragging the last target onto
 	// the first row. The new primary must land first, the rest keep their
@@ -695,33 +484,19 @@ func TestUpsertVirtualModelTargetOrderRoundTrips(t *testing.T) {
 	put(`{"source":"smart","strategy":"failover","targets":[{"model":"anthropic/claude-haiku"},{"model":"openai/gpt-4o"},{"model":"openai/gpt-4o-mini"}]}`)
 
 	vm, ok = service.Get("smart")
-	if !ok {
-		t.Fatal("stored virtual model missing after reorder put")
-	}
-	want = []string{"anthropic/claude-haiku", "openai/gpt-4o", "openai/gpt-4o-mini"}
-	if !slices.Equal(qualifiedTargetNames(vm.Targets), want) {
-		t.Fatalf("stored order after reorder = %v, want %v", vm.Targets, want)
-	}
+	require.True(t, ok)
+	want := []string{"anthropic/claude-haiku", "openai/gpt-4o", "openai/gpt-4o-mini"}
+	assert.Equal(t, want, qualifiedTargetNames(vm.Targets), "stored order after reorder")
 
 	// The list view the dashboard renders must return the same order.
-	c, rec := newHandlerContext("/admin/virtual-models")
-	if err := h.ListVirtualModels(c); err != nil {
-		t.Fatalf("ListVirtualModels() error = %v", err)
-	}
-	var views []virtualmodels.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
-	for _, view := range views {
-		if view.Source != "smart" {
-			continue
-		}
-		if !slices.Equal(qualifiedTargetNames(view.Targets), want) {
-			t.Fatalf("view order after reorder = %v, want %v", view.Targets, want)
-		}
-		return
-	}
-	t.Fatal("smart missing from list views")
+	c, rec := echotest.Get(t, "/admin/virtual-models")
+	err := h.ListVirtualModels(c)
+	require.NoError(t, err)
+
+	views := echotest.Decode[[]virtualmodels.View](t, rec)
+	idx := slices.IndexFunc(views, func(view virtualmodels.View) bool { return view.Source == "smart" })
+	require.NotEqual(t, -1, idx, "smart missing from list views")
+	assert.Equal(t, want, qualifiedTargetNames(views[idx].Targets), "view order after reorder")
 }
 
 func qualifiedTargetNames(targets []virtualmodels.Target) []string {

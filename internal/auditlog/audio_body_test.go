@@ -3,6 +3,9 @@ package auditlog
 import (
 	"encoding/base64"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsAudioContentType(t *testing.T) {
@@ -19,9 +22,7 @@ func TestIsAudioContentType(t *testing.T) {
 		{"text/plain", false},
 	}
 	for _, tt := range tests {
-		if got := IsAudioContentType(tt.contentType); got != tt.want {
-			t.Errorf("IsAudioContentType(%q) = %v, want %v", tt.contentType, got, tt.want)
-		}
+		assert.Equal(t, tt.want, IsAudioContentType(tt.contentType), "IsAudioContentType(%q)", tt.contentType)
 	}
 }
 
@@ -29,37 +30,25 @@ func TestBuildAudioResponseBody_StoresBase64WhenEnabled(t *testing.T) {
 	data := []byte{0x00, 0x01, 0x02, 0xff, 0xfe}
 	body := BuildAudioResponseBody("audio/mpeg", data, true)
 
-	if !body.Audio {
-		t.Fatal("expected Audio marker to be true")
-	}
-	if !body.Stored || body.Encoding != "base64" {
-		t.Fatalf("expected stored base64, got stored=%v encoding=%q", body.Stored, body.Encoding)
-	}
-	if body.Bytes != len(data) {
-		t.Errorf("Bytes = %d, want %d", body.Bytes, len(data))
-	}
+	require.True(t, body.Audio)
+	require.True(t, body.Stored)
+	require.Equal(t, "base64", body.Encoding)
+	assert.Equal(t, len(data), body.Bytes)
+
 	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	if err != nil {
-		t.Fatalf("stored data is not valid base64: %v", err)
-	}
-	if string(decoded) != string(data) {
-		t.Errorf("round-trip mismatch: audio bytes were not preserved losslessly")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, string(data), string(decoded))
 }
 
 func TestBuildAudioResponseBody_PlaceholderWhenDisabled(t *testing.T) {
 	data := []byte{0x00, 0x01, 0x02}
 	body := BuildAudioResponseBody("audio/mpeg", data, false)
 
-	if !body.Audio {
-		t.Fatal("expected Audio marker to be true")
-	}
-	if body.Stored || body.Data != "" || body.Encoding != "" {
-		t.Errorf("expected no bytes stored when disabled, got %+v", body)
-	}
-	if body.Bytes != len(data) {
-		t.Errorf("Bytes = %d, want %d (size metadata should still be recorded)", body.Bytes, len(data))
-	}
+	require.True(t, body.Audio)
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.Data)
+	assert.Empty(t, body.Encoding, "no bytes should be stored when disabled: %+v", body)
+	assert.Equal(t, len(data), body.Bytes)
 }
 
 func TestBuildAudioUploadBody_StoresBase64AndMeta(t *testing.T) {
@@ -67,40 +56,32 @@ func TestBuildAudioUploadBody_StoresBase64AndMeta(t *testing.T) {
 	meta := map[string]any{"model": "gpt-4o-transcribe", "filename": "a.mp3"}
 	body := BuildAudioUploadBody("audio/mpeg", data, true, meta)
 
-	if !body.Audio || !body.Stored || body.Encoding != "base64" {
-		t.Fatalf("expected stored base64 upload, got %+v", body)
-	}
+	require.True(t, body.Audio)
+	require.True(t, body.Stored)
+	require.Equal(t, "base64", body.Encoding)
+
 	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	if err != nil || string(decoded) != "uploaded-audio" {
-		t.Fatalf("base64 did not round-trip: decoded=%q err=%v", decoded, err)
-	}
-	if body.Meta["model"] != "gpt-4o-transcribe" {
-		t.Errorf("meta not preserved alongside audio: %+v", body.Meta)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "uploaded-audio", string(decoded))
+	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"], "meta not preserved alongside audio: %+v", body.Meta)
 }
 
 func TestBuildAudioUploadBody_PlaceholderKeepsMeta(t *testing.T) {
 	meta := map[string]any{"model": "whisper-1"}
 	body := BuildAudioUploadBody("audio/wav", []byte("x"), false, meta)
 
-	if body.Stored || body.Data != "" {
-		t.Errorf("expected no bytes stored when disabled, got %+v", body)
-	}
-	if body.Meta["model"] != "whisper-1" {
-		t.Errorf("meta should be kept on the placeholder: %+v", body.Meta)
-	}
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.Data, "no bytes should be stored when disabled: %+v", body)
+	assert.Equal(t, "whisper-1", body.Meta["model"], "meta should be kept on the placeholder: %+v", body.Meta)
 }
 
 func TestBuildAudioResponseBody_TooLarge(t *testing.T) {
 	data := make([]byte, audioBodyMaxBytes+1)
 	body := BuildAudioResponseBody("audio/mpeg", data, true)
 
-	if body.Stored || body.Data != "" {
-		t.Error("expected oversized audio to not be stored")
-	}
-	if !body.TooLarge {
-		t.Error("expected TooLarge to be set for oversized audio")
-	}
+	assert.False(t, body.Stored)
+	assert.Empty(t, body.Data)
+	assert.True(t, body.TooLarge)
 }
 
 func TestBuildAudioResponseBody_AvoidsUTF8Corruption(t *testing.T) {
@@ -109,18 +90,10 @@ func TestBuildAudioResponseBody_AvoidsUTF8Corruption(t *testing.T) {
 	data := []byte{0xff, 0xfb, 0x90, 0x00}
 	body := BuildAudioResponseBody("audio/mpeg", data, true)
 	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	if err != nil {
-		t.Fatalf("invalid base64: %v", err)
-	}
+	require.NoError(t, err)
+
 	// The bytes must survive verbatim — the old toValidUTF8String path would
 	// have rewritten 0xff/0x90 into the U+FFFD replacement character (0xEF 0xBF
 	// 0xBD), changing the byte length and content.
-	if len(decoded) != len(data) {
-		t.Fatalf("length changed: got %d bytes, want %d (UTF-8 coercion would have altered this)", len(decoded), len(data))
-	}
-	for i := range data {
-		if decoded[i] != data[i] {
-			t.Fatalf("byte %d = %#x, want %#x", i, decoded[i], data[i])
-		}
-	}
+	require.Equal(t, data, decoded)
 }

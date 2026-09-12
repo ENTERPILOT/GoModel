@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCaptureInternalJSONExchange_PreservesHeadersWithoutBodies(t *testing.T) {
@@ -36,24 +37,15 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWithoutBodies(t *testing.T)
 		LogBodies:  false,
 	})
 
-	if entry.Data == nil {
-		t.Fatal("Data = nil, want populated log data")
-	}
-	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_123" {
-		t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_123", got)
-	}
-	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/alpha" {
-		t.Fatalf("RequestHeaders[%s] = %q, want /team/alpha", core.UserPathHeader, got)
-	}
-	if got := entry.Data.RequestHeaders["Traceparent"]; got == "" {
-		t.Fatal("RequestHeaders[Traceparent] = empty, want propagated trace header")
-	}
-	if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_123" {
-		t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_123", got)
-	}
-	if entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil {
-		t.Fatal("expected no bodies when body logging is disabled")
-	}
+	require.NotNil(t, entry.Data)
+	got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]
+	require.Equal(t, "req_123", got)
+	require.Equal(t, "/team/alpha", entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)])
+	got = entry.Data.RequestHeaders["Traceparent"]
+	require.NotEmpty(t, got)
+	require.Equal(t, "req_123", entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+	require.Nil(t, entry.Data.RequestBody)
+	require.Nil(t, entry.Data.ResponseBody)
 }
 
 func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *testing.T) {
@@ -69,21 +61,12 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 			LogBodies:  true,
 		})
 
-		if entry.Data == nil {
-			t.Fatal("Data = nil, want populated log data")
-		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456" {
-			t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_456", got)
-		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
-			t.Fatalf("RequestHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
-		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456" {
-			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456", got)
-		}
-		if entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil {
-			t.Fatal("expected marshal failures to skip bodies while preserving headers")
-		}
+		require.NotNil(t, entry.Data)
+		require.Equal(t, "req_456", entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+		require.Equal(t, "/team/beta", entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)])
+		require.Equal(t, "req_456", entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+		require.Nil(t, entry.Data.RequestBody)
+		require.Nil(t, entry.Data.ResponseBody)
 	})
 
 	t.Run("response error preserves headers and captures error body", func(t *testing.T) {
@@ -99,41 +82,24 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 			LogBodies:  true,
 		})
 
-		if entry.Data == nil {
-			t.Fatal("Data = nil, want populated log data")
-		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_err" {
-			t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_456_err", got)
-		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
-			t.Fatalf("RequestHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
-		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_err" {
-			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456_err", got)
-		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
-			t.Fatalf("ResponseHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
-		}
+		require.NotNil(t, entry.Data)
+		require.Equal(t, "req_456_err", entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+		require.Equal(t, "/team/beta", entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)])
+		require.Equal(t, "req_456_err", entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+		require.Equal(t, "/team/beta", entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)])
+
 		body, ok := BodyDocument(entry.Data.ResponseBody).(map[string]any)
-		if !ok {
-			t.Fatalf("ResponseBody = %T, want synthesized error envelope", entry.Data.ResponseBody)
-		}
+		require.True(t, ok, "ResponseBody = %T, want synthesized error envelope", entry.Data.ResponseBody)
+
 		errorBody, ok := body["error"].(map[string]any)
-		if !ok {
-			t.Fatalf("ResponseBody[error] = %#v, want object", body["error"])
-		}
-		if got := errorBody["message"]; got != "upstream failed" {
-			t.Fatalf("ResponseBody.error.message = %#v, want upstream failed", got)
-		}
-		if got := errorBody["type"]; got != string(core.ErrorTypeProvider) {
-			t.Fatalf("ResponseBody.error.type = %#v, want %q", got, core.ErrorTypeProvider)
-		}
-		if got, ok := errorBody["param"]; !ok || got != nil {
-			t.Fatalf("ResponseBody.error.param = %#v (present=%t), want nil present field", got, ok)
-		}
-		if got, ok := errorBody["code"]; !ok || got != nil {
-			t.Fatalf("ResponseBody.error.code = %#v (present=%t), want nil present field", got, ok)
-		}
+		require.True(t, ok, "ResponseBody[error] = %#v, want object", body["error"])
+
+		require.Equal(t, "upstream failed", errorBody["message"])
+		require.Equal(t, string(core.ErrorTypeProvider), errorBody["type"])
+		require.Contains(t, errorBody, "param")
+		require.Nil(t, errorBody["param"])
+		require.Contains(t, errorBody, "code")
+		require.Nil(t, errorBody["code"])
 	})
 
 	t.Run("response error takes precedence over body payload", func(t *testing.T) {
@@ -150,16 +116,11 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 		})
 
 		body, ok := BodyDocument(entry.Data.ResponseBody).(map[string]any)
-		if !ok {
-			t.Fatalf("ResponseBody = %T, want synthesized error envelope", entry.Data.ResponseBody)
-		}
+		require.True(t, ok, "ResponseBody = %T, want synthesized error envelope", entry.Data.ResponseBody)
+
 		errorBody, ok := body["error"].(map[string]any)
-		if !ok {
-			t.Fatalf("ResponseBody[error] = %#v, want object", body["error"])
-		}
-		if got := errorBody["message"]; got != "upstream failed" {
-			t.Fatalf("ResponseBody.error.message = %#v, want upstream failed", got)
-		}
+		require.True(t, ok, "ResponseBody[error] = %#v, want object", body["error"])
+		require.Equal(t, "upstream failed", errorBody["message"])
 	})
 
 	t.Run("oversized payload preserves headers and sets truncation flags", func(t *testing.T) {
@@ -180,37 +141,18 @@ func TestCaptureInternalJSONExchange_PreservesHeadersWhenBodyMarshalFails(t *tes
 			},
 		)
 
-		if entry.Data == nil {
-			t.Fatal("Data = nil, want populated log data")
-		}
-		if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_big" {
-			t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_456_big", got)
-		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_456_big" {
-			t.Fatalf("ResponseHeaders[X-Request-ID] = %q, want req_456_big", got)
-		}
-		if got := entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/beta" {
-			t.Fatalf("ResponseHeaders[%s] = %q, want /team/beta", core.UserPathHeader, got)
-		}
-		if !entry.Data.RequestBodyTooBigToHandle {
-			t.Fatal("RequestBodyTooBigToHandle = false, want true")
-		}
-		if entry.Data.RequestBody != nil {
-			t.Fatalf("RequestBody = %#v, want omitted oversized request body", entry.Data.RequestBody)
-		}
-		if !entry.Data.ResponseBodyTooBigToHandle {
-			t.Fatal("ResponseBodyTooBigToHandle = false, want true")
-		}
+		require.NotNil(t, entry.Data)
+		require.Equal(t, "req_456_big", entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+		require.Equal(t, "req_456_big", entry.Data.ResponseHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+		require.Equal(t, "/team/beta", entry.Data.ResponseHeaders[http.CanonicalHeaderKey(core.UserPathHeader)])
+		require.True(t, entry.Data.RequestBodyTooBigToHandle)
+		require.Nil(t, entry.Data.RequestBody)
+		require.True(t, entry.Data.ResponseBodyTooBigToHandle)
+
 		responseBody, ok := entry.Data.ResponseBody.(string)
-		if !ok {
-			t.Fatalf("ResponseBody = %T, want truncated string payload", entry.Data.ResponseBody)
-		}
-		if responseBody == "" {
-			t.Fatal("ResponseBody = empty, want truncated captured payload")
-		}
-		if strings.Contains(responseBody, `"`+large+`"`) {
-			t.Fatal("ResponseBody retained the full oversized payload, want truncated body")
-		}
+		require.True(t, ok, "ResponseBody = %T, want truncated string payload", entry.Data.ResponseBody)
+		require.NotEmpty(t, responseBody)
+		require.False(t, strings.Contains(responseBody, `"`+large+`"`))
 	})
 }
 
@@ -241,19 +183,9 @@ func TestCaptureInternalJSONExchange_DoesNotReuseIngressSnapshotOnMarshalFailure
 		LogBodies:  true,
 	})
 
-	if entry.Data == nil {
-		t.Fatal("Data = nil, want populated log data")
-	}
-	if entry.Data.RequestBody != nil {
-		t.Fatalf("RequestBody = %#v, want nil to avoid leaking ingress snapshot body", entry.Data.RequestBody)
-	}
-	if entry.Data.RequestBodyTooBigToHandle {
-		t.Fatal("RequestBodyTooBigToHandle = true, want false for marshal failure")
-	}
-	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")]; got != "req_789" {
-		t.Fatalf("RequestHeaders[X-Request-ID] = %q, want req_789", got)
-	}
-	if got := entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)]; got != "/team/internal" {
-		t.Fatalf("RequestHeaders[%s] = %q, want /team/internal", core.UserPathHeader, got)
-	}
+	require.NotNil(t, entry.Data)
+	require.Nil(t, entry.Data.RequestBody)
+	require.False(t, entry.Data.RequestBodyTooBigToHandle)
+	require.Equal(t, "req_789", entry.Data.RequestHeaders[http.CanonicalHeaderKey("X-Request-ID")])
+	require.Equal(t, "/team/internal", entry.Data.RequestHeaders[http.CanonicalHeaderKey(core.UserPathHeader)])
 }

@@ -4,6 +4,9 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // responseSideLogDataFields are the LogData fields CreateStreamEntry may
@@ -42,32 +45,23 @@ func TestCreateStreamEntryPreservesRequestRevisions(t *testing.T) {
 	}
 
 	streamEntry := CreateStreamEntry(context.Background(), base)
-	if streamEntry == nil || streamEntry.Data == nil {
-		t.Fatal("expected a stream entry with data")
-	}
+	require.NotNil(t, streamEntry)
+	require.NotNil(t, streamEntry.Data)
 
 	got := streamEntry.Data.RequestRevisions
-	if len(got) != 1 {
-		t.Fatalf("RequestRevisions dropped: got %d revisions, want 1", len(got))
-	}
-	if got[0].Rewriter != "pro-token-compression" || got[0].TokensSaved != 189 {
-		t.Fatalf("revision not copied faithfully: %+v", got[0])
-	}
-	if got[0].BytesBefore != 65209 || got[0].BytesAfter != 64418 {
-		t.Fatalf("revision byte counts not copied: %+v", got[0])
-	}
-	if !streamEntry.Data.RequestBodyTooBigToHandle {
-		t.Error("RequestBodyTooBigToHandle dropped")
-	}
+	require.Len(t, got, 1)
+	require.Equal(t, "pro-token-compression", got[0].Rewriter)
+	require.Equal(t, 189, got[0].TokensSaved, "revision not copied faithfully: %+v", got[0])
+	require.Equal(t, 65209, got[0].BytesBefore)
+	require.Equal(t, 64418, got[0].BytesAfter, "revision byte counts not copied: %+v", got[0])
+	assert.True(t, streamEntry.Data.RequestBodyTooBigToHandle)
 
 	// The copy must own its slice. Appending to the base entry would not show
 	// that: the source literal has no spare capacity, so append reallocates and
 	// leaves the copy alone whether or not the two share an array. Writing
 	// through an existing element is what actually distinguishes them.
 	base.Data.RequestRevisions[0].Rewriter = "mutated"
-	if streamEntry.Data.RequestRevisions[0].Rewriter != "pro-token-compression" {
-		t.Error("stream entry shares its revision backing array with the base entry")
-	}
+	assert.Equal(t, "pro-token-compression", streamEntry.Data.RequestRevisions[0].Rewriter)
 }
 
 // The nil case is the one the stream observer sees most often — most requests
@@ -75,15 +69,10 @@ func TestCreateStreamEntryPreservesRequestRevisions(t *testing.T) {
 // so a streamed entry without rewrites serializes the same as it always did.
 func TestCreateStreamEntryLeavesAbsentRequestRevisionsNil(t *testing.T) {
 	streamEntry := CreateStreamEntry(context.Background(), &LogEntry{ID: "entry-1", Data: &LogData{UserAgent: "curl/8"}})
-	if streamEntry == nil || streamEntry.Data == nil {
-		t.Fatal("expected a stream entry with data")
-	}
-	if streamEntry.Data.RequestRevisions != nil {
-		t.Errorf("RequestRevisions = %#v, want nil", streamEntry.Data.RequestRevisions)
-	}
-	if streamEntry.Data.UserAgent != "curl/8" {
-		t.Errorf("UserAgent = %q, want %q", streamEntry.Data.UserAgent, "curl/8")
-	}
+	require.NotNil(t, streamEntry)
+	require.NotNil(t, streamEntry.Data)
+	assert.Nil(t, streamEntry.Data.RequestRevisions)
+	assert.Equal(t, "curl/8", streamEntry.Data.UserAgent)
 }
 
 // CreateStreamEntry builds LogData with a field whitelist, so any request-side
@@ -101,15 +90,12 @@ func TestCreateStreamEntryCopiesEveryRequestSideField(t *testing.T) {
 		if !v.Field(i).CanSet() {
 			continue
 		}
-		if !setRecognizableValue(v.Field(i)) {
-			t.Fatalf("test needs a sample value for LogData.%s (%s)", field.Name, field.Type)
-		}
+		require.True(t, setRecognizableValue(v.Field(i)), "test needs a sample value for LogData.%s (%s)", field.Name, field.Type)
 	}
 
 	streamEntry := CreateStreamEntry(context.Background(), &LogEntry{ID: "entry-1", Data: populated})
-	if streamEntry == nil || streamEntry.Data == nil {
-		t.Fatal("expected a stream entry with data")
-	}
+	require.NotNil(t, streamEntry)
+	require.NotNil(t, streamEntry.Data)
 
 	copied := reflect.ValueOf(streamEntry.Data).Elem()
 	for i := range typ.NumField() {
@@ -117,9 +103,7 @@ func TestCreateStreamEntryCopiesEveryRequestSideField(t *testing.T) {
 		if responseSideLogDataFields[name] {
 			continue
 		}
-		if copied.Field(i).IsZero() {
-			t.Errorf("LogData.%s is a request-side field but CreateStreamEntry dropped it", name)
-		}
+		assert.False(t, copied.Field(i).IsZero(), "LogData.%s is a request-side field but CreateStreamEntry dropped it", name)
 	}
 }
 

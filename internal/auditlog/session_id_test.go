@@ -3,21 +3,20 @@ package auditlog
 import (
 	"context"
 	"fmt"
-	"slices"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSQLStore_SessionIDRoundtripAndFilter(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
@@ -28,67 +27,51 @@ func TestSQLStore_SessionIDRoundtripAndFilter(t *testing.T) {
 			{ID: "s-3", Timestamp: base.Add(2 * time.Second), Provider: "openai", SessionID: "sess-b"},
 			{ID: "s-4", Timestamp: base.Add(3 * time.Second), Provider: "openai"},
 		}
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		all, err := reader.GetLogs(ctx, LogQueryParams{Limit: 10})
-		if err != nil {
-			t.Fatalf("GetLogs failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		bySession := make(map[string]string, len(all.Entries))
 		for _, entry := range all.Entries {
 			bySession[entry.ID] = entry.SessionID
 		}
-		if bySession["s-1"] != "sess-a" || bySession["s-3"] != "sess-b" || bySession["s-4"] != "" {
-			t.Fatalf("session ids not round-tripped: %#v", bySession)
-		}
+		require.Equal(t, "sess-a", bySession["s-1"])
+		require.Equal(t, "sess-b", bySession["s-3"])
+		require.Empty(t, bySession["s-4"], "session ids not round-tripped: %#v", bySession)
 
 		filtered, err := reader.GetLogs(ctx, LogQueryParams{SessionID: "sess-a", Limit: 10})
-		if err != nil {
-			t.Fatalf("GetLogs with session filter failed: %v", err)
-		}
-		if filtered.Total != 2 || len(filtered.Entries) != 2 {
-			t.Fatalf("session filter: total=%d entries=%d, want 2/2", filtered.Total, len(filtered.Entries))
-		}
+		require.NoError(t, err)
+		require.Equal(t, 2, filtered.Total)
+		require.Len(t, filtered.Entries, 2)
+
 		for _, entry := range filtered.Entries {
-			if entry.SessionID != "sess-a" {
-				t.Fatalf("filter leaked entry %q with session %q", entry.ID, entry.SessionID)
-			}
+			require.Equal(t, "sess-a", entry.SessionID, "filter leaked entry %q with session %q", entry.ID, entry.SessionID)
 		}
 
 		conversation, err := reader.GetConversation(ctx, "s-1", 10)
-		if err != nil {
-			t.Fatalf("GetConversation failed: %v", err)
-		}
-		if conversation.AnchorID != "s-1" || len(conversation.Entries) != 2 {
-			t.Fatalf("conversation = %+v, want the two-entry sess-a thread", conversation)
-		}
-		if conversation.Entries[0].ID != "s-1" || conversation.Entries[1].ID != "s-2" {
-			t.Fatalf("conversation ids = %q, %q; want s-1, s-2",
-				conversation.Entries[0].ID, conversation.Entries[1].ID)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "s-1", conversation.AnchorID)
+		require.Len(t, conversation.Entries, 2, "conversation = %+v, want the two-entry sess-a thread", conversation)
+		require.Equal(t, "s-1", conversation.Entries[0].ID)
+		require.Equal(t, "s-2", conversation.Entries[1].ID)
 	})
 }
 
 func TestSQLReader_GetConversationUsesKeysetPagination(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("NewSQLReader failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		base := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
 		cases := []struct {
@@ -121,27 +104,21 @@ func TestSQLReader_GetConversationUsesKeysetPagination(t *testing.T) {
 						SessionID: sessionID,
 					}
 				}
-				if err := store.WriteBatch(ctx, entries); err != nil {
-					t.Fatalf("WriteBatch failed: %v", err)
-				}
+				err := store.WriteBatch(ctx, entries)
+				require.NoError(t, err)
 
 				conversation, err := reader.GetConversation(ctx, entries[0].ID, 120)
-				if err != nil {
-					t.Fatalf("GetConversation failed: %v", err)
-				}
-				if len(conversation.Entries) != 120 || conversation.Truncated != tc.truncated {
-					t.Fatalf("conversation entries/truncated = %d/%v, want 120/%v",
-						len(conversation.Entries), conversation.Truncated, tc.truncated)
-				}
+				require.NoError(t, err)
+				require.Len(t, conversation.Entries, 120)
+				require.Equal(t, tc.truncated, conversation.Truncated)
+
 				seen := make(map[string]struct{}, len(conversation.Entries))
 				for i, entry := range conversation.Entries {
 					wantID := fmt.Sprintf("%s%03d", prefix, i)
-					if entry.ID != wantID {
-						t.Fatalf("entry %d = %q, want %q", i, entry.ID, wantID)
-					}
-					if _, exists := seen[entry.ID]; exists {
-						t.Fatalf("duplicate entry %q", entry.ID)
-					}
+					require.Equal(t, wantID, entry.ID, "entry %d", i)
+					_, exists := seen[entry.ID]
+					require.False(t, exists, "duplicate entry %q", entry.ID)
+
 					seen[entry.ID] = struct{}{}
 				}
 			})
@@ -152,32 +129,26 @@ func TestSQLReader_GetConversationUsesKeysetPagination(t *testing.T) {
 func TestSQLReader_GetInteractionParentAllowsLegacyNulls(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
 		entry := &LogEntry{ID: "legacy-parent", Timestamp: time.Now().UTC(), UserPath: "/"}
-		if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
-		if _, err := db.Exec(ctx,
-			"UPDATE audit_logs SET user_path = NULL, session_id = NULL WHERE id = ?", entry.ID); err != nil {
-			t.Fatalf("clear legacy parent fields: %v", err)
-		}
+		err = store.WriteBatch(ctx, []*LogEntry{entry})
+		require.NoError(t, err)
+		_, err = db.Exec(ctx,
+			"UPDATE audit_logs SET user_path = NULL, session_id = NULL WHERE id = ?", entry.ID)
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("NewSQLReader failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		parent, err := reader.GetInteractionParent(ctx, entry.ID)
-		if err != nil {
-			t.Fatalf("GetInteractionParent failed: %v", err)
-		}
-		if parent == nil || parent.UserPath != "" || parent.SessionID != "" {
-			t.Fatalf("interaction parent = %#v, want empty legacy fields", parent)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+		require.Empty(t, parent.UserPath)
+		require.Empty(t, parent.SessionID)
 	})
 }
 
@@ -197,44 +168,34 @@ func assertConversationUserPathIsolation(t *testing.T, reader Reader) {
 	t.Helper()
 	ctx := context.Background()
 	conversation, err := reader.GetConversation(ctx, "tenant-a-1", 10)
-	if err != nil {
-		t.Fatalf("GetConversation failed: %v", err)
-	}
-	if len(conversation.Entries) != 2 {
-		t.Fatalf("conversation entries = %+v, want only tenant A", conversation.Entries)
-	}
+	require.NoError(t, err)
+	require.Len(t, conversation.Entries, 2)
+
 	for _, entry := range conversation.Entries {
-		if entry.UserPath != "/tenants/a" {
-			t.Fatalf("conversation leaked %q from %q", entry.ID, entry.UserPath)
-		}
+		require.Equal(t, "/tenants/a", entry.UserPath, "conversation leaked %q from %q", entry.ID, entry.UserPath)
 	}
 
 	rootConversation, err := reader.GetConversation(ctx, "root-1", 10)
-	if err != nil {
-		t.Fatalf("root GetConversation failed: %v", err)
-	}
-	if len(rootConversation.Entries) != 2 || rootConversation.Entries[0].ID != "root-1" || rootConversation.Entries[1].ID != "root-legacy" {
-		t.Fatalf("root conversation leaked child paths: %+v", rootConversation.Entries)
-	}
+	require.NoError(t, err)
+	require.Len(t, rootConversation.Entries, 2)
+	require.Equal(t, "root-1", rootConversation.Entries[0].ID)
+	require.Equal(t, "root-legacy", rootConversation.Entries[1].ID)
 }
 
 func TestSQLReader_GetConversationScopesSessionToUserPath(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
-		if err := store.WriteBatch(ctx, conversationPathIsolationFixture(time.Now().UTC())); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, conversationPathIsolationFixture(time.Now().UTC()))
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
+
 		assertConversationUserPathIsolation(t, reader)
 	})
 }
@@ -242,49 +203,33 @@ func TestSQLReader_GetConversationScopesSessionToUserPath(t *testing.T) {
 func TestSQLReader_GetSessions(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
 		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
 		entries := sessionThreadFixture(base)
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		result, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions failed: %v", err)
-		}
-		if result.Total != 3 || len(result.Sessions) != 3 {
-			t.Fatalf("total=%d sessions=%d, want 3/3", result.Total, len(result.Sessions))
-		}
-
+		require.NoError(t, err)
+		require.Equal(t, 3, result.Total)
+		require.Len(t, result.Sessions, 3)
 		// Ordered by latest activity: solo (10:03), sess-a (10:02), sess-b (10:01).
-		if got := result.Sessions[0].Latest.ID; got != "solo" {
-			t.Fatalf("sessions[0].Latest.ID = %q, want solo", got)
-		}
-		if result.Sessions[0].SessionID != "" || result.Sessions[0].RequestCount != 1 {
-			t.Fatalf("singleton thread = %+v", result.Sessions[0])
-		}
+		require.Equal(t, "solo", result.Sessions[0].Latest.ID)
+		require.Empty(t, result.Sessions[0].SessionID)
+		require.Equal(t, 1, result.Sessions[0].RequestCount, "singleton thread = %+v", result.Sessions[0])
 
 		threadA := result.Sessions[1]
-		if threadA.SessionID != "sess-a" || threadA.RequestCount != 2 {
-			t.Fatalf("sess-a summary = %+v", threadA)
-		}
-		if threadA.Latest.ID != "a-2" {
-			t.Fatalf("sess-a latest = %q, want a-2", threadA.Latest.ID)
-		}
-		if result.Sessions[2].SessionID != "sess-b" {
-			t.Fatalf("sessions[2] = %+v", result.Sessions[2])
-		}
+		require.Equal(t, "sess-a", threadA.SessionID)
+		require.Equal(t, 2, threadA.RequestCount, "sess-a summary = %+v", threadA)
+		require.Equal(t, "a-2", threadA.Latest.ID)
+		require.Equal(t, "sess-b", result.Sessions[2].SessionID, "sessions[2] = %+v", result.Sessions[2])
 
 		// The thread head is a full list row, not just the columns the
 		// grouping pass ranks on.
@@ -310,7 +255,7 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 		ctx := context.Background()
 		// The audit_logs table exactly as the standalone PostgreSQL store
 		// created it; session_id is absent and arrives via migration.
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE audit_logs (
 				id UUID PRIMARY KEY,
 				timestamp TIMESTAMPTZ NOT NULL,
@@ -352,14 +297,12 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 				started_at TIMESTAMPTZ,
 				duration_ns BIGINT DEFAULT 0,
 				UNIQUE(audit_log_id, seq)
-			)`); err != nil {
-			t.Fatalf("create legacy tables: %v", err)
-		}
+			)`)
+		require.NoError(t, err)
 
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
@@ -368,21 +311,17 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 			{ID: "b32d7a52-0000-4000-8000-000000000002", Timestamp: base.Add(time.Minute), Provider: "openai", SessionID: "sess-a", StatusCode: 200},
 			{ID: "b32d7a52-0000-4000-8000-000000000003", Timestamp: base.Add(2 * time.Minute), Provider: "openai", StatusCode: 200},
 		}
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
+
 		result, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions failed: %v", err)
-		}
-		if result.Total != 2 || len(result.Sessions) != 2 {
-			t.Fatalf("total=%d sessions=%d, want 2/2", result.Total, len(result.Sessions))
-		}
+		require.NoError(t, err)
+		require.Equal(t, 2, result.Total)
+		require.Len(t, result.Sessions, 2)
+
 		want := []struct {
 			latestID     string
 			sessionID    string
@@ -393,10 +332,9 @@ func TestSQLReader_GetSessionsOnLegacyUUIDSchema(t *testing.T) {
 		}
 		for i, tt := range want {
 			got := result.Sessions[i]
-			if got.Latest.ID != tt.latestID || got.SessionID != tt.sessionID || got.RequestCount != tt.requestCount {
-				t.Fatalf("sessions[%d] = %+v, want latest %q session %q count %d",
-					i, got, tt.latestID, tt.sessionID, tt.requestCount)
-			}
+			require.Equal(t, tt.latestID, got.Latest.ID)
+			require.Equal(t, tt.sessionID, got.SessionID)
+			require.Equal(t, tt.requestCount, got.RequestCount, "sessions[%d] = %+v, want latest %q session %q count %d", i, got, tt.latestID, tt.sessionID, tt.requestCount)
 		}
 	})
 }
@@ -425,19 +363,15 @@ func sessionThreadFixture(base time.Time) []*LogEntry {
 func assertGetSessionsHeadPayload(t *testing.T, reader Reader) {
 	t.Helper()
 	result, err := reader.GetSessions(context.Background(), LogQueryParams{SessionID: "sess-a", Limit: 10})
-	if err != nil {
-		t.Fatalf("GetSessions() error = %v", err)
-	}
-	if len(result.Sessions) != 1 {
-		t.Fatalf("sessions = %d, want 1", len(result.Sessions))
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Sessions, 1)
+
 	head := result.Sessions[0].Latest
-	if head.Provider != "openai" || head.Path != "/v1/chat/completions" || head.StatusCode != 200 {
-		t.Fatalf("head lost list columns: %+v", head)
-	}
-	if head.Data == nil || head.Data.UserAgent != "probe/1.0" {
-		t.Fatalf("head lost its data payload: %+v", head.Data)
-	}
+	require.Equal(t, "openai", head.Provider)
+	require.Equal(t, "/v1/chat/completions", head.Path)
+	require.Equal(t, 200, head.StatusCode, "head lost list columns: %+v", head)
+	require.NotNil(t, head.Data)
+	require.Equal(t, "probe/1.0", head.Data.UserAgent)
 }
 
 // assertGetSessionsPaging walks the thread list one page at a time: the window
@@ -448,20 +382,13 @@ func assertGetSessionsPaging(t *testing.T, reader Reader) {
 	var ids []string
 	for offset := range 3 {
 		result, err := reader.GetSessions(context.Background(), LogQueryParams{Limit: 1, Offset: offset})
-		if err != nil {
-			t.Fatalf("GetSessions(offset=%d) error = %v", offset, err)
-		}
-		if result.Total != 3 {
-			t.Fatalf("offset %d: total = %d, want 3", offset, result.Total)
-		}
-		if len(result.Sessions) != 1 {
-			t.Fatalf("offset %d: sessions = %d, want 1", offset, len(result.Sessions))
-		}
+		require.NoError(t, err)
+		require.Equal(t, 3, result.Total, "offset %d", offset)
+		require.Len(t, result.Sessions, 1)
+
 		ids = append(ids, result.Sessions[0].Latest.ID)
 	}
-	if want := []string{"solo", "a-2", "b-1"}; !slices.Equal(ids, want) {
-		t.Fatalf("paged heads = %v, want %v", ids, want)
-	}
+	require.Equal(t, []string{"solo", "a-2", "b-1"}, ids)
 }
 
 // assertGetSessionsFilters runs the shared filtered-grouping cases against a
@@ -514,17 +441,14 @@ func assertGetSessionsFilters(t *testing.T, reader Reader) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := reader.GetSessions(context.Background(), tt.params)
-			if err != nil {
-				t.Fatalf("GetSessions() error = %v", err)
-			}
-			if result.Total != 1 || len(result.Sessions) != 1 {
-				t.Fatalf("result = %+v, want exactly one thread", result)
-			}
+			require.NoError(t, err)
+			require.Equal(t, 1, result.Total)
+			require.Len(t, result.Sessions, 1, "result = %+v, want exactly one thread", result)
+
 			got := result.Sessions[0]
-			if got.SessionID != tt.wantSessionID || got.RequestCount != tt.wantRequestCount || got.Latest.ID != tt.wantLatestID {
-				t.Fatalf("thread = %+v, want session %q request count %d latest %q",
-					got, tt.wantSessionID, tt.wantRequestCount, tt.wantLatestID)
-			}
+			require.Equal(t, tt.wantSessionID, got.SessionID)
+			require.Equal(t, tt.wantRequestCount, got.RequestCount)
+			require.Equal(t, tt.wantLatestID, got.Latest.ID, "thread = %+v, want session %q request count %d latest %q", got, tt.wantSessionID, tt.wantRequestCount, tt.wantLatestID)
 		})
 	}
 }
@@ -536,12 +460,8 @@ func TestCreateStreamEntryPreservesSessionID(t *testing.T) {
 		SessionID: "sess-42",
 	}
 	streamEntry := CreateStreamEntry(context.Background(), base)
-	if streamEntry == nil {
-		t.Fatal("expected a stream entry")
-	}
-	if streamEntry.SessionID != "sess-42" {
-		t.Fatalf("SessionID = %q, want %q (lost in the whitelist copy)", streamEntry.SessionID, "sess-42")
-	}
+	require.NotNil(t, streamEntry)
+	require.Equal(t, "sess-42", streamEntry.SessionID)
 }
 
 // The stream copy is created mid-handler, before the audit middleware's
@@ -551,12 +471,8 @@ func TestCreateStreamEntryPreservesSessionID(t *testing.T) {
 func TestCreateStreamEntryCapturesSessionIDFromContext(t *testing.T) {
 	ctx := core.WithSessionID(context.Background(), "sess-ctx")
 	streamEntry := CreateStreamEntry(ctx, &LogEntry{ID: "entry-1", Path: "/v1/chat/completions"})
-	if streamEntry == nil {
-		t.Fatal("expected a stream entry")
-	}
-	if streamEntry.SessionID != "sess-ctx" {
-		t.Fatalf("SessionID = %q, want context-derived %q", streamEntry.SessionID, "sess-ctx")
-	}
+	require.NotNil(t, streamEntry)
+	require.Equal(t, "sess-ctx", streamEntry.SessionID)
 }
 
 // The stream copy must finalize every context-derived identity field the
@@ -573,15 +489,12 @@ func TestCreateStreamEntryFinalizesContextIdentity(t *testing.T) {
 		Path: "/v1/chat/completions",
 		Data: &LogData{Labels: []string{"pre-auth"}},
 	})
-	if streamEntry == nil || streamEntry.Data == nil {
-		t.Fatal("expected a stream entry with data")
-	}
-	if streamEntry.SessionID != "sess-ctx" || streamEntry.AuthKeyID != "key-1" {
-		t.Fatalf("identity not finalized: session=%q auth=%q", streamEntry.SessionID, streamEntry.AuthKeyID)
-	}
-	if len(streamEntry.Data.Labels) != 2 || streamEntry.Data.Labels[0] != "team-a" {
-		t.Fatalf("managed-key labels lost on the stream copy: %#v", streamEntry.Data.Labels)
-	}
+	require.NotNil(t, streamEntry)
+	require.NotNil(t, streamEntry.Data)
+	require.Equal(t, "sess-ctx", streamEntry.SessionID)
+	require.Equal(t, "key-1", streamEntry.AuthKeyID)
+	require.Len(t, streamEntry.Data.Labels, 2)
+	require.Equal(t, "team-a", streamEntry.Data.Labels[0])
 }
 
 // The page query yields the thread total on every row, so an empty page has
@@ -590,34 +503,26 @@ func TestCreateStreamEntryFinalizesContextIdentity(t *testing.T) {
 func TestSQLReader_GetSessionsTotalOnEmptyPage(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
+
 		ctx := context.Background()
 
 		empty, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10})
-		if err != nil {
-			t.Fatalf("GetSessions(empty) failed: %v", err)
-		}
-		if empty.Total != 0 || len(empty.Sessions) != 0 {
-			t.Fatalf("empty window: total=%d sessions=%d, want 0/0", empty.Total, len(empty.Sessions))
-		}
+		require.NoError(t, err)
+		require.Equal(t, 0, empty.Total)
+		require.Empty(t, empty.Sessions)
 
 		base := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
-		if err := store.WriteBatch(ctx, sessionThreadFixture(base)); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, sessionThreadFixture(base))
+		require.NoError(t, err)
+
 		past, err := reader.GetSessions(ctx, LogQueryParams{Limit: 10, Offset: 50})
-		if err != nil {
-			t.Fatalf("GetSessions(past end) failed: %v", err)
-		}
-		if past.Total != 3 || len(past.Sessions) != 0 {
-			t.Fatalf("past last page: total=%d sessions=%d, want 3/0", past.Total, len(past.Sessions))
-		}
+		require.NoError(t, err)
+		require.Equal(t, 3, past.Total)
+		require.Empty(t, past.Sessions)
 	})
 }
