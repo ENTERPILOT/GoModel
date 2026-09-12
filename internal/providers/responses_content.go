@@ -49,6 +49,19 @@ func ConvertResponsesContentToChatContent(content any) (any, bool) {
 // chat providers such as Fireworks reject unknown members of a text part.
 var responsesOnlyTextKeys = []string{"annotations", "logprobs"}
 
+// responsesOnlyItemKeys are input-item members that a chat message has no place
+// for. Replayed Responses output items always carry an "id" (the OpenAI SDK
+// emits one on every output item), and strict chat providers reject it:
+// Groq answers "property 'id' is unsupported", Fireworks "Extra inputs are not
+// permitted, field: 'messages[1].id'".
+var responsesOnlyItemKeys = []string{"id"}
+
+// chatExtraFieldsFromResponsesItem copies the unknown members of a Responses
+// input item onto a chat message, dropping the Responses-only ones.
+func chatExtraFieldsFromResponsesItem(fields core.UnknownJSONFields) core.UnknownJSONFields {
+	return core.CloneUnknownJSONFields(fields.Without(responsesOnlyItemKeys...))
+}
+
 func convertResponsesContentParts(parts []any) (any, bool) {
 	typedParts := make([]core.ContentPart, 0, len(parts))
 

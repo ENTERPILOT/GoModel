@@ -85,8 +85,7 @@ func (m *simpleCacheMiddleware) TryHit(ex exchange, body []byte) (bool, error) {
 		return false, nil
 	}
 	path := ex.Path()
-	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := exactCacheKey(ex, body)
 	cached, err := m.store.Get(ex.Context(), key)
 	if err != nil {
 		return false, nil
@@ -116,9 +115,7 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 	if m == nil || m.store == nil {
 		return next()
 	}
-	path := ex.Path()
-	plan := core.GetWorkflow(ex.Context())
-	key := hashRequest(path, body, plan)
+	key := exactCacheKey(ex, body)
 
 	call, leader := m.joinMiss(key)
 	if leader {
@@ -150,6 +147,13 @@ func (m *simpleCacheMiddleware) StoreAfter(ex exchange, body []byte, next func()
 		m.hitRecorder(ex, call.data, CacheTypeExact)
 	}
 	return err
+}
+
+// exactCacheKey derives the exact-cache key for one exchange, scoping the entry
+// to the request's guardrail chain identity.
+func exactCacheKey(ex exchange, body []byte) string {
+	ctx := ex.Context()
+	return hashRequest(ex.Path(), body, core.GetWorkflow(ctx), core.GetGuardrailsHash(ctx))
 }
 
 // captureAndStore executes one cache miss without joining the coalescing
@@ -269,7 +273,13 @@ func isStreamingRequestGJSON(path string, body []byte) bool {
 	return result.Bool()
 }
 
-func hashRequest(path string, body []byte, plan *core.Workflow) string {
+// hashRequest builds the exact-cache key. chainHash is the effective guardrail
+// chain identity (prompt, response and stream phases; see plugins.Chains.CacheHash),
+// already computed once per request by the workflow compiler and carried on the
+// context. Mixing it in scopes every entry to the chain that produced it, so a
+// request whose response or stream guardrails differ misses instead of being
+// served a body those guardrails never saw.
+func hashRequest(path string, body []byte, plan *core.Workflow, chainHash string) string {
 	h := sha256.New()
 	h.Write([]byte(path))
 	h.Write([]byte{0})
@@ -281,6 +291,8 @@ func hashRequest(path string, body []byte, plan *core.Workflow) string {
 		h.Write([]byte(plan.ResolvedQualifiedModel()))
 		h.Write([]byte{0})
 	}
+	h.Write([]byte(chainHash))
+	h.Write([]byte{0})
 	h.Write(cacheKeyRequestBody(path, body))
 	return hex.EncodeToString(h.Sum(nil))
 }

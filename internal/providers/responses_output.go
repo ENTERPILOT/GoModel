@@ -197,16 +197,22 @@ func toolCallExtraContent(fields core.UnknownJSONFields) core.UnknownJSONFields 
 	return core.UnknownJSONFieldsFromMap(map[string]json.RawMessage{core.ExtraContentField: raw})
 }
 
+// responseMessageReasoningContent returns the reasoning text a provider
+// surfaced on the message: "reasoning_content" (DeepSeek, Fireworks, the
+// anthropic provider) or the vendor "reasoning" member (Groq, OpenRouter),
+// the same precedence the streaming codec applies.
 func responseMessageReasoningContent(msg core.ResponseMessage) string {
-	raw := msg.ExtraFields.Lookup("reasoning_content")
-	if len(raw) == 0 {
-		return ""
+	for _, member := range []string{"reasoning_content", "reasoning"} {
+		raw := msg.ExtraFields.Lookup(member)
+		if len(raw) == 0 {
+			continue
+		}
+		var content string
+		if err := json.Unmarshal(raw, &content); err == nil && content != "" {
+			return content
+		}
 	}
-	var content string
-	if err := json.Unmarshal(raw, &content); err != nil {
-		return ""
-	}
-	return content
+	return ""
 }
 
 // ConvertChatResponseToResponses converts a ChatResponse to a ResponsesResponse.

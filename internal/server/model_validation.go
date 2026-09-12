@@ -105,6 +105,17 @@ func deriveWorkflowWithPolicy(
 
 	case core.OperationChatCompletions, core.OperationResponses, core.OperationEmbeddings:
 		workflow.Mode = core.ExecutionModeTranslated
+		if desc.BodyMode != core.BodyModeJSON {
+			// Responses lifecycle routes (GET/DELETE /v1/responses/{id},
+			// /cancel, /input_items) address a stored response by id and carry
+			// no model. Running the create-path model resolution on them turns
+			// any JSON body a client happens to send — `{}` included — into a
+			// misleading "model is required" 400.
+			if err := applyWorkflowPolicy(c.Request().Context(), workflow, policyResolver, core.WorkflowSelector{}); err != nil {
+				return nil, err
+			}
+			return workflow, nil
+		}
 		resolution, parsed, err := ensureRequestModelResolution(c, provider, resolver)
 		if err != nil {
 			return nil, err
