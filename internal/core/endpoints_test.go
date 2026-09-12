@@ -3,6 +3,8 @@ package core
 import (
 	"net/http"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDescribeEndpointPath(t *testing.T) {
@@ -47,21 +49,11 @@ func TestDescribeEndpointPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			got := DescribeEndpointPath(tt.path)
-			if got.ModelInteraction != tt.interaction {
-				t.Fatalf("ModelInteraction = %v, want %v", got.ModelInteraction, tt.interaction)
-			}
-			if got.IngressManaged != tt.managed {
-				t.Fatalf("IngressManaged = %v, want %v", got.IngressManaged, tt.managed)
-			}
-			if got.Dialect != tt.dialect {
-				t.Fatalf("Dialect = %q, want %q", got.Dialect, tt.dialect)
-			}
-			if got.Operation != tt.operation {
-				t.Fatalf("Operation = %q, want %q", got.Operation, tt.operation)
-			}
-			if got.BodyMode != tt.bodyMode {
-				t.Fatalf("BodyMode = %q, want %q", got.BodyMode, tt.bodyMode)
-			}
+			require.Equal(t, tt.interaction, got.ModelInteraction)
+			require.Equal(t, tt.managed, got.IngressManaged)
+			require.Equal(t, tt.dialect, got.Dialect)
+			require.Equal(t, tt.operation, got.Operation)
+			require.Equal(t, tt.bodyMode, got.BodyMode)
 		})
 	}
 }
@@ -116,22 +108,14 @@ func TestDescribeEndpoint_UsesMethodForBodyMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.method+" "+tt.path, func(t *testing.T) {
 			got := DescribeEndpoint(tt.method, tt.path)
-			if got.BodyMode != tt.bodyMode {
-				t.Fatalf("BodyMode = %q, want %q", got.BodyMode, tt.bodyMode)
-			}
+			require.Equal(t, tt.bodyMode, got.BodyMode)
 		})
 	}
 }
 
 func TestParseProviderPassthroughPath(t *testing.T) {
 	provider, endpoint, ok := ParseProviderPassthroughPath("/p/anthropic/messages/batches")
-	if !ok {
-		t.Fatal("ok = false, want true")
-	}
-	if provider != "anthropic" {
-		t.Fatalf("provider = %q, want anthropic", provider)
-	}
-	if endpoint != "messages/batches" {
-		t.Fatalf("endpoint = %q, want messages/batches", endpoint)
-	}
+	require.True(t, ok)
+	require.Equal(t, "anthropic", provider)
+	require.Equal(t, "messages/batches", endpoint)
 }

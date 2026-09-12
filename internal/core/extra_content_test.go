@@ -4,14 +4,15 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func extraContentFields(t *testing.T, raw string) UnknownJSONFields {
 	t.Helper()
 	var members map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &members); err != nil {
-		t.Fatal(err)
-	}
+	err := json.Unmarshal([]byte(raw), &members)
+	require.NoError(t, err)
 	return UnknownJSONFieldsFromMap(members)
 }
 
@@ -32,9 +33,7 @@ func TestUnknownJSONFields_ExtraContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := string(extraContentFields(t, tt.fields).ExtraContent(tt.vendor))
-			if got != tt.want {
-				t.Errorf("ExtraContent(%q) = %s, want %s", tt.vendor, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "ExtraContent(%q)", tt.vendor)
 		})
 	}
 }
@@ -56,9 +55,8 @@ func TestUnknownJSONFields_WithExtraContent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := extraContentFields(t, tt.fields).WithExtraContent(tt.vendor, json.RawMessage(tt.value))
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			assertSameJSON(t, got, tt.want)
 		})
 	}
@@ -84,9 +82,7 @@ func TestUnknownJSONFields_WithoutForeignExtraContent(t *testing.T) {
 			fields := extraContentFields(t, tt.fields)
 			got := fields.WithoutForeignExtraContent(tt.keep)
 			assertSameJSON(t, got, tt.want)
-			if has, changed := fields.HasForeignExtraContent(tt.keep), tt.fields != tt.want; has != changed {
-				t.Errorf("HasForeignExtraContent(%q) = %v, want %v", tt.keep, has, changed)
-			}
+			assert.Equal(t, tt.fields != tt.want, fields.HasForeignExtraContent(tt.keep), "HasForeignExtraContent(%q)", tt.keep)
 		})
 	}
 }
@@ -97,16 +93,5 @@ func assertSameJSON(t *testing.T, fields UnknownJSONFields, want string) {
 	if fields.IsEmpty() {
 		raw = []byte("{}")
 	}
-	var got, expected any
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("fields %s: %v", raw, err)
-	}
-	if err := json.Unmarshal([]byte(want), &expected); err != nil {
-		t.Fatal(err)
-	}
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(expected)
-	if string(gotJSON) != string(wantJSON) {
-		t.Errorf("fields = %s, want %s", gotJSON, wantJSON)
-	}
+	assert.JSONEq(t, want, string(raw))
 }

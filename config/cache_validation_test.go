@@ -1,8 +1,10 @@
 package config
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateCacheConfig_BothLocalAndRedis(t *testing.T) {
@@ -12,9 +14,8 @@ func TestValidateCacheConfig_BothLocalAndRedis(t *testing.T) {
 			Redis: &RedisModelConfig{URL: "redis://localhost:6379"},
 		},
 	}
-	if err := ValidateCacheConfig(cfg); err != nil {
-		t.Fatalf("both local and redis should be valid (redis preferred, local is fallback): %v", err)
-	}
+	err := ValidateCacheConfig(cfg)
+	require.NoError(t, err)
 }
 
 func TestValidateCacheConfig_NeitherLocalNorRedis(t *testing.T) {
@@ -25,12 +26,8 @@ func TestValidateCacheConfig_NeitherLocalNorRedis(t *testing.T) {
 		},
 	}
 	err := ValidateCacheConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error when neither local nor redis configured")
-	}
-	if err.Error() != "cache.model: must have either local or redis configured" {
-		t.Errorf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	assert.Equal(t, "cache.model: must have either local or redis configured", err.Error())
 }
 
 func TestValidateCacheConfig_RedisWithoutURL(t *testing.T) {
@@ -41,12 +38,8 @@ func TestValidateCacheConfig_RedisWithoutURL(t *testing.T) {
 		},
 	}
 	err := ValidateCacheConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error when redis configured but URL empty")
-	}
-	if err.Error() != "cache.model.redis: URL is required when using redis" {
-		t.Errorf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	assert.Equal(t, "cache.model.redis: URL is required when using redis", err.Error())
 }
 
 func TestValidateCacheConfig_LocalOnly(t *testing.T) {
@@ -57,9 +50,7 @@ func TestValidateCacheConfig_LocalOnly(t *testing.T) {
 		},
 	}
 	err := ValidateCacheConfig(cfg)
-	if err != nil {
-		t.Errorf("expected no error for valid local config: %v", err)
-	}
+	assert.NoError(t, err)
 }
 
 func TestValidateCacheConfig_RedisOnly(t *testing.T) {
@@ -70,9 +61,7 @@ func TestValidateCacheConfig_RedisOnly(t *testing.T) {
 		},
 	}
 	err := ValidateCacheConfig(cfg)
-	if err != nil {
-		t.Errorf("expected no error for valid redis config: %v", err)
-	}
+	assert.NoError(t, err)
 }
 
 func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testing.T) {
@@ -91,9 +80,8 @@ func TestValidateCacheConfig_SemanticDisabledIgnoresInvalidVectorStore(t *testin
 			},
 		},
 	}
-	if err := ValidateCacheConfig(cfg); err != nil {
-		t.Fatalf("expected no error when semantic cache disabled: %v", err)
-	}
+	err := ValidateCacheConfig(cfg)
+	require.NoError(t, err)
 }
 
 func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
@@ -114,9 +102,7 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantURL(t *testing.T) {
 			},
 		},
 	}
-	if err := ValidateCacheConfig(cfg); err == nil {
-		t.Fatal("expected error when semantic enabled without qdrant URL")
-	}
+	require.Error(t, ValidateCacheConfig(cfg))
 }
 
 func TestValidateCacheConfig_SemanticEnabledRequiresQdrantCollection(t *testing.T) {
@@ -138,9 +124,7 @@ func TestValidateCacheConfig_SemanticEnabledRequiresQdrantCollection(t *testing.
 			},
 		},
 	}
-	if err := ValidateCacheConfig(cfg); err == nil {
-		t.Fatal("expected error when qdrant collection empty")
-	}
+	require.Error(t, ValidateCacheConfig(cfg))
 }
 
 func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
@@ -179,12 +163,8 @@ func TestValidateCacheConfig_SemanticSimilarityThresholdInvalid(t *testing.T) {
 			cfg := base
 			cfg.Response.Semantic.SimilarityThreshold = tc.th
 			err := ValidateCacheConfig(&cfg)
-			if err == nil {
-				t.Fatal("expected error")
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error should mention %q: %v", tc.want, err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
 		})
 	}
 }
@@ -211,12 +191,8 @@ func TestValidateCacheConfig_SemanticRequiresEmbedderProvider(t *testing.T) {
 		},
 	}
 	err := ValidateCacheConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error when semantic enabled without embedder provider")
-	}
-	if !strings.Contains(err.Error(), "embedder.provider") {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "embedder.provider")
 }
 
 func TestValidateCacheConfig_SemanticRejectsLocalEmbedder(t *testing.T) {
@@ -242,9 +218,7 @@ func TestValidateCacheConfig_SemanticRejectsLocalEmbedder(t *testing.T) {
 		},
 	}
 	err := ValidateCacheConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error for local embedder provider")
-	}
+	require.Error(t, err)
 }
 
 func TestValidateCacheConfig_SemanticNegativeTTL(t *testing.T) {
@@ -270,10 +244,6 @@ func TestValidateCacheConfig_SemanticNegativeTTL(t *testing.T) {
 		},
 	}
 	err := ValidateCacheConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error for negative semantic ttl")
-	}
-	if !strings.Contains(err.Error(), "ttl") {
-		t.Fatalf("expected ttl in error: %v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ttl")
 }

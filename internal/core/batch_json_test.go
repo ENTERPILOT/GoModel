@@ -3,6 +3,8 @@ package core
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBatchRequestJSON_PreservesUnknownFields(t *testing.T) {
@@ -21,58 +23,40 @@ func TestBatchRequestJSON_PreservesUnknownFields(t *testing.T) {
 		}],
 		"x_top":{"trace":"batch-1","mode":"strict"}
 	}`)
-	if err := json.Unmarshal(body, &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err := json.Unmarshal(body, &req)
+	require.NoError(t, err)
+	require.NotNil(t, req.ExtraFields.Lookup("x_top"), "x_top missing from ExtraFields: %+v", req.ExtraFields)
 
-	if req.ExtraFields.Lookup("x_top") == nil {
-		t.Fatalf("x_top missing from ExtraFields: %+v", req.ExtraFields)
-	}
 	var topExtra map[string]any
-	if err := json.Unmarshal(req.ExtraFields.Lookup("x_top"), &topExtra); err != nil {
-		t.Fatalf("failed to decode x_top: %v", err)
-	}
-	if topExtra["trace"] != "batch-1" || topExtra["mode"] != "strict" {
-		t.Fatalf("x_top = %#v, want trace=batch-1 mode=strict", topExtra)
-	}
-	if len(req.Requests) != 1 {
-		t.Fatalf("len(Requests) = %d, want 1", len(req.Requests))
-	}
-	if req.Requests[0].ExtraFields.Lookup("x_item_flag") == nil {
-		t.Fatalf("x_item_flag missing from Requests[0].ExtraFields: %+v", req.Requests[0].ExtraFields)
-	}
+	err = json.Unmarshal(req.ExtraFields.Lookup("x_top"), &topExtra)
+	require.NoError(t, err)
+	require.Equal(t, "batch-1", topExtra["trace"])
+	require.Equal(t, "strict", topExtra["mode"], "x_top = %#v, want trace=batch-1 mode=strict", topExtra)
+	require.Len(t, req.Requests, 1)
+	require.NotNil(t, req.Requests[0].ExtraFields.Lookup("x_item_flag"), "x_item_flag missing from Requests[0].ExtraFields: %+v", req.Requests[0].ExtraFields)
+
 	var itemExtra map[string]any
-	if err := json.Unmarshal(req.Requests[0].ExtraFields.Lookup("x_item_flag"), &itemExtra); err != nil {
-		t.Fatalf("failed to decode x_item_flag: %v", err)
-	}
-	if itemExtra["enabled"] != true || itemExtra["label"] != "batch-item" {
-		t.Fatalf("x_item_flag = %#v, want enabled=true label=batch-item", itemExtra)
-	}
+	err = json.Unmarshal(req.Requests[0].ExtraFields.Lookup("x_item_flag"), &itemExtra)
+	require.NoError(t, err)
+	require.Equal(t, true, itemExtra["enabled"])
+	require.Equal(t, "batch-item", itemExtra["label"], "x_item_flag = %#v, want enabled=true label=batch-item", itemExtra)
 
 	roundTrip, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(roundTrip, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
-	}
+	err = json.Unmarshal(roundTrip, &decoded)
+	require.NoError(t, err)
+
 	top, ok := decoded["x_top"].(map[string]any)
-	if !ok {
-		t.Fatalf("x_top = %#v, want object", decoded["x_top"])
-	}
-	if top["trace"] != "batch-1" || top["mode"] != "strict" {
-		t.Fatalf("x_top = %#v, want trace=batch-1 mode=strict", top)
-	}
+	require.True(t, ok, "x_top = %#v, want object", decoded["x_top"])
+	require.Equal(t, "batch-1", top["trace"])
+	require.Equal(t, "strict", top["mode"], "x_top = %#v, want trace=batch-1 mode=strict", top)
 
 	requests := decoded["requests"].([]any)
 	first := requests[0].(map[string]any)
 	item, ok := first["x_item_flag"].(map[string]any)
-	if !ok {
-		t.Fatalf("x_item_flag = %#v, want object", first["x_item_flag"])
-	}
-	if item["enabled"] != true || item["label"] != "batch-item" {
-		t.Fatalf("x_item_flag = %#v, want enabled=true label=batch-item", item)
-	}
+	require.True(t, ok, "x_item_flag = %#v, want object", first["x_item_flag"])
+	require.Equal(t, true, item["enabled"])
+	require.Equal(t, "batch-item", item["label"], "x_item_flag = %#v, want enabled=true label=batch-item", item)
 }

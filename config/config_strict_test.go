@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestLoad_RejectsUnknownYAMLFields locks in strict parsing: an unknown key is a
@@ -55,15 +57,9 @@ uranium-geryon-9b:
 				writeConfigYAML(t, dir, tt.yaml)
 
 				_, err := Load()
-				if err == nil {
-					t.Fatal("Load() succeeded, want unknown-field error")
-				}
-				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("Load() error = %q, want it to contain %q", err, tt.wantErr)
-				}
-				if strings.Contains(err.Error(), "in type") {
-					t.Fatalf("Load() error leaks an internal Go type name: %q", err)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.wantErr)
+				require.False(t, strings.Contains(err.Error(), "in type"))
 			})
 		})
 	}
@@ -98,15 +94,9 @@ func TestLoad_AcceptsValidYAMLShapes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clearAllConfigEnvVars(t)
 			withTempDir(t, func(dir string) {
-				writeConfigYAML(t, dir, tt.yaml)
-
-				result, err := Load()
-				if err != nil {
-					t.Fatalf("Load() failed: %v", err)
-				}
-				if got := len(result.RawProviders); got != tt.wantProviders {
-					t.Fatalf("len(RawProviders) = %d, want %d", got, tt.wantProviders)
-				}
+				result := loadConfigYAML(t, dir, tt.yaml)
+				got := len(result.RawProviders)
+				require.Equal(t, tt.wantProviders, got)
 			})
 		})
 	}
@@ -124,12 +114,8 @@ func TestLoad_RejectsMultipleYAMLDocuments(t *testing.T) {
 				writeConfigYAML(t, dir, "providers:\n  a:\n    type: vllm\n    base_url: \"http://a:8000/v1\"\n---\nproviders:\n  b:\n    type: vllm\n    base_url: \"http://b:8000/v1\"\n")
 
 				_, err := Load()
-				if err == nil {
-					t.Fatal("Load() succeeded, want a multi-document error")
-				}
-				if !strings.Contains(err.Error(), "only one YAML document is supported") {
-					t.Fatalf("Load() error = %q, want a multi-document error", err)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "only one YAML document is supported")
 			})
 		})
 	}
@@ -155,15 +141,9 @@ uranium-geryon-9b:
 `)
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed under CONFIG_STRICT=false: %v", err)
-		}
-		if len(result.RawProviders) != 0 {
-			t.Fatalf("len(RawProviders) = %d, want 0 (the keys are not providers)", len(result.RawProviders))
-		}
-		if result.Config.Server.Port != "9999" {
-			t.Fatalf("Server.Port = %q, want the known keys to still apply", result.Config.Server.Port)
-		}
+		require.NoError(t, err)
+		require.Empty(t, result.RawProviders)
+		require.Equal(t, "9999", result.Config.Server.Port)
 	})
 }
 
@@ -177,12 +157,8 @@ func TestLoad_ConfigStrictFalseStillRejectsMalformedValues(t *testing.T) {
 		writeConfigYAML(t, dir, "server:\n  port: [9999, 8080]\n")
 
 		_, err := Load()
-		if err == nil {
-			t.Fatal("Load() succeeded, want a type error even under CONFIG_STRICT=false")
-		}
-		if !strings.Contains(err.Error(), "cannot unmarshal") {
-			t.Fatalf("Load() error = %q, want a type error", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot unmarshal")
 	})
 }
 
@@ -196,12 +172,8 @@ func TestLoad_ConfigStrictFalseFailsWhenAnyErrorIsFatal(t *testing.T) {
 		writeConfigYAML(t, dir, "bogus_section:\n  a: 1\nserver:\n  port: [9999]\n")
 
 		_, err := Load()
-		if err == nil {
-			t.Fatal("Load() succeeded, want the type error to remain fatal")
-		}
-		if strings.Contains(err.Error(), "bogus_section") {
-			t.Fatalf("Load() error = %q, want only the fatal type error reported", err)
-		}
+		require.Error(t, err)
+		require.False(t, strings.Contains(err.Error(), "bogus_section"))
 	})
 }
 
@@ -211,12 +183,8 @@ func TestLoad_ConfigStrictRejectsNonBoolean(t *testing.T) {
 
 	withTempDir(t, func(string) {
 		_, err := Load()
-		if err == nil {
-			t.Fatal("Load() succeeded, want an invalid CONFIG_STRICT error")
-		}
-		if !strings.Contains(err.Error(), "invalid CONFIG_STRICT") {
-			t.Fatalf("Load() error = %q, want it to name CONFIG_STRICT", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid CONFIG_STRICT")
 	})
 }
 
@@ -227,16 +195,12 @@ func TestApplyYAML_ExampleConfigParses(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	example, err := os.ReadFile("config.example.yaml")
-	if err != nil {
-		t.Fatalf("Failed to read config.example.yaml: %v", err)
-	}
+	require.NoError(t, err)
 
 	withTempDir(t, func(dir string) {
 		writeConfigYAML(t, dir, string(example))
-
-		if _, err := applyYAML(buildDefaultConfig(), true); err != nil {
-			t.Fatalf("config.example.yaml does not parse: %v", err)
-		}
+		_, err := applyYAML(buildDefaultConfig(), true)
+		require.NoError(t, err)
 	})
 }
 
@@ -246,23 +210,27 @@ func TestApplyYAML_UnreadableConfigFileIsAnError(t *testing.T) {
 	clearAllConfigEnvVars(t)
 
 	withTempDir(t, func(dir string) {
-		if err := os.Mkdir(filepath.Join(dir, "config.yaml"), 0755); err != nil {
-			t.Fatalf("Failed to create directory: %v", err)
-		}
+		err := os.Mkdir(filepath.Join(dir, "config.yaml"), 0755)
+		require.NoError(t, err)
 
-		_, err := applyYAML(buildDefaultConfig(), true)
-		if err == nil {
-			t.Fatal("applyYAML() succeeded, want read error")
-		}
-		if !strings.Contains(err.Error(), "failed to read config.yaml") {
-			t.Fatalf("applyYAML() error = %q, want a read error naming the file", err)
-		}
+		_, err = applyYAML(buildDefaultConfig(), true)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to read config.yaml")
 	})
 }
 
 func writeConfigYAML(t *testing.T, dir, contents string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(contents), 0644); err != nil {
-		t.Fatalf("Failed to write config.yaml: %v", err)
-	}
+	err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(contents), 0644)
+	require.NoError(t, err)
+}
+
+// loadConfigYAML writes contents as dir/config.yaml and loads it, failing the
+// test on any load error.
+func loadConfigYAML(t *testing.T, dir, contents string) *LoadResult {
+	t.Helper()
+	writeConfigYAML(t, dir, contents)
+	result, err := Load()
+	require.NoError(t, err)
+	return result
 }

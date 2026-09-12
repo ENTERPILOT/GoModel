@@ -6,23 +6,18 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRawProviderModel_UnmarshalYAML_String(t *testing.T) {
 	const data = `- some-model`
 	var models []RawProviderModel
-	if err := yaml.Unmarshal([]byte(data), &models); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(models) != 1 {
-		t.Fatalf("len = %d, want 1", len(models))
-	}
-	if models[0].ID != "some-model" {
-		t.Errorf("ID = %q, want some-model", models[0].ID)
-	}
-	if models[0].Metadata != nil {
-		t.Errorf("Metadata = %+v, want nil", models[0].Metadata)
-	}
+	err := yaml.Unmarshal([]byte(data), &models)
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	assert.Equal(t, "some-model", models[0].ID)
+	assert.Nil(t, models[0].Metadata)
 }
 
 func TestRawProviderModel_UnmarshalYAML_MappingWithMetadata(t *testing.T) {
@@ -42,34 +37,22 @@ func TestRawProviderModel_UnmarshalYAML_MappingWithMetadata(t *testing.T) {
       output_per_mtok: 0
 `
 	var models []RawProviderModel
-	if err := yaml.Unmarshal([]byte(data), &models); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(models) != 1 {
-		t.Fatalf("len = %d, want 1", len(models))
-	}
+	err := yaml.Unmarshal([]byte(data), &models)
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+
 	m := models[0]
-	if m.ID != "local-model" {
-		t.Errorf("ID = %q, want local-model", m.ID)
-	}
-	if m.Metadata == nil {
-		t.Fatal("Metadata = nil, want non-nil")
-	}
-	if m.Metadata.DisplayName != "Local Model" {
-		t.Errorf("DisplayName = %q", m.Metadata.DisplayName)
-	}
-	if m.Metadata.ContextWindow == nil || *m.Metadata.ContextWindow != 131072 {
-		t.Errorf("ContextWindow = %v, want 131072", m.Metadata.ContextWindow)
-	}
-	if m.Metadata.MaxOutputTokens == nil || *m.Metadata.MaxOutputTokens != 8192 {
-		t.Errorf("MaxOutputTokens = %v, want 8192", m.Metadata.MaxOutputTokens)
-	}
-	if got := m.Metadata.Capabilities["tools"]; !got {
-		t.Errorf("Capabilities[tools] = %v, want true", got)
-	}
-	if m.Metadata.Pricing == nil || m.Metadata.Pricing.Currency != "USD" {
-		t.Errorf("Pricing = %+v", m.Metadata.Pricing)
-	}
+	assert.Equal(t, "local-model", m.ID)
+	require.NotNil(t, m.Metadata)
+	assert.Equal(t, "Local Model", m.Metadata.DisplayName)
+	require.NotNil(t, m.Metadata.ContextWindow)
+	assert.Equal(t, 131072, *m.Metadata.ContextWindow)
+	require.NotNil(t, m.Metadata.MaxOutputTokens)
+	assert.Equal(t, 8192, *m.Metadata.MaxOutputTokens)
+	got := m.Metadata.Capabilities["tools"]
+	assert.True(t, got)
+	require.NotNil(t, m.Metadata.Pricing)
+	assert.Equal(t, "USD", m.Metadata.Pricing.Currency)
 }
 
 func TestRawProviderModel_UnmarshalYAML_MixedList(t *testing.T) {
@@ -80,18 +63,13 @@ func TestRawProviderModel_UnmarshalYAML_MixedList(t *testing.T) {
     context_window: 4096
 `
 	var models []RawProviderModel
-	if err := yaml.Unmarshal([]byte(data), &models); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(models) != 2 {
-		t.Fatalf("len = %d, want 2", len(models))
-	}
-	if models[0].ID != "plain-id" || models[0].Metadata != nil {
-		t.Errorf("models[0] = %+v", models[0])
-	}
-	if models[1].ID != "rich-model" || models[1].Metadata == nil {
-		t.Errorf("models[1] = %+v", models[1])
-	}
+	err := yaml.Unmarshal([]byte(data), &models)
+	require.NoError(t, err)
+	require.Len(t, models, 2)
+	assert.Equal(t, "plain-id", models[0].ID)
+	assert.Nil(t, models[0].Metadata, "models[0] = %+v", models[0])
+	assert.Equal(t, "rich-model", models[1].ID)
+	assert.NotNil(t, models[1].Metadata, "models[1] = %+v", models[1])
 }
 
 func TestRawProviderModel_UnmarshalYAML_RejectsMappingWithoutID(t *testing.T) {
@@ -101,27 +79,21 @@ func TestRawProviderModel_UnmarshalYAML_RejectsMappingWithoutID(t *testing.T) {
 `
 	var models []RawProviderModel
 	err := yaml.Unmarshal([]byte(data), &models)
-	if err == nil {
-		t.Fatal("expected error for mapping without id, got nil")
-	}
+	require.Error(t, err)
 }
 
 func TestRawProviderModel_UnmarshalYAML_RejectsEmptyScalar(t *testing.T) {
 	const data = `- ""`
 	var models []RawProviderModel
 	err := yaml.Unmarshal([]byte(data), &models)
-	if err == nil {
-		t.Fatal("expected error for empty scalar id, got nil")
-	}
+	require.Error(t, err)
 }
 
 func TestRawProviderModel_UnmarshalYAML_RejectsWhitespaceOnlyScalar(t *testing.T) {
 	const data = `- "   "`
 	var models []RawProviderModel
 	err := yaml.Unmarshal([]byte(data), &models)
-	if err == nil {
-		t.Fatal("expected error for whitespace-only scalar id, got nil")
-	}
+	require.Error(t, err)
 }
 
 func TestRawProviderModel_UnmarshalYAML_RejectsWhitespaceOnlyMappingID(t *testing.T) {
@@ -132,20 +104,15 @@ func TestRawProviderModel_UnmarshalYAML_RejectsWhitespaceOnlyMappingID(t *testin
 `
 	var models []RawProviderModel
 	err := yaml.Unmarshal([]byte(data), &models)
-	if err == nil {
-		t.Fatal("expected error for whitespace-only mapping id, got nil")
-	}
+	require.Error(t, err)
 }
 
 func TestRawProviderModel_UnmarshalYAML_TrimsScalar(t *testing.T) {
 	const data = `- "  some-model  "`
 	var models []RawProviderModel
-	if err := yaml.Unmarshal([]byte(data), &models); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if models[0].ID != "some-model" {
-		t.Errorf("ID = %q, want some-model (trimmed)", models[0].ID)
-	}
+	err := yaml.Unmarshal([]byte(data), &models)
+	require.NoError(t, err)
+	assert.Equal(t, "some-model", models[0].ID)
 }
 
 func TestProviderModelIDs(t *testing.T) {
@@ -155,12 +122,11 @@ func TestProviderModelIDs(t *testing.T) {
 		{ID: ""}, // filtered
 	}
 	ids := ProviderModelIDs(models)
-	if len(ids) != 2 || ids[0] != "a" || ids[1] != "b" {
-		t.Errorf("ids = %v, want [a b]", ids)
-	}
-	if got := ProviderModelIDs(nil); got != nil {
-		t.Errorf("nil input -> %v, want nil", got)
-	}
+	assert.Len(t, ids, 2)
+	assert.Equal(t, "a", ids[0])
+	assert.Equal(t, "b", ids[1])
+	got := ProviderModelIDs(nil)
+	assert.Nil(t, got)
 }
 
 func TestProviderModelMetadataOverrides(t *testing.T) {
@@ -171,13 +137,9 @@ func TestProviderModelMetadataOverrides(t *testing.T) {
 		{ID: "", Metadata: &core.ModelMetadata{ContextWindow: &ctxWindow}}, // filtered
 	}
 	overrides := ProviderModelMetadataOverrides(models)
-	if len(overrides) != 1 {
-		t.Fatalf("len = %d, want 1", len(overrides))
-	}
-	if overrides["rich"].ContextWindow == nil || *overrides["rich"].ContextWindow != ctxWindow {
-		t.Errorf("overrides[rich] = %+v", overrides["rich"])
-	}
-	if got := ProviderModelMetadataOverrides(nil); got != nil {
-		t.Errorf("nil input -> %v, want nil", got)
-	}
+	require.Len(t, overrides, 1)
+	require.NotNil(t, overrides["rich"].ContextWindow)
+	assert.Equal(t, ctxWindow, *overrides["rich"].ContextWindow, "overrides[rich] = %+v", overrides["rich"])
+	got := ProviderModelMetadataOverrides(nil)
+	assert.Nil(t, got)
 }

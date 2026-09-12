@@ -3,6 +3,8 @@ package core
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestCloneBatchRequestDeepCopiesNestedFields(t *testing.T) {
@@ -30,38 +32,27 @@ func TestCloneBatchRequestDeepCopiesNestedFields(t *testing.T) {
 	}
 
 	cloned := cloneBatchRequest(original)
-	if cloned == nil {
-		t.Fatal("cloneBatchRequest() returned nil")
-		return
-	}
+	require.NotNil(t, cloned)
 
 	cloned.Metadata["provider"] = "anthropic"
 	cloned.Requests[0].CustomID = "chat-2"
 	cloned.Requests[0].Body[10] = 'X'
 	itemExtra := cloned.Requests[0].ExtraFields.Lookup("x_item")
-	if len(itemExtra) <= 9 {
-		t.Fatalf("cloned item extra too short: %q", itemExtra)
-	}
+	require.Greater(t, len(itemExtra), 9, "cloned item extra too short: %q", itemExtra)
+
 	itemExtra[9] = 'f'
 	topExtra := cloned.ExtraFields.Lookup("x_top")
-	if len(topExtra) <= 9 {
-		t.Fatalf("cloned top extra too short: %q", topExtra)
-	}
-	topExtra[9] = 'f'
+	require.Greater(t, len(topExtra), 9, "cloned top extra too short: %q", topExtra)
 
-	if got := original.Metadata["provider"]; got != "openai" {
-		t.Fatalf("original metadata mutated to %q", got)
-	}
-	if got := original.Requests[0].CustomID; got != "chat-1" {
-		t.Fatalf("original custom_id mutated to %q", got)
-	}
-	if got := string(original.Requests[0].Body); got != `{"model":"smart","messages":[{"role":"user","content":"hi"}]}` {
-		t.Fatalf("original body mutated to %s", got)
-	}
-	if got := string(original.Requests[0].ExtraFields.Lookup("x_item")); got != `{"trace":true}` {
-		t.Fatalf("original item extra mutated to %s", got)
-	}
-	if got := string(original.ExtraFields.Lookup("x_top")); got != `{"debug":true}` {
-		t.Fatalf("original top extra mutated to %s", got)
-	}
+	topExtra[9] = 'f'
+	got := original.Metadata["provider"]
+	require.Equal(t, "openai", got)
+	got = original.Requests[0].CustomID
+	require.Equal(t, "chat-1", got)
+	got = string(original.Requests[0].Body)
+	require.Equal(t, `{"model":"smart","messages":[{"role":"user","content":"hi"}]}`, got)
+	got = string(original.Requests[0].ExtraFields.Lookup("x_item"))
+	require.Equal(t, `{"trace":true}`, got)
+	got = string(original.ExtraFields.Lookup("x_top"))
+	require.Equal(t, `{"debug":true}`, got)
 }

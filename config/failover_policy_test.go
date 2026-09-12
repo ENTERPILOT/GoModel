@@ -3,6 +3,9 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseFailoverRetryStatuses(t *testing.T) {
@@ -25,23 +28,17 @@ func TestParseFailoverRetryStatuses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := parseFailoverRetryStatuses(tt.entries)
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
+
 			for _, code := range tt.want {
-				if !got[code] {
-					t.Errorf("status %d missing", code)
-				}
+				assert.True(t, got[code], "status %d missing", code)
 			}
 			for _, code := range tt.wantNot {
-				if got[code] {
-					t.Errorf("status %d unexpectedly present", code)
-				}
+				assert.False(t, got[code], "status %d unexpectedly present", code)
 			}
 		})
 	}
@@ -49,75 +46,62 @@ func TestParseFailoverRetryStatuses(t *testing.T) {
 
 func TestParseFailoverRetryErrors(t *testing.T) {
 	phrases, err := parseFailoverRetryErrors([]string{"Model Not Found", "404 deprecated", "4xx upstream"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(phrases) != 3 {
-		t.Fatalf("got %d phrases, want 3", len(phrases))
-	}
-	if got := strings.Join(phrases[0].Words, " "); got != "model not found" || phrases[0].Statuses != nil {
-		t.Errorf("phrase 0 = %+v, want lower-cased words and no status", phrases[0])
-	}
-	if got := strings.Join(phrases[1].Words, " "); got != "deprecated" || !phrases[1].Statuses[404] || phrases[1].Statuses[400] {
-		t.Errorf("phrase 1 = %+v, want word 'deprecated' scoped to 404", phrases[1])
-	}
-	if !phrases[2].Statuses[400] || !phrases[2].Statuses[499] || phrases[2].Statuses[500] {
-		t.Errorf("phrase 2 = %+v, want status class 4xx", phrases[2])
-	}
+	require.NoError(t, err)
+	require.Len(t, phrases, 3)
+	got := strings.Join(phrases[0].Words, " ")
+	assert.Equal(t, "model not found", got)
+	assert.Nil(t, phrases[0].Statuses, "phrase 0 = %+v, want lower-cased words and no status", phrases[0])
 
-	if defaults, err := parseFailoverRetryErrors(nil); err != nil || len(defaults) != len(DefaultFailoverRetryErrors) {
-		t.Errorf("empty list: got %d phrases, err %v; want the %d defaults", len(defaults), err, len(DefaultFailoverRetryErrors))
-	}
-	if _, err := parseFailoverRetryErrors([]string{"404"}); err == nil {
-		t.Error("a status-only phrase must be rejected")
-	}
-	if _, err := parseFailoverRetryErrors([]string{"  "}); err == nil {
-		t.Error("a blank phrase must be rejected")
-	}
+	assert.Equal(t, "deprecated", strings.Join(phrases[1].Words, " "))
+	assert.True(t, phrases[1].Statuses[404], "phrase 1 must be scoped to 404")
+	assert.False(t, phrases[1].Statuses[400], "phrase 1 must not match 400")
+	assert.True(t, phrases[2].Statuses[400], "phrase 2 must cover the 4xx class")
+	assert.True(t, phrases[2].Statuses[499], "phrase 2 must cover the 4xx class")
+	assert.False(t, phrases[2].Statuses[500], "phrase 2 must not cover 500")
+	defaults, err := parseFailoverRetryErrors(nil)
+	assert.NoError(t, err)
+	assert.Len(t, defaults, len(DefaultFailoverRetryErrors))
+	_, err = parseFailoverRetryErrors([]string{"404"})
+	assert.Error(t, err)
+	_, err = parseFailoverRetryErrors([]string{"  "})
+	assert.Error(t, err)
 }
 
 func TestLoadFailoverConfig_Policy(t *testing.T) {
 	cfg := FailoverConfig{Enabled: true}
-	if err := loadFailoverConfig(&cfg); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.MaxAttempts != 0 || !cfg.RetryStatuses[429] || !cfg.RetryStatuses[502] || len(cfg.RetryErrors) == 0 {
-		t.Errorf("defaults not applied: %+v", cfg)
-	}
+	err := loadFailoverConfig(&cfg)
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.MaxAttempts)
+	assert.True(t, cfg.RetryStatuses[429])
+	assert.True(t, cfg.RetryStatuses[502])
+	assert.NotEmpty(t, cfg.RetryErrors, "defaults not applied: %+v", cfg)
 
 	cfg = FailoverConfig{Enabled: true, MaxAttempts: -1}
-	if err := loadFailoverConfig(&cfg); err == nil || !strings.Contains(err.Error(), "max_attempts") {
-		t.Errorf("negative max_attempts: err = %v", err)
-	}
+	err = loadFailoverConfig(&cfg)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "max_attempts")
 
 	cfg = FailoverConfig{Enabled: true, RetryOnStatuses: []string{"503"}, RetryOnErrors: []string{"overloaded"}}
-	if err := loadFailoverConfig(&cfg); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg.RetryStatuses[429] || !cfg.RetryStatuses[503] || len(cfg.RetryErrors) != 1 {
-		t.Errorf("overrides must replace defaults: %+v", cfg)
-	}
+	err = loadFailoverConfig(&cfg)
+	require.NoError(t, err)
+	assert.False(t, cfg.RetryStatuses[429], "overrides must replace default statuses")
+	assert.True(t, cfg.RetryStatuses[503])
+	assert.Len(t, cfg.RetryErrors, 1, "overrides must replace default errors")
 }
 
 func TestLoadFailoverPolicy_FromYAML(t *testing.T) {
 	var cfg FailoverConfig
 	withTempDir(t, func(dir string) {
-		writeConfigYAML(t, dir, "failover:\n  max_attempts: 2\n  retry_on_statuses: [408, 5xx]\n  retry_on_errors: [\"model not found\", overloaded]\n")
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		result := loadConfigYAML(t, dir, "failover:\n  max_attempts: 2\n  retry_on_statuses: [408, 5xx]\n  retry_on_errors: [\"model not found\", overloaded]\n")
+
 		cfg = result.Config.Failover
 	})
-	if cfg.MaxAttempts != 2 {
-		t.Errorf("MaxAttempts = %d, want 2", cfg.MaxAttempts)
-	}
-	if !cfg.RetryStatuses[408] || !cfg.RetryStatuses[503] || cfg.RetryStatuses[429] {
-		t.Errorf("RetryStatuses = %v, want 408 and 5xx only", cfg.RetryStatuses)
-	}
-	if len(cfg.RetryErrors) != 2 || strings.Join(cfg.RetryErrors[1].Words, " ") != "overloaded" {
-		t.Errorf("RetryErrors = %+v, want the two configured phrases", cfg.RetryErrors)
-	}
+	assert.Equal(t, 2, cfg.MaxAttempts)
+	assert.True(t, cfg.RetryStatuses[408])
+	assert.True(t, cfg.RetryStatuses[503])
+	assert.False(t, cfg.RetryStatuses[429], "RetryStatuses = %v, want 408 and 5xx only", cfg.RetryStatuses)
+	assert.Len(t, cfg.RetryErrors, 2)
+	assert.Equal(t, "overloaded", strings.Join(cfg.RetryErrors[1].Words, " "))
 }
 
 func TestLoadFailoverPolicy_FromEnv(t *testing.T) {
@@ -126,14 +110,13 @@ func TestLoadFailoverPolicy_FromEnv(t *testing.T) {
 	t.Setenv("FAILOVER_RETRY_ON_ERRORS", "overloaded,404 gone")
 
 	result, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	cfg := result.Config.Failover
-	if cfg.MaxAttempts != 3 || !cfg.RetryStatuses[503] || !cfg.RetryStatuses[400] || cfg.RetryStatuses[500] {
-		t.Errorf("env policy not applied: max=%d statuses=%v", cfg.MaxAttempts, cfg.RetryStatuses)
-	}
-	if len(cfg.RetryErrors) != 2 || !cfg.RetryErrors[1].Statuses[404] {
-		t.Errorf("RetryErrors = %+v, want two phrases with the second scoped to 404", cfg.RetryErrors)
-	}
+	assert.Equal(t, 3, cfg.MaxAttempts)
+	assert.True(t, cfg.RetryStatuses[503])
+	assert.True(t, cfg.RetryStatuses[400])
+	assert.False(t, cfg.RetryStatuses[500], "env policy not applied: statuses=%v", cfg.RetryStatuses)
+	assert.Len(t, cfg.RetryErrors, 2)
+	assert.True(t, cfg.RetryErrors[1].Statuses[404])
 }

@@ -3,11 +3,13 @@ package core
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestUsageUnmarshalJSON_PreservesExtendedFields(t *testing.T) {
 	var usage Usage
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"prompt_tokens": 120,
 		"completion_tokens": 30,
 		"total_tokens": 150,
@@ -19,25 +21,15 @@ func TestUsageUnmarshalJSON_PreservesExtendedFields(t *testing.T) {
 		},
 		"cost_in_usd_ticks": 969250,
 		"num_sources_used": 2
-	}`), &usage); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if usage.PromptTokens != 120 {
-		t.Fatalf("PromptTokens = %d, want 120", usage.PromptTokens)
-	}
-	if usage.PromptTokensDetails == nil || usage.PromptTokensDetails.CachedTokens != 80 {
-		t.Fatalf("PromptTokensDetails = %+v, want cached_tokens=80", usage.PromptTokensDetails)
-	}
-	if usage.CompletionTokensDetails == nil || usage.CompletionTokensDetails.ReasoningTokens != 12 {
-		t.Fatalf("CompletionTokensDetails = %+v, want reasoning_tokens=12", usage.CompletionTokensDetails)
-	}
-	if usage.RawUsage["cost_in_usd_ticks"] != float64(969250) {
-		t.Fatalf("RawUsage[cost_in_usd_ticks] = %#v, want 969250", usage.RawUsage["cost_in_usd_ticks"])
-	}
-	if usage.RawUsage["num_sources_used"] != float64(2) {
-		t.Fatalf("RawUsage[num_sources_used] = %#v, want 2", usage.RawUsage["num_sources_used"])
-	}
+	}`), &usage)
+	require.NoError(t, err)
+	require.Equal(t, 120, usage.PromptTokens)
+	require.NotNil(t, usage.PromptTokensDetails)
+	require.Equal(t, 80, usage.PromptTokensDetails.CachedTokens)
+	require.NotNil(t, usage.CompletionTokensDetails)
+	require.Equal(t, 12, usage.CompletionTokensDetails.ReasoningTokens)
+	require.Equal(t, float64(969250), usage.RawUsage["cost_in_usd_ticks"])
+	require.Equal(t, float64(2), usage.RawUsage["num_sources_used"])
 }
 
 func TestUsageMarshalJSON_MergesRawUsageIntoTopLevelUsage(t *testing.T) {
@@ -53,28 +45,20 @@ func TestUsageMarshalJSON_MergesRawUsageIntoTopLevelUsage(t *testing.T) {
 			"service_tier":            "priority",
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if payload["cache_read_input_tokens"] != float64(140) {
-		t.Fatalf("cache_read_input_tokens = %#v, want 140", payload["cache_read_input_tokens"])
-	}
-	if payload["service_tier"] != "priority" {
-		t.Fatalf("service_tier = %#v, want priority", payload["service_tier"])
-	}
-	if _, exists := payload["raw_usage"]; exists {
-		t.Fatalf("did not expect raw_usage field in marshaled usage payload: %s", string(body))
-	}
+	err = json.Unmarshal(body, &payload)
+	require.NoError(t, err)
+	require.Equal(t, float64(140), payload["cache_read_input_tokens"])
+	require.Equal(t, "priority", payload["service_tier"])
+	_, exists := payload["raw_usage"]
+	require.False(t, exists, "did not expect raw_usage field in marshaled usage payload: %s", string(body))
 }
 
 func TestResponsesUsageUnmarshalJSON_AcceptsResponsesDetailFieldNames(t *testing.T) {
 	var usage ResponsesUsage
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"input_tokens": 125,
 		"output_tokens": 48,
 		"total_tokens": 173,
@@ -85,22 +69,14 @@ func TestResponsesUsageUnmarshalJSON_AcceptsResponsesDetailFieldNames(t *testing
 			"reasoning_tokens": 7
 		},
 		"cost_in_usd_ticks": 158500
-	}`), &usage); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if usage.InputTokens != 125 {
-		t.Fatalf("InputTokens = %d, want 125", usage.InputTokens)
-	}
-	if usage.PromptTokensDetails == nil || usage.PromptTokensDetails.CachedTokens != 98 {
-		t.Fatalf("PromptTokensDetails = %+v, want cached_tokens=98", usage.PromptTokensDetails)
-	}
-	if usage.CompletionTokensDetails == nil || usage.CompletionTokensDetails.ReasoningTokens != 7 {
-		t.Fatalf("CompletionTokensDetails = %+v, want reasoning_tokens=7", usage.CompletionTokensDetails)
-	}
-	if usage.RawUsage["cost_in_usd_ticks"] != float64(158500) {
-		t.Fatalf("RawUsage[cost_in_usd_ticks] = %#v, want 158500", usage.RawUsage["cost_in_usd_ticks"])
-	}
+	}`), &usage)
+	require.NoError(t, err)
+	require.Equal(t, 125, usage.InputTokens)
+	require.NotNil(t, usage.PromptTokensDetails)
+	require.Equal(t, 98, usage.PromptTokensDetails.CachedTokens)
+	require.NotNil(t, usage.CompletionTokensDetails)
+	require.Equal(t, 7, usage.CompletionTokensDetails.ReasoningTokens)
+	require.Equal(t, float64(158500), usage.RawUsage["cost_in_usd_ticks"])
 }
 
 func TestResponsesUsageMarshalJSON_UsesResponsesDetailFieldNames(t *testing.T) {
@@ -118,42 +94,27 @@ func TestResponsesUsageMarshalJSON_UsesResponsesDetailFieldNames(t *testing.T) {
 			"cache_read_input_tokens": 98,
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if _, exists := payload["prompt_tokens_details"]; exists {
-		t.Fatalf("did not expect prompt_tokens_details in marshaled responses payload: %s", string(body))
-	}
-	if _, exists := payload["completion_tokens_details"]; exists {
-		t.Fatalf("did not expect completion_tokens_details in marshaled responses payload: %s", string(body))
-	}
+	err = json.Unmarshal(body, &payload)
+	require.NoError(t, err)
+	_, exists := payload["prompt_tokens_details"]
+	require.False(t, exists, "did not expect prompt_tokens_details in marshaled responses payload: %s", string(body))
+	_, exists = payload["completion_tokens_details"]
+	require.False(t, exists, "did not expect completion_tokens_details in marshaled responses payload: %s", string(body))
 
 	inputDetails, ok := payload["input_tokens_details"].(map[string]any)
-	if !ok {
-		t.Fatalf("input_tokens_details = %#v, want object", payload["input_tokens_details"])
-	}
-	if inputDetails["cached_tokens"] != float64(98) {
-		t.Fatalf("input_tokens_details.cached_tokens = %#v, want 98", inputDetails["cached_tokens"])
-	}
+	require.True(t, ok)
+	require.Equal(t, float64(98), inputDetails["cached_tokens"])
 
 	outputDetails, ok := payload["output_tokens_details"].(map[string]any)
-	if !ok {
-		t.Fatalf("output_tokens_details = %#v, want object", payload["output_tokens_details"])
-	}
-	if outputDetails["reasoning_tokens"] != float64(7) {
-		t.Fatalf("output_tokens_details.reasoning_tokens = %#v, want 7", outputDetails["reasoning_tokens"])
-	}
-	// The Responses usage object is closed: provider-named members stay in
-	// RawUsage for usage records and cost calculation.
-	if _, exists := payload["cache_read_input_tokens"]; exists {
-		t.Fatalf("did not expect cache_read_input_tokens in marshaled responses payload: %s", string(body))
-	}
-	if _, exists := payload["raw_usage"]; exists {
-		t.Fatalf("did not expect raw_usage in marshaled responses payload: %s", string(body))
-	}
+	require.True(t, ok)
+	require.Equal(t, float64(7), outputDetails["reasoning_tokens"])
+	_, exists = // The Responses usage object is closed: provider-named members stay in
+		// RawUsage for usage records and cost calculation.
+		payload["cache_read_input_tokens"]
+	require.False(t, exists, "did not expect cache_read_input_tokens in marshaled responses payload: %s", string(body))
+	_, exists = payload["raw_usage"]
+	require.False(t, exists, "did not expect raw_usage in marshaled responses payload: %s", string(body))
 }

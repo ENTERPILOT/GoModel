@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStatusPoliciesAndModelBreakers(t *testing.T) {
@@ -36,24 +38,16 @@ func TestStatusPoliciesAndModelBreakers(t *testing.T) {
 			request := func(model string) error {
 				return client.Do(context.Background(), Request{Method: "GET", Endpoint: "/" + model, Model: model}, nil)
 			}
-			if err := request("model1"); err == nil {
-				t.Fatal("expected exhausted retries")
-			}
-			if len(calls) != 3 {
-				t.Fatalf("calls = %v, want three model1 attempts", calls)
-			}
-			if err := request("model2"); err != nil {
-				t.Fatal(err)
-			}
-			if err := request("model1"); err == nil {
-				t.Fatal("expected open breaker")
-			}
-			if len(calls) != 4 || calls[3] != "/model2" {
-				t.Fatalf("calls = %v", calls)
-			}
-			if states[0] != "open" || states[1] != "closed" || states[2] != "open" {
-				t.Fatalf("states = %v", states)
-			}
+			require.Error(t, request("model1"))
+			require.Len(t, calls, 3)
+			err := request("model2")
+			require.NoError(t, err)
+			require.Error(t, request("model1"))
+			require.Len(t, calls, 4)
+			require.Equal(t, "/model2", calls[3])
+			require.Equal(t, "open", states[0])
+			require.Equal(t, "closed", states[1])
+			require.Equal(t, "open", states[2], "states = %v", states)
 		})
 	}
 }
@@ -80,12 +74,9 @@ func TestCustomAndEmptyStatusPolicies(t *testing.T) {
 			cfg.CircuitBreaker.FailureOnStatuses = tc.failure
 			cfg.CircuitBreaker.FailureThreshold = 1
 			client := New(cfg, nil)
-			if err := client.Do(context.Background(), Request{Method: "GET", Endpoint: "/test"}, nil); err == nil {
-				t.Fatal("expected failure")
-			}
-			if calls != tc.wantCalls || client.circuitBreaker.State() != tc.wantState {
-				t.Fatalf("calls=%d state=%s", calls, client.circuitBreaker.State())
-			}
+			require.Error(t, client.Do(context.Background(), Request{Method: "GET", Endpoint: "/test"}, nil))
+			require.Equal(t, tc.wantCalls, calls)
+			require.Equal(t, tc.wantState, client.circuitBreaker.State())
 		})
 	}
 }
@@ -98,15 +89,12 @@ func TestModelBreakerConcurrentLookup(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 30 {
 		wg.Go(func() {
-			if got := client.breakerForModel("model1"); got != want {
-				t.Error("model breaker was replaced")
-			}
+			got := client.breakerForModel("model1")
+			assert.Same(t, want, got)
 		})
 	}
 	wg.Wait()
-	if client.breakerForModel("") != client.circuitBreaker {
-		t.Fatal("discovery should use provider breaker")
-	}
+	require.Same(t, client.circuitBreaker, client.breakerForModel(""))
 }
 
 func TestBreakerCountsRetrySequenceOnce(t *testing.T) {
@@ -122,16 +110,11 @@ func TestBreakerCountsRetrySequenceOnce(t *testing.T) {
 	cfg.CircuitBreaker.FailureThreshold = 2
 	client := New(cfg, nil)
 	for _, wantState := range []string{"closed", "open"} {
-		if err := client.Do(context.Background(), Request{Method: "GET", Endpoint: "/test"}, nil); err == nil {
-			t.Fatal("expected timeout error")
-		}
-		if got := client.circuitBreaker.State(); got != wantState {
-			t.Fatalf("breaker state=%s, want %s", got, wantState)
-		}
+		require.Error(t, client.Do(context.Background(), Request{Method: "GET", Endpoint: "/test"}, nil))
+		got := client.circuitBreaker.State()
+		require.Equal(t, wantState, got)
 	}
-	if calls != 6 {
-		t.Fatalf("calls=%d, want two sequences of three attempts", calls)
-	}
+	require.Equal(t, 6, calls)
 }
 
 func TestExcludedStatusAllowsHalfOpenRecovery(t *testing.T) {
@@ -143,44 +126,30 @@ func TestExcludedStatusAllowsHalfOpenRecovery(t *testing.T) {
 	client := New(cfg, nil)
 	client.circuitBreaker.state = circuitOpen
 	client.circuitBreaker.lastFailure = time.Now().Add(-cfg.CircuitBreaker.Timeout - time.Second)
-	if err := client.Do(context.Background(), Request{Method: "GET", Endpoint: "/test"}, nil); err == nil {
-		t.Fatal("expected rate limit response")
-	}
-	if got := client.circuitBreaker.State(); got != "closed" {
-		t.Fatalf("state=%s, excluded status must not reopen breaker", got)
-	}
+	require.Error(t, client.Do(context.Background(), Request{Method: "GET", Endpoint: "/test"}, nil))
+	got := client.circuitBreaker.State()
+	require.Equal(t, "closed", got)
 }
 
 func TestNilStatusPoliciesFallBackToDefaults(t *testing.T) {
 	// A programmatic caller that never sets the lists must still get the
 	// documented defaults rather than an empty, never-matching policy.
 	client := New(Config{ProviderName: "test"}, nil)
-	if client.configErr != nil {
-		t.Fatal(client.configErr)
-	}
+	require.NoError(t, client.configErr)
+
 	for _, status := range config.DefaultRetryConfig().RetryOnStatuses {
 		code, err := strconv.Atoi(status)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !client.isRetryable(code) {
-			t.Fatalf("%d must be retryable by default", code)
-		}
+		require.NoError(t, err)
+		require.True(t, client.isRetryable(code), "%d must be retryable by default", code)
 	}
 	for _, status := range []int{400, 404, 500} {
-		if client.isRetryable(status) {
-			t.Fatalf("%d is not a default retry trigger", status)
-		}
+		require.False(t, client.isRetryable(status), "%d is not a default retry trigger", status)
 	}
 	for _, status := range []int{429, 500, 599} {
-		if !client.shouldTripCircuitBreaker(status) {
-			t.Fatalf("%d must trip the breaker by default", status)
-		}
+		require.True(t, client.shouldTripCircuitBreaker(status), "%d must trip the breaker by default", status)
 	}
 	for _, status := range []int{200, 400, 404} {
-		if client.shouldTripCircuitBreaker(status) {
-			t.Fatalf("%d must not trip the breaker", status)
-		}
+		require.False(t, client.shouldTripCircuitBreaker(status), "%d must not trip the breaker", status)
 	}
 }
 
@@ -189,12 +158,10 @@ func TestEmptyStatusPoliciesDisableStatusTriggers(t *testing.T) {
 	cfg.Retry.RetryOnStatuses = []string{}
 	cfg.CircuitBreaker.FailureOnStatuses = []string{}
 	client := New(cfg, nil)
-	if client.configErr != nil {
-		t.Fatal(client.configErr)
-	}
+	require.NoError(t, client.configErr)
+
 	for _, status := range []int{429, 500, 503, 524} {
-		if client.isRetryable(status) || client.shouldTripCircuitBreaker(status) {
-			t.Fatalf("%d must not trigger anything once the lists are explicitly empty", status)
-		}
+		require.False(t, client.isRetryable(status))
+		require.False(t, client.shouldTripCircuitBreaker(status), "%d must not trigger anything once the lists are explicitly empty", status)
 	}
 }
