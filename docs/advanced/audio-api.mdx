@@ -171,9 +171,13 @@ back as that provider's own error rather than a silent 200.
 
 Two things never travel: the fields GoModel controls itself (`model`, `file`,
 and the routing hint `provider`, plus the transcription options it re-emits —
-`language`, `prompt`, `response_format`, `temperature`,
+`language`, `prompt`, `response_format`, `temperature`, and both spellings of
 `timestamp_granularities[]`), and extra **file** parts on a transcription
 upload; only the audio in `file` is sent.
+
+Forwarded values are not stored in the [audit log](/advanced/admin-endpoints):
+because they are arbitrary client input that may carry provider credentials,
+the entry records only the field **names** under `forwarded_fields`.
 
 <Note>
   **Streaming is relayed, not streamed.** A forwarded `stream_format: "sse"`

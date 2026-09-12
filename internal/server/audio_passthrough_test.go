@@ -5,6 +5,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -101,6 +102,34 @@ func TestPassthroughFormFields_SkipsReservedNames(t *testing.T) {
 	}
 	if passthroughFormFields(nil) != nil {
 		t.Error("passthroughFormFields(nil) should be nil")
+	}
+}
+
+// TestAudioTranscriptionAuditInput_RecordsFieldNamesOnly keeps arbitrary
+// client input out of the audit record: a forwarded field may carry a
+// provider-native credential, so only its name is stored.
+func TestAudioTranscriptionAuditInput_RecordsFieldNamesOnly(t *testing.T) {
+	meta := audioTranscriptionAuditInput(&core.AudioTranscriptionRequest{
+		Model:    "gpt-4o-transcribe",
+		Filename: "speech.wav",
+		File:     []byte("audio"),
+		Fields: []core.FormField{
+			{Name: "include[]", Value: "logprobs"},
+			{Name: "x_api_key", Value: "super-secret"},
+			{Name: "x_api_key", Value: "super-secret-2"},
+		},
+	})
+	names, ok := meta["forwarded_fields"].([]string)
+	if !ok || len(names) != 2 || names[0] != "include[]" || names[1] != "x_api_key" {
+		t.Fatalf("forwarded_fields = %v, want the distinct names in request order", meta["forwarded_fields"])
+	}
+	for key, value := range meta {
+		if str, isString := value.(string); isString && strings.Contains(str, "super-secret") {
+			t.Fatalf("audit meta %q leaked a forwarded value: %q", key, str)
+		}
+	}
+	if _, present := meta["x_api_key"]; present {
+		t.Error("forwarded field was recorded as its own audit key")
 	}
 }
 

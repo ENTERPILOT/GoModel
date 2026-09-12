@@ -372,12 +372,29 @@ func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[strin
 	if len(req.TimestampGranularities) > 0 {
 		meta["timestamp_granularities"] = req.TimestampGranularities
 	}
-	for _, field := range req.Fields {
-		if existing, ok := meta[field.Name]; ok {
-			meta[field.Name] = appendAuditValue(existing, field.Value)
-			continue
-		}
-		meta[field.Name] = field.Value
+	// Forwarded fields are arbitrary client input and may carry provider-native
+	// credentials, so the audit entry records only which ones were passed
+	// through, never their values.
+	if names := forwardedFieldNames(req.Fields); len(names) > 0 {
+		meta["forwarded_fields"] = names
 	}
 	return meta
+}
+
+// forwardedFieldNames lists the distinct passthrough field names in request
+// order, for the audit metadata.
+func forwardedFieldNames(fields []core.FormField) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		if _, ok := seen[field.Name]; ok {
+			continue
+		}
+		seen[field.Name] = struct{}{}
+		names = append(names, field.Name)
+	}
+	return names
 }
