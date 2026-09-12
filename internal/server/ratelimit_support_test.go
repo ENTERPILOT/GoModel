@@ -156,6 +156,49 @@ func TestEnforceRateLimitBreachReturns429WithHeaders(t *testing.T) {
 	}
 }
 
+// A concurrency breach reports the same limit/remaining headers as a window
+// breach; only the reset header is absent, because an in-flight gauge has no
+// window to reset.
+func TestEnforceRateLimitConcurrencyBreachSendsRequestHeaders(t *testing.T) {
+	maxRequests := int64(1)
+	service := newTestRateLimitService(t, ratelimit.Rule{
+		Subject:       "/team",
+		PeriodSeconds: ratelimit.PeriodConcurrent,
+		MaxRequests:   &maxRequests,
+	})
+
+	c, _ := newRateLimitTestContext("/team/alice")
+	release, err := enforceRateLimit(c, service, rateLimitRoute{})
+	if err != nil {
+		t.Fatalf("first enforceRateLimit() error = %v", err)
+	}
+	defer release()
+
+	c2, _ := newRateLimitTestContext("/team/alice")
+	_, err = enforceRateLimit(c2, service, rateLimitRoute{})
+	if err == nil {
+		t.Fatal("second in-flight request admitted, want breach")
+	}
+
+	headerErr, ok := err.(*gatewayErrorWithResponseHeaders)
+	if !ok {
+		t.Fatalf("error %T does not carry response headers", err)
+	}
+	headers := headerErr.ResponseHeaders()
+	if got := headers.Get("x-ratelimit-limit-requests"); got != "1" {
+		t.Fatalf("x-ratelimit-limit-requests = %q, want 1", got)
+	}
+	if got := headers.Get("x-ratelimit-remaining-requests"); got != "0" {
+		t.Fatalf("x-ratelimit-remaining-requests = %q, want 0", got)
+	}
+	if got := headers.Get("x-ratelimit-reset-requests"); got != "" {
+		t.Fatalf("x-ratelimit-reset-requests = %q, want none for a concurrency breach", got)
+	}
+	if got := headers.Get("Retry-After"); got == "" {
+		t.Fatal("Retry-After missing on a concurrency breach")
+	}
+}
+
 func TestEnforceRateLimitDefaultsToRootPath(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
 

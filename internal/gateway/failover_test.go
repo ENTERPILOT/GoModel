@@ -231,7 +231,7 @@ func TestExecuteTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 	resp, meta, err := executeTranslatedWithFailover(
 		ctx, o, workflow, "req", "openai/gpt-4o", "openai",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
-		func(_ context.Context, req string) (string, string, error) {
+		func(_ context.Context, req string, _ string) (string, string, error) {
 			calls = append(calls, req)
 			if req == "req" {
 				t.Fatal("saturated primary route reached the provider")
@@ -259,7 +259,7 @@ func TestExecuteTranslatedSaturatedPrimarySurfaces429WhenNoTargetRemains(t *test
 	_, meta, err := executeTranslatedWithFailover(
 		ctx, o, workflow, "req", "openai/gpt-4o", "openai",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
-		func(_ context.Context, _ string) (string, string, error) {
+		func(_ context.Context, _ string, _ string) (string, string, error) {
 			t.Fatal("no provider call expected: primary saturated, failover gated")
 			return "", "", nil
 		},
@@ -285,7 +285,7 @@ func TestStreamTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 		o, ctx, workflow, "req", "openai/gpt-4o", "openai",
 		"openai", "openai", "gpt-4o",
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
-		func(_ context.Context, req string) (io.ReadCloser, error) {
+		func(_ context.Context, req string, _ string) (io.ReadCloser, error) {
 			calls = append(calls, req)
 			if req == "req" {
 				t.Fatal("saturated primary route reached the provider")

@@ -70,6 +70,83 @@ func TestSQLStoreRoundTripsNullableLimits(t *testing.T) {
 	})
 }
 
+// The folded subject stays the key; the written spelling survives the round
+// trip so breaches and listings can name a provider that exists.
+func TestSQLStoreRoundTripsSubjectDisplay(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+
+		if err := store.UpsertRules(ctx, []Rule{
+			{Scope: ScopeProvider, Subject: "mockA", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)), Source: SourceManual},
+		}); err != nil {
+			t.Fatalf("UpsertRules() failed: %v", err)
+		}
+
+		rules, err := store.ListRules(ctx)
+		if err != nil {
+			t.Fatalf("ListRules() failed: %v", err)
+		}
+		if len(rules) != 1 {
+			t.Fatalf("rules = %d, want 1", len(rules))
+		}
+		if rules[0].Subject != "mocka" {
+			t.Fatalf("Subject = %q, want the folded match key", rules[0].Subject)
+		}
+		if got := rules[0].DisplaySubject(); got != "mockA" {
+			t.Fatalf("DisplaySubject() = %q, want %q", got, "mockA")
+		}
+	})
+}
+
+// subject_display follows the same source precedence as the limits: a config
+// re-seed may not re-spell a subject an operator edited by hand.
+func TestSQLStoreSubjectDisplayPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		storedSpell string
+		storedSrc   string
+		nextSpell   string
+		nextSrc     string
+		want        string
+	}{
+		{name: "config over config", storedSpell: "mockA", storedSrc: SourceConfig, nextSpell: "MOCKA", nextSrc: SourceConfig, want: "MOCKA"},
+		{name: "config over manual", storedSpell: "mockA", storedSrc: SourceManual, nextSpell: "MOCKA", nextSrc: SourceConfig, want: "mockA"},
+		{name: "manual over config", storedSpell: "mockA", storedSrc: SourceConfig, nextSpell: "MOCKA", nextSrc: SourceManual, want: "MOCKA"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+				ctx := context.Background()
+
+				if err := store.UpsertRules(ctx, []Rule{
+					{Scope: ScopeProvider, Subject: tt.storedSpell, PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)), Source: tt.storedSrc},
+				}); err != nil {
+					t.Fatalf("UpsertRules() failed: %v", err)
+				}
+				if err := store.UpsertRules(ctx, []Rule{
+					{Scope: ScopeProvider, Subject: tt.nextSpell, PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(2)), Source: tt.nextSrc},
+				}); err != nil {
+					t.Fatalf("second UpsertRules() failed: %v", err)
+				}
+
+				rules, err := store.ListRules(ctx)
+				if err != nil {
+					t.Fatalf("ListRules() failed: %v", err)
+				}
+				if len(rules) != 1 {
+					t.Fatalf("rules = %d, want 1: %+v", len(rules), rules)
+				}
+				if rules[0].Subject != "mocka" {
+					t.Fatalf("Subject = %q, want the folded match key", rules[0].Subject)
+				}
+				if got := rules[0].DisplaySubject(); got != tt.want {
+					t.Fatalf("DisplaySubject() = %q, want %q", got, tt.want)
+				}
+			})
+		})
+	}
+}
+
 func TestSQLStoreDeleteRule(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()

@@ -307,8 +307,11 @@ func TestRateLimitEndpointsProviderAndModelScopes(t *testing.T) {
 		t.Fatalf("rate limits = %d, want 1", len(body.RateLimits))
 	}
 	item := body.RateLimits[0]
-	if item.Scope != "provider" || item.Subject != "openai" {
-		t.Fatalf("item = %+v, want provider openai (normalized lowercase)", item)
+	// Matching is case-insensitive, but the rule is reported with the
+	// spelling it was written with: the folded key names no configured
+	// provider.
+	if item.Scope != "provider" || item.Subject != "OpenAI" {
+		t.Fatalf("item = %+v, want provider OpenAI (written spelling)", item)
 	}
 	if item.UserPath != "" {
 		t.Fatalf("user_path = %q, want empty for provider rules", item.UserPath)
@@ -319,8 +322,8 @@ func TestRateLimitEndpointsProviderAndModelScopes(t *testing.T) {
 		t.Fatalf("Acquire() failed: %v", err)
 	}
 
-	// A model rule for the same period coexists; mixed-case subjects are
-	// stored lowercase and match lowercase live routes.
+	// A model rule for the same period coexists; mixed-case subjects match
+	// lowercase live routes and keep their written spelling.
 	modelCtx, modelRec := adminRateLimitRequest(
 		http.MethodPut,
 		`{"scope":"model","subject":"OpenAI/GPT-4o","limit_key":{"period":"minute"},"max_tokens":90000}`,
@@ -339,8 +342,8 @@ func TestRateLimitEndpointsProviderAndModelScopes(t *testing.T) {
 	for _, item := range modelBody.RateLimits {
 		if item.Scope == "model" {
 			foundModel = true
-			if item.Subject != "openai/gpt-4o" {
-				t.Fatalf("model subject = %q, want lowercase openai/gpt-4o", item.Subject)
+			if item.Subject != "OpenAI/GPT-4o" {
+				t.Fatalf("model subject = %q, want the written OpenAI/GPT-4o", item.Subject)
 			}
 		}
 	}
