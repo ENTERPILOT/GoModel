@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 func newPrompt(msgs ...pluginapi.Message) *pluginapi.Prompt {
@@ -21,17 +22,14 @@ func newPrompt(msgs ...pluginapi.Message) *pluginapi.Prompt {
 func run(t *testing.T, cfg string, prompt *pluginapi.Prompt) *pluginapi.Prompt {
 	t.Helper()
 	p := New()
-	if err := p.Init(context.Background(), json.RawMessage(cfg), nil); err != nil {
-		t.Fatalf("Init() error = %v", err)
-	}
+	err := p.Init(context.Background(), json.RawMessage(cfg), nil)
+	require.NoError(t, err)
+
 	x := &pluginapi.Exchange{Prompt: prompt, Values: pluginapi.Values{}}
 	decision, err := p.(pluginapi.PromptHook).OnPrompt(context.Background(), x)
-	if err != nil {
-		t.Fatalf("OnPrompt() error = %v", err)
-	}
-	if decision.Action != pluginapi.ActionAllow {
-		t.Fatalf("decision = %+v, want allow", decision)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, decision.Action, "decision = %+v, want allow", decision)
+
 	return x.Prompt
 }
 
@@ -63,40 +61,37 @@ func TestModes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := run(t, tt.cfg, tt.prompt)
-			if roles(got) != tt.want {
-				t.Fatalf("messages = %q, want %q", roles(got), tt.want)
-			}
-			if got.Changes().Dirty != tt.dirty {
-				t.Fatalf("dirty = %v, want %v", got.Changes().Dirty, tt.dirty)
-			}
+			require.Equal(t, tt.want, roles(got))
+			require.Equal(t, tt.dirty, got.Changes().Dirty)
 		})
 	}
 }
 
 func TestParseConfigAndSummarize(t *testing.T) {
-	if _, err := ParseConfig(json.RawMessage(`{"mode":"weird","content":"x"}`)); err == nil {
-		t.Fatal("invalid mode accepted")
-	}
-	if _, err := ParseConfig(json.RawMessage(`{"mode":"inject","content":"  "}`)); err == nil {
-		t.Fatal("empty content accepted")
-	}
+	_, err := ParseConfig(json.RawMessage(`{"mode":"weird","content":"x"}`))
+	require.Error(t, err)
+	_, err = ParseConfig(json.RawMessage(`{"mode":"inject","content":"  "}`))
+	require.Error(t, err)
+
 	cfg, err := ParseConfig(json.RawMessage(`{"content":" x "}`))
-	if err != nil || cfg.Mode != "inject" || cfg.Content != "x" {
-		t.Fatalf("cfg = %+v, %v", cfg, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "inject", cfg.Mode)
+	require.Equal(t, "x", cfg.Content)
+
 	p := New().(*Plugin)
-	if got := p.Summarize(json.RawMessage(`{"mode":"decorator","content":"be   very\nsafe"}`)); got != "decorator • be very safe" {
-		t.Fatalf("Summarize() = %q", got)
-	}
+	got := p.Summarize(json.RawMessage(`{"mode":"decorator","content":"be   very\nsafe"}`))
+	require.Equal(t, "decorator • be very safe", got)
+
 	long := strings.Repeat("a", 100)
-	if got := p.Summarize(json.RawMessage(`{"content":"` + long + `"}`)); !strings.HasSuffix(got, "...") || len(got) != len("inject • ")+72 {
-		t.Fatalf("Summarize(long) = %q", got)
-	}
-	if p.Summarize(json.RawMessage(`{}`)) != "" {
-		t.Fatal("Summarize(invalid) should be empty")
-	}
+	got = p.Summarize(json.RawMessage(`{"content":"` + long + `"}`))
+	require.True(t, strings.HasSuffix(got, "..."))
+	require.Equal(t, len("inject • ")+72, len(got), "Summarize(long) = %q", got)
+	require.Empty(t, p.Summarize(json.RawMessage(`{}`)))
+
 	m := p.Manifest()
-	if m.Name != Name || !m.Mutates || !m.Guardrail || len(m.Kinds) != 1 || len(m.ConfigSchema) != 2 {
-		t.Fatalf("manifest = %+v", m)
-	}
+	require.Equal(t, Name, m.Name)
+	require.True(t, m.Mutates)
+	require.True(t, m.Guardrail)
+	require.Len(t, m.Kinds, 1)
+	require.Len(t, m.ConfigSchema, 2)
 }

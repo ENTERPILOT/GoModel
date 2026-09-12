@@ -2,10 +2,11 @@ package usage
 
 import (
 	"encoding/json"
-	"math"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractFromChatResponse(t *testing.T) {
@@ -81,42 +82,23 @@ func TestExtractFromChatResponse(t *testing.T) {
 			entry := ExtractFromChatResponse(tt.resp, tt.requestID, tt.provider, tt.endpoint)
 
 			if tt.wantNil {
-				if entry != nil {
-					t.Error("expected nil entry")
-				}
+				assert.Nil(t, entry)
 				return
 			}
 
-			if entry == nil {
-				t.Fatal("expected non-nil entry")
-			}
+			require.NotNil(t, entry)
+			assert.Equal(t, tt.wantInput, entry.InputTokens)
+			assert.Equal(t, tt.wantOutput, entry.OutputTokens)
+			assert.Equal(t, tt.wantTotal, entry.TotalTokens)
+			assert.Equal(t, tt.wantProvider, entry.Provider)
+			assert.Equal(t, tt.wantModel, entry.Model)
+			assert.Equal(t, tt.requestID, entry.RequestID)
+			assert.Equal(t, tt.endpoint, entry.Endpoint)
 
-			if entry.InputTokens != tt.wantInput {
-				t.Errorf("InputTokens = %d, want %d", entry.InputTokens, tt.wantInput)
-			}
-			if entry.OutputTokens != tt.wantOutput {
-				t.Errorf("OutputTokens = %d, want %d", entry.OutputTokens, tt.wantOutput)
-			}
-			if entry.TotalTokens != tt.wantTotal {
-				t.Errorf("TotalTokens = %d, want %d", entry.TotalTokens, tt.wantTotal)
-			}
-			if entry.Provider != tt.wantProvider {
-				t.Errorf("Provider = %s, want %s", entry.Provider, tt.wantProvider)
-			}
-			if entry.Model != tt.wantModel {
-				t.Errorf("Model = %s, want %s", entry.Model, tt.wantModel)
-			}
-			if entry.RequestID != tt.requestID {
-				t.Errorf("RequestID = %s, want %s", entry.RequestID, tt.requestID)
-			}
-			if entry.Endpoint != tt.endpoint {
-				t.Errorf("Endpoint = %s, want %s", entry.Endpoint, tt.endpoint)
-			}
-			if tt.wantRawData && entry.RawData == nil {
-				t.Error("expected RawData to be set")
-			}
-			if !tt.wantRawData && entry.RawData != nil {
-				t.Error("expected RawData to be nil")
+			if tt.wantRawData {
+				assert.NotNil(t, entry.RawData)
+			} else {
+				assert.Nil(t, entry.RawData)
 			}
 		})
 	}
@@ -179,25 +161,14 @@ func TestExtractFromResponsesResponse(t *testing.T) {
 			entry := ExtractFromResponsesResponse(tt.resp, tt.requestID, tt.provider, tt.endpoint)
 
 			if tt.wantNil {
-				if entry != nil {
-					t.Error("expected nil entry")
-				}
+				assert.Nil(t, entry)
 				return
 			}
 
-			if entry == nil {
-				t.Fatal("expected non-nil entry")
-			}
-
-			if entry.InputTokens != tt.wantInput {
-				t.Errorf("InputTokens = %d, want %d", entry.InputTokens, tt.wantInput)
-			}
-			if entry.OutputTokens != tt.wantOutput {
-				t.Errorf("OutputTokens = %d, want %d", entry.OutputTokens, tt.wantOutput)
-			}
-			if entry.TotalTokens != tt.wantTotal {
-				t.Errorf("TotalTokens = %d, want %d", entry.TotalTokens, tt.wantTotal)
-			}
+			require.NotNil(t, entry)
+			assert.Equal(t, tt.wantInput, entry.InputTokens)
+			assert.Equal(t, tt.wantOutput, entry.OutputTokens)
+			assert.Equal(t, tt.wantTotal, entry.TotalTokens)
 		})
 	}
 }
@@ -217,15 +188,9 @@ func TestExtractFromChatResponse_WithPromptTokensDetails(t *testing.T) {
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-details", "openai", "/v1/chat/completions")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.RawData == nil {
-		t.Fatal("expected RawData to be set from PromptTokensDetails")
-	}
-	if entry.RawData["prompt_cached_tokens"] != 150 {
-		t.Errorf("RawData[prompt_cached_tokens] = %v, want 150", entry.RawData["prompt_cached_tokens"])
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.RawData)
+	assert.Equal(t, 150, entry.RawData["prompt_cached_tokens"])
 }
 
 func TestExtractFromChatResponse_WithCompletionTokensDetails(t *testing.T) {
@@ -243,15 +208,9 @@ func TestExtractFromChatResponse_WithCompletionTokensDetails(t *testing.T) {
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-reason", "openai", "/v1/chat/completions")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.RawData == nil {
-		t.Fatal("expected RawData to be set from CompletionTokensDetails")
-	}
-	if entry.RawData["completion_reasoning_tokens"] != 64 {
-		t.Errorf("RawData[completion_reasoning_tokens] = %v, want 64", entry.RawData["completion_reasoning_tokens"])
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.RawData)
+	assert.Equal(t, 64, entry.RawData["completion_reasoning_tokens"])
 }
 
 func TestExtractFromChatResponse_ZeroDetails(t *testing.T) {
@@ -272,12 +231,8 @@ func TestExtractFromChatResponse_ZeroDetails(t *testing.T) {
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-zero", "openai", "/v1/chat/completions")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.RawData != nil {
-		t.Errorf("expected RawData to be nil for zero-value details, got %v", entry.RawData)
-	}
+	require.NotNil(t, entry)
+	assert.Nil(t, entry.RawData)
 }
 
 func TestExtractFromChatResponse_RawUsageTakesPrecedenceOverDetails(t *testing.T) {
@@ -298,16 +253,11 @@ func TestExtractFromChatResponse_RawUsageTakesPrecedenceOverDetails(t *testing.T
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-precedence", "openai", "/v1/chat/completions")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
+	require.NotNil(t, entry)
+
 	// RawUsage should take precedence - details should NOT overwrite
-	if entry.RawData["cached_tokens"] != 99 {
-		t.Errorf("RawData[cached_tokens] = %v, want 99 (from RawUsage)", entry.RawData["cached_tokens"])
-	}
-	if entry.RawData["prompt_cached_tokens"] != 150 {
-		t.Errorf("RawData[prompt_cached_tokens] = %v, want 150 (from PromptTokensDetails)", entry.RawData["prompt_cached_tokens"])
-	}
+	assert.Equal(t, 99, entry.RawData["cached_tokens"])
+	assert.Equal(t, 150, entry.RawData["prompt_cached_tokens"])
 }
 
 func TestExtractFromResponsesResponse_WithDetails(t *testing.T) {
@@ -328,18 +278,10 @@ func TestExtractFromResponsesResponse_WithDetails(t *testing.T) {
 	}
 
 	entry := ExtractFromResponsesResponse(resp, "req-resp-details", "openai", "/v1/responses")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.RawData == nil {
-		t.Fatal("expected RawData to be set from details")
-	}
-	if entry.RawData["prompt_cached_tokens"] != 80 {
-		t.Errorf("RawData[prompt_cached_tokens] = %v, want 80", entry.RawData["prompt_cached_tokens"])
-	}
-	if entry.RawData["completion_reasoning_tokens"] != 30 {
-		t.Errorf("RawData[completion_reasoning_tokens] = %v, want 30", entry.RawData["completion_reasoning_tokens"])
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.RawData)
+	assert.Equal(t, 80, entry.RawData["prompt_cached_tokens"])
+	assert.Equal(t, 30, entry.RawData["completion_reasoning_tokens"])
 }
 
 func TestExtractFromChatResponse_WithPricing(t *testing.T) {
@@ -359,36 +301,22 @@ func TestExtractFromChatResponse_WithPricing(t *testing.T) {
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-priced", "openai", "/v1/chat/completions", pricing)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost == nil {
-		t.Fatal("expected InputCost to be non-nil")
-	}
-	if entry.OutputCost == nil {
-		t.Fatal("expected OutputCost to be non-nil")
-	}
-	if entry.TotalCost == nil {
-		t.Fatal("expected TotalCost to be non-nil")
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.InputCost)
+	require.NotNil(t, entry.OutputCost)
+	require.NotNil(t, entry.TotalCost)
 
 	// 1000 tokens / 1M * $3 = $0.003
 	wantInput := 1000.0 / 1_000_000.0 * 3.0
-	if *entry.InputCost != wantInput {
-		t.Errorf("InputCost = %f, want %f", *entry.InputCost, wantInput)
-	}
+	assert.Equal(t, wantInput, *entry.InputCost)
+
 	// 500 tokens / 1M * $15 = $0.0075
 	wantOutput := 500.0 / 1_000_000.0 * 15.0
-	if *entry.OutputCost != wantOutput {
-		t.Errorf("OutputCost = %f, want %f", *entry.OutputCost, wantOutput)
-	}
+	assert.Equal(t, wantOutput, *entry.OutputCost)
+
 	wantTotal := wantInput + wantOutput
-	if *entry.TotalCost != wantTotal {
-		t.Errorf("TotalCost = %f, want %f", *entry.TotalCost, wantTotal)
-	}
-	if entry.CostSource != CostSourceModelPricing {
-		t.Errorf("CostSource = %q, want %q", entry.CostSource, CostSourceModelPricing)
-	}
+	assert.Equal(t, wantTotal, *entry.TotalCost)
+	assert.Equal(t, CostSourceModelPricing, entry.CostSource)
 }
 
 func TestExtractFromResponsesResponse_WithPricing(t *testing.T) {
@@ -408,34 +336,20 @@ func TestExtractFromResponsesResponse_WithPricing(t *testing.T) {
 	}
 
 	entry := ExtractFromResponsesResponse(resp, "req-resp-priced", "openai", "/v1/responses", pricing)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost == nil {
-		t.Fatal("expected InputCost to be non-nil")
-	}
-	if entry.OutputCost == nil {
-		t.Fatal("expected OutputCost to be non-nil")
-	}
-	if entry.TotalCost == nil {
-		t.Fatal("expected TotalCost to be non-nil")
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.InputCost)
+	require.NotNil(t, entry.OutputCost)
+	require.NotNil(t, entry.TotalCost)
 
 	wantInput := 2000.0 / 1_000_000.0 * 2.5
-	if *entry.InputCost != wantInput {
-		t.Errorf("InputCost = %f, want %f", *entry.InputCost, wantInput)
-	}
+	assert.Equal(t, wantInput, *entry.InputCost)
+
 	wantOutput := 800.0 / 1_000_000.0 * 10.0
-	if *entry.OutputCost != wantOutput {
-		t.Errorf("OutputCost = %f, want %f", *entry.OutputCost, wantOutput)
-	}
+	assert.Equal(t, wantOutput, *entry.OutputCost)
+
 	wantTotal := wantInput + wantOutput
-	if *entry.TotalCost != wantTotal {
-		t.Errorf("TotalCost = %f, want %f", *entry.TotalCost, wantTotal)
-	}
-	if entry.CostSource != CostSourceModelPricing {
-		t.Errorf("CostSource = %q, want %q", entry.CostSource, CostSourceModelPricing)
-	}
+	assert.Equal(t, wantTotal, *entry.TotalCost)
+	assert.Equal(t, CostSourceModelPricing, entry.CostSource)
 }
 
 func TestExtractFromChatResponse_OpenRouterCreditCostWithoutStaticPricing(t *testing.T) {
@@ -453,18 +367,12 @@ func TestExtractFromChatResponse_OpenRouterCreditCostWithoutStaticPricing(t *tes
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-openrouter", "openrouter", "/v1/chat/completions")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost != nil || entry.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %v/%v, want nil without credited split", entry.InputCost, entry.OutputCost)
-	}
-	if entry.TotalCost == nil || *entry.TotalCost != 0.00014 {
-		t.Fatalf("TotalCost = %v, want 0.00014", entry.TotalCost)
-	}
-	if entry.CostSource != CostSourceOpenRouterCredits {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceOpenRouterCredits)
-	}
+	require.NotNil(t, entry)
+	require.Nil(t, entry.InputCost)
+	require.Nil(t, entry.OutputCost)
+	require.NotNil(t, entry.TotalCost)
+	require.Equal(t, 0.00014, *entry.TotalCost)
+	require.Equal(t, CostSourceOpenRouterCredits, entry.CostSource)
 }
 
 func TestExtractFromChatResponse_XAITicksWithoutStaticPricing(t *testing.T) {
@@ -482,16 +390,12 @@ func TestExtractFromChatResponse_XAITicksWithoutStaticPricing(t *testing.T) {
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-xai", "xai", "/v1/chat/completions")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost != nil || entry.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %v/%v, want nil without response split", entry.InputCost, entry.OutputCost)
-	}
-	assertCostPtrNear(t, "TotalCost", entry.TotalCost, 0.00001585)
-	if entry.CostSource != CostSourceXAITicks {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceXAITicks)
-	}
+	require.NotNil(t, entry)
+	require.Nil(t, entry.InputCost)
+	require.Nil(t, entry.OutputCost)
+
+	assertCostNear(t, "TotalCost", entry.TotalCost, 0.00001585)
+	require.Equal(t, CostSourceXAITicks, entry.CostSource)
 }
 
 func TestExtractFromResponsesResponse_XAITicksWithoutStaticPricing(t *testing.T) {
@@ -509,13 +413,10 @@ func TestExtractFromResponsesResponse_XAITicksWithoutStaticPricing(t *testing.T)
 	}
 
 	entry := ExtractFromResponsesResponse(resp, "req-xai-response", "xai", "/v1/responses")
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	assertCostPtrNear(t, "TotalCost", entry.TotalCost, 0.00001585)
-	if entry.CostSource != CostSourceXAITicks {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceXAITicks)
-	}
+	require.NotNil(t, entry)
+
+	assertCostNear(t, "TotalCost", entry.TotalCost, 0.00001585)
+	require.Equal(t, CostSourceXAITicks, entry.CostSource)
 }
 
 func TestExtractFromSSEUsage(t *testing.T) {
@@ -526,28 +427,13 @@ func TestExtractFromSSEUsage(t *testing.T) {
 		"req-789", "gpt-4", "openai", "/v1/chat/completions",
 	)
 
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-
-	if entry.ProviderID != "chatcmpl-789" {
-		t.Errorf("ProviderID = %s, want chatcmpl-789", entry.ProviderID)
-	}
-	if entry.InputTokens != 100 {
-		t.Errorf("InputTokens = %d, want 100", entry.InputTokens)
-	}
-	if entry.OutputTokens != 50 {
-		t.Errorf("OutputTokens = %d, want 50", entry.OutputTokens)
-	}
-	if entry.TotalTokens != 150 {
-		t.Errorf("TotalTokens = %d, want 150", entry.TotalTokens)
-	}
-	if entry.RawData == nil {
-		t.Error("expected RawData to be set")
-	}
-	if entry.RawData["cached_tokens"] != 25 {
-		t.Errorf("RawData[cached_tokens] = %v, want 25", entry.RawData["cached_tokens"])
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, "chatcmpl-789", entry.ProviderID)
+	assert.Equal(t, 100, entry.InputTokens)
+	assert.Equal(t, 50, entry.OutputTokens)
+	assert.Equal(t, 150, entry.TotalTokens)
+	require.NotNil(t, entry.RawData)
+	assert.Equal(t, 25, entry.RawData["cached_tokens"])
 }
 
 func TestExtractFromSSEUsageEmptyRawData(t *testing.T) {
@@ -558,13 +444,8 @@ func TestExtractFromSSEUsageEmptyRawData(t *testing.T) {
 		"req-789", "gpt-4", "openai", "/v1/chat/completions",
 	)
 
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-
-	if entry.RawData != nil {
-		t.Error("expected RawData to be nil")
-	}
+	require.NotNil(t, entry)
+	assert.Nil(t, entry.RawData)
 }
 
 func TestExtractFromCachedResponseBody(t *testing.T) {
@@ -579,32 +460,18 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 			},
 		}
 		body, err := json.Marshal(resp)
-		if err != nil {
-			t.Fatalf("Marshal: %v", err)
-		}
+		require.NoError(t, err)
 
 		entry := ExtractFromCachedResponseBody(body, "req-cache", "gpt-4o", "openai", "/v1/chat/completions", CacheTypeExact)
-		if entry == nil {
-			t.Fatal("expected non-nil entry")
-		}
-		if entry.CacheType != CacheTypeExact {
-			t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeExact)
-		}
-		if entry.RequestID != "req-cache" {
-			t.Fatalf("RequestID = %q, want %q", entry.RequestID, "req-cache")
-		}
-		if entry.Provider != "openai" {
-			t.Fatalf("Provider = %q, want %q", entry.Provider, "openai")
-		}
-		if entry.Endpoint != "/v1/chat/completions" {
-			t.Fatalf("Endpoint = %q, want %q", entry.Endpoint, "/v1/chat/completions")
-		}
-		if entry.Model != "gpt-4o" {
-			t.Fatalf("Model = %q, want %q", entry.Model, "gpt-4o")
-		}
-		if entry.InputTokens != 42 || entry.OutputTokens != 18 || entry.TotalTokens != 60 {
-			t.Fatalf("unexpected token counts: %+v", entry)
-		}
+		require.NotNil(t, entry)
+		require.Equal(t, CacheTypeExact, entry.CacheType)
+		require.Equal(t, "req-cache", entry.RequestID)
+		require.Equal(t, "openai", entry.Provider)
+		require.Equal(t, "/v1/chat/completions", entry.Endpoint)
+		require.Equal(t, "gpt-4o", entry.Model)
+		require.Equal(t, 42, entry.InputTokens)
+		require.Equal(t, 18, entry.OutputTokens)
+		require.Equal(t, 60, entry.TotalTokens, "unexpected token counts: %+v", entry)
 	})
 
 	t.Run("normalizes equivalent endpoint paths", func(t *testing.T) {
@@ -618,42 +485,24 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 			},
 		}
 		body, err := json.Marshal(resp)
-		if err != nil {
-			t.Fatalf("Marshal: %v", err)
-		}
+		require.NoError(t, err)
 
 		entry := ExtractFromCachedResponseBody(body, "req-cache", "gpt-4o", "openai", "/v1/chat/completions/", CacheTypeExact)
-		if entry == nil {
-			t.Fatal("expected non-nil entry")
-		}
-		if entry.Endpoint != "/v1/chat/completions" {
-			t.Fatalf("Endpoint = %q, want %q", entry.Endpoint, "/v1/chat/completions")
-		}
-		if entry.TotalTokens != 10 {
-			t.Fatalf("TotalTokens = %d, want 10", entry.TotalTokens)
-		}
+		require.NotNil(t, entry)
+		require.Equal(t, "/v1/chat/completions", entry.Endpoint)
+		require.Equal(t, 10, entry.TotalTokens)
 	})
 
 	t.Run("falls back to synthetic entry when body cannot be parsed", func(t *testing.T) {
 		entry := ExtractFromCachedResponseBody([]byte("{"), "req-cache-fallback", "gpt-4o", "openai", "/v1/chat/completions", CacheTypeExact)
-		if entry == nil {
-			t.Fatal("expected non-nil entry")
-		}
-		if entry.RequestID != "req-cache-fallback" {
-			t.Fatalf("RequestID = %q, want %q", entry.RequestID, "req-cache-fallback")
-		}
-		if entry.Provider != "openai" {
-			t.Fatalf("Provider = %q, want %q", entry.Provider, "openai")
-		}
-		if entry.Endpoint != "/v1/chat/completions" {
-			t.Fatalf("Endpoint = %q, want %q", entry.Endpoint, "/v1/chat/completions")
-		}
-		if entry.Model != "gpt-4o" {
-			t.Fatalf("Model = %q, want %q", entry.Model, "gpt-4o")
-		}
-		if entry.InputTokens != 0 || entry.OutputTokens != 0 || entry.TotalTokens != 0 {
-			t.Fatalf("expected zero-token synthetic entry, got %+v", entry)
-		}
+		require.NotNil(t, entry)
+		require.Equal(t, "req-cache-fallback", entry.RequestID)
+		require.Equal(t, "openai", entry.Provider)
+		require.Equal(t, "/v1/chat/completions", entry.Endpoint)
+		require.Equal(t, "gpt-4o", entry.Model)
+		require.Equal(t, 0, entry.InputTokens)
+		require.Equal(t, 0, entry.OutputTokens)
+		require.Equal(t, 0, entry.TotalTokens, "expected zero-token synthetic entry, got %+v", entry)
 	})
 
 	t.Run("parses cached chat SSE bodies", func(t *testing.T) {
@@ -664,15 +513,11 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 		)
 
 		entry := ExtractFromCachedResponseBody(body, "req-cache-sse", "gpt-4o", "openai", "/v1/chat/completions", CacheTypeExact)
-		if entry == nil {
-			t.Fatal("expected non-nil entry")
-		}
-		if entry.ProviderID != "chatcmpl-cache-sse" {
-			t.Fatalf("ProviderID = %q, want chatcmpl-cache-sse", entry.ProviderID)
-		}
-		if entry.InputTokens != 9 || entry.OutputTokens != 4 || entry.TotalTokens != 13 {
-			t.Fatalf("unexpected token counts: %+v", entry)
-		}
+		require.NotNil(t, entry)
+		require.Equal(t, "chatcmpl-cache-sse", entry.ProviderID)
+		require.Equal(t, 9, entry.InputTokens)
+		require.Equal(t, 4, entry.OutputTokens)
+		require.Equal(t, 13, entry.TotalTokens, "unexpected token counts: %+v", entry)
 	})
 
 	t.Run("parses cached responses SSE bodies", func(t *testing.T) {
@@ -685,15 +530,11 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 		)
 
 		entry := ExtractFromCachedResponseBody(body, "req-resp-sse", "gpt-5", "openai", "/v1/responses", CacheTypeExact)
-		if entry == nil {
-			t.Fatal("expected non-nil entry")
-		}
-		if entry.ProviderID != "resp-cache-sse" {
-			t.Fatalf("ProviderID = %q, want resp-cache-sse", entry.ProviderID)
-		}
-		if entry.InputTokens != 15 || entry.OutputTokens != 8 || entry.TotalTokens != 23 {
-			t.Fatalf("unexpected token counts: %+v", entry)
-		}
+		require.NotNil(t, entry)
+		require.Equal(t, "resp-cache-sse", entry.ProviderID)
+		require.Equal(t, 15, entry.InputTokens)
+		require.Equal(t, 8, entry.OutputTokens)
+		require.Equal(t, 23, entry.TotalTokens, "unexpected token counts: %+v", entry)
 	})
 
 	t.Run("defaults unknown cache type to exact", func(t *testing.T) {
@@ -707,17 +548,11 @@ func TestExtractFromCachedResponseBody(t *testing.T) {
 			},
 		}
 		body, err := json.Marshal(resp)
-		if err != nil {
-			t.Fatalf("Marshal: %v", err)
-		}
+		require.NoError(t, err)
 
 		entry := ExtractFromCachedResponseBody(body, "req-cache", "gpt-4o", "openai", "/v1/chat/completions", "unknown")
-		if entry == nil {
-			t.Fatal("expected non-nil entry")
-		}
-		if entry.CacheType != CacheTypeExact {
-			t.Fatalf("CacheType = %q, want %q", entry.CacheType, CacheTypeExact)
-		}
+		require.NotNil(t, entry)
+		require.Equal(t, CacheTypeExact, entry.CacheType)
 	})
 }
 
@@ -740,22 +575,13 @@ func TestExtractFromChatResponse_WithBatchPricingEndpoint(t *testing.T) {
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-batch-priced", "openai", "/v1/batches", pricing)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost == nil || entry.OutputCost == nil || entry.TotalCost == nil {
-		t.Fatal("expected all costs to be populated")
-	}
-
-	if math.Abs(*entry.InputCost-1.0) > 1e-9 {
-		t.Errorf("InputCost = %f, want 1.0", *entry.InputCost)
-	}
-	if math.Abs(*entry.OutputCost-1.0) > 1e-9 {
-		t.Errorf("OutputCost = %f, want 1.0", *entry.OutputCost)
-	}
-	if math.Abs(*entry.TotalCost-2.0) > 1e-9 {
-		t.Errorf("TotalCost = %f, want 2.0", *entry.TotalCost)
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.InputCost)
+	require.NotNil(t, entry.OutputCost)
+	require.NotNil(t, entry.TotalCost)
+	assert.InDelta(t, 1.0, *entry.InputCost, 1e-9)
+	assert.InDelta(t, 1.0, *entry.OutputCost, 1e-9)
+	assert.InDelta(t, 2.0, *entry.TotalCost, 1e-9)
 }
 
 func TestExtractFromChatResponse_BatchPricingIgnoresStandardTiers(t *testing.T) {
@@ -780,15 +606,9 @@ func TestExtractFromChatResponse_BatchPricingIgnoresStandardTiers(t *testing.T) 
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-batch-tiered", "openai", "/v1/batches", pricing)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if math.Abs(*entry.InputCost-0.25) > 1e-9 {
-		t.Errorf("InputCost = %f, want 0.25", *entry.InputCost)
-	}
-	if math.Abs(*entry.OutputCost-0.02) > 1e-9 {
-		t.Errorf("OutputCost = %f, want 0.02", *entry.OutputCost)
-	}
+	require.NotNil(t, entry)
+	assert.InDelta(t, 0.25, *entry.InputCost, 1e-9)
+	assert.InDelta(t, 0.02, *entry.OutputCost, 1e-9)
 }
 
 func TestExtractFromChatResponse_PartialBatchPricingPreservesOtherSideTiers(t *testing.T) {
@@ -841,18 +661,11 @@ func TestExtractFromChatResponse_PartialBatchPricingPreservesOtherSideTiers(t *t
 			}
 
 			entry := ExtractFromChatResponse(resp, "req-batch-partial-tiered", "openai", "/v1/batches", tt.pricing)
-			if entry == nil {
-				t.Fatal("expected non-nil entry")
-			}
-			if entry.InputCost == nil || entry.OutputCost == nil {
-				t.Fatalf("costs = input:%v output:%v, want both populated", entry.InputCost, entry.OutputCost)
-			}
-			if math.Abs(*entry.InputCost-tt.wantInput) > 1e-9 {
-				t.Errorf("InputCost = %f, want %f", *entry.InputCost, tt.wantInput)
-			}
-			if math.Abs(*entry.OutputCost-tt.wantOutput) > 1e-9 {
-				t.Errorf("OutputCost = %f, want %f", *entry.OutputCost, tt.wantOutput)
-			}
+			require.NotNil(t, entry)
+			require.NotNil(t, entry.InputCost)
+			require.NotNil(t, entry.OutputCost)
+			assert.InDelta(t, tt.wantInput, *entry.InputCost, 1e-9)
+			assert.InDelta(t, tt.wantOutput, *entry.OutputCost, 1e-9)
 		})
 	}
 }
@@ -876,22 +689,13 @@ func TestExtractFromChatResponse_WithBatchPricingSubpathEndpoint(t *testing.T) {
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-batch-subpath-priced", "openai", "/v1/batches/batch_123", pricing)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost == nil || entry.OutputCost == nil || entry.TotalCost == nil {
-		t.Fatal("expected all costs to be populated")
-	}
-
-	if math.Abs(*entry.InputCost-1.0) > 1e-9 {
-		t.Errorf("InputCost = %f, want 1.0", *entry.InputCost)
-	}
-	if math.Abs(*entry.OutputCost-1.0) > 1e-9 {
-		t.Errorf("OutputCost = %f, want 1.0", *entry.OutputCost)
-	}
-	if math.Abs(*entry.TotalCost-2.0) > 1e-9 {
-		t.Errorf("TotalCost = %f, want 2.0", *entry.TotalCost)
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.InputCost)
+	require.NotNil(t, entry.OutputCost)
+	require.NotNil(t, entry.TotalCost)
+	assert.InDelta(t, 1.0, *entry.InputCost, 1e-9)
+	assert.InDelta(t, 1.0, *entry.OutputCost, 1e-9)
+	assert.InDelta(t, 2.0, *entry.TotalCost, 1e-9)
 }
 
 func TestExtractFromEmbeddingResponse_WithBatchPricingEndpoint(t *testing.T) {
@@ -910,15 +714,9 @@ func TestExtractFromEmbeddingResponse_WithBatchPricingEndpoint(t *testing.T) {
 	}
 
 	entry := ExtractFromEmbeddingResponse(resp, "req-embed-batch", "openai", "/v1/batches", pricing)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost == nil {
-		t.Fatal("expected InputCost to be populated")
-	}
-	if math.Abs(*entry.InputCost-1.5) > 1e-9 {
-		t.Errorf("InputCost = %f, want 1.5", *entry.InputCost)
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.InputCost)
+	assert.InDelta(t, 1.5, *entry.InputCost, 1e-9)
 }
 
 func TestExtractFromChatResponse_BatchPrefixOvermatchUsesStandardPricing(t *testing.T) {
@@ -940,48 +738,27 @@ func TestExtractFromChatResponse_BatchPrefixOvermatchUsesStandardPricing(t *test
 	}
 
 	entry := ExtractFromChatResponse(resp, "req-standard-priced", "openai", "/v1/batcheship", pricing)
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.InputCost == nil || entry.OutputCost == nil || entry.TotalCost == nil {
-		t.Fatal("expected all costs to be populated")
-	}
-	if math.Abs(*entry.InputCost-4.0) > 1e-9 {
-		t.Errorf("InputCost = %f, want 4.0", *entry.InputCost)
-	}
-	if math.Abs(*entry.OutputCost-4.0) > 1e-9 {
-		t.Errorf("OutputCost = %f, want 4.0", *entry.OutputCost)
-	}
-	if math.Abs(*entry.TotalCost-8.0) > 1e-9 {
-		t.Errorf("TotalCost = %f, want 8.0", *entry.TotalCost)
-	}
-}
-
-func assertCostPtrNear(t *testing.T, name string, got *float64, want float64) {
-	t.Helper()
-	if got == nil {
-		t.Fatalf("%s is nil, want %f", name, want)
-	}
-	if math.Abs(*got-want) > 1e-9 {
-		t.Fatalf("%s = %f, want %f", name, *got, want)
-	}
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.InputCost)
+	require.NotNil(t, entry.OutputCost)
+	require.NotNil(t, entry.TotalCost)
+	assert.InDelta(t, 4.0, *entry.InputCost, 1e-9)
+	assert.InDelta(t, 4.0, *entry.OutputCost, 1e-9)
+	assert.InDelta(t, 8.0, *entry.TotalCost, 1e-9)
 }
 
 func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 	pricing := &core.ModelPricing{InputPerMtok: new(0.15)}
 
 	zero := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "gemini-embedding-001"}, "req", "gemini", "/v1/embeddings", pricing)
-	if zero.CostsCalculationCaveat == "" {
-		t.Fatal("expected a caveat when the provider reports no embedding usage")
-	}
+	require.NotEmpty(t, zero.CostsCalculationCaveat)
 
 	counted := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{
 		Model: "text-embedding-3-small",
 		Usage: core.EmbeddingUsage{PromptTokens: 8, TotalTokens: 8},
 	}, "req", "openai", "/v1/embeddings", pricing)
-	if counted.CostsCalculationCaveat != "" || counted.TotalCost == nil {
-		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", counted.CostsCalculationCaveat, counted.TotalCost)
-	}
+	require.Empty(t, counted.CostsCalculationCaveat)
+	require.NotNil(t, counted.TotalCost)
 
 	// Pricing that does not depend on token counts determines the cost even
 	// with nothing reported, so the row must not claim it was uncalculated.
@@ -992,12 +769,8 @@ func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 	for name, priced := range determined {
 		t.Run(name, func(t *testing.T) {
 			entry := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "free-embed"}, "req", "openai", "/v1/embeddings", priced)
-			if entry.CostsCalculationCaveat != "" {
-				t.Fatalf("caveat = %q, want none when pricing determines the cost", entry.CostsCalculationCaveat)
-			}
-			if entry.TotalCost == nil {
-				t.Fatal("total cost = nil, want the deterministic model-pricing cost")
-			}
+			require.Empty(t, entry.CostsCalculationCaveat)
+			require.NotNil(t, entry.TotalCost)
 		})
 	}
 
@@ -1012,10 +785,7 @@ func TestExtractFromEmbeddingResponse_NoUsageCaveat(t *testing.T) {
 		},
 	}
 	unreported := ExtractFromEmbeddingResponse(&core.EmbeddingResponse{Model: "tiered-embed"}, "req", "openai", "/v1/embeddings", tiered)
-	if unreported.CostsCalculationCaveat != caveatEmbeddingMissingUsage {
-		t.Fatalf("caveat = %q, want %q for a zero base rate with a priced tier", unreported.CostsCalculationCaveat, caveatEmbeddingMissingUsage)
-	}
-	if retained := retainedMissingUsageCaveat(caveatEmbeddingMissingUsage, 0, nil, tiered); retained != caveatEmbeddingMissingUsage {
-		t.Fatalf("repricing retained %q, want the caveat kept for tiered token rates", retained)
-	}
+	require.Equal(t, caveatEmbeddingMissingUsage, unreported.CostsCalculationCaveat)
+	retained := retainedMissingUsageCaveat(caveatEmbeddingMissingUsage, 0, nil, tiered)
+	require.Equal(t, caveatEmbeddingMissingUsage, retained)
 }

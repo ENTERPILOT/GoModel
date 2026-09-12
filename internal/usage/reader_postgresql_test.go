@@ -3,9 +3,11 @@ package usage
 import (
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPostgreSQLSessionUsageQueriesArePagedAndExcludeCachedCost(t *testing.T) {
@@ -14,28 +16,22 @@ func TestPostgreSQLSessionUsageQueriesArePagedAndExcludeCachedCost(t *testing.T)
 		Limit:  25,
 		Offset: 10,
 	})
-	if err != nil {
-		t.Fatalf("postgresqlSessionUsageQueries: %v", err)
-	}
-	if limit != 25 || offset != 10 {
-		t.Fatalf("pagination = %d/%d, want 25/10", limit, offset)
-	}
-	if !strings.Contains(countQuery, "GROUP BY session_id") || strings.Contains(countQuery, "cache_type") {
-		t.Fatalf("count query has unexpected scope: %s", countQuery)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 25, limit)
+	require.Equal(t, 10, offset)
+	require.Contains(t, countQuery, "GROUP BY session_id")
+	require.NotContains(t, countQuery, "cache_type")
+
 	for _, fragment := range []string{
 		"session_id = $1",
 		"COUNT(CASE WHEN (cache_type IS NULL OR cache_type = '') THEN 1 END)",
 		"ORDER BY MAX(timestamp) DESC, session_id ASC, user_path ASC",
 		"LIMIT $2 OFFSET $3",
 	} {
-		if !strings.Contains(dataQuery, fragment) {
-			t.Fatalf("data query missing %q: %s", fragment, dataQuery)
-		}
+		require.Contains(t, dataQuery, fragment)
 	}
-	if !reflect.DeepEqual(args, []any{"scoped-session"}) || !reflect.DeepEqual(dataArgs, []any{"scoped-session", 25, 10}) {
-		t.Fatalf("args = %#v / %#v", args, dataArgs)
-	}
+	require.Equal(t, []any{"scoped-session"}, args)
+	require.Equal(t, []any{"scoped-session", 25, 10}, dataArgs)
 }
 
 // fakePgxRows feeds scanPostgreSQLUsageLogEntries rows whose values are laid
@@ -87,26 +83,15 @@ func TestScanPostgreSQLUsageLogEntries_CarriesRewriteSavings(t *testing.T) {
 	}}
 
 	entries, err := scanPostgreSQLUsageLogEntries(rows)
-	if err != nil {
-		t.Fatalf("scanPostgreSQLUsageLogEntries() error = %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("scanPostgreSQLUsageLogEntries() returned %d entries, want 2", len(entries))
-	}
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
 
 	saved := entries[0]
-	if saved.RewriteTokensSaved != 89 {
-		t.Errorf("RewriteTokensSaved = %d, want 89", saved.RewriteTokensSaved)
-	}
-	if saved.RewriteCostSaved == nil || *saved.RewriteCostSaved != cost {
-		t.Errorf("RewriteCostSaved = %v, want %v", saved.RewriteCostSaved, cost)
-	}
+	assert.Equal(t, int64(89), saved.RewriteTokensSaved)
+	require.NotNil(t, saved.RewriteCostSaved)
+	assert.Equal(t, cost, *saved.RewriteCostSaved)
 
 	plain := entries[1]
-	if plain.RewriteTokensSaved != 0 {
-		t.Errorf("RewriteTokensSaved = %d, want 0", plain.RewriteTokensSaved)
-	}
-	if plain.RewriteCostSaved != nil {
-		t.Errorf("RewriteCostSaved = %v, want nil", *plain.RewriteCostSaved)
-	}
+	assert.Equal(t, int64(0), plain.RewriteTokensSaved)
+	assert.Nil(t, plain.RewriteCostSaved)
 }

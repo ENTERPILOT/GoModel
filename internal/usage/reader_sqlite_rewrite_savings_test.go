@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
@@ -15,15 +17,12 @@ import (
 // and the nullable rewrite_cost_saved.
 func TestSQLiteReader_UsageLogCarriesRewriteSavings(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	cost := 0.0375
 	ctx := context.Background()
@@ -55,25 +54,20 @@ func TestSQLiteReader_UsageLogCarriesRewriteSavings(t *testing.T) {
 			TotalTokens:  60,
 		},
 	})
-	if err != nil {
-		t.Fatalf("failed to write usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader := &SQLiteReader{db: db}
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{})
-	if err != nil {
-		t.Fatalf("GetUsageLog() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	logByRequest := make(map[string]UsageLogEntry, len(log.Entries))
 	for _, entry := range log.Entries {
 		logByRequest[entry.RequestID] = entry
 	}
 
 	grouped, err := reader.GetUsageByRequestIDs(ctx, []string{"req-saved", "req-plain"})
-	if err != nil {
-		t.Fatalf("GetUsageByRequestIDs() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	cases := []struct {
 		name       string
@@ -87,26 +81,20 @@ func TestSQLiteReader_UsageLogCarriesRewriteSavings(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			byRequest, ok := grouped[tc.requestID]
-			if !ok || len(byRequest) != 1 {
-				t.Fatalf("GetUsageByRequestIDs()[%q] = %v, want one entry", tc.requestID, byRequest)
-			}
+			require.True(t, ok)
+			require.Len(t, byRequest, 1, "request %q", tc.requestID)
+
 			logEntry, ok := logByRequest[tc.requestID]
-			if !ok {
-				t.Fatalf("GetUsageLog() missing request %q", tc.requestID)
-			}
+			require.True(t, ok, "GetUsageLog() missing request %q", tc.requestID)
+
 			for path, entry := range map[string]UsageLogEntry{"usage log": logEntry, "by request id": byRequest[0]} {
-				if entry.RewriteTokensSaved != tc.wantTokens {
-					t.Errorf("%s RewriteTokensSaved = %d, want %d", path, entry.RewriteTokensSaved, tc.wantTokens)
-				}
-				switch {
-				case tc.wantCost == nil:
-					if entry.RewriteCostSaved != nil {
-						t.Errorf("%s RewriteCostSaved = %v, want nil", path, *entry.RewriteCostSaved)
-					}
-				case entry.RewriteCostSaved == nil:
-					t.Errorf("%s RewriteCostSaved = nil, want %v", path, *tc.wantCost)
-				case *entry.RewriteCostSaved != *tc.wantCost:
-					t.Errorf("%s RewriteCostSaved = %v, want %v", path, *entry.RewriteCostSaved, *tc.wantCost)
+				assert.Equal(t, tc.wantTokens, entry.RewriteTokensSaved, path)
+
+				if tc.wantCost == nil {
+					assert.Nil(t, entry.RewriteCostSaved, path)
+				} else {
+					require.NotNil(t, entry.RewriteCostSaved, path)
+					assert.Equal(t, *tc.wantCost, *entry.RewriteCostSaved, path)
 				}
 			}
 		})

@@ -2,13 +2,13 @@ package plugins
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 type chatFunc func(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error)
@@ -40,32 +40,24 @@ func TestHostInference(t *testing.T) {
 		Temperature: &temp,
 		Messages:    []pluginapi.Message{pluginapi.TextMessage(pluginapi.RoleUser, "hi")},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Text(0) != "rewritten" {
-		t.Fatalf("text = %q", out.Text(0))
-	}
-	if captured.Model != "openai/gpt-4o-mini" || *captured.MaxTokens != 32 || *captured.Temperature != 0.5 || len(captured.Messages) != 1 {
-		t.Fatalf("request = %+v", captured)
-	}
-	if core.GetRequestOrigin(capturedCtx) != core.RequestOriginPlugin {
-		t.Fatalf("origin = %q", core.GetRequestOrigin(capturedCtx))
-	}
-	if got := core.UserPathFromContext(capturedCtx); got != "/team/alpha/guardrails/privacy" {
-		t.Fatalf("user path = %q", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "rewritten", out.Text(0))
+	require.Equal(t, "openai/gpt-4o-mini", captured.Model)
+	require.Equal(t, 32, *captured.MaxTokens)
+	require.Equal(t, 0.5, *captured.Temperature)
+	require.Len(t, captured.Messages, 1)
+	require.Equal(t, core.RequestOriginPlugin, core.GetRequestOrigin(capturedCtx))
+	got := core.UserPathFromContext(capturedCtx)
+	require.Equal(t, "/team/alpha/guardrails/privacy", got)
+
 	h.Metrics().Inc("Calls Total", nil)
 	h.Metrics().Observe("latency", 1, nil)
-	if len(sink.names) != 2 || sink.names[0] != "plugin_llm_judge_calls_total" || sink.names[1] != "plugin_llm_judge_latency" {
-		t.Fatalf("metric names = %v", sink.names)
-	}
-	if _, err := h.History(context.Background(), pluginapi.Meta{}); !errors.Is(err, ErrHistoryUnavailable) {
-		t.Fatalf("History error = %v", err)
-	}
-	if h.Logger() == nil {
-		t.Fatal("Logger() = nil")
-	}
+	require.Len(t, sink.names, 2)
+	require.Equal(t, "plugin_llm_judge_calls_total", sink.names[0])
+	require.Equal(t, "plugin_llm_judge_latency", sink.names[1])
+	_, err = h.History(context.Background(), pluginapi.Meta{})
+	require.ErrorIs(t, err, ErrHistoryUnavailable)
+	require.NotNil(t, h.Logger())
 }
 
 func TestHostInferenceUserPathFallsBackToRequest(t *testing.T) {
@@ -74,25 +66,21 @@ func TestHostInferenceUserPathFallsBackToRequest(t *testing.T) {
 		capturedCtx = ctx
 		return &core.ChatResponse{}, nil
 	})}, HostInfo{PluginName: "p", InstanceName: "i"})
-	if _, err := h.Inference().Complete(core.WithEffectiveUserPath(context.Background(), "/acme"), pluginapi.InferenceRequest{Model: "m"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := core.UserPathFromContext(capturedCtx); got != "/acme/guardrails/i" {
-		t.Fatalf("user path = %q", got)
-	}
-	if _, err := h.Inference().Complete(context.Background(), pluginapi.InferenceRequest{Model: "m", UserPath: "/override"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := core.UserPathFromContext(capturedCtx); got != "/override/guardrails/i" {
-		t.Fatalf("override user path = %q", got)
-	}
+	_, err := h.Inference().Complete(core.WithEffectiveUserPath(context.Background(), "/acme"), pluginapi.InferenceRequest{Model: "m"})
+	require.NoError(t, err)
+	got := core.UserPathFromContext(capturedCtx)
+	require.Equal(t, "/acme/guardrails/i", got)
+	_, err = h.Inference().Complete(context.Background(), pluginapi.InferenceRequest{Model: "m", UserPath: "/override"})
+	require.NoError(t, err)
+	got = core.UserPathFromContext(capturedCtx)
+	require.Equal(t, "/override/guardrails/i", got)
 }
 
 func TestHostInferenceUnavailable(t *testing.T) {
 	h := NewHost(HostDeps{}, HostInfo{PluginName: "p", InstanceName: "i"})
-	if _, err := h.Inference().Complete(context.Background(), pluginapi.InferenceRequest{Model: "m"}); !errors.Is(err, ErrInferenceUnavailable) {
-		t.Fatalf("error = %v", err)
-	}
+	_, err := h.Inference().Complete(context.Background(), pluginapi.InferenceRequest{Model: "m"})
+	require.ErrorIs(t, err, ErrInferenceUnavailable)
+
 	// A no-op metrics sink never panics.
 	h.Metrics().Inc("x", nil)
 }
@@ -118,49 +106,53 @@ func TestMetaFromContextAndRequestState(t *testing.T) {
 		Policy: &core.ResolvedWorkflowPolicy{VersionID: "wf-1", Features: core.WorkflowFeatures{Cache: true}},
 	}
 	meta := MetaFromContext(ctx, workflow)
-	if meta.RequestID != "req-9" || meta.Dialect != "anthropic_messages" || meta.Endpoint != "/v1/messages" || meta.Operation != string(core.OperationChatCompletions) {
-		t.Fatalf("meta identity = %+v", meta)
-	}
-	if meta.UserPath != "/team" || meta.AuthKeyID != "key-1" || meta.SessionID != "sess" || meta.Origin != "external" {
-		t.Fatalf("meta request = %+v", meta)
-	}
-	if meta.RequestedModel != "smart" || meta.Model != "claude" || meta.Provider != "anthropic" || meta.ProviderName != "anthropic-eu" || meta.VirtualModelSource != "smart" {
-		t.Fatalf("meta routing = %+v", meta)
-	}
-	if meta.WorkflowVersionID != "wf-1" || !meta.Features["cache"] || meta.Features["usage"] {
-		t.Fatalf("meta workflow = %+v", meta)
-	}
+	require.Equal(t, "req-9", meta.RequestID)
+	require.Equal(t, "anthropic_messages", meta.Dialect)
+	require.Equal(t, "/v1/messages", meta.Endpoint)
+	require.Equal(t, string(core.OperationChatCompletions), meta.Operation)
+	require.Equal(t, "/team", meta.UserPath)
+	require.Equal(t, "key-1", meta.AuthKeyID)
+	require.Equal(t, "sess", meta.SessionID)
+	require.Equal(t, "external", meta.Origin)
+	require.Equal(t, "smart", meta.RequestedModel)
+	require.Equal(t, "claude", meta.Model)
+	require.Equal(t, "anthropic", meta.Provider)
+	require.Equal(t, "anthropic-eu", meta.ProviderName)
+	require.Equal(t, "smart", meta.VirtualModelSource)
+
+	require.Equal(t, "wf-1", meta.WorkflowVersionID)
+	require.True(t, meta.Features["cache"])
+	require.False(t, meta.Features["usage"])
 	meta = WithAttempts(meta, []Attempt{{Seq: 1, Kind: "primary", ProviderType: "anthropic", Success: true}})
-	if len(meta.Attempts) != 1 || meta.Attempts[0].Provider != "anthropic" {
-		t.Fatalf("attempts = %+v", meta.Attempts)
-	}
-	if bare := MetaFromContext(context.Background(), nil); bare.Dialect != "openai" || bare.Endpoint != "" {
-		t.Fatalf("bare meta = %+v", bare)
-	}
+	require.Len(t, meta.Attempts, 1)
+	require.Equal(t, "anthropic", meta.Attempts[0].Provider)
+	bare := MetaFromContext(context.Background(), nil)
+	require.Equal(t, "openai", bare.Dialect)
+	require.Empty(t, bare.Endpoint)
 
 	ctx, state := WithRequestState(ctx)
 	ctx2, again := WithRequestState(ctx)
-	if again != state || ctx2 != ctx {
-		t.Fatal("WithRequestState must be idempotent")
-	}
+	require.Same(t, state, again)
+	require.Equal(t, ctx, ctx2)
+
 	x := state.NewExchange(ctx, meta)
-	if x.Headers.Request.Get("Authorization") != "[redacted]" || x.Headers.Request.Get("X-Trace") != "t1" {
-		t.Fatalf("request headers = %v", x.Headers.Request)
-	}
+	require.Equal(t, "[redacted]", x.Headers.Request.Get("Authorization"))
+	require.Equal(t, "t1", x.Headers.Request.Get("X-Trace"), "request headers = %v", x.Headers.Request)
+
 	x.Values.Set("k", 1)
 	x.Headers.Response.Set("X-GoModel-Guardrail", "warn; code=x")
-	if v, _ := state.Values.Get("k"); v != 1 {
-		t.Fatal("values not shared with state")
-	}
+	v, _ := state.Values.Get("k")
+	require.Equal(t, 1, v)
+
 	dst := http.Header{}
 	state.ApplyResponseHeaders(dst)
-	if dst.Get("X-GoModel-Guardrail") != "warn; code=x" {
-		t.Fatalf("headers = %v", dst)
-	}
+	require.Equal(t, "warn; code=x", dst.Get("X-GoModel-Guardrail"), "headers = %v", dst)
+
 	state.Record(DecisionRecord{Phase: pluginapi.KindPrompt, Instance: "a"})
-	if got := state.Snapshot(); len(got) != 1 || got[0].Instance != "a" {
-		t.Fatalf("snapshot = %+v", got)
-	}
+	got := state.Snapshot()
+	require.Len(t, got, 1)
+	require.Equal(t, "a", got[0].Instance)
+
 	x.Headers.Upstream = http.Header{"X-Up": {"1"}}
 	state.Finish(x)
 }
@@ -168,27 +160,18 @@ func TestMetaFromContextAndRequestState(t *testing.T) {
 func TestHostHTTPClient(t *testing.T) {
 	h := NewHost(HostDeps{}, HostInfo{PluginName: "presidio", InstanceName: "pii"})
 	client := h.HTTPClient()
-	if client == nil {
-		t.Fatal("HTTPClient() = nil, want the default client")
-	}
-	if client.Timeout != PluginHTTPTimeout {
-		t.Fatalf("default client timeout = %v, want %v", client.Timeout, PluginHTTPTimeout)
-	}
+	require.NotNil(t, client)
+	require.Equal(t, PluginHTTPTimeout, client.Timeout)
+
 	transport, ok := client.Transport.(*http.Transport)
-	if !ok || transport.Proxy == nil {
-		t.Fatalf("default client transport = %T, want an *http.Transport with a proxy function", client.Transport)
-	}
-	if transport.ResponseHeaderTimeout != PluginHTTPTimeout {
-		t.Fatalf("default response header timeout = %v, want %v", transport.ResponseHeaderTimeout, PluginHTTPTimeout)
-	}
+	require.True(t, ok)
+	require.NotNil(t, transport.Proxy, "default client transport = %T, want an *http.Transport with a proxy function", client.Transport)
+	require.Equal(t, PluginHTTPTimeout, transport.ResponseHeaderTimeout)
+
 	other := NewHost(HostDeps{}, HostInfo{PluginName: "other", InstanceName: "b"})
-	if other.HTTPClient() != client {
-		t.Fatal("instances must share the default client")
-	}
+	require.Same(t, client, other.HTTPClient())
 
 	custom := &http.Client{Timeout: time.Second}
 	h = NewHost(HostDeps{HTTP: custom}, HostInfo{PluginName: "presidio", InstanceName: "pii"})
-	if h.HTTPClient() != custom {
-		t.Fatal("HTTPClient() must return the client from HostDeps")
-	}
+	require.Same(t, custom, h.HTTPClient())
 }

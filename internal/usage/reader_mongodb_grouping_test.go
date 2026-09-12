@@ -1,9 +1,9 @@
 package usage
 
 import (
-	"reflect"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -22,7 +22,5 @@ func TestMongoUsageGroupedProviderNameExpr_CollapsesBlankProviderName(t *testing
 		bson.D{{Key: "$trim", Value: bson.D{{Key: "input", Value: "$provider"}}}},
 	}}}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mongoUsageGroupedProviderNameExpr() = %#v, want %#v", got, want)
-	}
+	require.Equal(t, want, got)
 }

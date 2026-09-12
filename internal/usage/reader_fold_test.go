@@ -3,6 +3,8 @@ package usage
 import (
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // fakeInputSegmentRows is an in-memory inputSegmentRows for exercising
@@ -54,18 +56,11 @@ func TestFoldInputSegments_FoldsAndToleratesMalformedRawData(t *testing.T) {
 	}}
 
 	summary := &UsageSummary{}
-	if err := foldInputSegments(rows, summary); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if summary.UncachedInputTokens != 40+50+70+10 {
-		t.Fatalf("UncachedInputTokens = %d, want %d", summary.UncachedInputTokens, 40+50+70+10)
-	}
-	if summary.CachedInputTokens != 80+90 {
-		t.Fatalf("CachedInputTokens = %d, want %d", summary.CachedInputTokens, 80+90)
-	}
-	if summary.CacheWriteInputTokens != 30 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 30", summary.CacheWriteInputTokens)
-	}
+	err := foldInputSegments(rows, summary)
+	require.NoError(t, err)
+	require.Equal(t, int64(40+50+70+10), summary.UncachedInputTokens)
+	require.Equal(t, int64(80+90), summary.CachedInputTokens)
+	require.Equal(t, int64(30), summary.CacheWriteInputTokens)
 }
 
 func TestFoldInputSegments_ScanErrorPropagates(t *testing.T) {
@@ -76,9 +71,8 @@ func TestFoldInputSegments_ScanErrorPropagates(t *testing.T) {
 		scanErr:   wantErr,
 	}
 	err := foldInputSegments(rows, &UsageSummary{})
-	if err == nil || !errors.Is(err, wantErr) {
-		t.Fatalf("expected wrapped scan error, got %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestFoldInputSegments_IterationErrorPropagates(t *testing.T) {
@@ -88,7 +82,6 @@ func TestFoldInputSegments_IterationErrorPropagates(t *testing.T) {
 		iterErr: wantErr,
 	}
 	err := foldInputSegments(rows, &UsageSummary{})
-	if err == nil || !errors.Is(err, wantErr) {
-		t.Fatalf("expected wrapped iteration error, got %v", err)
-	}
+	require.Error(t, err)
+	require.ErrorIs(t, err, wantErr)
 }

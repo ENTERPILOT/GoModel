@@ -14,6 +14,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // deepSeekOffPeakPricing mirrors the ai-model-list entry for deepseek-v4-flash:
@@ -74,15 +76,12 @@ func TestApplyUsageCostsUsesTimeWindowAtEntryTimestamp(t *testing.T) {
 				RawData:      map[string]any{"prompt_cache_hit_tokens": 500_000},
 			}
 			applyUsageCosts(entry, "deepseek", entry.Endpoint, deepSeekOffPeakPricing())
-			if entry.InputCost == nil || !costsNearlyEqual(*entry.InputCost, tc.wantInput) {
-				t.Fatalf("InputCost = %v, want %v", entry.InputCost, tc.wantInput)
-			}
-			if entry.TotalCost == nil || !costsNearlyEqual(*entry.TotalCost, tc.wantTotal) {
-				t.Fatalf("TotalCost = %v, want %v", entry.TotalCost, tc.wantTotal)
-			}
-			if entry.CostSource != CostSourceModelPricing || entry.CostsCalculationCaveat != "" {
-				t.Fatalf("source %q caveat %q", entry.CostSource, entry.CostsCalculationCaveat)
-			}
+			require.NotNil(t, entry.InputCost)
+			require.True(t, costsNearlyEqual(*entry.InputCost, tc.wantInput), "InputCost = %v, want %v", entry.InputCost, tc.wantInput)
+			require.NotNil(t, entry.TotalCost)
+			require.True(t, costsNearlyEqual(*entry.TotalCost, tc.wantTotal), "TotalCost = %v, want %v", entry.TotalCost, tc.wantTotal)
+			require.Equal(t, CostSourceModelPricing, entry.CostSource)
+			require.Empty(t, entry.CostsCalculationCaveat)
 		})
 	}
 }
@@ -95,9 +94,8 @@ func TestApplyRewriteSavingsUsesTimeWindowAtEntryTimestamp(t *testing.T) {
 		InputTokens: 1_000_000,
 	}
 	ApplyRewriteSavings(entry, 1_000_000, deepSeekOffPeakPricing())
-	if entry.RewriteCostSaved == nil || !costsNearlyEqual(*entry.RewriteCostSaved, 0.22) {
-		t.Fatalf("RewriteCostSaved = %v, want off-peak 0.22", entry.RewriteCostSaved)
-	}
+	require.NotNil(t, entry.RewriteCostSaved)
+	require.True(t, costsNearlyEqual(*entry.RewriteCostSaved, 0.22))
 }
 
 func TestRecalculateEntryCostsUsesStoredTimestamp(t *testing.T) {
@@ -113,21 +111,20 @@ func TestRecalculateEntryCostsUsesStoredTimestamp(t *testing.T) {
 
 	peak := base
 	peak.Timestamp = mondayPeakUTC
-	if update := recalculateEntryCosts(peak, resolver); update.TotalCost == nil || !costsNearlyEqual(*update.TotalCost, 1.76) {
-		t.Fatalf("peak TotalCost = %v, want 1.76", update.TotalCost)
-	}
+	update := recalculateEntryCosts(peak, resolver)
+	require.NotNil(t, update.TotalCost)
+	require.True(t, costsNearlyEqual(*update.TotalCost, 1.76))
 
 	offPeak := base
 	offPeak.Timestamp = mondayOffPeakUTC
-	if update := recalculateEntryCosts(offPeak, resolver); update.TotalCost == nil || !costsNearlyEqual(*update.TotalCost, 0.88) {
-		t.Fatalf("off-peak TotalCost = %v, want 0.88", update.TotalCost)
-	}
-
+	update = recalculateEntryCosts(offPeak, resolver)
+	require.NotNil(t, update.TotalCost)
+	require.True(t, costsNearlyEqual(*update.TotalCost, 0.88))
 	// A row whose timestamp could not be read is priced at the base rates so
 	// that it is never understated.
-	if update := recalculateEntryCosts(base, resolver); update.TotalCost == nil || !costsNearlyEqual(*update.TotalCost, 1.76) {
-		t.Fatalf("zero-timestamp TotalCost = %v, want base 1.76", update.TotalCost)
-	}
+	update = recalculateEntryCosts(base, resolver)
+	require.NotNil(t, update.TotalCost)
+	require.True(t, costsNearlyEqual(*update.TotalCost, 1.76))
 }
 
 // timeWindowRecalculationEntries returns one stale-priced DeepSeek row per
@@ -170,9 +167,8 @@ func writeTimeWindowRecalculationEntries(t *testing.T, store UsageStore) {
 			TotalCost:    &stale,
 		})
 	}
-	if err := store.WriteBatch(context.Background(), entries); err != nil {
-		t.Fatalf("WriteBatch() error = %v", err)
-	}
+	err := store.WriteBatch(context.Background(), entries)
+	require.NoError(t, err)
 }
 
 // recalculatingStore is a usage store that can re-price its rows.
@@ -188,37 +184,32 @@ func assertTimeWindowRecalculation(t *testing.T, store recalculatingStore, readT
 	t.Helper()
 	result, err := store.RecalculatePricing(context.Background(), timeWindowRecalculationParams,
 		staticTestPricingResolver{"deepseek/deepseek-v4-flash": deepSeekOffPeakPricing()})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if want := int64(len(timeWindowRecalculationEntries)); result.Recalculated != want || result.WithPricing != want {
-		t.Fatalf("result = %+v, want %d recalculated rows with pricing", result, want)
-	}
+	require.NoError(t, err)
+	want := int64(len(timeWindowRecalculationEntries))
+	require.Equal(t, want, result.Recalculated)
+	require.Equal(t, want, result.WithPricing)
+
 	for _, row := range timeWindowRecalculationEntries {
-		if got := readTotal(row.ID); !costsNearlyEqual(got, row.WantTotal) {
-			t.Fatalf("%s (%s) total_cost = %v, want %v", row.ID, row.At.Format(time.RFC3339), got, row.WantTotal)
-		}
+		got := readTotal(row.ID)
+		require.True(t, costsNearlyEqual(got, row.WantTotal), "%s (%s) total_cost = %v, want %v", row.ID, row.At.Format(time.RFC3339), got, row.WantTotal)
 	}
 }
 
 func TestSQLiteStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	writeTimeWindowRecalculationEntries(t, store)
 	assertTimeWindowRecalculation(t, store, func(id string) float64 {
 		var total float64
-		if err := db.QueryRowContext(context.Background(), "SELECT total_cost FROM usage WHERE id = ?", id).Scan(&total); err != nil {
-			t.Fatalf("read %s: %v", id, err)
-		}
+		err := db.QueryRowContext(context.Background(), "SELECT total_cost FROM usage WHERE id = ?", id).Scan(&total)
+		require.NoError(t, err, "read %s", id)
+
 		return total
 	})
 }
@@ -230,16 +221,14 @@ func TestPostgreSQLStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps
 	}
 
 	store, err := NewPostgreSQLStore(pool, 0)
-	if err != nil {
-		t.Fatalf("NewPostgreSQLStore() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	writeTimeWindowRecalculationEntries(t, store)
 	assertTimeWindowRecalculation(t, store, func(id string) float64 {
 		var total float64
-		if err := pool.QueryRow(context.Background(), "SELECT total_cost FROM usage WHERE id = $1::uuid", id).Scan(&total); err != nil {
-			t.Fatalf("read %s: %v", id, err)
-		}
+		err := pool.QueryRow(context.Background(), "SELECT total_cost FROM usage WHERE id = $1::uuid", id).Scan(&total)
+		require.NoError(t, err, "read %s", id)
+
 		return total
 	})
 }
@@ -251,9 +240,8 @@ func TestMongoDBStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t 
 	}
 	ctx := context.Background()
 	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
-	if err != nil {
-		t.Fatalf("mongo.Connect: %v", err)
-	}
+	require.NoError(t, err)
+
 	db := client.Database("gomodel_usage_test_" + time.Now().UTC().Format("20060102150405_000000000"))
 	t.Cleanup(func() {
 		_ = db.Drop(ctx)
@@ -261,18 +249,16 @@ func TestMongoDBStoreRecalculatePricingAppliesTimeWindowsFromStoredTimestamps(t 
 	})
 
 	store, err := NewMongoDBStore(db, 0)
-	if err != nil {
-		t.Fatalf("NewMongoDBStore() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	writeTimeWindowRecalculationEntries(t, store)
 	assertTimeWindowRecalculation(t, store, func(id string) float64 {
 		var doc struct {
 			TotalCost float64 `bson:"total_cost"`
 		}
-		if err := db.Collection("usage").FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&doc); err != nil {
-			t.Fatalf("read %s: %v", id, err)
-		}
+		err := db.Collection("usage").FindOne(ctx, bson.D{{Key: "_id", Value: id}}).Decode(&doc)
+		require.NoError(t, err, "read %s", id)
+
 		return doc.TotalCost
 	})
 }
@@ -301,8 +287,7 @@ func TestNewPostgreSQLStoreToleratesConcurrentStartup(t *testing.T) {
 	}
 	close(start)
 	for range workers {
-		if err := <-errs; err != nil {
-			t.Errorf("concurrent NewPostgreSQLStore() error = %v", err)
-		}
+		err := <-errs
+		assert.NoError(t, err)
 	}
 }

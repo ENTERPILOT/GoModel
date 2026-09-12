@@ -5,16 +5,15 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCalculateGranularCost_NilPricing(t *testing.T) {
 	result := CalculateGranularCost(100, 50, nil, "openai", nil)
-	if result.InputCost != nil || result.OutputCost != nil || result.TotalCost != nil {
-		t.Fatal("expected nil costs for nil pricing")
-	}
-	if result.Caveat != "" {
-		t.Fatalf("expected empty caveat, got %q", result.Caveat)
-	}
+	require.Nil(t, result.InputCost)
+	require.Nil(t, result.OutputCost)
+	require.Nil(t, result.TotalCost)
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_BaseOnly(t *testing.T) {
@@ -27,9 +26,7 @@ func TestCalculateGranularCost_BaseOnly(t *testing.T) {
 	assertCostNear(t, "InputCost", result.InputCost, 3.0)
 	assertCostNear(t, "OutputCost", result.OutputCost, 7.5)
 	assertCostNear(t, "TotalCost", result.TotalCost, 10.5)
-	if result.Caveat != "" {
-		t.Fatalf("expected empty caveat, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_OpenAI_CachedAndReasoning(t *testing.T) {
@@ -50,9 +47,7 @@ func TestCalculateGranularCost_OpenAI_CachedAndReasoning(t *testing.T) {
 	// Output: 300k * 10.0/1M + 100k * (15.0-10.0)/1M = 3.0 + 0.5 = 3.5
 	assertCostNear(t, "OutputCost", result.OutputCost, 3.5)
 	assertCostNear(t, "TotalCost", result.TotalCost, 4.5)
-	if result.Caveat != "" {
-		t.Fatalf("expected empty caveat, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_OpenAI_AudioTokens(t *testing.T) {
@@ -118,9 +113,7 @@ func TestCalculateGranularCost_Anthropic_ThinkingTokens(t *testing.T) {
 
 			assertCostNear(t, "InputCost", result.InputCost, 0.6)
 			assertCostNear(t, "OutputCost", result.OutputCost, tt.wantOutput)
-			if result.Caveat != "" {
-				t.Fatalf("expected no caveat for Anthropic thinking tokens, got %q", result.Caveat)
-			}
+			require.Empty(t, result.Caveat)
 		})
 	}
 }
@@ -157,9 +150,7 @@ func TestCalculateGranularCost_Gemini_PromptCachedTokens(t *testing.T) {
 
 	// Input: 11653 * 0.30/1M + 11240 * (0.03-0.30)/1M
 	assertCostNear(t, "InputCost", result.InputCost, 0.0004611)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for gemini prompt_cached_tokens, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_Gemini_NativeUsageAliases(t *testing.T) {
@@ -183,9 +174,7 @@ func TestCalculateGranularCost_Gemini_NativeUsageAliases(t *testing.T) {
 	// Output: 120k * 2.50/1M + 20k * (5.00-2.50)/1M
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.35)
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.3665)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for native Gemini usage aliases, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_Gemini_AudioTokens(t *testing.T) {
@@ -249,9 +238,8 @@ func TestCalculateGranularCost_NilPricingFieldNoCaveat(t *testing.T) {
 	}
 	result := CalculateGranularCost(500_000, 300_000, rawData, "openai", pricing)
 
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat when pricing field is nil (base rate covers it), got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
+
 	// Base costs should still be calculated correctly without the adjustment
 	assertCostNear(t, "InputCost", result.InputCost, 1.25)  // 500k * 2.50/1M
 	assertCostNear(t, "OutputCost", result.OutputCost, 3.0) // 300k * 10.0/1M
@@ -267,12 +255,8 @@ func TestCalculateGranularCost_UnmappedTokenField(t *testing.T) {
 	}
 	result := CalculateGranularCost(100_000, 50_000, rawData, "openai", pricing)
 
-	if result.Caveat == "" {
-		t.Fatal("expected caveat for unmapped token field")
-	}
-	if result.Caveat != "unmapped token field: some_new_tokens" {
-		t.Fatalf("unexpected caveat: %q", result.Caveat)
-	}
+	require.NotEmpty(t, result.Caveat)
+	require.Equal(t, "unmapped token field: some_new_tokens", result.Caveat)
 }
 
 func TestCalculateGranularCost_PerRequestFee(t *testing.T) {
@@ -301,9 +285,7 @@ func TestCalculateGranularCost_UnknownProvider(t *testing.T) {
 	assertCostNear(t, "InputCost", result.InputCost, 1.0)
 	assertCostNear(t, "OutputCost", result.OutputCost, 1.0)
 	// Unmapped token field should produce caveat
-	if result.Caveat != "unmapped token field: custom_tokens" {
-		t.Fatalf("unexpected caveat: %q", result.Caveat)
-	}
+	require.Equal(t, "unmapped token field: custom_tokens", result.Caveat)
 }
 
 func TestCalculateGranularCost_ZeroTokenRawData(t *testing.T) {
@@ -316,9 +298,7 @@ func TestCalculateGranularCost_ZeroTokenRawData(t *testing.T) {
 	}
 	// Zero-value token fields should not produce caveats
 	result := CalculateGranularCost(100_000, 50_000, rawData, "openai", pricing)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for zero token count, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_NonTokenField(t *testing.T) {
@@ -331,9 +311,7 @@ func TestCalculateGranularCost_NonTokenField(t *testing.T) {
 	}
 	// Non-token fields should not produce caveats
 	result := CalculateGranularCost(100_000, 50_000, rawData, "openai", pricing)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for non-token field, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestExtractInt(t *testing.T) {
@@ -352,10 +330,7 @@ func TestExtractInt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractInt(tt.data, tt.key)
-			if got != tt.expected {
-				t.Fatalf("extractInt(%v, %q) = %d, want %d", tt.data, tt.key, got, tt.expected)
-			}
+			require.Equal(t, tt.expected, extractInt(tt.data, tt.key))
 		})
 	}
 }
@@ -373,9 +348,7 @@ func TestIsTokenField(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			if got := isTokenField(tt.key); got != tt.expected {
-				t.Fatalf("isTokenField(%q) = %v, want %v", tt.key, got, tt.expected)
-			}
+			require.Equal(t, tt.expected, isTokenField(tt.key))
 		})
 	}
 }
@@ -398,9 +371,7 @@ func TestCalculateGranularCost_XAI_PrefixedKeys(t *testing.T) {
 	// xAI reports reasoning tokens separately from completion_tokens, so they are charged in addition.
 	// Output: 300k * 10.0/1M + 100k * 15.0/1M = 3.0 + 1.5 = 4.5
 	assertCostNear(t, "OutputCost", result.OutputCost, 4.5)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for xAI prefixed keys, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_XAI_ReasoningTokensAreAdditionalOutput(t *testing.T) {
@@ -440,9 +411,7 @@ func TestCalculateGranularCost_Groq_PromptCachedTokensAndReasoningBreakdown(t *t
 	// Input: 1409 * 0.075/1M + 1280 * (0.0375-0.075)/1M
 	assertCostNear(t, "InputCost", result.InputCost, 0.000057675)
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.0000012)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for groq prompt_cached_tokens/reasoning breakdown, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateGranularCost_OpenRouter_PromptCachedTokensAndReasoningBreakdown(t *testing.T) {
@@ -461,9 +430,7 @@ func TestCalculateGranularCost_OpenRouter_PromptCachedTokensAndReasoningBreakdow
 	assertCostNear(t, "InputCost", result.InputCost, 0.0980973)
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.0105035)
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.1086008)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for openrouter token details, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func TestCalculateUsageCost_OpenRouterCreditsOverrideStaticPricing(t *testing.T) {
@@ -484,9 +451,7 @@ func TestCalculateUsageCost_OpenRouterCreditsOverrideStaticPricing(t *testing.T)
 	assertCostNear(t, "InputCost", result.InputCost, 0.00010)
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.00004)
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.00014)
-	if result.Source != CostSourceOpenRouterCredits {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceOpenRouterCredits)
-	}
+	require.Equal(t, CostSourceOpenRouterCredits, result.Source)
 }
 
 func TestCalculateUsageCost_OpenRouterCreditsWithoutMatchingSplitUsesTotalOnly(t *testing.T) {
@@ -500,13 +465,11 @@ func TestCalculateUsageCost_OpenRouterCreditsWithoutMatchingSplitUsesTotalOnly(t
 
 	result := CalculateUsageCost(10, 4, rawData, "openrouter", nil)
 
-	if result.InputCost != nil || result.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %v/%v, want nil split when details do not match credited total", result.InputCost, result.OutputCost)
-	}
+	require.Nil(t, result.InputCost)
+	require.Nil(t, result.OutputCost)
+
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.00014)
-	if result.Source != CostSourceOpenRouterCredits {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceOpenRouterCredits)
-	}
+	require.Equal(t, CostSourceOpenRouterCredits, result.Source)
 }
 
 func TestCalculateUsageCost_OpenRouterRejectsNonFiniteCreditCost(t *testing.T) {
@@ -532,9 +495,7 @@ func TestCalculateUsageCost_OpenRouterRejectsNonFiniteCreditCost(t *testing.T) {
 			assertCostNear(t, "InputCost", result.InputCost, 1.0)
 			assertCostNear(t, "OutputCost", result.OutputCost, 1.0)
 			assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
-			if result.Source != CostSourceModelPricing {
-				t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
-			}
+			require.Equal(t, CostSourceModelPricing, result.Source)
 		})
 	}
 }
@@ -563,13 +524,11 @@ func TestCalculateUsageCost_OpenRouterRejectsNonFiniteCreditCostSplit(t *testing
 
 			result := CalculateUsageCost(10, 4, rawData, "openrouter", nil)
 
-			if result.InputCost != nil || result.OutputCost != nil {
-				t.Fatalf("InputCost/OutputCost = %v/%v, want nil split for non-finite details", result.InputCost, result.OutputCost)
-			}
+			require.Nil(t, result.InputCost)
+			require.Nil(t, result.OutputCost)
+
 			assertCostNear(t, "TotalCost", result.TotalCost, 0.00014)
-			if result.Source != CostSourceOpenRouterCredits {
-				t.Fatalf("Source = %q, want %q", result.Source, CostSourceOpenRouterCredits)
-			}
+			require.Equal(t, CostSourceOpenRouterCredits, result.Source)
 		})
 	}
 }
@@ -585,9 +544,7 @@ func TestCalculateUsageCost_OpenRouterFallsBackToModelPricingWithoutCredits(t *t
 	assertCostNear(t, "InputCost", result.InputCost, 1.0)
 	assertCostNear(t, "OutputCost", result.OutputCost, 1.0)
 	assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
-	if result.Source != CostSourceModelPricing {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
-	}
+	require.Equal(t, CostSourceModelPricing, result.Source)
 }
 
 func TestCalculateUsageCost_XAITicksOverrideStaticPricing(t *testing.T) {
@@ -601,13 +558,11 @@ func TestCalculateUsageCost_XAITicksOverrideStaticPricing(t *testing.T) {
 
 	result := CalculateUsageCost(10, 4, rawData, "xai", pricing)
 
-	if result.InputCost != nil || result.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %v/%v, want nil when xAI supplies only total cost", result.InputCost, result.OutputCost)
-	}
+	require.Nil(t, result.InputCost)
+	require.Nil(t, result.OutputCost)
+
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.0037756)
-	if result.Source != CostSourceXAITicks {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceXAITicks)
-	}
+	require.Equal(t, CostSourceXAITicks, result.Source)
 }
 
 func TestCalculateUsageCost_XAITicksAcceptsZeroCost(t *testing.T) {
@@ -619,12 +574,9 @@ func TestCalculateUsageCost_XAITicksAcceptsZeroCost(t *testing.T) {
 	result := CalculateUsageCost(1_000_000, 500_000, map[string]any{"cost_in_usd_ticks": 0}, "xai", pricing)
 
 	assertCostNear(t, "TotalCost", result.TotalCost, 0)
-	if result.InputCost != nil || result.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %v/%v, want nil when xAI supplies only total cost", result.InputCost, result.OutputCost)
-	}
-	if result.Source != CostSourceXAITicks {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceXAITicks)
-	}
+	require.Nil(t, result.InputCost)
+	require.Nil(t, result.OutputCost)
+	require.Equal(t, CostSourceXAITicks, result.Source)
 }
 
 func TestCalculateUsageCost_XAITicksFallBackToModelPricingWhenInvalid(t *testing.T) {
@@ -648,9 +600,7 @@ func TestCalculateUsageCost_XAITicksFallBackToModelPricingWhenInvalid(t *testing
 			assertCostNear(t, "InputCost", result.InputCost, 1.0)
 			assertCostNear(t, "OutputCost", result.OutputCost, 1.0)
 			assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
-			if result.Source != CostSourceModelPricing {
-				t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
-			}
+			require.Equal(t, CostSourceModelPricing, result.Source)
 		})
 	}
 }
@@ -666,9 +616,7 @@ func TestCalculateUsageCost_XAITicksIgnoredForOtherProviders(t *testing.T) {
 	assertCostNear(t, "InputCost", result.InputCost, 1.0)
 	assertCostNear(t, "OutputCost", result.OutputCost, 1.0)
 	assertCostNear(t, "TotalCost", result.TotalCost, 2.0)
-	if result.Source != CostSourceModelPricing {
-		t.Fatalf("Source = %q, want %q", result.Source, CostSourceModelPricing)
-	}
+	require.Equal(t, CostSourceModelPricing, result.Source)
 }
 
 func TestCalculateGranularCost_InformationalFieldsNoCaveat(t *testing.T) {
@@ -684,9 +632,8 @@ func TestCalculateGranularCost_InformationalFieldsNoCaveat(t *testing.T) {
 	}
 	result := CalculateGranularCost(100_000, 50_000, rawData, "openai", pricing)
 
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for informational fields, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
+
 	assertCostNear(t, "InputCost", result.InputCost, 0.25)   // 100k * 2.50/1M
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.50) // 50k * 10.0/1M
 }
@@ -705,9 +652,8 @@ func TestCalculateGranularCost_ReasoningModelNoCaveat(t *testing.T) {
 	}
 	result := CalculateGranularCost(500, 2000, rawData, "openai", pricing)
 
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat for reasoning model, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
+
 	// Input: 500 * 1.10/1M = 0.00055
 	assertCostNear(t, "InputCost", result.InputCost, 0.00055)
 	// Output: 2000 * 4.40/1M = 0.0088
@@ -722,9 +668,8 @@ func TestCalculateGranularCost_InputOnlyPricing(t *testing.T) {
 	result := CalculateGranularCost(1_000_000, 500_000, nil, "openai", pricing)
 
 	assertCostNear(t, "InputCost", result.InputCost, 3.0)
-	if result.OutputCost != nil {
-		t.Fatalf("expected nil OutputCost, got %f", *result.OutputCost)
-	}
+	require.Nil(t, result.OutputCost)
+
 	// TotalCost should still be set (input-only)
 	assertCostNear(t, "TotalCost", result.TotalCost, 3.0)
 }
@@ -736,9 +681,8 @@ func TestCalculateGranularCost_OutputOnlyPricing(t *testing.T) {
 	}
 	result := CalculateGranularCost(1_000_000, 500_000, nil, "openai", pricing)
 
-	if result.InputCost != nil {
-		t.Fatalf("expected nil InputCost, got %f", *result.InputCost)
-	}
+	require.Nil(t, result.InputCost)
+
 	assertCostNear(t, "OutputCost", result.OutputCost, 7.5)
 	// TotalCost should still be set (output-only)
 	assertCostNear(t, "TotalCost", result.TotalCost, 7.5)
@@ -763,9 +707,7 @@ func TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings(t *testi
 	rawData := map[string]any{"prompt_cached_tokens": 900_000}
 
 	want := CalculateGranularCost(1_000_000, 200_000, rawData, "openai", pricing)
-	if want.TotalCost == nil {
-		t.Fatal("expected a total cost for the openai baseline")
-	}
+	require.NotNil(t, want.TotalCost)
 
 	for _, provider := range []string{
 		"xiaomi", "deepseek", "zai", "minimax", "bailian",
@@ -775,9 +717,7 @@ func TestCalculateGranularCost_OpenAICompatibleProvidersDefaultMappings(t *testi
 		assertCostNear(t, provider+" InputCost", got.InputCost, *want.InputCost)
 		assertCostNear(t, provider+" OutputCost", got.OutputCost, *want.OutputCost)
 		assertCostNear(t, provider+" TotalCost", got.TotalCost, *want.TotalCost)
-		if got.Caveat != "" {
-			t.Fatalf("%s: expected no caveat, got %q", provider, got.Caveat)
-		}
+		require.Empty(t, got.Caveat, "%s: expected no caveat, got %q", provider, got.Caveat)
 	}
 }
 
@@ -806,17 +746,11 @@ func TestCalculateGranularCost_DeepSeekTopLevelCacheFields(t *testing.T) {
 	// Output: 200k * 0.79/1M = 0.158
 	assertCostNear(t, "OutputCost", result.OutputCost, 0.158)
 	assertCostNear(t, "TotalCost", result.TotalCost, 0.1979)
-	if result.Caveat != "" {
-		t.Fatalf("expected no caveat, got %q", result.Caveat)
-	}
+	require.Empty(t, result.Caveat)
 }
 
 func assertCostNear(t *testing.T, name string, got *float64, want float64) {
 	t.Helper()
-	if got == nil {
-		t.Fatalf("%s is nil, want %f", name, want)
-	}
-	if math.Abs(*got-want) > 1e-9 {
-		t.Fatalf("%s = %f, want %f", name, *got, want)
-	}
+	require.NotNil(t, got, "%s is nil, want %f", name, want)
+	require.InDelta(t, want, *got, 1e-9, "%s", name)
 }

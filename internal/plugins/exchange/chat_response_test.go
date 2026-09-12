@@ -6,6 +6,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/goccy/go-json"
 )
@@ -15,34 +17,33 @@ const chatResponseFixture = `{"id":"r1","object":"chat.completion","model":"m","
 func chatCompletion(t *testing.T) (*core.ChatResponse, *pluginapi.Completion) {
 	t.Helper()
 	var resp core.ChatResponse
-	if err := json.Unmarshal([]byte(chatResponseFixture), &resp); err != nil {
-		t.Fatal(err)
-	}
+	err := json.Unmarshal([]byte(chatResponseFixture), &resp)
+	require.NoError(t, err)
+
 	c, err := FromChatResponse(&resp)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return &resp, c
 }
 
 func TestFromChatResponse(t *testing.T) {
 	_, c := chatCompletion(t)
-	if c.ID != "r1" || c.Model != "m" || len(c.Choices) != 1 {
-		t.Fatalf("completion = %+v", c)
-	}
+	require.Equal(t, "r1", c.ID)
+	require.Equal(t, "m", c.Model)
+	require.Len(t, c.Choices, 1)
+
 	parts := c.Choices[0].Message.Parts
-	if len(parts) != 3 || parts[0].Kind != pluginapi.PartReasoning || parts[0].Text != "think" || parts[1].Text != "hello world" || parts[2].Kind != pluginapi.PartToolCall || parts[2].ToolCall.ID != "c1" {
-		t.Errorf("parts = %+v", parts)
-	}
-	if c.Choices[0].FinishReason != "tool_calls" || c.Choices[0].Message.ID != "choice:0" {
-		t.Errorf("choice = %+v", c.Choices[0])
-	}
-	if c.Usage != (pluginapi.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, CachedInputTokens: 4}) {
-		t.Errorf("usage = %+v", c.Usage)
-	}
-	if c.Text(0) != "hello world" || c.Changes().Dirty {
-		t.Error("text or clean state wrong")
-	}
+	require.Len(t, parts, 3)
+	assert.Equal(t, pluginapi.PartReasoning, parts[0].Kind)
+	assert.Equal(t, "think", parts[0].Text)
+	assert.Equal(t, "hello world", parts[1].Text)
+	assert.Equal(t, pluginapi.PartToolCall, parts[2].Kind)
+	assert.Equal(t, "c1", parts[2].ToolCall.ID)
+	assert.Equal(t, "tool_calls", c.Choices[0].FinishReason)
+	assert.Equal(t, "choice:0", c.Choices[0].Message.ID)
+	assert.Equal(t, pluginapi.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, CachedInputTokens: 4}, c.Usage)
+	assert.Equal(t, "hello world", c.Text(0))
+	assert.False(t, c.Changes().Dirty)
 }
 
 func TestApplyToChatResponse(t *testing.T) {
@@ -76,64 +77,53 @@ func TestApplyToChatResponse(t *testing.T) {
 			canonical := string(mustJSON(t, resp))
 			want := canonical
 			if tt.from != "" {
-				if !strings.Contains(canonical, tt.from) {
-					t.Fatalf("fixture lacks %q", tt.from)
-				}
+				require.Contains(t, canonical, tt.from)
+
 				want = strings.Replace(canonical, tt.from, tt.to, 1)
 			}
-			if err := tt.edit(c); err != nil {
-				t.Fatal(err)
-			}
+			err := tt.edit(c)
+			require.NoError(t, err)
+
 			applied, err := ApplyToChatResponse(resp, c)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := string(mustJSON(t, applied)); got != want {
-				t.Errorf("\n got: %s\nwant: %s", got, want)
-			}
+			require.NoError(t, err)
+			got := string(mustJSON(t, applied))
+			assert.Equal(t, want, got)
 			// The original is never mutated.
-			if got := string(mustJSON(t, resp)); got != canonical {
-				t.Errorf("original mutated: %s", got)
-			}
+			got = string(mustJSON(t, resp))
+			assert.Equal(t, canonical, got)
 		})
 	}
 }
 
 func TestCompletionToChatResponse(t *testing.T) {
 	resp := CompletionToChatResponse(pluginapi.Respond("nope").Response, "m")
-	if !strings.HasPrefix(resp.ID, "gomodel-plugin-") || resp.Object != "chat.completion" || resp.Model != "m" || resp.Created == 0 {
-		t.Errorf("envelope = %+v", resp)
-	}
-	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "nope" || resp.Choices[0].FinishReason != "stop" || resp.Choices[0].Message.Role != "assistant" {
-		t.Errorf("choice = %+v", resp.Choices)
-	}
-	if resp.Usage.TotalTokens != 0 {
-		t.Error("usage must be zero")
-	}
-	if _, err := json.Marshal(resp); err != nil {
-		t.Errorf("must encode: %v", err)
-	}
+	assert.True(t, strings.HasPrefix(resp.ID, "gomodel-plugin-"))
+	assert.Equal(t, "chat.completion", resp.Object)
+	assert.Equal(t, "m", resp.Model)
+	assert.NotEqual(t, int64(0), resp.Created, "envelope = %+v", resp)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "nope", resp.Choices[0].Message.Content)
+	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+	assert.Equal(t, "assistant", resp.Choices[0].Message.Role)
+	assert.Equal(t, 0, resp.Usage.TotalTokens)
+	_, err := json.Marshal(resp)
+	assert.NoError(t, err)
+
 	empty := CompletionToChatResponse(nil, "m")
-	if len(empty.Choices) != 1 {
-		t.Error("nil completion must still yield one choice")
-	}
+	assert.Len(t, empty.Choices, 1)
 }
 
 func TestApplyToChatResponseToolArguments(t *testing.T) {
 	resp, c := chatCompletion(t)
-	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{"to":"a@b.c"}`)); err != nil {
-		t.Fatal(err)
-	}
+	err := c.SetToolArguments(0, "c1", json.RawMessage(`{"to":"a@b.c"}`))
+	require.NoError(t, err)
+
 	applied, err := ApplyToChatResponse(resp, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := applied.Choices[0].Message.ToolCalls[0].Function.Arguments; got != `{"to":"a@b.c"}` {
-		t.Errorf("arguments = %q", got)
-	}
-	if resp.Choices[0].Message.ToolCalls[0].Function.Arguments != "{}" {
-		t.Error("original mutated")
-	}
+	require.NoError(t, err)
+	got := applied.Choices[0].Message.ToolCalls[0].Function.Arguments
+	assert.Equal(t, `{"to":"a@b.c"}`, got)
+	assert.Equal(t, "{}", resp.Choices[0].Message.ToolCalls[0].Function.Arguments)
+
 	// A replaced text keeps the argument edit, whichever came first.
 	for _, first := range []string{"replace", "arguments"} {
 		resp, c := chatCompletion(t)
@@ -145,22 +135,14 @@ func TestApplyToChatResponseToolArguments(t *testing.T) {
 			edits[0], edits[1] = edits[1], edits[0]
 		}
 		for _, edit := range edits {
-			if err := edit(); err != nil {
-				t.Fatal(err)
-			}
+			err := edit()
+			require.NoError(t, err)
 		}
 		applied, err := ApplyToChatResponse(resp, c)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if applied.Choices[0].Message.ToolCalls[0].Function.Arguments != `{"to":"a@b.c"}` || core.ExtractTextContent(applied.Choices[0].Message.Content) != "[x]" {
-			t.Errorf("%s first: %+v", first, applied.Choices[0].Message)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, `{"to":"a@b.c"}`, applied.Choices[0].Message.ToolCalls[0].Function.Arguments)
+		assert.Equal(t, "[x]", core.ExtractTextContent(applied.Choices[0].Message.Content), "%s first: %+v", first, applied.Choices[0].Message)
 	}
-	if err := c.SetToolArguments(0, "nope", json.RawMessage(`{}`)); err == nil {
-		t.Error("unknown call accepted")
-	}
-	if err := c.SetToolArguments(0, "c1", json.RawMessage(`{`)); err == nil {
-		t.Error("invalid JSON accepted")
-	}
+	assert.Error(t, c.SetToolArguments(0, "nope", json.RawMessage(`{}`)))
+	assert.Error(t, c.SetToolArguments(0, "c1", json.RawMessage(`{`)))
 }

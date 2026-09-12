@@ -6,20 +6,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
 func TestSQLiteReaderSummary_IncludesFractionalStartBoundaryAndExcludesFractionalEndBoundary(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	err = store.WriteBatch(ctx, []*UsageEntry{
@@ -57,48 +55,32 @@ func TestSQLiteReaderSummary_IncludesFractionalStartBoundaryAndExcludesFractiona
 			OutputTokens: 999,
 		},
 	})
-	if err != nil {
-		t.Fatalf("failed to seed usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("failed to load location: %v", err)
-	}
+	require.NoError(t, err)
 
 	summary, err := reader.GetSummary(ctx, UsageQueryParams{
 		StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		TimeZone:  "Europe/Warsaw",
 	})
-	if err != nil {
-		t.Fatalf("GetSummary returned error: %v", err)
-	}
-
-	if summary.TotalRequests != 2 {
-		t.Fatalf("expected 2 requests in range, got %d", summary.TotalRequests)
-	}
-	if summary.TotalTokens != 30 {
-		t.Fatalf("expected 30 total tokens in range, got %d", summary.TotalTokens)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 2, summary.TotalRequests)
+	require.Equal(t, int64(30), summary.TotalTokens)
 }
 
 func TestSQLiteReaderGetDailyUsage_GroupsAcrossDSTTransitionInConfiguredTimeZone(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	err = store.WriteBatch(ctx, []*UsageEntry{
@@ -125,19 +107,13 @@ func TestSQLiteReaderGetDailyUsage_GroupsAcrossDSTTransitionInConfiguredTimeZone
 			OutputTokens: 20,
 		},
 	})
-	if err != nil {
-		t.Fatalf("failed to seed usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("failed to load location: %v", err)
-	}
+	require.NoError(t, err)
 
 	daily, err := reader.GetDailyUsage(ctx, UsageQueryParams{
 		StartDate: time.Date(2026, 3, 29, 0, 0, 0, 0, location),
@@ -145,34 +121,20 @@ func TestSQLiteReaderGetDailyUsage_GroupsAcrossDSTTransitionInConfiguredTimeZone
 		Interval:  "daily",
 		TimeZone:  "Europe/Warsaw",
 	})
-	if err != nil {
-		t.Fatalf("GetDailyUsage returned error: %v", err)
-	}
-
-	if len(daily) != 1 {
-		t.Fatalf("expected 1 grouped period, got %d", len(daily))
-	}
-	if daily[0].Date != "2026-03-29" {
-		t.Fatalf("expected grouped date %q, got %q", "2026-03-29", daily[0].Date)
-	}
-	if daily[0].Requests != 2 {
-		t.Fatalf("expected 2 requests in grouped period, got %d", daily[0].Requests)
-	}
-	if daily[0].TotalTokens != 30 {
-		t.Fatalf("expected 30 total tokens in grouped period, got %d", daily[0].TotalTokens)
-	}
+	require.NoError(t, err)
+	require.Len(t, daily, 1)
+	require.Equal(t, "2026-03-29", daily[0].Date)
+	require.Equal(t, 2, daily[0].Requests)
+	require.Equal(t, int64(30), daily[0].TotalTokens)
 }
 
 func TestSQLiteReaderSummary_IncludesSpaceSeparatedBoundaryTimestamp(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
-	defer db.Close()
+	require.NoError(t, err)
 
-	if _, err := NewSQLiteStore(db, 0); err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	defer db.Close()
+	_, err = NewSQLiteStore(db, 0)
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	_, err = db.ExecContext(ctx, `
@@ -196,47 +158,31 @@ func TestSQLiteReaderSummary_IncludesSpaceSeparatedBoundaryTimestamp(t *testing.
 		0.0,
 		"",
 	)
-	if err != nil {
-		t.Fatalf("failed to seed mixed-format usage entry: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("failed to load location: %v", err)
-	}
+	require.NoError(t, err)
 
 	summary, err := reader.GetSummary(ctx, UsageQueryParams{
 		StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		TimeZone:  "Europe/Warsaw",
 	})
-	if err != nil {
-		t.Fatalf("GetSummary returned error: %v", err)
-	}
-
-	if summary.TotalRequests != 1 {
-		t.Fatalf("expected 1 request in range, got %d", summary.TotalRequests)
-	}
-	if summary.TotalTokens != 10 {
-		t.Fatalf("expected 10 total tokens in range, got %d", summary.TotalTokens)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.TotalRequests)
+	require.Equal(t, int64(10), summary.TotalTokens)
 }
 
 func TestSQLiteReaderSummary_ExcludesLegacyOffsetTimestampBeforeUTCBoundary(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
-	defer db.Close()
+	require.NoError(t, err)
 
-	if _, err := NewSQLiteStore(db, 0); err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	defer db.Close()
+	_, err = NewSQLiteStore(db, 0)
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	_, err = db.ExecContext(ctx, `
@@ -276,47 +222,31 @@ func TestSQLiteReaderSummary_ExcludesLegacyOffsetTimestampBeforeUTCBoundary(t *t
 		0.0,
 		"",
 	)
-	if err != nil {
-		t.Fatalf("failed to seed mixed-offset usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	location, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("failed to load location: %v", err)
-	}
+	require.NoError(t, err)
 
 	summary, err := reader.GetSummary(ctx, UsageQueryParams{
 		StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		EndDate:   time.Date(2026, 1, 16, 0, 0, 0, 0, location),
 		TimeZone:  "Europe/Warsaw",
 	})
-	if err != nil {
-		t.Fatalf("GetSummary returned error: %v", err)
-	}
-
-	if summary.TotalRequests != 1 {
-		t.Fatalf("expected 1 request in range, got %d", summary.TotalRequests)
-	}
-	if summary.TotalTokens != 20 {
-		t.Fatalf("expected 20 total tokens in range, got %d", summary.TotalTokens)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, summary.TotalRequests)
+	require.Equal(t, int64(20), summary.TotalTokens)
 }
 
 func TestSQLiteReaderGroupingRange_UsesAbsoluteTimestampExtremaAcrossOffsets(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
-	defer db.Close()
+	require.NoError(t, err)
 
-	if _, err := NewSQLiteStore(db, 0); err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	defer db.Close()
+	_, err = NewSQLiteStore(db, 0)
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	_, err = db.ExecContext(ctx, `
@@ -371,45 +301,30 @@ func TestSQLiteReaderGroupingRange_UsesAbsoluteTimestampExtremaAcrossOffsets(t *
 		0.0,
 		"",
 	)
-	if err != nil {
-		t.Fatalf("failed to seed mixed-format usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	start, end, ok, err := reader.sqliteGroupingRange(ctx, UsageQueryParams{
 		TimeZone: "Europe/Warsaw",
 	})
-	if err != nil {
-		t.Fatalf("sqliteGroupingRange returned error: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected sqliteGroupingRange to detect a usage range")
-	}
+	require.NoError(t, err)
+	require.True(t, ok)
 
 	expectedStart := time.Date(2026, 3, 28, 22, 30, 0, 0, time.UTC)
 	expectedEnd := time.Date(2026, 3, 30, 1, 30, 1, 0, time.UTC)
-	if !start.Equal(expectedStart) {
-		t.Fatalf("expected range start %s, got %s", expectedStart, start)
-	}
-	if !end.Equal(expectedEnd) {
-		t.Fatalf("expected range end %s, got %s", expectedEnd, end)
-	}
+	require.True(t, start.Equal(expectedStart), "expected range start %s, got %s", expectedStart, start)
+	require.True(t, end.Equal(expectedEnd), "expected range end %s, got %s", expectedEnd, end)
 }
 
 func TestSQLiteReaderGetUsageLog_OrdersMixedTimestampFormatsByAbsoluteTime(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
-	defer db.Close()
+	require.NoError(t, err)
 
-	if _, err := NewSQLiteStore(db, 0); err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	defer db.Close()
+	_, err = NewSQLiteStore(db, 0)
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	_, err = db.ExecContext(ctx, `
@@ -464,45 +379,29 @@ func TestSQLiteReaderGetUsageLog_OrdersMixedTimestampFormatsByAbsoluteTime(t *te
 		0.0,
 		"",
 	)
-	if err != nil {
-		t.Fatalf("failed to seed mixed-format usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{
 		Limit:  2,
 		Offset: 0,
 	})
-	if err != nil {
-		t.Fatalf("GetUsageLog returned error: %v", err)
-	}
-
-	if len(log.Entries) != 2 {
-		t.Fatalf("expected 2 log entries, got %d", len(log.Entries))
-	}
-	if log.Entries[0].ID != "latest-negative-offset" {
-		t.Fatalf("expected latest entry first, got %s", log.Entries[0].ID)
-	}
-	if log.Entries[1].ID != "middle-zulu" {
-		t.Fatalf("expected middle entry second, got %s", log.Entries[1].ID)
-	}
+	require.NoError(t, err)
+	require.Len(t, log.Entries, 2)
+	require.Equal(t, "latest-negative-offset", log.Entries[0].ID)
+	require.Equal(t, "middle-zulu", log.Entries[1].ID)
 }
 
 func TestSQLiteReaderGetUsageByModel_CollapsesBlankProviderNameIntoProviderGroup(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	err = store.WriteBatch(ctx, []*UsageEntry{
@@ -531,45 +430,27 @@ func TestSQLiteReaderGetUsageByModel_CollapsesBlankProviderNameIntoProviderGroup
 			OutputTokens: 40,
 		},
 	})
-	if err != nil {
-		t.Fatalf("failed to seed usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	got, err := reader.GetUsageByModel(ctx, UsageQueryParams{})
-	if err != nil {
-		t.Fatalf("GetUsageByModel returned error: %v", err)
-	}
-
-	if len(got) != 1 {
-		t.Fatalf("expected 1 grouped usage row, got %d: %#v", len(got), got)
-	}
-	if got[0].ProviderName != "openai" {
-		t.Fatalf("expected provider_name %q, got %q", "openai", got[0].ProviderName)
-	}
-	if got[0].InputTokens != 40 {
-		t.Fatalf("expected 40 input tokens, got %d", got[0].InputTokens)
-	}
-	if got[0].OutputTokens != 60 {
-		t.Fatalf("expected 60 output tokens, got %d", got[0].OutputTokens)
-	}
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, "openai", got[0].ProviderName)
+	require.Equal(t, int64(40), got[0].InputTokens)
+	require.Equal(t, int64(60), got[0].OutputTokens)
 }
 
 func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	err = store.WriteBatch(ctx, []*UsageEntry{
@@ -626,89 +507,58 @@ func TestSQLiteReaderGetUsageByUserPath_GroupsByTrackedPath(t *testing.T) {
 			TotalTokens:  110,
 		},
 	})
-	if err != nil {
-		t.Fatalf("failed to seed usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	got, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{})
-	if err != nil {
-		t.Fatalf("GetUsageByUserPath returned error: %v", err)
-	}
+	require.NoError(t, err)
 
 	byPath := make(map[string]UserPathUsage, len(got))
 	for _, row := range got {
 		byPath[row.UserPath] = row
 	}
-	if len(byPath) != 3 {
-		t.Fatalf("expected 3 grouped usage rows, got %d: %#v", len(byPath), got)
-	}
-	if byPath["/"].InputTokens != 15 {
-		t.Fatalf("expected root input tokens 15, got %d", byPath["/"].InputTokens)
-	}
-	if byPath["/"].TotalTokens != 50 {
-		t.Fatalf("expected root total tokens 50, got %d", byPath["/"].TotalTokens)
-	}
-	if byPath["/team/alpha"].TotalTokens != 70 {
-		t.Fatalf("expected alpha total tokens 70, got %d", byPath["/team/alpha"].TotalTokens)
-	}
-	if byPath["/team/beta"].OutputTokens != 60 {
-		t.Fatalf("expected beta output tokens 60, got %d", byPath["/team/beta"].OutputTokens)
-	}
+	require.Len(t, byPath, 3)
+	require.Equal(t, int64(15), byPath["/"].InputTokens)
+	require.Equal(t, int64(50), byPath["/"].TotalTokens)
+	require.Equal(t, int64(70), byPath["/team/alpha"].TotalTokens)
+	require.Equal(t, int64(60), byPath["/team/beta"].OutputTokens)
 
 	filtered, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{UserPath: "/team"})
-	if err != nil {
-		t.Fatalf("filtered GetUsageByUserPath returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	filteredByPath := make(map[string]UserPathUsage, len(filtered))
 	for _, row := range filtered {
 		filteredByPath[row.UserPath] = row
 	}
-	if len(filteredByPath) != 2 {
-		t.Fatalf("expected 2 filtered grouped usage rows, got %d: %#v", len(filteredByPath), filtered)
-	}
-	if _, ok := filteredByPath["/"]; ok {
-		t.Fatalf("expected root path to be excluded by /team subtree filter")
-	}
+	require.Len(t, filteredByPath, 2)
+	_, ok := filteredByPath["/"]
+	require.False(t, ok)
 
 	rootFiltered, err := reader.GetUsageByUserPath(ctx, UsageQueryParams{UserPath: "/"})
-	if err != nil {
-		t.Fatalf("root filtered GetUsageByUserPath returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	rootFilteredByPath := make(map[string]UserPathUsage, len(rootFiltered))
 	for _, row := range rootFiltered {
 		rootFilteredByPath[row.UserPath] = row
 	}
-	if len(rootFilteredByPath) != len(byPath) {
-		t.Fatalf("expected root filter to include %d grouped usage rows, got %d: %#v", len(byPath), len(rootFilteredByPath), rootFiltered)
-	}
-	if rootFilteredByPath["/"].TotalTokens != 50 {
-		t.Fatalf("expected root filter to include blank root total tokens 50, got %d", rootFilteredByPath["/"].TotalTokens)
-	}
-	if rootFilteredByPath["/team/alpha"].TotalTokens != 70 {
-		t.Fatalf("expected root filter to include alpha total tokens 70, got %d", rootFilteredByPath["/team/alpha"].TotalTokens)
-	}
-	if rootFilteredByPath["/team/beta"].TotalTokens != 110 {
-		t.Fatalf("expected root filter to include beta total tokens 110, got %d", rootFilteredByPath["/team/beta"].TotalTokens)
-	}
+	require.Len(t, rootFilteredByPath, len(byPath), "root filter must include every grouped usage row: %#v", rootFiltered)
+	require.Equal(t, int64(50), rootFilteredByPath["/"].TotalTokens)
+	require.Equal(t, int64(70), rootFilteredByPath["/team/alpha"].TotalTokens)
+	require.Equal(t, int64(110), rootFilteredByPath["/team/beta"].TotalTokens)
 }
 
 func TestSQLiteStoreCleanup_KeepsNewerLegacyOffsetRows(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 
 	store, err := NewSQLiteStore(db, 1)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer store.Close()
 
 	cutoff := time.Now().AddDate(0, 0, -1).UTC().Truncate(time.Second)
@@ -752,47 +602,39 @@ func TestSQLiteStoreCleanup_KeepsNewerLegacyOffsetRows(t *testing.T) {
 		0.0,
 		"",
 	)
-	if err != nil {
-		t.Fatalf("failed to seed cleanup rows: %v", err)
-	}
+	require.NoError(t, err)
 
 	store.cleanup()
 
 	var remainingIDs []string
 	rows, err := db.Query(`SELECT id FROM usage ORDER BY id`)
-	if err != nil {
-		t.Fatalf("failed to query remaining rows: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer rows.Close()
 
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("failed to scan remaining id: %v", err)
-		}
+		err := rows.Scan(&id)
+		require.NoError(t, err)
+
 		remainingIDs = append(remainingIDs, id)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("failed to iterate remaining rows: %v", err)
-	}
-
-	if len(remainingIDs) != 1 || remainingIDs[0] != "keep-newer-legacy" {
-		t.Fatalf("expected only the newer legacy row to remain, got %v", remainingIDs)
-	}
+	err = rows.Err()
+	require.NoError(t, err)
+	require.Len(t, remainingIDs, 1)
+	require.Equal(t, "keep-newer-legacy", remainingIDs[0])
 }
 
 func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer store.Close()
 
 	_, err = db.Exec(`
@@ -834,26 +676,16 @@ func TestSQLiteReader_GetUsageLogFiltersByUserPathSubtree(t *testing.T) {
 		0.0,
 		"",
 	)
-	if err != nil {
-		t.Fatalf("failed to seed usage rows: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	log, err := reader.GetUsageLog(ctx, UsageLogParams{
 		UserPath: "/team",
 		Limit:    10,
 	})
-	if err != nil {
-		t.Fatalf("GetUsageLog returned error: %v", err)
-	}
-	if len(log.Entries) != 1 {
-		t.Fatalf("expected 1 log entry, got %d", len(log.Entries))
-	}
-	if log.Entries[0].ID != "match-team" {
-		t.Fatalf("expected match-team, got %s", log.Entries[0].ID)
-	}
+	require.NoError(t, err)
+	require.Len(t, log.Entries, 1)
+	require.Equal(t, "match-team", log.Entries[0].ID)
 }

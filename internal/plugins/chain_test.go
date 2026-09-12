@@ -2,11 +2,11 @@ package plugins
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -28,26 +28,21 @@ func TestNewInstance(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			inst, err := NewInstance(context.Background(), newEntry(tt.plugin), tt.spec, NewHost(HostDeps{}, HostInfo{}))
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("NewInstance() error = %v, want %q", err, tt.wantErr)
-				}
-				if tt.plugin.initErr != nil && !tt.plugin.closed {
-					t.Fatal("a plugin whose Init failed must be closed")
+				require.ErrorContains(t, err, tt.wantErr)
+				if tt.plugin.initErr != nil {
+					require.True(t, tt.plugin.closed, "a plugin whose Init failed must be closed")
 				}
 				return
 			}
-			if err != nil {
-				t.Fatalf("NewInstance() error = %v", err)
-			}
-			if inst.Type != "p" || inst.Name != "i" || inst.ConfigHash == "" || tt.plugin.lastHost == nil {
-				t.Fatalf("instance = %+v", inst)
-			}
-			if string(tt.plugin.config) != `{"content":"x"}` {
-				t.Fatalf("init config = %s", tt.plugin.config)
-			}
-			if err := inst.Close(context.Background()); err != nil || !tt.plugin.closed {
-				t.Fatalf("Close() error = %v, closed = %v", err, tt.plugin.closed)
-			}
+			require.NoError(t, err)
+			require.Equal(t, "p", inst.Type)
+			require.Equal(t, "i", inst.Name)
+			require.NotEmpty(t, inst.ConfigHash)
+			require.NotNil(t, tt.plugin.lastHost)
+			require.Equal(t, `{"content":"x"}`, string(tt.plugin.config), "init config = %s", tt.plugin.config)
+			err = inst.Close(context.Background())
+			require.NoError(t, err)
+			require.True(t, tt.plugin.closed)
 		})
 	}
 }
@@ -55,9 +50,7 @@ func TestNewInstance(t *testing.T) {
 func TestNewInstanceRecoversInitPanic(t *testing.T) {
 	entry := Entry{Name: "boom", Factory: func() pluginapi.Plugin { return &panicInit{} }}
 	_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
-	if err == nil || !strings.Contains(err.Error(), "panicked") {
-		t.Fatalf("error = %v", err)
-	}
+	require.ErrorContains(t, err, "panicked")
 }
 
 type panicInit struct{ fakePlugin }
@@ -65,20 +58,18 @@ type panicInit struct{ fakePlugin }
 func (*panicInit) Init(context.Context, json.RawMessage, pluginapi.Host) error { panic("init boom") }
 
 func TestFailModes(t *testing.T) {
-	if mode, err := ParseFailMode(" Open "); err != nil || mode != FailOpen {
-		t.Fatalf("ParseFailMode(Open) = %q, %v", mode, err)
-	}
-	if _, err := ParseFailMode("maybe"); err == nil {
-		t.Fatal("ParseFailMode(maybe) error = nil")
-	}
+	mode, err := ParseFailMode(" Open ")
+	require.NoError(t, err)
+	require.Equal(t, FailOpen, mode)
+	_, err = ParseFailMode("maybe")
+	require.Error(t, err)
+
 	inst := newTestInstance(&fakePlugin{name: "p"}, InstanceSpec{})
-	if inst.EffectiveFailMode(pluginapi.KindPrompt) != FailClosed || inst.EffectiveFailMode(pluginapi.KindRequest) != FailOpen {
-		t.Fatal("default fail modes wrong")
-	}
+	require.Equal(t, FailClosed, inst.EffectiveFailMode(pluginapi.KindPrompt))
+	require.Equal(t, FailOpen, inst.EffectiveFailMode(pluginapi.KindRequest))
+
 	inst.FailMode = FailOpen
-	if inst.EffectiveFailMode(pluginapi.KindPrompt) != FailOpen {
-		t.Fatal("explicit fail mode ignored")
-	}
+	require.Equal(t, FailOpen, inst.EffectiveFailMode(pluginapi.KindPrompt))
 }
 
 func TestBuildChain(t *testing.T) {
@@ -86,9 +77,8 @@ func TestBuildChain(t *testing.T) {
 	editorA := newTestInstance(&fakePlugin{name: "editor-a", mutates: true}, InstanceSpec{})
 	editorB := newTestInstance(&fakePlugin{name: "editor-b", mutates: true}, InstanceSpec{})
 	promptOnlyInst, err := NewInstance(context.Background(), newEntry(&promptOnly{fakePlugin{name: "prompt-only", kinds: []pluginapi.Kind{pluginapi.KindPrompt}}}), InstanceSpec{Name: "prompt-only"}, NewHost(HostDeps{}, HostInfo{}))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	promptOnlyInst.Kinds = []pluginapi.Kind{pluginapi.KindPrompt}
 
 	tests := []struct {
@@ -109,31 +99,22 @@ func TestBuildChain(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			chain, err := BuildChain(tt.phase, tt.refs)
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("BuildChain() error = %v, want %q", err, tt.wantErr)
-				}
+				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("BuildChain() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			if len(tt.refs) == 0 {
-				if chain != nil {
-					t.Fatal("empty refs should give nil chain")
-				}
+				require.Nil(t, chain)
 				return
 			}
-			if len(chain.Steps) != len(tt.steps) {
-				t.Fatalf("steps = %d, want %d", len(chain.Steps), len(tt.steps))
-			}
+			require.Len(t, chain.Steps, len(tt.steps))
+
 			for i, order := range tt.steps {
-				if chain.Steps[i].Order != order {
-					t.Fatalf("step %d order = %d, want %d", i, chain.Steps[i].Order, order)
-				}
+				require.Equal(t, order, chain.Steps[i].Order)
 			}
-			if chain.Hash == "" || chain.Len() != len(tt.refs) {
-				t.Fatalf("chain = %+v", chain)
-			}
+			require.NotEmpty(t, chain.Hash)
+			require.Equal(t, len(tt.refs), chain.Len())
 		})
 	}
 }
@@ -142,53 +123,43 @@ func TestChainHashChangesWithConfigStepAndFailMode(t *testing.T) {
 	build := func(config string, step int, mode FailMode) string {
 		inst := newTestInstance(&fakePlugin{name: "p", schema: []pluginapi.Field{{Key: "v", Input: pluginapi.InputText}}}, InstanceSpec{Config: json.RawMessage(config), FailMode: mode})
 		chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{inst, step}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		return chain.Hash
 	}
 	base := build(`{"v":"a"}`, 10, "")
-	if base != build(`{"v":"a"}`, 10, "") {
-		t.Fatal("hash not stable")
-	}
+	require.Equal(t, build(`{"v":"a"}`, 10, ""), base)
+
 	for name, other := range map[string]string{
 		"config":   build(`{"v":"b"}`, 10, ""),
 		"step":     build(`{"v":"a"}`, 20, ""),
 		"failmode": build(`{"v":"a"}`, 10, FailOpen),
 	} {
-		if other == base {
-			t.Fatalf("hash unchanged for %s", name)
-		}
+		require.NotEqual(t, base, other, "hash unchanged for %s", name)
 	}
 	chains := &Chains{Prompt: &Chain{Hash: "p", Steps: []Step{{Order: 1}}}}
-	if got := chains.Hashes(); len(got) != 1 || got["prompt"] != "p" {
-		t.Fatalf("Hashes() = %v", got)
-	}
-	if chains.Empty() || chains.PromptHash() != "p" {
-		t.Fatal("Chains helpers wrong")
-	}
+	got := chains.Hashes()
+	require.Len(t, got, 1)
+	require.Equal(t, "p", got["prompt"])
+	require.False(t, chains.Empty())
+	require.Equal(t, "p", chains.PromptHash())
 }
 
 func TestComputeChainHashFormat(t *testing.T) {
-	if ComputeChainHash(nil) != "" {
-		t.Fatal("empty hash should be empty")
-	}
+	require.Empty(t, ComputeChainHash(nil))
+
 	a := ComputeChainHash([]RuleDescriptor{{Name: "a", Type: "t", Order: 1, Mode: "closed", Content: "x"}, {Name: "b", Type: "t", Order: 2, Mode: "closed", Content: "y"}})
 	b := ComputeChainHash([]RuleDescriptor{{Name: "b", Type: "t", Order: 2, Mode: "closed", Content: "y"}, {Name: "a", Type: "t", Order: 1, Mode: "closed", Content: "x"}})
-	if a != b || len(a) != 64 {
-		t.Fatalf("hash order-dependent or wrong length: %q %q", a, b)
-	}
+	require.Equal(t, b, a)
+	require.Len(t, a, 64)
 }
 
 func TestInstanceStreamPolicyDefaultsToObserve(t *testing.T) {
 	inst := newTestInstance(&fakePlugin{name: "s"}, InstanceSpec{})
-	if inst.StreamPolicy().Mode != pluginapi.StreamObserve {
-		t.Fatalf("mode = %q", inst.StreamPolicy().Mode)
-	}
+	require.Equal(t, pluginapi.StreamObserve, inst.StreamPolicy().Mode)
+
 	inst.Timeout = time.Second
-	if inst.Timeout != time.Second {
-		t.Fatal("timeout not kept")
-	}
+	require.Equal(t, time.Second, inst.Timeout)
 }
 
 type panickingPolicy struct{ *fakePlugin }
@@ -197,22 +168,19 @@ func (panickingPolicy) StreamPolicy() pluginapi.StreamPolicy { panic("policy boo
 
 func TestInstanceStreamPolicyRecoversPanic(t *testing.T) {
 	inst := &Instance{Name: "s", Type: "s", Plugin: panickingPolicy{&fakePlugin{name: "s"}}, Kinds: []pluginapi.Kind{pluginapi.KindStream}}
-	if got := inst.StreamPolicy().Mode; got != pluginapi.StreamObserve {
-		t.Fatalf("mode after panic = %q, want observe", got)
-	}
+	got := inst.StreamPolicy().Mode
+	require.Equal(t, pluginapi.StreamObserve, got)
 }
 
 func TestChainsCacheHash(t *testing.T) {
 	promptOnly := &Chains{Prompt: &Chain{Hash: "p", Steps: []Step{{Order: 1}}}}
-	if promptOnly.CacheHash() != "p" {
-		t.Fatalf("prompt-only cache hash = %q, want the prompt hash", promptOnly.CacheHash())
-	}
+	require.Equal(t, "p", promptOnly.CacheHash())
+
 	withResponse := &Chains{Prompt: promptOnly.Prompt, Response: &Chain{Hash: "r", Steps: []Step{{Order: 1}}}}
 	other := &Chains{Prompt: promptOnly.Prompt, Response: &Chain{Hash: "r2", Steps: []Step{{Order: 1}}}}
-	if withResponse.CacheHash() == "p" || withResponse.CacheHash() == other.CacheHash() || len(withResponse.CacheHash()) != 64 {
-		t.Fatalf("cache hash with response chain = %q / %q", withResponse.CacheHash(), other.CacheHash())
-	}
-	if (&Chains{}).CacheHash() != "" || (*Chains)(nil).CacheHash() != "" {
-		t.Fatal("empty chains must hash to empty")
-	}
+	require.NotEqual(t, "p", withResponse.CacheHash())
+	require.NotEqual(t, other.CacheHash(), withResponse.CacheHash())
+	require.Len(t, withResponse.CacheHash(), 64)
+	require.Empty(t, (&Chains{}).CacheHash())
+	require.Empty(t, (*Chains)(nil).CacheHash())
 }

@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeRoute is a test routing strategy whose schema and behaviour are shared
@@ -76,12 +76,11 @@ var routeSchema = []pluginapi.Field{
 func newRouteCatalog(t *testing.T, route *fakeRoute) *Catalog {
 	t.Helper()
 	catalog := NewCatalog()
-	if err := catalog.Register(func() pluginapi.Plugin { return route }, SourceBuiltin); err != nil {
-		t.Fatalf("Register(route): %v", err)
-	}
-	if err := catalog.Register(factoryOf(&fakePlugin{name: "prompt_only", kinds: []pluginapi.Kind{pluginapi.KindPrompt}}), SourceBuiltin); err != nil {
-		t.Fatalf("Register(prompt): %v", err)
-	}
+	err := catalog.Register(func() pluginapi.Plugin { return route }, SourceBuiltin)
+	require.NoError(t, err)
+	err = catalog.Register(factoryOf(&fakePlugin{name: "prompt_only", kinds: []pluginapi.Kind{pluginapi.KindPrompt}}), SourceBuiltin)
+	require.NoError(t, err)
+
 	return catalog
 }
 
@@ -108,17 +107,11 @@ func TestRouteResolver_ValidateRouteConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := resolver.ValidateRouteConfig(tc.plugin, tc.cfg)
 			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
-				}
+				require.ErrorContains(t, err, tc.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("ValidateRouteConfig: %v", err)
-			}
-			if string(got) != tc.want {
-				t.Fatalf("canonical = %s, want %s", got, tc.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, string(got))
 		})
 	}
 }
@@ -127,10 +120,8 @@ func TestRouteResolver_StrategyBuildsLazilyFromInstanceConfig(t *testing.T) {
 	t.Parallel()
 	route := &fakeRoute{name: "lat", schema: routeSchema}
 	resolver := NewRouteResolver(newRouteCatalog(t, route), HostDeps{})
-
-	if _, _, err := resolver.Strategy("lat"); err == nil || !strings.Contains(err.Error(), `"endpoint" is required`) {
-		t.Fatalf("Strategy without instance config error = %v, want required-field error", err)
-	}
+	_, _, err := resolver.Strategy("lat")
+	require.ErrorContains(t, err, `"endpoint" is required`)
 
 	configs := map[string]json.RawMessage{"lat": json.RawMessage(`{"endpoint":"http://a"}`)}
 	resolver.SetInstanceConfigs(func(name string) (json.RawMessage, bool) {
@@ -138,19 +129,17 @@ func TestRouteResolver_StrategyBuildsLazilyFromInstanceConfig(t *testing.T) {
 		return raw, ok
 	})
 	strategy, inst, err := resolver.Strategy("lat")
-	if err != nil {
-		t.Fatalf("Strategy: %v", err)
-	}
-	if strategy == nil || inst == nil || inst.Name != "lat" || inst.Type != "lat" {
-		t.Fatalf("Strategy returned %v / %+v", strategy, inst)
-	}
-	if string(route.config) != `{"endpoint":"http://a"}` {
-		t.Fatalf("instance config = %s", route.config)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, strategy)
+	require.NotNil(t, inst)
+	require.Equal(t, "lat", inst.Name)
+	require.Equal(t, "lat", inst.Type)
+	require.Equal(t, `{"endpoint":"http://a"}`, string(route.config), "instance config = %s", route.config)
+
 	again, againInst, err := resolver.Strategy("lat")
-	if err != nil || again != strategy {
-		t.Fatalf("second Strategy = %v, %v; want the cached instance", again, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, strategy, again)
+
 	againInst.Release()
 
 	// A changed definition rebuilds the instance. The previous one is still
@@ -158,25 +147,24 @@ func TestRouteResolver_StrategyBuildsLazilyFromInstanceConfig(t *testing.T) {
 	// it and the resolver next looks.
 	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
 	_, rebuilt, err := resolver.Strategy("lat")
-	if err != nil {
-		t.Fatalf("Strategy after change: %v", err)
-	}
-	if string(route.config) != `{"endpoint":"http://b"}` || route.closed != 0 || inst.Closed() {
-		t.Fatalf("after change config = %s closed = %d, want the held instance kept open", route.config, route.closed)
-	}
+	require.NoError(t, err)
+	require.Equal(t, `{"endpoint":"http://b"}`, string(route.config))
+	require.Equal(t, 0, route.closed)
+	require.False(t, inst.Closed(), "after change config = %s closed = %d, want the held instance kept open", route.config, route.closed)
+
 	inst.Release()
 	resolver.ReportOutcome(pluginapi.RouteOutcome{Source: "smart"})
-	if route.closed != 1 || !inst.Closed() || rebuilt.Closed() {
-		t.Fatalf("after release closed = %d (previous closed %v, current closed %v), want the previous instance closed", route.closed, inst.Closed(), rebuilt.Closed())
-	}
-	rebuilt.Release()
+	require.Equal(t, 1, route.closed)
+	require.True(t, inst.Closed())
+	require.False(t, rebuilt.Closed())
 
-	if names := resolver.Names(); len(names) != 1 || names[0] != "lat" {
-		t.Fatalf("Names() = %v, want [lat]", names)
-	}
-	if err := resolver.Close(context.Background()); err != nil || route.closed != 2 {
-		t.Fatalf("Close() error = %v closed = %d", err, route.closed)
-	}
+	rebuilt.Release()
+	names := resolver.Names()
+	require.Len(t, names, 1)
+	require.Equal(t, "lat", names[0])
+	err = resolver.Close(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, route.closed)
 }
 
 func TestRouteResolver_StrategyErrors(t *testing.T) {
@@ -191,17 +179,12 @@ func TestRouteResolver_StrategyErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := resolver.Strategy(tc.plugin)
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("Strategy(%q) error = %v, want containing %q", tc.plugin, err, tc.wantErr)
-			}
+			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
-	if _, _, err := resolver.Strategy("missing"); err == nil {
-		t.Fatal("Strategy(missing) error = nil")
-	}
-	if len(resolver.strategies) != 1 {
-		t.Fatalf("resolver cached %d strategies, want only the failed build", len(resolver.strategies))
-	}
+	_, _, err := resolver.Strategy("missing")
+	require.Error(t, err)
+	require.Len(t, resolver.strategies, 1)
 }
 
 func TestRouteResolver_ReportOutcomeFansOutAndRecovers(t *testing.T) {
@@ -210,28 +193,24 @@ func TestRouteResolver_ReportOutcomeFansOutAndRecovers(t *testing.T) {
 	bad := &fakeRoute{name: "bad", panicEnd: true}
 	catalog := NewCatalog()
 	for _, route := range []*fakeRoute{good, bad} {
-		if err := catalog.Register(func() pluginapi.Plugin { return route }, SourceBuiltin); err != nil {
-			t.Fatalf("Register: %v", err)
-		}
+		err := catalog.Register(func() pluginapi.Plugin { return route }, SourceBuiltin)
+		require.NoError(t, err)
 	}
 	resolver := NewRouteResolver(catalog, HostDeps{})
 	outcome := pluginapi.RouteOutcome{Source: "smart", Target: pluginapi.RouteTarget{Provider: "openai", Model: "gpt-4o"}, Success: true}
 
 	// Nothing built yet: nothing to report to.
 	resolver.ReportOutcome(outcome)
-	if len(good.outcomes) != 0 {
-		t.Fatalf("unbuilt strategy received %d outcomes", len(good.outcomes))
-	}
+	require.Empty(t, good.outcomes)
+
 	for _, name := range []string{"good", "bad"} {
-		if _, _, err := resolver.Strategy(name); err != nil {
-			t.Fatalf("Strategy(%s): %v", name, err)
-		}
+		_, _, err := resolver.Strategy(name)
+		require.NoError(t, err, "Strategy(%s): %v", name, err)
 	}
 	resolver.ReportOutcome(outcome)
 	resolver.ReportOutcome(outcome)
-	if len(good.outcomes) != 2 || good.outcomes[0].Target.Qualified() != "openai/gpt-4o" {
-		t.Fatalf("good strategy outcomes = %+v, want 2 for openai/gpt-4o", good.outcomes)
-	}
+	require.Len(t, good.outcomes, 2)
+	require.Equal(t, "openai/gpt-4o", good.outcomes[0].Target.Qualified())
 }
 
 // A rebuild's Init must not hold the mutex ReportOutcome takes at the end of
@@ -260,9 +239,8 @@ func TestRouteResolver_ReportOutcomeNotBlockedByInit(t *testing.T) {
 		t.Fatal("ReportOutcome blocked behind a plugin Init")
 	}
 	close(slow.initGate)
-	if err := <-built; err != nil {
-		t.Fatalf("Strategy: %v", err)
-	}
+	err := <-built
+	require.NoError(t, err)
 }
 
 // waitForBuild returns once a rebuild holds buildMu, i.e. is inside Init.
@@ -325,16 +303,15 @@ func TestRouteResolver_CloseWaitsForRebuildAndRefusesAfter(t *testing.T) {
 	}
 	close(slow.initGate)
 	b := <-strategy
-	if err := <-closed; err != nil {
-		t.Fatal(err)
-	}
-	if b.err != nil || b.inst == nil || !b.inst.Closed() {
-		t.Fatalf("rebuild published %+v (err %v), want it built and closed by Close", b.inst, b.err)
-	}
+	err := <-closed
+	require.NoError(t, err)
+	require.NoError(t, b.err)
+	require.NotNil(t, b.inst)
+	require.True(t, b.inst.Closed())
+
 	b.inst.Release()
-	if _, _, err := resolver.Strategy("slow"); !errors.Is(err, ErrRouteResolverClosed) {
-		t.Fatalf("Strategy after Close error = %v, want ErrRouteResolverClosed", err)
-	}
+	_, _, err = resolver.Strategy("slow")
+	require.ErrorIs(t, err, ErrRouteResolverClosed)
 }
 
 // An instance stays open while its OnAttemptEnd runs, even when a rebuild
@@ -349,9 +326,8 @@ func TestRouteResolver_ReportOutcomeHoldsInstanceAcrossOnAttemptEnd(t *testing.T
 		return raw, ok
 	})
 	_, inst, err := resolver.Strategy("lat")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	inst.Release()
 
 	reported := make(chan struct{})
@@ -363,18 +339,15 @@ func TestRouteResolver_ReportOutcomeHoldsInstanceAcrossOnAttemptEnd(t *testing.T
 
 	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
 	_, rebuilt, err := resolver.Strategy("lat")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	rebuilt.Release()
-	if inst.Closed() {
-		t.Fatal("replaced instance closed while OnAttemptEnd was still running")
-	}
+	require.False(t, inst.Closed())
+
 	close(route.endGate)
 	<-reported
-	if !inst.Closed() || rebuilt.Closed() {
-		t.Fatalf("after OnAttemptEnd returned: previous closed %v, current closed %v", inst.Closed(), rebuilt.Closed())
-	}
+	require.True(t, inst.Closed())
+	require.False(t, rebuilt.Closed())
 }
 
 // Handing an instance back closes it at once when a rebuild retired it
@@ -389,20 +362,16 @@ func TestRouteResolver_ReleaseClosesRetiredInstance(t *testing.T) {
 		return raw, ok
 	})
 	_, inst, err := resolver.Strategy("lat")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	configs["lat"] = json.RawMessage(`{"endpoint":"http://b"}`)
 	_, rebuilt, err := resolver.Strategy("lat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if inst.Closed() {
-		t.Fatal("replaced instance closed while its Select was still held")
-	}
+	require.NoError(t, err)
+	require.False(t, inst.Closed())
+
 	resolver.Release(inst)
-	if !inst.Closed() || rebuilt.Closed() {
-		t.Fatalf("after Release: previous closed %v, current closed %v; want the previous closed at once", inst.Closed(), rebuilt.Closed())
-	}
+	require.True(t, inst.Closed())
+	require.False(t, rebuilt.Closed())
+
 	resolver.Release(rebuilt)
 }

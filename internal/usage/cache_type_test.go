@@ -1,6 +1,10 @@
 package usage
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestNormalizedUsageEntryForStorageClearsInvalidCacheTypeWithoutMutatingInput(t *testing.T) {
 	entry := &UsageEntry{
@@ -10,15 +14,9 @@ func TestNormalizedUsageEntryForStorageClearsInvalidCacheTypeWithoutMutatingInpu
 	}
 
 	got := normalizedUsageEntryForStorage(entry)
-	if got == entry {
-		t.Fatal("expected invalid cache type to clone entry for normalization")
-	}
-	if got.CacheType != "" {
-		t.Fatalf("normalized CacheType = %q, want empty", got.CacheType)
-	}
-	if entry.CacheType != "invalid-cache-type" {
-		t.Fatalf("input CacheType mutated to %q", entry.CacheType)
-	}
+	require.NotSame(t, entry, got)
+	require.Empty(t, got.CacheType)
+	require.Equal(t, "invalid-cache-type", entry.CacheType)
 }
 
 func TestNormalizedUsageEntryForStorageUserPathFallbackAndCloneBehavior(t *testing.T) {
@@ -92,22 +90,14 @@ func TestNormalizedUsageEntryForStorageUserPathFallbackAndCloneBehavior(t *testi
 			original := entry
 
 			got := normalizedUsageEntryForStorage(&entry)
-
-			if same := got == &entry; same != tt.wantSamePointer {
-				t.Fatalf("same pointer = %v, want %v", same, tt.wantSamePointer)
-			}
-			if got.UserPath != tt.wantUserPath {
-				t.Fatalf("UserPath = %q, want %q", got.UserPath, tt.wantUserPath)
-			}
-			if got.CacheType != tt.wantCacheType {
-				t.Fatalf("CacheType = %q, want %q", got.CacheType, tt.wantCacheType)
-			}
-			if got.ProviderName != tt.wantProviderName {
-				t.Fatalf("ProviderName = %q, want %q", got.ProviderName, tt.wantProviderName)
-			}
-			if entry.UserPath != original.UserPath || entry.CacheType != original.CacheType || entry.ProviderName != original.ProviderName {
-				t.Fatalf("input mutated from %+v to %+v", original, entry)
-			}
+			same := got == &entry
+			require.Equal(t, tt.wantSamePointer, same)
+			require.Equal(t, tt.wantUserPath, got.UserPath)
+			require.Equal(t, tt.wantCacheType, got.CacheType)
+			require.Equal(t, tt.wantProviderName, got.ProviderName)
+			require.Equal(t, original.UserPath, entry.UserPath)
+			require.Equal(t, original.CacheType, entry.CacheType)
+			require.Equal(t, original.ProviderName, entry.ProviderName, "input mutated from %+v to %+v", original, entry)
 		})
 	}
 }
