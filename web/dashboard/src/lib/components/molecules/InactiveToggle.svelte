@@ -13,7 +13,7 @@
   <input type="checkbox" bind:checked />
   <span>
     {label}
-    {#if count > 0}({count}){/if}
+    {#if !checked && count > 0}({count}){/if}
   </span>
 </label>
 
