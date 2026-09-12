@@ -77,3 +77,15 @@ type CompleteHook interface {
 type HealthChecker interface {
 	Health(ctx context.Context) error
 }
+
+// ContentEditor is implemented by a plugin whose manifest declares Mutates
+// but whose configuration decides whether it actually edits content: a
+// presidio instance that only flags detections, a string_replace instance
+// that only blocks. GoModel asks a configured instance before work it does
+// solely so an editing plugin sees the whole request — replaying the stored
+// history of a chained Responses request instead of letting the provider
+// resolve previous_response_id itself. It never relaxes how a hook runs.
+// A mutating plugin that does not implement it is taken to edit.
+type ContentEditor interface {
+	EditsContent() bool
+}

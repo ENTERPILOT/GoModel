@@ -38,6 +38,26 @@ func (p *redactingPatcher) PatchResponsesRequest(_ context.Context, req *core.Re
 	return &patched, nil
 }
 
+// inspectingPatcher stands in for a prompt guardrail that only classifies:
+// it reads the request but never rewrites it, so a chained request keeps the
+// native passthrough.
+type inspectingPatcher struct{ seen []string }
+
+func (p *inspectingPatcher) PatchChatRequest(_ context.Context, req *core.ChatRequest) (*core.ChatRequest, error) {
+	return req, nil
+}
+
+func (p *inspectingPatcher) PatchResponsesRequest(_ context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error) {
+	raw, err := json.Marshal(req.Input)
+	if err != nil {
+		return nil, err
+	}
+	p.seen = append(p.seen, string(raw))
+	return req, nil
+}
+
+func (p *inspectingPatcher) EditsPromptContent(context.Context) bool { return false }
+
 func forwardedInput(t *testing.T, provider *capturingProvider) string {
 	t.Helper()
 	if provider.capturedResponsesReq == nil {
@@ -119,6 +139,78 @@ func TestResponsesWithConversation_HistoryPassesPromptGuardrails(t *testing.T) {
 	}
 	if got := forwardedInput(t, provider); strings.Contains(got, "zebra") || !strings.Contains(got, "[animal]") {
 		t.Fatalf("conversation history forwarded %s, want it redacted", got)
+	}
+}
+
+// A native primary resolves previous_response_id itself, so a rewriting
+// prompt guardrail would never see the earlier turns: an anonymizing
+// guardrail would hand the placeholders of that history to new values and
+// restore another turn's data into the answer. The history is expanded for a
+// native primary too while such a guardrail runs, and the id goes with it so
+// the provider does not replay the same turns twice.
+func TestResponsesWithPreviousResponseID_NativePrimaryExpandsForEditingGuardrail(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		provider := previousResponseTestProvider(t, "openai")
+		provider.streamData = streamedResponseData("resp_conv_2", "still zebra")
+		patcher := &redactingPatcher{}
+		srv := New(provider, &Config{TranslatedRequestPatcher: patcher})
+		store := srv.handler.currentResponseStore()
+
+		if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"my pet is a zebra"}`); rec.Code != http.StatusOK {
+			t.Fatalf("stream=%v turn one status = %d (%s)", stream, rec.Code, rec.Body.String())
+		}
+		waitForStoredResponse(t, store, "resp_conv_1")
+
+		provider.responsesResponse.ID = "resp_conv_2"
+		body := `{"model":"gpt-5-mini","input":"what is it?","previous_response_id":"resp_conv_1","stream":` + map[bool]string{false: "false", true: "true"}[stream] + `}`
+		rec := postResponses(t, srv, body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("stream=%v chained status = %d (%s)", stream, rec.Code, rec.Body.String())
+		}
+		forwarded := provider.capturedResponsesReq
+		if forwarded.PreviousResponseID != "" {
+			t.Fatalf("stream=%v expanded history must not also carry previous_response_id, got %q", stream, forwarded.PreviousResponseID)
+		}
+		items := forwardedInputItems(t, provider.capturingProvider)
+		if len(items) != 3 {
+			t.Fatalf("stream=%v forwarded %d items, want the replayed turn plus the new input: %#v", stream, len(items), items)
+		}
+		if got := forwardedInput(t, provider.capturingProvider); strings.Contains(got, "zebra") || strings.Count(got, "[animal]") != 2 {
+			t.Fatalf("stream=%v chained turn forwarded %s, want the replayed input and output redacted", stream, got)
+		}
+		if seen := patcher.seen[len(patcher.seen)-1]; !strings.Contains(seen, "the word is zebra") {
+			t.Fatalf("stream=%v prompt guardrail saw %s, want the replayed history", stream, seen)
+		}
+		if !stream && !strings.Contains(rec.Body.String(), `"previous_response_id":"resp_conv_1"`) {
+			t.Fatalf("stream=%v chained response must still echo previous_response_id: %s", stream, rec.Body.String())
+		}
+	}
+}
+
+// A prompt guardrail that only classifies leaves the native passthrough
+// alone: the provider keeps resolving previous_response_id itself, so its
+// own history stays cached upstream.
+func TestResponsesWithPreviousResponseID_NativePrimaryKeepsIDForInspectingGuardrail(t *testing.T) {
+	provider := previousResponseTestProvider(t, "openai")
+	patcher := &inspectingPatcher{}
+	srv := New(provider, &Config{TranslatedRequestPatcher: patcher})
+	store := srv.handler.currentResponseStore()
+
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"my pet is a zebra"}`); rec.Code != http.StatusOK {
+		t.Fatalf("turn one status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	waitForStoredResponse(t, store, "resp_conv_1")
+
+	provider.responsesResponse.ID = "resp_conv_2"
+	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is it?","previous_response_id":"resp_conv_1"}`); rec.Code != http.StatusOK {
+		t.Fatalf("chained status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	forwarded := provider.capturedResponsesReq
+	if forwarded.PreviousResponseID != "resp_conv_1" {
+		t.Fatalf("previous_response_id = %q, want it forwarded to the native provider", forwarded.PreviousResponseID)
+	}
+	if _, ok := forwarded.Input.(string); !ok {
+		t.Fatalf("native input must be untouched, got %#v", forwarded.Input)
 	}
 }
 

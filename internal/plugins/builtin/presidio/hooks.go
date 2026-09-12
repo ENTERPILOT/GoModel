@@ -100,6 +100,13 @@ type pass struct {
 	requestID string
 }
 
+// EditsContent reports whether this instance rewrites the text it analyzes.
+// An instance that only blocks, answers, or flags detections leaves the
+// request as it is - unless it restores placeholders, which edits again.
+func (p *Plugin) EditsContent() bool {
+	return p.action == ActionAnonymize || p.restore
+}
+
 // OnPrompt analyzes the text of the prompt messages of the configured
 // roles, tool-result text and tool-call arguments included.
 func (p *Plugin) OnPrompt(ctx context.Context, x *pluginapi.Exchange) (pluginapi.Decision, error) {
