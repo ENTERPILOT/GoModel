@@ -28,18 +28,24 @@ type ModelInfo struct {
 func FromModels(models []core.Model) *ModelsList {
 	out := &ModelsList{Data: make([]ModelInfo, 0, len(models))}
 	for _, model := range models {
-		out.Data = append(out.Data, ModelInfo{
-			Type:        "model",
-			ID:          model.ID,
-			DisplayName: modelDisplayName(model),
-			CreatedAt:   time.Unix(model.Created, 0).UTC().Format(time.RFC3339),
-		})
+		out.Data = append(out.Data, FromModel(model))
 	}
 	if len(out.Data) > 0 {
 		out.FirstID = &out.Data[0].ID
 		out.LastID = &out.Data[len(out.Data)-1].ID
 	}
 	return out
+}
+
+// FromModel renders one model in the Anthropic model shape, as returned by
+// Anthropic's retrieve-model endpoint.
+func FromModel(model core.Model) ModelInfo {
+	return ModelInfo{
+		Type:        "model",
+		ID:          model.ID,
+		DisplayName: modelDisplayName(model),
+		CreatedAt:   time.Unix(model.Created, 0).UTC().Format(time.RFC3339),
+	}
 }
 
 func modelDisplayName(model core.Model) string {

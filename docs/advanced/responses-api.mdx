@@ -78,6 +78,20 @@ when a failover target is chat-translated. Without such a guardrail the id is
 forwarded untouched, so the provider keeps serving the chain from its own
 state.
 
+## Background responses
+
+`background: true` returns immediately with a `queued` snapshot. Because that
+snapshot is not final, `GET /v1/responses/{id}` re-reads it from the provider
+that created it on every poll and stores the result once the response reaches
+a terminal status (`completed`, `incomplete`, `failed`, or `cancelled`), so the
+usual SDK loop — poll until the status is terminal, then read `output` — works
+through the gateway. Terminal snapshots are served from the store without an
+upstream call. If the refresh fails, the stored snapshot is returned unchanged.
+
+Background creates are never served from the [response
+cache](/features/cache): a `queued` body carries an id that belongs to
+one caller's response.
+
 ## Native provider lookup
 
 When a response was not created through the current GoModel process or response

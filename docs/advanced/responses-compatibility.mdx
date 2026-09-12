@@ -34,6 +34,7 @@ function tool loops. They cannot safely execute OpenAI-hosted tools.
 | Streaming over HTTP/SSE | Forwarded | Converted from chat streaming events into the OpenAI event sequence: `response.created` and `response.in_progress`, output item and content part lifecycle events, and a `sequence_number` on every event |
 | Function tools | Forwarded | Converted to provider function/tool declarations |
 | Function call output items | Forwarded | Converted to chat tool-result messages |
+| Replayed output item metadata (`id`, `status`, `annotations`, `logprobs`) | Forwarded | Dropped before dispatch: chat providers have no place for them, and Groq and Fireworks reject them outright |
 | `text.format` structured output | Forwarded | Converted to `response_format` when the provider supports it |
 | Responses-only tools (`web_search`, `file_search`, `computer_use_preview`, and `namespace`) | Provider decides | Accepted and omitted |
 | `previous_response_id` | Forwarded, unless GoModel minted the id for a chat-translated provider or a content-editing prompt guardrail runs: then resolved as on the right | Resolved by GoModel: the stored previous response's input items and output are prepended to the input. The previous response must be stored (`store` left on), or the request returns 404 (see [Stored responses](/advanced/responses-api#stored-responses)) |
@@ -102,6 +103,12 @@ GoModel for portable flows:
 Provider-hosted tools are ignored by chat-translated providers. Server-managed
 conversation state and websocket Responses transport still depend on
 provider-specific support.
+
+Stateless replay works too. Clients that send the previous turn's output items
+back as input (`store: false`, Codex, SDK-managed history) always include the
+item `id` that the Responses API returned. GoModel drops that `id`, along with
+the other Responses-only item metadata, before calling a chat provider, so the
+same replay body works on every provider.
 
 For Python Agents SDK clients, namespaced GoModel model IDs such as
 `anthropic/claude-sonnet-4-20250514` and `gemini/gemini-2.0-flash` need model ID

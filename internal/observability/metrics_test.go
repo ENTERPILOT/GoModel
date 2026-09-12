@@ -386,3 +386,23 @@ func TestRequestDuration(t *testing.T) {
 		t.Fatal("Expected histogram, got nil")
 	}
 }
+
+func TestEmptyResponseMetric(t *testing.T) {
+	ResetMetrics()
+	hooks := NewPrometheusHooks()
+
+	for _, reason := range []string{llmclient.EmptyReasonNoChoices, llmclient.EmptyReasonNoChoices, llmclient.EmptyReasonNoUsage} {
+		hooks.OnEmptyResponse(context.Background(), llmclient.EmptyResponseInfo{
+			Provider: "openai-eu",
+			Model:    "gpt-4",
+			Reason:   reason,
+		})
+	}
+
+	if got := testutil.ToFloat64(EmptyResponsesTotal.WithLabelValues("openai-eu", "gpt-4", llmclient.EmptyReasonNoChoices)); got != 2 {
+		t.Fatalf("no_choices count = %v, want 2", got)
+	}
+	if got := testutil.ToFloat64(EmptyResponsesTotal.WithLabelValues("openai-eu", "gpt-4", llmclient.EmptyReasonNoUsage)); got != 1 {
+		t.Fatalf("no_usage count = %v, want 1", got)
+	}
+}

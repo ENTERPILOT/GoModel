@@ -77,6 +77,21 @@ type Codec interface {
 	Restate(ev Event) (Event, bool)
 }
 
+// Renumberer is implemented by codecs whose dialect numbers the events of a
+// stream (the Responses API sequence_number, which must run 0..N without
+// gaps). A stream that may drop, merge, split or inject events renumbers the
+// ones it delivers so the client still sees a contiguous sequence.
+type Renumberer interface {
+	// BeginRenumber puts the codec in renumbering mode: from then on the
+	// codec assigns the outgoing numbers, both to the events handed to
+	// Renumber and to the ones Terminate renders.
+	BeginRenumber()
+	// Renumber returns a copy of ev numbered with the next outgoing number;
+	// ok reports that ev was changed, and is false when the event carries no
+	// number or already carries the right one.
+	Renumber(ev Event) (Event, bool)
+}
+
 // ErrNotTextEvent is returned by RewriteText for events without delta text.
 var ErrNotTextEvent = errors.New("streaming: event carries no rewritable text")
 
