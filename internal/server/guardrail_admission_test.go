@@ -201,6 +201,46 @@ func TestPassthroughRefusesWhenGuardrailsApply(t *testing.T) {
 			configured: true,
 			info:       &core.PassthroughRouteInfo{GenAIOperation: "chat", Model: "gpt-4.1-mini"},
 		},
+		// Only a provider that ships a passthrough semantics table names a
+		// GenAI operation, so the endpoint path decides for the providers that
+		// do not: the refusal must not be escapable by sending the same body to
+		// one of them.
+		{
+			name:            "chat path on a provider without semantics refuses",
+			chains:          chains,
+			info:            &core.PassthroughRouteInfo{NormalizedEndpoint: "chat/completions", Model: "gpt-4.1-mini"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
+		{
+			name:            "unreadable model on a native inference path refuses",
+			configured:      true,
+			info:            &core.PassthroughRouteInfo{NormalizedEndpoint: "v1beta/models/gemini-2.5-flash:generateContent"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
+		{
+			name:            "legacy completions refuses",
+			chains:          chains,
+			info:            &core.PassthroughRouteInfo{GenAIOperation: "text_completion", Model: "gpt-4.1-mini"},
+			wantRefused:     true,
+			wantErrContains: "passthrough_guardrails_unsupported",
+		},
+		{
+			name:   "model listing on a provider without semantics allows",
+			chains: chains,
+			info:   &core.PassthroughRouteInfo{NormalizedEndpoint: "models"},
+		},
+		{
+			name:   "token counting allows",
+			chains: chains,
+			info:   &core.PassthroughRouteInfo{NormalizedEndpoint: "messages/count_tokens", Model: "claude-sonnet-4-5"},
+		},
+		{
+			name:   "embeddings allow",
+			chains: chains,
+			info:   &core.PassthroughRouteInfo{GenAIOperation: "embeddings", Model: "text-embedding-3-small"},
+		},
 	}
 
 	for _, tt := range tests {

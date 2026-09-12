@@ -99,6 +99,12 @@ model read from the provider-native body, and that read is best effort, so an
 inference call whose model GoModel cannot read is refused whenever *any*
 guardrail is configured — an unreadable body must not be a way around a policy.
 
+Only text-generating routes are refused: chat completions, responses, Anthropic
+messages, the legacy completion endpoints, and any provider-native path of the
+same shape. Model lists, token counts, embeddings, files, batches, images, and
+audio run no guardrail chain on `/v1` either, so passthrough serves them
+unchanged.
+
 Route that traffic through the
 OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/responses`,
 `/v1/messages`), which do run the chains, or choose one of:
@@ -199,7 +205,7 @@ Passthrough routes are enabled by default:
 ```env
 ENABLE_PASSTHROUGH_ROUTES=true
 ALLOW_PASSTHROUGH_V1_ALIAS=true
-ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek
+ENABLED_PASSTHROUGH_PROVIDERS=openai,anthropic,openrouter,kilo,zai,sglang,vllm,llamacpp,llmd,deepseek,hetzner
 ALLOW_UNGUARDED_PASSTHROUGH=false
 ```
 
