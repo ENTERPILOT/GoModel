@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -51,53 +53,29 @@ func newImageMock() *imageMockProvider {
 	}
 }
 
-func newImageRequest(body string) (*echo.Context, *httptest.ResponseRecorder) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	return echo.New().NewContext(req, rec), rec
-}
-
 func TestImageGenerations_ReturnsProviderResponse(t *testing.T) {
 	mock := newImageMock()
 	svc := &imageService{provider: mock}
-	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat","n":1,"size":"1024x1024","style":"vivid"}`)
+	c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat","n":1,"size":"1024x1024","style":"vivid"}`)
+	err := svc.CreateImage(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	ct := rec.Header().Get("Content-Type")
+	assert.True(t, strings.HasPrefix(ct, "application/json"), "Content-Type = %q, want application/json", ct)
 
-	if err := svc.CreateImage(c); err != nil {
-		t.Fatalf("CreateImage returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-		t.Errorf("Content-Type = %q, want application/json", ct)
-	}
+	got := echotest.Decode[map[string]any](t, rec)
+	assert.Equal(t, float64(1713833628), got["created"])
 
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response is not JSON: %v (body: %s)", err, rec.Body.String())
-	}
-	if got["created"] != float64(1713833628) {
-		t.Errorf("created = %v, want 1713833628", got["created"])
-	}
 	data, _ := got["data"].([]any)
-	if len(data) != 1 {
-		t.Fatalf("data = %v, want one image", got["data"])
-	}
-	if image, _ := data[0].(map[string]any); image["url"] != "https://img/1.png" {
-		t.Errorf("data[0] = %v, want url https://img/1.png", data[0])
-	}
+	require.Len(t, data, 1)
+	image, _ := data[0].(map[string]any)
+	assert.Equal(t, "https://img/1.png", image["url"], "data[0] = %v, want url https://img/1.png", data[0])
+	require.NotNil(t, mock.captured)
+	assert.Equal(t, "dall-e-3", mock.captured.Model)
+	assert.Empty(t, mock.captured.Provider)
 
-	if mock.captured == nil {
-		t.Fatal("provider was not called")
-	}
-	if mock.captured.Model != "dall-e-3" || mock.captured.Provider != "" {
-		t.Errorf("provider saw %q/%q, want dall-e-3 with provider hint stripped", mock.captured.Provider, mock.captured.Model)
-	}
 	forwarded, _ := json.Marshal(mock.captured)
-	if !strings.Contains(string(forwarded), `"style":"vivid"`) {
-		t.Errorf("extra field style not preserved in forwarded request: %s", forwarded)
-	}
+	assert.Contains(t, string(forwarded), `"style":"vivid"`, "extra field style not preserved in forwarded request: %s", forwarded)
 }
 
 func TestImageGenerations_RejectsInvalidRequests(t *testing.T) {
@@ -116,37 +94,23 @@ func TestImageGenerations_RejectsInvalidRequests(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newImageMock()
 			svc := &imageService{provider: mock}
-			c, rec := newImageRequest(tt.body)
-
-			if err := svc.CreateImage(c); err != nil {
-				t.Fatalf("CreateImage returned error: %v", err)
-			}
-			if rec.Code == http.StatusOK {
-				t.Fatalf("status = 200, want an error (body: %s)", rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), tt.wantMsg) {
-				t.Errorf("body = %s, want %q", rec.Body.String(), tt.wantMsg)
-			}
-			if mock.captured != nil {
-				t.Error("provider should not be called for an invalid request")
-			}
+			c, rec := echotest.Post(t, "/v1/images/generations", tt.body)
+			err := svc.CreateImage(c)
+			require.NoError(t, err)
+			require.NotEqual(t, http.StatusOK, rec.Code, "status = 200, want an error (body: %s)", rec.Body.String())
+			assert.Contains(t, rec.Body.String(), tt.wantMsg)
+			assert.Nil(t, mock.captured)
 		})
 	}
 }
 
 func TestImageGenerations_RouterWithoutImageSupport(t *testing.T) {
 	svc := &imageService{provider: &mockProvider{supportedModels: []string{"dall-e-3"}}}
-	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
-
-	if err := svc.CreateImage(c); err != nil {
-		t.Fatalf("CreateImage returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "image generation is not supported") {
-		t.Errorf("body = %s", rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
+	err := svc.CreateImage(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "image generation is not supported")
 }
 
 // TestImageGenerations_AuthorizesResolvedSelector verifies the authorizer
@@ -158,34 +122,23 @@ func TestImageGenerations_AuthorizesResolvedSelector(t *testing.T) {
 		mock.resolved = &core.ModelSelector{Provider: "openai", Model: "dall-e-3"}
 		authorizer := &recordingModelAuthorizer{}
 		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
-		c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
-
-		if err := svc.CreateImage(c); err != nil {
-			t.Fatalf("CreateImage returned error: %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-		}
-		if authorizer.lastSelector.Provider != "openai" || authorizer.lastSelector.Model != "dall-e-3" {
-			t.Errorf("authorizer saw %+v, want resolved openai/dall-e-3", authorizer.lastSelector)
-		}
+		c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
+		err := svc.CreateImage(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Equal(t, "openai", authorizer.lastSelector.Provider)
+		assert.Equal(t, "dall-e-3", authorizer.lastSelector.Model, "authorizer saw %+v, want resolved openai/dall-e-3", authorizer.lastSelector)
 	})
 
 	t.Run("denied", func(t *testing.T) {
 		mock := newImageMock()
 		authorizer := &recordingModelAuthorizer{err: core.NewInvalidRequestError("denied", nil)}
 		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
-		c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
-
-		if err := svc.CreateImage(c); err != nil {
-			t.Fatalf("CreateImage returned error: %v", err)
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400", rec.Code)
-		}
-		if mock.captured != nil {
-			t.Error("provider should not be called when access is denied")
-		}
+		c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
+		err := svc.CreateImage(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Nil(t, mock.captured)
 	})
 }
 
@@ -193,17 +146,11 @@ func TestImageGenerations_ProviderErrorIsSurfaced(t *testing.T) {
 	mock := newImageMock()
 	mock.imageErr = core.NewProviderError("openai", http.StatusBadRequest, "Your request was rejected by the safety system.", nil)
 	svc := &imageService{provider: mock}
-	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
-
-	if err := svc.CreateImage(c); err != nil {
-		t.Fatalf("CreateImage returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "safety system") {
-		t.Errorf("body = %s, want upstream message", rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
+	err := svc.CreateImage(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "safety system")
 }
 
 func TestImageGenerations_NilProviderResponseIs502(t *testing.T) {
@@ -213,23 +160,13 @@ func TestImageGenerations_NilProviderResponseIs502(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	svc := &imageService{provider: mock, usageLogger: logger}
-	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
-
-	if err := svc.CreateImage(c); err != nil {
-		t.Fatalf("CreateImage returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"provider":"image-primary"`) {
-		t.Errorf("response does not identify the provider: %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "provider image-primary returned empty image response") {
-		t.Errorf("response does not identify the provider in its message: %s", rec.Body.String())
-	}
-	if captured != nil {
-		t.Error("no usage entry should be written for a failed call")
-	}
+	c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
+	err := svc.CreateImage(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"provider":"image-primary"`)
+	assert.Contains(t, rec.Body.String(), "provider image-primary returned empty image response")
+	assert.Nil(t, captured)
 }
 
 func TestImageGenerations_LogsUsage(t *testing.T) {
@@ -242,46 +179,29 @@ func TestImageGenerations_LogsUsage(t *testing.T) {
 		provider:        mock,
 		usageLogger:     logger,
 		pricingResolver: &mockPricingResolver{pricing: pricing}}
-	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat","n":2}`)
-
-	if err := svc.CreateImage(c); err != nil {
-		t.Fatalf("CreateImage returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if captured == nil {
-		t.Fatal("expected a usage entry to be written")
-	}
-	if captured.Endpoint != "/v1/images/generations" {
-		t.Errorf("endpoint = %q, want /v1/images/generations", captured.Endpoint)
-	}
-	if captured.Model != "dall-e-3" {
-		t.Errorf("model = %q, want dall-e-3", captured.Model)
-	}
-	if got := captured.RawData["images"]; got != 2 {
-		t.Errorf("images = %v, want 2", got)
-	}
-	if captured.TotalCost == nil || *captured.TotalCost < 0.0799 || *captured.TotalCost > 0.0801 {
-		t.Errorf("total cost = %v, want 0.08", captured.TotalCost)
-	}
+	c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat","n":2}`)
+	err := svc.CreateImage(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, captured)
+	assert.Equal(t, "/v1/images/generations", captured.Endpoint)
+	assert.Equal(t, "dall-e-3", captured.Model)
+	got := captured.RawData["images"]
+	assert.Equal(t, 2, got)
+	assert.NotNil(t, captured.TotalCost)
+	assert.GreaterOrEqual(t, *captured.TotalCost, 0.0799)
+	assert.LessOrEqual(t, *captured.TotalCost, 0.0801)
 }
 
 func TestImageGenerations_UsageDisabledWritesNothing(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: false}, captured: &captured}
 	svc := &imageService{provider: newImageMock(), usageLogger: logger}
-	c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
-
-	if err := svc.CreateImage(c); err != nil {
-		t.Fatalf("CreateImage returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if captured != nil {
-		t.Error("usage entry written although tracking is disabled")
-	}
+	c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
+	err := svc.CreateImage(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, captured)
 }
 
 // TestImageGenerations_HandlerRoute verifies POST /v1/images/generations is
@@ -295,23 +215,16 @@ func TestImageGenerations_HandlerRoute(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response is not JSON: %v (body: %s)", err, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	got := echotest.Decode[map[string]any](t, rec)
+
 	data, _ := got["data"].([]any)
-	if len(data) != 1 {
-		t.Fatalf("data = %v, want one image", got["data"])
-	}
-	if image, _ := data[0].(map[string]any); image["url"] != "https://img/1.png" {
-		t.Errorf("data[0] = %v, want url https://img/1.png", data[0])
-	}
-	if mock.captured == nil || mock.captured.Prompt != "a cat" {
-		t.Errorf("provider did not receive the routed request: %+v", mock.captured)
-	}
+	require.Len(t, data, 1)
+	image, _ := data[0].(map[string]any)
+	assert.Equal(t, "https://img/1.png", image["url"], "data[0] = %v, want url https://img/1.png", data[0])
+	assert.NotNil(t, mock.captured)
+	assert.Equal(t, "a cat", mock.captured.Prompt)
 }
 
 // TestImageGenerations_AuditsRequestBody verifies the prompt reaches the audit
@@ -323,33 +236,28 @@ func TestImageGenerations_AuditsRequestBody(t *testing.T) {
 			mock := newImageMock()
 			mock.resolved = &core.ModelSelector{Provider: "openai", Model: "dall-e-3"}
 			svc := &imageService{provider: mock, logBodies: logBodies}
-			c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat","style":"vivid"}`)
+			c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat","style":"vivid"}`)
 			entry := &auditlog.LogEntry{}
 			c.Set(string(auditlog.LogEntryKey), entry)
+			err := svc.CreateImage(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-			if err := svc.CreateImage(c); err != nil {
-				t.Fatalf("CreateImage returned error: %v", err)
-			}
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-			}
 			// mockProvider reports "mock" as the provider type for every model.
-			if entry.RequestedModel != "dall-e-3" || entry.ResolvedModel != "openai/dall-e-3" || entry.Provider != "mock" {
-				t.Errorf("audit route = requested %q resolved %q provider %q, want dall-e-3 / openai/dall-e-3 / mock", entry.RequestedModel, entry.ResolvedModel, entry.Provider)
-			}
+			assert.Equal(t, "dall-e-3", entry.RequestedModel)
+			assert.Equal(t, "openai/dall-e-3", entry.ResolvedModel)
+			assert.Equal(t, "mock", entry.Provider)
+
 			if !logBodies {
-				if entry.Data != nil && entry.Data.RequestBody != nil {
-					t.Fatalf("request body captured although body logging is off: %v", entry.Data.RequestBody)
+				if entry.Data != nil {
+					require.Nil(t, entry.Data.RequestBody, "body logging is off")
 				}
 				return
 			}
 			body, ok := auditlog.BodyDocument(entry.Data.RequestBody).(map[string]any)
-			if !ok {
-				t.Fatalf("request body = %T, want JSON object", entry.Data.RequestBody)
-			}
-			if body["prompt"] != "a cat" || body["style"] != "vivid" {
-				t.Errorf("audited request body = %v, want prompt and extra fields", body)
-			}
+			require.True(t, ok, "request body = %T, want JSON object", entry.Data.RequestBody)
+			assert.Equal(t, "a cat", body["prompt"])
+			assert.Equal(t, "vivid", body["style"], "audited request body = %v, want prompt and extra fields", body)
 		})
 	}
 }
@@ -378,42 +286,34 @@ func TestImageGenerations_AuditsResponseImages(t *testing.T) {
 				Usage:   &core.ImageUsage{TotalTokens: 300},
 			}
 			svc := &imageService{provider: mock, logBodies: tt.logBodies, logImageOutputs: tt.logImageOutputs}
-			c, rec := newImageRequest(`{"model":"dall-e-3","prompt":"a cat"}`)
+			c, rec := echotest.Post(t, "/v1/images/generations", `{"model":"dall-e-3","prompt":"a cat"}`)
 			entry := &auditlog.LogEntry{}
 			c.Set(string(auditlog.LogEntryKey), entry)
+			err := svc.CreateImage(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-			if err := svc.CreateImage(c); err != nil {
-				t.Fatalf("CreateImage returned error: %v", err)
-			}
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-			}
 			if !tt.logBodies {
-				if entry.Data != nil && entry.Data.ResponseBody != nil {
-					t.Fatalf("response body captured although body logging is off: %v", entry.Data.ResponseBody)
+				if entry.Data != nil {
+					require.Nil(t, entry.Data.ResponseBody, "body logging is off")
 				}
 				return
 			}
-			if !auditlog.IsResponseBodyCapturedByHandler(c) {
-				t.Error("handler must mark the response body as captured so the middleware leaves it alone")
-			}
+			assert.True(t, auditlog.IsResponseBodyCapturedByHandler(c))
+
 			body, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
-			if !ok {
-				t.Fatalf("response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
-			}
-			if body.Meta["size"] != "1024x1024" || body.Meta["created"] != int64(1713833628) {
-				t.Errorf("response meta = %v", body.Meta)
-			}
-			if len(body.Items) != 2 {
-				t.Fatalf("items = %+v, want base64 and url outputs", body.Items)
-			}
+			require.True(t, ok, "response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
+			assert.Equal(t, "1024x1024", body.Meta["size"])
+			assert.Equal(t, int64(1713833628), body.Meta["created"], "response meta = %v", body.Meta)
+			require.Len(t, body.Items, 2)
+
 			b64, hosted := body.Items[0], body.Items[1]
-			if b64.Bytes != 5 || b64.Stored != tt.logImageOutputs || (tt.logImageOutputs && b64.Data != "aGVsbG8=") {
-				t.Errorf("base64 item = %+v, want stored=%v", b64, tt.logImageOutputs)
+			assert.Equal(t, 5, b64.Bytes)
+			assert.Equal(t, tt.logImageOutputs, b64.Stored)
+			if tt.logImageOutputs {
+				assert.Equal(t, "aGVsbG8=", b64.Data)
 			}
-			if hosted.URL != "https://img/2.png" {
-				t.Errorf("url item = %+v", hosted)
-			}
+			assert.Equal(t, "https://img/2.png", hosted.URL)
 		})
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRedactSensitiveRequestURI(t *testing.T) {
@@ -24,19 +26,15 @@ func TestRedactSensitiveRequestURI(t *testing.T) {
 			e := echo.New()
 			e.Use(redactSensitiveRequestURI())
 			e.GET("/*", func(c *echo.Context) error {
-				if tt.name == "oauth callback" && c.QueryParam("code") != "secret-code" {
-					t.Fatalf("handler lost original query value")
+				if tt.name == "oauth callback" {
+					assert.Equal(t, "secret-code", c.QueryParam("code"), "handler lost original query value")
 				}
-				if got := c.Request().RequestURI; got != tt.want {
-					t.Fatalf("RequestURI = %q, want %q", got, tt.want)
-				}
+				assert.Equal(t, tt.want, c.Request().RequestURI)
 				return c.NoContent(http.StatusNoContent)
 			})
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.uri, nil))
-			if rec.Code != http.StatusNoContent {
-				t.Fatalf("status = %d", rec.Code)
-			}
+			require.Equal(t, http.StatusNoContent, rec.Code)
 		})
 	}
 }

@@ -2,14 +2,13 @@ package server
 
 import (
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type passthroughSemanticEnricherStub struct {
@@ -32,12 +31,7 @@ func (p passthroughSemanticEnricherStub) Enrich(_ *core.RequestSnapshot, _ *core
 
 func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t *testing.T) {
 	provider := &mockProvider{}
-	e := echo.New()
-
-	req := httptest.NewRequest(http.MethodPost, "/p/openai/v1/responses", strings.NewReader(`{"model":"gpt-5-mini","stream":true}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/p/openai/v1/responses", `{"model":"gpt-5-mini","stream":true}`)
 
 	var capturedWorkflow *core.Workflow
 	handler := PassthroughSemanticEnrichment(provider, []core.PassthroughSemanticEnricher{
@@ -51,20 +45,10 @@ func TestPassthroughSemanticEnrichment_EnrichesPromptBeforeWorkflowResolution(t 
 	c.SetRequest(ctxReq)
 	err := RequestSnapshotCapture()(handler)(c)
 	require.NoError(t, err)
-
-	if capturedWorkflow == nil || capturedWorkflow.Passthrough == nil {
-		t.Fatal("expected passthrough workflow")
-	}
-	if capturedWorkflow.Passthrough.NormalizedEndpoint != "responses" {
-		t.Fatalf("NormalizedEndpoint = %q, want responses", capturedWorkflow.Passthrough.NormalizedEndpoint)
-	}
-	if capturedWorkflow.Passthrough.SemanticOperation != "openai.responses" {
-		t.Fatalf("SemanticOperation = %q, want openai.responses", capturedWorkflow.Passthrough.SemanticOperation)
-	}
-	if capturedWorkflow.Passthrough.AuditPath != "/v1/responses" {
-		t.Fatalf("AuditPath = %q, want /v1/responses", capturedWorkflow.Passthrough.AuditPath)
-	}
-	if !capturedWorkflow.Passthrough.Stream {
-		t.Fatal("passthrough workflow lost stream intent")
-	}
+	require.NotNil(t, capturedWorkflow)
+	require.NotNil(t, capturedWorkflow.Passthrough)
+	require.Equal(t, "responses", capturedWorkflow.Passthrough.NormalizedEndpoint)
+	require.Equal(t, "openai.responses", capturedWorkflow.Passthrough.SemanticOperation)
+	require.Equal(t, "/v1/responses", capturedWorkflow.Passthrough.AuditPath)
+	require.True(t, capturedWorkflow.Passthrough.Stream)
 }

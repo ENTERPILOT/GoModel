@@ -3,18 +3,19 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
 
@@ -54,9 +55,8 @@ func editForm(t *testing.T, values [][2]string, files ...editFormFile) (*bytes.B
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	for _, kv := range values {
-		if err := w.WriteField(kv[0], kv[1]); err != nil {
-			t.Fatalf("write field: %v", err)
-		}
+		err := w.WriteField(kv[0], kv[1])
+		require.NoError(t, err)
 	}
 	for _, f := range files {
 		h := make(textproto.MIMEHeader)
@@ -65,9 +65,8 @@ func editForm(t *testing.T, values [][2]string, files ...editFormFile) (*bytes.B
 			h.Set("Content-Type", f.contentType)
 		}
 		part, err := w.CreatePart(h)
-		if err != nil {
-			t.Fatalf("create part: %v", err)
-		}
+		require.NoError(t, err)
+
 		_, _ = part.Write([]byte(f.data))
 	}
 	_ = w.Close()
@@ -77,10 +76,7 @@ func editForm(t *testing.T, values [][2]string, files ...editFormFile) (*bytes.B
 func newImageEditRequest(t *testing.T, values [][2]string, files ...editFormFile) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	body, contentType := editForm(t, values, files...)
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", body)
-	req.Header.Set("Content-Type", contentType)
-	rec := httptest.NewRecorder()
-	return echo.New().NewContext(req, rec), rec
+	return echotest.Post(t, "/v1/images/edits", body, echotest.WithContentType(contentType))
 }
 
 var catPNG = editFormFile{field: "image", filename: "cat.png", contentType: "image/png", data: "cat-bytes"}
@@ -93,46 +89,34 @@ func TestImageEdits_ReturnsProviderResponse(t *testing.T) {
 		catPNG,
 		editFormFile{field: "mask", filename: "mask.png", contentType: "image/png", data: "mask-bytes"},
 	)
+	err := svc.CreateImageEdit(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if err := svc.CreateImageEdit(c); err != nil {
-		t.Fatalf("CreateImageEdit returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response is not JSON: %v (body: %s)", err, rec.Body.String())
-	}
+	got := echotest.Decode[map[string]any](t, rec)
+
 	data, _ := got["data"].([]any)
-	if len(data) != 1 {
-		t.Fatalf("data = %v, want one image", got["data"])
-	}
-	if image, _ := data[0].(map[string]any); image["b64_json"] != "aGk=" {
-		t.Errorf("data[0] = %v, want b64_json aGk=", data[0])
-	}
+	require.Len(t, data, 1)
+	image, _ := data[0].(map[string]any)
+	assert.Equal(t, "aGk=", image["b64_json"], "data[0] = %v, want b64_json aGk=", data[0])
 
 	req := mock.capturedEdit
-	if req == nil {
-		t.Fatal("provider was not called")
-	}
-	if req.Model != "gpt-image-1" || req.Provider != "" || req.Prompt != "add a hat" {
-		t.Errorf("provider saw %+v", req)
-	}
-	if len(req.Images) != 1 || req.Images[0].Filename != "cat.png" || req.Images[0].ContentType != "image/png" || string(req.Images[0].Data) != "cat-bytes" {
-		t.Errorf("images = %+v", req.Images)
-	}
-	if req.Mask == nil || string(req.Mask.Data) != "mask-bytes" {
-		t.Errorf("mask = %+v", req.Mask)
-	}
+	require.NotNil(t, req)
+	assert.Equal(t, "gpt-image-1", req.Model)
+	assert.Empty(t, req.Provider)
+	assert.Equal(t, "add a hat", req.Prompt, "provider saw %+v", req)
+	assert.Len(t, req.Images, 1)
+	assert.Equal(t, "cat.png", req.Images[0].Filename)
+	assert.Equal(t, "image/png", req.Images[0].ContentType)
+	assert.Equal(t, "cat-bytes", string(req.Images[0].Data))
+	assert.NotNil(t, req.Mask)
+	assert.Equal(t, "mask-bytes", string(req.Mask.Data))
+
 	want := []core.FormField{{Name: "input_fidelity", Value: "high"}, {Name: "n", Value: "1"}, {Name: "size", Value: "1024x1024"}}
-	if len(req.Fields) != len(want) {
-		t.Fatalf("fields = %+v, want %+v", req.Fields, want)
-	}
+	require.Len(t, req.Fields, len(want))
+
 	for i := range want {
-		if req.Fields[i] != want[i] {
-			t.Errorf("fields[%d] = %+v, want %+v", i, req.Fields[i], want[i])
-		}
+		assert.Equal(t, want[i], req.Fields[i], "fields[%d] = %+v, want %+v", i, req.Fields[i], want[i])
 	}
 }
 
@@ -144,16 +128,14 @@ func TestImageEdits_CollectsImageArray(t *testing.T) {
 		editFormFile{field: "image[]", filename: "one.png", data: "one"},
 		editFormFile{field: "image[]", filename: "two.png", data: "two"},
 	)
-
-	if err := svc.CreateImageEdit(c); err != nil {
-		t.Fatalf("CreateImageEdit returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if req := mock.capturedEdit; req == nil || len(req.Images) != 2 || string(req.Images[0].Data) != "one" || string(req.Images[1].Data) != "two" {
-		t.Errorf("images = %+v", mock.capturedEdit)
-	}
+	err := svc.CreateImageEdit(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	req := mock.capturedEdit
+	assert.NotNil(t, req)
+	assert.Len(t, req.Images, 2)
+	assert.Equal(t, "one", string(req.Images[0].Data))
+	assert.Equal(t, "two", string(req.Images[1].Data), "images = %+v", mock.capturedEdit)
 }
 
 func TestImageEdits_RejectsInvalidRequests(t *testing.T) {
@@ -174,48 +156,32 @@ func TestImageEdits_RejectsInvalidRequests(t *testing.T) {
 			mock := newImageEditMock()
 			svc := &imageService{provider: mock}
 			c, rec := newImageEditRequest(t, tt.values, tt.files...)
-
-			if err := svc.CreateImageEdit(c); err != nil {
-				t.Fatalf("CreateImageEdit returned error: %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), tt.wantMsg) {
-				t.Errorf("body = %s, want %q", rec.Body.String(), tt.wantMsg)
-			}
-			if mock.capturedEdit != nil {
-				t.Error("provider should not be called for an invalid request")
-			}
+			err := svc.CreateImageEdit(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Contains(t, rec.Body.String(), tt.wantMsg)
+			assert.Nil(t, mock.capturedEdit)
 		})
 	}
 }
 
 func TestImageEdits_RejectsNonMultipartBody(t *testing.T) {
 	svc := &imageService{provider: newImageEditMock()}
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(`{"model":"gpt-image-1","prompt":"x"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	if err := svc.CreateImageEdit(echo.New().NewContext(req, rec)); err != nil {
-		t.Fatalf("CreateImageEdit returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid multipart form") {
-		t.Fatalf("status = %d body = %s, want 400 invalid multipart form", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/images/edits", `{"model":"gpt-image-1","prompt":"x"}`)
+	err := svc.CreateImageEdit(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "invalid multipart form")
 }
 
 func TestImageEdits_RouterWithoutEditSupport(t *testing.T) {
 	// A router that generates images but cannot edit them.
 	svc := &imageService{provider: newImageMock()}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "dall-e-3"}, {"prompt", "x"}}, catPNG)
-
-	if err := svc.CreateImageEdit(c); err != nil {
-		t.Fatalf("CreateImageEdit returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "image edits are not supported") {
-		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
-	}
+	err := svc.CreateImageEdit(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "image edits are not supported")
 }
 
 func TestImageEdits_AuthorizesResolvedSelector(t *testing.T) {
@@ -225,16 +191,11 @@ func TestImageEdits_AuthorizesResolvedSelector(t *testing.T) {
 		authorizer := &recordingModelAuthorizer{}
 		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
 		c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
-
-		if err := svc.CreateImageEdit(c); err != nil {
-			t.Fatalf("CreateImageEdit returned error: %v", err)
-		}
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-		}
-		if authorizer.lastSelector.Provider != "openai" || authorizer.lastSelector.Model != "gpt-image-1" {
-			t.Errorf("authorizer saw %+v, want resolved openai/gpt-image-1", authorizer.lastSelector)
-		}
+		err := svc.CreateImageEdit(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Equal(t, "openai", authorizer.lastSelector.Provider)
+		assert.Equal(t, "gpt-image-1", authorizer.lastSelector.Model, "authorizer saw %+v, want resolved openai/gpt-image-1", authorizer.lastSelector)
 	})
 
 	t.Run("denied", func(t *testing.T) {
@@ -242,16 +203,10 @@ func TestImageEdits_AuthorizesResolvedSelector(t *testing.T) {
 		authorizer := &recordingModelAuthorizer{err: core.NewInvalidRequestError("denied", nil)}
 		svc := &imageService{provider: mock, modelAuthorizer: authorizer}
 		c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
-
-		if err := svc.CreateImageEdit(c); err != nil {
-			t.Fatalf("CreateImageEdit returned error: %v", err)
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400", rec.Code)
-		}
-		if mock.capturedEdit != nil {
-			t.Error("provider should not be called when access is denied")
-		}
+		err := svc.CreateImageEdit(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Nil(t, mock.capturedEdit)
 	})
 }
 
@@ -260,13 +215,10 @@ func TestImageEdits_ProviderErrorIsSurfaced(t *testing.T) {
 	mock.imageErr = core.NewProviderError("openai", http.StatusBadRequest, "Invalid image format", nil)
 	svc := &imageService{provider: mock}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
-
-	if err := svc.CreateImageEdit(c); err != nil {
-		t.Fatalf("CreateImageEdit returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Invalid image format") {
-		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
-	}
+	err := svc.CreateImageEdit(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "Invalid image format")
 }
 
 func TestImageEdits_NilProviderResponseIs502(t *testing.T) {
@@ -277,22 +229,12 @@ func TestImageEdits_NilProviderResponseIs502(t *testing.T) {
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	svc := &imageService{provider: mock, usageLogger: logger}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
-
-	if err := svc.CreateImageEdit(c); err != nil {
-		t.Fatalf("CreateImageEdit returned error: %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"provider":"image-primary"`) {
-		t.Errorf("response does not identify the provider: %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "provider image-primary returned empty image response") {
-		t.Errorf("response does not identify the provider in its message: %s", rec.Body.String())
-	}
-	if captured != nil {
-		t.Error("no usage entry should be written for a failed call")
-	}
+	err := svc.CreateImageEdit(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"provider":"image-primary"`)
+	assert.Contains(t, rec.Body.String(), "provider image-primary returned empty image response")
+	assert.Nil(t, captured)
 }
 
 func TestImageEdits_LogsUsage(t *testing.T) {
@@ -307,28 +249,18 @@ func TestImageEdits_LogsUsage(t *testing.T) {
 		usageLogger:     logger,
 		pricingResolver: &mockPricingResolver{pricing: pricing}}
 	c, rec := newImageEditRequest(t, [][2]string{{"model", "gpt-image-1"}, {"prompt", "x"}}, catPNG)
-
-	if err := svc.CreateImageEdit(c); err != nil {
-		t.Fatalf("CreateImageEdit returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	if captured == nil {
-		t.Fatal("expected a usage entry to be written")
-	}
-	if captured.Endpoint != "/v1/images/edits" {
-		t.Errorf("endpoint = %q, want /v1/images/edits", captured.Endpoint)
-	}
-	if captured.Model != "gpt-image-1" || captured.TotalTokens != 1050 {
-		t.Errorf("entry = model %q tokens %d", captured.Model, captured.TotalTokens)
-	}
-	if got := captured.RawData["images"]; got != 1 {
-		t.Errorf("images = %v, want 1", got)
-	}
-	if captured.TotalCost == nil || *captured.TotalCost < 0.0399 || *captured.TotalCost > 0.0401 {
-		t.Errorf("total cost = %v, want 0.04", captured.TotalCost)
-	}
+	err := svc.CreateImageEdit(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotNil(t, captured)
+	assert.Equal(t, "/v1/images/edits", captured.Endpoint)
+	assert.Equal(t, "gpt-image-1", captured.Model)
+	assert.Equal(t, 1050, captured.TotalTokens)
+	got := captured.RawData["images"]
+	assert.Equal(t, 1, got)
+	assert.NotNil(t, captured.TotalCost)
+	assert.GreaterOrEqual(t, *captured.TotalCost, 0.0399)
+	assert.LessOrEqual(t, *captured.TotalCost, 0.0401)
 }
 
 // TestImageEdits_HandlerRoute verifies POST /v1/images/edits is registered on
@@ -343,19 +275,14 @@ func TestImageEdits_HandlerRoute(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
-	var got map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("response is not JSON: %v (body: %s)", err, rec.Body.String())
-	}
-	if data, _ := got["data"].([]any); len(data) != 1 {
-		t.Fatalf("data = %v, want one image", got["data"])
-	}
-	if mock.capturedEdit == nil || mock.capturedEdit.Prompt != "add a hat" || len(mock.capturedEdit.Images) != 1 {
-		t.Errorf("provider did not receive the routed request: %+v", mock.capturedEdit)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	got := echotest.Decode[map[string]any](t, rec)
+	data, _ := got["data"].([]any)
+	require.Len(t, data, 1)
+	assert.NotNil(t, mock.capturedEdit)
+	assert.Equal(t, "add a hat", mock.capturedEdit.Prompt)
+	assert.Len(t, mock.capturedEdit.Images, 1)
 }
 
 // TestImageEdits_AuditsRequestMetadata verifies the edit parameters and upload
@@ -392,54 +319,47 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 			)
 			entry := &auditlog.LogEntry{}
 			c.Set(string(auditlog.LogEntryKey), entry)
+			err := svc.CreateImageEdit(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.Equal(t, "gpt-image-1", entry.RequestedModel)
+			assert.Equal(t, "openai/gpt-image-1", entry.ResolvedModel)
+			assert.Equal(t, "mock", entry.Provider)
 
-			if err := svc.CreateImageEdit(c); err != nil {
-				t.Fatalf("CreateImageEdit returned error: %v", err)
-			}
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-			}
-			if entry.RequestedModel != "gpt-image-1" || entry.ResolvedModel != "openai/gpt-image-1" || entry.Provider != "mock" {
-				t.Errorf("audit route = requested %q resolved %q provider %q", entry.RequestedModel, entry.ResolvedModel, entry.Provider)
-			}
 			if !tt.logBodies {
-				if entry.Data != nil && (entry.Data.RequestBody != nil || entry.Data.ResponseBody != nil) {
-					t.Fatalf("bodies captured although body logging is off: %+v", entry.Data)
+				if entry.Data != nil {
+					require.Nil(t, entry.Data.RequestBody, "body logging is off")
+					require.Nil(t, entry.Data.ResponseBody, "body logging is off")
 				}
 				return
 			}
 
 			reqBody, ok := entry.Data.RequestBody.(auditlog.ImageBodyLog)
-			if !ok {
-				t.Fatalf("request body = %T, want auditlog.ImageBodyLog", entry.Data.RequestBody)
-			}
-			if reqBody.Meta["prompt"] != "add a hat" || reqBody.Meta["size"] != "1024x1024" || reqBody.Meta["model"] != "gpt-image-1" {
-				t.Errorf("audited request meta = %v", reqBody.Meta)
-			}
-			if _, present := reqBody.Meta["provider"]; present {
-				t.Errorf("routing hint must not be audited: %v", reqBody.Meta)
-			}
-			if len(reqBody.Items) != 2 {
-				t.Fatalf("audited uploads = %+v, want source and mask", reqBody.Items)
-			}
+			require.True(t, ok, "request body = %T, want auditlog.ImageBodyLog", entry.Data.RequestBody)
+			assert.Equal(t, "add a hat", reqBody.Meta["prompt"])
+			assert.Equal(t, "1024x1024", reqBody.Meta["size"])
+			assert.Equal(t, "gpt-image-1", reqBody.Meta["model"], "audited request meta = %v", reqBody.Meta)
+			_, present := reqBody.Meta["provider"]
+			assert.False(t, present, "routing hint must not be audited: %v", reqBody.Meta)
+			require.Len(t, reqBody.Items, 2)
+
 			src, mask := reqBody.Items[0], reqBody.Items[1]
-			if src.Role != "input" || src.Filename != "cat.png" || src.Bytes != len("cat-bytes") || mask.Role != "mask" || mask.Filename != "mask.png" {
-				t.Errorf("audited uploads = %+v", reqBody.Items)
-			}
-			if src.Stored != tt.logImageInputs || mask.Stored != tt.logImageInputs {
-				t.Errorf("upload bytes stored = %v/%v, want %v", src.Stored, mask.Stored, tt.logImageInputs)
-			}
+			assert.Equal(t, "input", src.Role)
+			assert.Equal(t, "cat.png", src.Filename)
+			assert.Equal(t, len("cat-bytes"), src.Bytes)
+			assert.Equal(t, "mask", mask.Role)
+			assert.Equal(t, "mask.png", mask.Filename, "audited uploads = %+v", reqBody.Items)
+			assert.Equal(t, tt.logImageInputs, src.Stored)
+			assert.Equal(t, tt.logImageInputs, mask.Stored)
 
 			respBody, ok := entry.Data.ResponseBody.(auditlog.ImageBodyLog)
-			if !ok {
-				t.Fatalf("response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
-			}
-			if len(respBody.Items) != 1 || respBody.Items[0].Role != "output" || respBody.Items[0].Stored != tt.logImageOutputs {
-				t.Errorf("audited outputs = %+v, want one output stored=%v", respBody.Items, tt.logImageOutputs)
-			}
-			if usage, _ := respBody.Meta["usage"].(map[string]any); usage == nil || usage["total_tokens"] != 1050 {
-				t.Errorf("audited response meta = %v, want usage envelope", respBody.Meta)
-			}
+			require.True(t, ok, "response body = %T, want auditlog.ImageBodyLog", entry.Data.ResponseBody)
+			assert.Len(t, respBody.Items, 1)
+			assert.Equal(t, "output", respBody.Items[0].Role)
+			assert.Equal(t, tt.logImageOutputs, respBody.Items[0].Stored)
+			usage, _ := respBody.Meta["usage"].(map[string]any)
+			assert.NotNil(t, usage)
+			assert.Equal(t, 1050, usage["total_tokens"])
 		})
 	}
 }
