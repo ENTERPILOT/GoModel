@@ -21,6 +21,9 @@ func TestResponsesReasoningFromVendorReasoningMember(t *testing.T) {
 	}{
 		{name: "reasoning alone", delta: `{"reasoning":"Think."}`, want: "Think."},
 		{name: "reasoning_content wins", delta: `{"reasoning_content":"Canonical.","reasoning":"Vendor."}`, want: "Canonical."},
+		// A provider that sends a non-string reasoning_content (an effort echo,
+		// say) must not suppress the vendor member that carries the text.
+		{name: "a non-string reasoning_content falls back", delta: `{"reasoning_content":{"effort":"high"},"reasoning":"Vendor."}`, want: "Vendor."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,6 +69,14 @@ func TestConvertChatResponseToResponsesReadsVendorReasoningMember(t *testing.T) 
 			want: "Canonical.",
 		},
 		{name: "a non-string member is ignored", fields: map[string]json.RawMessage{"reasoning": json.RawMessage(`{"effort":"high"}`)}},
+		{
+			name: "a non-string reasoning_content falls back",
+			fields: map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`{"effort":"high"}`),
+				"reasoning":         json.RawMessage(`"Vendor."`),
+			},
+			want: "Vendor.",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

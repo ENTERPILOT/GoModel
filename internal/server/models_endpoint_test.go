@@ -214,6 +214,26 @@ func TestRetrieveModel_AnthropicDialect(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"type":"error"`)
 }
 
+// An Anthropic SDK client must never have to parse an OpenAI envelope on this
+// route, so an upstream failure is rendered in the Anthropic error shape too.
+func TestRetrieveModel_AnthropicDialectProviderError(t *testing.T) {
+	srv := New(&mockProvider{err: context.DeadlineExceeded}, &Config{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models/openai/gpt-4.1-mini", nil)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	require.GreaterOrEqual(t, rec.Code, http.StatusInternalServerError)
+	var envelope struct {
+		Type  string          `json:"type"`
+		Error json.RawMessage `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &envelope), rec.Body.String())
+	require.Equal(t, "error", envelope.Type, rec.Body.String())
+	require.NotEmpty(t, envelope.Error)
+}
+
 func TestRetrieveModel_ProviderErrorIsReported(t *testing.T) {
 	srv := New(&mockProvider{err: context.DeadlineExceeded}, &Config{})
 

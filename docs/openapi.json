@@ -9404,6 +9404,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Anthropic API version, e.g. 2023-06-01. When present, the model and error bodies use the Anthropic envelopes instead of the OpenAI ones.",
+            "name": "anthropic-version",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9412,7 +9420,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.Model"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.Model"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ModelInfo"
+                    }
+                  ]
                 }
               }
             }
@@ -9432,7 +9448,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -9442,7 +9466,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                  "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/core.OpenAIErrorEnvelope"
+                    },
+                    {
+                      "$ref": "#/components/schemas/anthropicapi.ErrorResponse"
+                    }
+                  ]
                 }
               }
             }
@@ -16429,6 +16461,34 @@
             "$ref": "#/components/schemas/anthropicapi.SSEUnknownEvent"
           }
         ]
+      },
+      "anthropicapi.ModelInfo": {
+        "description": "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+        "type": "object",
+        "required": [
+          "created_at",
+          "display_name",
+          "id",
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "model"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   }
