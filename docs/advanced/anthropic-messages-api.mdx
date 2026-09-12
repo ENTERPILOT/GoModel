@@ -51,6 +51,7 @@ Anthropic unchanged.
 | `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
 | `POST /v1/messages/count_tokens` | Counts input tokens. Exact for models whose provider has a counting endpoint (Anthropic); a calibrated estimate otherwise. |
 | `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. |
+| `GET /v1/models/{model}` | Retrieves one model, in the Anthropic model shape when the request carries `anthropic-version`; OpenAI shape otherwise. |
 | `POST /v1/messages/batches` | Creates a Message Batch. Inline `requests[].params` are translated per item, so a batch can target any provider with native batch support (Anthropic, OpenAI, …), not only Anthropic. |
 | `GET /v1/messages/batches` | Lists batches (`limit`, `after_id`). |
 | `GET /v1/messages/batches/{id}` | Retrieves a batch (`processing_status`, `request_counts`, `results_url` once ended). |
