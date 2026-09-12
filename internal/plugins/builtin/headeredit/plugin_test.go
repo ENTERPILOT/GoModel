@@ -4,48 +4,43 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/enterpilot/gomodel/pluginapi/plugintest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newPlugin(t *testing.T, cfg string) *Plugin {
 	t.Helper()
 	p := New()
-	if err := p.Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost()); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	err := p.Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost())
+	require.NoError(t, err)
+
 	return p.(*Plugin)
 }
 
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
-	if m.Name != "header_edit" || m.Mutates || !m.Guardrail {
-		t.Fatalf("manifest = %+v", m)
-	}
-	if !reflect.DeepEqual(m.Kinds, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse}) {
-		t.Errorf("kinds = %v", m.Kinds)
-	}
+	require.Equal(t, "header_edit", m.Name)
+	require.False(t, m.Mutates)
+	require.True(t, m.Guardrail)
+	assert.Equal(t, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse}, m.Kinds)
+
 	want := []string{"request_set", "request_remove", "response_set", "response_add", "response_remove", "upstream_set"}
 	var keys []string
 	for _, f := range m.ConfigSchema {
 		keys = append(keys, f.Key)
-		if f.Label == "" || f.Help == "" || f.Input != pluginapi.InputTextarea {
-			t.Errorf("field %s incomplete: %+v", f.Key, f)
-		}
+		assert.NotEmpty(t, f.Label)
+		assert.NotEmpty(t, f.Help)
+		assert.Equal(t, pluginapi.InputTextarea, f.Input, "field %s incomplete: %+v", f.Key, f)
 	}
-	if !reflect.DeepEqual(keys, want) {
-		t.Errorf("keys = %v, want %v", keys, want)
-	}
-	if _, ok := New().(pluginapi.PromptHook); !ok {
-		t.Error("plugin must implement PromptHook")
-	}
-	if _, ok := New().(pluginapi.ResponseHook); !ok {
-		t.Error("plugin must implement ResponseHook")
-	}
+	assert.Equal(t, want, keys)
+	_, ok := New().(pluginapi.PromptHook)
+	assert.True(t, ok)
+	_, ok = New().(pluginapi.ResponseHook)
+	assert.True(t, ok)
 }
 
 func TestInitErrors(t *testing.T) {
@@ -72,9 +67,7 @@ func TestInitErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("err = %v, want containing %q", err, tt.want)
-			}
+			require.ErrorContains(t, err, tt.want)
 		})
 	}
 }
@@ -94,9 +87,8 @@ func TestInitAccepts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost()); err != nil {
-				t.Fatalf("Init: %v", err)
-			}
+			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
+			require.NoError(t, err)
 		})
 	}
 }
@@ -118,88 +110,69 @@ func TestApplyEdits(t *testing.T) {
 		Values: pluginapi.Values{},
 	}
 	d, err := p.OnPrompt(context.Background(), x)
-	if err != nil || d.Action != pluginapi.ActionAllow {
-		t.Fatalf("OnPrompt = %+v, %v", d, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, d.Action)
+
 	wantReq := http.Header{"X-Team": {"platform"}, "X-Env": {"prod"}, "Accept": {"*/*"}}
-	if !reflect.DeepEqual(x.Headers.Request, wantReq) {
-		t.Errorf("request = %v, want %v", x.Headers.Request, wantReq)
-	}
+	assert.Equal(t, wantReq, x.Headers.Request)
+
 	wantResp := http.Header{"Cache-Control": {"no-store"}, "X-Served-By": {"upstream", "gomodel"}, "X-Internal": {""}}
-	if !reflect.DeepEqual(x.Headers.Response, wantResp) {
-		t.Errorf("response = %v, want %v", x.Headers.Response, wantResp)
-	}
-	if got := x.Headers.Upstream.Get("X-Tenant"); got != "acme" {
-		t.Errorf("upstream X-Tenant = %q", got)
-	}
+	assert.Equal(t, wantResp, x.Headers.Response)
+	got := x.Headers.Upstream.Get("X-Tenant")
+	assert.Equal(t, "acme", got)
+
 	wantDetail := map[string][]string{
 		"request":  {"X-Team", "X-Env", "X-Debug"},
 		"response": {"Cache-Control", "X-Served-By", "X-Internal"},
 		"upstream": {"X-Tenant"},
 	}
-	if !reflect.DeepEqual(d.Detail, wantDetail) {
-		t.Errorf("detail = %v, want %v", d.Detail, wantDetail)
-	}
-	if strings.Contains(mustJSON(t, d.Detail), "platform") {
-		t.Error("detail must not contain header values")
-	}
+	assert.Equal(t, wantDetail, d.Detail)
+	assert.NotContains(t, mustJSON(t, d.Detail), "platform")
 }
 
 func TestIdempotentAcrossPhases(t *testing.T) {
 	p := newPlugin(t, `{"response_add": "X-Served-By: gomodel", "response_set": "X-Mode: strict"}`)
 	x := &pluginapi.Exchange{Headers: &pluginapi.Headers{}, Values: pluginapi.Values{}}
-	if _, err := p.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
+	_, err := p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
 	d, err := p.OnResponse(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Headers.Response.Values("X-Served-By"); !reflect.DeepEqual(got, []string{"gomodel"}) {
-		t.Errorf("X-Served-By = %v, want added once", got)
-	}
-	if got := x.Headers.Response.Values("X-Mode"); !reflect.DeepEqual(got, []string{"strict"}) {
-		t.Errorf("X-Mode = %v", got)
-	}
-	if detail := d.Detail.(map[string][]string); !reflect.DeepEqual(detail["response"], []string{"X-Mode"}) {
-		t.Errorf("second-phase detail = %v, want only the set header", detail)
-	}
+	require.NoError(t, err)
+	got := x.Headers.Response.Values("X-Served-By")
+	assert.Equal(t, []string{"gomodel"}, got)
+	got = x.Headers.Response.Values("X-Mode")
+	assert.Equal(t, []string{"strict"}, got)
+	detail := d.Detail.(map[string][]string)
+	assert.Equal(t, []string{"X-Mode"}, detail["response"], "second-phase detail = %v, want only the set header", detail)
 
 	// Two instances do not share the add guard.
 	other := newPlugin(t, `{"response_add": "X-Served-By: other"}`)
-	if _, err := other.OnResponse(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Headers.Response.Values("X-Served-By"); !reflect.DeepEqual(got, []string{"gomodel", "other"}) {
-		t.Errorf("X-Served-By after second instance = %v", got)
-	}
+	_, err = other.OnResponse(context.Background(), x)
+	require.NoError(t, err)
+	got = x.Headers.Response.Values("X-Served-By")
+	assert.Equal(t, []string{"gomodel", "other"}, got)
 }
 
 func TestNilHeadersAndValues(t *testing.T) {
 	p := newPlugin(t, `{"request_set": "X-A: 1", "response_add": "X-B: 2", "upstream_set": "X-C: 3"}`)
 	x := &pluginapi.Exchange{}
 	d, err := p.OnResponse(context.Background(), x)
-	if err != nil || d.Action != pluginapi.ActionAllow {
-		t.Fatalf("OnResponse = %+v, %v", d, err)
-	}
-	if x.Headers == nil || x.Headers.Request.Get("X-A") != "1" || x.Headers.Response.Get("X-B") != "2" || x.Headers.Upstream.Get("X-C") != "3" {
-		t.Errorf("headers = %+v", x.Headers)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, d.Action)
+	assert.NotNil(t, x.Headers)
+	assert.Equal(t, "1", x.Headers.Request.Get("X-A"))
+	assert.Equal(t, "2", x.Headers.Response.Get("X-B"))
+	assert.Equal(t, "3", x.Headers.Upstream.Get("X-C"))
 }
 
 func TestNoEditsDetail(t *testing.T) {
 	p := newPlugin(t, `{}`)
 	x := &pluginapi.Exchange{Headers: &pluginapi.Headers{Request: http.Header{"A": {"1"}}}, Values: pluginapi.Values{}}
 	d, err := p.OnPrompt(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(d.Detail.(map[string][]string)) != 0 {
-		t.Errorf("detail = %v, want empty", d.Detail)
-	}
-	if x.Headers.Response != nil || x.Headers.Upstream != nil {
-		t.Errorf("unused header maps must stay nil: %+v", x.Headers)
-	}
+	require.NoError(t, err)
+	assert.Empty(t, d.Detail.(map[string][]string))
+	assert.Nil(t, x.Headers.Response)
+	assert.Nil(t, x.Headers.Upstream, "unused header maps must stay nil: %+v", x.Headers)
 }
 
 func TestSummarize(t *testing.T) {
@@ -215,9 +188,8 @@ func TestSummarize(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := New().(*Plugin).Summarize(json.RawMessage(tt.cfg)); got != tt.want {
-				t.Errorf("Summarize = %q, want %q", got, tt.want)
-			}
+			got := New().(*Plugin).Summarize(json.RawMessage(tt.cfg))
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -225,8 +197,7 @@ func TestSummarize(t *testing.T) {
 func mustJSON(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return string(b)
 }

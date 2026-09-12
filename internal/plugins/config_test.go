@@ -2,10 +2,10 @@ package plugins
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/pluginapi"
 )
@@ -135,65 +135,46 @@ func TestValidateConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ValidateConfig(testSchema, json.RawMessage(tt.raw), pluginapi.ScopeInstance)
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("ValidateConfig() error = %v, want containing %q", err, tt.wantErr)
-				}
+				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("ValidateConfig() error = %v", err)
-			}
-			if string(got) != tt.want {
-				t.Fatalf("ValidateConfig() = %s, want %s", got, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(got))
 		})
 	}
 }
 
 func TestValidateConfigEmptySchemaPassesThrough(t *testing.T) {
 	got, err := ValidateConfig(nil, json.RawMessage(`{"b":1,"a":"x"}`), pluginapi.ScopeInstance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != `{"a":"x","b":1}` {
-		t.Fatalf("got %s", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, `{"a":"x","b":1}`, string(got), "got %s", got)
+
 	got, err = ValidateConfig(nil, nil, pluginapi.ScopeInstance)
-	if err != nil || string(got) != `{}` {
-		t.Fatalf("empty raw = %s, %v", got, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, `{}`, string(got), "empty raw = %s, %v", got, err)
 }
 
 func TestSecrets(t *testing.T) {
 	stored := json.RawMessage(`{"api_key":"s3cret","content":"x"}`)
 	redacted := RedactSecrets(testSchema, stored)
-	if string(redacted) != `{"api_key":"********","content":"x"}` {
-		t.Fatalf("RedactSecrets() = %s", redacted)
-	}
+	require.Equal(t, `{"api_key":"********","content":"x"}`, string(redacted), "RedactSecrets() = %s", redacted)
+
 	merged := MergeSecrets(testSchema, redacted, stored)
-	if string(merged) != string(stored) {
-		t.Fatalf("MergeSecrets() = %s, want %s", merged, stored)
-	}
+	require.Equal(t, string(stored), string(merged))
+
 	cleared := MergeSecrets(testSchema, json.RawMessage(`{"api_key":"","content":"x"}`), stored)
-	if string(cleared) != `{"api_key":"","content":"x"}` {
-		t.Fatalf("MergeSecrets(cleared) = %s", cleared)
-	}
-	if got := RedactSecrets(testSchema, json.RawMessage(`{"content":"x"}`)); string(got) != `{"content":"x"}` {
-		t.Fatalf("RedactSecrets(no secret) = %s", got)
-	}
+	require.Equal(t, `{"api_key":"","content":"x"}`, string(cleared), "MergeSecrets(cleared) = %s", cleared)
+	got := RedactSecrets(testSchema, json.RawMessage(`{"content":"x"}`))
+	require.Equal(t, `{"content":"x"}`, string(got), "RedactSecrets(no secret) = %s", got)
 }
 
 func TestSchemaDefaultsAndConfigHash(t *testing.T) {
 	defaults := SchemaDefaults(testSchema)
-	if string(defaults) != `{"api_key":"","content":"","entities":[],"max_tokens":4096,"mode":"inject","reversible":false,"roles":["user"]}` {
-		t.Fatalf("SchemaDefaults() = %s", defaults)
-	}
+	require.Equal(t, `{"api_key":"","content":"","entities":[],"max_tokens":4096,"mode":"inject","reversible":false,"roles":["user"]}`, string(defaults), "SchemaDefaults() = %s", defaults)
+
 	a := ConfigHash(json.RawMessage(`{"b":1,"a":2}`))
 	b := ConfigHash(json.RawMessage(`{"a":2, "b":1}`))
-	if a != b || len(a) != 16 {
-		t.Fatalf("ConfigHash not canonical: %q vs %q", a, b)
-	}
-	if ConfigHash(json.RawMessage(`{"a":3}`)) == a {
-		t.Fatal("ConfigHash did not change with content")
-	}
+	require.Equal(t, b, a)
+	require.Len(t, a, 16)
+	require.NotEqual(t, a, ConfigHash(json.RawMessage(`{"a":3}`)))
 }

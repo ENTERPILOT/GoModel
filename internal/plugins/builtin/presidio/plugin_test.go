@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -16,6 +15,8 @@ import (
 
 	"github.com/enterpilot/gomodel/pluginapi"
 	"github.com/enterpilot/gomodel/pluginapi/plugintest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // analyzer is a fake Presidio analyzer: it finds e-mail addresses, credit
@@ -107,17 +108,17 @@ func newPlugin(t *testing.T, a *analyzer, cfg string) *Plugin {
 		cfg = "{}"
 	}
 	var m map[string]any
-	if err := json.Unmarshal([]byte(cfg), &m); err != nil {
-		t.Fatal(err)
-	}
+	err := json.Unmarshal([]byte(cfg), &m)
+	require.NoError(t, err)
+
 	if _, ok := m["analyzer_url"]; !ok && a != nil {
 		m["analyzer_url"] = a.srv.URL
 	}
 	raw, _ := json.Marshal(m)
 	p := New()
-	if err := p.Init(context.Background(), raw, plugintest.NewHost()); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	err = p.Init(context.Background(), raw, plugintest.NewHost())
+	require.NoError(t, err)
+
 	return p.(*Plugin)
 }
 
@@ -137,35 +138,32 @@ func TestEditsContent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := newPlugin(t, nil, tt.cfg).EditsContent(); got != tt.want {
-				t.Fatalf("EditsContent() = %v, want %v", got, tt.want)
-			}
+			got := newPlugin(t, nil, tt.cfg).EditsContent()
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
 
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
-	if m.Name != "presidio" || !m.Mutates || !m.Guardrail {
-		t.Fatalf("manifest = %+v", m)
-	}
-	if !reflect.DeepEqual(m.Kinds, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}) {
-		t.Errorf("kinds = %v", m.Kinds)
-	}
+	require.Equal(t, "presidio", m.Name)
+	require.True(t, m.Mutates)
+	require.True(t, m.Guardrail)
+	assert.Equal(t, []pluginapi.Kind{pluginapi.KindPrompt, pluginapi.KindResponse, pluginapi.KindStream}, m.Kinds)
+
 	want := []string{"analyzer_url", "api_key", "language", "entities", "block_entities", "score_threshold", "allow_list", "ad_hoc_recognizers", "roles", "action", "operator", "restore", "message", "block_status", "stream_chunk", "stream_lookbehind"}
 	var keys []string
 	for _, f := range m.ConfigSchema {
 		keys = append(keys, f.Key)
-		if f.Label == "" || f.Help == "" {
-			t.Errorf("field %s lacks label or help", f.Key)
-		}
-		if (f.Input == pluginapi.InputSelect || f.Input == pluginapi.InputCheckboxes) && len(f.Options) == 0 {
-			t.Errorf("field %s lacks options", f.Key)
+		assert.NotEmpty(t, f.Label)
+		assert.NotEmpty(t, f.Help, "field %s lacks label or help", f.Key)
+
+		if f.Input == pluginapi.InputSelect || f.Input == pluginapi.InputCheckboxes {
+			assert.NotEmpty(t, f.Options, "field %s lacks options", f.Key)
 		}
 	}
-	if !reflect.DeepEqual(keys, want) {
-		t.Errorf("keys = %v, want %v", keys, want)
-	}
+	assert.Equal(t, want, keys)
+
 	p := New()
 	for name, ok := range map[string]bool{
 		"PromptHook":    func() bool { _, ok := p.(pluginapi.PromptHook); return ok }(),
@@ -173,9 +171,7 @@ func TestManifest(t *testing.T) {
 		"StreamHook":    func() bool { _, ok := p.(pluginapi.StreamHook); return ok }(),
 		"HealthChecker": func() bool { _, ok := p.(pluginapi.HealthChecker); return ok }(),
 	} {
-		if !ok {
-			t.Errorf("must implement %s", name)
-		}
+		assert.True(t, ok, "must implement %s", name)
 	}
 }
 
@@ -202,40 +198,43 @@ func TestInitErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := New().Init(context.Background(), json.RawMessage(tt.cfg), plugintest.NewHost())
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("err = %v, want containing %q", err, tt.want)
-			}
+			require.ErrorContains(t, err, tt.want)
 		})
 	}
 }
 
 func TestDefaults(t *testing.T) {
 	p := newPlugin(t, nil, `{}`)
-	if p.analyzerURL != DefaultAnalyzerURL || p.language != "en" || p.action != ActionAnonymize || p.operator != OperatorReplace || p.restore || p.enforcement.Message != DefaultMessage || p.streamChunk != DefaultStreamChunk || p.lookbehind != DefaultStreamLookbehind {
-		t.Errorf("settings = %+v", p.settings)
-	}
-	if p.entities != nil || p.scoreThreshold != nil || p.allowList != nil || p.adHocRecognizers != nil || p.blockEntities != nil {
-		t.Errorf("optional settings not nil: %+v", p.settings)
-	}
+	assert.Equal(t, DefaultAnalyzerURL, p.analyzerURL)
+	assert.Equal(t, "en", p.language)
+	assert.Equal(t, ActionAnonymize, p.action)
+	assert.Equal(t, OperatorReplace, p.operator)
+	assert.False(t, p.restore)
+	assert.Equal(t, DefaultMessage, p.enforcement.Message)
+	assert.Equal(t, DefaultStreamChunk, p.streamChunk)
+	assert.Equal(t, DefaultStreamLookbehind, p.lookbehind)
+	assert.Nil(t, p.entities)
+	assert.Nil(t, p.scoreThreshold)
+	assert.Nil(t, p.allowList)
+	assert.Nil(t, p.adHocRecognizers)
+	assert.Nil(t, p.blockEntities, "optional settings not nil: %+v", p.settings)
+
 	wantRoles := map[pluginapi.Role]bool{pluginapi.RoleUser: true, pluginapi.RoleAssistant: true, pluginapi.RoleTool: true}
-	if !reflect.DeepEqual(p.roles, wantRoles) {
-		t.Errorf("roles = %v", p.roles)
-	}
+	assert.Equal(t, wantRoles, p.roles)
+
 	// Lists as text, threshold as string, block entities merged into
 	// entities, trailing slash and case normalized.
 	p = newPlugin(t, nil, `{"analyzer_url": "http://presidio:3000/", "entities": "person, email_address\n", "block_entities": ["CREDIT_CARD"], "score_threshold": "0.4", "roles": "system", "restore": "yes", "ad_hoc_recognizers": "[{\"supported_entity\": \"ZIP\"}]"}`)
-	if p.analyzerURL != "http://presidio:3000" || *p.scoreThreshold != 0.4 || !p.restore {
-		t.Errorf("settings = %+v", p.settings)
-	}
-	if !reflect.DeepEqual(p.entities, []string{"PERSON", "EMAIL_ADDRESS", "CREDIT_CARD"}) || !p.blockEntities["CREDIT_CARD"] {
-		t.Errorf("entities = %v, blocked = %v", p.entities, p.blockEntities)
-	}
-	if !p.roles[pluginapi.RoleSystem] || !p.roles[pluginapi.RoleDeveloper] || p.roles[pluginapi.RoleUser] {
-		t.Errorf("roles = %v", p.roles)
-	}
-	if string(p.adHocRecognizers) != `[{"supported_entity":"ZIP"}]` {
-		t.Errorf("recognizers = %s", p.adHocRecognizers)
-	}
+	assert.Equal(t, "http://presidio:3000", p.analyzerURL)
+	assert.Equal(t, 0.4, *p.scoreThreshold)
+	assert.True(t, p.restore)
+	assert.Equal(t, []string{"PERSON", "EMAIL_ADDRESS", "CREDIT_CARD"}, p.entities)
+	assert.True(t, p.blockEntities["CREDIT_CARD"], "entities = %v, blocked = %v", p.entities, p.blockEntities)
+
+	assert.True(t, p.roles[pluginapi.RoleSystem])
+	assert.True(t, p.roles[pluginapi.RoleDeveloper])
+	assert.False(t, p.roles[pluginapi.RoleUser])
+	assert.Equal(t, `[{"supported_entity":"ZIP"}]`, string(p.adHocRecognizers), "recognizers = %s", p.adHocRecognizers)
 }
 
 func TestOnPromptAnonymizes(t *testing.T) {
@@ -248,36 +247,32 @@ func TestOnPromptAnonymizes(t *testing.T) {
 		plugintest.Text(pluginapi.RoleUser, "m3", "   "),
 	), nil)
 	d, err := p.OnPrompt(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Action != pluginapi.ActionAllow || d.NoStore {
-		t.Fatalf("decision = %+v", d)
-	}
-	if got := x.Prompt.Message("m1").Text(); got != "I am <PERSON_1>, mail <EMAIL_ADDRESS_1>. My friend is also <PERSON_1>." {
-		t.Errorf("m1 = %q", got)
-	}
-	if got := x.Prompt.Message("m2").Text(); got != "Hello <PERSON_1>" {
-		t.Errorf("m2 = %q", got)
-	}
-	if got := x.Prompt.Message("m0").Text(); !strings.Contains(got, "john@acme.com") {
-		t.Errorf("system message edited: %q", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, d.Action)
+	require.False(t, d.NoStore)
+	got := x.Prompt.Message("m1").Text()
+	assert.Equal(t, "I am <PERSON_1>, mail <EMAIL_ADDRESS_1>. My friend is also <PERSON_1>.", got)
+	got = x.Prompt.Message("m2").Text()
+	assert.Equal(t, "Hello <PERSON_1>", got)
+	got = x.Prompt.Message("m0").Text()
+	assert.Contains(t, got, "john@acme.com")
+
 	detail := d.Detail.(map[string]any)
-	if !reflect.DeepEqual(detail["entities"], map[string]int{"PERSON": 3, "EMAIL_ADDRESS": 1}) || detail["messages"] != 2 || detail["replacements"] != 4 {
-		t.Errorf("detail = %v", detail)
-	}
+	assert.Equal(t, map[string]int{"PERSON": 3, "EMAIL_ADDRESS": 1}, detail["entities"])
+	assert.Equal(t, 2, detail["messages"])
+	assert.Equal(t, 4, detail["replacements"], "detail = %v", detail)
+
 	texts := a.texts()
-	if len(texts) != 2 {
-		t.Fatalf("analyzer calls = %v", texts)
-	}
+	require.Len(t, texts, 2)
+
 	req := a.requests[0]
-	if req.Language != "en" || !reflect.DeepEqual(req.Entities, []string{"PERSON", "EMAIL_ADDRESS"}) || req.ScoreThreshold == nil || *req.ScoreThreshold != 0.3 || !reflect.DeepEqual(req.AllowList, []string{"ACME"}) || req.CorrelationID != "test-request" {
-		t.Errorf("request = %+v", req)
-	}
-	if a.auth != "Bearer tok" {
-		t.Errorf("authorization = %q", a.auth)
-	}
+	assert.Equal(t, "en", req.Language)
+	assert.Equal(t, []string{"PERSON", "EMAIL_ADDRESS"}, req.Entities)
+	assert.NotNil(t, req.ScoreThreshold)
+	assert.Equal(t, 0.3, *req.ScoreThreshold)
+	assert.Equal(t, []string{"ACME"}, req.AllowList)
+	assert.Equal(t, "test-request", req.CorrelationID)
+	assert.Equal(t, "Bearer tok", a.auth)
 }
 
 func TestOnPromptOperators(t *testing.T) {
@@ -289,19 +284,15 @@ func TestOnPromptOperators(t *testing.T) {
 	} {
 		p := newPlugin(t, a, `{"operator": "`+tt.operator+`"}`)
 		x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Hi Zoë, mail zoe@example.org")), nil)
-		if _, err := p.OnPrompt(context.Background(), x); err != nil {
-			t.Fatal(err)
-		}
+		_, err := p.OnPrompt(context.Background(), x)
+		require.NoError(t, err)
+
 		got := x.Prompt.Message("m1").Text()
 		if tt.operator == OperatorHash {
-			if !regexp.MustCompile(`^Hi [0-9a-f]{64}, mail [0-9a-f]{64}$`).MatchString(got) {
-				t.Errorf("%s: %q", tt.operator, got)
-			}
+			assert.True(t, regexp.MustCompile(`^Hi [0-9a-f]{64}, mail [0-9a-f]{64}$`).MatchString(got), "%s: %q", tt.operator, got)
 			continue
 		}
-		if got != tt.want {
-			t.Errorf("%s: %q, want %q", tt.operator, got, tt.want)
-		}
+		assert.Equal(t, tt.want, got, "%s: %q, want %q", tt.operator, got, tt.want)
 	}
 }
 
@@ -330,20 +321,18 @@ func TestOnPromptDecisions(t *testing.T) {
 			p := newPlugin(t, a, tt.cfg)
 			x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", tt.text)), nil)
 			d, err := p.OnPrompt(context.Background(), x)
-			if err != nil {
-				t.Fatal(err)
+			require.NoError(t, err)
+			require.Equal(t, tt.action, d.Action)
+			require.Equal(t, tt.code, d.Code)
+			require.Equal(t, tt.status, d.Status)
+			edited := x.Prompt.Message("m1").Text() != tt.text
+			assert.Equal(t, tt.edited, edited)
+
+			if d.Action == pluginapi.ActionRespond {
+				assert.Equal(t, DefaultMessage, d.Response.Text(0))
 			}
-			if d.Action != tt.action || d.Code != tt.code || d.Status != tt.status {
-				t.Fatalf("decision = %+v", d)
-			}
-			if edited := x.Prompt.Message("m1").Text() != tt.text; edited != tt.edited {
-				t.Errorf("edited = %v, text %q", edited, x.Prompt.Message("m1").Text())
-			}
-			if d.Action == pluginapi.ActionRespond && d.Response.Text(0) != DefaultMessage {
-				t.Errorf("respond text = %q", d.Response.Text(0))
-			}
-			if tt.code == CodeBlocked && d.Detail.(map[string]any)["blocked_entity"] != "CREDIT_CARD" {
-				t.Errorf("detail = %v", d.Detail)
+			if tt.code == CodeBlocked {
+				assert.Equal(t, "CREDIT_CARD", d.Detail.(map[string]any)["blocked_entity"])
 			}
 		})
 	}
@@ -360,23 +349,18 @@ func TestOnPromptToolCallsAndResults(t *testing.T) {
 		{Kind: pluginapi.PartToolResult, ToolResult: &pluginapi.ToolResult{CallID: "c1", Parts: []pluginapi.Part{{Kind: pluginapi.PartText, Text: "Ann <ann@x.io>"}}}},
 	}}
 	x := plugintest.Exchange(plugintest.Prompt(call, result), nil)
-	if _, err := p.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Prompt.Message("m1").Text(); got != "Looking up <PERSON_1>" {
-		t.Errorf("text = %q", got)
-	}
-	if got := string(x.Prompt.ToolCalls()[0].Call.Arguments); got != `{"n":1,"name":"<PERSON_1>","tags":["vip","<EMAIL_ADDRESS_1>"]}` {
-		t.Errorf("arguments = %s", got)
-	}
-	if got := x.Prompt.Message("m2").Parts[0].ToolResult.Parts[0].Text; got != "<PERSON_1> <<EMAIL_ADDRESS_1>>" {
-		t.Errorf("result = %q", got)
-	}
+	_, err := p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+	got := x.Prompt.Message("m1").Text()
+	assert.Equal(t, "Looking up <PERSON_1>", got)
+	got = string(x.Prompt.ToolCalls()[0].Call.Arguments)
+	assert.Equal(t, `{"n":1,"name":"<PERSON_1>","tags":["vip","<EMAIL_ADDRESS_1>"]}`, got)
+	got = x.Prompt.Message("m2").Parts[0].ToolResult.Parts[0].Text
+	assert.Equal(t, "<PERSON_1> <<EMAIL_ADDRESS_1>>", got)
+
 	// Strings inside the arguments are analyzed one by one, never the JSON.
 	for _, s := range a.texts() {
-		if strings.Contains(s, "{") {
-			t.Errorf("analyzer saw JSON: %q", s)
-		}
+		assert.NotContains(t, s, "{", "analyzer saw JSON")
 	}
 }
 
@@ -386,19 +370,14 @@ func TestOnPromptAnalyzerErrorsFailWithoutEditing(t *testing.T) {
 	p := newPlugin(t, a, `{}`)
 	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Ann is here")), nil)
 	_, err := p.OnPrompt(context.Background(), x)
-	if err == nil || !strings.Contains(err.Error(), "analyzer returned HTTP 500") {
-		t.Fatalf("err = %v", err)
-	}
-	if strings.Contains(err.Error(), "Ann") {
-		t.Errorf("error echoes the text: %v", err)
-	}
-	if x.Prompt.Message("m1").Text() != "Ann is here" || x.Prompt.Changes().Dirty {
-		t.Error("prompt edited despite the error")
-	}
+	require.ErrorContains(t, err, "analyzer returned HTTP 500")
+	assert.NotContains(t, err.Error(), "Ann")
+	assert.Equal(t, "Ann is here", x.Prompt.Message("m1").Text())
+	assert.False(t, x.Prompt.Changes().Dirty)
+
 	p = newPlugin(t, nil, `{"analyzer_url": "http://127.0.0.1:1"}`)
-	if _, err := p.OnPrompt(context.Background(), x); err == nil || !strings.Contains(err.Error(), "analyzer unreachable") {
-		t.Errorf("err = %v", err)
-	}
+	_, err = p.OnPrompt(context.Background(), x)
+	require.ErrorContains(t, err, "analyzer unreachable")
 }
 
 func TestRestoreRoundTrip(t *testing.T) {
@@ -407,45 +386,34 @@ func TestRestoreRoundTrip(t *testing.T) {
 	out := newPlugin(t, a, `{"restore": true}`)
 	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee (ann@x.io). Draft an email to Bob.")), nil)
 	d, err := in.OnPrompt(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !d.NoStore {
-		t.Errorf("prompt decision = %+v, want NoStore", d)
-	}
-	if got := x.Prompt.Message("m1").Text(); got != "I am <PERSON_1> (<EMAIL_ADDRESS_1>). Draft an email to Bob." {
-		t.Fatalf("prompt = %q", got)
-	}
+	require.NoError(t, err)
+	assert.True(t, d.NoStore, "prompt decision = %+v, want NoStore", d)
+	got := x.Prompt.Message("m1").Text()
+	require.Equal(t, "I am <PERSON_1> (<EMAIL_ADDRESS_1>). Draft an email to Bob.", got)
+
 	// The model repeats the placeholders, reveals a new address of its
 	// own, and calls a tool with a placeholder argument.
 	x.Response = plugintest.Completion("Dear Bob, <PERSON_1> (<EMAIL_ADDRESS_1>) wrote; cc bob@y.io.")
 	x.Response.Choices[0].Message.Parts = append(x.Response.Choices[0].Message.Parts, pluginapi.Part{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "send", Arguments: json.RawMessage(`{"to":"<EMAIL_ADDRESS_1>"}`)}})
 	d, err = out.OnResponse(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Action != pluginapi.ActionAllow {
-		t.Fatalf("response decision = %+v", d)
-	}
-	if got := x.Response.Text(0); got != "Dear Bob, Ann Lee (ann@x.io) wrote; cc <EMAIL_ADDRESS_2>." {
-		t.Errorf("response = %q", got)
-	}
-	if got := string(x.Response.Choices[0].Message.Parts[1].ToolCall.Arguments); got != `{"to":"ann@x.io"}` {
-		t.Errorf("arguments = %s", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, d.Action)
+	got = x.Response.Text(0)
+	assert.Equal(t, "Dear Bob, Ann Lee (ann@x.io) wrote; cc <EMAIL_ADDRESS_2>.", got)
+	got = string(x.Response.Choices[0].Message.Parts[1].ToolCall.Arguments)
+	assert.Equal(t, `{"to":"ann@x.io"}`, got)
+
 	detail := d.Detail.(map[string]any)
-	if detail["restored"] != 3 || detail["replacements"] != 1 {
-		t.Errorf("detail = %v", detail)
-	}
+	assert.Equal(t, 3, detail["restored"])
+	assert.Equal(t, 1, detail["replacements"], "detail = %v", detail)
+
 	// Without a prompt-phase mapping there is nothing to restore and the
 	// model's own values are still anonymized.
 	y := plugintest.Exchange(nil, plugintest.Completion("Write to <PERSON_1> at bob@y.io"))
-	if _, err := out.OnResponse(context.Background(), y); err != nil {
-		t.Fatal(err)
-	}
-	if got := y.Response.Text(0); got != "Write to <PERSON_1> at <EMAIL_ADDRESS_1>" {
-		t.Errorf("response = %q", got)
-	}
+	_, err = out.OnResponse(context.Background(), y)
+	require.NoError(t, err)
+	got = y.Response.Text(0)
+	assert.Equal(t, "Write to <PERSON_1> at <EMAIL_ADDRESS_1>", got)
 }
 
 func TestOnResponseDecisions(t *testing.T) {
@@ -453,33 +421,31 @@ func TestOnResponseDecisions(t *testing.T) {
 	p := newPlugin(t, a, `{"action": "block", "block_entities": ["EMAIL_ADDRESS"]}`)
 	x := plugintest.Exchange(nil, plugintest.Completion("clean", "Ann was here"))
 	d, err := p.OnResponse(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Action != pluginapi.ActionBlock || d.Code != Code || d.Status != 0 {
-		t.Errorf("decision = %+v", d)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, pluginapi.ActionBlock, d.Action)
+	assert.Equal(t, Code, d.Code)
+	assert.Equal(t, 0, d.Status)
+
 	x = plugintest.Exchange(nil, plugintest.Completion("mail ann@x.io"))
-	if d, _ = p.OnResponse(context.Background(), x); d.Code != CodeBlocked {
-		t.Errorf("decision = %+v", d)
-	}
+	d, _ = p.OnResponse(context.Background(), x)
+	assert.Equal(t, CodeBlocked, d.Code)
+
 	p = newPlugin(t, a, `{"action": "warn"}`)
 	x = plugintest.Exchange(nil, plugintest.Completion("Ann was here"))
-	if d, _ = p.OnResponse(context.Background(), x); d.Action != pluginapi.ActionWarn || x.Response.Text(0) != "Ann was here" {
-		t.Errorf("decision = %+v, text %q", d, x.Response.Text(0))
-	}
+	d, _ = p.OnResponse(context.Background(), x)
+	assert.Equal(t, pluginapi.ActionWarn, d.Action)
+	assert.Equal(t, "Ann was here", x.Response.Text(0), "decision = %+v, text %q", d, x.Response.Text(0))
 }
 
 func TestStreamPolicy(t *testing.T) {
 	p := newPlugin(t, nil, `{"stream_chunk": 100, "stream_lookbehind": 20}`)
-	if got := p.StreamPolicy(); got != (pluginapi.StreamPolicy{Mode: pluginapi.StreamTransform, LookbehindChars: 20, MinChunkChars: 100}) {
-		t.Errorf("policy = %+v", got)
-	}
+	got := p.StreamPolicy()
+	assert.Equal(t, pluginapi.StreamPolicy{Mode: pluginapi.StreamTransform, LookbehindChars: 20, MinChunkChars: 100}, got)
+
 	for _, action := range []string{ActionBlock, ActionRespond} {
 		p = newPlugin(t, nil, `{"action": "`+action+`"}`)
-		if got := p.StreamPolicy(); got.Mode != pluginapi.StreamBuffer {
-			t.Errorf("%s policy = %+v", action, got)
-		}
+		got := p.StreamPolicy()
+		assert.Equal(t, pluginapi.StreamBuffer, got.Mode, "%s policy = %+v", action, got)
 	}
 }
 
@@ -488,9 +454,9 @@ func TestStreamEvents(t *testing.T) {
 	in := newPlugin(t, a, `{"restore": true}`)
 	p := newPlugin(t, a, `{"restore": true, "block_entities": ["CREDIT_CARD"]}`)
 	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee")), nil)
-	if _, err := in.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
+	_, err := in.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
 	ev := func(s string, overlap int) *pluginapi.StreamEvent {
 		return &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: s, Overlap: overlap}
 	}
@@ -508,29 +474,29 @@ func TestStreamEvents(t *testing.T) {
 	}
 	for i, st := range steps {
 		got, err := p.OnStreamEvent(context.Background(), x, st.ev)
-		if err != nil {
-			t.Fatalf("step %d: %v", i, err)
-		}
-		if got.Action != st.want.Action || got.Text != st.want.Text {
-			t.Errorf("step %d: %+v, want %+v", i, got, st.want)
-		}
-		if got.Action == pluginapi.StreamTerminate && (got.Terminate == nil || got.Terminate.Code != CodeBlocked) {
-			t.Errorf("step %d: terminate = %+v", i, got.Terminate)
+		require.NoError(t, err, "step %d: %v", i, err)
+		assert.Equal(t, st.want.Action, got.Action)
+		assert.Equal(t, st.want.Text, got.Text, "step %d: %+v, want %+v", i, got, st.want)
+
+		if got.Action == pluginapi.StreamTerminate {
+			require.NotNil(t, got.Terminate, "step %d", i)
+			assert.Equal(t, CodeBlocked, got.Terminate.Code, "step %d", i)
 		}
 	}
 	// The end decision repeats what the stream contained, the cut included.
 	d, err := p.OnStreamEnd(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	detail := d.Detail.(map[string]any)
-	if d.Action != pluginapi.ActionBlock || d.Code != CodeBlocked || detail["restored"] != 1 || detail["replacements"] != 2 || !reflect.DeepEqual(detail["entities"], map[string]int{"EMAIL_ADDRESS": 1, "CREDIT_CARD": 1}) {
-		t.Errorf("end = %+v", d)
-	}
+	assert.Equal(t, pluginapi.ActionBlock, d.Action)
+	assert.Equal(t, CodeBlocked, d.Code)
+	assert.Equal(t, 1, detail["restored"])
+	assert.Equal(t, 2, detail["replacements"])
+	assert.Equal(t, map[string]int{"EMAIL_ADDRESS": 1, "CREDIT_CARD": 1}, detail["entities"])
 	// A clean stream ends with a plain allow.
-	if d, _ := p.OnStreamEnd(context.Background(), plugintest.Exchange(nil, nil)); d.Action != pluginapi.ActionAllow || d.Detail != nil {
-		t.Errorf("clean end = %+v", d)
-	}
+	d, _ = p.OnStreamEnd(context.Background(), plugintest.Exchange(nil, nil))
+	assert.Equal(t, pluginapi.ActionAllow, d.Action)
+	assert.Nil(t, d.Detail)
 }
 
 func TestStreamWarn(t *testing.T) {
@@ -538,34 +504,28 @@ func TestStreamWarn(t *testing.T) {
 	p := newPlugin(t, a, `{"action": "warn"}`)
 	x := plugintest.Exchange(nil, nil)
 	got, err := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "Ann"})
-	if err != nil || got.Action != pluginapi.StreamPass {
-		t.Fatalf("event = %+v, %v", got, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.StreamPass, got.Action)
+
 	d, _ := p.OnStreamEnd(context.Background(), x)
-	if d.Action != pluginapi.ActionWarn || d.Code != Code {
-		t.Errorf("end = %+v", d)
-	}
+	assert.Equal(t, pluginapi.ActionWarn, d.Action)
+	assert.Equal(t, Code, d.Code)
+
 	p = newPlugin(t, a, `{"action": "block"}`)
-	if got, _ := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "Ann"}); got.Action != pluginapi.StreamPass {
-		t.Errorf("buffered event = %+v", got)
-	}
-	if d, _ := p.OnStreamEnd(context.Background(), plugintest.Exchange(nil, nil)); d.Action != pluginapi.ActionAllow {
-		t.Errorf("buffered end = %+v", d)
-	}
+	got, _ = p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "Ann"})
+	assert.Equal(t, pluginapi.StreamPass, got.Action)
+	d, _ = p.OnStreamEnd(context.Background(), plugintest.Exchange(nil, nil))
+	assert.Equal(t, pluginapi.ActionAllow, d.Action)
 }
 
 func TestHealth(t *testing.T) {
 	a := newAnalyzer(t)
-	if err := newPlugin(t, a, `{}`).Health(context.Background()); err != nil {
-		t.Errorf("healthy: %v", err)
-	}
-	err := newPlugin(t, a, `{"language": "xx"}`).Health(context.Background())
-	if err == nil || !strings.Contains(err.Error(), `HTTP 500 for language "xx"`) {
-		t.Errorf("unsupported language: %v", err)
-	}
-	if err := newPlugin(t, nil, `{"analyzer_url": "http://127.0.0.1:1"}`).Health(context.Background()); err == nil {
-		t.Error("unreachable analyzer reported healthy")
-	}
+	err := newPlugin(t, a, `{}`).Health(context.Background())
+	assert.NoError(t, err)
+
+	err = newPlugin(t, a, `{"language": "xx"}`).Health(context.Background())
+	require.ErrorContains(t, err, `HTTP 500 for language "xx"`)
+	assert.Error(t, newPlugin(t, nil, `{"analyzer_url": "http://127.0.0.1:1"}`).Health(context.Background()))
 }
 
 func TestSummarize(t *testing.T) {
@@ -576,9 +536,8 @@ func TestSummarize(t *testing.T) {
 		`{"action": "block", "entities": ["PERSON", "URL"], "block_entities": ["US_SSN"]}`: "block, 3 entity types, 1 blocking, en",
 		`{"bogus": 1}`: "",
 	} {
-		if got := p.Summarize(json.RawMessage(cfg)); got != want {
-			t.Errorf("%s: %q, want %q", cfg, got, want)
-		}
+		got := p.Summarize(json.RawMessage(cfg))
+		assert.Equal(t, want, got)
 	}
 }
 
@@ -590,57 +549,49 @@ func TestRestoreProvenance(t *testing.T) {
 		plugintest.Text(pluginapi.RoleSystem, "m0", "Escalate to Sam Ops at ops@corp.io."),
 		plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
 	), nil)
-	if _, err := in.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Prompt.Message("m0").Text(); got != "Escalate to <PERSON_1> at <EMAIL_ADDRESS_1>." {
-		t.Fatalf("system = %q", got)
-	}
+	_, err := in.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+	got := x.Prompt.Message("m0").Text()
+	require.Equal(t, "Escalate to <PERSON_1> at <EMAIL_ADDRESS_1>.", got)
+
 	// The model is talked into repeating the system placeholders: they
 	// stay placeholders, while the user's own value comes back.
 	x.Response = plugintest.Completion("Contact <PERSON_1> at <EMAIL_ADDRESS_1>, <PERSON_2>.")
 	d, err := out.OnResponse(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Response.Text(0); got != "Contact <PERSON_1> at <EMAIL_ADDRESS_1>, Ann Lee." {
-		t.Errorf("response = %q", got)
-	}
-	if !d.NoStore {
-		t.Errorf("restored response must not be cached: %+v", d)
-	}
+	require.NoError(t, err)
+	got = x.Response.Text(0)
+	assert.Equal(t, "Contact <PERSON_1> at <EMAIL_ADDRESS_1>, Ann Lee.", got)
+	assert.True(t, d.NoStore, "restored response must not be cached: %+v", d)
+
 	// A value the system prompt mentions first becomes restorable once the
 	// user sends it too.
 	z := plugintest.Exchange(plugintest.Prompt(
 		plugintest.Text(pluginapi.RoleSystem, "m0", "The customer is Ann Lee."),
 		plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee."),
 	), nil)
-	if _, err := in.OnPrompt(context.Background(), z); err != nil {
-		t.Fatal(err)
-	}
+	_, err = in.OnPrompt(context.Background(), z)
+	require.NoError(t, err)
+
 	z.Response = plugintest.Completion("Hello <PERSON_1>.")
-	if _, err := out.OnResponse(context.Background(), z); err != nil {
-		t.Fatal(err)
-	}
-	if got := z.Response.Text(0); got != "Hello Ann Lee." {
-		t.Errorf("response = %q", got)
-	}
+	_, err = out.OnResponse(context.Background(), z)
+	require.NoError(t, err)
+	got = z.Response.Text(0)
+	assert.Equal(t, "Hello Ann Lee.", got)
 
 	// A prompt instance without restore never hands values to a response
 	// instance with restore.
 	plain := newPlugin(t, a, `{}`)
 	y := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "I am Ann Lee.")), nil)
 	d, err = plain.OnPrompt(context.Background(), y)
-	if err != nil || d.NoStore {
-		t.Fatalf("prompt = %+v, %v", d, err)
-	}
+	require.NoError(t, err)
+	require.False(t, d.NoStore)
+
 	y.Response = plugintest.Completion("Hello <PERSON_1>.")
-	if d, err = out.OnResponse(context.Background(), y); err != nil || d.NoStore {
-		t.Fatalf("response = %+v, %v", d, err)
-	}
-	if got := y.Response.Text(0); got != "Hello <PERSON_1>." {
-		t.Errorf("response = %q", got)
-	}
+	d, err = out.OnResponse(context.Background(), y)
+	require.NoError(t, err)
+	require.False(t, d.NoStore)
+	got = y.Response.Text(0)
+	assert.Equal(t, "Hello <PERSON_1>.", got)
 }
 
 func TestPartialAnalyzerFailureLeavesNoState(t *testing.T) {
@@ -659,25 +610,21 @@ func TestPartialAnalyzerFailureLeavesNoState(t *testing.T) {
 	p.client.baseURL = proxy.URL
 
 	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Ann one"), plugintest.Text(pluginapi.RoleUser, "m2", "Ann two")), nil)
-	if _, err := p.OnPrompt(context.Background(), x); err == nil {
-		t.Fatal("expected the phase to fail")
-	}
-	if x.Prompt.Changes().Dirty {
-		t.Error("prompt edited despite the failure")
-	}
-	if m := p.mapping(x); m.hasRestorable() || len(m.byPlaceholder) != 0 {
-		t.Errorf("mapping kept state from the failed phase: %v", m.byPlaceholder)
-	}
+	_, err := p.OnPrompt(context.Background(), x)
+	require.Error(t, err)
+	assert.False(t, x.Prompt.Changes().Dirty)
+	m := p.mapping(x)
+	assert.False(t, m.hasRestorable())
+	assert.Empty(t, m.byPlaceholder)
+
 	// A later response phase (fail_mode open let the request continue)
 	// finds nothing to restore.
 	x.Response = plugintest.Completion("Hi <PERSON_1>")
 	restore := newPlugin(t, a, `{"restore": true}`)
-	if _, err := restore.OnResponse(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Response.Text(0); got != "Hi <PERSON_1>" {
-		t.Errorf("response = %q", got)
-	}
+	_, err = restore.OnResponse(context.Background(), x)
+	require.NoError(t, err)
+	got := x.Response.Text(0)
+	assert.Equal(t, "Hi <PERSON_1>", got)
 }
 
 func TestPlaceholdersAreNumberedInDocumentOrder(t *testing.T) {
@@ -685,13 +632,11 @@ func TestPlaceholdersAreNumberedInDocumentOrder(t *testing.T) {
 	p := newPlugin(t, a, `{}`)
 	for range 5 {
 		x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Cid"), plugintest.Text(pluginapi.RoleUser, "m2", "Bob"), plugintest.Text(pluginapi.RoleUser, "m3", "Ann and Cid")), nil)
-		if _, err := p.OnPrompt(context.Background(), x); err != nil {
-			t.Fatal(err)
-		}
+		_, err := p.OnPrompt(context.Background(), x)
+		require.NoError(t, err)
+
 		got := x.Prompt.Message("m1").Text() + " " + x.Prompt.Message("m2").Text() + " " + x.Prompt.Message("m3").Text()
-		if got != "<PERSON_1> <PERSON_2> <PERSON_3> and <PERSON_1>" {
-			t.Fatalf("numbering = %q", got)
-		}
+		require.Equal(t, "<PERSON_1> <PERSON_2> <PERSON_3> and <PERSON_1>", got)
 	}
 }
 
@@ -702,15 +647,12 @@ func TestToolArgumentsKeepLargeNumbers(t *testing.T) {
 		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "f", Arguments: json.RawMessage(`{"id":9007199254740993,"name":"Ann","ratio":1.10}`)}},
 	}}
 	x := plugintest.Exchange(plugintest.Prompt(call), nil)
-	if _, err := p.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := string(x.Prompt.ToolCalls()[0].Call.Arguments); got != `{"id":9007199254740993,"name":"<PERSON_1>","ratio":1.10}` {
-		t.Errorf("arguments = %s", got)
-	}
-	if _, _, ok := argStrings(json.RawMessage(`{"a":"b"} {"c":"d"}`)); ok {
-		t.Error("two JSON values accepted")
-	}
+	_, err := p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+	got := string(x.Prompt.ToolCalls()[0].Call.Arguments)
+	assert.Equal(t, `{"id":9007199254740993,"name":"<PERSON_1>","ratio":1.10}`, got)
+	_, _, ok := argStrings(json.RawMessage(`{"a":"b"} {"c":"d"}`))
+	assert.False(t, ok)
 }
 
 func TestAPIKeyNeedsHTTPS(t *testing.T) {
@@ -718,9 +660,8 @@ func TestAPIKeyNeedsHTTPS(t *testing.T) {
 		`{"api_key": "tok", "analyzer_url": "http://presidio.internal:5002"}`,
 		`{"api_key": "tok", "analyzer_url": "http://10.0.0.5:5002"}`,
 	} {
-		if err := New().Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost()); err == nil || !strings.Contains(err.Error(), "api_key needs an https:// analyzer_url") {
-			t.Errorf("%s: err = %v", cfg, err)
-		}
+		err := New().Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost())
+		require.ErrorContains(t, err, "api_key needs an https:// analyzer_url")
 	}
 	for _, cfg := range []string{
 		`{"api_key": "tok", "analyzer_url": "https://presidio.internal"}`,
@@ -729,9 +670,8 @@ func TestAPIKeyNeedsHTTPS(t *testing.T) {
 		`{"api_key": "tok", "analyzer_url": "http://[::1]:5002"}`,
 		`{"analyzer_url": "http://presidio.internal:5002"}`,
 	} {
-		if err := New().Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost()); err != nil {
-			t.Errorf("%s: %v", cfg, err)
-		}
+		err := New().Init(context.Background(), json.RawMessage(cfg), plugintest.NewHost())
+		assert.NoError(t, err, "%s: %v", cfg, err)
 	}
 }
 
@@ -747,20 +687,18 @@ func TestAPIKeyIsNotFollowedToPlainHTTP(t *testing.T) {
 	p.client.http = front.Client()
 	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Ann is here")), nil)
 	_, err := p.OnPrompt(context.Background(), x)
-	if err == nil || !strings.Contains(err.Error(), "redirect to plain http") {
-		t.Fatalf("err = %v", err)
-	}
+	require.ErrorContains(t, err, "redirect to plain http")
+
 	// A loopback sidecar may still be reached over plain http, and without
 	// a key any redirect is followed as usual.
 	target = a.srv.URL
-	if _, err := p.OnPrompt(context.Background(), x); err != nil {
-		t.Fatalf("loopback redirect: %v", err)
-	}
+	_, err = p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
 	p = newPlugin(t, nil, `{"analyzer_url": "`+front.URL+`"}`)
 	p.client.http = front.Client()
-	if _, err := p.OnPrompt(context.Background(), x); err != nil {
-		t.Fatalf("err = %v", err)
-	}
+	_, err = p.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
 }
 
 func TestPlaceholdersSkipLiteralTokens(t *testing.T) {
@@ -776,36 +714,26 @@ func TestPlaceholdersSkipLiteralTokens(t *testing.T) {
 		plugintest.Text(pluginapi.RoleAssistant, "m2", "Meet <PERSON_2>, a historian."),
 		plugintest.Text(pluginapi.RoleUser, "m3", "My colleague Jan Kowalczyk wants to meet <PERSON_2>."),
 	), nil)
-	if _, err := in.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Prompt.Message("m3").Text(); got != "My colleague <PERSON_4> wants to meet <PERSON_2>." {
-		t.Fatalf("prompt = %q", got)
-	}
+	_, err := in.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
+	require.Equal(t, "My colleague <PERSON_4> wants to meet <PERSON_2>.", x.Prompt.Message("m3").Text())
 	x.Response = plugintest.Completion("<PERSON_4> meets <PERSON_2>; <PERSON_1> watches.")
-	if _, err := out.OnResponse(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Response.Text(0); got != "Jan Kowalczyk meets <PERSON_2>; Jakub Nowak watches." {
-		t.Errorf("response = %q", got)
-	}
+	_, err = out.OnResponse(context.Background(), x)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Jan Kowalczyk meets <PERSON_2>; Jakub Nowak watches.", x.Response.Text(0))
 	// A value the model produces next to a literal placeholder gets a fresh
 	// number, in the response phase and in a stream.
 	y := plugintest.Exchange(nil, plugintest.Completion("<PERSON_1> meets Zoe Ray"))
-	if _, err := out.OnResponse(context.Background(), y); err != nil {
-		t.Fatal(err)
-	}
-	if got := y.Response.Text(0); got != "<PERSON_1> meets <PERSON_2>" {
-		t.Errorf("response = %q", got)
-	}
+	_, err = out.OnResponse(context.Background(), y)
+	require.NoError(t, err)
+
+	assert.Equal(t, "<PERSON_1> meets <PERSON_2>", y.Response.Text(0))
 	z := plugintest.Exchange(nil, nil)
 	got, err := out.OnStreamEvent(context.Background(), z, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "<PERSON_1> meets Zoe Ray"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Text != "<PERSON_1> meets <PERSON_2>" {
-		t.Errorf("stream = %+v", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "<PERSON_1> meets <PERSON_2>", got.Text)
 }
 
 func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
@@ -818,51 +746,45 @@ func TestPlaceholdersSkipUnanalyzedToolArguments(t *testing.T) {
 		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"name": "\u003cPERSON_1\u003e"}`)}},
 	}}
 	x := plugintest.Exchange(plugintest.Prompt(call, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
-	if _, err := in.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
-		t.Fatalf("prompt = %q", got)
-	}
+	_, err := in.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+	got := x.Prompt.Message("m2").Text()
+	require.Equal(t, "I am <PERSON_2>.", got)
+
 	x.Response = plugintest.Completion("<PERSON_1> is not <PERSON_2>")
-	if _, err := out.OnResponse(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Response.Text(0); got != "<PERSON_1> is not Ann Lee" {
-		t.Errorf("response = %q", got)
-	}
+	_, err = out.OnResponse(context.Background(), x)
+	require.NoError(t, err)
+	got = x.Response.Text(0)
+	assert.Equal(t, "<PERSON_1> is not Ann Lee", got)
+
 	// Arguments that are a JSON string rather than an object are decoded too.
 	scalar := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
 		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`"\u003cPERSON_1\u003e"`)}},
 	}}
 	y := plugintest.Exchange(plugintest.Prompt(scalar, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
-	if _, err := in.OnPrompt(context.Background(), y); err != nil {
-		t.Fatal(err)
-	}
-	if got := y.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
-		t.Fatalf("scalar prompt = %q", got)
-	}
+	_, err = in.OnPrompt(context.Background(), y)
+	require.NoError(t, err)
+	got = y.Prompt.Message("m2").Text()
+	require.Equal(t, "I am <PERSON_2>.", got)
+
 	// Object keys are reserved as well as values.
 	keyed := pluginapi.Message{ID: "m1", Role: pluginapi.RoleAssistant, Parts: []pluginapi.Part{
 		{Kind: pluginapi.PartToolCall, ToolCall: &pluginapi.ToolCall{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{"\u003cPERSON_1\u003e": "x"}`)}},
 	}}
 	z := plugintest.Exchange(plugintest.Prompt(keyed, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
-	if _, err := in.OnPrompt(context.Background(), z); err != nil {
-		t.Fatal(err)
-	}
-	if got := z.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
-		t.Fatalf("keyed prompt = %q", got)
-	}
+	_, err = in.OnPrompt(context.Background(), z)
+	require.NoError(t, err)
+	got = z.Prompt.Message("m2").Text()
+	require.Equal(t, "I am <PERSON_2>.", got)
+
 	// With assistant analysis on (the default roles), a scalar argument is
 	// not analyzed but still reserved.
 	all := newPlugin(t, a, `{"restore": true}`)
 	w := plugintest.Exchange(plugintest.Prompt(scalar, plugintest.Text(pluginapi.RoleUser, "m2", "I am Ann Lee.")), nil)
-	if _, err := all.OnPrompt(context.Background(), w); err != nil {
-		t.Fatal(err)
-	}
-	if got := w.Prompt.Message("m2").Text(); got != "I am <PERSON_2>." {
-		t.Fatalf("analyzed-role scalar prompt = %q", got)
-	}
+	_, err = all.OnPrompt(context.Background(), w)
+	require.NoError(t, err)
+	got = w.Prompt.Message("m2").Text()
+	require.Equal(t, "I am <PERSON_2>.", got)
 }
 
 func TestStreamRestoresToolCallArguments(t *testing.T) {
@@ -870,23 +792,18 @@ func TestStreamRestoresToolCallArguments(t *testing.T) {
 	in := newPlugin(t, a, `{"restore": true}`)
 	out := newPlugin(t, a, `{"restore": true, "stream_lookbehind": 12}`)
 	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", "Email ann@x.io for Ann Lee")), nil)
-	if _, err := in.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
+	_, err := in.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
 	res, err := plugintest.RunStream(context.Background(), out, x, []*pluginapi.StreamEvent{
 		plugintest.TextDelta("Sending to <PERSON_1>."),
 		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `{"to":"<EMAIL_ADD`},
 		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `RESS_1>","cc":"bob@y.io"}`},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Text[0] != "Sending to Ann Lee." || res.ToolArguments[0][0] != `{"to":"ann@x.io","cc":"<EMAIL_ADDRESS_2>"}` {
-		t.Errorf("result = %+v", res)
-	}
-	if res.End.Detail.(map[string]any)["restored"] != 2 {
-		t.Errorf("end = %+v", res.End)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Sending to Ann Lee.", res.Text[0])
+	assert.Equal(t, `{"to":"ann@x.io","cc":"<EMAIL_ADDRESS_2>"}`, res.ToolArguments[0][0])
+	assert.Equal(t, 2, res.End.Detail.(map[string]any)["restored"])
 }
 
 // Gemini returns tool-call arguments with angle brackets escaped: the
@@ -897,22 +814,20 @@ func TestStreamRestoresEscapedToolCallArguments(t *testing.T) {
 	in := newPlugin(t, a, `{"restore": true}`)
 	out := newPlugin(t, a, `{"restore": true, "stream_lookbehind": 32}`)
 	x := plugintest.Exchange(plugintest.Prompt(plugintest.Text(pluginapi.RoleUser, "m1", `Email ann@x.io for Ann "Lee"`)), nil)
-	if _, err := in.OnPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
+	_, err := in.OnPrompt(context.Background(), x)
+	require.NoError(t, err)
+
 	res, err := plugintest.RunStream(context.Background(), out, x, []*pluginapi.StreamEvent{
 		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `{"to":"\u003cEMAIL_ADD`},
 		{Kind: pluginapi.EventToolCallDelta, Call: 0, Text: `RESS_1\u003e","name":"\u003cPERSON_1\u003e","raw":"\\u003cPERSON_1\u003e"}`},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got := res.ToolArguments[0][0]
-	if want := `{"to":"ann@x.io","name":"Ann \"Lee\"","raw":"\\u003cPERSON_1\u003e"}`; got != want {
-		t.Fatalf("arguments = %s, want %s", got, want)
-	}
+	want := `{"to":"ann@x.io","name":"Ann \"Lee\"","raw":"\\u003cPERSON_1\u003e"}`
+	require.Equal(t, want, got)
+
 	var args map[string]string
-	if err := json.Unmarshal([]byte(got), &args); err != nil {
-		t.Fatalf("restored arguments are not JSON: %v", err)
-	}
+	err = json.Unmarshal([]byte(got), &args)
+	require.NoError(t, err)
 }

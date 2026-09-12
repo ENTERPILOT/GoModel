@@ -9,6 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 // TestDashboardCostAggregation_EndToEnd validates the numbers shown on the
@@ -25,18 +26,15 @@ import (
 // non-standard top-level (deepseek) cache reporting.
 func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	// Pin to one connection so every operation shares the same in-memory DB;
 	// ":memory:" gives each pooled connection its own private database.
 	db.SetMaxOpenConns(1)
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("new store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ts := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
@@ -74,19 +72,15 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 	assertCostNear(t, "live1.TotalCost", live1.TotalCost, 0.22074)
 	assertCostNear(t, "live2.TotalCost", live2.TotalCost, 0.1979)
 	assertCostNear(t, "hit.TotalCost", hit.TotalCost, 0.11037)
-	if live2.CostsCalculationCaveat != "" {
-		t.Fatalf("deepseek live row carried a caveat: %q", live2.CostsCalculationCaveat)
-	}
+	require.Empty(t, live2.CostsCalculationCaveat)
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{live1, live2, hit}); err != nil {
-		t.Fatalf("write batch: %v", err)
-	}
+	err = store.WriteBatch(ctx, []*UsageEntry{live1, live2, hit})
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("new reader: %v", err)
-	}
+	require.NoError(t, err)
+
 	params := UsageQueryParams{
 		StartDate: time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
 		EndDate:   time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC),
@@ -95,38 +89,31 @@ func TestDashboardCostAggregation_EndToEnd(t *testing.T) {
 
 	// --- "Estimated Cost" card: live spend only, cache hit excluded ---
 	summary, err := reader.GetSummary(ctx, params)
-	if err != nil {
-		t.Fatalf("GetSummary: %v", err)
-	}
-	if summary.TotalRequests != 2 {
-		t.Fatalf("TotalRequests = %d, want 2 (cache hit must be excluded)", summary.TotalRequests)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 2, summary.TotalRequests)
+
 	assertCostNear(t, "summary.TotalInputCost", summary.TotalInputCost, 0.04674+0.0399)
 	assertCostNear(t, "summary.TotalOutputCost", summary.TotalOutputCost, 0.174+0.158)
 	assertCostNear(t, "summary.TotalCost", summary.TotalCost, 0.22074+0.1979)
 
 	// --- per-model table ---
 	byModel, err := reader.GetUsageByModel(ctx, params)
-	if err != nil {
-		t.Fatalf("GetUsageByModel: %v", err)
-	}
+	require.NoError(t, err)
+
 	got := make(map[string]*float64)
 	for _, m := range byModel {
 		got[m.Provider+"/"+m.Model] = m.TotalCost
 	}
-	if _, ok := got["xiaomi/mimo-v2.5-pro"]; !ok {
-		t.Fatalf("missing xiaomi/mimo-v2.5-pro in by-model; got %v", got)
-	}
+	_, ok := got["xiaomi/mimo-v2.5-pro"]
+	require.True(t, ok, "missing xiaomi/mimo-v2.5-pro in by-model; got %v", got)
+
 	assertCostNear(t, "byModel xiaomi", got["xiaomi/mimo-v2.5-pro"], 0.22074)
 	assertCostNear(t, "byModel deepseek", got["deepseek/deepseek-v3.1"], 0.1979)
 
 	// --- "Saved Cost" card: cache hits only ---
 	cacheOverview, err := reader.GetCacheOverview(ctx, params)
-	if err != nil {
-		t.Fatalf("GetCacheOverview: %v", err)
-	}
-	if cacheOverview.Summary.TotalHits != 1 {
-		t.Fatalf("cache TotalHits = %d, want 1", cacheOverview.Summary.TotalHits)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, cacheOverview.Summary.TotalHits)
+
 	assertCostNear(t, "cache TotalSavedCost", cacheOverview.Summary.TotalSavedCost, 0.11037)
 }

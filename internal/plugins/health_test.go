@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 // healthPlugin is a fakePlugin with a Health probe. The probe function is
@@ -41,28 +42,24 @@ func newHealthInstance(t *testing.T, health func(ctx context.Context) error, spe
 		spec.Name = "checker"
 	}
 	inst, err := NewInstance(context.Background(), newEntry(p), spec, NewHost(HostDeps{}, HostInfo{PluginName: p.name, InstanceName: spec.Name}))
-	if err != nil {
-		t.Fatalf("NewInstance() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return inst
 }
 
 func TestInstanceHealthWithoutChecker(t *testing.T) {
 	inst := newTestInstance(&fakePlugin{name: "plain", kinds: []pluginapi.Kind{pluginapi.KindPrompt}}, InstanceSpec{})
-	if inst.Checks() {
-		t.Fatal("a plugin without Health must not be a checker")
-	}
+	require.False(t, inst.Checks())
+
 	got := inst.CheckHealth(context.Background())
-	if got.Status != HealthOK || got.Degraded() || !got.CheckedAt.IsZero() {
-		t.Fatalf("CheckHealth() = %+v, want ok without a probe time", got)
-	}
-	if inst.Health().Status != HealthOK {
-		t.Fatalf("Health() = %+v, want ok", inst.Health())
-	}
+	require.Equal(t, HealthOK, got.Status)
+	require.False(t, got.Degraded())
+	require.True(t, got.CheckedAt.IsZero(), "CheckHealth() = %+v, want ok without a probe time", got)
+	require.Equal(t, HealthOK, inst.Health().Status, "Health() = %+v, want ok", inst.Health())
+
 	var nilInst *Instance
-	if nilInst.Checks() || nilInst.Health().Status != HealthOK {
-		t.Fatal("a nil instance must read as ok")
-	}
+	require.False(t, nilInst.Checks())
+	require.Equal(t, HealthOK, nilInst.Health().Status)
 }
 
 func TestInstanceCheckHealth(t *testing.T) {
@@ -84,23 +81,15 @@ func TestInstanceCheckHealth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			inst := newHealthInstance(t, tt.health, InstanceSpec{Timeout: tt.timeout})
-			if !inst.Checks() {
-				t.Fatal("plugin with Health must be a checker")
-			}
-			if inst.Health().Status != HealthOK {
-				t.Fatalf("Health() before a probe = %+v, want ok", inst.Health())
-			}
+			require.True(t, inst.Checks())
+			require.Equal(t, HealthOK, inst.Health().Status, "Health() before a probe = %+v, want ok", inst.Health())
+
 			before := time.Now()
 			got := inst.CheckHealth(context.Background())
-			if got.Status != tt.want || !strings.Contains(got.Error, tt.wantErr) {
-				t.Fatalf("CheckHealth() = %+v, want status %q with error containing %q", got, tt.want, tt.wantErr)
-			}
-			if got.CheckedAt.Before(before) {
-				t.Fatalf("CheckedAt %v predates the probe", got.CheckedAt)
-			}
-			if inst.Health() != got {
-				t.Fatalf("Health() = %+v, want the last probe %+v", inst.Health(), got)
-			}
+			require.Equal(t, tt.want, got.Status)
+			require.Contains(t, got.Error, tt.wantErr)
+			require.False(t, got.CheckedAt.Before(before), "CheckedAt %v predates the probe", got.CheckedAt)
+			require.Equal(t, got, inst.Health())
 		})
 	}
 }
@@ -114,21 +103,21 @@ func TestInstanceCheckHealthUsesProbeDeadline(t *testing.T) {
 		return ctx.Err()
 	}, InstanceSpec{})
 	got := inst.CheckHealth(context.Background())
-	if !got.Degraded() || !strings.Contains(got.Error, "abandoned") {
-		t.Fatalf("CheckHealth() = %+v, want degraded by the probe deadline", got)
-	}
+	require.True(t, got.Degraded())
+	require.Contains(t, got.Error, "abandoned", "CheckHealth() = %+v, want degraded by the probe deadline", got)
+
 	// A later successful probe recovers.
 	inst.Plugin.(*healthPlugin).setHealth(func(context.Context) error { return nil })
-	if got := inst.CheckHealth(context.Background()); got.Degraded() {
-		t.Fatalf("CheckHealth() after recovery = %+v", got)
-	}
+	got = inst.CheckHealth(context.Background())
+	require.False(t, got.Degraded())
 }
 
 func TestInstanceCheckHealthBoundsErrorText(t *testing.T) {
 	long := strings.Repeat("é", 300)
 	inst := newHealthInstance(t, func(context.Context) error { return errors.New(long) }, InstanceSpec{})
 	got := inst.CheckHealth(context.Background())
-	if !got.Degraded() || len(got.Error) > maxHealthErrorLen+len("…") || !strings.HasSuffix(got.Error, "…") || !utf8.ValidString(got.Error) {
-		t.Fatalf("Error = %q (%d bytes), want a valid string bounded to %d bytes plus an ellipsis", got.Error, len(got.Error), maxHealthErrorLen)
-	}
+	require.True(t, got.Degraded())
+	require.LessOrEqual(t, len(got.Error), maxHealthErrorLen+len("…"))
+	require.True(t, strings.HasSuffix(got.Error, "…"))
+	require.True(t, utf8.ValidString(got.Error), "Error = %q (%d bytes), want a valid string bounded to %d bytes plus an ellipsis", got.Error, len(got.Error), maxHealthErrorLen)
 }

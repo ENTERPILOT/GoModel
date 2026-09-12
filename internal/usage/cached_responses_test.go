@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -27,24 +28,18 @@ func TestExtractFromCachedResponseBody_AnthropicResponsesCachedTokens(t *testing
 			PromptTokensDetails: &core.PromptTokensDetails{CachedTokens: 100},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Marshal: %v", err)
-	}
+	require.NoError(t, err)
 
 	entry := ExtractFromCachedResponseBody(body, "req-cache", "claude-haiku-4-5", "anthropic", "/v1/responses", CacheTypeExact, &core.ModelPricing{
 		InputPerMtok:       &inputRate,
 		OutputPerMtok:      &outputRate,
 		CachedInputPerMtok: &cachedRate,
 	})
-	if entry == nil {
-		t.Fatal("expected non-nil entry")
-	}
-	if entry.RawData["prompt_cached_tokens"] != 100 {
-		t.Fatalf("RawData = %+v, want prompt_cached_tokens 100", entry.RawData)
-	}
+	require.NotNil(t, entry)
+	require.Equal(t, 100, entry.RawData["prompt_cached_tokens"], "RawData = %+v, want prompt_cached_tokens 100", entry.RawData)
+
 	// 20 input at 3/Mtok + 100 cache reads at 0.30/Mtok.
 	wantInput := 20*inputRate/1_000_000 + 100*cachedRate/1_000_000
-	if entry.InputCost == nil || *entry.InputCost != wantInput {
-		t.Fatalf("InputCost = %v, want %v", entry.InputCost, wantInput)
-	}
+	require.NotNil(t, entry.InputCost)
+	require.Equal(t, wantInput, *entry.InputCost)
 }

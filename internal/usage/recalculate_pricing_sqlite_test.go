@@ -9,6 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type staticTestPricingResolver map[string]*core.ModelPricing
@@ -19,19 +20,16 @@ func (r staticTestPricingResolver) ResolvePricing(model, providerType string) *c
 
 func TestSQLiteStoreRecalculatePricingUpdatesFilteredUsageCosts(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	oldCost := 99.0
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, []*UsageEntry{
 		{
 			ID:           "usage-match",
 			RequestID:    "req-match",
@@ -62,9 +60,8 @@ func TestSQLiteStoreRecalculatePricingUpdatesFilteredUsageCosts(t *testing.T) {
 			TotalTokens: 1_000_000,
 			TotalCost:   &oldCost,
 		},
-	}); err != nil {
-		t.Fatalf("WriteBatch() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 
 	inputRate := 2.0
 	outputRate := 6.0
@@ -80,41 +77,33 @@ func TestSQLiteStoreRecalculatePricingUpdatesFilteredUsageCosts(t *testing.T) {
 			OutputPerMtok: &outputRate,
 		},
 	})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.Matched != 1 || result.Recalculated != 1 || result.WithPricing != 1 || result.WithoutPricing != 0 {
-		t.Fatalf("result = %+v, want one recalculated row with pricing", result)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Matched)
+	require.Equal(t, int64(1), result.Recalculated)
+	require.Equal(t, int64(1), result.WithPricing)
+	require.Equal(t, int64(0), result.WithoutPricing, "result = %+v, want one recalculated row with pricing", result)
 
 	var inputCost, outputCost, totalCost float64
-	if err := db.QueryRow(`SELECT input_cost, output_cost, total_cost FROM usage WHERE id = 'usage-match'`).Scan(&inputCost, &outputCost, &totalCost); err != nil {
-		t.Fatalf("query recalculated row: %v", err)
-	}
-	if inputCost != 2.0 || outputCost != 3.0 || totalCost != 5.0 {
-		t.Fatalf("costs = input %.4f output %.4f total %.4f, want 2/3/5", inputCost, outputCost, totalCost)
-	}
+	err = db.QueryRow(`SELECT input_cost, output_cost, total_cost FROM usage WHERE id = 'usage-match'`).Scan(&inputCost, &outputCost, &totalCost)
+	require.NoError(t, err)
+	require.Equal(t, 2.0, inputCost)
+	require.Equal(t, 3.0, outputCost)
+	require.Equal(t, 5.0, totalCost)
 
 	var otherTotal float64
-	if err := db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-other-model'`).Scan(&otherTotal); err != nil {
-		t.Fatalf("query untouched row: %v", err)
-	}
-	if otherTotal != oldCost {
-		t.Fatalf("other total cost = %.4f, want %.4f", otherTotal, oldCost)
-	}
+	err = db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-other-model'`).Scan(&otherTotal)
+	require.NoError(t, err)
+	require.Equal(t, oldCost, otherTotal)
 }
 
 func TestSQLiteStoreRecalculatePricingFiltersByLabel(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	oldCost := 99.0
 	ctx := context.Background()
@@ -134,13 +123,12 @@ func TestSQLiteStoreRecalculatePricingFiltersByLabel(t *testing.T) {
 			TotalCost:   &oldCost,
 		}
 	}
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, []*UsageEntry{
 		entry("usage-labelled", []string{"env:prod", "batch"}),
 		entry("usage-other-label", []string{"env:staging"}),
 		entry("usage-unlabelled", nil),
-	}); err != nil {
-		t.Fatalf("WriteBatch() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 
 	inputRate := 2.0
 	// The padded label exercises normalizedRecalculatePricingParams trimming.
@@ -149,46 +137,35 @@ func TestSQLiteStoreRecalculatePricingFiltersByLabel(t *testing.T) {
 	}, staticTestPricingResolver{
 		"openai/gpt-4o": {InputPerMtok: &inputRate},
 	})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.Matched != 1 || result.Recalculated != 1 {
-		t.Fatalf("result = %+v, want exactly the labelled row recalculated", result)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Matched)
+	require.Equal(t, int64(1), result.Recalculated, "result = %+v, want exactly the labelled row recalculated", result)
 
 	var labelledCost, otherCost, unlabelledCost float64
-	if err := db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-labelled'`).Scan(&labelledCost); err != nil {
-		t.Fatalf("query labelled row: %v", err)
-	}
-	if labelledCost != 2.0 {
-		t.Fatalf("labelled total cost = %.4f, want 2.0", labelledCost)
-	}
-	if err := db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-other-label'`).Scan(&otherCost); err != nil {
-		t.Fatalf("query other-label row: %v", err)
-	}
-	if err := db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-unlabelled'`).Scan(&unlabelledCost); err != nil {
-		t.Fatalf("query unlabelled row: %v", err)
-	}
-	if otherCost != oldCost || unlabelledCost != oldCost {
-		t.Fatalf("non-matching rows changed: other %.4f unlabelled %.4f, want %.4f", otherCost, unlabelledCost, oldCost)
-	}
+	err = db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-labelled'`).Scan(&labelledCost)
+	require.NoError(t, err)
+	require.Equal(t, 2.0, labelledCost)
+	err = db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-other-label'`).Scan(&otherCost)
+	require.NoError(t, err)
+	err = db.QueryRow(`SELECT total_cost FROM usage WHERE id = 'usage-unlabelled'`).Scan(&unlabelledCost)
+	require.NoError(t, err)
+	require.Equal(t, oldCost, otherCost)
+	require.Equal(t, oldCost, unlabelledCost)
 }
 
 func TestSQLiteStoreRecalculatePricingProcessesBatches(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	store.recalculationBatchSize = 1
 
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, []*UsageEntry{
 		{
 			ID:          "usage-1",
 			RequestID:   "req-1",
@@ -210,9 +187,8 @@ func TestSQLiteStoreRecalculatePricingProcessesBatches(t *testing.T) {
 			Endpoint:     "/v1/chat/completions",
 			InputTokens:  2_000_000,
 		},
-	}); err != nil {
-		t.Fatalf("WriteBatch() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 
 	inputRate := 2.0
 	result, err := store.RecalculatePricing(ctx, RecalculatePricingParams{
@@ -225,32 +201,27 @@ func TestSQLiteStoreRecalculatePricingProcessesBatches(t *testing.T) {
 			InputPerMtok: &inputRate,
 		},
 	})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.Matched != 2 || result.Recalculated != 2 || result.WithPricing != 2 {
-		t.Fatalf("result = %+v, want two recalculated rows with pricing", result)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int64(2), result.Matched)
+	require.Equal(t, int64(2), result.Recalculated)
+	require.Equal(t, int64(2), result.WithPricing, "result = %+v, want two recalculated rows with pricing", result)
 
 	rows, err := db.Query(`SELECT id, input_cost FROM usage ORDER BY id`)
-	if err != nil {
-		t.Fatalf("query recalculated rows: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer rows.Close()
 
 	got := map[string]float64{}
 	for rows.Next() {
 		var id string
 		var inputCost float64
-		if err := rows.Scan(&id, &inputCost); err != nil {
-			t.Fatalf("scan recalculated row: %v", err)
-		}
+		err := rows.Scan(&id, &inputCost)
+		require.NoError(t, err)
+
 		got[id] = inputCost
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate recalculated rows: %v", err)
-	}
-	if got["usage-1"] != 2.0 || got["usage-2"] != 4.0 {
-		t.Fatalf("input costs = %+v, want usage-1=2 usage-2=4", got)
-	}
+	err = rows.Err()
+	require.NoError(t, err)
+	require.Equal(t, 2.0, got["usage-1"])
+	require.Equal(t, 4.0, got["usage-2"], "input costs = %+v, want usage-1=2 usage-2=4", got)
 }

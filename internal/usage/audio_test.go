@@ -1,43 +1,34 @@
 package usage
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractFromSpeechRequest(t *testing.T) {
 	entry := ExtractFromSpeechRequest("hello", nil, "", "req-1", "gpt-4o-mini-tts", "openai")
-	if entry == nil {
-		t.Fatal("expected a usage entry")
-	}
-	if entry.Endpoint != endpointAudioSpeech {
-		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointAudioSpeech)
-	}
-	if entry.Model != "gpt-4o-mini-tts" || entry.Provider != "openai" || entry.RequestID != "req-1" {
-		t.Errorf("identity mismatch: %+v", entry)
-	}
-	if got := entry.RawData["input_characters"]; got != 5 {
-		t.Errorf("input_characters = %v, want 5", got)
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, endpointAudioSpeech, entry.Endpoint)
+	assert.Equal(t, "gpt-4o-mini-tts", entry.Model)
+	assert.Equal(t, "openai", entry.Provider)
+	assert.Equal(t, "req-1", entry.RequestID, "identity mismatch: %+v", entry)
+	assert.Equal(t, 5, entry.RawData["input_characters"])
 }
 
 func TestExtractFromSpeechRequest_EmptyInput(t *testing.T) {
 	entry := ExtractFromSpeechRequest("", nil, "", "req", "tts-1", "openai")
-	if entry == nil {
-		t.Fatal("empty input should still yield an entry")
-	}
-	if entry.RawData != nil {
-		t.Errorf("empty input should record no characters, got %+v", entry.RawData)
-	}
+	require.NotNil(t, entry)
+	assert.Nil(t, entry.RawData)
 }
 
 func TestExtractFromSpeechRequest_PerCharacterPricing(t *testing.T) {
 	// "hello" = 5 characters at $0.00001/char => $0.00005.
 	entry := ExtractFromSpeechRequest("hello", nil, "", "req", "tts-1", "openai", &core.ModelPricing{PerCharacterInput: new(0.00001)})
-	assertCostPtrNear(t, "input cost", entry.InputCost, 0.00005)
-	assertCostPtrNear(t, "total cost", entry.TotalCost, 0.00005)
+	assertCostNear(t, "input cost", entry.InputCost, 0.00005)
+	assertCostNear(t, "total cost", entry.TotalCost, 0.00005)
 }
 
 func TestExtractFromSpeechRequest_WavOutputPerSecondOutput(t *testing.T) {
@@ -45,15 +36,11 @@ func TestExtractFromSpeechRequest_WavOutputPerSecondOutput(t *testing.T) {
 	wav := buildWAV(t, 24000, 1, 16, 1.0)
 	entry := ExtractFromSpeechRequest("hello", wav, "wav", "req", "gpt-4o-mini-tts", "openai",
 		&core.ModelPricing{InputPerMtok: new(0.6), PerSecondOutput: new(0.00025)})
+	assert.Equal(t, float64(1), entry.RawData[rawKeyAudioOutputSeconds])
 
-	if got := entry.RawData[rawKeyAudioOutputSeconds]; got != float64(1) {
-		t.Errorf("audio_output_seconds = %v, want 1", got)
-	}
-	assertCostPtrNear(t, "output cost", entry.OutputCost, 0.00025)
-	assertCostPtrNear(t, "total cost", entry.TotalCost, 0.00025)
-	if entry.CostsCalculationCaveat != "" {
-		t.Errorf("measured wav should carry no caveat, got %q", entry.CostsCalculationCaveat)
-	}
+	assertCostNear(t, "output cost", entry.OutputCost, 0.00025)
+	assertCostNear(t, "total cost", entry.TotalCost, 0.00025)
+	assert.Empty(t, entry.CostsCalculationCaveat)
 }
 
 func TestExtractFromSpeechRequest_PcmOutputPerSecondOutput(t *testing.T) {
@@ -61,11 +48,9 @@ func TestExtractFromSpeechRequest_PcmOutputPerSecondOutput(t *testing.T) {
 	pcm := make([]byte, 24000)
 	entry := ExtractFromSpeechRequest("hi", pcm, "pcm", "req", "gpt-4o-mini-tts", "openai",
 		&core.ModelPricing{PerSecondOutput: new(0.00025)})
+	assert.Equal(t, 0.5, entry.RawData[rawKeyAudioOutputSeconds])
 
-	if got := entry.RawData[rawKeyAudioOutputSeconds]; got != 0.5 {
-		t.Errorf("audio_output_seconds = %v, want 0.5", got)
-	}
-	assertCostPtrNear(t, "output cost", entry.OutputCost, 0.000125)
+	assertCostNear(t, "output cost", entry.OutputCost, 0.000125)
 }
 
 func TestExtractFromSpeechRequest_CompressedOutputCaveat(t *testing.T) {
@@ -73,28 +58,20 @@ func TestExtractFromSpeechRequest_CompressedOutputCaveat(t *testing.T) {
 	// must surface a caveat rather than a silent zero.
 	entry := ExtractFromSpeechRequest("hello", []byte("\xff\xfbmp3 frames"), "mp3", "req", "gpt-4o-mini-tts", "openai",
 		&core.ModelPricing{InputPerMtok: new(0.6), PerSecondOutput: new(0.00025)})
-
-	if _, ok := entry.RawData[rawKeyAudioOutputSeconds]; ok {
-		t.Error("mp3 output should not record a measured duration")
-	}
-	if entry.RawData[rawKeyAudioOutputFormat] != "mp3" {
-		t.Errorf("audio_output_format = %v, want mp3", entry.RawData[rawKeyAudioOutputFormat])
-	}
-	if !strings.Contains(entry.CostsCalculationCaveat, "mp3") {
-		t.Errorf("want caveat mentioning mp3, got %q", entry.CostsCalculationCaveat)
-	}
+	_, ok := entry.RawData[rawKeyAudioOutputSeconds]
+	assert.False(t, ok)
+	assert.Equal(t, "mp3", entry.RawData[rawKeyAudioOutputFormat])
+	assert.Contains(t, entry.CostsCalculationCaveat, "mp3")
 }
 
 func TestExtractFromTranscriptionResponse_TokenUsage(t *testing.T) {
 	body := []byte(`{"text":"hi","usage":{"type":"tokens","input_tokens":14,"output_tokens":45,"total_tokens":59}}`)
 
 	entry := ExtractFromTranscriptionResponse(body, nil, "req-2", "gpt-4o-transcribe", "openai")
-	if entry == nil {
-		t.Fatal("expected a usage entry")
-	}
-	if entry.InputTokens != 14 || entry.OutputTokens != 45 || entry.TotalTokens != 59 {
-		t.Errorf("token counts mismatch: %+v", entry)
-	}
+	require.NotNil(t, entry)
+	assert.Equal(t, 14, entry.InputTokens)
+	assert.Equal(t, 45, entry.OutputTokens)
+	assert.Equal(t, 59, entry.TotalTokens, "token counts mismatch: %+v", entry)
 }
 
 func TestExtractFromAudioTextResponse_UsesEndpoint(t *testing.T) {
@@ -122,9 +99,7 @@ func TestExtractFromAudioTextResponse_UsesEndpoint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := tt.extract()
-			if entry.Endpoint != tt.endpoint {
-				t.Errorf("endpoint = %q, want %q", entry.Endpoint, tt.endpoint)
-			}
+			assert.Equal(t, tt.endpoint, entry.Endpoint)
 		})
 	}
 }
@@ -133,21 +108,15 @@ func TestExtractFromTranscriptionResponse_TotalTokensDerived(t *testing.T) {
 	body := []byte(`{"usage":{"input_tokens":10,"output_tokens":20}}`)
 
 	entry := ExtractFromTranscriptionResponse(body, nil, "req", "m", "openai")
-	if entry.TotalTokens != 30 {
-		t.Errorf("total_tokens = %d, want 30 (derived)", entry.TotalTokens)
-	}
+	assert.Equal(t, 30, entry.TotalTokens)
 }
 
 func TestExtractFromTranscriptionResponse_DurationUsage(t *testing.T) {
 	body := []byte(`{"text":"hi","usage":{"type":"duration","seconds":9}}`)
 
 	entry := ExtractFromTranscriptionResponse(body, nil, "req", "whisper-1", "openai")
-	if entry.TotalTokens != 0 {
-		t.Errorf("duration usage should report no tokens, got %d", entry.TotalTokens)
-	}
-	if got := entry.RawData["audio_seconds"]; got != float64(9) {
-		t.Errorf("audio_seconds = %v, want 9", got)
-	}
+	assert.Equal(t, 0, entry.TotalTokens)
+	assert.Equal(t, float64(9), entry.RawData["audio_seconds"])
 }
 
 func TestExtractFromTranscriptionResponse_PerSecondCost(t *testing.T) {
@@ -156,7 +125,7 @@ func TestExtractFromTranscriptionResponse_PerSecondCost(t *testing.T) {
 	pricing := &core.ModelPricing{PerSecondInput: new(0.0001)}
 
 	entry := ExtractFromTranscriptionResponse(body, nil, "req", "whisper-1", "openai", pricing)
-	assertCostPtrNear(t, "input cost", entry.InputCost, 0.0009)
+	assertCostNear(t, "input cost", entry.InputCost, 0.0009)
 }
 
 func TestExtractFromTranscriptionResponse_NoUsage(t *testing.T) {
@@ -172,12 +141,9 @@ func TestExtractFromTranscriptionResponse_NoUsage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := ExtractFromTranscriptionResponse(tt.body, nil, "req", "whisper-1", "openai")
-			if entry == nil {
-				t.Fatal("expected an entry")
-			}
-			if entry.TotalTokens != 0 || entry.RawData != nil {
-				t.Errorf("expected zero-usage entry, got %+v", entry)
-			}
+			require.NotNil(t, entry)
+			assert.Equal(t, 0, entry.TotalTokens)
+			assert.Nil(t, entry.RawData, "expected zero-usage entry, got %+v", entry)
 		})
 	}
 }
@@ -187,7 +153,7 @@ func TestExtractFromTranscriptionResponse_TokenCost(t *testing.T) {
 	pricing := &core.ModelPricing{InputPerMtok: new(2.5)}
 
 	entry := ExtractFromTranscriptionResponse(body, nil, "req", "gpt-4o-transcribe", "openai", pricing)
-	assertCostPtrNear(t, "input cost", entry.InputCost, 2.5)
+	assertCostNear(t, "input cost", entry.InputCost, 2.5)
 }
 
 // TestTranscriptionBillableDuration pins the rule that the billable unit of a
@@ -323,20 +289,15 @@ func TestTranscriptionBillableDuration(t *testing.T) {
 			} {
 				entry := extract()
 				seconds, _ := extractFloat(entry.RawData, rawKeyAudioSeconds)
-				if !costsNearlyEqual(seconds, tt.wantSeconds) {
-					t.Errorf("audio_seconds = %v, want %v", seconds, tt.wantSeconds)
+				assert.True(t, costsNearlyEqual(seconds, tt.wantSeconds), "audio_seconds = %v, want %v", seconds, tt.wantSeconds)
+
+				if tt.wantCost == nil {
+					assert.Nil(t, entry.TotalCost)
+				} else {
+					require.NotNil(t, entry.TotalCost)
+					assert.True(t, costsNearlyEqual(*entry.TotalCost, *tt.wantCost), "total cost = %v, want %v", *entry.TotalCost, *tt.wantCost)
 				}
-				switch {
-				case tt.wantCost == nil && entry.TotalCost != nil:
-					t.Errorf("total cost = %v, want nil", *entry.TotalCost)
-				case tt.wantCost != nil && entry.TotalCost == nil:
-					t.Errorf("total cost = nil, want %v", *tt.wantCost)
-				case tt.wantCost != nil && !costsNearlyEqual(*entry.TotalCost, *tt.wantCost):
-					t.Errorf("total cost = %v, want %v", *entry.TotalCost, *tt.wantCost)
-				}
-				if entry.CostsCalculationCaveat != tt.wantCaveat {
-					t.Errorf("caveat = %q, want %q", entry.CostsCalculationCaveat, tt.wantCaveat)
-				}
+				assert.Equal(t, tt.wantCaveat, entry.CostsCalculationCaveat)
 			}
 		})
 	}

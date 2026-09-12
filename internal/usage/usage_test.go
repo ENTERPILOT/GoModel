@@ -7,6 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockStore implements UsageStore for testing
@@ -112,15 +115,10 @@ func TestLogger(t *testing.T) {
 	}
 entriesReady:
 
-	// Close logger
-	if err := logger.Close(); err != nil {
-		t.Errorf("logger close error: %v", err)
-	}
+	assert.NoError(t, logger.Close())
 
 	// Verify store was closed
-	if !store.closed {
-		t.Error("store should be closed")
-	}
+	assert.True(t, store.closed)
 }
 
 func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
@@ -132,15 +130,9 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	logger.flushBatch([]*UsageEntry{entry})
 
 	events := publisher.snapshot()
-	if len(events) != 1 {
-		t.Fatalf("live events len = %d, want 1", len(events))
-	}
-	if events[0].eventType != LiveEventUsageFailed {
-		t.Fatalf("event type = %q, want %q", events[0].eventType, LiveEventUsageFailed)
-	}
-	if events[0].entry != entry {
-		t.Fatal("failed event entry does not match flushed entry")
-	}
+	require.Len(t, events, 1)
+	require.Equal(t, LiveEventUsageFailed, events[0].eventType)
+	require.Equal(t, entry, events[0].entry)
 }
 
 func TestLoggerClose(t *testing.T) {
@@ -160,17 +152,12 @@ func TestLoggerClose(t *testing.T) {
 			RequestID: "req-" + string(rune('0'+i)),
 		})
 	}
-
 	// Close immediately - should flush pending entries
-	if err := logger.Close(); err != nil {
-		t.Errorf("logger close error: %v", err)
-	}
+	assert.NoError(t, logger.Close())
 
 	// Verify all entries were flushed
 	entries := store.getEntries()
-	if len(entries) != 10 {
-		t.Errorf("expected 10 entries after close, got %d", len(entries))
-	}
+	assert.Len(t, entries, 10)
 }
 
 func TestLoggerCloseIdempotent(t *testing.T) {
@@ -185,27 +172,16 @@ func TestLoggerCloseIdempotent(t *testing.T) {
 
 	// Write an entry
 	logger.Write(&UsageEntry{ID: "test-1", RequestID: "req-1"})
-
 	// First close should succeed
-	if err := logger.Close(); err != nil {
-		t.Errorf("first close error: %v", err)
-	}
-
+	assert.NoError(t, logger.Close())
 	// Second close should not panic and should return nil
-	if err := logger.Close(); err != nil {
-		t.Errorf("second close error: %v", err)
-	}
-
+	assert.NoError(t, logger.Close())
 	// Third close for good measure
-	if err := logger.Close(); err != nil {
-		t.Errorf("third close error: %v", err)
-	}
+	assert.NoError(t, logger.Close())
 
 	// Verify entry was flushed only once
 	entries := store.getEntries()
-	if len(entries) != 1 {
-		t.Errorf("expected 1 entry, got %d", len(entries))
-	}
+	assert.Len(t, entries, 1)
 }
 
 func TestNoopLogger(t *testing.T) {
@@ -216,17 +192,10 @@ func TestNoopLogger(t *testing.T) {
 
 	// Config should show disabled
 	cfg := logger.Config()
-	if cfg.Enabled {
-		t.Error("NoopLogger should report disabled")
-	}
-	if !cfg.EnforceReturningUsageData {
-		t.Error("NoopLogger should preserve default stream usage policy")
-	}
-
+	assert.False(t, cfg.Enabled)
+	assert.True(t, cfg.EnforceReturningUsageData)
 	// Close should not error
-	if err := logger.Close(); err != nil {
-		t.Errorf("NoopLogger close error: %v", err)
-	}
+	assert.NoError(t, logger.Close())
 }
 
 func TestNewNoopLogger_PreservesConfiguredUsagePolicy(t *testing.T) {
@@ -236,12 +205,8 @@ func TestNewNoopLogger_PreservesConfiguredUsagePolicy(t *testing.T) {
 	})
 
 	cfg := logger.Config()
-	if cfg.Enabled {
-		t.Error("NewNoopLogger should report disabled")
-	}
-	if cfg.EnforceReturningUsageData {
-		t.Error("NewNoopLogger should preserve false enforcement setting")
-	}
+	assert.False(t, cfg.Enabled)
+	assert.False(t, cfg.EnforceReturningUsageData)
 }
 
 func TestLoggerBufferFull(t *testing.T) {

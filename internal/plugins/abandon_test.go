@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 // stuckPrompt ignores its context and only returns after d.
@@ -28,12 +28,10 @@ func TestCallReturnsAtDeadlineForHookIgnoringContext(t *testing.T) {
 	_, err := Call(context.Background(), inst, func(ctx context.Context) (pluginapi.Decision, error) {
 		return inst.Plugin.(pluginapi.PromptHook).OnPrompt(ctx, newExchange())
 	})
-	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
-		t.Fatalf("Call took %s, want to return at the 20ms deadline", elapsed)
-	}
-	if !errors.Is(err, ErrAbandoned) || !strings.Contains(err.Error(), "20ms timeout") {
-		t.Fatalf("error = %v, want ErrAbandoned with the timeout", err)
-	}
+	elapsed := time.Since(start)
+	require.LessOrEqual(t, elapsed, 250*time.Millisecond)
+	require.ErrorIs(t, err, ErrAbandoned)
+	require.Contains(t, err.Error(), "20ms timeout")
 }
 
 func TestCallReturnsWhenRequestEnds(t *testing.T) {
@@ -47,8 +45,9 @@ func TestCallReturnsWhenRequestEnds(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 		return pluginapi.Allow(), nil
 	})
-	if !errors.Is(err, ErrAbandoned) || !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "canceled") {
-		t.Fatalf("error = %v, want abandoned by cancellation", err)
+	require.ErrorIs(t, err, ErrAbandoned)
+	if !errors.Is(err, context.Canceled) {
+		require.ErrorContains(t, err, "canceled", "want abandoned by cancellation")
 	}
 }
 
@@ -60,14 +59,12 @@ func TestRunAbandonedHooks(t *testing.T) {
 		mutator := &fakePlugin{name: "mut", mutates: true, onPrompt: stuckPrompt(100*time.Millisecond, late)}
 		inst := newTestInstance(mutator, timeout)
 		chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{inst, 10}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		_, err = chain.RunPrompt(context.Background(), withPromptText(newExchange(), "x"))
 		pluginErr, ok := errors.AsType[*PluginError](err)
-		if !ok || !errors.Is(pluginErr.Err, ErrAbandoned) {
-			t.Fatalf("error = %v, want PluginError wrapping ErrAbandoned despite fail_open", err)
-		}
+		require.True(t, ok)
+		require.ErrorIs(t, pluginErr.Err, ErrAbandoned)
 	})
 
 	t.Run("abandoned reader fails open and its copy is dropped", func(t *testing.T) {
@@ -77,24 +74,19 @@ func TestRunAbandonedHooks(t *testing.T) {
 			return pluginapi.Warn("w", "warned", nil), nil
 		}}
 		chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{newTestInstance(reader, timeout), 10}, {newTestInstance(quick, InstanceSpec{}), 10}})
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		x := withPromptText(newExchange(), "x")
 		outcome, err := chain.RunPrompt(context.Background(), x)
-		if err != nil {
-			t.Fatalf("error = %v, want fail open", err)
-		}
-		if outcome.Decision.Action != pluginapi.ActionWarn {
-			t.Fatalf("decision = %+v, want the quick reader's warn", outcome.Decision)
-		}
-		if _, ok := x.Values.Get("quick"); !ok {
-			t.Fatal("quick reader's values were not merged")
-		}
-		time.Sleep(150 * time.Millisecond) // let the abandoned reader finish writing its copy
-		if _, ok := x.Values.Get("late"); ok {
-			t.Fatal("abandoned reader's values leaked into the exchange")
-		}
+		require.NoError(t, err)
+		require.Equal(t, pluginapi.ActionWarn, outcome.Decision.Action, "decision = %+v, want the quick reader's warn", outcome.Decision)
+		_, ok := x.Values.Get("quick")
+		require.True(t, ok)
+
+		time.Sleep(150 * time.Millisecond)
+		_, // let the abandoned reader finish writing its copy
+			ok = x.Values.Get("late")
+		require.False(t, ok)
 	})
 }
 
@@ -113,12 +105,9 @@ func TestNewInstanceAbandonsInitAtDeadline(t *testing.T) {
 	entry := Entry{Name: "stuck", Factory: func() pluginapi.Plugin { return &stuckInit{} }}
 	start := time.Now()
 	_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
-	if time.Since(start) > 200*time.Millisecond {
-		t.Fatal("NewInstance waited past the init deadline")
-	}
-	if !errors.Is(err, ErrAbandoned) || !strings.Contains(err.Error(), "init deadline") {
-		t.Fatalf("error = %v, want ErrAbandoned at the init deadline", err)
-	}
+	require.LessOrEqual(t, time.Since(start), 200*time.Millisecond)
+	require.ErrorIs(t, err, ErrAbandoned)
+	require.Contains(t, err.Error(), "init deadline")
 }
 
 // streamOnly implements the stream hook but not the response hook.
@@ -144,18 +133,13 @@ func TestNewInstanceRejectsBufferPolicyWithoutResponseHook(t *testing.T) {
 	buffered := &streamOnly{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamBuffer}}
 	entry := Entry{Name: "stream-only", Manifest: buffered.Manifest(), Kinds: ImplementedKinds(buffered), Factory: func() pluginapi.Plugin { return buffered }}
 	_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
-	if err == nil || !strings.Contains(err.Error(), "buffer stream policy needs OnResponse") {
-		t.Fatalf("error = %v, want buffer policy rejection", err)
-	}
-	if !buffered.closed {
-		t.Fatal("rejected plugin was not closed")
-	}
+	require.ErrorContains(t, err, "buffer stream policy needs OnResponse")
+	require.True(t, buffered.closed)
 
 	observing := &streamOnly{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamTransform}}
 	entry.Factory = func() pluginapi.Plugin { return observing }
-	if _, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{})); err != nil {
-		t.Fatalf("transform policy rejected: %v", err)
-	}
+	_, err = NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
+	require.NoError(t, err)
 }
 
 // slowInit ignores the init deadline, returns later, and reports Close.
@@ -178,9 +162,9 @@ func TestNewInstanceClosesAbandonedInitOnceItReturns(t *testing.T) {
 
 	plugin := &slowInit{delay: 60 * time.Millisecond, closed: make(chan struct{})}
 	entry := Entry{Name: "slow", Factory: func() pluginapi.Plugin { return plugin }}
-	if _, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{})); !errors.Is(err, ErrAbandoned) {
-		t.Fatalf("error = %v, want ErrAbandoned", err)
-	}
+	_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
+	require.ErrorIs(t, err, ErrAbandoned)
+
 	select {
 	case <-plugin.closed:
 	case <-time.After(2 * time.Second):
@@ -207,12 +191,10 @@ func TestNewInstanceDoesNotWaitForAStuckCloseAfterFailedInit(t *testing.T) {
 	defer close(plugin.release)
 	entry := Entry{Name: "stuck-close", Factory: func() pluginapi.Plugin { return plugin }}
 	start := time.Now()
-	if _, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{})); err == nil || !strings.Contains(err.Error(), "init failed") {
-		t.Fatalf("error = %v, want the init failure", err)
-	}
-	if time.Since(start) > 500*time.Millisecond {
-		t.Fatal("NewInstance waited on a Close that ignores its deadline")
-	}
+	_, err := NewInstance(context.Background(), entry, InstanceSpec{Name: "i"}, NewHost(HostDeps{}, HostInfo{}))
+	require.ErrorContains(t, err, "init failed")
+	require.LessOrEqual(t, time.Since(start), 500*time.Millisecond)
+
 	select {
 	case <-plugin.entered:
 	case <-time.After(time.Second):
