@@ -116,7 +116,6 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 		// both report even when they report no usage object at all.
 		Duration any `json:"duration"`
 	}
-	var seconds float64
 	if json.Unmarshal(body, &parsed) == nil {
 		if u := parsed.Usage; u != nil {
 			entry.InputTokens = u.InputTokens
@@ -125,17 +124,19 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 			if entry.TotalTokens == 0 {
 				entry.TotalTokens = u.InputTokens + u.OutputTokens
 			}
-			seconds = u.Seconds
 		}
 	}
-	// A provider that reported tokens has named its own billable unit; duration
-	// is then not a second charge on the same audio (whisper-1 publishes both a
-	// token rate and a per-second rate for it). Otherwise fall back to the
-	// verbose_json duration and finally to the upload the gateway already
-	// holds, so the same call costs the same whether the transcript comes back
-	// as json, text, srt or vtt.
-	if seconds <= 0 && entry.TotalTokens == 0 {
-		if duration, ok := numericFloat(parsed.Duration); ok && duration > 0 {
+	// A provider that reported tokens has named its own billable unit, so the
+	// duration is not a second charge on the same audio (whisper-1 publishes
+	// both a token rate and a per-second rate for it). Otherwise the duration is
+	// the billable unit: the reported one, then the verbose_json duration, then
+	// the upload the gateway already holds — so the same call costs the same
+	// whether the transcript comes back as json, text, srt or vtt.
+	var seconds float64
+	if entry.TotalTokens == 0 {
+		if parsed.Usage != nil && parsed.Usage.Seconds > 0 {
+			seconds = parsed.Usage.Seconds
+		} else if duration, ok := numericFloat(parsed.Duration); ok && duration > 0 {
 			seconds = duration
 		} else if measured, ok := measureUploadDurationSeconds(audio); ok {
 			seconds = measured

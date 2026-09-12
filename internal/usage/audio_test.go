@@ -264,6 +264,16 @@ func TestTranscriptionBillableDuration(t *testing.T) {
 			wantCost: new(2.5),
 		},
 		{
+			// A usage object carrying both units must not be charged twice:
+			// whisper-1 publishes a token rate and a per-second rate for the
+			// same audio.
+			name:     "a usage object with tokens and seconds is billed by tokens",
+			body:     []byte(`{"text":"hi","usage":{"input_tokens":1000000,"output_tokens":0,"seconds":9}}`),
+			audio:    wav,
+			pricing:  &core.ModelPricing{InputPerMtok: new(2.5), PerSecondInput: new(0.0001)},
+			wantCost: new(2.5),
+		},
+		{
 			name:    "an unpriced model records the duration without a caveat",
 			body:    []byte(`{"text":"hi"}`),
 			audio:   wav,
