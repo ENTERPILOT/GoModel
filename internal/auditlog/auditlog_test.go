@@ -395,7 +395,7 @@ func TestLoggerFlushBatchPublishesFailedLiveEvent(t *testing.T) {
 	events := publisher.snapshot()
 	require.Len(t, events, 1)
 	require.Equal(t, LiveEventAuditFailed, events[0].eventType)
-	require.Equal(t, entry, events[0].entry)
+	require.Same(t, entry, events[0].entry)
 }
 
 func TestMiddleware_UsesIngressFrameRequestBodyWithoutReadingStream(t *testing.T) {
