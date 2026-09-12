@@ -2,12 +2,12 @@ package auditlog
 
 import (
 	"context"
-	"math"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/require"
 )
 
 func hourRow(hour time.Time, provider string, mutate func(*statsRow)) statsRow {
@@ -50,65 +50,51 @@ func TestFoldRequestStats_HourInterval(t *testing.T) {
 		Now:      day.Add(12*time.Hour + 30*time.Minute),
 	})
 
-	if stats.Interval != StatsIntervalHour {
-		t.Fatalf("interval = %q, want hour", stats.Interval)
-	}
+	require.Equal(t, StatsIntervalHour, stats.Interval)
+
 	// Zero-filled from local midnight through the bucket containing Now.
-	if len(stats.Buckets) != 13 {
-		t.Fatalf("bucket count = %d, want 13", len(stats.Buckets))
-	}
-	if !stats.Buckets[0].Start.Equal(day) {
-		t.Fatalf("first bucket = %v, want %v", stats.Buckets[0].Start, day)
-	}
+	require.Len(t, stats.Buckets, 13)
+	require.True(t, stats.Buckets[0].Start.Equal(day), "first bucket = %v, want %v", stats.Buckets[0].Start, day)
 
 	ten := stats.Buckets[10]
-	if ten.Requests != 4 || ten.Status2xx != 3 || ten.Status4xx != 1 || ten.Status5xx != 0 || ten.StatusOther != 0 {
-		t.Fatalf("10:00 bucket = %+v", ten)
-	}
+	require.Equal(t, int64(4), ten.Requests)
+	require.Equal(t, int64(3), ten.Status2xx)
+	require.Equal(t, int64(1), ten.Status4xx)
+	require.Equal(t, int64(0), ten.Status5xx)
+	require.Equal(t, int64(0), ten.StatusOther, "10:00 bucket = %+v", ten)
+
 	eleven := stats.Buckets[11]
-	if eleven.Requests != 2 || eleven.Status5xx != 1 || eleven.StatusOther != 1 {
-		t.Fatalf("11:00 bucket = %+v", eleven)
-	}
+	require.Equal(t, int64(2), eleven.Requests)
+	require.Equal(t, int64(1), eleven.Status5xx)
+	require.Equal(t, int64(1), eleven.StatusOther, "11:00 bucket = %+v", eleven)
+	require.Equal(t, int64(6), stats.Summary.Requests)
+	require.Equal(t, int64(3), stats.Summary.Status2xx)
+	require.Equal(t, int64(1), stats.Summary.StatusOther, "summary = %+v", stats.Summary)
+	require.NotNil(t, stats.Summary.SuccessRate)
+	require.Equal(t, float64(3)/float64(6), *stats.Summary.SuccessRate)
 
-	if stats.Summary.Requests != 6 || stats.Summary.Status2xx != 3 || stats.Summary.StatusOther != 1 {
-		t.Fatalf("summary = %+v", stats.Summary)
-	}
-	if stats.Summary.SuccessRate == nil || *stats.Summary.SuccessRate != float64(3)/float64(6) {
-		t.Fatalf("success rate = %v", stats.Summary.SuccessRate)
-	}
 	wantAvg := float64(400e6+900e6) / 3 / 1e6
-	if stats.Summary.AvgDurationMs == nil || math.Abs(*stats.Summary.AvgDurationMs-wantAvg) > 1e-9 {
-		t.Fatalf("avg duration = %v, want %v", stats.Summary.AvgDurationMs, wantAvg)
-	}
+	require.NotNil(t, stats.Summary.AvgDurationMs)
+	require.InDelta(t, wantAvg, *stats.Summary.AvgDurationMs, 1e-9)
+	require.Len(t, stats.ProviderLatency, 2)
 
-	if len(stats.ProviderLatency) != 2 {
-		t.Fatalf("provider series = %d, want 2", len(stats.ProviderLatency))
-	}
 	// Busiest provider (by latency-eligible requests) first.
-	if stats.ProviderLatency[0].Provider != "openai-prod" || stats.ProviderLatency[1].Provider != "anthropic" {
-		t.Fatalf("provider order = %q, %q", stats.ProviderLatency[0].Provider, stats.ProviderLatency[1].Provider)
-	}
+	require.Equal(t, "openai-prod", stats.ProviderLatency[0].Provider)
+	require.Equal(t, "anthropic", stats.ProviderLatency[1].Provider)
+
 	openai := stats.ProviderLatency[0]
-	if len(openai.AvgDurationMs) != len(stats.Buckets) {
-		t.Fatalf("series length = %d, want %d", len(openai.AvgDurationMs), len(stats.Buckets))
-	}
-	if openai.AvgDurationMs[10] == nil || *openai.AvgDurationMs[10] != 200 {
-		t.Fatalf("openai 10:00 avg = %v, want 200", openai.AvgDurationMs[10])
-	}
-	if openai.Requests[10] != 2 {
-		t.Fatalf("openai 10:00 requests = %d, want 2", openai.Requests[10])
-	}
+	require.Len(t, openai.AvgDurationMs, len(stats.Buckets))
+	require.NotNil(t, openai.AvgDurationMs[10])
+	require.Equal(t, float64(200), *openai.AvgDurationMs[10])
+	require.Equal(t, int64(2), openai.Requests[10])
+
 	// The 11:00 failure bucket has no eligible requests -> a gap, not zero.
-	if openai.AvgDurationMs[11] != nil {
-		t.Fatalf("openai 11:00 avg = %v, want nil gap", openai.AvgDurationMs[11])
-	}
+	require.Nil(t, openai.AvgDurationMs[11])
 }
 
 func TestFoldRequestStats_DayIntervalFoldsHoursIntoLocalDays(t *testing.T) {
 	location, err := time.LoadLocation("Europe/Warsaw")
-	if err != nil {
-		t.Fatalf("failed to load location: %v", err)
-	}
+	require.NoError(t, err)
 
 	// 23:30 UTC on Jan 16 is already Jan 17 00:30 in Warsaw (UTC+1).
 	rows := []statsRow{
@@ -135,18 +121,11 @@ func TestFoldRequestStats_DayIntervalFoldsHoursIntoLocalDays(t *testing.T) {
 		Now:      time.Date(2026, 1, 18, 12, 0, 0, 0, location),
 	})
 
-	if len(stats.Buckets) != 2 {
-		t.Fatalf("bucket count = %d, want 2", len(stats.Buckets))
-	}
-	if !stats.Buckets[0].Start.Equal(start) || !stats.Buckets[1].Start.Equal(end) {
-		t.Fatalf("bucket starts = %v, %v", stats.Buckets[0].Start, stats.Buckets[1].Start)
-	}
-	if stats.Buckets[0].Requests != 4 {
-		t.Fatalf("Jan 16 requests = %d, want 4", stats.Buckets[0].Requests)
-	}
-	if stats.Buckets[1].Requests != 3 {
-		t.Fatalf("Jan 17 requests = %d, want 3 (late UTC hour folds into the next local day)", stats.Buckets[1].Requests)
-	}
+	require.Len(t, stats.Buckets, 2)
+	require.True(t, stats.Buckets[0].Start.Equal(start))
+	require.True(t, stats.Buckets[1].Start.Equal(end), "bucket starts = %v, %v", stats.Buckets[0].Start, stats.Buckets[1].Start)
+	require.Equal(t, int64(4), stats.Buckets[0].Requests)
+	require.Equal(t, int64(3), stats.Buckets[1].Requests)
 }
 
 func TestFoldRequestStats_ZeroFillStopsAtNow(t *testing.T) {
@@ -161,24 +140,16 @@ func TestFoldRequestStats_ZeroFillStopsAtNow(t *testing.T) {
 		Now:      time.Date(2026, 1, 12, 15, 0, 0, 0, location),
 	})
 
-	if len(stats.Buckets) != 3 {
-		t.Fatalf("bucket count = %d, want 3 (10th-12th)", len(stats.Buckets))
-	}
-	if stats.Summary.SuccessRate != nil || stats.Summary.AvgDurationMs != nil {
-		t.Fatalf("empty summary rates = %+v, want nil", stats.Summary)
-	}
-	if len(stats.ProviderLatency) != 0 {
-		t.Fatalf("provider series = %d, want 0", len(stats.ProviderLatency))
-	}
+	require.Len(t, stats.Buckets, 3)
+	require.Nil(t, stats.Summary.SuccessRate)
+	require.Nil(t, stats.Summary.AvgDurationMs, "empty summary rates = %+v, want nil", stats.Summary)
+	require.Empty(t, stats.ProviderLatency)
 }
 
 func TestSQLReaderGetRequestStats(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
 
 		day := time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC)
 		entries := []*LogEntry{
@@ -193,14 +164,11 @@ func TestSQLReaderGetRequestStats(t *testing.T) {
 			// Outside the queried range.
 			{ID: "next-day", Timestamp: day.Add(30 * time.Hour), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 100e6},
 		}
-		if err := store.WriteBatch(context.Background(), entries); err != nil {
-			t.Fatalf("failed to seed audit logs: %v", err)
-		}
+		err = store.WriteBatch(context.Background(), entries)
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		stats, err := reader.GetRequestStats(context.Background(), RequestStatsParams{
 			StartDate: day, EndDate: day,
@@ -208,58 +176,46 @@ func TestSQLReaderGetRequestStats(t *testing.T) {
 			Location: time.UTC,
 			Now:      day.Add(23 * time.Hour),
 		})
-		if err != nil {
-			t.Fatalf("GetRequestStats failed: %v", err)
-		}
-
-		if stats.Summary.Requests != 6 {
-			t.Fatalf("summary requests = %d, want 6", stats.Summary.Requests)
-		}
-		if stats.Summary.Status2xx != 4 || stats.Summary.Status4xx != 1 || stats.Summary.Status5xx != 1 || stats.Summary.StatusOther != 0 {
-			t.Fatalf("summary = %+v", stats.Summary)
-		}
+		require.NoError(t, err)
+		require.Equal(t, int64(6), stats.Summary.Requests)
+		require.Equal(t, int64(4), stats.Summary.Status2xx)
+		require.Equal(t, int64(1), stats.Summary.Status4xx)
+		require.Equal(t, int64(1), stats.Summary.Status5xx)
+		require.Equal(t, int64(0), stats.Summary.StatusOther, "summary = %+v", stats.Summary)
 
 		byStart := map[int]RequestStatsBucket{}
 		for _, b := range stats.Buckets {
 			byStart[b.Start.UTC().Hour()] = b
 		}
-		if b := byStart[10]; b.Requests != 3 || b.Status2xx != 2 || b.Status4xx != 1 {
-			t.Fatalf("10:00 bucket = %+v", b)
-		}
-		if b := byStart[11]; b.Requests != 3 || b.Status2xx != 2 || b.Status5xx != 1 {
-			t.Fatalf("11:00 bucket = %+v", b)
-		}
+		b := byStart[10]
+		require.Equal(t, int64(3), b.Requests)
+		require.Equal(t, int64(2), b.Status2xx)
+		require.Equal(t, int64(1), b.Status4xx, "10:00 bucket = %+v", b)
+		b = byStart[11]
+		require.Equal(t, int64(3), b.Requests)
+		require.Equal(t, int64(2), b.Status2xx)
+		require.Equal(t, int64(1), b.Status5xx, "11:00 bucket = %+v", b)
+		require.Len(t, stats.ProviderLatency, 2)
+		require.Equal(t, "openai-prod", stats.ProviderLatency[0].Provider)
 
-		if len(stats.ProviderLatency) != 2 {
-			t.Fatalf("provider series = %d, want 2", len(stats.ProviderLatency))
-		}
-		if stats.ProviderLatency[0].Provider != "openai-prod" {
-			t.Fatalf("first provider = %q, want openai-prod", stats.ProviderLatency[0].Provider)
-		}
 		openai := stats.ProviderLatency[0]
-		if openai.AvgDurationMs[10] == nil || *openai.AvgDurationMs[10] != 200 {
-			t.Fatalf("openai 10:00 avg = %v, want 200 (2xx only)", openai.AvgDurationMs[10])
-		}
+		require.NotNil(t, openai.AvgDurationMs[10])
+		require.Equal(t, float64(200), *openai.AvgDurationMs[10])
+
 		// The 11:00 openai bucket only saw a 502 and a cache hit -> gap.
-		if openai.AvgDurationMs[11] != nil {
-			t.Fatalf("openai 11:00 avg = %v, want nil", openai.AvgDurationMs[11])
-		}
+		require.Nil(t, openai.AvgDurationMs[11])
+
 		anthropic := stats.ProviderLatency[1]
-		if anthropic.Provider != "anthropic" {
-			t.Fatalf("second provider = %q, want anthropic", anthropic.Provider)
-		}
-		if anthropic.AvgDurationMs[11] == nil || *anthropic.AvgDurationMs[11] != 700 {
-			t.Fatalf("anthropic 11:00 avg = %v, want 700", anthropic.AvgDurationMs[11])
-		}
+		require.Equal(t, "anthropic", anthropic.Provider)
+		require.NotNil(t, anthropic.AvgDurationMs[11])
+		require.Equal(t, float64(700), *anthropic.AvgDurationMs[11])
 	})
 }
 
 func TestSQLReaderGetRequestStats_FiltersByUserPathSubtree(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
 
 		day := time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC)
 		entries := []*LogEntry{
@@ -269,13 +225,11 @@ func TestSQLReaderGetRequestStats_FiltersByUserPathSubtree(t *testing.T) {
 			{ID: "beta", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6, UserPath: "/team/beta"},
 			{ID: "no-path", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6},
 		}
-		if err := store.WriteBatch(context.Background(), entries); err != nil {
-			t.Fatalf("failed to seed audit logs: %v", err)
-		}
+		err = store.WriteBatch(context.Background(), entries)
+		require.NoError(t, err)
+
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		tests := []struct {
 			name         string
@@ -297,15 +251,9 @@ func TestSQLReaderGetRequestStats_FiltersByUserPathSubtree(t *testing.T) {
 					Location: time.UTC,
 					Now:      day.Add(23 * time.Hour),
 				})
-				if err != nil {
-					t.Fatalf("GetRequestStats failed: %v", err)
-				}
-				if stats.Summary.Requests != tt.wantRequests {
-					t.Fatalf("summary requests = %d, want %d", stats.Summary.Requests, tt.wantRequests)
-				}
-				if stats.Summary.Status5xx != tt.wantStatus5x {
-					t.Fatalf("summary 5xx = %d, want %d", stats.Summary.Status5xx, tt.wantStatus5x)
-				}
+				require.NoError(t, err)
+				require.Equal(t, tt.wantRequests, stats.Summary.Requests)
+				require.Equal(t, tt.wantStatus5x, stats.Summary.Status5xx)
 			})
 		}
 	})

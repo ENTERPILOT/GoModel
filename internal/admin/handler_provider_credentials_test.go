@@ -1,19 +1,19 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"sort"
 	"testing"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/providers"
 )
 
@@ -120,25 +120,6 @@ func newProviderCredentialsHandlerWithConfigured(fake *providerCredentialsAdminF
 	return NewHandler(nil, nil, WithProviderCredentials(fake), WithConfiguredProviders(configured))
 }
 
-func newProviderCredentialContext(method, target, body string) (*echo.Context, *httptest.ResponseRecorder) {
-	e := echo.New()
-	var req *http.Request
-	if body == "" {
-		req = httptest.NewRequest(method, target, nil)
-	} else {
-		req = httptest.NewRequest(method, target, bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	return e.NewContext(req, rec), rec
-}
-
-func newProviderCredentialNameContext(method, target, name string) (*echo.Context, *httptest.ResponseRecorder) {
-	c, rec := newProviderCredentialContext(method, target, "")
-	c.SetPathValues(echo.PathValues{{Name: "name", Value: name}})
-	return c, rec
-}
-
 func TestListProviderCredentials_RedactsSecretsAndFlagsManaged(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	fake.rows["multi-key"] = providers.ManagedProviderCredential{
@@ -155,43 +136,29 @@ func TestListProviderCredentials_RedactsSecretsAndFlagsManaged(t *testing.T) {
 	}
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials", "")
-	if err := h.ListProviderCredentials(c); err != nil {
-		t.Fatalf("ListProviderCredentials() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/provider-credentials")
+	err := h.ListProviderCredentials(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	for _, secret := range []string{"sk-top-secret", "hidden"} {
-		if containsString(rec.Body.String(), secret) {
-			t.Fatalf("response leaked secret %q: %s", secret, rec.Body.String())
-		}
+		assert.NotContains(t, rec.Body.String(), secret)
 	}
 
-	var body []providerCredentialViewResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
+	body := echotest.Decode[[]providerCredentialViewResponse](t, rec)
+
 	byName := map[string]providerCredentialViewResponse{}
 	for _, v := range body {
 		byName[v.Name] = v
 	}
 
 	multiKey := byName["multi-key"]
-	if multiKey.Managed {
-		t.Fatal("multi-key.Managed = true, want false (admin-store row)")
-	}
-	if len(multiKey.APIKeys) != 1 || multiKey.APIKeys[0] != "***********" {
-		t.Fatalf("multi-key.APIKeys = %#v, want one redacted entry", multiKey.APIKeys)
-	}
+	assert.False(t, multiKey.Managed)
+	assert.Equal(t, []string{"***********"}, multiKey.APIKeys)
 
 	vertex := byName["local-vertex"]
-	if vertex.Managed {
-		t.Fatal("local-vertex.Managed = true, want false (admin-store row)")
-	}
-	if vertex.ServiceAccountJSON != "***********" {
-		t.Fatalf("local-vertex.ServiceAccountJSON = %q, want redacted", vertex.ServiceAccountJSON)
-	}
+	assert.False(t, vertex.Managed)
+	assert.Equal(t, "***********", vertex.ServiceAccountJSON)
 }
 
 func TestListProviderCredentials_IncludesDeclaredProvidersReadOnly(t *testing.T) {
@@ -206,47 +173,29 @@ func TestListProviderCredentials_IncludesDeclaredProvidersReadOnly(t *testing.T)
 		{Name: "openai", Type: "openai", BaseURL: "https://api.openai.com/v1"},
 	})
 
-	c, rec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials", "")
-	if err := h.ListProviderCredentials(c); err != nil {
-		t.Fatalf("ListProviderCredentials() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/provider-credentials")
+	err := h.ListProviderCredentials(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	var body []providerCredentialViewResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 2 {
-		t.Fatalf("len(body) = %d, want 2 (declared openai + store-managed my-vllm): %#v", len(body), body)
-	}
+	body := echotest.Decode[[]providerCredentialViewResponse](t, rec)
+	require.Len(t, body, 2)
+
 	byName := map[string]providerCredentialViewResponse{}
 	for _, v := range body {
 		byName[v.Name] = v
 	}
 
 	declared, ok := byName["openai"]
-	if !ok {
-		t.Fatal("declared provider 'openai' missing from list")
-	}
-	if !declared.Managed {
-		t.Error("declared.Managed = false, want true (config/env-declared)")
-	}
-	if declared.BaseURL != "https://api.openai.com/v1" {
-		t.Errorf("declared.BaseURL = %q, want https://api.openai.com/v1", declared.BaseURL)
-	}
-	if declared.CreatedAt != nil || declared.UpdatedAt != nil {
-		t.Errorf("declared timestamps = (%v, %v), want both nil/omitted", declared.CreatedAt, declared.UpdatedAt)
-	}
+	require.True(t, ok)
+	assert.True(t, declared.Managed)
+	assert.Equal(t, "https://api.openai.com/v1", declared.BaseURL)
+	assert.Nil(t, declared.CreatedAt)
+	assert.Nil(t, declared.UpdatedAt)
 
 	stored, ok := byName["my-vllm"]
-	if !ok {
-		t.Fatal("store-managed provider 'my-vllm' missing from list")
-	}
-	if stored.Managed {
-		t.Error("stored.Managed = true, want false (admin-store row)")
-	}
+	require.True(t, ok)
+	assert.False(t, stored.Managed)
 }
 
 func TestListProviderCredentials_ShadowedStoreRowIsHiddenNotDuplicated(t *testing.T) {
@@ -260,73 +209,46 @@ func TestListProviderCredentials_ShadowedStoreRowIsHiddenNotDuplicated(t *testin
 		{Name: "openai", Type: "openai"},
 	})
 
-	c, rec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials", "")
-	if err := h.ListProviderCredentials(c); err != nil {
-		t.Fatalf("ListProviderCredentials() error = %v", err)
-	}
-	var body []providerCredentialViewResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if len(body) != 1 {
-		t.Fatalf("len(body) = %d, want 1 (shadowed store row hidden): %#v", len(body), body)
-	}
-	if !body[0].Managed {
-		t.Error("body[0].Managed = false, want true (the declared row must win)")
-	}
-	if containsString(rec.Body.String(), "sk-stale") {
-		t.Fatalf("response leaked the shadowed store row's stale key: %s", rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/provider-credentials")
+	err := h.ListProviderCredentials(c)
+	require.NoError(t, err)
+
+	body := echotest.Decode[[]providerCredentialViewResponse](t, rec)
+	require.Len(t, body, 1)
+	assert.True(t, body[0].Managed)
+	assert.NotContains(t, rec.Body.String(), "sk-stale")
 }
 
 func TestUpsertProviderCredential_CreatesAndRegistersImmediately(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"my-openai","type":"openai","api_keys":["sk-real"]}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"my-openai","type":"openai","api_keys":["sk-real"]}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	stored, ok := fake.rows["my-openai"]
-	if !ok {
-		t.Fatal("provider credential was not persisted")
-	}
-	if len(stored.APIKeys) != 1 || stored.APIKeys[0] != "sk-real" {
-		t.Fatalf("stored.APIKeys = %#v, want [sk-real]", stored.APIKeys)
-	}
-	if !stored.Enabled {
-		t.Fatal("stored.Enabled = false, want true (default)")
-	}
-	if containsString(rec.Body.String(), "sk-real") {
-		t.Fatalf("response leaked the real API key: %s", rec.Body.String())
-	}
+	require.True(t, ok)
+	assert.Equal(t, []string{"sk-real"}, stored.APIKeys)
+	assert.True(t, stored.Enabled)
+	assert.NotContains(t, rec.Body.String(), "sk-real")
 }
 
 func TestUpsertProviderCredential_CanDisableSessionStickyKeys(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"my-openai","type":"openai","api_keys":["sk-real"],"session_sticky_keys":false}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"my-openai","type":"openai","api_keys":["sk-real"],"session_sticky_keys":false}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	stored := fake.rows["my-openai"]
-	if stored.SessionStickyKeys == nil || *stored.SessionStickyKeys {
-		t.Fatalf("stored.SessionStickyKeys = %v, want false", stored.SessionStickyKeys)
-	}
-	var response providerCredentialViewResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if response.SessionStickyKeys {
-		t.Error("response.SessionStickyKeys = true, want false")
-	}
+	require.NotNil(t, stored.SessionStickyKeys)
+	assert.False(t, *stored.SessionStickyKeys)
+	response := echotest.Decode[providerCredentialViewResponse](t, rec)
+	assert.False(t, response.SessionStickyKeys)
 }
 
 func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t *testing.T) {
@@ -340,17 +262,12 @@ func TestUpsertProviderCredential_RedactedKeyPreservesStoredValuePositionally(t 
 	h := newProviderCredentialsHandler(fake)
 
 	// Position 0 kept via "***", position 1 replaced with a new real value.
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"multi","type":"openai","api_keys":["***","sk-new"]}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	stored := fake.rows["multi"]
-	if len(stored.APIKeys) != 2 || stored.APIKeys[0] != "sk-one" || stored.APIKeys[1] != "sk-new" {
-		t.Fatalf("stored.APIKeys = %#v, want [sk-one sk-new]", stored.APIKeys)
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"multi","type":"openai","api_keys":["***","sk-new"]}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, []string{"sk-one", "sk-new"}, fake.rows["multi"].APIKeys)
 }
 
 func TestUpsertProviderCredential_LongerRedactedKeyPreservesStoredValue(t *testing.T) {
@@ -363,17 +280,12 @@ func TestUpsertProviderCredential_LongerRedactedKeyPreservesStoredValue(t *testi
 	}
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"single","type":"openai","api_keys":["***********"]}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	stored := fake.rows["single"]
-	if len(stored.APIKeys) != 1 || stored.APIKeys[0] != "sk-secret" {
-		t.Fatalf("stored.APIKeys = %#v, want [sk-secret]", stored.APIKeys)
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"single","type":"openai","api_keys":["***********"]}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	assert.Equal(t, []string{"sk-secret"}, fake.rows["single"].APIKeys)
 }
 
 func TestUpsertProviderCredential_RedactedKeyBeyondStoredLengthIsRejected(t *testing.T) {
@@ -386,14 +298,10 @@ func TestUpsertProviderCredential_RedactedKeyBeyondStoredLengthIsRejected(t *tes
 	}
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"single","type":"openai","api_keys":["sk-one","***"]}`)
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"single","type":"openai","api_keys":["sk-one","***"]}`)
 	err := h.UpsertProviderCredential(c)
-	if err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
 
 func TestUpsertProviderCredential_RejectsManagedName(t *testing.T) {
@@ -401,35 +309,11 @@ func TestUpsertProviderCredential_RejectsManagedName(t *testing.T) {
 	fake.addManaged("openai")
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"openai","type":"openai","api_keys":["sk-real"]}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
-	if _, ok := fake.rows["openai"]; ok {
-		t.Fatal("managed provider should not have been persisted")
-	}
-}
-
-func TestUpsertProviderCredential_RejectsNameContainingSlash(t *testing.T) {
-	fake := newProviderCredentialsAdminFake()
-	h := newProviderCredentialsHandler(fake)
-
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"my/provider","type":"openai","api_keys":["sk-real"]}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
-	if got := errorParam(t, rec); got != "name" {
-		t.Errorf("error param = %q, want name", got)
-	}
-	if _, ok := fake.rows["my/provider"]; ok {
-		t.Fatal("a name containing '/' should not have been persisted")
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"openai","type":"openai","api_keys":["sk-real"]}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.NotContains(t, fake.rows, "openai")
 }
 
 // errorParam reads the `param` a rejection blames, which is what lets the
@@ -442,12 +326,9 @@ func errorParam(t *testing.T, rec *httptest.ResponseRecorder) string {
 			Message string  `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode error body: %v (body=%s)", err, rec.Body.String())
-	}
-	if body.Error.Param == nil {
-		t.Fatalf("error has no param (body=%s)", rec.Body.String())
-	}
+	err := json.Unmarshal(rec.Body.Bytes(), &body)
+	require.NoError(t, err)
+	require.NotNil(t, body.Error.Param, "error has no param (body=%s)", rec.Body.String())
 	return *body.Error.Param
 }
 
@@ -458,6 +339,7 @@ func TestUpsertProviderCredential_RejectionsNameTheOffendingField(t *testing.T) 
 		param string
 	}{
 		{name: "missing name", body: `{"type":"openai","api_keys":["sk-real"]}`, param: "name"},
+		{name: "name containing slash", body: `{"name":"my/provider","type":"openai","api_keys":["sk-real"]}`, param: "name"},
 		{name: "missing type", body: `{"name":"x","api_keys":["sk-real"]}`, param: "type"},
 		{name: "unknown type", body: `{"name":"x","type":"not-a-real-type","api_keys":["sk-real"]}`, param: "type"},
 		{name: "redacted key with nothing to preserve", body: `{"name":"x","type":"openai","api_keys":["***********"]}`, param: "api_keys"},
@@ -465,17 +347,14 @@ func TestUpsertProviderCredential_RejectionsNameTheOffendingField(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := newProviderCredentialsHandler(newProviderCredentialsAdminFake())
-			c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", tt.body)
-			if err := h.UpsertProviderCredential(c); err != nil {
-				t.Fatalf("UpsertProviderCredential() error = %v", err)
-			}
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-			}
-			if got := errorParam(t, rec); got != tt.param {
-				t.Errorf("error param = %q, want %q", got, tt.param)
-			}
+			fake := newProviderCredentialsAdminFake()
+			h := newProviderCredentialsHandler(fake)
+			c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", tt.body)
+			err := h.UpsertProviderCredential(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			assert.Equal(t, tt.param, errorParam(t, rec))
+			assert.Empty(t, fake.rows)
 		})
 	}
 }
@@ -490,42 +369,27 @@ func TestUpsertProviderCredential_ServiceFieldErrorIsABadRequest(t *testing.T) {
 	}
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"openai"}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
-	if got := errorParam(t, rec); got != providers.CredentialFieldAPIKeys {
-		t.Errorf("error param = %q, want api_keys", got)
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"openai"}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Equal(t, providers.CredentialFieldAPIKeys, errorParam(t, rec))
 }
 
 func TestProviderCredentialTypes_ServesEachTypesCredentialForm(t *testing.T) {
 	h := newProviderCredentialsHandler(newProviderCredentialsAdminFake())
 
-	c, rec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials/types", "")
-	if err := h.ProviderCredentialTypes(c); err != nil {
-		t.Fatalf("ProviderCredentialTypes() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Get(t, "/admin/provider-credentials/types")
+	err := h.ProviderCredentialTypes(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	var body []providerCredentialTypeResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v (body=%s)", err, rec.Body.String())
-	}
-	if len(body) != 3 {
-		t.Fatalf("got %d types, want 3", len(body))
-	}
-	if body[0].Type != "openai" {
-		t.Errorf("first type = %q, want openai", body[0].Type)
-	}
-	if len(body[0].Fields) == 0 || body[0].Fields[0].Name != providers.CredentialFieldAPIKeys || !body[0].Fields[0].Required {
-		t.Errorf("openai fields = %+v, want api_keys first and required", body[0].Fields)
-	}
+	body := echotest.Decode[[]providerCredentialTypeResponse](t, rec)
+	require.Len(t, body, 3)
+	assert.Equal(t, "openai", body[0].Type)
+	assert.NotEmpty(t, body[0].Fields)
+	assert.Equal(t, providers.CredentialFieldAPIKeys, body[0].Fields[0].Name)
+	assert.True(t, body[0].Fields[0].Required)
 }
 
 func TestDeleteProviderCredential(t *testing.T) {
@@ -533,16 +397,11 @@ func TestDeleteProviderCredential(t *testing.T) {
 	fake.rows["gone"] = providers.ManagedProviderCredential{Name: "gone", Type: "openai", APIKeys: []string{"sk"}, Enabled: true}
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialNameContext(http.MethodDelete, "/admin/provider-credentials/gone", "gone")
-	if err := h.DeleteProviderCredential(c); err != nil {
-		t.Fatalf("DeleteProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", rec.Code)
-	}
-	if _, ok := fake.rows["gone"]; ok {
-		t.Fatal("provider credential was not deleted")
-	}
+	c, rec := echotest.Request(t, http.MethodDelete, "/admin/provider-credentials/gone", nil, echotest.WithPathValue("name", "gone"))
+	err := h.DeleteProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.NotContains(t, fake.rows, "gone")
 }
 
 func TestDeleteProviderCredential_RejectsManagedName(t *testing.T) {
@@ -551,29 +410,21 @@ func TestDeleteProviderCredential_RejectsManagedName(t *testing.T) {
 	fake.rows["openai"] = providers.ManagedProviderCredential{Name: "openai", Type: "openai", Enabled: true}
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialNameContext(http.MethodDelete, "/admin/provider-credentials/openai", "openai")
-	if err := h.DeleteProviderCredential(c); err != nil {
-		t.Fatalf("DeleteProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
-	}
-	if _, ok := fake.rows["openai"]; !ok {
-		t.Fatal("managed provider should not have been deleted")
-	}
+	c, rec := echotest.Request(t, http.MethodDelete, "/admin/provider-credentials/openai", nil, echotest.WithPathValue("name", "openai"))
+	err := h.DeleteProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	assert.Contains(t, fake.rows, "openai")
 }
 
 func TestDeleteProviderCredential_NotFound(t *testing.T) {
 	fake := newProviderCredentialsAdminFake()
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialNameContext(http.MethodDelete, "/admin/provider-credentials/missing", "missing")
-	if err := h.DeleteProviderCredential(c); err != nil {
-		t.Fatalf("DeleteProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodDelete, "/admin/provider-credentials/missing", nil, echotest.WithPathValue("name", "missing"))
+	err := h.DeleteProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
 }
 
 func TestProviderCredentialsEndpointsReturn503WhenUnavailable(t *testing.T) {
@@ -581,24 +432,20 @@ func TestProviderCredentialsEndpointsReturn503WhenUnavailable(t *testing.T) {
 
 	assertUnavailable := func(name string, err error, rec *httptest.ResponseRecorder) {
 		t.Helper()
-		if err != nil {
-			t.Fatalf("%s error = %v", name, err)
-		}
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("%s status = %d, want 503", name, rec.Code)
-		}
+		require.NoError(t, err)
+		require.Equal(t, http.StatusServiceUnavailable, rec.Code, name)
 	}
 
-	listCtx, listRec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials", "")
+	listCtx, listRec := echotest.Get(t, "/admin/provider-credentials")
 	assertUnavailable("ListProviderCredentials", h.ListProviderCredentials(listCtx), listRec)
 
-	typesCtx, typesRec := newProviderCredentialContext(http.MethodGet, "/admin/provider-credentials/types", "")
+	typesCtx, typesRec := echotest.Get(t, "/admin/provider-credentials/types")
 	assertUnavailable("ProviderCredentialTypes", h.ProviderCredentialTypes(typesCtx), typesRec)
 
-	putCtx, putRec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"openai","api_keys":["sk"]}`)
+	putCtx, putRec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"openai","api_keys":["sk"]}`)
 	assertUnavailable("UpsertProviderCredential", h.UpsertProviderCredential(putCtx), putRec)
 
-	deleteCtx, deleteRec := newProviderCredentialNameContext(http.MethodDelete, "/admin/provider-credentials/x", "x")
+	deleteCtx, deleteRec := echotest.Request(t, http.MethodDelete, "/admin/provider-credentials/x", nil, echotest.WithPathValue("name", "x"))
 	assertUnavailable("DeleteProviderCredential", h.DeleteProviderCredential(deleteCtx), deleteRec)
 }
 
@@ -607,13 +454,10 @@ func TestUpsertProviderCredential_BubblesProviderErrorOnStoreFailure(t *testing.
 	fake.upsertErr = errors.New("disk full")
 	h := newProviderCredentialsHandler(fake)
 
-	c, rec := newProviderCredentialContext(http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"openai","api_keys":["sk"]}`)
-	if err := h.UpsertProviderCredential(c); err != nil {
-		t.Fatalf("UpsertProviderCredential() error = %v", err)
-	}
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Request(t, http.MethodPut, "/admin/provider-credentials", `{"name":"x","type":"openai","api_keys":["sk"]}`)
+	err := h.UpsertProviderCredential(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusBadGateway, rec.Code, rec.Body.String())
 }
 
 // TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders covers
@@ -628,9 +472,9 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 			models: &core.ModelsResponse{Object: "list", Data: []core.Model{{ID: "gpt-4o", Object: "model"}}},
 		}, name, "openai")
 	}
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+
 	// A dashboard-registered provider installed after startup has no model
 	// inventory until its first refresh; it must still report its effective
 	// configuration and classify as configured rather than unknown.
@@ -653,17 +497,13 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 	declared := providers.SanitizedProviderConfig{Name: "openai_declared", Type: "openai", Resilience: resilience(1)}
 	h := NewHandler(nil, registry, WithProviderCredentials(fake), WithConfiguredProviders([]providers.SanitizedProviderConfig{declared}))
 
-	c, rec := newHandlerContext("/admin/providers/status")
-	if err := h.ProviderStatus(c); err != nil {
-		t.Fatalf("ProviderStatus() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	var body providerStatusResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("failed to unmarshal: %v", err)
-	}
+	c, rec := echotest.Get(t, "/admin/providers/status")
+	err = h.ProviderStatus(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := echotest.Decode[providerStatusResponse](t, rec)
+
 	byName := make(map[string]providerStatusItemResponse, len(body.Providers))
 	for _, provider := range body.Providers {
 		byName[provider.Name] = provider
@@ -681,18 +521,10 @@ func TestProviderStatus_ReportsCredentialServiceConfigForRuntimeProviders(t *tes
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			item, ok := byName[tt.name]
-			if !ok {
-				t.Fatalf("missing %s in %#v", tt.name, body.Providers)
-			}
-			if item.Config.BaseURL != tt.want.BaseURL {
-				t.Errorf("config.base_url = %q, want %q", item.Config.BaseURL, tt.want.BaseURL)
-			}
-			if !reflect.DeepEqual(item.Config.Resilience, tt.want.Resilience) {
-				t.Errorf("config.resilience = %+v, want %+v", item.Config.Resilience, tt.want.Resilience)
-			}
-			if item.StatusLabel != tt.wantLabel {
-				t.Errorf("status_label = %q, want %q", item.StatusLabel, tt.wantLabel)
-			}
+			require.True(t, ok, "missing %s in %#v", tt.name, body.Providers)
+			assert.Equal(t, tt.want.BaseURL, item.Config.BaseURL)
+			assert.Equal(t, tt.want.Resilience, item.Config.Resilience)
+			assert.Equal(t, tt.wantLabel, item.StatusLabel)
 		})
 	}
 }

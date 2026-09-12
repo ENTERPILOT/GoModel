@@ -16,6 +16,8 @@ import (
 	apiTrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestObserverRecordsBufferedGenAISpanAndDuration(t *testing.T) {
@@ -25,16 +27,15 @@ func TestObserverRecordsBufferedGenAISpanAndDuration(t *testing.T) {
 	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 250*time.Millisecond, nil))
 
 	spans := recorder.Ended()
-	if len(spans) != 1 || spans[0].Name() != "chat gpt-5" || spans[0].SpanKind() != apiTrace.SpanKindClient {
-		t.Fatalf("spans = %+v, want one CLIENT span named chat gpt-5", spans)
-	}
+	require.Len(t, spans, 1)
+	require.Equal(t, "chat gpt-5", spans[0].Name())
+	require.Equal(t, apiTrace.SpanKindClient, spans[0].SpanKind())
+
 	attrs := attributeMap(spans[0].Attributes())
-	if attrs["gen_ai.provider.name"] != "openai" || attrs["gomodel.provider.name"] != "openai-eu" || attrs["gen_ai.request.model"] != "gpt-5" {
-		t.Fatalf("span attributes = %+v", attrs)
-	}
-	if !hasMetric(t, reader, "gen_ai.client.operation.duration") {
-		t.Fatal("duration metric not recorded")
-	}
+	require.Equal(t, "openai", attrs["gen_ai.provider.name"])
+	require.Equal(t, "openai-eu", attrs["gomodel.provider.name"])
+	require.Equal(t, "gpt-5", attrs["gen_ai.request.model"], "span attributes = %+v", attrs)
+	require.True(t, hasMetric(t, reader, "gen_ai.client.operation.duration"))
 }
 
 func TestObserverRecordsStreamingTTFCWithoutPrematureSpan(t *testing.T) {
@@ -42,17 +43,11 @@ func TestObserverRecordsStreamingTTFCWithoutPrematureSpan(t *testing.T) {
 	call := llmclient.RequestInfo{Provider: "anthropic", Model: "claude", Operation: "chat", Endpoint: "/messages", Stream: true}
 	ctx := hooks.OnRequestStart(t.Context(), call)
 	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 80*time.Millisecond, nil))
+	require.Empty(t, recorder.Ended())
+	require.False(t, hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk"))
 
-	if got := len(recorder.Ended()); got != 0 {
-		t.Fatalf("ended spans = %d, want 0 at stream establishment", got)
-	}
-	if hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk") {
-		t.Fatal("stream establishment incorrectly recorded time-to-first-chunk")
-	}
 	hooks.OnStreamFirstChunk(ctx, response(call, http.StatusOK, 180*time.Millisecond, nil))
-	if !hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk") {
-		t.Fatal("time-to-first-chunk metric not recorded")
-	}
+	require.True(t, hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk"))
 }
 
 func TestObserverRecordsFailedStreamingOperation(t *testing.T) {
@@ -62,21 +57,13 @@ func TestObserverRecordsFailedStreamingOperation(t *testing.T) {
 	hooks.OnRequestEnd(ctx, response(call, 0, 250*time.Millisecond, context.DeadlineExceeded))
 
 	spans := recorder.Ended()
-	if len(spans) != 1 || spans[0].Name() != "chat gpt-5" || spans[0].SpanKind() != apiTrace.SpanKindClient {
-		t.Fatalf("spans = %+v, want one CLIENT failure span named chat gpt-5", spans)
-	}
-	if spans[0].Status().Code != codes.Error {
-		t.Fatalf("span status = %v, want Error", spans[0].Status().Code)
-	}
-	if got := spans[0].EndTime().Sub(spans[0].StartTime()); got < 250*time.Millisecond {
-		t.Fatalf("retrospective span duration = %v, want at least 250ms", got)
-	}
-	if got := attributeMap(spans[0].Attributes())["error.type"]; got != "timeout" {
-		t.Fatalf("span error.type = %q, want timeout", got)
-	}
-	if !metricHasAttribute(t, reader, "gen_ai.client.operation.duration", "error.type", "timeout") {
-		t.Fatal("failed streaming duration metric missing error.type=timeout")
-	}
+	require.Len(t, spans, 1)
+	require.Equal(t, "chat gpt-5", spans[0].Name())
+	require.Equal(t, apiTrace.SpanKindClient, spans[0].SpanKind())
+	require.Equal(t, codes.Error, spans[0].Status().Code)
+	require.GreaterOrEqual(t, spans[0].EndTime().Sub(spans[0].StartTime()), 250*time.Millisecond)
+	require.Equal(t, "timeout", attributeMap(spans[0].Attributes())["error.type"])
+	require.True(t, metricHasAttribute(t, reader, "gen_ai.client.operation.duration", "error.type", "timeout"))
 }
 
 func TestObserverRecordsHTTPErrorType(t *testing.T) {
@@ -86,13 +73,11 @@ func TestObserverRecordsHTTPErrorType(t *testing.T) {
 	hooks.OnRequestEnd(ctx, response(call, http.StatusTooManyRequests, time.Millisecond, nil))
 
 	spans := recorder.Ended()
-	if len(spans) != 1 {
-		t.Fatalf("ended spans = %d, want 1", len(spans))
-	}
+	require.Len(t, spans, 1)
+
 	attrs := attributeMap(spans[0].Attributes())
-	if attrs["error.type"] != "429" || attrs["http.response.status_code"] != "429" {
-		t.Fatalf("span attributes = %+v, want error.type and status 429", attrs)
-	}
+	require.Equal(t, "429", attrs["error.type"])
+	require.Equal(t, "429", attrs["http.response.status_code"], "span attributes = %+v, want error.type and status 429", attrs)
 }
 
 func TestObserverCountsEmptyResponses(t *testing.T) {
@@ -101,25 +86,19 @@ func TestObserverCountsEmptyResponses(t *testing.T) {
 	hooks.OnEmptyResponse(t.Context(), info)
 	hooks.OnEmptyResponse(t.Context(), info)
 
-	for _, scope := range collect(t, reader).ScopeMetrics {
-		for _, candidate := range scope.Metrics {
-			if candidate.Name != "gomodel.client.empty_responses" {
-				continue
-			}
-			sum, ok := candidate.Data.(metricdata.Sum[int64])
-			if !ok || len(sum.DataPoints) != 1 {
-				t.Fatalf("empty_responses data = %+v, want one int64 sum point", candidate.Data)
-			}
-			point := sum.DataPoints[0]
-			attrs := attributeMap(point.Attributes.ToSlice())
-			if point.Value != 2 || attrs["error.type"] != "no_choices" || attrs["gen_ai.provider.name"] != "openai" ||
-				attrs["gomodel.provider.name"] != "openai-eu" || attrs["gen_ai.request.model"] != "gpt-5" {
-				t.Fatalf("empty_responses point = %d %+v", point.Value, attrs)
-			}
-			return
-		}
-	}
-	t.Fatal("gomodel.client.empty_responses was not recorded")
+	counter, ok := findMetric(t, reader, "gomodel.client.empty_responses")
+	require.True(t, ok, "gomodel.client.empty_responses was not recorded")
+	sum, ok := counter.Data.(metricdata.Sum[int64])
+	require.True(t, ok, "empty_responses data = %T, want int64 sum", counter.Data)
+	require.Len(t, sum.DataPoints, 1)
+
+	point := sum.DataPoints[0]
+	attrs := attributeMap(point.Attributes.ToSlice())
+	require.Equal(t, int64(2), point.Value)
+	require.Equal(t, "no_choices", attrs["error.type"])
+	require.Equal(t, "openai", attrs["gen_ai.provider.name"])
+	require.Equal(t, "openai-eu", attrs["gomodel.provider.name"])
+	require.Equal(t, "gpt-5", attrs["gen_ai.request.model"])
 }
 
 func TestObserverDefersTelemetryWhenStreamIntentIsUncertain(t *testing.T) {
@@ -128,14 +107,12 @@ func TestObserverDefersTelemetryWhenStreamIntentIsUncertain(t *testing.T) {
 	ctx := hooks.OnRequestStart(t.Context(), call)
 	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 80*time.Millisecond, nil))
 
-	if len(recorder.Ended()) != 0 || hasMetric(t, reader, "gen_ai.client.operation.duration") {
-		t.Fatal("uncertain passthrough request produced buffered telemetry")
-	}
+	require.Empty(t, recorder.Ended())
+	require.False(t, hasMetric(t, reader, "gen_ai.client.operation.duration"))
+
 	call.Stream = true
 	hooks.OnStreamFirstChunk(ctx, response(call, http.StatusOK, 180*time.Millisecond, nil))
-	if !hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk") {
-		t.Fatal("response-confirmed stream did not record time-to-first-chunk")
-	}
+	require.True(t, hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk"))
 }
 
 func TestObserverRecordsUncertainCallResolvedAsBuffered(t *testing.T) {
@@ -147,15 +124,11 @@ func TestObserverRecordsUncertainCallResolvedAsBuffered(t *testing.T) {
 	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 300*time.Millisecond, nil))
 
 	spans := recorder.Ended()
-	if len(spans) != 1 || spans[0].Name() != "chat gpt-5" || spans[0].Status().Code == codes.Error {
-		t.Fatalf("spans = %+v, want one successful CLIENT span synthesized at completion", spans)
-	}
-	if got := spans[0].EndTime().Sub(spans[0].StartTime()); got < 300*time.Millisecond {
-		t.Fatalf("synthesized span duration = %v, want at least 300ms", got)
-	}
-	if !hasMetric(t, reader, "gen_ai.client.operation.duration") {
-		t.Fatal("duration metric not recorded for a buffered response")
-	}
+	require.Len(t, spans, 1)
+	require.Equal(t, "chat gpt-5", spans[0].Name())
+	require.NotEqual(t, codes.Error, spans[0].Status().Code)
+	require.GreaterOrEqual(t, spans[0].EndTime().Sub(spans[0].StartTime()), 300*time.Millisecond)
+	require.True(t, hasMetric(t, reader, "gen_ai.client.operation.duration"))
 }
 
 func TestObserverRecordsStreamThatEndsBeforeFirstChunkAsFailure(t *testing.T) {
@@ -166,18 +139,11 @@ func TestObserverRecordsStreamThatEndsBeforeFirstChunkAsFailure(t *testing.T) {
 	hooks.OnStreamEmpty(ctx, response(call, http.StatusOK, 120*time.Millisecond, io.EOF))
 
 	spans := recorder.Ended()
-	if len(spans) != 1 || spans[0].Status().Code != codes.Error {
-		t.Fatalf("spans = %+v, want one failed CLIENT span", spans)
-	}
-	if got := attributeMap(spans[0].Attributes())["error.type"]; got != "empty_stream" {
-		t.Fatalf("span error.type = %q, want empty_stream", got)
-	}
-	if !metricHasAttribute(t, reader, "gen_ai.client.operation.duration", "error.type", "empty_stream") {
-		t.Fatal("duration metric missing error.type=empty_stream")
-	}
-	if hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk") {
-		t.Fatal("empty stream must not record time-to-first-chunk")
-	}
+	require.Len(t, spans, 1)
+	require.Equal(t, codes.Error, spans[0].Status().Code)
+	require.Equal(t, "empty_stream", attributeMap(spans[0].Attributes())["error.type"])
+	require.True(t, metricHasAttribute(t, reader, "gen_ai.client.operation.duration", "error.type", "empty_stream"))
+	require.False(t, hasMetric(t, reader, "gen_ai.client.operation.time_to_first_chunk"))
 }
 
 func TestObserverSkipsNonInferenceCalls(t *testing.T) {
@@ -186,9 +152,8 @@ func TestObserverSkipsNonInferenceCalls(t *testing.T) {
 	ctx := hooks.OnRequestStart(t.Context(), call)
 	hooks.OnRequestEnd(ctx, response(call, http.StatusOK, 0, nil))
 
-	if len(recorder.Ended()) != 0 || hasMetric(t, reader, "gen_ai.client.operation.duration") {
-		t.Fatal("non-inference call produced GenAI telemetry")
-	}
+	require.Empty(t, recorder.Ended())
+	require.False(t, hasMetric(t, reader, "gen_ai.client.operation.duration"))
 }
 
 func TestSemanticProviderName(t *testing.T) {
@@ -206,9 +171,7 @@ func TestSemanticProviderName(t *testing.T) {
 		{"custom", "fallback", "unknown"},
 	}
 	for _, tt := range tests {
-		if got := semanticProviderName(tt.providerType, tt.provider); got != tt.want {
-			t.Errorf("semanticProviderName(%q, %q) = %q, want %q", tt.providerType, tt.provider, got, tt.want)
-		}
+		assert.Equal(t, tt.want, semanticProviderName(tt.providerType, tt.provider), "semanticProviderName(%q, %q)", tt.providerType, tt.provider)
 	}
 }
 
@@ -219,9 +182,8 @@ func newTestHooks(t *testing.T) (llmclient.Hooks, *tracetest.SpanRecorder, *metr
 	reader := metric.NewManualReader()
 	mp := metric.NewMeterProvider(metric.WithReader(reader))
 	observer, err := newObserver(tp, mp)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		_ = mp.Shutdown(context.Background())
 		_ = tp.Shutdown(context.Background())
@@ -247,37 +209,43 @@ func response(call llmclient.RequestInfo, status int, duration time.Duration, er
 func collect(t *testing.T, reader *metric.ManualReader) metricdata.ResourceMetrics {
 	t.Helper()
 	var data metricdata.ResourceMetrics
-	if err := reader.Collect(t.Context(), &data); err != nil {
-		t.Fatal(err)
-	}
+	err := reader.Collect(t.Context(), &data)
+	require.NoError(t, err)
+
 	return data
 }
 
-func hasMetric(t *testing.T, reader *metric.ManualReader, name string) bool {
+func findMetric(t *testing.T, reader *metric.ManualReader, name string) (metricdata.Metrics, bool) {
 	t.Helper()
 	for _, scope := range collect(t, reader).ScopeMetrics {
 		for _, candidate := range scope.Metrics {
 			if candidate.Name == name {
-				return true
+				return candidate, true
 			}
 		}
 	}
-	return false
+	return metricdata.Metrics{}, false
+}
+
+func hasMetric(t *testing.T, reader *metric.ManualReader, name string) bool {
+	t.Helper()
+	_, ok := findMetric(t, reader, name)
+	return ok
 }
 
 func metricHasAttribute(t *testing.T, reader *metric.ManualReader, name, key, value string) bool {
 	t.Helper()
-	for _, scope := range collect(t, reader).ScopeMetrics {
-		for _, candidate := range scope.Metrics {
-			histogram, ok := candidate.Data.(metricdata.Histogram[float64])
-			if candidate.Name != name || !ok {
-				continue
-			}
-			for _, point := range histogram.DataPoints {
-				if got, ok := point.Attributes.Value(attribute.Key(key)); ok && got.AsString() == value {
-					return true
-				}
-			}
+	found, ok := findMetric(t, reader, name)
+	if !ok {
+		return false
+	}
+	histogram, ok := found.Data.(metricdata.Histogram[float64])
+	if !ok {
+		return false
+	}
+	for _, point := range histogram.DataPoints {
+		if got, ok := point.Attributes.Value(attribute.Key(key)); ok && got.AsString() == value {
+			return true
 		}
 	}
 	return false
