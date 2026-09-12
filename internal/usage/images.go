@@ -75,13 +75,41 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	}
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
-	// A response without a usage block cannot be costed by token rates, and
-	// zero-token math quietly yields $0 — indistinguishable from a free call.
-	// Flag that unless the configured pricing can cost the row without usage.
-	if resp.Usage == nil && entry.CostsCalculationCaveat == "" &&
-		!imageCostDetermined(effectiveEndpointPricing(endpoint, pricing...), len(resp.Data)) {
-		entry.CostsCalculationCaveat = caveatImageMissingUsage
+	// Zero-token math and an unpriced token count both yield $0 quietly —
+	// indistinguishable from a free call. Flag whichever gap applies, so the row
+	// reads as "we could not price this" rather than as a cheap call.
+	if entry.CostsCalculationCaveat == "" {
+		entry.CostsCalculationCaveat = imageCostCaveat(
+			effectiveEndpointPricing(endpoint, pricing...), entry.OutputTokens, len(resp.Data))
 	}
 
 	return entry
+}
+
+// isImageEndpoint reports whether an endpoint prices image output.
+func isImageEndpoint(endpoint string) bool {
+	return endpoint == endpointImageGenerations || endpoint == endpointImageEdits
+}
+
+// pricingForImageEndpoint resolves the output rate that applies to an image
+// generation or edit: everything the model returns there is image output, which
+// providers bill at output_image_per_mtok rather than the text output rate
+// (gpt-image-1 has no text output rate at all, and Gemini 3 Pro Image charges
+// $120/Mtok for image output against $12/Mtok for text).
+func pricingForImageEndpoint(pricing *core.ModelPricing) *core.ModelPricing {
+	if pricing == nil || pricing.OutputImagePerMtok == nil {
+		return pricing
+	}
+	effective := *pricing
+	effective.OutputPerMtok = pricing.OutputImagePerMtok
+	// Volume tiers publish text rates; image output is billed at the image rate
+	// whatever tier the input lands in.
+	if len(pricing.Tiers) > 0 {
+		effective.Tiers = make([]core.ModelPricingTier, len(pricing.Tiers))
+		copy(effective.Tiers, pricing.Tiers)
+		for i := range effective.Tiers {
+			effective.Tiers[i].OutputPerMtok = nil
+		}
+	}
+	return &effective
 }

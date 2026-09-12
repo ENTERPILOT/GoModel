@@ -375,6 +375,9 @@ func pricingForEndpoint(pricing *core.ModelPricing, endpoint string) *core.Model
 	if pricing == nil {
 		return nil
 	}
+	if isImageEndpoint(endpoint) {
+		return pricingForImageEndpoint(pricing)
+	}
 	if endpoint != "/v1/batches" && !strings.HasPrefix(endpoint, "/v1/batches/") {
 		return pricing
 	}

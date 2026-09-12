@@ -59,6 +59,7 @@ func mergeConfigPricing(base, override *core.ModelPricing) *core.ModelPricing {
 	applyPricingOverride(&merged.BatchOutputPerMtok, override.BatchOutputPerMtok)
 	applyPricingOverride(&merged.AudioInputPerMtok, override.AudioInputPerMtok)
 	applyPricingOverride(&merged.AudioOutputPerMtok, override.AudioOutputPerMtok)
+	applyPricingOverride(&merged.OutputImagePerMtok, override.OutputImagePerMtok)
 	applyPricingOverride(&merged.PerImage, override.PerImage)
 	applyPricingOverride(&merged.InputPerImage, override.InputPerImage)
 	applyPricingOverride(&merged.PerSecondInput, override.PerSecondInput)

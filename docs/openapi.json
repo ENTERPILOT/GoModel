@@ -13975,6 +13975,10 @@
           "input_per_mtok": {
             "type": "number"
           },
+          "output_image_per_mtok": {
+            "description": "OutputImagePerMtok prices generated image tokens, which providers bill at a\ndifferent rate from text output (OpenAI gpt-image-1: $40/Mtok image output\nand no text output rate at all; Gemini 3 Pro Image: $120/Mtok image output\nversus $12/Mtok text). It is the output rate on the image endpoints.",
+            "type": "number"
+          },
           "output_per_mtok": {
             "type": "number"
           },
@@ -13982,6 +13986,7 @@
             "type": "number"
           },
           "per_image": {
+            "description": "PerImage prices a returned image as a flat unit, for models that report no\ntoken usage at all (DALL·E, Imagen, grok-imagine). It is an alternative\nexpression of the same charge as OutputImagePerMtok, never an addition to\nit: catalog entries carry both, so only one may be applied (see\nusage.CalculateGranularCost).",
             "type": "number"
           },
           "per_page": {
@@ -14925,6 +14930,9 @@
             "type": "number"
           },
           "input_per_mtok": {
+            "type": "number"
+          },
+          "output_image_per_mtok": {
             "type": "number"
           },
           "output_per_mtok": {
