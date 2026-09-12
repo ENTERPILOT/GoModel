@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
@@ -71,9 +72,8 @@ func TestIsOnlyDuplicateKeyErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isOnlyDuplicateKeyErrors(tt.err); got != tt.want {
-				t.Fatalf("isOnlyDuplicateKeyErrors() = %v, want %v", got, tt.want)
-			}
+			got := isOnlyDuplicateKeyErrors(tt.err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -136,9 +136,8 @@ func TestDuplicateKeyErrorsOnConfigRulesOnly(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := duplicateKeyErrorsOnConfigRulesOnly(tt.err, tt.rules); got != tt.want {
-				t.Fatalf("duplicateKeyErrorsOnConfigRulesOnly() = %v, want %v", got, tt.want)
-			}
+			got := duplicateKeyErrorsOnConfigRulesOnly(tt.err, tt.rules)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -172,9 +171,8 @@ func TestClassifyBulkWriteError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := classifyBulkWriteError(tt.err, tt.rules); got != tt.want {
-				t.Fatalf("classifyBulkWriteError() = %d, want %d", got, tt.want)
-			}
+			got := classifyBulkWriteError(tt.err, tt.rules)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -187,40 +185,34 @@ func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		rules := db.Collection("rate_limits")
-		if _, err := rules.Indexes().CreateOne(ctx, mongo.IndexModel{
+		_, err := rules.Indexes().CreateOne(ctx, mongo.IndexModel{
 			Keys:    bson.D{{Key: "user_path", Value: 1}, {Key: "period_seconds", Value: 1}},
 			Options: options.Index().SetUnique(true),
-		}); err != nil {
-			t.Fatalf("create pre-scope index: %v", err)
-		}
+		})
+		require.NoError(t, err)
+
 		now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 		// Two paths sharing one period: the case that collides.
-		if _, err := rules.InsertMany(ctx, []any{
+		_, err = rules.InsertMany(ctx, []any{
 			bson.D{{Key: "user_path", Value: "/team/alpha"}, {Key: "period_seconds", Value: PeriodMinuteSeconds},
 				{Key: "max_requests", Value: int64(10)}, {Key: "source", Value: SourceManual},
 				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
 			bson.D{{Key: "user_path", Value: "/team/beta"}, {Key: "period_seconds", Value: PeriodMinuteSeconds},
 				{Key: "max_requests", Value: int64(20)}, {Key: "source", Value: SourceManual},
 				{Key: "created_at", Value: now}, {Key: "updated_at", Value: now}},
-		}); err != nil {
-			t.Fatalf("seed pre-scope documents: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		store, err := NewMongoDBStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		got, err := store.ListRules(ctx)
-		if err != nil {
-			t.Fatalf("ListRules() failed: %v", err)
-		}
-		if len(got) != 2 {
-			t.Fatalf("migrated rules = %+v, want both pre-scope rows", got)
-		}
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
 		for _, rule := range got {
-			if rule.Scope != ScopeUserPath || rule.Subject == "" {
-				t.Fatalf("migrated rule %+v, want a user_path scope and a subject", rule)
-			}
+			require.Equal(t, ScopeUserPath, rule.Scope)
+			require.NotEmpty(t, rule.Subject, "migrated rule %+v, want a user_path scope and a subject", rule)
 		}
 	})
 }
@@ -231,15 +223,13 @@ func TestMongoDBStoreMigratesPreScopeDocuments(t *testing.T) {
 func TestMongoDBStoreCounterRoundTrip(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		store, err := NewMongoDBStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		runCounterStoreSuite(t, store, func(t *testing.T, snap WindowSnapshot, updatedAt int64) {
 			t.Helper()
 			doc := counterDocument{WindowSnapshot: snap, UpdatedAt: updatedAt}
-			if _, err := db.Collection("rate_limit_counters").InsertOne(context.Background(), doc); err != nil {
-				t.Fatalf("seed stale counter: %v", err)
-			}
+			_, err := db.Collection("rate_limit_counters").InsertOne(context.Background(), doc)
+			require.NoError(t, err)
 		})
 	})
 }
@@ -251,32 +241,26 @@ func TestMongoDBStoreLoadCountersSkipsMalformedDocument(t *testing.T) {
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		ctx := context.Background()
 		store, err := NewMongoDBStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore() failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		good := WindowSnapshot{
 			Scope: string(ScopeUserPath), Subject: "/team", PeriodSeconds: PeriodHourSeconds,
 			RequestsWindowStart: 1700000000, RequestsCurrent: 2,
 		}
-		if err := store.SaveCounters(ctx, []WindowSnapshot{good}); err != nil {
-			t.Fatalf("SaveCounters: %v", err)
-		}
-		if _, err := db.Collection("rate_limit_counters").InsertOne(ctx, bson.D{
+		err = store.SaveCounters(ctx, []WindowSnapshot{good})
+		require.NoError(t, err)
+		_, err = db.Collection("rate_limit_counters").InsertOne(ctx, bson.D{
 			{Key: "scope", Value: string(ScopeUserPath)},
 			{Key: "subject", Value: "/broken"},
 			{Key: "partition", Value: ""},
 			{Key: "period_seconds", Value: "not-a-number"},
 			{Key: "updated_at", Value: time.Now().Unix()},
-		}); err != nil {
-			t.Fatalf("seed malformed document: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		got, err := store.LoadCounters(ctx)
-		if err != nil {
-			t.Fatalf("LoadCounters: %v", err)
-		}
-		if len(got) != 1 || got[0] != good {
-			t.Fatalf("loaded = %+v, want only the readable window %+v", got, good)
-		}
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, good, got[0])
 	})
 }

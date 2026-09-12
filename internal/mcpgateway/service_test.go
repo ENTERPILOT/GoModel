@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
@@ -98,9 +99,8 @@ func newTestService(t *testing.T, usageLogger usage.LoggerInterface, specs ...Se
 		ConfigServers: configServers,
 		UsageLogger:   usageLogger,
 	})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(service.Close)
 
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -159,9 +159,8 @@ func connectClient(t *testing.T, endpoint string, headers map[string]string) *mc
 		}},
 	}
 	session, err := client.Connect(context.Background(), transport, nil)
-	if err != nil {
-		t.Fatalf("client connect to %s: %v", endpoint, err)
-	}
+	require.NoError(t, err, "client connect to %s: %v", endpoint, err)
+
 	t.Cleanup(func() { _ = session.Close() })
 	return session
 }
@@ -171,18 +170,16 @@ const testInitializeBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","param
 func rawMCPPost(t *testing.T, endpoint, body string, headers map[string]string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("create MCP request: %v", err)
-	}
+	require.NoError(t, err)
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
 	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("MCP request error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return resp
 }
 
@@ -190,13 +187,11 @@ func initializeRawSession(t *testing.T, endpoint string, headers map[string]stri
 	t.Helper()
 	resp := rawMCPPost(t, endpoint, testInitializeBody, headers)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("initialize status = %d, want 200", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
 	sessionID := resp.Header.Get("Mcp-Session-Id")
-	if sessionID == "" {
-		t.Fatalf("initialize returned no Mcp-Session-Id")
-	}
+	require.NotEmpty(t, sessionID)
+
 	return sessionID
 }
 
@@ -210,9 +205,8 @@ func rawMCPStatus(t *testing.T, endpoint, body string, headers map[string]string
 func listToolNames(t *testing.T, session *mcp.ClientSession) []string {
 	t.Helper()
 	result, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListTools() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	names := make([]string, 0, len(result.Tools))
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
@@ -236,24 +230,20 @@ func TestAggregatedEndpointNamespacesAndRelays(t *testing.T) {
 
 	names := listToolNames(t, session)
 	want := []string{"alpha_echo", "beta_search"}
-	if len(names) != 2 || names[0] != want[0] || names[1] != want[1] {
-		t.Fatalf("ListTools() = %v, want %v", names, want)
-	}
+	require.Len(t, names, 2)
+	require.Equal(t, want[0], names[0])
+	require.Equal(t, want[1], names[1], "ListTools() = %v, want %v", names, want)
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "alpha_echo",
 		Arguments: map[string]any{"value": 1},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(alpha_echo) error = %v", err)
-	}
-	if len(result.Content) != 1 {
-		t.Fatalf("CallTool content length = %d, want 1", len(result.Content))
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+
 	text, ok := result.Content[0].(*mcp.TextContent)
-	if !ok || !strings.HasPrefix(text.Text, "echo:") {
-		t.Fatalf("CallTool content = %#v, want echo:... text", result.Content[0])
-	}
+	require.True(t, ok)
+	require.True(t, strings.HasPrefix(text.Text, "echo:"), "CallTool content = %#v, want echo:... text", result.Content[0])
 
 	// The tool call must be attributed in the usage pipeline.
 	deadline := time.Now().Add(2 * time.Second)
@@ -261,19 +251,14 @@ func TestAggregatedEndpointNamespacesAndRelays(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	entries := usageLog.all()
-	if len(entries) != 1 {
-		t.Fatalf("usage entries = %d, want 1", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.Provider != "mcp" || entry.ProviderName != "alpha" || entry.Model != "alpha_echo" {
-		t.Fatalf("usage entry routing = %s/%s/%s, want mcp/alpha/alpha_echo", entry.Provider, entry.ProviderName, entry.Model)
-	}
-	if entry.UserPath != "/team-a" {
-		t.Fatalf("usage entry user path = %q, want /team-a", entry.UserPath)
-	}
-	if entry.RequestID != "req-123" {
-		t.Fatalf("usage entry request id = %q, want req-123", entry.RequestID)
-	}
+	require.Equal(t, "mcp", entry.Provider)
+	require.Equal(t, "alpha", entry.ProviderName)
+	require.Equal(t, "alpha_echo", entry.Model)
+	require.Equal(t, "/team-a", entry.UserPath)
+	require.Equal(t, "req-123", entry.RequestID)
 }
 
 func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {
@@ -289,21 +274,19 @@ func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {
 
 	// tools/list stays namespaced; only tools/call accepts the bare name.
 	names := listToolNames(t, session)
-	if len(names) != 2 || names[0] != "alpha_echo" || names[1] != "beta_search" {
-		t.Fatalf("ListTools() = %v, want [alpha_echo beta_search]", names)
-	}
+	require.Len(t, names, 2)
+	require.Equal(t, "alpha_echo", names[0])
+	require.Equal(t, "beta_search", names[1])
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "echo",
 		Arguments: map[string]any{"value": 1},
 	})
-	if err != nil {
-		t.Fatalf("CallTool(echo) error = %v", err)
-	}
+	require.NoError(t, err)
+
 	text, ok := result.Content[0].(*mcp.TextContent)
-	if !ok || !strings.HasPrefix(text.Text, "echo:") {
-		t.Fatalf("CallTool(echo) content = %#v, want echo:... text", result.Content[0])
-	}
+	require.True(t, ok)
+	require.True(t, strings.HasPrefix(text.Text, "echo:"), "CallTool(echo) content = %#v, want echo:... text", result.Content[0])
 
 	// Usage accounting stays canonical: the entry records the namespaced name.
 	deadline := time.Now().Add(2 * time.Second)
@@ -311,9 +294,9 @@ func TestAggregatedEndpointAcceptsUniqueBareToolName(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	entries := usageLog.all()
-	if len(entries) != 1 || entries[0].Model != "alpha_echo" || entries[0].ProviderName != "alpha" {
-		t.Fatalf("usage entries = %+v, want one alpha/alpha_echo entry", entries)
-	}
+	require.Len(t, entries, 1)
+	require.Equal(t, "alpha_echo", entries[0].Model)
+	require.Equal(t, "alpha", entries[0].ProviderName)
 }
 
 func TestAggregatedEndpointRejectsAmbiguousBareToolName(t *testing.T) {
@@ -325,16 +308,13 @@ func TestAggregatedEndpointRejectsAmbiguousBareToolName(t *testing.T) {
 	)
 
 	session := connectClient(t, gatewayURL+"/mcp", nil)
-
-	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "echo"}); err == nil {
-		t.Fatalf("CallTool(echo) succeeded, want unknown-tool error for an ambiguous bare name")
-	}
+	_, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "echo"})
+	require.Error(t, err)
 
 	// The namespaced forms keep working.
 	for _, name := range []string{"alpha_echo", "beta_echo"} {
-		if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name}); err != nil {
-			t.Fatalf("CallTool(%s) error = %v", name, err)
-		}
+		_, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name})
+		require.NoError(t, err)
 	}
 }
 
@@ -348,17 +328,12 @@ func TestPerServerEndpointKeepsOriginalNames(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp/alpha", nil)
 	names := listToolNames(t, session)
-	if len(names) != 1 || names[0] != "echo" {
-		t.Fatalf("ListTools(/mcp/alpha) = %v, want [echo]", names)
-	}
+	require.Len(t, names, 1)
+	require.Equal(t, "echo", names[0])
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "echo"})
-	if err != nil {
-		t.Fatalf("CallTool(echo) error = %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("CallTool(echo) unexpectedly returned isError")
-	}
+	require.NoError(t, err)
+	require.False(t, result.IsError)
 }
 
 func TestUnknownPinnedServerReturns404(t *testing.T) {
@@ -366,13 +341,10 @@ func TestUnknownPinnedServerReturns404(t *testing.T) {
 	_, gatewayURL := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
 
 	resp, err := http.Post(gatewayURL+"/mcp/ghost", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("POST /mcp/ghost error = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("POST /mcp/ghost status = %d, want 404", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestUserPathVisibilityFiltersServers(t *testing.T) {
@@ -388,29 +360,22 @@ func TestUserPathVisibilityFiltersServers(t *testing.T) {
 	// A /team-a caller must not discover beta's tools.
 	teamA := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/team-a"})
 	names := listToolNames(t, teamA)
-	if len(names) != 1 || names[0] != "alpha_echo" {
-		t.Fatalf("ListTools(team-a) = %v, want [alpha_echo]", names)
-	}
-	if _, err := teamA.CallTool(context.Background(), &mcp.CallToolParams{Name: "beta_search"}); err == nil {
-		t.Fatalf("CallTool(beta_search) as /team-a should fail")
-	}
+	require.Len(t, names, 1)
+	require.Equal(t, "alpha_echo", names[0])
+	_, err := teamA.CallTool(context.Background(), &mcp.CallToolParams{Name: "beta_search"})
+	require.Error(t, err)
 
 	// A /team-b/dev caller inherits the /team-b subtree scope.
 	teamB := connectClient(t, gatewayURL+"/mcp", map[string]string{core.UserPathHeader: "/team-b/dev"})
 	names = listToolNames(t, teamB)
-	if len(names) != 2 {
-		t.Fatalf("ListTools(team-b) = %v, want both servers", names)
-	}
+	require.Len(t, names, 2)
 
 	// A pinned endpoint for an out-of-scope server is a 404.
 	resp, err := http.Post(gatewayURL+"/mcp/beta", "application/json", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatalf("POST /mcp/beta error = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("POST /mcp/beta without scope status = %d, want 404", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestScopeHeaderNarrowsVisibleServers(t *testing.T) {
@@ -423,9 +388,8 @@ func TestScopeHeaderNarrowsVisibleServers(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp", map[string]string{ScopeHeader: "beta, ghost"})
 	names := listToolNames(t, session)
-	if len(names) != 1 || names[0] != "beta_search" {
-		t.Fatalf("ListTools(X-MCP-Servers=beta) = %v, want [beta_search]", names)
-	}
+	require.Len(t, names, 1)
+	require.Equal(t, "beta_search", names[0])
 }
 
 func TestToolFiltersHideTools(t *testing.T) {
@@ -443,9 +407,8 @@ func TestToolFiltersHideTools(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 	names := listToolNames(t, session)
-	if len(names) != 1 || names[0] != "alpha_read" {
-		t.Fatalf("ListTools() = %v, want [alpha_read]", names)
-	}
+	require.Len(t, names, 1)
+	require.Equal(t, "alpha_read", names[0])
 }
 
 func TestSessionBindingRejectsForeignUserPath(t *testing.T) {
@@ -460,9 +423,7 @@ func TestSessionBindingRejectsForeignUserPath(t *testing.T) {
 		"Mcp-Session-Id":    sessionID,
 		core.UserPathHeader: "/team-b",
 	})
-	if status != http.StatusNotFound {
-		t.Fatalf("cross-principal session reuse status = %d, want 404", status)
-	}
+	require.Equal(t, http.StatusNotFound, status)
 }
 
 func TestSessionBindingRejectsForeignAuthKey(t *testing.T) {
@@ -475,9 +436,7 @@ func TestSessionBindingRejectsForeignAuthKey(t *testing.T) {
 		"Mcp-Session-Id":     sessionID,
 		"X-Test-Auth-Key-ID": "key-b",
 	})
-	if status != http.StatusNotFound {
-		t.Fatalf("cross-auth-key session reuse status = %d, want 404", status)
-	}
+	require.Equal(t, http.StatusNotFound, status)
 }
 
 func TestSessionBindingRejectsDifferentPinnedEndpoint(t *testing.T) {
@@ -491,9 +450,7 @@ func TestSessionBindingRejectsDifferentPinnedEndpoint(t *testing.T) {
 	sessionID := initializeRawSession(t, gatewayURL+"/mcp/alpha", nil)
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
 	status := rawMCPStatus(t, gatewayURL+"/mcp/beta", listBody, map[string]string{"Mcp-Session-Id": sessionID})
-	if status != http.StatusNotFound {
-		t.Fatalf("cross-endpoint session reuse status = %d, want 404", status)
-	}
+	require.Equal(t, http.StatusNotFound, status)
 }
 
 func TestStreamableHTTPRejectsCrossOriginRequests(t *testing.T) {
@@ -503,9 +460,7 @@ func TestStreamableHTTPRejectsCrossOriginRequests(t *testing.T) {
 	status := rawMCPStatus(t, gatewayURL+"/mcp", testInitializeBody, map[string]string{
 		"Origin": "https://attacker.example",
 	})
-	if status != http.StatusForbidden {
-		t.Fatalf("cross-origin initialize status = %d, want 403", status)
-	}
+	require.Equal(t, http.StatusForbidden, status)
 }
 
 func TestDownstreamCapabilitiesDoNotPromiseListChanged(t *testing.T) {
@@ -514,18 +469,14 @@ func TestDownstreamCapabilitiesDoNotPromiseListChanged(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 	init := session.InitializeResult()
-	if init == nil || init.Capabilities == nil {
-		t.Fatalf("initialize capabilities are nil")
-	}
-	if init.Capabilities.Tools == nil || init.Capabilities.Tools.ListChanged {
-		t.Fatalf("tools capabilities = %+v, want supported without listChanged", init.Capabilities.Tools)
-	}
-	if init.Capabilities.Prompts == nil || init.Capabilities.Prompts.ListChanged {
-		t.Fatalf("prompts capabilities = %+v, want supported without listChanged", init.Capabilities.Prompts)
-	}
-	if init.Capabilities.Resources == nil || init.Capabilities.Resources.ListChanged {
-		t.Fatalf("resources capabilities = %+v, want supported without listChanged", init.Capabilities.Resources)
-	}
+	require.NotNil(t, init)
+	require.NotNil(t, init.Capabilities)
+	require.NotNil(t, init.Capabilities.Tools)
+	require.False(t, init.Capabilities.Tools.ListChanged)
+	require.NotNil(t, init.Capabilities.Prompts)
+	require.False(t, init.Capabilities.Prompts.ListChanged)
+	require.NotNil(t, init.Capabilities.Resources)
+	require.False(t, init.Capabilities.Resources.ListChanged)
 }
 
 func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
@@ -553,21 +504,15 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 	}, http.DefaultClient)
 	client := u.httpClientWithHeaders()
 	resp, err := client.Get(origin.URL + "/same-origin")
-	if err != nil {
-		t.Fatalf("same-origin request error = %v", err)
-	}
+	require.NoError(t, err)
+
 	_ = resp.Body.Close()
 	resp, err = client.Get(origin.URL + "/redirect")
-	if err != nil {
-		t.Fatalf("redirected request error = %v", err)
-	}
+	require.NoError(t, err)
+
 	_ = resp.Body.Close()
-	if sameOriginHeader != "Bearer upstream-secret" {
-		t.Fatalf("same-origin Authorization = %q, want configured header", sameOriginHeader)
-	}
-	if redirectedHeader != "" {
-		t.Fatalf("cross-origin Authorization = %q, want empty", redirectedHeader)
-	}
+	require.Equal(t, "Bearer upstream-secret", sameOriginHeader)
+	require.Empty(t, redirectedHeader)
 }
 
 func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {
@@ -584,30 +529,23 @@ func TestDegradedUpstreamKeepsCatalogAndReportsError(t *testing.T) {
 	// live connections before Close (which waits for outstanding requests).
 	ts.CloseClientConnections()
 	ts.Close()
-	if _, err := service.Reconnect(context.Background(), "alpha"); err == nil {
-		t.Fatalf("Reconnect() against a dead upstream should error")
-	}
+	_, err := service.Reconnect(context.Background(), "alpha")
+	require.Error(t, err)
+
 	views := service.Views()
-	if len(views) != 1 || views[0].Status != StatusDegraded {
-		t.Fatalf("views = %+v, want alpha degraded", views)
-	}
-	if views[0].ToolCount != 1 {
-		t.Fatalf("degraded tool count = %d, want stale catalog kept (1)", views[0].ToolCount)
-	}
-	if views[0].LastError == "" {
-		t.Fatalf("degraded server should carry last error")
-	}
+	require.Len(t, views, 1)
+	require.Equal(t, StatusDegraded, views[0].Status)
+	require.Equal(t, 1, views[0].ToolCount)
+	require.NotEmpty(t, views[0].LastError)
 
 	// New sessions still see the stale catalog; calling the tool fails with a
 	// JSON-RPC error, never a fabricated result.
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 	names := listToolNames(t, session)
-	if len(names) != 1 || names[0] != "alpha_echo" {
-		t.Fatalf("ListTools() with degraded upstream = %v, want stale [alpha_echo]", names)
-	}
-	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_echo"}); err == nil {
-		t.Fatalf("CallTool against dead upstream should return a protocol error")
-	}
+	require.Len(t, names, 1)
+	require.Equal(t, "alpha_echo", names[0])
+	_, err = session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_echo"})
+	require.Error(t, err)
 }
 
 // TestDegradedUpstreamRecoversOnReprobe covers the background re-probe path:
@@ -619,28 +557,22 @@ func TestDegradedUpstreamRecoversOnReprobe(t *testing.T) {
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("net.Listen() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	addr := listener.Addr().String()
 	ts1 := &httptest.Server{Listener: listener, Config: &http.Server{Handler: handler}}
 	ts1.Start()
 
 	service, _ := newTestService(t, nil, testSpec("alpha", "http://"+addr, nil))
 	u, ok := service.manager.get("alpha")
-	if !ok {
-		t.Fatalf("upstream alpha not registered")
-	}
+	require.True(t, ok)
 
 	// Kill the upstream and drive one failed refresh (the re-probe path).
 	ts1.CloseClientConnections()
 	ts1.Close()
-	if err := u.refresh(context.Background()); err == nil {
-		t.Fatalf("refresh() against a dead upstream should error")
-	}
-	if _, status := u.snapshot(); status != StatusDegraded {
-		t.Fatalf("status after failed refresh = %v, want degraded", status)
-	}
+	require.Error(t, u.refresh(context.Background()))
+	_, status := u.snapshot()
+	require.Equal(t, StatusDegraded, status)
 
 	// Resurrect the upstream on the same address; the port was just freed by
 	// this process, so rebinding may need a brief retry.
@@ -653,25 +585,22 @@ func TestDegradedUpstreamRecoversOnReprobe(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if err != nil {
-		t.Fatalf("re-listen on %s: %v", addr, err)
-	}
+	require.NoError(t, err, "re-listen on %s: %v", addr, err)
+
 	ts2 := &httptest.Server{Listener: listener2, Config: &http.Server{Handler: handler}}
 	ts2.Start()
 	t.Cleanup(func() {
 		ts2.CloseClientConnections()
 		ts2.Close()
 	})
-
 	// The next refresh (as the maintenance ticker would run it) must redial
 	// from scratch and flip the server back to connected.
-	if err := u.refresh(context.Background()); err != nil {
-		t.Fatalf("refresh() after upstream recovery error = %v", err)
-	}
+	err = u.refresh(context.Background())
+	require.NoError(t, err)
+
 	view := u.view()
-	if view.Status != StatusConnected || view.ToolCount != 1 {
-		t.Fatalf("view after recovery = %+v, want connected with 1 tool", view)
-	}
+	require.Equal(t, StatusConnected, view.Status)
+	require.Equal(t, 1, view.ToolCount, "view after recovery = %+v, want connected with 1 tool", view)
 }
 
 // TestRemovedUpstreamRefusesRedial covers the reconcile race: a background
@@ -682,25 +611,20 @@ func TestRemovedUpstreamRefusesRedial(t *testing.T) {
 	service, _ := newTestService(t, nil, testSpec("alpha", alphaURL, nil))
 
 	u, ok := service.manager.get("alpha")
-	if !ok {
-		t.Fatalf("upstream alpha not registered")
-	}
+	require.True(t, ok)
 
 	// Reconcile away the server, then run the stale refresh a background
 	// goroutine could still be holding.
 	service.manager.Apply(nil)
-	if err := u.refresh(context.Background()); err != nil {
-		t.Fatalf("refresh() on a removed upstream should be a no-op, got %v", err)
-	}
+	err := u.refresh(context.Background())
+	require.NoError(t, err)
+
 	u.stateMu.Lock()
 	session := u.session
 	u.stateMu.Unlock()
-	if session != nil {
-		t.Fatalf("removed upstream redialed and holds a session")
-	}
-	if _, err := u.callTool(context.Background(), "echo", nil); err == nil {
-		t.Fatalf("callTool on a removed upstream should fail")
-	}
+	require.Nil(t, session)
+	_, err = u.callTool(context.Background(), "echo", nil)
+	require.Error(t, err)
 }
 
 // TestCloseDuringDialDiscardsSession covers the dial-vs-close race: close()
@@ -737,22 +661,17 @@ func TestCloseDuringDialDiscardsSession(t *testing.T) {
 	u.close()
 	close(releaseDial)
 
-	if err := <-refreshDone; err == nil {
-		t.Fatalf("refresh() racing close() should fail, not connect")
-	}
+	require.Error(t, <-refreshDone)
+
 	u.stateMu.Lock()
 	session := u.session
 	u.stateMu.Unlock()
-	if session != nil {
-		t.Fatalf("closed upstream stored the in-flight dial's session")
-	}
+	require.Nil(t, session)
 }
 
 func TestCloseCancelsActiveDownstreamRequests(t *testing.T) {
 	service, err := NewService(context.Background(), Options{})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	requestStarted := make(chan struct{})
 	requestDone := make(chan error, 1)
@@ -776,9 +695,7 @@ func TestCloseCancelsActiveDownstreamRequests(t *testing.T) {
 
 	select {
 	case err := <-requestDone:
-		if err != nil {
-			t.Fatalf("ServeHTTP() error = %v", err)
-		}
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("Close did not cancel the downstream request")
 	}
@@ -790,12 +707,9 @@ func TestInstructionsComposeFromUpstreams(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 	init := session.InitializeResult()
-	if init == nil || !strings.Contains(init.Instructions, "instructions from alpha") {
-		t.Fatalf("aggregated instructions = %q, want upstream instructions merged", init.Instructions)
-	}
-	if !strings.Contains(init.Instructions, "GoModel MCP gateway") {
-		t.Fatalf("aggregated instructions = %q, want gateway preamble", init.Instructions)
-	}
+	require.NotNil(t, init)
+	require.Contains(t, init.Instructions, "instructions from alpha")
+	require.Contains(t, init.Instructions, "GoModel MCP gateway")
 }
 
 func TestPromptsAndResourcesRelay(t *testing.T) {
@@ -824,35 +738,26 @@ func TestPromptsAndResourcesRelay(t *testing.T) {
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 
 	prompts, err := session.ListPrompts(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListPrompts() error = %v", err)
-	}
-	if len(prompts.Prompts) != 1 || prompts.Prompts[0].Name != "alpha_greet" {
-		t.Fatalf("ListPrompts() = %+v, want [alpha_greet]", prompts.Prompts)
-	}
+	require.NoError(t, err)
+	require.Len(t, prompts.Prompts, 1)
+	require.Equal(t, "alpha_greet", prompts.Prompts[0].Name)
+
 	prompt, err := session.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "alpha_greet"})
-	if err != nil {
-		t.Fatalf("GetPrompt(alpha_greet) error = %v", err)
-	}
+	require.NoError(t, err)
+
 	text, ok := prompt.Messages[0].Content.(*mcp.TextContent)
-	if !ok || text.Text != "hello from greet" {
-		t.Fatalf("GetPrompt content = %#v, want original prompt name forwarded", prompt.Messages[0].Content)
-	}
+	require.True(t, ok)
+	require.Equal(t, "hello from greet", text.Text, "GetPrompt content = %#v, want original prompt name forwarded", prompt.Messages[0].Content)
 
 	resources, err := session.ListResources(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("ListResources() error = %v", err)
-	}
-	if len(resources.Resources) != 1 || resources.Resources[0].URI != "file:///alpha/readme" {
-		t.Fatalf("ListResources() = %+v, want alpha readme", resources.Resources)
-	}
+	require.NoError(t, err)
+	require.Len(t, resources.Resources, 1)
+	require.Equal(t, "file:///alpha/readme", resources.Resources[0].URI)
+
 	read, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "file:///alpha/readme"})
-	if err != nil {
-		t.Fatalf("ReadResource() error = %v", err)
-	}
-	if len(read.Contents) != 1 || read.Contents[0].Text != "readme body" {
-		t.Fatalf("ReadResource() = %+v, want readme body", read.Contents)
-	}
+	require.NoError(t, err)
+	require.Len(t, read.Contents, 1)
+	require.Equal(t, "readme body", read.Contents[0].Text)
 }
 
 func TestUpstreamToolErrorRelaysVerbatim(t *testing.T) {
@@ -871,12 +776,8 @@ func TestUpstreamToolErrorRelaysVerbatim(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "alpha_fail"})
-	if err != nil {
-		t.Fatalf("CallTool(alpha_fail) error = %v, want isError result", err)
-	}
-	if !result.IsError {
-		t.Fatalf("CallTool(alpha_fail).IsError = false, want true (relayed verbatim)")
-	}
+	require.NoError(t, err)
+	require.True(t, result.IsError)
 }
 
 func TestDisabledServerIsInvisible(t *testing.T) {
@@ -889,7 +790,6 @@ func TestDisabledServerIsInvisible(t *testing.T) {
 
 	session := connectClient(t, gatewayURL+"/mcp", nil)
 	names := listToolNames(t, session)
-	if len(names) != 1 || names[0] != "alpha_echo" {
-		t.Fatalf("ListTools() = %v, want disabled beta hidden", names)
-	}
+	require.Len(t, names, 1)
+	require.Equal(t, "alpha_echo", names[0])
 }
