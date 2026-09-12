@@ -358,7 +358,7 @@ func TestImageEdits_AuditsRequestMetadata(t *testing.T) {
 			assert.Equal(t, "output", respBody.Items[0].Role)
 			assert.Equal(t, tt.logImageOutputs, respBody.Items[0].Stored)
 			usage, _ := respBody.Meta["usage"].(map[string]any)
-			assert.NotNil(t, usage)
+			require.NotNil(t, usage)
 			assert.Equal(t, 1050, usage["total_tokens"])
 		})
 	}

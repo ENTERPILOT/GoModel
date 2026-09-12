@@ -388,7 +388,7 @@ func TestRealtimeClientSecrets_HappyPath(t *testing.T) {
 	assert.Equal(t, "Bearer upstream-key", upstreamAuth)
 
 	session, _ := upstreamBody["session"].(map[string]any)
-	assert.NotNil(t, session)
+	require.NotNil(t, session)
 	assert.Equal(t, "gpt-realtime-2", session["model"])
 	assert.Equal(t, "be brief", session["instructions"])
 	expires, _ := upstreamBody["expires_after"].(map[string]any)
@@ -414,7 +414,7 @@ func TestRealtimeClientSecrets_TranscriptionModelFallback(t *testing.T) {
 	err := handler.RealtimeClientSecrets(c)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.NotNil(t, mock.capturedSecret)
+	require.NotNil(t, mock.capturedSecret)
 	assert.Equal(t, "gpt-4o-transcribe", mock.capturedSecret.Model)
 }
 

@@ -237,7 +237,7 @@ func TestAudioSpeech_HappyPath(t *testing.T) {
 	got := rec.Header().Get("Content-Type")
 	assert.Equal(t, "audio/mpeg", got)
 	assert.Equal(t, "synthetic-audio", rec.Body.String())
-	assert.NotNil(t, mock.capturedSpeech)
+	require.NotNil(t, mock.capturedSpeech)
 	assert.Equal(t, "gpt-4o-mini-tts", mock.capturedSpeech.Model)
 	assert.Equal(t, "hello", mock.capturedSpeech.Input)
 }
