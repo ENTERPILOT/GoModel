@@ -243,3 +243,31 @@ test("countInactiveUserNodes counts fully inactive subtrees", () => {
     [],
   );
 });
+
+test("filterUserNodes retains inactive ancestors only when query matches an active descendant", () => {
+  // /acme is inactive; /acme/eng is active but does NOT match query "xyz".
+  // Retained inactive ancestors must be scoped to query-matching active nodes,
+  // so /acme must NOT be retained and visibleNodes must be empty.
+  const nodes = [
+    node({ user_path: "/acme", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/acme/eng", key_count: 1, active_key_count: 1 }),
+  ];
+  const filtered = filterUserNodes(nodes, "xyz");
+  assert.deepEqual(filtered, []);
+  assert.equal(countInactiveUserNodes(nodes, "xyz"), 1);
+});
+
+test("filterUserNodes retains inactive ancestor when query matches an active descendant", () => {
+  // /acme is inactive; /acme/eng is active AND matches "eng".
+  // /acme must be retained to anchor the visible descendant.
+  const nodes = [
+    node({ user_path: "/acme", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/acme/eng", key_count: 1, active_key_count: 1 }),
+  ];
+  const filtered = filterUserNodes(nodes, "eng");
+  assert.deepEqual(
+    filtered.map((n) => n.user_path),
+    ["/acme", "/acme/eng"],
+  );
+  assert.equal(countInactiveUserNodes(nodes, "eng"), 0);
+});

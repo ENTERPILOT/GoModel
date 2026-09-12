@@ -165,6 +165,17 @@ export function filterUserNodes(nodes, query, options = {}) {
   const retainedInactive = new Set();
   for (const node of list) {
     if (userNodeInactive(node)) continue;
+    // Only retain inactive ancestors of nodes that match the query.
+    if (
+      needle &&
+      ![node.user_path, node.description, ...(node.allowed_models || [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle)
+    ) {
+      continue;
+    }
     for (const anc of inactiveAncestors(list, node.user_path)) {
       retainedInactive.add(anc);
     }
@@ -187,8 +198,11 @@ export function filterUserNodes(nodes, query, options = {}) {
 
 // countInactiveUserNodes counts the nodes hidden by the default view.
 // Inactive ancestors retained to anchor visible descendants are excluded.
-export function countInactiveUserNodes(nodes) {
+// When `needle` is provided, only inactive ancestors of nodes matching the
+// query are retained — matching filterUserNodes' query-aware scoping.
+export function countInactiveUserNodes(nodes, needle) {
   const list = Array.isArray(nodes) ? nodes : [];
+  const search = String(needle || "").trim().toLowerCase();
 
   // Recompute the same retained set used by filterUserNodes.
   const inactiveRoots = new Set();
@@ -203,6 +217,17 @@ export function countInactiveUserNodes(nodes) {
   const retained = new Set();
   for (const node of list) {
     if (userNodeInactive(node)) continue;
+    // Only retain inactive ancestors of query-matching active nodes.
+    if (
+      search &&
+      ![node.user_path, node.description, ...(node.allowed_models || [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(search)
+    ) {
+      continue;
+    }
     for (const anc of inactiveAncestors(list, node.user_path)) {
       retained.add(anc);
     }

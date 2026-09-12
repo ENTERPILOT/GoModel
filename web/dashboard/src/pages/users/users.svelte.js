@@ -32,7 +32,10 @@ class UsersStore {
   // Count inactive only among rows matching the current filter, so the
   // toggle badge never claims hidden rows the query would not surface.
   inactiveCount = $derived(
-    countInactiveUserNodes(filterUserNodes(this.nodes, this.filter, { showInactive: true })),
+    countInactiveUserNodes(
+      filterUserNodes(this.nodes, this.filter, { showInactive: true }),
+      this.filter,
+    ),
   );
 
   formOpen = $state(false);
