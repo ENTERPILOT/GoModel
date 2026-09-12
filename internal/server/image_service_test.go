@@ -188,7 +188,7 @@ func TestImageGenerations_LogsUsage(t *testing.T) {
 	assert.Equal(t, "dall-e-3", captured.Model)
 	got := captured.RawData["images"]
 	assert.Equal(t, 2, got)
-	assert.NotNil(t, captured.TotalCost)
+	require.NotNil(t, captured.TotalCost)
 	assert.GreaterOrEqual(t, *captured.TotalCost, 0.0799)
 	assert.LessOrEqual(t, *captured.TotalCost, 0.0801)
 }
@@ -223,7 +223,7 @@ func TestImageGenerations_HandlerRoute(t *testing.T) {
 	require.Len(t, data, 1)
 	image, _ := data[0].(map[string]any)
 	assert.Equal(t, "https://img/1.png", image["url"], "data[0] = %v, want url https://img/1.png", data[0])
-	assert.NotNil(t, mock.captured)
+	require.NotNil(t, mock.captured)
 	assert.Equal(t, "a cat", mock.captured.Prompt)
 }
 

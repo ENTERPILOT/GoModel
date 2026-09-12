@@ -2325,9 +2325,9 @@ func TestListModels_AnthropicDialect(t *testing.T) {
 	// Models without metadata fall back to the ID as display name.
 	assert.Equal(t, "gpt-4-turbo", body.Data[1].DisplayName)
 	assert.False(t, body.HasMore)
-	assert.NotNil(t, body.FirstID)
+	require.NotNil(t, body.FirstID)
 	assert.Equal(t, "gpt-4o-mini", *body.FirstID)
-	assert.NotNil(t, body.LastID)
+	require.NotNil(t, body.LastID)
 	assert.Equal(t, "gpt-4-turbo", *body.LastID)
 }
 
@@ -2876,7 +2876,7 @@ func TestEmbeddings_WithUsageTracking(t *testing.T) {
 	assert.Equal(t, 10, capturedEntry.InputTokens)
 	assert.Equal(t, "test-req-embed-usage", capturedEntry.RequestID)
 	assert.Equal(t, "text-embedding-3-small", resolver.model)
-	assert.NotNil(t, capturedEntry.InputCost)
+	require.NotNil(t, capturedEntry.InputCost)
 	assert.NotEqual(t, float64(0), *capturedEntry.InputCost)
 }
 
