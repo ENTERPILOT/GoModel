@@ -487,7 +487,7 @@ func TestUsageByModel_Success(t *testing.T) {
 	models := echotest.Decode[[]usage.ModelUsage](t, rec)
 	require.Len(t, models, 1)
 	assert.Equal(t, "gpt-4", models[0].Model)
-	assert.NotNil(t, models[0].TotalCost)
+	require.NotNil(t, models[0].TotalCost)
 	assert.Equal(t, 1.5, *models[0].TotalCost)
 }
 
@@ -544,7 +544,7 @@ func TestUsageByUserPath_Success(t *testing.T) {
 	require.Len(t, userPaths, 1)
 	assert.Equal(t, "/team/alpha", userPaths[0].UserPath)
 	assert.Equal(t, int64(150), userPaths[0].TotalTokens)
-	assert.NotNil(t, userPaths[0].TotalCost)
+	require.NotNil(t, userPaths[0].TotalCost)
 	assert.Equal(t, 0.75, *userPaths[0].TotalCost)
 }
 
@@ -584,7 +584,7 @@ func TestUsageByLabel_Success(t *testing.T) {
 	require.Len(t, labels, 1)
 	assert.Equal(t, "team-alpha", labels[0].Label)
 	assert.Equal(t, 4, labels[0].Requests)
-	assert.NotNil(t, labels[0].TotalCost)
+	require.NotNil(t, labels[0].TotalCost)
 	assert.Equal(t, 1.25, *labels[0].TotalCost)
 }
 
@@ -1042,9 +1042,9 @@ func TestAuditLog_WithFilters(t *testing.T) {
 	assert.Equal(t, "/v1/chat/completions", reader.lastQuery.Path)
 	assert.Equal(t, "/team", reader.lastQuery.UserPath)
 	assert.Equal(t, "provider_error", reader.lastQuery.ErrorType)
-	assert.NotNil(t, reader.lastQuery.StatusCode)
+	require.NotNil(t, reader.lastQuery.StatusCode)
 	assert.Equal(t, 502, *reader.lastQuery.StatusCode)
-	assert.NotNil(t, reader.lastQuery.Stream)
+	require.NotNil(t, reader.lastQuery.Stream)
 	assert.True(t, *reader.lastQuery.Stream)
 	assert.Equal(t, "timeout", reader.lastQuery.Search)
 	assert.Equal(t, 10, reader.lastQuery.Limit)
@@ -2226,7 +2226,7 @@ func TestTokenThroughput_SuccessForwardsArgs(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	tp := echotest.Decode[usage.TokenThroughput](t, rec)
-	assert.Len(t, tp.Buckets, 1)
+	require.Len(t, tp.Buckets, 1)
 	assert.Equal(t, int64(30), tp.Buckets[0].PromptCachedTokens)
 
 	// The handler forwards the parsed granularity, ~now, and a UTC offset by default.

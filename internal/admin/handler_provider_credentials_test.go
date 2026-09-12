@@ -387,7 +387,7 @@ func TestProviderCredentialTypes_ServesEachTypesCredentialForm(t *testing.T) {
 	body := echotest.Decode[[]providerCredentialTypeResponse](t, rec)
 	require.Len(t, body, 3)
 	assert.Equal(t, "openai", body[0].Type)
-	assert.NotEmpty(t, body[0].Fields)
+	require.NotEmpty(t, body[0].Fields)
 	assert.Equal(t, providers.CredentialFieldAPIKeys, body[0].Fields[0].Name)
 	assert.True(t, body[0].Fields[0].Required)
 }

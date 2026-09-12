@@ -99,7 +99,7 @@ func TestBuildImageResponseBody(t *testing.T) {
 		assert.Equal(t, "high", body.Meta["quality"])
 		assert.Equal(t, "openai", body.Meta["provider"], "meta = %+v", body.Meta)
 		usage, _ := body.Meta["usage"].(map[string]any)
-		assert.NotNil(t, usage)
+		require.NotNil(t, usage)
 		assert.Equal(t, 282, usage["total_tokens"])
 		_, present := body.Meta["background"]
 		assert.False(t, present, "empty envelope fields must be omitted: %+v", body.Meta)
