@@ -2,10 +2,11 @@ package exchange
 
 import (
 	"encoding/base64"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
@@ -33,133 +34,120 @@ func responsesPrompt(t *testing.T) (*core.ResponsesRequest, *pluginapi.Prompt) {
 	t.Helper()
 	req := decodeResponses(t, responsesFixture)
 	p, err := FromResponsesRequest(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	return req, p
 }
 
 func TestFromResponsesRequestMapping(t *testing.T) {
 	_, p := responsesPrompt(t)
-	if len(p.Messages) != 6 {
-		t.Fatalf("messages = %d", len(p.Messages))
-	}
+	require.Len(t, p.Messages, 6)
+
 	ins, m0, m1, m2, m3, m4 := p.Messages[0], p.Messages[1], p.Messages[2], p.Messages[3], p.Messages[4], p.Messages[5]
-	if ins.ID != InstructionsMessageID || ins.Role != pluginapi.RoleSystem || ins.Text() != "be kind" {
-		t.Errorf("instructions = %+v", ins)
-	}
-	if m0.ID != "m0" || m0.Role != pluginapi.RoleUser || len(m0.Parts) != 2 || m0.Parts[0].Text != "hi" || m0.Parts[1].Kind != pluginapi.PartImage || m0.Parts[1].URL != "https://x/y.png" || len(m0.Parts[1].Raw) == 0 {
-		t.Errorf("m0 = %+v", m0)
-	}
-	if m1.Role != pluginapi.RoleAssistant || m1.Parts[0].Kind != pluginapi.PartToolCall || m1.Parts[0].ToolCall.ID != "call_1" || string(m1.Parts[0].ToolCall.Arguments) != `{"q":1}` {
-		t.Errorf("m1 = %+v", m1)
-	}
-	if m2.Role != pluginapi.RoleTool || m2.ToolCallID != "call_1" || m2.Text() != "found" {
-		t.Errorf("m2 = %+v", m2)
-	}
-	if m3.Role != pluginapi.RoleAssistant || len(m3.Parts) != 1 || m3.Parts[0].Kind != pluginapi.PartOpaque || !strings.Contains(string(m3.Parts[0].Raw), "encrypted_content") {
-		t.Errorf("m3 = %+v", m3)
-	}
-	if m4.Role != pluginapi.RoleAssistant || m4.Text() != "ok" {
-		t.Errorf("m4 = %+v", m4)
-	}
-	if *p.Params.MaxTokens != 50 || p.Params.Model != "gpt-5" || p.Params.Extra["store"] != true || p.Params.Extra["custom_field"] != float64(123) {
-		t.Errorf("params = %+v", p.Params)
-	}
+	assert.Equal(t, InstructionsMessageID, ins.ID)
+	assert.Equal(t, pluginapi.RoleSystem, ins.Role)
+	assert.Equal(t, "be kind", ins.Text())
+	assert.Equal(t, "m0", m0.ID)
+	assert.Equal(t, pluginapi.RoleUser, m0.Role)
+	assert.Len(t, m0.Parts, 2)
+	assert.Equal(t, "hi", m0.Parts[0].Text)
+	assert.Equal(t, pluginapi.PartImage, m0.Parts[1].Kind)
+	assert.Equal(t, "https://x/y.png", m0.Parts[1].URL)
+	assert.NotEmpty(t, m0.Parts[1].Raw)
+	assert.Equal(t, pluginapi.RoleAssistant, m1.Role)
+	assert.Equal(t, pluginapi.PartToolCall, m1.Parts[0].Kind)
+	assert.Equal(t, "call_1", m1.Parts[0].ToolCall.ID)
+	assert.Equal(t, `{"q":1}`, string(m1.Parts[0].ToolCall.Arguments))
+	assert.Equal(t, pluginapi.RoleTool, m2.Role)
+	assert.Equal(t, "call_1", m2.ToolCallID)
+	assert.Equal(t, "found", m2.Text())
+	assert.Equal(t, pluginapi.RoleAssistant, m3.Role)
+	assert.Len(t, m3.Parts, 1)
+	assert.Equal(t, pluginapi.PartOpaque, m3.Parts[0].Kind)
+	assert.Contains(t, string(m3.Parts[0].Raw), "encrypted_content", "m3 = %+v", m3)
+	assert.Equal(t, pluginapi.RoleAssistant, m4.Role)
+	assert.Equal(t, "ok", m4.Text())
+	assert.Equal(t, 50, *p.Params.MaxTokens)
+	assert.Equal(t, "gpt-5", p.Params.Model)
+	assert.Equal(t, true, p.Params.Extra["store"])
+	assert.Equal(t, float64(123), p.Params.Extra["custom_field"])
 }
 
 func TestResponsesRoundTripNoEdits(t *testing.T) {
 	req, p := responsesPrompt(t)
 	applied, err := ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	assertJSONEqual(t, req, applied)
 }
 
 func TestResponsesEditStructuredTextPart(t *testing.T) {
 	req, p := responsesPrompt(t)
-	if err := p.SetText("m0", 0, "hello"); err != nil {
-		t.Fatal(err)
-	}
+	err := p.SetText("m0", 0, "hello")
+	require.NoError(t, err)
+
 	applied, err := ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	elements := applied.Input.([]core.ResponsesInputElement)
 	var want, got any
-	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"},{"type":"input_image","image_url":"https://x/y.png","detail":"low"}]}`), &want); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(mustJSON(t, elements[0]), &got); err != nil {
-		t.Fatal(err)
-	}
+	err = json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"},{"type":"input_image","image_url":"https://x/y.png","detail":"low"}]}`), &want)
+	require.NoError(t, err)
+	err = json.Unmarshal(mustJSON(t, elements[0]), &got)
+	require.NoError(t, err)
+
 	assertJSONEqual(t, want, got)
 	orig := req.Input.([]core.ResponsesInputElement)
 	for i := 1; i < len(orig); i++ {
 		assertJSONEqual(t, orig[i], elements[i])
 	}
-	if applied.Instructions != "be kind" {
-		t.Error("instructions changed")
-	}
+	assert.Equal(t, "be kind", applied.Instructions)
 }
 
 func TestResponsesInstructions(t *testing.T) {
 	t.Run("edit", func(t *testing.T) {
 		req, p := responsesPrompt(t)
-		if err := p.SetText(InstructionsMessageID, 0, "be strict"); err != nil {
-			t.Fatal(err)
-		}
+		err := p.SetText(InstructionsMessageID, 0, "be strict")
+		require.NoError(t, err)
+
 		applied, err := ApplyToResponsesRequest(req, p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if applied.Instructions != "be strict" {
-			t.Errorf("instructions = %q", applied.Instructions)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "be strict", applied.Instructions)
+
 		assertJSONEqual(t, req.Input, applied.Input)
 	})
 	t.Run("remove", func(t *testing.T) {
 		req, p := responsesPrompt(t)
-		if err := p.Remove(InstructionsMessageID); err != nil {
-			t.Fatal(err)
-		}
+		err := p.Remove(InstructionsMessageID)
+		require.NoError(t, err)
+
 		applied, err := ApplyToResponsesRequest(req, p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if applied.Instructions != "" {
-			t.Errorf("instructions = %q, want cleared", applied.Instructions)
-		}
+		require.NoError(t, err)
+		assert.Empty(t, applied.Instructions)
+
 		assertJSONEqual(t, req.Input, applied.Input)
 	})
 	t.Run("insert system at 0 without instructions", func(t *testing.T) {
 		req := decodeResponses(t, `{"model":"m","input":[{"role":"user","content":"hi"}]}`)
 		p, err := FromResponsesRequest(req)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		p.Insert(0, pluginapi.TextMessage(pluginapi.RoleSystem, "guard"))
 		applied, err := ApplyToResponsesRequest(req, p)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if applied.Instructions != "guard" {
-			t.Errorf("instructions = %q", applied.Instructions)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "guard", applied.Instructions)
+
 		assertJSONEqual(t, req.Input, applied.Input)
 	})
 	t.Run("insert system elsewhere becomes an input item", func(t *testing.T) {
 		req, p := responsesPrompt(t)
 		p.Append(pluginapi.TextMessage(pluginapi.RoleSystem, "tail"))
 		applied, err := ApplyToResponsesRequest(req, p)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		elements := applied.Input.([]core.ResponsesInputElement)
-		if got := messageJSON(t, elements[len(elements)-1]); got != `{"type":"message","role":"system","content":"tail"}` {
-			t.Errorf("tail = %s", got)
-		}
+		got := messageJSON(t, elements[len(elements)-1])
+		assert.Equal(t, `{"type":"message","role":"system","content":"tail"}`, got)
 	})
 }
 
@@ -185,17 +173,14 @@ func TestResponsesStringInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := decodeResponses(t, `{"model":"m","input":"hello"}`)
 			p, err := FromResponsesRequest(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if p.Messages[0].ID != "m0" || p.Messages[0].Text() != "hello" {
-				t.Fatalf("m0 = %+v", p.Messages[0])
-			}
+			require.NoError(t, err)
+			require.Equal(t, "m0", p.Messages[0].ID)
+			require.Equal(t, "hello", p.Messages[0].Text())
+
 			tt.edit(p)
 			applied, err := ApplyToResponsesRequest(req, p)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			assertJSONEqual(t, tt.want, applied.Input)
 		})
 	}
@@ -222,37 +207,30 @@ func TestResponsesInputEnvelopeShapes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := &core.ResponsesRequest{Model: "m", Input: tt.input}
 			p, err := FromResponsesRequest(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := p.SetText("m0", 0, "hello"); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+			err = p.SetText("m0", 0, "hello")
+			require.NoError(t, err)
+
 			applied, err := ApplyToResponsesRequest(req, p)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			var got []any
 			switch out := applied.Input.(type) {
 			case []map[string]any:
-				if tt.name != "map slice" {
-					t.Fatalf("container changed to %T", applied.Input)
-				}
+				require.Equal(t, "map slice", tt.name, "container changed to %T", applied.Input)
 				for _, m := range out {
 					got = append(got, m)
 				}
 			case []any:
-				if tt.name != "interface slice" {
-					t.Fatalf("container changed to %T", applied.Input)
-				}
+				require.Equal(t, "interface slice", tt.name, "container changed to %T", applied.Input)
 				got = out
 			default:
 				t.Fatalf("container changed to %T", applied.Input)
 			}
 			first := got[0].(map[string]any)
-			if first["content"] != "hello" || first["meta"].(map[string]any)["k"] != "v" {
-				t.Errorf("edited item = %v", first)
-			}
+			assert.Equal(t, "hello", first["content"])
+			assert.Equal(t, "v", first["meta"].(map[string]any)["k"], "edited item = %v", first)
+
 			assertJSONEqual(t, items[1], got[1])
 			assertJSONEqual(t, items[2], got[2])
 		})
@@ -261,58 +239,48 @@ func TestResponsesInputEnvelopeShapes(t *testing.T) {
 
 func TestResponsesOpaqueItemsPreserved(t *testing.T) {
 	req, p := responsesPrompt(t)
-	if err := p.SetText("m4", 0, "fine"); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.SetText("m3", 0, "x"); err == nil {
-		t.Error("opaque part must not be editable")
-	}
+	err := p.SetText("m4", 0, "fine")
+	require.NoError(t, err)
+	assert.Error(t, p.SetText("m3", 0, "x"))
+
 	applied, err := ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	orig := req.Input.([]core.ResponsesInputElement)
 	elements := applied.Input.([]core.ResponsesInputElement)
 	assertJSONEqual(t, orig[3], elements[3])
-	if got := messageJSON(t, elements[4]); got != `{"role":"assistant","content":"fine","meta":{"k":"v"}}` {
-		t.Errorf("edited = %s", got)
-	}
+	got := messageJSON(t, elements[4])
+	assert.Equal(t, `{"role":"assistant","content":"fine","meta":{"k":"v"}}`, got)
 }
 
 func TestResponsesToolEditsAndRemoval(t *testing.T) {
 	req, p := responsesPrompt(t)
-	if err := p.SetToolArguments("m1", "call_1", json.RawMessage(`{"q":2}`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.SetToolResult("m2", "call_1", []pluginapi.Part{{Kind: pluginapi.PartText, Text: "[redacted]"}}); err != nil {
-		t.Fatal(err)
-	}
+	err := p.SetToolArguments("m1", "call_1", json.RawMessage(`{"q":2}`))
+	require.NoError(t, err)
+	err = p.SetToolResult("m2", "call_1", []pluginapi.Part{{Kind: pluginapi.PartText, Text: "[redacted]"}})
+	require.NoError(t, err)
+
 	applied, err := ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	elements := applied.Input.([]core.ResponsesInputElement)
-	if got := messageJSON(t, elements[1]); got != `{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":2}","status":"completed"}` {
-		t.Errorf("call = %s", got)
-	}
-	if got := messageJSON(t, elements[2]); got != `{"type":"function_call_output","call_id":"call_1","output":"[redacted]"}` {
-		t.Errorf("output = %s", got)
-	}
+	got := messageJSON(t, elements[1])
+	assert.Equal(t, `{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"q\":2}","status":"completed"}`, got)
+	got = messageJSON(t, elements[2])
+	assert.Equal(t, `{"type":"function_call_output","call_id":"call_1","output":"[redacted]"}`, got)
 
 	req, p = responsesPrompt(t)
 	_ = p.Remove("m2")
-	if err := p.Remove("m1"); err != nil {
-		t.Fatal(err)
-	}
+	err = p.Remove("m1")
+	require.NoError(t, err)
+
 	applied, err = ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	orig := req.Input.([]core.ResponsesInputElement)
 	elements = applied.Input.([]core.ResponsesInputElement)
-	if len(elements) != 3 {
-		t.Fatalf("elements = %d", len(elements))
-	}
+	require.Len(t, elements, 3)
+
 	assertJSONEqual(t, orig[0], elements[0])
 	assertJSONEqual(t, orig[3], elements[1])
 	assertJSONEqual(t, orig[4], elements[2])
@@ -328,20 +296,16 @@ func TestResponsesInsertedToolMessages(t *testing.T) {
 		{Kind: pluginapi.PartToolResult, ToolResult: &pluginapi.ToolResult{CallID: "call_2", Parts: []pluginapi.Part{{Kind: pluginapi.PartText, Text: "done"}}}},
 	}})
 	applied, err := ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	elements := applied.Input.([]core.ResponsesInputElement)
 	tail := elements[len(elements)-3:]
-	if got := messageJSON(t, tail[0]); got != `{"type":"message","role":"assistant","content":"calling"}` {
-		t.Errorf("message = %s", got)
-	}
-	if got := messageJSON(t, tail[1]); got != `{"type":"function_call","call_id":"call_2","name":"f","arguments":"{}"}` {
-		t.Errorf("call = %s", got)
-	}
-	if got := messageJSON(t, tail[2]); got != `{"type":"function_call_output","call_id":"call_2","output":"done"}` {
-		t.Errorf("output = %s", got)
-	}
+	got := messageJSON(t, tail[0])
+	assert.Equal(t, `{"type":"message","role":"assistant","content":"calling"}`, got)
+	got = messageJSON(t, tail[1])
+	assert.Equal(t, `{"type":"function_call","call_id":"call_2","name":"f","arguments":"{}"}`, got)
+	got = messageJSON(t, tail[2])
+	assert.Equal(t, `{"type":"function_call_output","call_id":"call_2","output":"done"}`, got)
 }
 
 func TestResponsesParams(t *testing.T) {
@@ -350,43 +314,39 @@ func TestResponsesParams(t *testing.T) {
 	p.SetParam("metadata", map[string]any{"team": "a"})
 	p.SetParam("custom", 1)
 	applied, err := ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *applied.MaxOutputTokens != 7 || applied.Metadata["team"] != "a" || string(applied.ExtraFields.Lookup("custom")) != "1" {
-		t.Errorf("applied = %+v extra=%s", applied, applied.ExtraFields.Lookup("custom"))
-	}
-	if string(applied.ExtraFields.Lookup("custom_field")) != "123" || applied.Store == nil || !*applied.Store {
-		t.Error("existing fields lost")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 7, *applied.MaxOutputTokens)
+	assert.Equal(t, "a", applied.Metadata["team"])
+	assert.Equal(t, "1", string(applied.ExtraFields.Lookup("custom")), "applied = %+v extra=%s", applied, applied.ExtraFields.Lookup("custom"))
+	assert.Equal(t, "123", string(applied.ExtraFields.Lookup("custom_field")))
+	assert.NotNil(t, applied.Store)
+	assert.True(t, *applied.Store)
+
 	assertJSONEqual(t, req.Input, applied.Input)
 
 	req, p = responsesPrompt(t)
 	p.SetParam("model", "other")
-	if _, err := ApplyToResponsesRequest(req, p); err == nil {
-		t.Error("model must be frozen")
-	}
+	_, err = ApplyToResponsesRequest(req, p)
+	assert.Error(t, err)
 }
 
 func TestResponsesSetMediaReencodesImage(t *testing.T) {
 	req, p := responsesPrompt(t)
 	redacted := []byte("redacted-png")
-	if err := p.SetMedia("m0", 1, "image/png", redacted); err != nil {
-		t.Fatal(err)
-	}
+	err := p.SetMedia("m0", 1, "image/png", redacted)
+	require.NoError(t, err)
+
 	applied, err := ApplyToResponsesRequest(req, p)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	elements := applied.Input.([]core.ResponsesInputElement)
 	wantURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(redacted)
 	var want, got any
-	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_image","image_url":"`+wantURL+`","detail":"low"}]}`), &want); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(mustJSON(t, elements[0]), &got); err != nil {
-		t.Fatal(err)
-	}
+	err = json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_image","image_url":"`+wantURL+`","detail":"low"}]}`), &want)
+	require.NoError(t, err)
+	err = json.Unmarshal(mustJSON(t, elements[0]), &got)
+	require.NoError(t, err)
+
 	assertJSONEqual(t, want, got)
 	orig := req.Input.([]core.ResponsesInputElement)
 	for i := 1; i < len(orig); i++ {
@@ -396,28 +356,20 @@ func TestResponsesSetMediaReencodesImage(t *testing.T) {
 	// An image block whose image_url is an object keeps the object.
 	objReq := decodeResponses(t, `{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_image","image_url":{"url":"https://x/y.png","detail":"auto"}}]}]}`)
 	p, err = FromResponsesRequest(objReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := p.SetMedia("m0", 0, "image/png", redacted); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	err = p.SetMedia("m0", 0, "image/png", redacted)
+	require.NoError(t, err)
+
 	applied, err = ApplyToResponsesRequest(objReq, p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_image","image_url":{"url":"`+wantURL+`","detail":"auto"}}]}`), &want); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(mustJSON(t, applied.Input.([]core.ResponsesInputElement)[0]), &got); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	err = json.Unmarshal([]byte(`{"type":"message","role":"user","content":[{"type":"input_image","image_url":{"url":"`+wantURL+`","detail":"auto"}}]}`), &want)
+	require.NoError(t, err)
+	err = json.Unmarshal(mustJSON(t, applied.Input.([]core.ResponsesInputElement)[0]), &got)
+	require.NoError(t, err)
+
 	assertJSONEqual(t, want, got)
 	var original any
-	if err := json.Unmarshal(mustJSON(t, objReq.Input.([]core.ResponsesInputElement)[0]), &original); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(mustJSON(t, original)), wantURL) {
-		t.Fatalf("original request was mutated: %s", mustJSON(t, original))
-	}
+	err = json.Unmarshal(mustJSON(t, objReq.Input.([]core.ResponsesInputElement)[0]), &original)
+	require.NoError(t, err)
+	require.NotContains(t, string(mustJSON(t, original)), wantURL, "original request was mutated")
 }

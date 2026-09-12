@@ -2,22 +2,20 @@ package authkeys
 
 import (
 	"context"
-	"errors"
-	"reflect"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/require"
 )
 
 func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore, db sqlx.DB)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		body(t, store, db)
 	})
 }
@@ -47,63 +45,48 @@ func TestSQLStoreAuthKeyLabelsRoundTrip(t *testing.T) {
 			UpdatedAt:     now.Add(-time.Hour),
 		}
 		for _, key := range []AuthKey{labelled, unlabelled} {
-			if err := store.Create(ctx, key); err != nil {
-				t.Fatalf("Create(%s) error = %v", key.ID, err)
-			}
+			err := store.Create(ctx, key)
+			require.NoError(t, err)
 		}
-
 		// Reopening against the same database must tolerate the already-applied
 		// labels migration.
-		if _, err := NewSQLStore(ctx, db); err != nil {
-			t.Fatalf("NewSQLStore() reopen error = %v", err)
-		}
+		_, err := NewSQLStore(ctx, db)
+		require.NoError(t, err)
 
 		keys, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() error = %v", err)
-		}
-		if len(keys) != 2 {
-			t.Fatalf("List() len = %d, want 2", len(keys))
-		}
+		require.NoError(t, err)
+		require.Len(t, keys, 2)
+
 		byID := map[string]AuthKey{}
 		for _, key := range keys {
 			byID[key.ID] = key
 		}
-		if got := byID["key-labelled"].Labels; !reflect.DeepEqual(got, []string{"team-a", "batch"}) {
-			t.Fatalf("labelled key labels = %v, want [team-a batch]", got)
-		}
-		if got := byID["key-unlabelled"].Labels; got != nil {
-			t.Fatalf("unlabelled key labels = %v, want nil", got)
-		}
+		got := byID["key-labelled"].Labels
+		require.Equal(t, []string{"team-a", "batch"}, got)
+		got = byID["key-unlabelled"].Labels
+		require.Nil(t, got)
 
 		later := now.Add(time.Hour)
-		if err := store.UpdateLabels(ctx, "key-unlabelled", []string{"added"}, later); err != nil {
-			t.Fatalf("UpdateLabels() error = %v", err)
-		}
-		if err := store.UpdateLabels(ctx, "key-labelled", nil, later); err != nil {
-			t.Fatalf("UpdateLabels(clear) error = %v", err)
-		}
-		if err := store.UpdateLabels(ctx, "missing", []string{"x"}, later); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("UpdateLabels(missing) error = %v, want %v", err, ErrNotFound)
-		}
+		err = store.UpdateLabels(ctx, "key-unlabelled", []string{"added"}, later)
+		require.NoError(t, err)
+		err = store.UpdateLabels(ctx, "key-labelled", nil, later)
+		require.NoError(t, err)
+		err = store.UpdateLabels(ctx, "missing", []string{"x"}, later)
+		require.ErrorIs(t, err, ErrNotFound)
 
 		keys, err = store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() after update error = %v", err)
-		}
+		require.NoError(t, err)
+
 		byID = map[string]AuthKey{}
 		for _, key := range keys {
 			byID[key.ID] = key
 		}
-		if got := byID["key-unlabelled"].Labels; !reflect.DeepEqual(got, []string{"added"}) {
-			t.Fatalf("updated key labels = %v, want [added]", got)
-		}
-		if got := byID["key-unlabelled"].UpdatedAt; !got.Equal(later) {
-			t.Fatalf("updated key UpdatedAt = %v, want %v", got, later)
-		}
-		if got := byID["key-labelled"].Labels; got != nil {
-			t.Fatalf("cleared key labels = %v, want nil", got)
-		}
+		got = byID["key-unlabelled"].Labels
+		require.Equal(t, []string{"added"}, got)
+
+		require.True(t, byID["key-unlabelled"].UpdatedAt.Equal(later), "updated key UpdatedAt = %v, want %v", byID["key-unlabelled"].UpdatedAt, later)
+		got = byID["key-labelled"].Labels
+		require.Nil(t, got)
 	})
 }
 
@@ -111,7 +94,7 @@ func TestSQLStoreAuthKeyDashboardAccessRoundTrip(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
 		now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 		ctx := context.Background()
-		if err := store.Create(ctx, AuthKey{
+		err := store.Create(ctx, AuthKey{
 			ID:              "key-admin",
 			Name:            "admin",
 			DashboardAccess: true,
@@ -120,10 +103,9 @@ func TestSQLStoreAuthKeyDashboardAccessRoundTrip(t *testing.T) {
 			Enabled:         true,
 			CreatedAt:       now,
 			UpdatedAt:       now,
-		}); err != nil {
-			t.Fatalf("Create() error = %v", err)
-		}
-		if err := store.Create(ctx, AuthKey{
+		})
+		require.NoError(t, err)
+		err = store.Create(ctx, AuthKey{
 			ID:            "key-plain",
 			Name:          "plain",
 			RedactedValue: TokenPrefix + "...efgh",
@@ -131,46 +113,35 @@ func TestSQLStoreAuthKeyDashboardAccessRoundTrip(t *testing.T) {
 			Enabled:       true,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		}); err != nil {
-			t.Fatalf("Create() error = %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		assertAccess := func(want map[string]bool) {
 			t.Helper()
 			keys, err := store.List(ctx)
-			if err != nil {
-				t.Fatalf("List() error = %v", err)
-			}
-			if len(keys) != len(want) {
-				t.Fatalf("List() len = %d, want %d", len(keys), len(want))
-			}
+			require.NoError(t, err)
+			require.Len(t, keys, len(want))
+
 			seen := make(map[string]bool, len(keys))
 			for _, key := range keys {
 				wantAccess, expected := want[key.ID]
-				if !expected {
-					t.Fatalf("List() returned unexpected key %s", key.ID)
-				}
-				if seen[key.ID] {
-					t.Fatalf("List() returned duplicate key %s", key.ID)
-				}
+				require.True(t, expected)
+
+				require.False(t, seen[key.ID], "List() returned duplicate key %s", key.ID)
 				seen[key.ID] = true
-				if key.DashboardAccess != wantAccess {
-					t.Fatalf("key %s dashboard access = %v, want %v", key.ID, key.DashboardAccess, wantAccess)
-				}
+				require.Equal(t, wantAccess, key.DashboardAccess)
 			}
 		}
 		assertAccess(map[string]bool{"key-admin": true, "key-plain": false})
 
 		later := now.Add(time.Hour)
-		if err := store.UpdateDashboardAccess(ctx, "key-plain", true, later); err != nil {
-			t.Fatalf("UpdateDashboardAccess(grant) error = %v", err)
-		}
-		if err := store.UpdateDashboardAccess(ctx, "key-admin", false, later); err != nil {
-			t.Fatalf("UpdateDashboardAccess(revoke) error = %v", err)
-		}
-		if err := store.UpdateDashboardAccess(ctx, "missing", true, later); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("UpdateDashboardAccess(missing) error = %v, want %v", err, ErrNotFound)
-		}
+		err = store.UpdateDashboardAccess(ctx, "key-plain", true, later)
+		require.NoError(t, err)
+		err = store.UpdateDashboardAccess(ctx, "key-admin", false, later)
+		require.NoError(t, err)
+		err = store.UpdateDashboardAccess(ctx, "missing", true, later)
+		require.ErrorIs(t, err, ErrNotFound)
+
 		assertAccess(map[string]bool{"key-admin": false, "key-plain": true})
 	})
 }
@@ -189,29 +160,21 @@ func TestSQLStoreAuthKeyAllowedModelsRoundTrip(t *testing.T) {
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
-		if err := store.Create(ctx, key); err != nil {
-			t.Fatalf("Create() error = %v", err)
-		}
-		keys, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() error = %v", err)
-		}
-		if len(keys) != 1 || !reflect.DeepEqual(keys[0].AllowedModels, key.AllowedModels) {
-			t.Fatalf("List() = %#v, want allowed models %v", keys, key.AllowedModels)
-		}
+		err := store.Create(ctx, key)
+		require.NoError(t, err)
 
-		if err := store.UpdateAllowedModels(ctx, key.ID, nil, now.Add(time.Hour)); err != nil {
-			t.Fatalf("UpdateAllowedModels(clear) error = %v", err)
-		}
+		keys, err := store.List(ctx)
+		require.NoError(t, err)
+		require.Len(t, keys, 1)
+		require.Equal(t, key.AllowedModels, keys[0].AllowedModels)
+		err = store.UpdateAllowedModels(ctx, key.ID, nil, now.Add(time.Hour))
+		require.NoError(t, err)
+
 		keys, err = store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() error = %v", err)
-		}
-		if keys[0].AllowedModels != nil || !keys[0].UpdatedAt.Equal(now.Add(time.Hour)) {
-			t.Fatalf("cleared key = %#v, want nil allowed models and bumped updated_at", keys[0])
-		}
-		if err := store.UpdateAllowedModels(ctx, "missing", []string{"openai/"}, now); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("UpdateAllowedModels(missing) error = %v, want ErrNotFound", err)
-		}
+		require.NoError(t, err)
+		require.Nil(t, keys[0].AllowedModels)
+		require.True(t, keys[0].UpdatedAt.Equal(now.Add(time.Hour)), "cleared key = %#v, want nil allowed models and bumped updated_at", keys[0])
+		err = store.UpdateAllowedModels(ctx, "missing", []string{"openai/"}, now)
+		require.ErrorIs(t, err, ErrNotFound)
 	})
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
 
@@ -16,20 +17,18 @@ import (
 // reader that could not enforce it.
 func TestGetCacheOverviewIgnoresRequestedCacheMode(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer store.Close()
 
 	day := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	ctx := context.Background()
-	if err := store.WriteBatch(ctx, []*UsageEntry{
+	err = store.WriteBatch(ctx, []*UsageEntry{
 		{
 			ID: "cached-hit", RequestID: "r1", ProviderID: "p1", Timestamp: day,
 			Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions",
@@ -40,14 +39,11 @@ func TestGetCacheOverviewIgnoresRequestedCacheMode(t *testing.T) {
 			Model: "gpt-5", Provider: "openai", Endpoint: "/v1/chat/completions",
 			InputTokens: 200, OutputTokens: 40, TotalTokens: 240,
 		},
-	}); err != nil {
-		t.Fatalf("WriteBatch: %v", err)
-	}
+	})
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("NewSQLiteReader: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Every mode a caller could pass, including the one that would otherwise
 	// widen the result to uncached rows.
@@ -58,20 +54,15 @@ func TestGetCacheOverviewIgnoresRequestedCacheMode(t *testing.T) {
 				EndDate:   day,
 				CacheMode: mode,
 			})
-			if err != nil {
-				t.Fatalf("GetCacheOverview: %v", err)
-			}
-			if overview.Summary.TotalHits != 1 {
-				t.Fatalf("total_hits = %d, want 1 (the cached row only)", overview.Summary.TotalHits)
-			}
+			require.NoError(t, err)
+			require.Equal(t, 1, overview.Summary.TotalHits)
+
 			// Hit counts alone cannot catch a leak: only one row is a cache
 			// hit either way, so a mode that wrongly widened to both rows
 			// would still count 1. The token totals differ between the two
 			// rows, so they do catch it.
-			if overview.Summary.TotalInput != 100 || overview.Summary.TotalTokens != 120 {
-				t.Fatalf("tokens = in %d / total %d, want 100 / 120 — the uncached row leaked in",
-					overview.Summary.TotalInput, overview.Summary.TotalTokens)
-			}
+			require.Equal(t, int64(100), overview.Summary.TotalInput)
+			require.Equal(t, int64(120), overview.Summary.TotalTokens)
 		})
 	}
 }

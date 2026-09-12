@@ -1,8 +1,9 @@
 package usage
 
 import (
-	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestEnrichUsageLogEntry_OpenAICachedTokens(t *testing.T) {
@@ -14,19 +15,12 @@ func TestEnrichUsageLogEntry_OpenAICachedTokens(t *testing.T) {
 		},
 	}
 	EnrichUsageLogEntry(&entry)
-	if entry.UncachedInputTokens != 40 {
-		t.Fatalf("UncachedInputTokens = %d, want 40", entry.UncachedInputTokens)
-	}
-	if entry.CachedInputTokens != 80 {
-		t.Fatalf("CachedInputTokens = %d, want 80", entry.CachedInputTokens)
-	}
-	if entry.CacheWriteInputTokens != 0 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 0", entry.CacheWriteInputTokens)
-	}
+	require.Equal(t, int64(40), entry.UncachedInputTokens)
+	require.Equal(t, int64(80), entry.CachedInputTokens)
+	require.Equal(t, int64(0), entry.CacheWriteInputTokens)
+
 	want := 80.0 / 120.0
-	if math.Abs(entry.CachedInputRatio-want) > 1e-9 {
-		t.Fatalf("CachedInputRatio = %f, want %f", entry.CachedInputRatio, want)
-	}
+	require.InDelta(t, want, entry.CachedInputRatio, 1e-9)
 }
 
 func TestEnrichUsageLogEntry_AnthropicSplitAccounting(t *testing.T) {
@@ -39,19 +33,12 @@ func TestEnrichUsageLogEntry_AnthropicSplitAccounting(t *testing.T) {
 		},
 	}
 	EnrichUsageLogEntry(&entry)
-	if entry.UncachedInputTokens != 50 {
-		t.Fatalf("UncachedInputTokens = %d, want 50", entry.UncachedInputTokens)
-	}
-	if entry.CachedInputTokens != 90 {
-		t.Fatalf("CachedInputTokens = %d, want 90", entry.CachedInputTokens)
-	}
-	if entry.CacheWriteInputTokens != 30 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 30", entry.CacheWriteInputTokens)
-	}
+	require.Equal(t, int64(50), entry.UncachedInputTokens)
+	require.Equal(t, int64(90), entry.CachedInputTokens)
+	require.Equal(t, int64(30), entry.CacheWriteInputTokens)
+
 	want := 90.0 / 170.0
-	if math.Abs(entry.CachedInputRatio-want) > 1e-9 {
-		t.Fatalf("CachedInputRatio = %f, want %f", entry.CachedInputRatio, want)
-	}
+	require.InDelta(t, want, entry.CachedInputRatio, 1e-9)
 }
 
 func TestEnrichUsageLogEntry_NoCacheData(t *testing.T) {
@@ -60,15 +47,9 @@ func TestEnrichUsageLogEntry_NoCacheData(t *testing.T) {
 		InputTokens: 100,
 	}
 	EnrichUsageLogEntry(&entry)
-	if entry.UncachedInputTokens != 100 {
-		t.Fatalf("UncachedInputTokens = %d, want 100", entry.UncachedInputTokens)
-	}
-	if entry.CachedInputTokens != 0 {
-		t.Fatalf("CachedInputTokens = %d, want 0", entry.CachedInputTokens)
-	}
-	if entry.CachedInputRatio != 0 {
-		t.Fatalf("CachedInputRatio = %f, want 0", entry.CachedInputRatio)
-	}
+	require.Equal(t, int64(100), entry.UncachedInputTokens)
+	require.Equal(t, int64(0), entry.CachedInputTokens)
+	require.Equal(t, float64(0), entry.CachedInputRatio)
 }
 
 func TestEnrichUsageLogEntry_BedrockCacheWriteField(t *testing.T) {
@@ -81,19 +62,12 @@ func TestEnrichUsageLogEntry_BedrockCacheWriteField(t *testing.T) {
 		},
 	}
 	EnrichUsageLogEntry(&entry)
-	if entry.UncachedInputTokens != 40 {
-		t.Fatalf("UncachedInputTokens = %d, want 40", entry.UncachedInputTokens)
-	}
-	if entry.CachedInputTokens != 120 {
-		t.Fatalf("CachedInputTokens = %d, want 120", entry.CachedInputTokens)
-	}
-	if entry.CacheWriteInputTokens != 60 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 60", entry.CacheWriteInputTokens)
-	}
+	require.Equal(t, int64(40), entry.UncachedInputTokens)
+	require.Equal(t, int64(120), entry.CachedInputTokens)
+	require.Equal(t, int64(60), entry.CacheWriteInputTokens)
+
 	want := 120.0 / 220.0
-	if math.Abs(entry.CachedInputRatio-want) > 1e-9 {
-		t.Fatalf("CachedInputRatio = %f, want %f", entry.CachedInputRatio, want)
-	}
+	require.InDelta(t, want, entry.CachedInputRatio, 1e-9)
 }
 
 func TestEnrichUsageLogEntry_BedrockCacheWriteOnly(t *testing.T) {
@@ -106,15 +80,9 @@ func TestEnrichUsageLogEntry_BedrockCacheWriteOnly(t *testing.T) {
 		},
 	}
 	EnrichUsageLogEntry(&entry)
-	if entry.UncachedInputTokens != 100 {
-		t.Fatalf("UncachedInputTokens = %d, want 100", entry.UncachedInputTokens)
-	}
-	if entry.CachedInputTokens != 0 {
-		t.Fatalf("CachedInputTokens = %d, want 0", entry.CachedInputTokens)
-	}
-	if entry.CacheWriteInputTokens != 80 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 80", entry.CacheWriteInputTokens)
-	}
+	require.Equal(t, int64(100), entry.UncachedInputTokens)
+	require.Equal(t, int64(0), entry.CachedInputTokens)
+	require.Equal(t, int64(80), entry.CacheWriteInputTokens)
 }
 
 func TestEnrichUsageLogEntry_CoalescesCacheWriteFieldsByMax(t *testing.T) {
@@ -131,9 +99,7 @@ func TestEnrichUsageLogEntry_CoalescesCacheWriteFieldsByMax(t *testing.T) {
 		},
 	}
 	EnrichUsageLogEntry(&entry)
-	if entry.CacheWriteInputTokens != 60 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 60", entry.CacheWriteInputTokens)
-	}
+	require.Equal(t, int64(60), entry.CacheWriteInputTokens)
 }
 
 func TestEnrichUsageLogEntry_NilSafe(t *testing.T) {
