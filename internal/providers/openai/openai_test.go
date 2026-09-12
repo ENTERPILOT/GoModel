@@ -2230,3 +2230,31 @@ func TestNew_AttributesErrorsToInstanceName(t *testing.T) {
 		t.Fatalf("error provider = %q, want the instance name openai-eu", gwErr.Provider)
 	}
 }
+
+// The provider name clients see (the response's provider field, translated
+// Responses output, file objects) is the configured instance name, so two
+// instances of one provider type stay distinguishable.
+func TestCompatibleProviders_ReportInstanceName(t *testing.T) {
+	cfg := CompatibleProviderConfig{ProviderName: "deepseek", BaseURL: "https://example.invalid"}
+
+	tests := []struct {
+		name string
+		opts providers.ProviderOptions
+		want string
+	}{
+		{name: "configured instance name", opts: providers.ProviderOptions{Name: "mockds"}, want: "mockds"},
+		{name: "blank instance name falls back to the type", opts: providers.ProviderOptions{Name: "   "}, want: "deepseek"},
+		{name: "no factory options", want: "deepseek"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NewCompatibleProvider("k", tt.opts, cfg).ProviderName(); got != tt.want {
+				t.Errorf("CompatibleProvider.ProviderName() = %q, want %q", got, tt.want)
+			}
+			if got := NewChatCompatible("k", tt.opts, cfg).ProviderName(); got != tt.want {
+				t.Errorf("ChatCompatible.ProviderName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

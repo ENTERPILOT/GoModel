@@ -441,6 +441,23 @@ test("workflowAuditChart forces audit nodes even when the workflow version canno
   assert.equal(chart.workflowID, "missing-workflow");
 });
 
+test("workflowAuditChart names the configured provider instance, not its type", () => {
+  const entry = {
+    workflow_version_id: "missing-workflow",
+    provider: "deepseek",
+    provider_name: "mockds",
+    model: "deepseek-flash",
+    status_code: 200,
+  };
+
+  assert.equal(workflowAuditChart(entry, null, ALL_CAPS).aiLabel, "mockds");
+  // Entries recorded without an instance name still show the provider type.
+  assert.equal(
+    workflowAuditChart({ ...entry, provider_name: "" }, null, ALL_CAPS).aiLabel,
+    "deepseek",
+  );
+});
+
 test("workflowAuditChart prefers request-time workflow features over current workflow state", () => {
   const source = {
     id: "historical-v2",

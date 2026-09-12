@@ -345,7 +345,7 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 	call func(context.Context, Req) (Resp, error),
 	responseProvider func(Resp) string,
 ) (Resp, ExecutionMeta, error) {
-	return executeTranslatedWithFailover(ctx, o, workflow, req, model, provider, cloneForSelector,
+	resp, meta, err := executeTranslatedWithFailover(ctx, o, workflow, req, model, provider, cloneForSelector,
 		func(ctx context.Context, req Req) (Resp, string, error) {
 			resp, err := call(ctx, req)
 			if err != nil {
@@ -355,6 +355,36 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 			return resp, responseProvider(resp), nil
 		},
 	)
+	if err != nil {
+		return resp, meta, err
+	}
+	// The provider type drives routing and audit filters, so it is what the
+	// attempt reported above; the client-facing field names the configured
+	// instance that served the request, as errors and breaker messages do.
+	return nameProviderInstance(resp, meta.ProviderName), meta, nil
+}
+
+// nameProviderInstance rewrites the response's public provider field to the
+// configured provider instance name. The router stamps the provider type; an
+// instance name is more precise whenever two instances share a type, and it
+// matches how the gateway names providers everywhere else. A request served
+// without a configured name keeps the type.
+func nameProviderInstance[Resp any](resp Resp, providerName string) Resp {
+	providerName = strings.TrimSpace(providerName)
+	if providerName == "" {
+		return resp
+	}
+	switch typed := any(resp).(type) {
+	case *core.ChatResponse:
+		if typed != nil {
+			typed.Provider = providerName
+		}
+	case *core.ResponsesResponse:
+		if typed != nil {
+			typed.Provider = providerName
+		}
+	}
+	return resp
 }
 
 func streamTranslatedProviderRequest[Req any](

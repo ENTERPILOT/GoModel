@@ -41,7 +41,7 @@ func TestNew_ReturnsProvider(t *testing.T) {
 }
 
 func TestStreamConverter_DrainsBufferedDoneMessage(t *testing.T) {
-	stream := newStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
+	stream := newStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929", "anthropic")
 	defer func() { _ = stream.Close() }()
 
 	buf := make([]byte, 4)
@@ -3527,7 +3527,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 		err: io.ErrUnexpectedEOF,
 	}
 
-	converter := newResponsesStreamConverter(reader, "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(reader, "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("ReadAll() error = %v, want io.ErrUnexpectedEOF surfaced after terminal events", err)
@@ -6415,7 +6415,7 @@ func assertAdaptiveHighEffort(t *testing.T, out *anthropicRequest) {
 // object of every emitted chat chunk.
 func chatStreamDeltas(t *testing.T, anthropicSSE string) []map[string]any {
 	t.Helper()
-	conv := newStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5")
+	conv := newStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5", "anthropic")
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
@@ -6441,6 +6441,66 @@ func chatStreamDeltas(t *testing.T, anthropicSSE string) []map[string]any {
 		}
 	}
 	return deltas
+}
+
+// Streamed events name the configured provider instance, as the buffered
+// response does, so two Anthropic instances stay distinguishable.
+func TestAnthropicStreamsNameTheProviderInstance(t *testing.T) {
+	const sse = "event: message_start\n" +
+		`data: {"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-5","usage":{"input_tokens":1,"output_tokens":0}}}` + "\n\n" +
+		"event: content_block_start\n" +
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+		"event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n\n"
+
+	tests := []struct {
+		name         string
+		converter    func() io.ReadCloser
+		wantProvider string
+	}{
+		{
+			name: "chat instance name",
+			converter: func() io.ReadCloser {
+				return newStreamConverter(io.NopCloser(strings.NewReader(sse)), "claude-sonnet-4-5", "anthropic-eu")
+			},
+			wantProvider: "anthropic-eu",
+		},
+		{
+			name: "chat without an instance name",
+			converter: func() io.ReadCloser {
+				return newStreamConverter(io.NopCloser(strings.NewReader(sse)), "claude-sonnet-4-5", "anthropic")
+			},
+			wantProvider: "anthropic",
+		},
+		{
+			name: "responses instance name",
+			converter: func() io.ReadCloser {
+				return newResponsesStreamConverter(io.NopCloser(strings.NewReader(sse)), "claude-sonnet-4-5", "anthropic-eu")
+			},
+			wantProvider: "anthropic-eu",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conv := tt.converter()
+			defer conv.Close() //nolint:errcheck
+
+			out, err := io.ReadAll(conv)
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			want := `"provider":"` + tt.wantProvider + `"`
+			if !strings.Contains(string(out), want) {
+				t.Fatalf("stream does not carry %s:\n%s", want, out)
+			}
+			if other := `"provider":"anthropic"`; tt.wantProvider != "anthropic" && strings.Contains(string(out), other) {
+				t.Fatalf("stream still carries the provider type:\n%s", out)
+			}
+		})
+	}
 }
 
 // lastExtraContent returns the last extra_content value seen on a delta, which
@@ -6571,7 +6631,7 @@ data: {"type":"message_stop"}
 // dialect and returns the decoded events.
 func responsesStreamEvents(t *testing.T, anthropicSSE string) []map[string]any {
 	t.Helper()
-	conv := newResponsesStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5")
+	conv := newResponsesStreamConverter(io.NopCloser(strings.NewReader(anthropicSSE)), "claude-sonnet-4-5", "anthropic")
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
@@ -6974,7 +7034,7 @@ event: message_stop
 data: {"type":"message_stop"}
 
 `
-	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	if err != nil {
 		t.Fatalf("failed to read from converter: %v", err)
@@ -7073,7 +7133,7 @@ event: message_stop
 data: {"type":"message_stop"}
 
 `
-	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader(stream)), "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	if err != nil {
 		t.Fatalf("failed to read from converter: %v", err)
@@ -7106,7 +7166,7 @@ data: {"type":"message_stop"}
 // response.created and response.in_progress before response.incomplete, so
 // stream helpers that snapshot the created response can finish cleanly.
 func TestStreamResponses_CutBeforeMessageStartStillOpens(t *testing.T) {
-	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929")
+	converter := newResponsesStreamConverter(io.NopCloser(strings.NewReader("")), "claude-sonnet-4-5-20250929", "anthropic")
 	raw, err := io.ReadAll(converter)
 	if err != nil {
 		t.Fatalf("failed to read from converter: %v", err)

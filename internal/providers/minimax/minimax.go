@@ -76,11 +76,11 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 // Responses sends a Responses API request to MiniMax using chat-completions
 // translation, dispatched through the clamped ChatCompletion above.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req, "minimax")
+	return providers.ResponsesViaChat(ctx, p, req, p.ProviderName())
 }
 
 // StreamResponses streams a Responses API request to MiniMax using
 // chat-completions translation, dispatched through the clamped streaming above.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return providers.StreamResponsesViaChat(ctx, p, req, "minimax")
+	return providers.StreamResponsesViaChat(ctx, p, req, p.ProviderName())
 }

@@ -74,6 +74,9 @@ type Provider struct {
 	keys         *providers.Keyring
 	backend      string
 	authType     string
+	// providerName is the configured instance name when the factory supplied
+	// one; empty for constructors invoked outside the factory.
+	providerName string
 	useNativeAPI bool
 	modelsURL    string
 	configErr    error
@@ -116,8 +119,9 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	if backend == geminiBackendVertex {
 		clientProviderName = "vertex"
 	}
+	p.providerName = opts.ClientName(clientProviderName)
 	clientCfg := llmclient.Config{
-		ProviderName:   opts.ClientName(clientProviderName),
+		ProviderName:   p.providerName,
 		BaseURL:        baseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -244,7 +248,13 @@ func (p *Provider) ready() error {
 	return core.NewProviderError(p.responseProviderName(), http.StatusBadGateway, "invalid Gemini provider configuration: "+p.configErr.Error(), p.configErr)
 }
 
+// responseProviderName names this provider in the values clients see: the
+// configured instance name when the factory supplied one, the provider type
+// otherwise.
 func (p *Provider) responseProviderName() string {
+	if p.providerName != "" {
+		return p.providerName
+	}
 	if p.backend == geminiBackendVertex {
 		return "vertex"
 	}

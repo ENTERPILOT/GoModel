@@ -79,12 +79,12 @@ func (p *Provider) StreamChatCompletion(ctx context.Context, req *core.ChatReque
 
 // Responses translates an OpenAI Responses request through Chutes chat completions.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req, "chutes")
+	return providers.ResponsesViaChat(ctx, p, req, p.compat.ProviderName())
 }
 
 // StreamResponses translates a streaming Responses request through Chutes chat completions.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return providers.StreamResponsesViaChat(ctx, p, req, "chutes")
+	return providers.StreamResponsesViaChat(ctx, p, req, p.compat.ProviderName())
 }
 
 // Embeddings returns an error because the shared Chutes LLM endpoint does not

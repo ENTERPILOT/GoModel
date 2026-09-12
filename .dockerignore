@@ -60,6 +60,9 @@ prometheus.yml
 # ===================
 .env
 .env.*
+# Local developer config (gitignored). The image ships config.example.yaml only;
+# runtime config comes from env vars or a mounted file.
+config/config.yaml
 
 # ===================
 # Miscellaneous

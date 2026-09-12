@@ -301,11 +301,22 @@ func applyAuthKeyResult(c *echo.Context, authResult authkeys.AuthenticationResul
 	auditlog.EnrichEntryWithAuthKeyID(c, authResult.ID)
 }
 
+// setAuthenticationUserHeader publishes the authenticated identity's user path
+// on the response. An empty path means the request has no identity to report,
+// so the header is removed rather than sent empty: that both keeps the header
+// off responses that never had a user path and hides an identity installed by
+// outer middleware.
 func setAuthenticationUserHeader(c *echo.Context, userPath string) {
 	if c == nil {
 		return
 	}
-	c.Response().Header().Set(ext.AuthenticationUserHeader, strings.TrimSpace(userPath))
+	header := c.Response().Header()
+	trimmed := strings.TrimSpace(userPath)
+	if trimmed == "" {
+		header.Del(ext.AuthenticationUserHeader)
+		return
+	}
+	header.Set(ext.AuthenticationUserHeader, trimmed)
 }
 
 func authFailureMessage(err error) string {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/pluginapi"
 )
 
@@ -401,5 +402,52 @@ func TestBlockErrorClampsStatus(t *testing.T) {
 	}
 	if got := BlockError(pluginapi.Block(0, "x", "y"), 99); got.HTTPStatusCode() != 400 {
 		t.Errorf("unusable default rendered as %d, want 400", got.HTTPStatusCode())
+	}
+}
+
+// No provider is involved in a plugin decision, so plugin errors must not
+// claim the provider_error type or name a provider.
+func TestPluginErrorsUseInternalErrorType(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *core.GatewayError
+		wantType core.ErrorType
+		wantCode string
+	}{
+		{
+			name:     "fail closed",
+			err:      FailureError(errFake),
+			wantType: core.ErrorTypeInternal,
+			wantCode: CodePluginFailure,
+		},
+		{
+			name:     "block with a 5xx status",
+			err:      BlockError(pluginapi.Block(0, "", ""), 502),
+			wantType: core.ErrorTypeInternal,
+			wantCode: CodeBlocked,
+		},
+		{
+			name:     "block with a 4xx status",
+			err:      BlockError(pluginapi.Block(0, "", ""), 400),
+			wantType: core.ErrorTypeInvalidRequest,
+			wantCode: CodeBlocked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.err.Type != tt.wantType {
+				t.Errorf("type = %q, want %q", tt.err.Type, tt.wantType)
+			}
+			if tt.err.Code == nil || *tt.err.Code != tt.wantCode {
+				t.Errorf("code = %v, want %q", tt.err.Code, tt.wantCode)
+			}
+			if tt.err.Provider != "" {
+				t.Errorf("provider = %q, want empty", tt.err.Provider)
+			}
+			if _, ok := tt.err.ToJSON()["error"].(map[string]any)["provider"]; ok {
+				t.Error("rendered error names a provider")
+			}
+		})
 	}
 }

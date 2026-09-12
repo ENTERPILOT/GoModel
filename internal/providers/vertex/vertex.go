@@ -55,6 +55,9 @@ type Provider struct {
 	gemini       *gemini.Provider
 	nativeClient *llmclient.Client
 	authType     string
+	// providerName is the configured instance name when the factory supplied
+	// one, the provider type otherwise.
+	providerName string
 	configErr    error
 }
 
@@ -66,7 +69,8 @@ func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) c
 func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOptions, baseHTTPClient *http.Client) *Provider {
 	providerCfg.Backend = "vertex"
 	p := &Provider{
-		authType: normalizeAuthType(providerCfg),
+		authType:     normalizeAuthType(providerCfg),
+		providerName: opts.ClientName("vertex"),
 	}
 	p.validateConfig(providerCfg)
 
@@ -77,7 +81,7 @@ func newProvider(providerCfg providers.ProviderConfig, opts providers.ProviderOp
 	p.gemini = gemini.NewVertexWithHTTPClient(providerCfg, opts, authClient)
 	nativeBaseURL := vertexNativeBaseURL(providerCfg)
 	nativeCfg := llmclient.Config{
-		ProviderName:   opts.ClientName("vertex"),
+		ProviderName:   p.providerName,
 		BaseURL:        nativeBaseURL,
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -223,7 +227,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.ResponsesViaChat(ctx, p, req, "vertex")
+	return providers.ResponsesViaChat(ctx, p, req, p.providerName)
 }
 
 // StreamResponses returns a raw response body for streaming Responses API.
@@ -231,7 +235,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.StreamResponsesViaChat(ctx, p, req, "vertex")
+	return providers.StreamResponsesViaChat(ctx, p, req, p.providerName)
 }
 
 // Embeddings sends an embedding request through Vertex AI native prediction.

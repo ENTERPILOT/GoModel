@@ -57,6 +57,20 @@ type Provider struct {
 	control   *bedrock.Client
 	hooks     llmclient.Hooks
 	configErr error
+	// instanceName is the configured provider instance name when the factory
+	// supplied one, the provider type otherwise. It names the provider in the
+	// values clients see.
+	instanceName string
+}
+
+// responseProviderName names this provider in the values clients see: the
+// configured instance name when the factory supplied one, the provider type
+// otherwise.
+func (p *Provider) responseProviderName() string {
+	if p.instanceName != "" {
+		return p.instanceName
+	}
+	return providerName
 }
 
 // New constructs a Bedrock provider from the resolved configuration.
@@ -65,7 +79,7 @@ type Provider struct {
 // qualified endpoint URL. When empty, the region is resolved from the
 // standard AWS environment variables / shared config.
 func New(providerCfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{hooks: opts.Hooks}
+	p := &Provider{hooks: opts.Hooks, instanceName: opts.ClientName(providerName)}
 
 	region, endpoint := parseBaseURL(providerCfg.BaseURL)
 	loadOpts := []func(*awsconfig.LoadOptions) error{}
@@ -235,7 +249,7 @@ func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.ResponsesViaChat(ctx, p, req, providerName)
+	return providers.ResponsesViaChat(ctx, p, req, p.responseProviderName())
 }
 
 // StreamResponses adapts the streaming Responses API onto Converse via the
@@ -244,7 +258,7 @@ func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesReque
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
-	return providers.StreamResponsesViaChat(ctx, p, req, providerName)
+	return providers.StreamResponsesViaChat(ctx, p, req, p.responseProviderName())
 }
 
 // mapAWSError converts an AWS SDK error into a gateway error preserving HTTP
