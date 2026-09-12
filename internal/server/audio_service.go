@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -243,8 +245,37 @@ func audioTranscriptionRequestFromForm(c *echo.Context, includeTranscriptionFiel
 		ResponseFormat:         strings.TrimSpace(c.FormValue("response_format")),
 		Temperature:            strings.TrimSpace(c.FormValue("temperature")),
 		TimestampGranularities: granularities,
+		Fields:                 passthroughFormFields(form),
 		Provider:               strings.TrimSpace(c.FormValue("provider")),
 	}, nil
+}
+
+// passthroughFormFields collects the form values the gateway does not consume
+// itself so they reach the provider unchanged (ADR-0011 rule 1). Names are
+// sorted for a deterministic upstream body; values sharing a name keep their
+// request order.
+func passthroughFormFields(form *multipart.Form) []core.FormField {
+	if form == nil {
+		return nil
+	}
+	names := make([]string, 0, len(form.Value))
+	for name := range form.Value {
+		if !core.ReservedAudioTranscriptionFormFields[name] {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+
+	fields := make([]core.FormField, 0, len(names))
+	for _, name := range names {
+		for _, value := range form.Value[name] {
+			fields = append(fields, core.FormField{Name: name, Value: value})
+		}
+	}
+	return fields
 }
 
 func (s *audioService) respondAudio(c *echo.Context, providerName string, resp *core.AudioResponse) error {
@@ -343,5 +374,29 @@ func audioTranscriptionAuditInput(req *core.AudioTranscriptionRequest) map[strin
 	if len(req.TimestampGranularities) > 0 {
 		meta["timestamp_granularities"] = req.TimestampGranularities
 	}
+	// Forwarded fields are arbitrary client input and may carry provider-native
+	// credentials, so the audit entry records only which ones were passed
+	// through, never their values.
+	if names := forwardedFieldNames(req.Fields); len(names) > 0 {
+		meta["forwarded_fields"] = names
+	}
 	return meta
+}
+
+// forwardedFieldNames lists the distinct passthrough field names in request
+// order, for the audit metadata.
+func forwardedFieldNames(fields []core.FormField) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		if _, ok := seen[field.Name]; ok {
+			continue
+		}
+		seen[field.Name] = struct{}{}
+		names = append(names, field.Name)
+	}
+	return names
 }

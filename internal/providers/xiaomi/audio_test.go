@@ -101,11 +101,40 @@ func TestCreateSpeech_MapsPCMAndRejectsUnsupportedFormats(t *testing.T) {
 		t.Fatalf("upstream body should request pcm16, got: %s", *gotBody)
 	}
 
-	_, err = provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
-		Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: "mp3",
-	})
-	if err == nil {
-		t.Fatal("CreateSpeech(mp3) succeeded, want unsupported-format error")
+	for _, format := range []string{"opus", "aac", "flac"} {
+		_, err = provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+			Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: format,
+		})
+		if err == nil {
+			t.Fatalf("CreateSpeech(%s) succeeded, want unsupported-format error", format)
+		}
+	}
+}
+
+// mp3 is OpenAI's documented default, so a client echoing it back is asking for
+// "unspecified" rather than for a codec MiMo cannot synthesize: it is answered
+// with wav, exactly like an omitted response_format.
+func TestCreateSpeech_TreatsMP3AsUnspecified(t *testing.T) {
+	for _, format := range []string{"", "mp3", "MP3", " mp3 ", "wav"} {
+		server, gotBody := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("wav")))
+		provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+
+		resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+			Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: format,
+		})
+		if err != nil {
+			server.Close()
+			t.Fatalf("CreateSpeech(%q) error = %v", format, err)
+		}
+		if resp.ContentType != "audio/wav" {
+			server.Close()
+			t.Fatalf("CreateSpeech(%q) ContentType = %q, want audio/wav", format, resp.ContentType)
+		}
+		if !strings.Contains(string(*gotBody), `"format":"wav"`) {
+			server.Close()
+			t.Fatalf("CreateSpeech(%q) upstream body should request wav, got: %s", format, *gotBody)
+		}
+		server.Close()
 	}
 }
 
