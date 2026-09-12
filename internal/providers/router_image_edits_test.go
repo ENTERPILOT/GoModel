@@ -3,10 +3,11 @@ package providers
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // mockImageEditProvider supports edits as well as generation, mirroring the
@@ -44,27 +45,16 @@ func TestRouterCreateImageEdit(t *testing.T) {
 
 	req := editRequest("gpt-image-1", "openai")
 	resp, err := router.CreateImageEdit(context.Background(), req)
-	if err != nil {
-		t.Fatalf("CreateImageEdit() error = %v", err)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].B64JSON != "aGk=" {
-		t.Errorf("response = %+v", resp)
-	}
-	if resp.Provider != "openai" {
-		t.Errorf("response provider = %q, want openai stamped", resp.Provider)
-	}
-	if editor.lastEditReq == nil {
-		t.Fatal("image edit provider was not called")
-	}
-	if editor.lastEditReq.Model != "gpt-image-1" || editor.lastEditReq.Provider != "" {
-		t.Errorf("forwarded selector = %q/%q, want provider metadata stripped", editor.lastEditReq.Provider, editor.lastEditReq.Model)
-	}
-	if len(editor.lastEditReq.Images) != 1 || string(editor.lastEditReq.Images[0].Data) != "png" {
-		t.Errorf("forwarded images = %+v", editor.lastEditReq.Images)
-	}
-	if req.Provider != "openai" {
-		t.Errorf("caller's request was mutated: provider = %q", req.Provider)
-	}
+	require.NoError(t, err)
+	assert.Len(t, resp.Data, 1)
+	assert.Equal(t, "aGk=", resp.Data[0].B64JSON, "response = %+v", resp)
+	assert.Equal(t, "openai", resp.Provider)
+	require.NotNil(t, editor.lastEditReq)
+	assert.Equal(t, "gpt-image-1", editor.lastEditReq.Model)
+	assert.Empty(t, editor.lastEditReq.Provider)
+	assert.Len(t, editor.lastEditReq.Images, 1)
+	assert.Equal(t, "png", string(editor.lastEditReq.Images[0].Data))
+	assert.Equal(t, "openai", req.Provider)
 }
 
 func TestRouterCreateImageEdit_Errors(t *testing.T) {
@@ -123,20 +113,16 @@ func TestRouterCreateImageEdit_Errors(t *testing.T) {
 				lookup.addModel(tt.model, tt.provider, tt.providerType)
 			}
 			router, err := NewRouter(lookup)
-			if err != nil {
-				t.Fatalf("NewRouter() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			_, err = router.CreateImageEdit(context.Background(), tt.req)
 			if tt.wantIs != nil {
-				if !errors.Is(err, tt.wantIs) {
-					t.Fatalf("CreateImageEdit() error = %v, want %v", err, tt.wantIs)
-				}
+				require.ErrorIs(t, err, tt.wantIs)
+
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("CreateImageEdit() error = %v, want message containing %q", err, tt.wantError)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantError)
 		})
 	}
 }

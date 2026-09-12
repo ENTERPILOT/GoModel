@@ -4,111 +4,76 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
-func TestCompatibleProvider_ListModels_ReturnsUpstreamOnSuccess(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-4o","object":"model","owned_by":"openai"}]}`))
-	}))
-	defer server.Close()
+// findRequest returns the first recorded request matching method and path.
+func findRequest(capture *providertest.Capture, method, path string) (providertest.Recorded, bool) {
+	for _, req := range capture.All() {
+		if req.Method == method && req.Path == path {
+			return req, true
+		}
+	}
+	return providertest.Recorded{}, false
+}
 
+func TestCompatibleProvider_ListModels_ReturnsUpstreamOnSuccess(t *testing.T) {
+	server, _ := providertest.JSONServer(t, http.StatusOK, providertest.ModelsJSON)
 	provider := NewCompatibleProviderWithHTTPClient(
 		"test-key",
 		server.Client(),
 		llmclient.Hooks{},
-		CompatibleProviderConfig{
-			ProviderName: "upstream-only",
-			BaseURL:      server.URL,
-		},
+		CompatibleProviderConfig{ProviderName: "upstream-only", BaseURL: server.URL},
 	)
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].ID != "gpt-4o" {
-		t.Fatalf("unexpected models: %+v", resp.Data)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, providertest.Model, resp.Data[0].ID)
 }
 
 func TestCompatibleProvider_ListModels_DefaultsMissingObjectFields(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"openrouter/model","object":"","owned_by":"openrouter"}]}`))
-	}))
-	defer server.Close()
-
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"data":[{"id":"openrouter/model","object":"","owned_by":"openrouter"}]}`)
 	provider := NewCompatibleProviderWithHTTPClient(
 		"test-key",
 		server.Client(),
 		llmclient.Hooks{},
-		CompatibleProviderConfig{
-			ProviderName: "openrouter",
-			BaseURL:      server.URL,
-		},
+		CompatibleProviderConfig{ProviderName: "openrouter", BaseURL: server.URL},
 	)
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if resp.Object != "list" {
-		t.Fatalf("response object = %q, want list", resp.Object)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("model count = %d, want 1", len(resp.Data))
-	}
-	if resp.Data[0].Object != "model" {
-		t.Fatalf("model object = %q, want model", resp.Data[0].Object)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "list", resp.Object)
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, "model", resp.Data[0].Object)
 }
 
 func TestCompatibleProvider_ListModels_ReturnsUpstreamError(t *testing.T) {
-	server := httptest.NewServer(http.NotFoundHandler())
-	defer server.Close()
-
+	server, _ := providertest.Server(t, http.NotFound)
 	provider := NewCompatibleProviderWithHTTPClient(
 		"test-key",
 		server.Client(),
 		llmclient.Hooks{},
-		CompatibleProviderConfig{
-			ProviderName: "test-provider",
-			BaseURL:      server.URL,
-		},
+		CompatibleProviderConfig{ProviderName: "test-provider", BaseURL: server.URL},
 	)
 
 	_, err := provider.ListModels(context.Background())
-	if err == nil {
-		t.Fatal("expected error when upstream fails, got nil")
-	}
-	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("error type = %T, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider && gatewayErr.Type != core.ErrorTypeNotFound {
-		t.Errorf("gatewayErr.Type = %q, want provider_error or not_found_error", gatewayErr.Type)
-	}
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Contains(t, []core.ErrorType{core.ErrorTypeProvider, core.ErrorTypeNotFound}, gatewayErr.Type)
 }
 
 func TestCompatibleProvider_AdaptChatRequest_RewritesBodyOnChatAndStream(t *testing.T) {
-	var bodies []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, string(raw))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"resp","model":"quirk-1","choices":[]}`))
-	}))
-	defer server.Close()
-
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"resp","model":"quirk-1","choices":[]}`)
 	provider := NewCompatibleProviderWithHTTPClient(
 		"test-key",
 		server.Client(),
@@ -125,36 +90,24 @@ func TestCompatibleProvider_AdaptChatRequest_RewritesBodyOnChatAndStream(t *test
 	)
 
 	original := &core.ChatRequest{Model: "quirk-1", User: "original-user"}
-	if _, err := provider.ChatCompletion(context.Background(), original); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	_, err := provider.ChatCompletion(context.Background(), original)
+	require.NoError(t, err)
+
 	stream, err := provider.StreamChatCompletion(context.Background(), original)
-	if err != nil {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	_, _ = io.ReadAll(stream)
 	stream.Close()
 
-	if len(bodies) != 2 {
-		t.Fatalf("upstream requests = %d, want 2", len(bodies))
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	for _, req := range requests {
+		assert.Equal(t, "adapted-user", req.JSON(t)["user"])
 	}
-	for i, body := range bodies {
-		if !strings.Contains(body, `"adapted-user"`) {
-			t.Fatalf("request %d body = %s, want adapted user", i, body)
-		}
-	}
-	if original.User != "original-user" {
-		t.Fatalf("original request mutated: User = %q", original.User)
-	}
+	assert.Equal(t, "original-user", original.User, "the caller's request must not be mutated")
 }
 
 func TestCompatibleProvider_AdaptChatRequest_ErrorAborts(t *testing.T) {
-	upstreamCalled := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstreamCalled = true
-	}))
-	defer server.Close()
-
+	server, capture := providertest.Server(t, nil)
 	provider := NewCompatibleProviderWithHTTPClient(
 		"test-key",
 		server.Client(),
@@ -167,32 +120,18 @@ func TestCompatibleProvider_AdaptChatRequest_ErrorAborts(t *testing.T) {
 			},
 		},
 	)
-
-	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "m"}); err == nil {
-		t.Fatal("ChatCompletion() error = nil, want adapter error")
-	}
-	if _, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "m"}); err == nil {
-		t.Fatal("StreamChatCompletion() error = nil, want adapter error")
-	}
-	if upstreamCalled {
-		t.Fatal("upstream called despite adapter error")
-	}
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "m"})
+	require.Error(t, err)
+	_, err = provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "m"})
+	require.Error(t, err)
+	assert.Zero(t, capture.Count(), "upstream must not be called when adaptation fails")
 }
 
 func TestCompatibleProvider_ChatRequestHeaders_AppliedToChatOnly(t *testing.T) {
-	headersByPath := map[string][]string{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		headersByPath[r.URL.Path] = append(headersByPath[r.URL.Path], r.Header.Get("X-Conv-Id"))
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/models":
-			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
-		default:
-			_, _ = w.Write([]byte(`{"id":"resp","model":"m","choices":[]}`))
-		}
-	}))
-	defer server.Close()
-
+	server, capture := providertest.RouteServer(t, map[string]http.HandlerFunc{
+		"/models":           jsonHandler(`{"object":"list","data":[]}`),
+		"/chat/completions": jsonHandler(`{"id":"resp","model":"m","choices":[]}`),
+	})
 	provider := NewCompatibleProviderWithHTTPClient(
 		"test-key",
 		server.Client(),
@@ -207,33 +146,29 @@ func TestCompatibleProvider_ChatRequestHeaders_AppliedToChatOnly(t *testing.T) {
 			},
 		},
 	)
+	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "m"})
+	require.NoError(t, err)
 
-	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{Model: "m"}); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{Model: "m"})
-	if err != nil {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	_, _ = io.ReadAll(stream)
 	stream.Close()
-	if _, err := provider.ListModels(context.Background()); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
 
-	for _, got := range headersByPath["/chat/completions"] {
-		if got != "conv-m" {
-			t.Fatalf("chat X-Conv-Id = %q, want conv-m", got)
+	_, err = provider.ListModels(context.Background())
+	require.NoError(t, err)
+
+	requests := capture.All()
+	require.Len(t, requests, 3)
+	chatRequests := 0
+	for _, req := range requests {
+		want := ""
+		if req.Path == "/chat/completions" {
+			want = "conv-m"
+			chatRequests++
 		}
+		assert.Equal(t, want, req.Header.Get("X-Conv-Id"), req.Path)
 	}
-	if len(headersByPath["/chat/completions"]) != 2 {
-		t.Fatalf("chat requests = %d, want 2", len(headersByPath["/chat/completions"]))
-	}
-	for _, got := range headersByPath["/models"] {
-		if got != "" {
-			t.Fatalf("models X-Conv-Id = %q, want empty", got)
-		}
-	}
+	assert.Equal(t, 2, chatRequests)
 }
 
 func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
@@ -260,12 +195,7 @@ func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var uploadedJSONL string
-			var batchCreateBody map[string]any
-			batchCalled := false
-			fileDeleted := false
-
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
 				case r.URL.Path == "/files" && r.Method == http.MethodPost:
@@ -274,35 +204,21 @@ func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
 						_, _ = w.Write([]byte(`{"error":{"message":"upload boom"}}`))
 						return
 					}
-					if err := r.ParseMultipartForm(1 << 20); err != nil {
-						t.Fatalf("parse multipart: %v", err)
-					}
-					file, _, err := r.FormFile("file")
-					if err != nil {
-						t.Fatalf("read file part: %v", err)
-					}
-					content, _ := io.ReadAll(file)
-					uploadedJSONL = string(content)
 					_, _ = w.Write([]byte(`{"id":"file-abc","object":"file","purpose":"batch"}`))
 				case r.URL.Path == "/batches" && r.Method == http.MethodPost:
-					batchCalled = true
 					if tc.batchStatus != http.StatusOK {
 						w.WriteHeader(tc.batchStatus)
 						_, _ = w.Write([]byte(`{"error":{"message":"create boom"}}`))
 						return
 					}
-					if err := json.NewDecoder(r.Body).Decode(&batchCreateBody); err != nil {
-						t.Fatalf("decode batch body: %v", err)
-					}
 					_, _ = w.Write([]byte(`{"id":"batch-up-1","object":"batch","status":"validating","input_file_id":"file-abc"}`))
 				case r.URL.Path == "/files/file-abc" && r.Method == http.MethodDelete:
-					fileDeleted = true
 					_, _ = w.Write([]byte(`{"id":"file-abc","object":"file","deleted":true}`))
 				default:
-					t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+					assert.Failf(t, "unexpected upstream request", "%s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
 				}
-			}))
-			defer server.Close()
+			})
 
 			provider := NewCompatibleProviderWithHTTPClient(
 				"test-key",
@@ -312,42 +228,36 @@ func TestCompatibleProvider_CreateBatch_InlineRequests(t *testing.T) {
 			)
 
 			resp, err := provider.CreateBatch(context.Background(), inlineReq)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("CreateBatch: %v", err)
-				}
-				if resp.ID != "batch-up-1" {
-					t.Fatalf("batch id = %q", resp.ID)
-				}
 
-				lines := strings.Split(strings.TrimSpace(uploadedJSONL), "\n")
-				if len(lines) != 2 {
-					t.Fatalf("uploaded JSONL lines = %d content=%q", len(lines), uploadedJSONL)
-				}
-				var first map[string]any
-				if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-					t.Fatalf("first line: %v", err)
-				}
-				if first["custom_id"] != "a" || first["url"] != "/v1/chat/completions" || first["method"] != "POST" {
-					t.Fatalf("first line = %v", first)
-				}
-				if batchCreateBody["input_file_id"] != "file-abc" {
-					t.Fatalf("batch create input_file_id = %v", batchCreateBody["input_file_id"])
-				}
-				if _, hasInline := batchCreateBody["requests"]; hasInline {
-					t.Fatalf("inline requests leaked to the provider create body: %v", batchCreateBody)
-				}
+			_, batchCalled := findRequest(capture, http.MethodPost, "/batches")
+			assert.Equal(t, tc.wantBatchCall, batchCalled, "batch create call")
+			_, fileDeleted := findRequest(capture, http.MethodDelete, "/files/file-abc")
+			assert.Equal(t, tc.wantFileDeleted, fileDeleted, "uploaded file cleanup")
+
+			if tc.wantErr {
+				require.Error(t, err)
+				return
 			}
-			if batchCalled != tc.wantBatchCall {
-				t.Fatalf("batch endpoint called = %v, want %v", batchCalled, tc.wantBatchCall)
-			}
-			if fileDeleted != tc.wantFileDeleted {
-				t.Fatalf("input file deleted = %v, want %v", fileDeleted, tc.wantFileDeleted)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, "batch-up-1", resp.ID)
+
+			upload, ok := findRequest(capture, http.MethodPost, "/files")
+			require.True(t, ok, "inline requests must be uploaded as a file")
+			uploaded := recordedMultipart(t, upload).files["file"]
+			require.Len(t, uploaded, 1)
+			lines := strings.Split(strings.TrimSpace(uploaded[0].data), "\n")
+			require.Len(t, lines, 2)
+			var first map[string]any
+			require.NoError(t, json.Unmarshal([]byte(lines[0]), &first))
+			assert.Equal(t, "a", first["custom_id"])
+			assert.Equal(t, "/v1/chat/completions", first["url"])
+			assert.Equal(t, "POST", first["method"])
+
+			create, ok := findRequest(capture, http.MethodPost, "/batches")
+			require.True(t, ok)
+			body := create.JSON(t)
+			assert.Equal(t, "file-abc", body["input_file_id"])
+			assert.NotContains(t, body, "requests", "inline requests leaked to the provider create body")
 		})
 	}
 }

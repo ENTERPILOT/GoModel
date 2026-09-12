@@ -2,14 +2,13 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFetchBatchResultsFromOutputFile(t *testing.T) {
@@ -32,21 +31,13 @@ func TestFetchBatchResultsFromOutputFile(t *testing.T) {
 
 	client := llmclient.NewWithHTTPClient(server.Client(), llmclient.DefaultConfig("openai", server.URL), nil)
 	resp, err := FetchBatchResultsFromOutputFile(context.Background(), client, "openai", "batch_1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.BatchID != "batch_1" {
-		t.Fatalf("BatchID = %q, want %q", resp.BatchID, "batch_1")
-	}
-	if len(resp.Data) != 2 {
-		t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
-	}
-	if resp.Data[0].StatusCode != 200 || resp.Data[0].Model != "gpt-4o-mini" {
-		t.Fatalf("unexpected first row: %+v", resp.Data[0])
-	}
-	if resp.Data[1].Error == nil || resp.Data[1].Error.Type != "invalid_request_error" {
-		t.Fatalf("unexpected error row: %+v", resp.Data[1])
-	}
+	require.NoError(t, err)
+	require.Equal(t, "batch_1", resp.BatchID)
+	require.Len(t, resp.Data, 2)
+	require.Equal(t, 200, resp.Data[0].StatusCode)
+	require.Equal(t, "gpt-4o-mini", resp.Data[0].Model, "unexpected first row: %+v", resp.Data[0])
+	require.NotNil(t, resp.Data[1].Error)
+	require.Equal(t, "invalid_request_error", resp.Data[1].Error.Type, "unexpected error row: %+v", resp.Data[1])
 }
 
 func TestFetchBatchResultsFromOutputFilePending(t *testing.T) {
@@ -62,16 +53,11 @@ func TestFetchBatchResultsFromOutputFilePending(t *testing.T) {
 
 	client := llmclient.NewWithHTTPClient(server.Client(), llmclient.DefaultConfig("openai", server.URL), nil)
 	_, err := FetchBatchResultsFromOutputFile(context.Background(), client, "openai", "batch_2")
-	if err == nil {
-		t.Fatal("expected error")
-	}
+	require.Error(t, err)
+
 	var gwErr *core.GatewayError
-	if !errors.As(err, &gwErr) {
-		t.Fatalf("expected GatewayError, got %T: %v", err, err)
-	}
-	if gwErr.HTTPStatusCode() != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", gwErr.HTTPStatusCode(), http.StatusConflict)
-	}
+	require.ErrorAs(t, err, &gwErr)
+	require.Equal(t, http.StatusConflict, gwErr.HTTPStatusCode())
 }
 
 func TestFetchBatchResultsFromOpenAICompatibleEndpoints_ReturnsProviderErrorOnNilBatchResponse(t *testing.T) {
@@ -107,19 +93,12 @@ func TestFetchBatchResultsFromOpenAICompatibleEndpoints_ReturnsProviderErrorOnNi
 					return nil, nil
 				},
 			)
-			if err == nil {
-				t.Fatal("expected error")
-			}
+			require.Error(t, err)
+
 			var gwErr *core.GatewayError
-			if !errors.As(err, &gwErr) {
-				t.Fatalf("expected GatewayError, got %T: %v", err, err)
-			}
-			if gwErr.Type != core.ErrorTypeProvider {
-				t.Fatalf("error type = %q, want %q", gwErr.Type, core.ErrorTypeProvider)
-			}
-			if !strings.Contains(gwErr.Message, tt.wantError) {
-				t.Fatalf("message = %q, want substring %q", gwErr.Message, tt.wantError)
-			}
+			require.ErrorAs(t, err, &gwErr)
+			require.Equal(t, core.ErrorTypeProvider, gwErr.Type)
+			require.Contains(t, gwErr.Message, tt.wantError)
 		})
 	}
 }

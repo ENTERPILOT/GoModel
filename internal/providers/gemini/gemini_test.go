@@ -1,10 +1,8 @@
 package gemini
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +17,9 @@ import (
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/googlecommon"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"golang.org/x/oauth2"
 )
@@ -27,32 +28,14 @@ func TestNew(t *testing.T) {
 	apiKey := "test-api-key"
 	// Use NewWithHTTPClient to get concrete type for internal testing
 	provider := NewWithHTTPClient(apiKey, nil, llmclient.Hooks{})
-
-	if got := provider.keys.Primary(); got != apiKey {
-		t.Errorf("primary key = %q, want %q", got, apiKey)
-	}
-	if provider.modelsURL != defaultModelsBaseURL {
-		t.Errorf("modelsURL = %q, want %q", provider.modelsURL, defaultModelsBaseURL)
-	}
-	if provider.client == nil {
-		t.Error("client should not be nil")
-	}
+	got := provider.keys.Primary()
+	assert.Equal(t, apiKey, got)
+	assert.Equal(t, defaultModelsBaseURL, provider.modelsURL)
+	assert.NotNil(t, provider.client)
 }
 
 func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
-	var creates atomic.Int32
-	var wrongPath atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/cachedContents" {
-			wrongPath.Store(true)
-			http.Error(w, "wrong path", http.StatusNotFound)
-			return
-		}
-		creates.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"name":"cachedContents/session-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"name":"cachedContents/session-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
 
 	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
@@ -71,27 +54,18 @@ func TestPrepareCachedContentCreatesAndReusesObject(t *testing.T) {
 	p.prepareCachedContent(context.Background(), req, first)
 	second := newBody()
 	p.prepareCachedContent(context.Background(), req, second)
-	if creates.Load() != 1 {
-		t.Fatalf("cache creates = %d, want 1", creates.Load())
-	}
-	if wrongPath.Load() {
-		t.Fatal("cached-content request used the wrong path")
-	}
+	require.Equal(t, 1, capture.Count())
+	require.Equal(t, "/cachedContents", capture.Last(t).Path)
+
 	for i, body := range []*geminiGenerateContentRequest{first, second} {
-		if body.CachedContent != "cachedContents/session-prefix" || len(body.Contents) != 1 || body.SystemInstruction != nil {
-			t.Fatalf("body %d did not use cached prefix: %+v", i, body)
-		}
+		require.Equal(t, "cachedContents/session-prefix", body.CachedContent)
+		require.Len(t, body.Contents, 1)
+		require.Nil(t, body.SystemInstruction, "body %d did not use cached prefix: %+v", i, body)
 	}
 }
 
 func TestPrepareCachedContentSupportsSystemOnlyPrefix(t *testing.T) {
-	var creates atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		creates.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"name":"cachedContents/system-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"name":"cachedContents/system-prefix","expireTime":"2099-01-01T00:00:00Z"}`)
 	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "system"}}
@@ -100,18 +74,14 @@ func TestPrepareCachedContentSupportsSystemOnlyPrefix(t *testing.T) {
 		Contents:          []geminiContent{{Role: "user", Parts: []geminiPart{{Text: "live turn"}}}},
 	}
 	p.prepareCachedContent(context.Background(), req, body)
-	if creates.Load() != 1 || body.CachedContent != "cachedContents/system-prefix" || len(body.Contents) != 1 || body.SystemInstruction != nil {
-		t.Fatalf("system prefix was not cached: creates=%d body=%+v", creates.Load(), body)
-	}
+	require.Equal(t, 1, capture.Count())
+	require.Equal(t, "cachedContents/system-prefix", body.CachedContent)
+	require.Len(t, body.Contents, 1)
+	require.Nil(t, body.SystemInstruction, "system prefix was not cached: %+v", body)
 }
 
 func TestPrepareCachedContentFailureIsBestEffortAndBackedOff(t *testing.T) {
-	var creates atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		creates.Add(1)
-		http.Error(w, "unsupported", http.StatusBadRequest)
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusBadRequest, `{"error":{"message":"unsupported"}}`)
 	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "failure"}}
@@ -127,28 +97,24 @@ func TestPrepareCachedContentFailureIsBestEffortAndBackedOff(t *testing.T) {
 	secondBefore, _ := json.Marshal(second)
 	p.prepareCachedContent(context.Background(), req, first)
 	p.prepareCachedContent(context.Background(), req, second)
-	if creates.Load() != 1 {
-		t.Fatalf("failed creation attempts = %d, want one during backoff", creates.Load())
-	}
+	require.Equal(t, 1, capture.Count(), "second call must be backed off")
+
 	firstAfter, _ := json.Marshal(first)
 	secondAfter, _ := json.Marshal(second)
-	if !bytes.Equal(firstBefore, firstAfter) || !bytes.Equal(secondBefore, secondAfter) {
-		t.Fatalf("failed best-effort creation modified requests: %s / %s", firstAfter, secondAfter)
-	}
+	require.Equal(t, firstAfter, firstBefore)
+	require.Equal(t, secondAfter, secondBefore)
 }
 
 func TestPrepareCachedContentEmptyNameAndExpiringEntry(t *testing.T) {
 	var creates atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		call := creates.Add(1)
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if call == 1 {
+		if creates.Add(1) == 1 {
 			_, _ = io.WriteString(w, `{}`)
 			return
 		}
 		_, _ = io.WriteString(w, `{"name":"cachedContents/recreated","expireTime":"2099-01-01T00:00:00Z"}`)
-	}))
-	defer server.Close()
+	})
 	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "expiry"}}
@@ -159,38 +125,33 @@ func TestPrepareCachedContentEmptyNameAndExpiringEntry(t *testing.T) {
 	before, _ := json.Marshal(failed)
 	p.prepareCachedContent(context.Background(), req, failed)
 	after, _ := json.Marshal(failed)
-	if !bytes.Equal(before, after) {
-		t.Fatalf("empty-name failure modified request: %s", after)
-	}
+	require.Equal(t, after, before)
+
 	scopedKey, ok := p.scopedCachedContentKey(context.Background(), req.PromptCachePlan.Key)
-	if !ok {
-		t.Fatal("single credential did not produce a stable key")
-	}
+	require.True(t, ok)
+
 	p.cacheMu.Lock()
 	p.cacheObjects[scopedKey] = geminiCacheObject{name: "cachedContents/expiring", expiresAt: time.Now().Add(5 * time.Second)}
 	p.cacheMu.Unlock()
 	recreated := newBody()
 	p.prepareCachedContent(context.Background(), req, recreated)
-	if creates.Load() != 2 || recreated.CachedContent != "cachedContents/recreated" {
-		t.Fatalf("expiring entry was not recreated: creates=%d body=%+v", creates.Load(), recreated)
-	}
+	require.Equal(t, int32(2), creates.Load())
+	require.Equal(t, "cachedContents/recreated", recreated.CachedContent, "expiring entry was not recreated: %+v", recreated)
 }
 
 func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
 	const callers = 12
-	var creates, begun atomic.Int32
+	var begun atomic.Int32
 	allBegun := make(chan struct{})
 	handlerEntered := make(chan struct{}, 1)
 	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		creates.Add(1)
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		handlerEntered <- struct{}{}
 		<-allBegun
 		<-release
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"name":"cachedContents/concurrent","expireTime":"2099-01-01T00:00:00Z"}`)
-	}))
-	defer server.Close()
+	})
 	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	req := &core.ChatRequest{Model: "gemini-2.5-pro", PromptCachePlan: &core.PromptCachePlan{Key: "concurrent"}}
@@ -209,44 +170,35 @@ func TestPrepareCachedContentCoalescesConcurrentCreation(t *testing.T) {
 	<-allBegun
 	close(release)
 	wg.Wait()
-	if got := creates.Load(); got != 1 {
-		t.Fatalf("concurrent cache creates = %d, want 1", got)
-	}
+	require.Equal(t, 1, capture.Count())
+
 	for i, body := range bodies {
-		if body.CachedContent != "cachedContents/concurrent" {
-			t.Fatalf("caller %d did not receive shared cache object: %+v", i, body)
-		}
+		require.Equal(t, "cachedContents/concurrent", body.CachedContent, "caller %d did not receive shared cache object: %+v", i, body)
 	}
 }
 
 func TestPrepareCachedContentRequiresStableCredentialAndAIStudio(t *testing.T) {
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		requests.Add(1)
-	}))
-	defer server.Close()
+	server, capture := providertest.Server(t, nil)
 	p := NewWithHTTPClient("key", server.Client(), llmclient.Hooks{})
 	p.SetBaseURL(server.URL)
 	p.keys = providers.NewKeyring("one", "two")
 	req := &core.ChatRequest{PromptCachePlan: &core.PromptCachePlan{Key: "prefix"}}
 	body := &geminiGenerateContentRequest{SystemInstruction: &geminiContent{}, Contents: []geminiContent{{Role: "user"}}}
-	if _, ok := p.scopedCachedContentKey(context.Background(), "prefix"); ok {
-		t.Fatal("sessionless rotating credentials must not own reusable cache objects")
-	}
+	_, ok := p.scopedCachedContentKey(context.Background(), "prefix")
+	require.False(t, ok)
+
 	ctx := core.WithSessionID(context.Background(), "session-a")
 	first, ok := p.scopedCachedContentKey(ctx, "prefix")
 	second, ok2 := p.scopedCachedContentKey(ctx, "prefix")
-	if !ok || !ok2 || first == "" || first != second {
-		t.Fatalf("sticky credential key is unstable: %q %q", first, second)
-	}
+	require.True(t, ok)
+	require.True(t, ok2)
+	require.NotEmpty(t, first)
+	require.Equal(t, second, first)
+
 	p.backend = geminiBackendVertex
 	p.prepareCachedContent(ctx, req, body)
-	if body.CachedContent != "" {
-		t.Fatal("Vertex must not use the AI Studio cachedContents endpoint")
-	}
-	if got := requests.Load(); got != 0 {
-		t.Fatalf("Vertex cache preparation made %d cachedContents requests, want none", got)
-	}
+	require.Empty(t, body.CachedContent)
+	require.Zero(t, capture.Count())
 }
 
 func TestGeminiCacheObjectMapIsBoundedAndSweepsExpiredEntries(t *testing.T) {
@@ -258,20 +210,9 @@ func TestGeminiCacheObjectMapIsBoundedAndSweepsExpiredEntries(t *testing.T) {
 	for i := range geminiCacheObjectLimit + 20 {
 		p.storeCachedContentObject(fmt.Sprintf("key-%d", i), geminiCacheObject{name: "cache", expiresAt: now.Add(time.Hour)}, now)
 	}
-	if _, exists := p.cacheObjects["expired"]; exists {
-		t.Fatal("expired entry was not swept")
-	}
-	if got := len(p.cacheObjects); got > geminiCacheObjectLimit {
-		t.Fatalf("cache object map size = %d, limit = %d", got, geminiCacheObjectLimit)
-	}
-}
-
-func TestNew_ReturnsProvider(t *testing.T) {
-	provider := New(providers.ProviderConfig{APIKey: "test-api-key"}, providers.ProviderOptions{})
-
-	if provider == nil {
-		t.Error("provider should not be nil")
-	}
+	_, exists := p.cacheObjects["expired"]
+	require.False(t, exists)
+	require.LessOrEqual(t, len(p.cacheObjects), geminiCacheObjectLimit)
 }
 
 func TestNew_AIStudioRejectsGCPAuthAliases(t *testing.T) {
@@ -283,16 +224,11 @@ func TestNew_AIStudioRejectsGCPAuthAliases(t *testing.T) {
 			}, providers.ProviderOptions{})
 
 			geminiProvider, ok := provider.(*Provider)
-			if !ok {
-				t.Fatalf("provider type = %T, want *Provider", provider)
-			}
+			require.True(t, ok, "provider type = %T, want *Provider", provider)
+
 			err := geminiProvider.ready()
-			if err == nil {
-				t.Fatal("expected GCP auth alias to be rejected for AI Studio")
-			}
-			if !strings.Contains(err.Error(), "ai studio backend does not support GCP auth") {
-				t.Fatalf("error = %v, want AI Studio GCP auth rejection", err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "ai studio backend does not support GCP auth")
 		})
 	}
 }
@@ -305,10 +241,8 @@ func TestNew_VertexAcceptsGCPAuthAliases(t *testing.T) {
 				VertexProject:  "prod-ai",
 				VertexLocation: "us-central1",
 			}, providers.ProviderOptions{}, http.DefaultClient)
-
-			if err := p.ready(); err != nil {
-				t.Fatalf("ready() error = %v, want nil for Vertex auth alias", err)
-			}
+			err := p.ready()
+			require.NoError(t, err)
 		})
 	}
 }
@@ -320,16 +254,11 @@ func TestNew_VertexConfigErrorUsesVertexProviderName(t *testing.T) {
 	}, providers.ProviderOptions{}, http.DefaultClient)
 
 	err := p.ready()
-	if err == nil {
-		t.Fatal("expected config error, got nil")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
-	}
-	if gatewayErr.Provider != "vertex" {
-		t.Fatalf("provider = %q, want vertex", gatewayErr.Provider)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, "vertex", gatewayErr.Provider)
 }
 
 func TestGeminiBaseURLs(t *testing.T) {
@@ -373,12 +302,8 @@ func TestGeminiBaseURLs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotCompat, gotNative := geminiBaseURLs(providers.ProviderConfig{BaseURL: tt.configured}, geminiBackendAIStudio)
-			if gotCompat != tt.wantCompat {
-				t.Fatalf("OpenAI-compatible base = %q, want %q", gotCompat, tt.wantCompat)
-			}
-			if gotNative != tt.wantNative {
-				t.Fatalf("native base = %q, want %q", gotNative, tt.wantNative)
-			}
+			require.Equal(t, tt.wantCompat, gotCompat)
+			require.Equal(t, tt.wantNative, gotNative)
 		})
 	}
 }
@@ -420,12 +345,8 @@ func TestVertexBaseURLs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gotCompat, gotNative := geminiBaseURLs(tt.cfg, geminiBackendVertex)
-			if gotCompat != tt.wantCompat {
-				t.Fatalf("OpenAI-compatible base = %q, want %q", gotCompat, tt.wantCompat)
-			}
-			if gotNative != tt.wantNative {
-				t.Fatalf("native base = %q, want %q", gotNative, tt.wantNative)
-			}
+			require.Equal(t, tt.wantCompat, gotCompat)
+			require.Equal(t, tt.wantNative, gotNative)
 		})
 	}
 }
@@ -455,9 +376,8 @@ func TestVertexModelsBaseURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := geminiModelsBaseURL(geminiBackendVertex, tt.nativeBase); got != tt.want {
-				t.Fatalf("geminiModelsBaseURL() = %q, want %q", got, tt.want)
-			}
+			got := geminiModelsBaseURL(geminiBackendVertex, tt.nativeBase)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -467,10 +387,8 @@ func TestNewVertexWithHTTPClientAcceptsBaseURLWithoutProjectLocation(t *testing.
 		BaseURL:  "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google",
 		AuthType: "gcp_adc",
 	}, providers.ProviderOptions{}, http.DefaultClient)
-
-	if err := p.ready(); err != nil {
-		t.Fatalf("ready() error = %v, want nil for Vertex custom base URL", err)
-	}
+	err := p.ready()
+	require.NoError(t, err)
 }
 
 func TestVertexModelNormalization(t *testing.T) {
@@ -491,12 +409,10 @@ func TestVertexModelNormalization(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			if got := normalizeGeminiModelID(tt.in); got != tt.wantNative {
-				t.Fatalf("normalizeGeminiModelID() = %q, want %q", got, tt.wantNative)
-			}
-			if got := vertexOpenAIModelID(tt.in); got != tt.wantOpenAI {
-				t.Fatalf("vertexOpenAIModelID() = %q, want %q", got, tt.wantOpenAI)
-			}
+			got := normalizeGeminiModelID(tt.in)
+			require.Equal(t, tt.wantNative, got)
+			got = vertexOpenAIModelID(tt.in)
+			require.Equal(t, tt.wantOpenAI, got)
 		})
 	}
 }
@@ -510,51 +426,23 @@ func TestNew_CustomBaseURLDerivesNativeBaseURL(t *testing.T) {
 	}, providers.ProviderOptions{})
 
 	geminiProvider, ok := provider.(*Provider)
-	if !ok {
-		t.Fatalf("provider type = %T, want *Provider", provider)
-	}
-	if !geminiProvider.useNativeAPI {
-		t.Fatal("useNativeAPI = false, want true for custom OpenAI-compatible base URL")
-	}
-	if got := geminiProvider.client.BaseURL(); got != "https://proxy.example.com/v1beta/openai" {
-		t.Fatalf("client.BaseURL() = %q, want OpenAI-compatible base URL", got)
-	}
-	if geminiProvider.modelsURL != "https://proxy.example.com/v1beta" {
-		t.Fatalf("modelsURL = %q, want derived native base URL", geminiProvider.modelsURL)
-	}
-	if geminiProvider.nativeClient.BaseURL() != "https://proxy.example.com/v1beta" {
-		t.Fatalf("nativeClient.BaseURL() = %q, want derived native base URL", geminiProvider.nativeClient.BaseURL())
-	}
+	require.True(t, ok, "provider type = %T, want *Provider", provider)
+	require.True(t, geminiProvider.useNativeAPI)
+	require.Equal(t, "https://proxy.example.com/v1beta/openai", geminiProvider.client.BaseURL())
+	require.Equal(t, "https://proxy.example.com/v1beta", geminiProvider.modelsURL)
+	require.Equal(t, "https://proxy.example.com/v1beta", geminiProvider.nativeClient.BaseURL())
 }
 
 func TestSetBaseURLDerivesNativeRouting(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	nativeHit := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/openai/") {
-			t.Fatalf("native routing used OpenAI-compatible path %q", r.URL.Path)
-		}
-		nativeHit = true
-		if r.URL.Path != "/v1beta/models/gemini-2.5-flash:generateContent" {
-			t.Errorf("native path = %q, want /v1beta/models/gemini-2.5-flash:generateContent", r.URL.Path)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
-			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "" {
-			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "gemini-native-baseurl",
-			"candidates": [{
-				"content": {"role": "model", "parts": [{"text": "ok"}]},
-				"finishReason": "STOP"
-			}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "gemini-native-baseurl",
+		"candidates": [{
+			"content": {"role": "model", "parts": [{"text": "ok"}]},
+			"finishReason": "STOP"
+		}]
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
@@ -565,68 +453,43 @@ func TestSetBaseURLDerivesNativeRouting(t *testing.T) {
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || resp.ID != "gemini-native-baseurl" {
-		t.Fatalf("response = %+v, want native response", resp)
-	}
-	if !nativeHit {
-		t.Fatal("native server was not called")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "gemini-native-baseurl", resp.ID)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1beta/models/gemini-2.5-flash:generateContent", sent.Path)
+	assert.Equal(t, "test-api-key", sent.Header.Get("x-goog-api-key"))
+	assert.Empty(t, sent.Header.Get("Authorization"))
 }
 
 func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	modelsHit := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		modelsHit = true
-		if strings.Contains(r.URL.Path, "/openai/") {
-			t.Fatalf("models request used OpenAI-compatible path %q", r.URL.Path)
-		}
-		if r.URL.Path != "/v1beta/models" {
-			t.Errorf("models path = %q, want /v1beta/models", r.URL.Path)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
-			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"models": [{
-				"name": "models/gemini-2.5-flash",
-				"displayName": "Gemini 2.5 Flash",
-				"supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
-				"inputTokenLimit": 1048576,
-				"outputTokenLimit": 8192
-			}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"models": [{
+			"name": "models/gemini-2.5-flash",
+			"displayName": "Gemini 2.5 Flash",
+			"supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+			"inputTokenLimit": 1048576,
+			"outputTokenLimit": 8192
+		}]
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
-	if provider.client.BaseURL() != server.URL+"/v1beta/openai" {
-		t.Fatalf("client.BaseURL() = %q, want OpenAI-compatible base URL", provider.client.BaseURL())
-	}
-	if provider.modelsURL != server.URL+"/v1beta" {
-		t.Fatalf("modelsURL = %q, want derived native base URL", provider.modelsURL)
-	}
-	if provider.nativeClient.BaseURL() != server.URL+"/v1beta" {
-		t.Fatalf("nativeClient.BaseURL() = %q, want derived native base URL", provider.nativeClient.BaseURL())
-	}
+	require.Equal(t, server.URL+"/v1beta/openai", provider.client.BaseURL())
+	require.Equal(t, server.URL+"/v1beta", provider.modelsURL)
+	require.Equal(t, server.URL+"/v1beta", provider.nativeClient.BaseURL())
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].ID != "gemini-2.5-flash" {
-		t.Fatalf("models = %+v, want gemini-2.5-flash", resp.Data)
-	}
-	if !modelsHit {
-		t.Fatal("models server was not called")
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "gemini-2.5-flash", resp.Data[0].ID)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1beta/models", sent.Path)
+	assert.Equal(t, "test-api-key", sent.Header.Get("x-goog-api-key"))
 }
 
 // ListModels must stamp modes/categories from supportedGenerationMethods so
@@ -635,78 +498,54 @@ func TestSetBaseURLDerivesModelsURL(t *testing.T) {
 func TestListModels_StampsDiscoveredModes(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"models": [{
-				"name": "models/gemini-2.5-flash",
-				"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
-			}, {
-				"name": "models/text-embedding-004",
-				"supportedGenerationMethods": ["embedContent"]
-			}]
-		}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"models": [{
+			"name": "models/gemini-2.5-flash",
+			"supportedGenerationMethods": ["generateContent", "streamGenerateContent"]
+		}, {
+			"name": "models/text-embedding-004",
+			"supportedGenerationMethods": ["embedContent"]
+		}]
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1beta/openai")
 
 	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	byID := make(map[string]core.Model, len(resp.Data))
 	for _, m := range resp.Data {
 		byID[m.ID] = m
 	}
 
 	chat, ok := byID["gemini-2.5-flash"]
-	if !ok || chat.Metadata == nil {
-		t.Fatalf("gemini-2.5-flash missing or has no metadata: %+v", resp.Data)
-	}
-	if len(chat.Metadata.Modes) != 1 || chat.Metadata.Modes[0] != "chat" {
-		t.Errorf("chat Modes = %v, want [chat]", chat.Metadata.Modes)
-	}
-	if len(chat.Metadata.Categories) != 1 || chat.Metadata.Categories[0] != core.CategoryTextGeneration {
-		t.Errorf("chat Categories = %v, want [text_generation]", chat.Metadata.Categories)
-	}
+	require.True(t, ok)
+	require.NotNil(t, chat.Metadata, "gemini-2.5-flash missing or has no metadata: %+v", resp.Data)
+	assert.Len(t, chat.Metadata.Modes, 1)
+	assert.Equal(t, "chat", chat.Metadata.Modes[0])
+	assert.Len(t, chat.Metadata.Categories, 1)
+	assert.Equal(t, core.CategoryTextGeneration, chat.Metadata.Categories[0])
 
 	embed, ok := byID["text-embedding-004"]
-	if !ok || embed.Metadata == nil {
-		t.Fatalf("text-embedding-004 missing or has no metadata: %+v", resp.Data)
-	}
-	if len(embed.Metadata.Modes) != 1 || embed.Metadata.Modes[0] != "embedding" {
-		t.Errorf("embed Modes = %v, want [embedding]", embed.Metadata.Modes)
-	}
-	if len(embed.Metadata.Categories) != 1 || embed.Metadata.Categories[0] != core.CategoryEmbedding {
-		t.Errorf("embed Categories = %v, want [embedding]", embed.Metadata.Categories)
-	}
+	require.True(t, ok)
+	require.NotNil(t, embed.Metadata, "text-embedding-004 missing or has no metadata: %+v", resp.Data)
+	assert.Len(t, embed.Metadata.Modes, 1)
+	assert.Equal(t, "embedding", embed.Metadata.Modes[0])
+	assert.Len(t, embed.Metadata.Categories, 1)
+	assert.Equal(t, core.CategoryEmbedding, embed.Metadata.Categories[0])
 }
 
 func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent" {
-			t.Errorf("Path = %q, want Vertex native generateContent endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
-			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "" {
-			t.Errorf("x-goog-api-key = %q, want empty for Vertex OAuth", got)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "vertex-native",
-			"candidates": [{
-				"content": {"role": "model", "parts": [{"text": "ok"}]},
-				"finishReason": "STOP"
-			}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "vertex-native",
+		"candidates": [{
+			"content": {"role": "model", "parts": [{"text": "ok"}]},
+			"finishReason": "STOP"
+		}]
+	}`)
 
 	p := newVertexTestProvider(server, true)
 	resp, err := p.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -715,34 +554,26 @@ func TestVertexNativeChatUsesOAuthAuthorization(t *testing.T) {
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || resp.ID != "vertex-native" {
-		t.Fatalf("response = %+v, want vertex-native", resp)
-	}
-	if resp.Provider != "vertex" {
-		t.Fatalf("provider = %q, want vertex", resp.Provider)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "vertex-native", resp.ID)
+	assert.Equal(t, "vertex", resp.Provider)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", sent.Path)
+	assert.Equal(t, "Bearer vertex-token", sent.Header.Get("Authorization"))
+	assert.Empty(t, sent.Header.Get("x-goog-api-key"))
 }
 
 func TestVertexNativeBlockedPromptUsesVertexProviderName(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent" {
-			t.Errorf("Path = %q, want Vertex native generateContent endpoint", r.URL.Path)
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "vertex-blocked",
+		"promptFeedback": {
+			"blockReason": "SAFETY",
+			"blockReasonMessage": "unsafe prompt"
 		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "vertex-blocked",
-			"promptFeedback": {
-				"blockReason": "SAFETY",
-				"blockReasonMessage": "unsafe prompt"
-			}
-		}`))
-	}))
-	defer server.Close()
+	}`)
 
 	p := newVertexTestProvider(server, true)
 	_, err := p.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -751,38 +582,20 @@ func TestVertexNativeBlockedPromptUsesVertexProviderName(t *testing.T) {
 			{Role: "user", Content: "blocked"},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected blocked prompt error, got nil")
-	}
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
-	}
-	if gatewayErr.Provider != "vertex" {
-		t.Fatalf("provider = %q, want vertex", gatewayErr.Provider)
-	}
-	if !strings.Contains(gatewayErr.Message, "SAFETY: unsafe prompt") {
-		t.Fatalf("message = %q, want block reason", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, "vertex", gatewayErr.Provider)
+	assert.Contains(t, gatewayErr.Message, "SAFETY: unsafe prompt")
+	assert.Equal(t, "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", capture.Last(t).Path)
 }
 
 func TestVertexNativeStreamUsesVertexProviderName(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent" {
-			t.Errorf("Path = %q, want Vertex native streamGenerateContent endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
-			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"responseId":"vertex-stream","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}
+	server, capture := providertest.SSEServer(t, `data: {"responseId":"vertex-stream","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}
 
-`))
-	}))
-	defer server.Close()
+`)
 
 	p := newVertexTestProvider(server, true)
 	body, err := p.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -792,95 +605,62 @@ func TestVertexNativeStreamUsesVertexProviderName(t *testing.T) {
 		},
 		StreamOptions: &core.StreamOptions{IncludeUsage: true},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	chunks := parseOpenAIStreamChunks(t, string(raw))
-	if len(chunks) == 0 {
-		t.Fatalf("stream = %q, want chunks", string(raw))
-	}
+	require.NotEmpty(t, chunks)
+
 	for _, chunk := range chunks {
-		if got := chunk["provider"]; got != "vertex" {
-			t.Fatalf("provider = %#v, want vertex in stream %q", got, string(raw))
-		}
+		assert.Equal(t, "vertex", chunk["provider"], "stream %q", raw)
 	}
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent", sent.Path)
+	assert.Equal(t, "Bearer vertex-token", sent.Header.Get("Authorization"))
 }
 
 func TestVertexNativeStreamResponsesUsesVertexProviderName(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent" {
-			t.Errorf("Path = %q, want Vertex native streamGenerateContent endpoint", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"responseId":"vertex-responses-stream","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}
+	server, capture := providertest.SSEServer(t, `data: {"responseId":"vertex-responses-stream","candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}
 
-`))
-	}))
-	defer server.Close()
+`)
 
 	p := newVertexTestProvider(server, true)
 	body, err := p.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "google/gemini-2.5-flash",
 		Input: "Hello",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-	stream := string(raw)
-	if !strings.Contains(stream, `"provider":"vertex"`) {
-		t.Fatalf("stream = %q, want vertex provider metadata", stream)
-	}
+	require.NoError(t, err)
+
+	assert.Contains(t, string(raw), `"provider":"vertex"`)
+	assert.Equal(t, "/v1/projects/prod-ai/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent", capture.Last(t).Path)
 }
 
 func TestVertexOpenAICompatibleChatUsesOAuthAndGoogleModelPrefix(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "false")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/endpoints/openapi/chat/completions" {
-			t.Errorf("Path = %q, want Vertex OpenAI-compatible chat endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
-			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "" {
-			t.Errorf("x-goog-api-key = %q, want empty for Vertex OAuth", got)
-		}
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if got := payload["model"]; got != "google/gemini-2.5-flash" {
-			t.Fatalf("model = %#v, want google/gemini-2.5-flash", got)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "vertex-openai",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "google/gemini-2.5-flash",
-			"choices": [{
-				"index": 0,
-				"message": {"role": "assistant", "content": "ok"},
-				"finish_reason": "stop"
-			}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"id": "vertex-openai",
+		"object": "chat.completion",
+		"created": 1677652288,
+		"model": "google/gemini-2.5-flash",
+		"choices": [{
+			"index": 0,
+			"message": {"role": "assistant", "content": "ok"},
+			"finish_reason": "stop"
+		}]
+	}`)
 
 	p := newVertexTestProvider(server, false)
 	resp, err := p.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -889,113 +669,75 @@ func TestVertexOpenAICompatibleChatUsesOAuthAndGoogleModelPrefix(t *testing.T) {
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || resp.ID != "vertex-openai" {
-		t.Fatalf("response = %+v, want vertex-openai", resp)
-	}
-	if resp.Provider != "vertex" {
-		t.Fatalf("provider = %q, want vertex", resp.Provider)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "vertex-openai", resp.ID)
+	assert.Equal(t, "vertex", resp.Provider)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1/projects/prod-ai/locations/us-central1/endpoints/openapi/chat/completions", sent.Path)
+	assert.Equal(t, "Bearer vertex-token", sent.Header.Get("Authorization"))
+	assert.Empty(t, sent.Header.Get("x-goog-api-key"))
+	assert.Equal(t, "google/gemini-2.5-flash", sent.JSON(t)["model"])
 }
 
 func TestVertexOpenAICompatibleEmbeddingsUsesOAuthAndGoogleModelPrefix(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "false")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/projects/prod-ai/locations/us-central1/endpoints/openapi/embeddings" {
-			t.Errorf("Path = %q, want Vertex OpenAI-compatible embeddings endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
-			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "" {
-			t.Errorf("x-goog-api-key = %q, want empty for Vertex OAuth", got)
-		}
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-		if got := payload["model"]; got != "google/text-embedding-005" {
-			t.Fatalf("model = %#v, want google/text-embedding-005", got)
-		}
-		if got := payload["input"]; got != "text" {
-			t.Fatalf("input = %#v, want text", got)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"object": "list",
-			"model": "google/text-embedding-005",
-			"data": [{
-				"object": "embedding",
-				"embedding": [0.1, 0.2],
-				"index": 0
-			}],
-			"usage": {"prompt_tokens": 1, "total_tokens": 1}
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"object": "list",
+		"model": "google/text-embedding-005",
+		"data": [{
+			"object": "embedding",
+			"embedding": [0.1, 0.2],
+			"index": 0
+		}],
+		"usage": {"prompt_tokens": 1, "total_tokens": 1}
+	}`)
 
 	p := newVertexTestProvider(server, false)
 	resp, err := p.Embeddings(context.Background(), &core.EmbeddingRequest{
 		Model: "text-embedding-005",
 		Input: "text",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil || resp.Model != "google/text-embedding-005" {
-		t.Fatalf("response = %+v, want google/text-embedding-005", resp)
-	}
-	if resp.Provider != "vertex" {
-		t.Fatalf("provider = %q, want vertex", resp.Provider)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("data = %+v, want one embedding", resp.Data)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "google/text-embedding-005", resp.Model)
+	assert.Equal(t, "vertex", resp.Provider)
+	require.Len(t, resp.Data, 1)
+
 	var embedding []float64
-	if err := json.Unmarshal(resp.Data[0].Embedding, &embedding); err != nil {
-		t.Fatalf("embedding = %s, want float array: %v", string(resp.Data[0].Embedding), err)
-	}
-	if len(embedding) != 2 || embedding[0] != 0.1 || embedding[1] != 0.2 {
-		t.Fatalf("embedding = %v, want [0.1 0.2]", embedding)
-	}
+	require.NoError(t, json.Unmarshal(resp.Data[0].Embedding, &embedding), "embedding = %s, want float array", resp.Data[0].Embedding)
+	assert.Equal(t, []float64{0.1, 0.2}, embedding)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1/projects/prod-ai/locations/us-central1/endpoints/openapi/embeddings", sent.Path)
+	assert.Equal(t, "Bearer vertex-token", sent.Header.Get("Authorization"))
+	assert.Empty(t, sent.Header.Get("x-goog-api-key"))
+	payload := sent.JSON(t)
+	assert.Equal(t, "google/text-embedding-005", payload["model"])
+	assert.Equal(t, "text", payload["input"])
 }
 
 func TestVertexListModelsAcceptsPublisherModelsResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1beta1/publishers/google/models" {
-			t.Errorf("Path = %q, want Vertex publisher models endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer vertex-token" {
-			t.Errorf("Authorization = %q, want Bearer vertex-token", got)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"publisherModels": [
-				{"name": "publishers/google/models/gemini-2.5-flash"},
-				{"name": "publishers/google/models/text-embedding-005"},
-				{"name": "publishers/google/models/imagen-4.0"}
-			]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"publisherModels": [
+			{"name": "publishers/google/models/gemini-2.5-flash"},
+			{"name": "publishers/google/models/text-embedding-005"},
+			{"name": "publishers/google/models/imagen-4.0"}
+		]
+	}`)
 
 	p := newVertexTestProvider(server, true)
 	resp, err := p.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Data) != 3 {
-		t.Fatalf("models = %+v, want 3 Gemini-compatible models", resp.Data)
-	}
-	if resp.Data[0].ID != "google/gemini-2.5-flash" || resp.Data[1].ID != "google/text-embedding-005" || resp.Data[2].ID != "google/imagen-4.0" {
-		t.Fatalf("models = %+v, want gemini-2.5-flash, text-embedding-005, and imagen-4.0", resp.Data)
-	}
-	if modes := resp.Data[2].Metadata.Modes; len(modes) != 1 || modes[0] != "image_generation" {
-		t.Fatalf("imagen modes = %+v, want [image_generation]", modes)
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Data, 3)
+	assert.Equal(t, "google/gemini-2.5-flash", resp.Data[0].ID)
+	assert.Equal(t, "google/text-embedding-005", resp.Data[1].ID)
+	assert.Equal(t, "google/imagen-4.0", resp.Data[2].ID)
+	assert.Equal(t, []string{"image_generation"}, resp.Data[2].Metadata.Modes)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/v1beta1/publishers/google/models", sent.Path)
+	assert.Equal(t, "Bearer vertex-token", sent.Header.Get("Authorization"))
 }
 
 func TestVertexListModelsErrorsUseVertexProviderName(t *testing.T) {
@@ -1015,24 +757,14 @@ func TestVertexListModelsErrorsUseVertexProviderName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(tt.body))
-			}))
-			defer server.Close()
+			server, _ := providertest.JSONServer(t, http.StatusOK, tt.body)
 
 			p := newVertexTestProvider(server, true)
 			_, err := p.ListModels(context.Background())
-			if err == nil {
-				t.Fatal("expected models error, got nil")
-			}
+
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) {
-				t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
-			}
-			if gatewayErr.Provider != "vertex" {
-				t.Fatalf("provider = %q, want vertex", gatewayErr.Provider)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			require.Equal(t, "vertex", gatewayErr.Provider)
 		})
 	}
 }
@@ -1094,30 +826,14 @@ func TestChatCompletion(t *testing.T) {
 			}`,
 			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ChatResponse) {
-				if resp.ID != "gemini-123" {
-					t.Errorf("ID = %q, want %q", resp.ID, "gemini-123")
-				}
-				if resp.Model != "gemini-2.0-flash" {
-					t.Errorf("Model = %q, want %q", resp.Model, "gemini-2.0-flash")
-				}
-				if resp.Provider != "gemini" {
-					t.Errorf("Provider = %q, want gemini", resp.Provider)
-				}
-				if len(resp.Choices) != 1 {
-					t.Fatalf("len(Choices) = %d, want 1", len(resp.Choices))
-				}
-				if resp.Choices[0].Message.Content != "Hello! How can I help you today?" {
-					t.Errorf("Message content = %q, want %q", resp.Choices[0].Message.Content, "Hello! How can I help you today?")
-				}
-				if resp.Usage.PromptTokens != 10 {
-					t.Errorf("PromptTokens = %d, want 10", resp.Usage.PromptTokens)
-				}
-				if resp.Usage.CompletionTokens != 20 {
-					t.Errorf("CompletionTokens = %d, want 20", resp.Usage.CompletionTokens)
-				}
-				if resp.Usage.TotalTokens != 30 {
-					t.Errorf("TotalTokens = %d, want 30", resp.Usage.TotalTokens)
-				}
+				assert.Equal(t, "gemini-123", resp.ID)
+				assert.Equal(t, "gemini-2.0-flash", resp.Model)
+				assert.Equal(t, "gemini", resp.Provider)
+				require.Len(t, resp.Choices, 1)
+				assert.Equal(t, "Hello! How can I help you today?", resp.Choices[0].Message.Content)
+				assert.Equal(t, 10, resp.Usage.PromptTokens)
+				assert.Equal(t, 20, resp.Usage.CompletionTokens)
+				assert.Equal(t, 30, resp.Usage.TotalTokens)
 			},
 		},
 		{
@@ -1142,28 +858,7 @@ func TestChatCompletion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
@@ -1177,17 +872,18 @@ func TestChatCompletion(t *testing.T) {
 
 			resp, err := provider.ChatCompletion(context.Background(), req)
 
+			sent := capture.Last(t)
+			assert.Equal(t, "application/json", sent.Header.Get("Content-Type"))
+			assert.Equal(t, "Bearer test-api-key", sent.Header.Get("Authorization"))
+			assert.Equal(t, "gemini-2.0-flash", sent.JSON(t)["model"])
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.checkResponse != nil {
+				tt.checkResponse(t, resp)
 			}
 		})
 	}
@@ -1196,61 +892,19 @@ func TestChatCompletion(t *testing.T) {
 func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "gemini-native-123",
+		"candidates": [{
+			"index": 0,
+			"content": {"role": "model", "parts": [{"text": "Hello from native Gemini"}]},
+			"finishReason": "STOP"
+		}],
+		"usageMetadata": {
+			"promptTokenCount": 7,
+			"candidatesTokenCount": 5,
+			"totalTokenCount": 12
 		}
-		if r.URL.Path != "/models/gemini-2.5-flash:generateContent" {
-			t.Errorf("Path = %q, want native generateContent endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
-			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "" {
-			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		if _, ok := payload["messages"]; ok {
-			t.Fatal("native request should not contain OpenAI messages")
-		}
-		if _, ok := payload["contents"]; !ok {
-			t.Fatal("native request should contain contents")
-		}
-		generationConfig, ok := payload["generationConfig"].(map[string]any)
-		if !ok {
-			t.Fatalf("generationConfig = %#v, want object", payload["generationConfig"])
-		}
-		if got := generationConfig["maxOutputTokens"]; got != float64(128) {
-			t.Fatalf("maxOutputTokens = %#v, want 128", got)
-		}
-		if _, ok := payload["system_instruction"]; !ok {
-			t.Fatal("system_instruction missing")
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "gemini-native-123",
-			"candidates": [{
-				"index": 0,
-				"content": {"role": "model", "parts": [{"text": "Hello from native Gemini"}]},
-				"finishReason": "STOP"
-			}],
-			"usageMetadata": {
-				"promptTokenCount": 7,
-				"candidatesTokenCount": 5,
-				"totalTokenCount": 12
-			}
-		}`))
-	}))
-	defer server.Close()
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -1264,24 +918,27 @@ func TestChatCompletion_UsesNativeGenerateContentByDefault(t *testing.T) {
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.ID != "gemini-native-123" {
-		t.Fatalf("ID = %q, want gemini-native-123", resp.ID)
-	}
-	if resp.Provider != "gemini" {
-		t.Fatalf("Provider = %q, want gemini", resp.Provider)
-	}
-	if got := resp.Choices[0].Message.Content; got != "Hello from native Gemini" {
-		t.Fatalf("content = %q, want native text", got)
-	}
-	if got := resp.Choices[0].FinishReason; got != "stop" {
-		t.Fatalf("finish_reason = %q, want stop", got)
-	}
-	if resp.Usage.TotalTokens != 12 {
-		t.Fatalf("TotalTokens = %d, want 12", resp.Usage.TotalTokens)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-native-123", resp.ID)
+	assert.Equal(t, "gemini", resp.Provider)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "Hello from native Gemini", resp.Choices[0].Message.Content)
+	assert.Equal(t, "stop", resp.Choices[0].FinishReason)
+	assert.Equal(t, 12, resp.Usage.TotalTokens)
+
+	sent := capture.Last(t)
+	assert.Equal(t, http.MethodPost, sent.Method)
+	assert.Equal(t, "/models/gemini-2.5-flash:generateContent", sent.Path)
+	assert.Equal(t, "test-api-key", sent.Header.Get("x-goog-api-key"))
+	assert.Empty(t, sent.Header.Get("Authorization"))
+
+	payload := sent.JSON(t)
+	assert.NotContains(t, payload, "messages")
+	assert.Contains(t, payload, "contents")
+	assert.Contains(t, payload, "system_instruction")
+	generationConfig, ok := payload["generationConfig"].(map[string]any)
+	require.True(t, ok, "generationConfig = %#v, want object", payload["generationConfig"])
+	assert.Equal(t, float64(128), generationConfig["maxOutputTokens"])
 }
 
 func TestGeminiGenerationConfig_UsesTypedTopP(t *testing.T) {
@@ -1291,10 +948,7 @@ func TestGeminiGenerationConfig_UsesTypedTopP(t *testing.T) {
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
 		TopP:     &topP,
 	})
-
-	if got := cfg["topP"]; got != 0.8 {
-		t.Fatalf("topP = %#v, want 0.8", got)
-	}
+	require.Equal(t, 0.8, cfg["topP"])
 }
 
 func TestConvertResponsesRequestToGeminiPreservesTopP(t *testing.T) {
@@ -1304,49 +958,38 @@ func TestConvertResponsesRequestToGeminiPreservesTopP(t *testing.T) {
 		Input: "hi",
 		TopP:  &topP,
 	})
-	if err != nil {
-		t.Fatalf("ConvertResponsesRequestToChat() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	geminiReq, err := convertChatRequestToGemini(chatReq)
-	if err != nil {
-		t.Fatalf("convertChatRequestToGemini() error = %v", err)
-	}
-
-	if got := geminiReq.GenerationConfig["topP"]; got != 0.7 {
-		t.Fatalf("topP = %#v, want 0.7", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 0.7, geminiReq.GenerationConfig["topP"])
 }
 
 func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "gemini-native-usage",
-			"candidates": [{
-				"index": 0,
-				"content": {"role": "model", "parts": [{"text": "Done"}]},
-				"finishReason": "STOP"
-			}],
-			"usageMetadata": {
-				"promptTokenCount": 100,
-				"cachedContentTokenCount": 40,
-				"candidatesTokenCount": 20,
-				"thoughtsTokenCount": 7,
-				"totalTokenCount": 127,
-				"promptTokensDetails": [
-					{"modality": "TEXT", "tokenCount": 60},
-					{"modality": "AUDIO", "tokenCount": 40}
-				],
-				"candidatesTokensDetails": [
-					{"modality": "AUDIO", "tokenCount": 5}
-				]
-			}
-		}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "gemini-native-usage",
+		"candidates": [{
+			"index": 0,
+			"content": {"role": "model", "parts": [{"text": "Done"}]},
+			"finishReason": "STOP"
+		}],
+		"usageMetadata": {
+			"promptTokenCount": 100,
+			"cachedContentTokenCount": 40,
+			"candidatesTokenCount": 20,
+			"thoughtsTokenCount": 7,
+			"totalTokenCount": 127,
+			"promptTokensDetails": [
+				{"modality": "TEXT", "tokenCount": 60},
+				{"modality": "AUDIO", "tokenCount": 40}
+			],
+			"candidatesTokensDetails": [
+				{"modality": "AUDIO", "tokenCount": 5}
+			]
+		}
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -1357,31 +1000,18 @@ func TestChatCompletion_NativeUsageMetadata(t *testing.T) {
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if resp.Usage.PromptTokens != 100 {
-		t.Fatalf("PromptTokens = %d, want 100", resp.Usage.PromptTokens)
-	}
-	if resp.Usage.CompletionTokens != 27 {
-		t.Fatalf("CompletionTokens = %d, want candidates + thoughts = 27", resp.Usage.CompletionTokens)
-	}
-	if resp.Usage.TotalTokens != 127 {
-		t.Fatalf("TotalTokens = %d, want 127", resp.Usage.TotalTokens)
-	}
-	if resp.Usage.PromptTokensDetails == nil || resp.Usage.PromptTokensDetails.CachedTokens != 40 || resp.Usage.PromptTokensDetails.AudioTokens != 40 {
-		t.Fatalf("PromptTokensDetails = %+v, want cached=40 audio=40", resp.Usage.PromptTokensDetails)
-	}
-	if resp.Usage.CompletionTokensDetails == nil || resp.Usage.CompletionTokensDetails.ReasoningTokens != 7 || resp.Usage.CompletionTokensDetails.AudioTokens != 5 {
-		t.Fatalf("CompletionTokensDetails = %+v, want reasoning=7 audio=5", resp.Usage.CompletionTokensDetails)
-	}
-	if resp.Usage.RawUsage["prompt_cached_tokens"] != 40 {
-		t.Fatalf("RawUsage[prompt_cached_tokens] = %#v, want 40", resp.Usage.RawUsage["prompt_cached_tokens"])
-	}
-	if resp.Usage.RawUsage["completion_reasoning_tokens"] != 7 {
-		t.Fatalf("RawUsage[completion_reasoning_tokens] = %#v, want 7", resp.Usage.RawUsage["completion_reasoning_tokens"])
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 100, resp.Usage.PromptTokens)
+	assert.Equal(t, 27, resp.Usage.CompletionTokens)
+	assert.Equal(t, 127, resp.Usage.TotalTokens)
+	require.NotNil(t, resp.Usage.PromptTokensDetails)
+	assert.Equal(t, 40, resp.Usage.PromptTokensDetails.CachedTokens)
+	assert.Equal(t, 40, resp.Usage.PromptTokensDetails.AudioTokens)
+	require.NotNil(t, resp.Usage.CompletionTokensDetails)
+	assert.Equal(t, 7, resp.Usage.CompletionTokensDetails.ReasoningTokens)
+	assert.Equal(t, 5, resp.Usage.CompletionTokensDetails.AudioTokens)
+	assert.Equal(t, 40, resp.Usage.RawUsage["prompt_cached_tokens"])
+	assert.Equal(t, 7, resp.Usage.RawUsage["completion_reasoning_tokens"])
 }
 
 func TestCopyJSONNumberAcceptsOnlyNumericValues(t *testing.T) {
@@ -1405,19 +1035,12 @@ func TestCopyJSONNumberAcceptsOnlyNumericValues(t *testing.T) {
 			copyJSONNumber(json.RawMessage(tt.raw), cfg, "value")
 
 			got, ok := cfg["value"]
-			if ok != tt.wantSet {
-				t.Fatalf("cfg[value] set = %v, want %v; cfg = %#v", ok, tt.wantSet, cfg)
-			}
+			require.Equal(t, tt.wantSet, ok, "cfg = %#v", cfg)
 			if !tt.wantSet {
 				return
 			}
-			gotFloat, ok := got.(float64)
-			if !ok {
-				t.Fatalf("cfg[value] = %T(%[1]v), want float64", got)
-			}
-			if gotFloat != tt.want {
-				t.Fatalf("cfg[value] = %v, want %v", gotFloat, tt.want)
-			}
+			require.IsType(t, float64(0), got)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -1425,17 +1048,13 @@ func TestCopyJSONNumberAcceptsOnlyNumericValues(t *testing.T) {
 func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "gemini-blocked",
-			"promptFeedback": {
-				"blockReason": "SAFETY",
-				"blockReasonMessage": "unsafe prompt"
-			}
-		}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "gemini-blocked",
+		"promptFeedback": {
+			"blockReason": "SAFETY",
+			"blockReasonMessage": "unsafe prompt"
+		}
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -1446,19 +1065,11 @@ func TestChatCompletion_NativeBlockedPromptReturnsError(t *testing.T) {
 			{Role: "user", Content: "blocked"},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected blocked prompt error, got nil")
-	}
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider {
-		t.Fatalf("error type = %q, want provider_error", gatewayErr.Type)
-	}
-	if !strings.Contains(gatewayErr.Message, "SAFETY: unsafe prompt") {
-		t.Fatalf("message = %q, want block reason", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+	assert.Contains(t, gatewayErr.Message, "SAFETY: unsafe prompt")
 }
 
 func TestChatCompletion_NativeRejectsRemoteImageURL(t *testing.T) {
@@ -1476,62 +1087,29 @@ func TestChatCompletion_NativeRejectsRemoteImageURL(t *testing.T) {
 			},
 		}},
 	})
-	if err == nil {
-		t.Fatal("expected remote image_url error, got nil")
-	}
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("error = %T %[1]v, want *core.GatewayError", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Fatalf("error type = %q, want invalid_request_error", gatewayErr.Type)
-	}
-	if !strings.Contains(gatewayErr.Message, "supports only data: URLs") {
-		t.Fatalf("message = %q, want data URL guidance", gatewayErr.Message)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
+	assert.Contains(t, gatewayErr.Message, "supports only data: URLs")
 }
 
 func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		tools, ok := payload["tools"].([]any)
-		if !ok || len(tools) != 1 {
-			t.Fatalf("tools = %#v, want one Gemini tool", payload["tools"])
-		}
-		toolConfig, ok := payload["toolConfig"].(map[string]any)
-		if !ok {
-			t.Fatalf("toolConfig = %#v, want object", payload["toolConfig"])
-		}
-		functionConfig := toolConfig["functionCallingConfig"].(map[string]any)
-		if functionConfig["mode"] != "ANY" {
-			t.Fatalf("tool mode = %#v, want ANY", functionConfig["mode"])
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "gemini-tools-123",
-			"candidates": [{
-				"content": {"role": "model", "parts": [{
-					"functionCall": {
-						"id": "call_native",
-						"name": "lookup_weather",
-						"args": {"city": "Warsaw"}
-					}
-				}]},
-				"finishReason": "STOP"
-			}]
-		}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "gemini-tools-123",
+		"candidates": [{
+			"content": {"role": "model", "parts": [{
+				"functionCall": {
+					"id": "call_native",
+					"name": "lookup_weather",
+					"args": {"city": "Warsaw"}
+				}
+			}]},
+			"finishReason": "STOP"
+		}]
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -1560,22 +1138,24 @@ func TestChatCompletion_NativeFunctionCallTranslation(t *testing.T) {
 			"function": map[string]any{"name": "lookup_weather"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := resp.Choices[0].FinishReason; got != "tool_calls" {
-		t.Fatalf("finish_reason = %q, want tool_calls", got)
-	}
-	if len(resp.Choices[0].Message.ToolCalls) != 1 {
-		t.Fatalf("tool calls = %d, want 1", len(resp.Choices[0].Message.ToolCalls))
-	}
+	require.NoError(t, err)
+	require.Len(t, resp.Choices, 1)
+	assert.Equal(t, "tool_calls", resp.Choices[0].FinishReason)
+	require.Len(t, resp.Choices[0].Message.ToolCalls, 1)
+
 	call := resp.Choices[0].Message.ToolCalls[0]
-	if call.ID != "call_native" || call.Function.Name != "lookup_weather" {
-		t.Fatalf("tool call = %+v, want native function call", call)
-	}
-	if call.Function.Arguments != `{"city":"Warsaw"}` {
-		t.Fatalf("arguments = %q, want JSON object", call.Function.Arguments)
-	}
+	assert.Equal(t, "call_native", call.ID)
+	assert.Equal(t, "lookup_weather", call.Function.Name)
+	assert.Equal(t, `{"city":"Warsaw"}`, call.Function.Arguments)
+
+	payload := capture.Last(t).JSON(t)
+	tools, ok := payload["tools"].([]any)
+	require.True(t, ok, "tools = %#v, want array", payload["tools"])
+	assert.Len(t, tools, 1)
+	toolConfig, ok := payload["toolConfig"].(map[string]any)
+	require.True(t, ok, "toolConfig = %#v, want object", payload["toolConfig"])
+	functionConfig, _ := toolConfig["functionCallingConfig"].(map[string]any)
+	assert.Equal(t, "ANY", functionConfig["mode"])
 }
 
 func TestStreamChatCompletion(t *testing.T) {
@@ -1608,31 +1188,10 @@ data: [DONE]
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Content-Type") != "application/json" {
-					t.Errorf("Content-Type = %q, want %q", r.Header.Get("Content-Type"), "application/json")
-				}
-				authHeader := r.Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					t.Errorf("Authorization header should start with 'Bearer '")
-				}
-
-				body, err := io.ReadAll(r.Body)
-				if err != nil {
-					t.Fatalf("failed to read request body: %v", err)
-				}
-				var req core.ChatRequest
-				if err := json.Unmarshal(body, &req); err != nil {
-					t.Fatalf("failed to unmarshal request: %v", err)
-				}
-				if !req.Stream {
-					t.Error("Stream should be true in request")
-				}
-
+			server, capture := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+				_, _ = io.WriteString(w, tt.responseBody)
+			})
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 			provider.SetBaseURL(server.URL)
@@ -1646,27 +1205,23 @@ data: [DONE]
 
 			body, err := provider.StreamChatCompletion(context.Background(), req)
 
-			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if body == nil {
-					t.Fatal("body should not be nil")
-				}
-				defer func() { _ = body.Close() }()
+			sent := capture.Last(t)
+			assert.Equal(t, "application/json", sent.Header.Get("Content-Type"))
+			assert.Equal(t, "Bearer test-api-key", sent.Header.Get("Authorization"))
+			stream, _ := sent.JSON(t)["stream"].(bool)
+			assert.True(t, stream)
 
-				respBody, err := io.ReadAll(body)
-				if err != nil {
-					t.Fatalf("failed to read response body: %v", err)
-				}
-				if string(respBody) != tt.responseBody {
-					t.Errorf("response body = %q, want %q", string(respBody), tt.responseBody)
-				}
+			if tt.expectedError {
+				assert.Error(t, err)
+				return
 			}
+			require.NoError(t, err)
+			require.NotNil(t, body)
+			defer func() { _ = body.Close() }()
+
+			respBody, err := io.ReadAll(body)
+			require.NoError(t, err)
+			assert.Equal(t, tt.responseBody, string(respBody))
 		})
 	}
 }
@@ -1674,38 +1229,11 @@ data: [DONE]
 func TestStreamChatCompletion_UsesNativeStreamByDefault(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/models/gemini-2.5-flash:streamGenerateContent" {
-			t.Errorf("Path = %q, want native streamGenerateContent endpoint", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("alt"); got != "sse" {
-			t.Errorf("alt = %q, want sse", got)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
-			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		if _, ok := payload["stream"]; ok {
-			t.Fatal("native stream request should not contain OpenAI stream flag")
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1,"totalTokenCount":5}}
+	server, capture := providertest.SSEServer(t, `data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1,"totalTokenCount":5}}
 
 data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model","parts":[{"text":"!"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":2,"totalTokenCount":6}}
 
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -1717,28 +1245,21 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 		},
 		StreamOptions: &core.StreamOptions{IncludeUsage: true},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	stream := string(raw)
-	if !strings.Contains(stream, `"id":"gemini-stream-123"`) {
-		t.Fatalf("stream = %q, want native response id", stream)
-	}
-	if !strings.Contains(stream, `"content":"Hello"`) || !strings.Contains(stream, `"content":"!"`) {
-		t.Fatalf("stream = %q, want converted content chunks", stream)
-	}
-	if !strings.Contains(stream, `"finish_reason":"stop"`) {
-		t.Fatalf("stream = %q, want stop finish reason", stream)
-	}
-	if !strings.Contains(stream, `"usage"`) || !strings.Contains(stream, `"total_tokens":6`) {
-		t.Fatalf("stream = %q, want usage chunk", stream)
-	}
+	assert.Contains(t, stream, `"id":"gemini-stream-123"`)
+	assert.Contains(t, stream, `"content":"Hello"`)
+	assert.Contains(t, stream, `"content":"!"`)
+	assert.Contains(t, stream, `"finish_reason":"stop"`)
+	assert.Contains(t, stream, `"total_tokens":6`)
+	assert.Contains(t, stream, "data: [DONE]")
+
 	usageChunks := 0
 	for _, chunk := range parseOpenAIStreamChunks(t, stream) {
 		if _, ok := chunk["usage"]; !ok {
@@ -1746,19 +1267,16 @@ data: {"responseId":"gemini-stream-123","candidates":[{"content":{"role":"model"
 		}
 		usageChunks++
 		choices, ok := chunk["choices"].([]any)
-		if !ok {
-			t.Fatalf("usage chunk choices = %T(%[1]v), want array", chunk["choices"])
-		}
-		if len(choices) != 0 {
-			t.Fatalf("usage chunk choices = %#v, want empty choices", choices)
-		}
+		require.True(t, ok, "usage chunk choices = %#v, want array", chunk["choices"])
+		assert.Empty(t, choices)
 	}
-	if usageChunks != 1 {
-		t.Fatalf("usage chunk count = %d, want 1 in stream %q", usageChunks, stream)
-	}
-	if !strings.Contains(stream, "data: [DONE]") {
-		t.Fatalf("stream = %q, want [DONE]", stream)
-	}
+	assert.Equal(t, 1, usageChunks, "stream %q", stream)
+
+	sent := capture.Last(t)
+	assert.Equal(t, "/models/gemini-2.5-flash:streamGenerateContent", sent.Path)
+	assert.Equal(t, "sse", sent.Query.Get("alt"))
+	assert.Equal(t, "test-api-key", sent.Header.Get("x-goog-api-key"))
+	assert.NotContains(t, sent.JSON(t), "stream")
 }
 
 func TestParseOpenAIStreamChunksStopsAtDone(t *testing.T) {
@@ -1789,11 +1307,9 @@ data: {}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chunks := parseOpenAIStreamChunks(t, tt.stream)
-			if len(chunks) != tt.wantChunks {
-				t.Fatalf("parsed %d chunks, want %d; chunks = %#v", len(chunks), tt.wantChunks, chunks)
-			}
-			if tt.wantID != "" && chunks[0]["id"] != tt.wantID {
-				t.Fatalf("first chunk id = %v, want %q", chunks[0]["id"], tt.wantID)
+			require.Len(t, chunks, tt.wantChunks, "chunks = %#v", chunks)
+			if tt.wantID != "" {
+				assert.Equal(t, tt.wantID, chunks[0]["id"])
 			}
 		})
 	}
@@ -1816,9 +1332,7 @@ func parseOpenAIStreamChunks(t *testing.T, stream string) []map[string]any {
 			break
 		}
 		var chunk map[string]any
-		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			t.Fatalf("failed to parse stream chunk %q: %v", payload, err)
-		}
+		require.NoError(t, json.Unmarshal([]byte(payload), &chunk), "stream chunk %q", payload)
 		chunks = append(chunks, chunk)
 	}
 	return chunks
@@ -1827,14 +1341,9 @@ func parseOpenAIStreamChunks(t *testing.T, stream string) []map[string]any {
 func TestStreamChatCompletion_NativePerChoiceState(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-choice-state","candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call_0","name":"lookup_weather","args":{"city":"Warsaw"}}}]},"finishReason":"STOP"},{"index":1,"content":{"role":"model","parts":[{"text":"plain text"}]},"finishReason":"STOP"}]}
+	server, _ := providertest.SSEServer(t, `data: {"responseId":"gemini-stream-choice-state","candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call_0","name":"lookup_weather","args":{"city":"Warsaw"}}}]},"finishReason":"STOP"},{"index":1,"content":{"role":"model","parts":[{"text":"plain text"}]},"finishReason":"STOP"}]}
 
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -1845,38 +1354,25 @@ func TestStreamChatCompletion_NativePerChoiceState(t *testing.T) {
 			{Role: "user", Content: "Hello"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	stream := string(raw)
-	if got := strings.Count(stream, `"role":"assistant"`); got != 2 {
-		t.Fatalf("assistant role count = %d, want 2 in stream %q", got, stream)
-	}
-	if got := strings.Count(stream, `"finish_reason":"tool_calls"`); got != 1 {
-		t.Fatalf("tool_calls finish count = %d, want 1 in stream %q", got, stream)
-	}
-	if got := strings.Count(stream, `"finish_reason":"stop"`); got != 1 {
-		t.Fatalf("stop finish count = %d, want 1 in stream %q", got, stream)
-	}
+	assert.Equal(t, 2, strings.Count(stream, `"role":"assistant"`), "stream %q", stream)
+	assert.Equal(t, 1, strings.Count(stream, `"finish_reason":"tool_calls"`), "stream %q", stream)
+	assert.Equal(t, 1, strings.Count(stream, `"finish_reason":"stop"`), "stream %q", stream)
 }
 
 func TestStreamChatCompletion_NativeBlockedPromptEmitsError(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"responseId":"gemini-stream-blocked","promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"unsafe prompt"}}
+	server, _ := providertest.SSEServer(t, `data: {"responseId":"gemini-stream-blocked","promptFeedback":{"blockReason":"SAFETY","blockReasonMessage":"unsafe prompt"}}
 
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -1887,22 +1383,17 @@ func TestStreamChatCompletion_NativeBlockedPromptEmitsError(t *testing.T) {
 			{Role: "user", Content: "blocked"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	stream := string(raw)
-	if !strings.Contains(stream, `"type":"provider_error"`) || !strings.Contains(stream, "Gemini blocked prompt: SAFETY: unsafe prompt") {
-		t.Fatalf("stream = %q, want normalized provider error", stream)
-	}
-	if !strings.Contains(stream, "data: [DONE]") {
-		t.Fatalf("stream = %q, want [DONE]", stream)
-	}
+	assert.Contains(t, stream, `"type":"provider_error"`)
+	assert.Contains(t, stream, "Gemini blocked prompt: SAFETY: unsafe prompt")
+	assert.Contains(t, stream, "data: [DONE]")
 }
 
 func TestListModels(t *testing.T) {
@@ -1946,21 +1437,11 @@ func TestListModels(t *testing.T) {
 			}`,
 			expectedError: false,
 			checkResponse: func(t *testing.T, resp *core.ModelsResponse) {
-				if resp.Object != "list" {
-					t.Errorf("Object = %q, want %q", resp.Object, "list")
-				}
-				if len(resp.Data) != 2 {
-					t.Fatalf("len(Data) = %d, want 2", len(resp.Data))
-				}
-				if resp.Data[0].ID != "gemini-2.0-flash" {
-					t.Errorf("Data[0].ID = %q, want %q", resp.Data[0].ID, "gemini-2.0-flash")
-				}
-				if resp.Data[0].OwnedBy != "google" {
-					t.Errorf("Data[0].OwnedBy = %q, want %q", resp.Data[0].OwnedBy, "google")
-				}
-				if resp.Data[1].ID != "gemini-1.5-pro" {
-					t.Errorf("Data[1].ID = %q, want %q", resp.Data[1].ID, "gemini-1.5-pro")
-				}
+				assert.Equal(t, "list", resp.Object)
+				require.Len(t, resp.Data, 2)
+				assert.Equal(t, "gemini-2.0-flash", resp.Data[0].ID)
+				assert.Equal(t, "google", resp.Data[0].OwnedBy)
+				assert.Equal(t, "gemini-1.5-pro", resp.Data[1].ID)
 			},
 		},
 		{
@@ -1973,51 +1454,35 @@ func TestListModels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodGet {
-					t.Errorf("Method = %q, want %q", r.Method, http.MethodGet)
-				}
-				if r.URL.Path != "/models" {
-					t.Errorf("Path = %q, want %q", r.URL.Path, "/models")
-				}
-
-				apiKey := r.Header.Get("x-goog-api-key")
-				if apiKey == "" {
-					t.Error("API key should be in x-goog-api-key header")
-				}
-
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write([]byte(tt.responseBody))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
 			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 			provider.SetModelsURL(server.URL)
 
 			resp, err := provider.ListModels(context.Background())
 
+			sent := capture.Last(t)
+			assert.Equal(t, http.MethodGet, sent.Method)
+			assert.Equal(t, "/models", sent.Path)
+			assert.Equal(t, "test-api-key", sent.Header.Get("x-goog-api-key"))
+
 			if tt.expectedError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if tt.checkResponse != nil {
-					tt.checkResponse(t, resp)
-				}
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tt.checkResponse != nil {
+				tt.checkResponse(t, resp)
 			}
 		})
 	}
 }
 
 func TestChatCompletionWithContext(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusRequestTimeout)
-	}))
-	defer server.Close()
+	})
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -2033,37 +1498,31 @@ func TestChatCompletionWithContext(t *testing.T) {
 	}
 
 	_, err := provider.ChatCompletion(ctx, req)
-	if err == nil {
-		t.Error("expected error when context is cancelled, got nil")
-	}
+	assert.Error(t, err)
 }
 
 func TestResponses(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "false")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"id": "gemini-123",
-			"object": "chat.completion",
-			"created": 1677652288,
-			"model": "gemini-2.0-flash",
-			"choices": [{
-				"index": 0,
-				"message": {
-					"role": "assistant",
-					"content": "Hello! How can I help you today?"
-				},
-				"finish_reason": "stop"
-			}],
-			"usage": {
-				"prompt_tokens": 10,
-				"completion_tokens": 20,
-				"total_tokens": 30
-			}
-		}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{
+		"id": "gemini-123",
+		"object": "chat.completion",
+		"created": 1677652288,
+		"model": "gemini-2.0-flash",
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"content": "Hello! How can I help you today?"
+			},
+			"finish_reason": "stop"
+		}],
+		"usage": {
+			"prompt_tokens": 10,
+			"completion_tokens": 20,
+			"total_tokens": 30
+		}
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -2074,92 +1533,27 @@ func TestResponses(t *testing.T) {
 	}
 
 	resp, err := provider.Responses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if resp.ID != "gemini-123" {
-		t.Errorf("ID = %q, want %q", resp.ID, "gemini-123")
-	}
-	if resp.Object != "response" {
-		t.Errorf("Object = %q, want %q", resp.Object, "response")
-	}
-	if resp.Model != "gemini-2.0-flash" {
-		t.Errorf("Model = %q, want %q", resp.Model, "gemini-2.0-flash")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-123", resp.ID)
+	assert.Equal(t, "response", resp.Object)
+	assert.Equal(t, "gemini-2.0-flash", resp.Model)
 }
 
 func TestResponses_Native(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"responseId": "gemini-native-response",
+		"candidates": [{
+			"content": {"role": "model", "parts": [{"text": "Native response"}]},
+			"finishReason": "STOP"
+		}],
+		"usageMetadata": {
+			"promptTokenCount": 5,
+			"candidatesTokenCount": 3,
+			"totalTokenCount": 8
 		}
-		if r.URL.Path != "/models/gemini-2.5-flash:generateContent" {
-			t.Errorf("Path = %q, want native generateContent endpoint", r.URL.Path)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
-			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "" {
-			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		if _, ok := payload["messages"]; ok {
-			t.Fatal("native request should not contain OpenAI messages")
-		}
-		systemInstruction, ok := payload["system_instruction"].(map[string]any)
-		if !ok {
-			t.Fatalf("system_instruction = %#v, want object", payload["system_instruction"])
-		}
-		systemParts, ok := systemInstruction["parts"].([]any)
-		if !ok || len(systemParts) != 1 || systemParts[0].(map[string]any)["text"] != "Be concise." {
-			t.Fatalf("system_instruction.parts = %#v, want instruction text", systemInstruction["parts"])
-		}
-		contents, ok := payload["contents"].([]any)
-		if !ok || len(contents) != 1 {
-			t.Fatalf("contents = %#v, want one native content", payload["contents"])
-		}
-		firstContent := contents[0].(map[string]any)
-		if firstContent["role"] != "user" {
-			t.Fatalf("contents[0].role = %#v, want user", firstContent["role"])
-		}
-		parts := firstContent["parts"].([]any)
-		if len(parts) != 1 || parts[0].(map[string]any)["text"] != "Hello" {
-			t.Fatalf("contents[0].parts = %#v, want user text", firstContent["parts"])
-		}
-		generationConfig, ok := payload["generationConfig"].(map[string]any)
-		if !ok {
-			t.Fatalf("generationConfig = %#v, want object", payload["generationConfig"])
-		}
-		if got := generationConfig["maxOutputTokens"]; got != float64(64) {
-			t.Fatalf("maxOutputTokens = %#v, want 64", got)
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{
-			"responseId": "gemini-native-response",
-			"candidates": [{
-				"content": {"role": "model", "parts": [{"text": "Native response"}]},
-				"finishReason": "STOP"
-			}],
-			"usageMetadata": {
-				"promptTokenCount": 5,
-				"candidatesTokenCount": 3,
-				"totalTokenCount": 8
-			}
-		}`))
-	}))
-	defer server.Close()
+	}`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -2171,38 +1565,65 @@ func TestResponses_Native(t *testing.T) {
 		Input:           "Hello",
 		MaxOutputTokens: &maxOutputTokens,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-native-response", resp.ID)
+	assert.Equal(t, "response", resp.Object)
+	assert.Equal(t, "gemini-2.5-flash", resp.Model)
+	assert.Equal(t, "gemini", resp.Provider)
+	require.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output[0].Content, 1)
+	assert.Equal(t, "Native response", resp.Output[0].Content[0].Text)
 
-	if resp.ID != "gemini-native-response" {
-		t.Fatalf("ID = %q, want gemini-native-response", resp.ID)
-	}
-	if resp.Object != "response" {
-		t.Fatalf("Object = %q, want response", resp.Object)
-	}
-	if resp.Model != "gemini-2.5-flash" {
-		t.Fatalf("Model = %q, want gemini-2.5-flash", resp.Model)
-	}
-	if resp.Provider != "gemini" {
-		t.Fatalf("Provider = %q, want gemini", resp.Provider)
-	}
-	if len(resp.Output) != 1 || len(resp.Output[0].Content) != 1 || resp.Output[0].Content[0].Text != "Native response" {
-		t.Fatalf("Output = %+v, want native response text", resp.Output)
-	}
+	sent := capture.Last(t)
+	assert.Equal(t, http.MethodPost, sent.Method)
+	assert.Equal(t, "/models/gemini-2.5-flash:generateContent", sent.Path)
+	assert.Equal(t, "test-api-key", sent.Header.Get("x-goog-api-key"))
+	assert.Empty(t, sent.Header.Get("Authorization"))
+
+	payload := sent.JSON(t)
+	assert.NotContains(t, payload, "messages")
+	assertSystemInstruction(t, payload, "Be concise.")
+	assertSingleUserText(t, payload, "Hello")
+	generationConfig, ok := payload["generationConfig"].(map[string]any)
+	require.True(t, ok, "generationConfig = %#v, want object", payload["generationConfig"])
+	assert.Equal(t, float64(64), generationConfig["maxOutputTokens"])
+}
+
+// assertSystemInstruction checks the native payload carries a single
+// system_instruction text part.
+func assertSystemInstruction(t *testing.T, payload map[string]any, want string) {
+	t.Helper()
+	systemInstruction, ok := payload["system_instruction"].(map[string]any)
+	require.True(t, ok, "system_instruction = %#v, want object", payload["system_instruction"])
+	systemParts, ok := systemInstruction["parts"].([]any)
+	require.True(t, ok, "system_instruction.parts = %#v, want array", systemInstruction["parts"])
+	require.Len(t, systemParts, 1)
+	part, _ := systemParts[0].(map[string]any)
+	assert.Equal(t, want, part["text"])
+}
+
+// assertSingleUserText checks the native payload has exactly one user
+// content with one text part.
+func assertSingleUserText(t *testing.T, payload map[string]any, want string) {
+	t.Helper()
+	contents, ok := payload["contents"].([]any)
+	require.True(t, ok, "contents = %#v, want array", payload["contents"])
+	require.Len(t, contents, 1)
+	content, _ := contents[0].(map[string]any)
+	assert.Equal(t, "user", content["role"])
+	parts, _ := content["parts"].([]any)
+	require.Len(t, parts, 1)
+	part, _ := parts[0].(map[string]any)
+	assert.Equal(t, want, part["text"])
 }
 
 func TestStreamResponses(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "false")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"id":"gemini-123","object":"chat.completion.chunk","created":1677652288,"model":"gemini-2.0-flash","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+	server, _ := providertest.SSEServer(t, `data: {"id":"gemini-123","object":"chat.completion.chunk","created":1677652288,"model":"gemini-2.0-flash","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
 data: [DONE]
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetBaseURL(server.URL)
@@ -2213,85 +1634,27 @@ data: [DONE]
 	}
 
 	body, err := provider.StreamResponses(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if body == nil {
-		t.Fatal("body should not be nil")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, body)
+
 	defer func() { _ = body.Close() }()
 
 	respBody, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-	}
+	require.NoError(t, err)
 
 	responseStr := string(respBody)
-	if !strings.Contains(responseStr, "response.created") {
-		t.Error("response should contain response.created event")
-	}
-	if !strings.Contains(responseStr, "[DONE]") {
-		t.Error("response should end with [DONE]")
-	}
+	assert.Contains(t, responseStr, "response.created")
+	assert.Contains(t, responseStr, "[DONE]")
 }
 
 func TestStreamResponses_Native(t *testing.T) {
 	t.Setenv(useNativeAPIEnvVar, "true")
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("Method = %q, want %q", r.Method, http.MethodPost)
-		}
-		if r.URL.Path != "/models/gemini-2.5-flash:streamGenerateContent" {
-			t.Errorf("Path = %q, want native streamGenerateContent endpoint", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("alt"); got != "sse" {
-			t.Errorf("alt = %q, want sse", got)
-		}
-		if got := r.Header.Get("x-goog-api-key"); got != "test-api-key" {
-			t.Errorf("x-goog-api-key = %q, want test-api-key", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "" {
-			t.Errorf("Authorization = %q, want empty for native Gemini API", got)
-		}
-
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatalf("failed to read request body: %v", err)
-		}
-		var payload map[string]any
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Fatalf("failed to unmarshal request: %v", err)
-		}
-		if _, ok := payload["stream"]; ok {
-			t.Fatal("native stream request should not contain OpenAI stream flag")
-		}
-		systemInstruction, ok := payload["system_instruction"].(map[string]any)
-		if !ok {
-			t.Fatalf("system_instruction = %#v, want object", payload["system_instruction"])
-		}
-		systemParts := systemInstruction["parts"].([]any)
-		if len(systemParts) != 1 || systemParts[0].(map[string]any)["text"] != "Be concise." {
-			t.Fatalf("system_instruction.parts = %#v, want instruction text", systemInstruction["parts"])
-		}
-		contents, ok := payload["contents"].([]any)
-		if !ok || len(contents) != 1 {
-			t.Fatalf("contents = %#v, want one native content", payload["contents"])
-		}
-		parts := contents[0].(map[string]any)["parts"].([]any)
-		if len(parts) != 1 || parts[0].(map[string]any)["text"] != "Hello" {
-			t.Fatalf("contents[0].parts = %#v, want user text", contents[0].(map[string]any)["parts"])
-		}
-
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}
+	server, capture := providertest.SSEServer(t, `data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}
 
 data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"role":"model","parts":[{"text":"!"}]},"finishReason":"STOP"}]}
 
-`))
-	}))
-	defer server.Close()
+`)
 
 	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
 	provider.SetModelsURL(server.URL)
@@ -2301,31 +1664,32 @@ data: {"responseId":"gemini-native-stream-response","candidates":[{"content":{"r
 		Instructions: "Be concise.",
 		Input:        "Hello",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if body == nil {
-		t.Fatal("body should not be nil")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, body)
+
 	defer func() { _ = body.Close() }()
 
 	raw, err := io.ReadAll(body)
-	if err != nil {
-		t.Fatalf("failed to read response stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	stream := string(raw)
-	if !strings.Contains(stream, "response.created") {
-		t.Fatalf("stream = %q, want response.created event", stream)
-	}
-	if !strings.Contains(stream, "response.output_text.delta") {
-		t.Fatalf("stream = %q, want response.output_text.delta event", stream)
-	}
-	if !strings.Contains(stream, `"delta":"Hello"`) || !strings.Contains(stream, `"delta":"!"`) {
-		t.Fatalf("stream = %q, want normalized text deltas", stream)
-	}
-	if !strings.Contains(stream, "data: [DONE]") {
-		t.Fatalf("stream = %q, want [DONE]", stream)
-	}
+	assert.Contains(t, stream, "response.created")
+	assert.Contains(t, stream, "response.output_text.delta")
+	assert.Contains(t, stream, `"delta":"Hello"`)
+	assert.Contains(t, stream, `"delta":"!"`)
+	assert.Contains(t, stream, "data: [DONE]")
+
+	sent := capture.Last(t)
+	assert.Equal(t, http.MethodPost, sent.Method)
+	assert.Equal(t, "/models/gemini-2.5-flash:streamGenerateContent", sent.Path)
+	assert.Equal(t, "sse", sent.Query.Get("alt"))
+	assert.Equal(t, "test-api-key", sent.Header.Get("x-goog-api-key"))
+	assert.Empty(t, sent.Header.Get("Authorization"))
+
+	payload := sent.JSON(t)
+	assert.NotContains(t, payload, "stream")
+	assertSystemInstruction(t, payload, "Be concise.")
+	assertSingleUserText(t, payload, "Hello")
 }
 
 func TestGeminiModelSupportedMethods_EmptyMethodFallback(t *testing.T) {
@@ -2340,9 +1704,8 @@ func TestGeminiModelSupportedMethods_EmptyMethodFallback(t *testing.T) {
 	}
 	for _, tt := range tests {
 		gotChat, gotEmbed, gotImage := geminiModelSupportedMethods(tt.model, nil)
-		if gotChat != tt.wantChat || gotEmbed != tt.wantEmbed || gotImage != tt.wantImage {
-			t.Errorf("geminiModelSupportedMethods(%q, nil) = %v/%v/%v, want %v/%v/%v",
-				tt.model, gotChat, gotEmbed, gotImage, tt.wantChat, tt.wantEmbed, tt.wantImage)
-		}
+		assert.Equal(t, tt.wantChat, gotChat, "%s chat", tt.model)
+		assert.Equal(t, tt.wantEmbed, gotEmbed, "%s embed", tt.model)
+		assert.Equal(t, tt.wantImage, gotImage, "%s image", tt.model)
 	}
 }

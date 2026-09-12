@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -35,9 +37,8 @@ data: [DONE]
 `
 			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "qwen/qwen3.6-27b", "groq")
 			raw, err := io.ReadAll(converter)
-			if err != nil {
-				t.Fatalf("read converter: %v", err)
-			}
+			require.NoError(t, err)
+
 			var got strings.Builder
 			for _, event := range parseTestSSEEvents(t, string(raw)) {
 				if event.Done || !strings.HasSuffix(event.Name, "reasoning_text.delta") {
@@ -46,9 +47,7 @@ data: [DONE]
 				delta, _ := event.Payload["delta"].(string)
 				got.WriteString(delta)
 			}
-			if got.String() != tt.want {
-				t.Errorf("reasoning_text deltas = %q, want %q", got.String(), tt.want)
-			}
+			assert.Equal(t, tt.want, got.String())
 		})
 	}
 }
@@ -97,9 +96,7 @@ func TestConvertChatResponseToResponsesReadsVendorReasoningMember(t *testing.T) 
 					got += part.Text
 				}
 			}
-			if got != tt.want {
-				t.Errorf("reasoning text = %q, want %q", got, tt.want)
-			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

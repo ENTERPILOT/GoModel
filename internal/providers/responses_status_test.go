@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -30,24 +31,17 @@ func TestConvertChatResponseToResponses_StatusFromFinishReason(t *testing.T) {
 					FinishReason: tt.finishReason,
 				}},
 			})
-			if resp.Status != tt.wantStatus {
-				t.Fatalf("status = %q, want %q", resp.Status, tt.wantStatus)
-			}
+			require.Equal(t, tt.wantStatus, resp.Status)
+
 			if tt.wantReason == "" {
-				if resp.IncompleteDetails != nil {
-					t.Fatalf("incomplete_details = %+v, want none", resp.IncompleteDetails)
-				}
-				if resp.Output[0].Status != "completed" {
-					t.Fatalf("message item status = %q, want completed", resp.Output[0].Status)
-				}
+				require.Nil(t, resp.IncompleteDetails)
+				require.Equal(t, "completed", resp.Output[0].Status)
+
 				return
 			}
-			if resp.IncompleteDetails == nil || resp.IncompleteDetails.Reason != tt.wantReason {
-				t.Fatalf("incomplete_details = %+v, want reason %q", resp.IncompleteDetails, tt.wantReason)
-			}
-			if resp.Output[0].Status != "incomplete" {
-				t.Fatalf("message item status = %q, want incomplete", resp.Output[0].Status)
-			}
+			require.NotNil(t, resp.IncompleteDetails)
+			require.Equal(t, tt.wantReason, resp.IncompleteDetails.Reason)
+			require.Equal(t, "incomplete", resp.Output[0].Status)
 		})
 	}
 }
@@ -60,21 +54,19 @@ func TestConvertChatResponseToResponses_SerializesIncompleteDetails(t *testing.T
 		Choices: []core.Choice{{Message: core.ResponseMessage{Role: "assistant", Content: "partial"}, FinishReason: "length"}},
 	})
 	encoded, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire struct {
 		Status            string `json:"status"`
 		IncompleteDetails *struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
 	}
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if wire.Status != "incomplete" || wire.IncompleteDetails == nil || wire.IncompleteDetails.Reason != "max_output_tokens" {
-		t.Fatalf("payload = %s, want incomplete with reason max_output_tokens", encoded)
-	}
+	err = json.Unmarshal(encoded, &wire)
+	require.NoError(t, err)
+	require.Equal(t, "incomplete", wire.Status)
+	require.NotNil(t, wire.IncompleteDetails)
+	require.Equal(t, "max_output_tokens", wire.IncompleteDetails.Reason, "payload = %s, want incomplete with reason max_output_tokens", encoded)
 }
 
 // Provider usage extras must not reach the client on the Responses surface;
@@ -95,49 +87,40 @@ func TestConvertChatResponseToResponses_NormalizesUsage(t *testing.T) {
 			},
 		},
 	})
-	if resp.Usage.RawUsage["thoughts_token_count"] != 5 {
-		t.Fatalf("RawUsage = %+v, want the provider extras kept for usage records", resp.Usage.RawUsage)
-	}
+	require.Equal(t, 5, resp.Usage.RawUsage["thoughts_token_count"], "RawUsage = %+v, want the provider extras kept for usage records", resp.Usage.RawUsage)
+
 	encoded, err := json.Marshal(resp.Usage)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire map[string]any
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
+	err = json.Unmarshal(encoded, &wire)
+	require.NoError(t, err)
+
 	for _, key := range []string{"thoughts_token_count", "completion_reasoning_tokens", "raw_usage"} {
-		if _, exists := wire[key]; exists {
-			t.Fatalf("usage payload %s carries %q, want the OpenAI Responses shape only", encoded, key)
-		}
+		_, exists := wire[key]
+		require.False(t, exists, "usage payload %s carries %q, want the OpenAI Responses shape only", encoded, key)
 	}
 	details, ok := wire["output_tokens_details"].(map[string]any)
-	if !ok || details["reasoning_tokens"] != float64(5) {
-		t.Fatalf("output_tokens_details = %#v, want reasoning_tokens 5", wire["output_tokens_details"])
-	}
+	require.True(t, ok)
+	require.Equal(t, float64(5), details["reasoning_tokens"])
 }
 
 // An empty assistant answer must still serialize the required text member.
 func TestBuildResponsesOutputItems_EmptyAnswerKeepsTextMember(t *testing.T) {
 	items := BuildResponsesOutputItems(core.ResponseMessage{Role: "assistant", Content: ""})
-	if len(items) != 1 {
-		t.Fatalf("items = %+v, want one message item", items)
-	}
+	require.Len(t, items, 1)
+
 	encoded, err := json.Marshal(items[0])
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire struct {
 		Content []map[string]json.RawMessage `json:"content"`
 	}
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(wire.Content) != 1 {
-		t.Fatalf("content = %s, want one part", encoded)
-	}
+	err = json.Unmarshal(encoded, &wire)
+	require.NoError(t, err)
+	require.Len(t, wire.Content, 1, "content = %s, want one part", encoded)
+
 	text, ok := wire.Content[0]["text"]
-	if !ok || string(text) != `""` {
-		t.Fatalf("output_text part = %s, want text \"\"", encoded)
-	}
+	require.True(t, ok)
+	require.Equal(t, `""`, string(text), "output_text part = %s, want text \"\"", encoded)
 }

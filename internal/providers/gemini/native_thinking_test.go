@@ -2,10 +2,10 @@ package gemini
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestThinkingConfigForEffort(t *testing.T) {
@@ -37,10 +37,7 @@ func TestThinkingConfigForEffort(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := thinkingConfigForEffort(tt.model, tt.effort)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("thinkingConfigForEffort(%q, %q) = %#v, want %#v", tt.model, tt.effort, got, tt.want)
-			}
+			require.Equal(t, tt.want, thinkingConfigForEffort(tt.model, tt.effort))
 		})
 	}
 }
@@ -50,13 +47,9 @@ func TestGeminiGenerationConfig_ExplicitThinkingConfigWins(t *testing.T) {
 	body := `{"model":"gemini-3.8-flash","messages":[{"role":"user","content":"hi"}],` +
 		`"reasoning":{"effort":"minimal"},` +
 		`"extra_body":{"google":{"thinking_config":{"thinking_level":"minimal"}}}}`
-	if err := json.Unmarshal([]byte(body), &req); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
+	err := json.Unmarshal([]byte(body), &req)
+	require.NoError(t, err)
 
 	cfg := geminiGenerationConfig(&req)
-	want := map[string]any{"thinkingLevel": "minimal"}
-	if got := cfg["thinkingConfig"]; !reflect.DeepEqual(got, want) {
-		t.Fatalf("thinkingConfig = %#v, want explicit %#v", got, want)
-	}
+	require.Equal(t, map[string]any{"thinkingLevel": "minimal"}, cfg["thinkingConfig"])
 }

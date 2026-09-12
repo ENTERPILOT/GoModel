@@ -6,6 +6,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/modeldata"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestInitialize_InfersEmbeddingModesForUnknownModels verifies the last-resort
@@ -29,42 +31,33 @@ func TestInitialize_InfersEmbeddingModesForUnknownModels(t *testing.T) {
 		},
 	}
 	registry.RegisterProviderWithNameAndType(local, "lagash", "openai")
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	for _, id := range []string{"nomic-embed-text-v1.5.Q8_0.gguf", "bge-m3"} {
 		info := registry.GetModel("lagash/" + id)
-		if info == nil || info.Model.Metadata == nil {
-			t.Fatalf("expected %s to have inferred metadata", id)
-		}
+		require.NotNil(t, info)
+		require.NotNil(t, info.Model.Metadata, "expected %s to have inferred metadata", id)
+
 		meta := info.Model.Metadata
-		if len(meta.Modes) != 1 || meta.Modes[0] != "embedding" {
-			t.Errorf("%s Modes = %v, want [embedding]", id, meta.Modes)
-		}
-		if len(meta.Categories) != 1 || meta.Categories[0] != core.CategoryEmbedding {
-			t.Errorf("%s Categories = %v, want [embedding]", id, meta.Categories)
-		}
+		assert.Len(t, meta.Modes, 1)
+		assert.Equal(t, "embedding", meta.Modes[0], "%s Modes = %v, want [embedding]", id, meta.Modes)
+		assert.Len(t, meta.Categories, 1)
+		assert.Equal(t, core.CategoryEmbedding, meta.Categories[0], "%s Categories = %v, want [embedding]", id, meta.Categories)
 	}
 
-	if info := registry.GetModel("lagash/llama-3.1-8b-instruct"); info == nil {
-		t.Fatal("expected llama-3.1-8b-instruct to be registered")
-	} else if info.Model.Metadata != nil {
-		t.Errorf("llama-3.1-8b-instruct metadata = %+v, want nil (no inference)", info.Model.Metadata)
-	}
+	chat := registry.GetModel("lagash/llama-3.1-8b-instruct")
+	require.NotNil(t, chat)
+	assert.Nil(t, chat.Model.Metadata, "chat model must not get inferred metadata")
 
 	embeddings := registry.ListModelsWithProviderByCategory(core.CategoryEmbedding)
 	found := map[string]bool{}
 	for _, m := range embeddings {
 		found[m.Model.ID] = true
 	}
-	if !found["nomic-embed-text-v1.5.Q8_0.gguf"] || !found["bge-m3"] {
-		t.Errorf("embedding category listing = %v, want both local embedding models", found)
-	}
-	if found["llama-3.1-8b-instruct"] {
-		t.Error("chat model must not appear in the embedding category")
-	}
+	assert.True(t, found["nomic-embed-text-v1.5.Q8_0.gguf"])
+	assert.True(t, found["bge-m3"], "embedding category listing = %v, want both local embedding models", found)
+	assert.False(t, found["llama-3.1-8b-instruct"], "chat model must not appear in the embedding category")
 }
 
 // TestApplyInferredModelMetadata_ReplacementsProtocol exercises the published-
@@ -88,31 +81,26 @@ func TestApplyInferredModelMetadata_ReplacementsProtocol(t *testing.T) {
 	replacements := map[*ModelInfo]*ModelInfo{orig: prior}
 
 	applied := applyInferredModelMetadata(map[string]map[string]*ModelInfo{"eridu": providerModels}, replacements)
-	if applied != 2 {
-		t.Fatalf("applied = %d, want 2", applied)
-	}
+	require.Equal(t, 2, applied)
 
 	// Original pointers must be untouched; new entries carry the metadata.
-	if fresh.Model.Metadata != nil || prior.Model.Metadata != nil {
-		t.Error("published ModelInfo values were mutated in place")
-	}
+	assert.Nil(t, fresh.Model.Metadata)
+	assert.Nil(t, prior.Model.Metadata)
+
 	for _, id := range []string{"nomic-embed-text", "bge-m3"} {
 		next := providerModels[id]
-		if next.Model.Metadata == nil || len(next.Model.Metadata.Modes) != 1 || next.Model.Metadata.Modes[0] != "embedding" {
-			t.Errorf("%s replacement metadata = %+v, want embedding modes", id, next.Model.Metadata)
-		}
+		assert.NotNil(t, next.Model.Metadata)
+		assert.Len(t, next.Model.Metadata.Modes, 1)
+		assert.Equal(t, "embedding", next.Model.Metadata.Modes[0], "%s replacement metadata = %+v, want embedding modes", id, next.Model.Metadata)
 	}
-	if got := replacements[fresh]; got != providerModels["nomic-embed-text"] {
-		t.Error("fresh entry not recorded in replacements")
-	}
-	// The chain must point from the ORIGINAL pre-enrichment pointer, not the
-	// intermediate clone, so callers fixing up r.models find their entry.
-	if got := replacements[orig]; got != providerModels["bge-m3"] {
-		t.Error("replacement chain broken: orig does not map to the final entry")
-	}
-	if chat.Model.Metadata != nil || providerModels["some-chat-model"] != chat {
-		t.Error("non-inferable model must be left untouched")
-	}
+	got := replacements[fresh]
+	assert.Equal(t, providerModels["nomic-embed-text"], got)
+	got = // The chain must point from the ORIGINAL pre-enrichment pointer, not the
+		// intermediate clone, so callers fixing up r.models find their entry.
+		replacements[orig]
+	assert.Equal(t, providerModels["bge-m3"], got)
+	assert.Nil(t, chat.Model.Metadata)
+	assert.Equal(t, chat, providerModels["some-chat-model"])
 }
 
 // TestEnrichModels_RegistryDataWinsOverInference verifies that when the remote
@@ -133,24 +121,19 @@ func TestEnrichModels_RegistryDataWinsOverInference(t *testing.T) {
 		},
 	}
 	registry.RegisterProviderWithNameAndType(local, "umma", "openai")
-
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
 
 	raw := []byte(`{"version":1,"updated_at":"2025-01-01T00:00:00Z","providers":{},"models":{"gte-large":{"modes":["chat"]}},"provider_models":{}}`)
 	list, err := modeldata.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	require.NoError(t, err)
+
 	registry.SetModelList(list, raw)
 	registry.EnrichModels()
 
 	info := registry.GetModel("umma/gte-large")
-	if info == nil || info.Model.Metadata == nil {
-		t.Fatal("expected gte-large to have metadata")
-	}
-	if len(info.Model.Metadata.Modes) != 1 || info.Model.Metadata.Modes[0] != "chat" {
-		t.Errorf("Modes = %v, want [chat] from model list", info.Model.Metadata.Modes)
-	}
+	require.NotNil(t, info)
+	require.NotNil(t, info.Model.Metadata)
+	assert.Len(t, info.Model.Metadata.Modes, 1)
+	assert.Equal(t, "chat", info.Model.Metadata.Modes[0])
 }

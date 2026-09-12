@@ -4,6 +4,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // A translated stream that hits the token limit must end with
@@ -29,9 +31,7 @@ data: [DONE]
 `
 			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 			raw, err := io.ReadAll(converter)
-			if err != nil {
-				t.Fatalf("ReadAll() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			itemStatus := ""
 			var response map[string]any
@@ -46,31 +46,21 @@ data: [DONE]
 				}
 			}
 
-			if response == nil {
-				t.Fatalf("expected %s terminal event, got %s", tt.wantEvent, raw)
-			}
+			require.NotNil(t, response, "expected %s terminal event, got %s", tt.wantEvent, raw)
+
 			if tt.wantReason == "" {
-				if response["status"] != "completed" {
-					t.Fatalf("response.status = %v, want completed", response["status"])
-				}
-				if _, exists := response["incomplete_details"]; exists {
-					t.Fatalf("incomplete_details = %#v, want none", response["incomplete_details"])
-				}
-				if itemStatus != "completed" {
-					t.Fatalf("message item status = %q, want completed", itemStatus)
-				}
+				require.Equal(t, "completed", response["status"])
+				_, exists := response["incomplete_details"]
+				require.False(t, exists, "incomplete_details = %#v, want none", response["incomplete_details"])
+				require.Equal(t, "completed", itemStatus)
+
 				return
 			}
-			if response["status"] != "incomplete" {
-				t.Fatalf("response.status = %v, want incomplete", response["status"])
-			}
+			require.Equal(t, "incomplete", response["status"])
+
 			details, _ := response["incomplete_details"].(map[string]any)
-			if details["reason"] != tt.wantReason {
-				t.Fatalf("incomplete_details = %#v, want reason %q", response["incomplete_details"], tt.wantReason)
-			}
-			if itemStatus != "incomplete" {
-				t.Fatalf("message item status = %q, want incomplete", itemStatus)
-			}
+			require.Equal(t, tt.wantReason, details["reason"], "incomplete_details = %#v, want reason %q", response["incomplete_details"], tt.wantReason)
+			require.Equal(t, "incomplete", itemStatus)
 		})
 	}
 }

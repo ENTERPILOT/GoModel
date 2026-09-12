@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -21,20 +23,17 @@ func TestBuildResponsesOutputItems_KeepsToolCallExtraFields(t *testing.T) {
 			ExtraFields: extra,
 		}},
 	})
-	if len(items) != 1 || items[0].Type != "function_call" {
-		t.Fatalf("items = %+v, want one function_call", items)
-	}
+	require.Len(t, items, 1)
+	require.Equal(t, "function_call", items[0].Type)
+
 	encoded, err := json.Marshal(items[0])
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got := string(wire["extra_content"]); got != `{"google":{"thought_signature":"sig-1"}}` {
-		t.Fatalf("extra_content = %s, want thought signature", got)
-	}
+	err = json.Unmarshal(encoded, &wire)
+	require.NoError(t, err)
+	got := string(wire["extra_content"])
+	require.Equal(t, `{"google":{"thought_signature":"sig-1"}}`, got)
 }
 
 func TestBuildResponsesOutputItems_ForwardsOnlyExtraContent(t *testing.T) {
@@ -51,19 +50,15 @@ func TestBuildResponsesOutputItems_ForwardsOnlyExtraContent(t *testing.T) {
 		}},
 	})
 	encoded, err := json.Marshal(items[0])
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var wire map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &wire); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if _, present := wire["provider_index"]; present {
-		t.Fatalf("provider_index leaked onto the function_call item: %s", encoded)
-	}
-	if got := string(wire["extra_content"]); got != `{"google":{"thought_signature":"sig-1"}}` {
-		t.Fatalf("extra_content = %s, want thought signature", got)
-	}
+	err = json.Unmarshal(encoded, &wire)
+	require.NoError(t, err)
+	_, present := wire["provider_index"]
+	require.False(t, present, "provider_index leaked onto the function_call item: %s", encoded)
+	got := string(wire["extra_content"])
+	require.Equal(t, `{"google":{"thought_signature":"sig-1"}}`, got)
 }
 
 // A reasoning item belongs to the assistant turn that follows it. When no
@@ -84,16 +79,14 @@ func TestConvertResponsesInputToMessages_ReasoningDoesNotLeakForward(t *testing.
 	}
 
 	messages, err := ConvertResponsesInputToMessages(input)
-	if err != nil {
-		t.Fatalf("ConvertResponsesInputToMessages: %v", err)
-	}
+	require.NoError(t, err)
+
 	for _, msg := range messages {
 		if msg.Role != "assistant" {
 			continue
 		}
-		if raw := msg.ExtraFields.Lookup(core.ExtraContentField); len(raw) > 0 {
-			t.Errorf("assistant turn %q inherited stale replay state: %s", msg.Content, raw)
-		}
+		raw := msg.ExtraFields.Lookup(core.ExtraContentField)
+		assert.Empty(t, raw, "assistant turn %q inherited stale replay state: %s", msg.Content, raw)
 	}
 }
 
@@ -112,16 +105,12 @@ func TestConvertResponsesInputToMessages_ReasoningAttachesToItsTurn(t *testing.T
 	}
 
 	messages, err := ConvertResponsesInputToMessages(input)
-	if err != nil {
-		t.Fatalf("ConvertResponsesInputToMessages: %v", err)
-	}
+	require.NoError(t, err)
+
 	assistant := messages[len(messages)-1]
-	if assistant.Role != "assistant" {
-		t.Fatalf("last message role = %q, want assistant", assistant.Role)
-	}
-	if raw := assistant.ExtraFields.Lookup(core.ExtraContentField); len(raw) == 0 {
-		t.Fatal("the assistant turn lost its replay state")
-	}
+	require.Equal(t, "assistant", assistant.Role)
+	raw := assistant.ExtraFields.Lookup(core.ExtraContentField)
+	require.NotEmpty(t, raw)
 }
 
 // OpenAI never emits a message item whose only content is an empty text
@@ -137,16 +126,14 @@ func TestBuildResponsesOutputItems_ToolCallOnlyHasNoEmptyMessage(t *testing.T) {
 			Function: core.FunctionCall{Name: "lookup_weather", Arguments: `{"city":"Warsaw"}`},
 		}},
 	})
-	if len(items) != 1 || items[0].Type != "function_call" {
-		t.Fatalf("items = %+v, want the function_call alone", items)
-	}
+	require.Len(t, items, 1)
+	require.Equal(t, "function_call", items[0].Type)
 
 	// A turn with neither text nor tool calls still yields one message so the
 	// output is never empty.
 	items = BuildResponsesOutputItems(core.ResponseMessage{Role: "assistant", Content: ""})
-	if len(items) != 1 || items[0].Type != "message" {
-		t.Fatalf("items = %+v, want a single message item", items)
-	}
+	require.Len(t, items, 1)
+	require.Equal(t, "message", items[0].Type)
 }
 
 // Turn-wide replay state on the assistant message (a Gemini 3 text-turn
@@ -156,40 +143,31 @@ func TestBuildResponsesOutputItems_ToolCallOnlyHasNoEmptyMessage(t *testing.T) {
 // on the assistant turn.
 func TestBuildResponsesOutputItems_MessageReplayStateBecomesReasoningItem(t *testing.T) {
 	fields, err := core.UnknownJSONFields{}.WithExtraContent(core.ExtraContentVendorGoogle, json.RawMessage(`{"thought_signature":"sig-1"}`))
-	if err != nil {
-		t.Fatalf("WithExtraContent: %v", err)
-	}
+	require.NoError(t, err)
+
 	items := BuildResponsesOutputItems(core.ResponseMessage{Role: "assistant", Content: "hi", ExtraFields: fields})
-	if len(items) != 2 || items[0].Type != "reasoning" || items[1].Type != "message" {
-		t.Fatalf("items = %+v, want a reasoning item followed by the message", items)
-	}
+	require.Len(t, items, 2)
+	require.Equal(t, "reasoning", items[0].Type)
+	require.Equal(t, "message", items[1].Type)
+
 	encoded, err := json.Marshal(items[0])
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
+	require.NoError(t, err)
+
 	var reasoning map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &reasoning); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if got := string(reasoning["extra_content"]); got != `{"google":{"thought_signature":"sig-1"}}` {
-		t.Errorf("reasoning extra_content = %s, want the message's replay state", got)
-	}
-	if _, ok := reasoning["content"]; ok {
-		t.Errorf("reasoning item carries content %s, want none for a turn without reasoning text", reasoning["content"])
-	}
+	err = json.Unmarshal(encoded, &reasoning)
+	require.NoError(t, err)
+	got := string(reasoning["extra_content"])
+	assert.Equal(t, `{"google":{"thought_signature":"sig-1"}}`, got)
+	_, ok := reasoning["content"]
+	assert.False(t, ok, "reasoning item carries content %s, want none for a turn without reasoning text", reasoning["content"])
 
 	// Echoed back, the item's state lands on the assistant turn it precedes.
 	messages, err := convertResponsesInputItems([]any{
 		map[string]any{"type": "reasoning", "summary": []any{}, "extra_content": map[string]any{"google": map[string]any{"thought_signature": "sig-1"}}},
 		map[string]any{"type": "message", "role": "assistant", "content": "hi"},
 	})
-	if err != nil {
-		t.Fatalf("convertResponsesInputItems: %v", err)
-	}
-	if len(messages) != 1 {
-		t.Fatalf("messages = %+v, want one assistant turn", messages)
-	}
-	if got := string(messages[0].ExtraFields.ExtraContent(core.ExtraContentVendorGoogle)); got != `{"thought_signature":"sig-1"}` {
-		t.Errorf("assistant extra_content.google = %s, want the echoed signature", got)
-	}
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	got = string(messages[0].ExtraFields.ExtraContent(core.ExtraContentVendorGoogle))
+	assert.Equal(t, `{"thought_signature":"sig-1"}`, got)
 }

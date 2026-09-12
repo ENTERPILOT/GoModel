@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // realtimeMockProvider is a mockProvider that also implements core.RealtimeProvider
@@ -59,15 +61,10 @@ func TestRouterRealtimeTargetRoutesByModel(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	target, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(target.URL, "model=gpt-realtime") {
-		t.Errorf("url = %q, want model in query", target.URL)
-	}
-	if rt.lastReq == nil || rt.lastReq.Model != "gpt-realtime" {
-		t.Errorf("provider received %+v, want forwarded model", rt.lastReq)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, target.URL, "model=gpt-realtime")
+	assert.NotNil(t, rt.lastReq)
+	assert.Equal(t, "gpt-realtime", rt.lastReq.Model)
 }
 
 func TestRouterRealtimeTargetUnsupportedModel(t *testing.T) {
@@ -76,9 +73,8 @@ func TestRouterRealtimeTargetUnsupportedModel(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "plain"})
-	if err == nil || !strings.Contains(err.Error(), "does not support realtime") {
-		t.Fatalf("err = %v, want does-not-support-realtime", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support realtime")
 }
 
 func TestRouterRealtimeTargetForwardsCallID(t *testing.T) {
@@ -88,12 +84,9 @@ func TestRouterRealtimeTargetForwardsCallID(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", CallID: "rtc_7"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rt.lastReq == nil || rt.lastReq.CallID != "rtc_7" {
-		t.Errorf("provider received %+v, want forwarded call id", rt.lastReq)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, rt.lastReq)
+	assert.Equal(t, "rtc_7", rt.lastReq.CallID)
 }
 
 func TestRouterRealtimeTargetForwardsIntent(t *testing.T) {
@@ -105,12 +98,9 @@ func TestRouterRealtimeTargetForwardsIntent(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-4o-transcribe", Intent: "transcription"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rt.lastReq == nil || rt.lastReq.Intent != "transcription" {
-		t.Errorf("provider received %+v, want forwarded intent", rt.lastReq)
-	}
+	require.NoError(t, err)
+	assert.NotNil(t, rt.lastReq)
+	assert.Equal(t, "transcription", rt.lastReq.Intent)
 }
 
 func TestRouterRealtimeCallTargetsForwardIntent(t *testing.T) {
@@ -122,20 +112,16 @@ func TestRouterRealtimeCallTargetsForwardIntent(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	req := &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: core.RealtimeIntentTranslation}
-	if _, err := router.RealtimeCallTarget(context.Background(), req); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rt.lastCallReq == nil || rt.lastCallReq.Intent != core.RealtimeIntentTranslation {
-		t.Errorf("call provider received %+v, want forwarded intent", rt.lastCallReq)
-	}
+	_, err := router.RealtimeCallTarget(context.Background(), req)
+	require.NoError(t, err)
+	assert.NotNil(t, rt.lastCallReq)
+	assert.Equal(t, core.RealtimeIntentTranslation, rt.lastCallReq.Intent)
 
 	rt.lastCallReq = nil
-	if _, err := router.RealtimeClientSecretTarget(context.Background(), req); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if rt.lastCallReq == nil || rt.lastCallReq.Intent != core.RealtimeIntentTranslation {
-		t.Errorf("client secret provider received %+v, want forwarded intent", rt.lastCallReq)
-	}
+	_, err = router.RealtimeClientSecretTarget(context.Background(), req)
+	require.NoError(t, err)
+	assert.NotNil(t, rt.lastCallReq)
+	assert.Equal(t, core.RealtimeIntentTranslation, rt.lastCallReq.Intent)
 }
 
 func TestRouterRealtimeCallTargetRoutesByModel(t *testing.T) {
@@ -145,15 +131,10 @@ func TestRouterRealtimeCallTargetRoutesByModel(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	target, err := router.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasSuffix(target.URL, "/realtime/calls") {
-		t.Errorf("url = %q, want the calls endpoint", target.URL)
-	}
-	if rt.lastCallReq == nil || rt.lastCallReq.Model != "gpt-realtime" {
-		t.Errorf("provider received %+v, want forwarded model", rt.lastCallReq)
-	}
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(target.URL, "/realtime/calls"), "url = %q, want the calls endpoint", target.URL)
+	assert.NotNil(t, rt.lastCallReq)
+	assert.Equal(t, "gpt-realtime", rt.lastCallReq.Model)
 }
 
 func TestRouterRealtimeClientSecretTargetRoutesByModel(t *testing.T) {
@@ -163,12 +144,8 @@ func TestRouterRealtimeClientSecretTargetRoutesByModel(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	target, err := router.RealtimeClientSecretTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasSuffix(target.URL, "/realtime/client_secrets") {
-		t.Errorf("url = %q, want the client secrets endpoint", target.URL)
-	}
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(target.URL, "/realtime/client_secrets"), "url = %q, want the client secrets endpoint", target.URL)
 }
 
 func TestRouterRealtimeCallTargetUnsupportedModel(t *testing.T) {
@@ -177,9 +154,8 @@ func TestRouterRealtimeCallTargetUnsupportedModel(t *testing.T) {
 	router, _ := NewRouter(lookup)
 
 	_, err := router.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "plain"})
-	if err == nil || !strings.Contains(err.Error(), "does not support realtime calls") {
-		t.Fatalf("err = %v, want does-not-support-realtime-calls", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support realtime calls")
 }
 
 func TestRouterRealtimeTargetWithProviderHint(t *testing.T) {
@@ -196,12 +172,9 @@ func TestRouterRealtimeTargetWithProviderHint(t *testing.T) {
 	router, _ := NewRouter(registry)
 
 	target, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", Provider: "openai"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if target == nil || target.URL == "" {
-		t.Fatal("expected a realtime target")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, target)
+	require.NotEmpty(t, target.URL)
 }
 
 func TestRouterRealtimeIntentRejectedByProviderWithoutSupport(t *testing.T) {
@@ -242,17 +215,14 @@ func TestRouterRealtimeIntentRejectedByProviderWithoutSupport(t *testing.T) {
 		for name, tc := range cases {
 			t.Run(surface+"/"+name, func(t *testing.T) {
 				err := call(&core.RealtimeRequest{Model: tc.model, Intent: tc.intent})
-				if err == nil || !strings.Contains(err.Error(), "does not support "+tc.intent+" realtime sessions") {
-					t.Fatalf("err = %v, want %s rejected for %q", err, tc.intent, tc.model)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "does not support "+tc.intent+" realtime sessions")
 			})
 		}
 	}
-
-	// Conversation sessions carry no intent and stay unaffected.
-	if _, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "conversation-only"}); err != nil {
-		t.Fatalf("conversation session rejected: %v", err)
-	}
+	_, err := // Conversation sessions carry no intent and stay unaffected.
+		router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "conversation-only"})
+	require.NoError(t, err)
 }
 
 func TestRouterRealtimeIntentAcceptsPaddedCasing(t *testing.T) {
@@ -262,8 +232,6 @@ func TestRouterRealtimeIntentAcceptsPaddedCasing(t *testing.T) {
 	lookup := newMockLookup()
 	lookup.addModel("translator", rt, "openai")
 	router, _ := NewRouter(lookup)
-
-	if _, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "translator", Intent: " Translation "}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	_, err := router.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "translator", Intent: " Translation "})
+	require.NoError(t, err)
 }
