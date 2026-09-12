@@ -213,3 +213,33 @@ test("previewEffectiveModels intersects the parent's models with the typed selec
   assert.deepEqual(previewEffectiveModels(parent, ["anthropic/opus"]), ["anthropic/opus"]);
   assert.deepEqual(previewEffectiveModels(parent, []), parent);
 });
+
+test("filterUserNodes keeps inactive ancestor when descendant is visible, and countInactiveUserNodes excludes it", () => {
+  // Inactive parent (/acme) with active child → parent stays visible and is NOT counted hidden.
+  // Child /acme/eng/deep is inactive, no active descendants → hidden and counted.
+  const nodes = [
+    node({ user_path: "/acme", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/acme/eng", key_count: 1, active_key_count: 1 }),
+    node({ user_path: "/acme/eng/deep", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/policies", key_count: 0 }),
+  ];
+  const filtered = filterUserNodes(nodes, "");
+  assert.deepEqual(
+    filtered.map((n) => n.user_path),
+    ["/acme", "/acme/eng", "/policies"],
+  );
+  // /acme is retained (anchors visible /acme/eng); /acme/eng/deep is hidden.
+  assert.equal(countInactiveUserNodes(nodes), 1);
+});
+
+test("countInactiveUserNodes counts fully inactive subtrees", () => {
+  const nodes = [
+    node({ user_path: "/teams", key_count: 1, active_key_count: 0 }),
+    node({ user_path: "/teams/old", key_count: 1, active_key_count: 0 }),
+  ];
+  assert.equal(countInactiveUserNodes(nodes), 2);
+  assert.deepEqual(
+    filterUserNodes(nodes, ""),
+    [],
+  );
+});

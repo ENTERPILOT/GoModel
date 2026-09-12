@@ -123,16 +123,56 @@ export function userNodeInactive(node) {
   return (node.key_count || 0) > 0 && (node.active_key_count || 0) === 0;
 }
 
+// inactiveAncestors returns the set of ancestor user_paths that are inactive
+// (all keys deactivated/expired) for the given path.  The path itself is
+// excluded — we only care about what sits above it in the tree.
+function inactiveAncestors(nodes, userPath) {
+  const trimmed = String(userPath || "").trim();
+  const raw = trimmed.startsWith("/") ? trimmed : "/" + trimmed;
+  const segments = raw.split("/").filter(Boolean);
+  const result = [];
+  for (let depth = segments.length - 1; depth >= 0; depth -= 1) {
+    const ancestor = depth === 0 ? "/" : "/" + segments.slice(0, depth).join("/");
+    const node = nodes.find((entry) => entry.user_path === ancestor);
+    if (node && userNodeInactive(node)) {
+      result.push(ancestor);
+    }
+  }
+  return result;
+}
+
 // filterUserNodes applies the toolbar query against the path, description,
 // and selectors, and hides nodes whose keys are all inactive unless
-// `showInactive` is set.
+// `showInactive` is set.  An inactive node is retained when at least one of
+// its descendants remains visible so the tree keeps a valid ancestor chain.
 export function filterUserNodes(nodes, query, options = {}) {
   const { showInactive = false } = options;
   const needle = String(query || "").trim().toLowerCase();
   const list = Array.isArray(nodes) ? nodes : [];
+
+  // Which inactive nodes should be retained?  An inactive node is retained
+  // only when it is an ancestor of at least one node that is naturally
+  // visible (not inactive).  Fully-inactive chains are not retained.
+  const inactiveRoots = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) {
+      const ancestors = inactiveAncestors(list, node.user_path);
+      if (ancestors.length === 0) {
+        inactiveRoots.add(node.user_path);
+      }
+    }
+  }
+  const retainedInactive = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) continue;
+    for (const anc of inactiveAncestors(list, node.user_path)) {
+      retainedInactive.add(anc);
+    }
+  }
+
   return list.filter((node) => {
     if (!showInactive && userNodeInactive(node)) {
-      return false;
+      return retainedInactive.has(node.user_path);
     }
     if (!needle) {
       return true;
@@ -146,9 +186,31 @@ export function filterUserNodes(nodes, query, options = {}) {
 }
 
 // countInactiveUserNodes counts the nodes hidden by the default view.
+// Inactive ancestors retained to anchor visible descendants are excluded.
 export function countInactiveUserNodes(nodes) {
   const list = Array.isArray(nodes) ? nodes : [];
-  return list.reduce((total, node) => total + (userNodeInactive(node) ? 1 : 0), 0);
+
+  // Recompute the same retained set used by filterUserNodes.
+  const inactiveRoots = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) {
+      const ancestors = inactiveAncestors(list, node.user_path);
+      if (ancestors.length === 0) {
+        inactiveRoots.add(node.user_path);
+      }
+    }
+  }
+  const retained = new Set();
+  for (const node of list) {
+    if (userNodeInactive(node)) continue;
+    for (const anc of inactiveAncestors(list, node.user_path)) {
+      retained.add(anc);
+    }
+  }
+  return list.reduce(
+    (total, node) => total + (userNodeInactive(node) && !retained.has(node.user_path) ? 1 : 0),
+    0,
+  );
 }
 
 // sortUserNodes orders the tree depth-first by path so a group is followed
