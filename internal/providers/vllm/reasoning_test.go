@@ -77,7 +77,7 @@ func TestAdaptChatRequest_NoOpWithoutLegacyReasoningContent(t *testing.T) {
 
 	adapted, err := adaptChatRequest(req)
 	require.NoError(t, err)
-	assert.Equal(t, req, adapted)
+	assert.Same(t, req, adapted)
 }
 
 func TestAdaptChatRequest_IgnoresNonAssistantMessages(t *testing.T) {
@@ -90,7 +90,7 @@ func TestAdaptChatRequest_IgnoresNonAssistantMessages(t *testing.T) {
 
 	adapted, err := adaptChatRequest(req)
 	require.NoError(t, err)
-	assert.Equal(t, req, adapted)
+	assert.Same(t, req, adapted)
 }
 
 func TestAdaptChatRequest_NilRequest(t *testing.T) {
@@ -146,5 +146,5 @@ func TestAdaptChatRequest_SkipsMalformedReasoningContentWithoutError(t *testing.
 
 	adapted, err := adaptChatRequest(req)
 	require.NoError(t, err)
-	assert.Equal(t, req, adapted)
+	assert.Same(t, req, adapted)
 }
