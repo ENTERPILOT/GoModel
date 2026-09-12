@@ -70,6 +70,29 @@ type Hooks struct {
 	// established but never delivered. OnStreamFirstChunk is not called for
 	// it. Error carries the read error, io.EOF for a clean empty stream.
 	OnStreamEmpty func(ctx context.Context, info ResponseInfo)
+
+	// OnEmptyResponse is called when a buffered inference call succeeded at
+	// the HTTP level but its normalized response carries no choices, output,
+	// or usage. The provider router fires it after decoding, so it follows
+	// the OnRequestEnd call that recorded the same attempt as a success.
+	OnEmptyResponse func(ctx context.Context, info EmptyResponseInfo)
+}
+
+// Empty response reasons reported through Hooks.OnEmptyResponse.
+const (
+	EmptyReasonNoChoices = "no_choices" // chat completion with no choices
+	EmptyReasonNoOutput  = "no_output"  // completed Responses API call with no output items
+	EmptyReasonNoUsage   = "no_usage"   // content returned without any token usage
+)
+
+// EmptyResponseInfo describes a provider response that returned 200 without
+// usable content or usage.
+type EmptyResponseInfo struct {
+	Provider     string // Configured provider name
+	ProviderType string // Provider implementation type
+	Model        string // Upstream model name, as sent to the provider
+	Operation    string // Semantic GenAI operation
+	Reason       string // One of the EmptyReason* values
 }
 
 // Config holds configuration for the LLM client

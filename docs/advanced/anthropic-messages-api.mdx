@@ -51,6 +51,7 @@ Anthropic unchanged.
 | `POST /v1/messages` | Creates a message through translated model routing. Supports streaming (`stream: true`) with Anthropic-format SSE events. |
 | `POST /v1/messages/count_tokens` | Counts input tokens. Exact for models whose provider has a counting endpoint (Anthropic); a calibrated estimate otherwise. |
 | `GET /v1/models` | Returns the catalog in the Anthropic list shape (`type: "model"`, `display_name`, `created_at`) when the request carries the `anthropic-version` header the Anthropic SDKs always send; OpenAI shape otherwise. |
+| `GET /v1/models/{model}` | Retrieves one model, in the Anthropic model shape when the request carries `anthropic-version`; OpenAI shape otherwise. |
 | `POST /v1/messages/batches` | Creates a Message Batch. Inline `requests[].params` are translated per item, so a batch can target any provider with native batch support (Anthropic, OpenAI, …), not only Anthropic. |
 | `GET /v1/messages/batches` | Lists batches (`limit`, `after_id`). |
 | `GET /v1/messages/batches/{id}` | Retrieves a batch (`processing_status`, `request_counts`, `results_url` once ended). |
@@ -232,8 +233,12 @@ features that have no canonical equivalent are not preserved end to end:
 - **`thinking`** on a non-Anthropic model becomes a reasoning effort (budget
   under 10000 tokens: `low`, under 20000: `medium`, otherwise `high`; adaptive:
   `medium`), sent as each provider's own field: `reasoning_effort` on OpenAI,
-  Groq, and Fireworks. Models that cannot reason (OpenAI `gpt-4*`, Groq models
-  other than gpt-oss and qwen3) get the request without it instead of an error.
+  Groq, Fireworks, and xAI. Models that reject the field (OpenAI `gpt-4*`, Groq
+  models other than gpt-oss and qwen3, xAI's `-non-reasoning`, `grok-build`,
+  `grok-2` and `grok-3` except `grok-3-mini`) get the request without it
+  instead of an error.
+  Reasoning comes back as `thinking` blocks whichever member the provider uses
+  for it (`reasoning_content` or `reasoning`).
 - **`count_tokens`** is exact when the model's provider can count tokens itself:
   Anthropic models are counted by Anthropic's own `count_tokens` endpoint. The
   forwarded request carries the resolved model (an alias is resolved first)

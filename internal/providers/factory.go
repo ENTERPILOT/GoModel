@@ -115,6 +115,14 @@ func (f *ProviderFactory) AddHooks(hooks llmclient.Hooks) {
 	f.hooks = llmclient.JoinHooks(f.hooks, hooks)
 }
 
+// emptyResponseHook returns the composed OnEmptyResponse hook. The router
+// fires it itself, with the route's identity, so providers never receive it.
+func (f *ProviderFactory) emptyResponseHook() func(context.Context, llmclient.EmptyResponseInfo) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.hooks.OnEmptyResponse
+}
+
 // Add adds a provider constructor to the factory.
 // Panics if reg.Type is empty or reg.New is nil — both are programming errors
 // caught at startup, not runtime conditions.

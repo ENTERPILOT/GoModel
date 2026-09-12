@@ -2,6 +2,7 @@ package providers
 
 import (
 	"bytes"
+	"cmp"
 	"io"
 	"slices"
 	"strings"
@@ -89,6 +90,7 @@ type openAIStreamChunk struct {
 		Delta struct {
 			Content          string                `json:"content"`
 			ReasoningContent string                `json:"reasoning_content"`
+			Reasoning        string                `json:"reasoning"`
 			ToolCalls        []openAIChunkToolCall `json:"tool_calls"`
 			ExtraContent     json.RawMessage       `json:"extra_content"`
 		} `json:"delta"`
@@ -304,8 +306,10 @@ func (sc *OpenAIResponsesStreamConverter) processChunk(data []byte) {
 	// closes the message item on the spot, and its output_item.done must
 	// already carry the state.
 	sc.setMessageExtraContent(choice.Delta.ExtraContent)
-	if choice.Delta.ReasoningContent != "" {
-		sc.appendReasoningDelta(choice.Delta.ReasoningContent)
+	// "reasoning_content" wins over the vendor "reasoning" member (Groq,
+	// OpenRouter), the same precedence the streaming codec applies.
+	if reasoning := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); reasoning != "" {
+		sc.appendReasoningDelta(reasoning)
 	}
 	if choice.Delta.Content != "" {
 		sc.appendTextDelta(choice.Delta.Content)
@@ -365,7 +369,11 @@ func (sc *OpenAIResponsesStreamConverter) processChunkTolerant(data []byte) {
 				sc.setMessageExtraContent(raw)
 			}
 		}
-		if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+		reasoning, _ := delta["reasoning_content"].(string)
+		if reasoning == "" {
+			reasoning, _ = delta["reasoning"].(string)
+		}
+		if reasoning != "" {
 			sc.appendReasoningDelta(reasoning)
 		}
 		if content, ok := delta["content"].(string); ok && content != "" {
