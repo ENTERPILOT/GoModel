@@ -299,7 +299,9 @@ func TestImageEdits_LogsUsage(t *testing.T) {
 	var captured *usage.UsageEntry
 	logger := &capturingUsageLogger{config: usage.Config{Enabled: true}, captured: &captured}
 	mock := newImageEditMock()
-	pricing := &core.ModelPricing{PerImage: new(0.04)}
+	// gpt-image-1 reports image output tokens, priced at $40/Mtok: the mock's
+	// 1000 output tokens cost $0.04.
+	pricing := &core.ModelPricing{OutputImagePerMtok: new(40.0)}
 	svc := &imageService{
 		provider:        mock,
 		usageLogger:     logger,

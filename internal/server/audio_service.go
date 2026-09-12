@@ -174,10 +174,12 @@ func (s *audioService) createAudioTranscription(c *echo.Context, translation boo
 		return s.respondAudio(c, route.providerName, resp) // emits the 502 guard before resp.Data is read
 	}
 	s.logUsage(ctx, route, func(pricing *core.ModelPricing) *usage.UsageEntry {
+		// The uploaded audio backs duration pricing when the provider reports no
+		// usage (whisper text/srt/vtt, Groq, ElevenLabs, every translation).
 		if translation {
-			return usage.ExtractFromTranslationResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
+			return usage.ExtractFromTranslationResponse(resp.Data, req.File, route.requestID, route.model, route.providerType, pricing)
 		}
-		return usage.ExtractFromTranscriptionResponse(resp.Data, route.requestID, route.model, route.providerType, pricing)
+		return usage.ExtractFromTranscriptionResponse(resp.Data, req.File, route.requestID, route.model, route.providerType, pricing)
 	})
 	if err := waitForModelSlowdownFactor(ctx, route.slowdown, inferenceTime); err != nil {
 		return handleError(c, err)
