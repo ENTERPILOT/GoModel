@@ -45,13 +45,13 @@ func TestRawProviderModel_UnmarshalYAML_MappingWithMetadata(t *testing.T) {
 	assert.Equal(t, "local-model", m.ID)
 	require.NotNil(t, m.Metadata)
 	assert.Equal(t, "Local Model", m.Metadata.DisplayName)
-	assert.NotNil(t, m.Metadata.ContextWindow)
+	require.NotNil(t, m.Metadata.ContextWindow)
 	assert.Equal(t, 131072, *m.Metadata.ContextWindow)
-	assert.NotNil(t, m.Metadata.MaxOutputTokens)
+	require.NotNil(t, m.Metadata.MaxOutputTokens)
 	assert.Equal(t, 8192, *m.Metadata.MaxOutputTokens)
 	got := m.Metadata.Capabilities["tools"]
 	assert.True(t, got)
-	assert.NotNil(t, m.Metadata.Pricing)
+	require.NotNil(t, m.Metadata.Pricing)
 	assert.Equal(t, "USD", m.Metadata.Pricing.Currency)
 }
 
@@ -138,7 +138,7 @@ func TestProviderModelMetadataOverrides(t *testing.T) {
 	}
 	overrides := ProviderModelMetadataOverrides(models)
 	require.Len(t, overrides, 1)
-	assert.NotNil(t, overrides["rich"].ContextWindow)
+	require.NotNil(t, overrides["rich"].ContextWindow)
 	assert.Equal(t, ctxWindow, *overrides["rich"].ContextWindow, "overrides[rich] = %+v", overrides["rich"])
 	got := ProviderModelMetadataOverrides(nil)
 	assert.Nil(t, got)

@@ -1148,8 +1148,8 @@ providers:
 
 		openai, exists := result.RawProviders["openai"]
 		require.True(t, exists)
-		assert.NotNil(t, openai.Resilience)
-		assert.NotNil(t, openai.Resilience.Retry)
+		require.NotNil(t, openai.Resilience)
+		require.NotNil(t, openai.Resilience.Retry)
 		assert.Equal(t, 10, *openai.Resilience.Retry.MaxRetries)
 
 		_, exists = result.RawProviders["anthropic"]
@@ -1219,7 +1219,7 @@ func TestLoad_CacheDir(t *testing.T) {
 
 		result, err := Load()
 		require.NoError(t, err)
-		assert.NotNil(t, result.Config.Cache.Model.Local)
+		require.NotNil(t, result.Config.Cache.Model.Local)
 		assert.Equal(t, "/tmp/gomodel-cache", result.Config.Cache.Model.Local.CacheDir)
 	})
 }
@@ -1533,7 +1533,7 @@ providers:
 		assert.Equal(t, "*:free", filter.Include[0])
 		assert.Len(t, filter.Exclude, 1)
 		assert.Equal(t, "*-preview:free", filter.Exclude[0])
-		assert.NotNil(t, filter.MaxPricePerMtok)
+		require.NotNil(t, filter.MaxPricePerMtok)
 		assert.Equal(t, float64(0), *filter.MaxPricePerMtok)
 		assert.False(t, filter.Empty())
 	})
