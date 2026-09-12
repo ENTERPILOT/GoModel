@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
 )
 
 // Known-field lists are derived from the struct definitions (json tags) at
@@ -331,13 +332,35 @@ func (r *ResponsesResponse) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	extraFields, err := extractUnknownJSONFieldsSet(data, responsesResponseFields)
+	keepIncompleteDetails := hasExplicitNullMember(data, responsesIncompleteDetailsMember)
+	extraFields, err := extractUnknownJSONFieldsWith(data, func(key string) bool {
+		if keepIncompleteDetails && key == responsesIncompleteDetailsMember {
+			return false
+		}
+		_, known := responsesResponseFields[key]
+		return known
+	})
 	if err != nil {
 		return err
 	}
 	*r = ResponsesResponse(decoded)
 	r.ExtraFields = extraFields
 	return nil
+}
+
+// responsesIncompleteDetailsMember is the one Response member OpenAI always
+// sends and always sets to null on a completed response. Once the struct types
+// it, an `omitempty` field decodes that null to a zero value and then drops it
+// on the way out, so the null has to be retained as an unknown extra to survive
+// the round trip. A populated value is emitted by the typed member itself and
+// must not be duplicated here.
+const responsesIncompleteDetailsMember = "incomplete_details"
+
+// hasExplicitNullMember reports whether the object carries member set to an
+// explicit JSON null, as opposed to omitting it.
+func hasExplicitNullMember(data []byte, member string) bool {
+	value := gjson.GetBytes(data, member)
+	return value.Exists() && value.Type == gjson.Null
 }
 
 // MarshalJSON emits the typed Response members together with every unknown

@@ -58,6 +58,49 @@ func TestResponsesResponseRoundTripsUnknownMembers(t *testing.T) {
 	}
 }
 
+// incomplete_details is sent on every OpenAI Response object, as an explicit
+// null on a completed one. It must survive the round trip exactly once,
+// whether or not the struct types it.
+func TestResponsesResponseKeepsIncompleteDetails(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "explicit null incomplete_details survives",
+			body: `{"id":"resp_1","object":"response","status":"completed","model":"gpt-4o-mini",` +
+				`"output":[],"incomplete_details":null}`,
+			want: `"incomplete_details":null`,
+		},
+		{
+			name: "populated incomplete_details is emitted once",
+			body: `{"id":"resp_2","object":"response","status":"incomplete","model":"gpt-4o-mini",` +
+				`"output":[],"incomplete_details":{"reason":"max_output_tokens"}}`,
+			want: `"incomplete_details":{"reason":"max_output_tokens"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var resp ResponsesResponse
+			if err := json.Unmarshal([]byte(tt.body), &resp); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			encoded, err := json.Marshal(resp)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			if !bytes.Contains(encoded, []byte(tt.want)) {
+				t.Fatalf("response = %s, want %s", encoded, tt.want)
+			}
+			if got := bytes.Count(encoded, []byte(`"incomplete_details"`)); got != 1 {
+				t.Fatalf("response = %s, want a single incomplete_details member, got %d", encoded, got)
+			}
+		})
+	}
+}
+
 // Typed members stay authoritative: a value set on the struct is emitted once,
 // from the field, not from the passthrough object.
 func TestResponsesResponseTypedMembersWinOverPassthrough(t *testing.T) {
