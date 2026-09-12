@@ -172,12 +172,14 @@ gateway's request body limit (`BODY_SIZE_LIMIT`).
 Image calls are recorded in [usage tracking](/features/cost-tracking) under the
 `/v1/images/generations` and `/v1/images/edits` endpoints:
 
-A response is billed one of two ways, never both — the reported usage decides:
+The prompt is always priced at `input_per_mtok` when the provider reports input
+tokens. The **generated images** are billed one of two ways, never both — the
+reported usage decides:
 
 - **Token-billed models** (`gpt-image-1`, Gemini image models) report `usage`.
   GoModel stores the token counts and prices the generated tokens with the
-  model's `output_image_per_mtok` rate (falling back to `output_per_mtok`),
-  plus `input_per_mtok` for the prompt. The image output rate is the one
+  model's `output_image_per_mtok` rate (falling back to `output_per_mtok`).
+  The image output rate is the one
   providers charge here: `gpt-image-1` has no text output price at all, and
   Gemini 3 Pro Image bills image output at $120/Mtok against $12/Mtok for text.
   Pricing this way is exact for every size and quality.
@@ -190,10 +192,11 @@ is the flat equivalent of one typical image's tokens ($0.039 for a 1290-token
 `gemini-2.5-flash-image`). A response that reported generated tokens is priced
 by those tokens alone, so the two are never added together.
 
-When the pricing cannot cost the row — no rate for the reported image output
-tokens, or no `usage` block and no `per_image`/`per_request` rate — the usage
-row is flagged with a cost-calculation caveat so it reads as "unreported usage"
-rather than a free call.
+When the pricing cannot cost the generated images — no rate for the image output
+tokens the response reported, or no reported output tokens and no
+`per_image`/`per_request` rate — the usage row is flagged with a
+cost-calculation caveat so it reads as "unreported usage" rather than a free
+call.
 
 Set `per_image` through a [pricing override](/features/cost-tracking#override-pricing)
 or in `config.yaml` when the model catalog has no price for an image model:

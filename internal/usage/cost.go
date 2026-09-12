@@ -68,8 +68,11 @@ func audioDurationAffectsCost(pricing *core.ModelPricing) bool {
 	if pricing == nil || pricing.PerRequest != nil {
 		return false
 	}
-	if pricing.PerSecondInput != nil && *pricing.PerSecondInput != 0 {
-		return true
+	rates := []*float64{pricing.PerSecondInput, pricing.AudioInputPerMtok, pricing.AudioOutputPerMtok}
+	for _, rate := range rates {
+		if rate != nil && *rate != 0 {
+			return true
+		}
 	}
 	return tokenRatesAffectCost(pricing)
 }

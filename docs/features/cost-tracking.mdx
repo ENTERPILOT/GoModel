@@ -21,7 +21,7 @@ For each request GoModel prices:
 
 - **Input** and **output** tokens at the model's per-million-token (MTok) rates.
 - **Cached input**, **reasoning**, and **audio** tokens at their own rates when the provider reports them, so cache-heavy and reasoning-heavy traffic is priced correctly.
-- **Non-token units** where that is how the provider bills: generated images (`per_image` / `output_image_per_mtok`), audio duration (`per_second_input`, `per_second_output`), and speech characters (`per_character_input`). See [images](/advanced/images-api#cost-tracking) and [audio](/advanced/audio-api#cost-tracking) for which unit applies to which model — a model is priced by one unit, never two at once.
+- **Non-token units** where that is how the provider bills: generated images (`per_image` / `output_image_per_mtok`), audio duration (`per_second_input`, `per_second_output`), and speech characters (`per_character_input`). See [images](/advanced/images-api#cost-tracking) and [audio](/advanced/audio-api#cost-tracking) for which unit applies to which model — where a rate and a token rate are two expressions of the same charge (an image's generated tokens, an audio clip's duration), only one of them is applied.
 
 When a provider returns an exact cost (OpenRouter credits, xAI `cost_in_usd_ticks`), GoModel uses that value instead of catalog pricing. Each row records which method was used in its `cost_source` field: `model_pricing`, `openrouter_credits`, or `xai_cost_in_usd_ticks`.
 

@@ -80,7 +80,7 @@ func extractFromImageResponse(resp *core.ImageGenerationResponse, requestID, mod
 	// reads as "we could not price this" rather than as a cheap call.
 	if entry.CostsCalculationCaveat == "" {
 		entry.CostsCalculationCaveat = imageCostCaveat(
-			effectiveEndpointPricing(endpoint, pricing...), entry.OutputTokens, len(resp.Data))
+			effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...), entry.OutputTokens, len(resp.Data))
 	}
 
 	return entry

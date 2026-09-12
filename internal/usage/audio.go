@@ -76,12 +76,24 @@ func ExtractFromSpeechRequest(input string, output []byte, format, requestID, mo
 }
 
 // transcriptionUsage mirrors the optional usage object the gpt-4o transcription
-// models return. It is token-based or duration-based; whisper omits it entirely.
+// models return. Type names the provider's own billable unit ("tokens" or
+// "duration"); whisper omits the object entirely.
 type transcriptionUsage struct {
+	Type         string  `json:"type"`
 	InputTokens  int     `json:"input_tokens"`
 	OutputTokens int     `json:"output_tokens"`
 	TotalTokens  int     `json:"total_tokens"`
 	Seconds      float64 `json:"seconds"`
+}
+
+// tokenBilled reports that the provider named tokens as the billable unit, so
+// the audio duration must not be charged on top of (or instead of) them — even
+// when it reported a zero count.
+func (u *transcriptionUsage) tokenBilled() bool {
+	if u == nil {
+		return false
+	}
+	return u.Type == "tokens" || u.InputTokens+u.OutputTokens+u.TotalTokens > 0
 }
 
 // ExtractFromTranscriptionResponse builds a usage entry for a speech-to-text
@@ -133,7 +145,7 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 	// the upload the gateway already holds — so the same call costs the same
 	// whether the transcript comes back as json, text, srt or vtt.
 	var seconds float64
-	if entry.TotalTokens == 0 {
+	if !parsed.Usage.tokenBilled() {
 		if parsed.Usage != nil && parsed.Usage.Seconds > 0 {
 			seconds = parsed.Usage.Seconds
 		} else if duration, ok := numericFloat(parsed.Duration); ok && duration > 0 {
@@ -150,7 +162,7 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 	// Nothing billable was reported or measurable: a duration-priced model then
 	// costs $0, which reads as a free call rather than an unrecorded one.
 	if entry.CostsCalculationCaveat == "" && seconds <= 0 && entry.TotalTokens == 0 &&
-		audioDurationAffectsCost(effectiveEndpointPricing(endpoint, pricing...)) {
+		audioDurationAffectsCost(effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...)) {
 		entry.CostsCalculationCaveat = caveatAudioMissingUsage
 	}
 

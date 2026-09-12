@@ -221,6 +221,33 @@ func TestImageBillingUnit(t *testing.T) {
 	}
 }
 
+// TestImageCostCaveat_TimeWindowRate guards the caveat against disagreeing with
+// the cost: when a time window supplies the output rate, the row is priced and
+// must not also be flagged as unpriceable.
+func TestImageCostCaveat_TimeWindowRate(t *testing.T) {
+	pricing := &core.ModelPricing{
+		InputPerMtok: new(5.0),
+		TimeWindows: []core.ModelPricingTimeWindow{{
+			Label:     "always",
+			UTCRanges: []core.ModelPricingUTCRange{{Start: "00:00", End: "00:00"}},
+			Pricing:   core.ModelPricingTimeWindowRates{OutputPerMtok: new(40.0)},
+		}},
+	}
+	resp := &core.ImageGenerationResponse{
+		Data:  []core.ImageData{{B64JSON: "aGk="}},
+		Usage: &core.ImageUsage{InputTokens: 9, OutputTokens: 272},
+	}
+
+	entry := ExtractFromImageResponse(resp, "req", "m", "openai", pricing)
+
+	if entry.TotalCost == nil || !costsNearlyEqual(*entry.TotalCost, 9*5/1e6+272*40/1e6) {
+		t.Errorf("total cost = %v, want the time-window rate applied", entry.TotalCost)
+	}
+	if entry.CostsCalculationCaveat != "" {
+		t.Errorf("caveat = %q, want none when the window priced the row", entry.CostsCalculationCaveat)
+	}
+}
+
 func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
 	// A token-priced model whose serving surface returns no usage block
 	// (e.g. Gemini's OpenAI-compatible images endpoint) must say why the
