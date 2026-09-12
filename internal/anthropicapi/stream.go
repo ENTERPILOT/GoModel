@@ -3,6 +3,7 @@ package anthropicapi
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"io"
 
 	"github.com/goccy/go-json"
@@ -20,6 +21,7 @@ type chatChunk struct {
 		Delta struct {
 			Content          string              `json:"content"`
 			ReasoningContent string              `json:"reasoning_content"`
+			Reasoning        string              `json:"reasoning"`
 			StopSequence     string              `json:"stop_sequence"`
 			ToolCalls        []chatToolCallDelta `json:"tool_calls"`
 			// ExtraContent is provider replay state for the turn so far;
@@ -178,12 +180,14 @@ func (sc *streamConverter) handleChunk(chunk *chatChunk) {
 		sc.usage = *chunk.Usage
 	}
 	for _, choice := range chunk.Choices {
-		if choice.Delta.ReasoningContent != "" {
+		// "reasoning_content" wins over "reasoning" (Groq, OpenRouter), the
+		// same precedence the streaming codec applies.
+		if thinking := cmp.Or(choice.Delta.ReasoningContent, choice.Delta.Reasoning); thinking != "" {
 			sc.ensureBlock("thinking")
 			sc.emit("content_block_delta", map[string]any{
 				"type":  "content_block_delta",
 				"index": sc.curIndex,
-				"delta": map[string]any{"type": "thinking_delta", "thinking": choice.Delta.ReasoningContent},
+				"delta": map[string]any{"type": "thinking_delta", "thinking": thinking},
 			})
 		}
 		sc.handleThinkingReplay(choice.Delta.ExtraContent)

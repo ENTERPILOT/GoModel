@@ -49,8 +49,12 @@ and passes through unchanged.
 | `xhigh` / `max` | `xhigh` on `grok-4.6` and later, and on the multi-agent Grok family (where it selects the agent count); `high` on older models, including the experimental `grok-4.20` family |
 | anything else | passed through for xAI to judge |
 
-Models without reasoning support reject the field upstream; omit `reasoning`
-for those.
+Models that do not take a configurable effort answer `400 ... does not support
+parameter reasoningEffort`. GoModel drops the field for them instead of
+forwarding it, so the same request works across the catalog: the
+`-non-reasoning` Grok variants, the `grok-build` coding family, `grok-2`, and
+`grok-3` (only `grok-3-mini` takes an effort). Unknown model IDs keep the
+field, so a new reasoning model works before GoModel learns about it.
 
 ## Prompt-cache affinity
 

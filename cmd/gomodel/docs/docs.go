@@ -6264,6 +6264,57 @@ const docTemplate = `{
                 ]
             }
         },
+        "/v1/models/{model}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Retrieve a model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model ID, e.g. openai/gpt-4.1-mini",
+                        "name": "model",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/core.Model"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
         "/v1/realtime": {
             "get": {
                 "description": "Upgrades to a websocket and relays an OpenAI-compatible realtime (speech-to-speech) session to the provider that owns the model named in the ?model= query parameter. Provider credentials are injected by the gateway. Passing ?call_id= instead attaches to an existing WebRTC/SIP call as a sideband channel; calls created through this gateway instance are routed automatically, others need explicit model (and provider) parameters.",
@@ -8891,6 +8942,60 @@ const docTemplate = `{
                 }
             }
         },
+        "auditlog.GuardrailOutcomeSnapshot": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "description": "Action is the decision (allow, warn, block, respond) or \"failure\" when\nthe instance errored; FailMode then says whether the chain carried on\n(\"open\") or the request failed (\"closed\").",
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "detail": {},
+                "dropped_events": {
+                    "type": "integer"
+                },
+                "duration_ns": {
+                    "type": "integer"
+                },
+                "edited": {
+                    "description": "Edited reports that the instance changed the request (prompt phase)\nor the response (response and stream phases); Target names which.",
+                    "type": "boolean"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "fail_mode": {
+                    "type": "string"
+                },
+                "instance": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "replaced_events": {
+                    "description": "ReplacedEvents and DroppedEvents count the stream events an in-flight\nstream instance rewrote or withheld.",
+                    "type": "integer"
+                },
+                "seq": {
+                    "type": "integer"
+                },
+                "step": {
+                    "type": "integer"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "auditlog.LogData": {
             "type": "object",
             "properties": {
@@ -8926,6 +9031,13 @@ const docTemplate = `{
                             "$ref": "#/definitions/auditlog.FailoverSnapshot"
                         }
                     ]
+                },
+                "guardrails": {
+                    "description": "Guardrails records the outcome of every guardrail (plugin instance)\nthat ran for the request, in execution order across the prompt,\nresponse and stream phases: what each decided, whether it edited the\nrequest or response, and how it failed. It is the decision trail;\nRequestRevisions is the body trail. A configured step without an\noutcome did not run (an earlier block, a cache hit).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/auditlog.GuardrailOutcomeSnapshot"
+                    }
                 },
                 "labels": {
                     "description": "Labels are request labels extracted from configured tagging headers.",
@@ -10174,6 +10286,10 @@ const docTemplate = `{
                 "input_per_mtok": {
                     "type": "number"
                 },
+                "output_image_per_mtok": {
+                    "description": "OutputImagePerMtok prices generated image tokens, which providers bill at a\ndifferent rate from text output (OpenAI gpt-image-1: $40/Mtok image output\nand no text output rate at all; Gemini 3 Pro Image: $120/Mtok image output\nversus $12/Mtok text). It is the output rate on the image endpoints.",
+                    "type": "number"
+                },
                 "output_per_mtok": {
                     "type": "number"
                 },
@@ -10181,6 +10297,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "per_image": {
+                    "description": "PerImage prices a returned image as a flat unit, for models that report no\ntoken usage at all (DALL·E, Imagen, grok-imagine). It is an alternative\nexpression of the same charge as OutputImagePerMtok, never an addition to\nit: catalog entries carry both, so only one may be applied (see\nusage.CalculateGranularCost).",
                     "type": "number"
                 },
                 "per_page": {
@@ -11090,6 +11207,9 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "input_per_mtok": {
+                    "type": "number"
+                },
+                "output_image_per_mtok": {
                     "type": "number"
                 },
                 "output_per_mtok": {

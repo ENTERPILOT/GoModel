@@ -23,27 +23,58 @@ const (
 // ticks equals 1 USD.
 const xaiUSDTicksPerUSD = 10_000_000_000
 
-// Missing-usage caveats mark rows whose provider reported no usage at all;
-// they describe the usage report, not the price math, so pricing
-// recalculation preserves them (see retainedMissingUsageCaveat).
+// Uncalculated-cost caveats mark rows the configured pricing could not cost:
+// the provider reported no usage, or reported a quantity with no rate to price
+// it. They describe the billable quantity, not the price math, so pricing
+// recalculation preserves them until new pricing closes the gap (see
+// retainedMissingUsageCaveat).
 const (
 	caveatImageMissingUsage     = "provider returned no token usage; set a per_image price to cost this model"
+	caveatImageUnpricedOutput   = "provider reported image output tokens with no configured rate; cost not calculated"
 	caveatEmbeddingMissingUsage = "provider reported no token usage; cost not calculated"
+	caveatAudioMissingUsage     = "provider reported no usage and audio duration could not be measured; cost not calculated"
 )
 
-// imageCostDetermined reports whether pricing can cost an image row whose
-// provider reported no usage: a per_image rate is not a basis on its own,
-// there must also be images to multiply it by. An explicit zero rate counts —
-// a deliberately free model is a known price, not a missing one. A per-request
-// rate stands alone, since it does not depend on reported usage at all.
-func imageCostDetermined(pricing *core.ModelPricing, imageCount int) bool {
-	if pricing == nil {
+// imageCostCaveat reports the caveat an image row needs, or "" when the
+// configured pricing costs it. An image response is billed one of two ways:
+// by the generated image tokens the provider reported, or — when it reported
+// none — by the number of images returned, each needing its own rate. An
+// explicit zero rate counts as priced: a deliberately free model is a known
+// price, not a missing one. A per-request rate stands alone, since it does not
+// depend on reported usage at all.
+//
+// pricing must already be resolved for the image endpoint (see
+// pricingForImageEndpoint), so OutputPerMtok is the image output rate.
+func imageCostCaveat(pricing *core.ModelPricing, outputTokens, imageCount int) string {
+	if pricing != nil && pricing.PerRequest != nil {
+		return ""
+	}
+	if outputTokens > 0 {
+		if pricing != nil && pricing.OutputPerMtok != nil {
+			return ""
+		}
+		return caveatImageUnpricedOutput
+	}
+	if imageCount > 0 && pricing != nil && pricing.PerImage != nil {
+		return ""
+	}
+	return caveatImageMissingUsage
+}
+
+// audioDurationAffectsCost reports whether a transcription or translation row
+// with no reported usage is understated: its model is priced by input audio
+// duration (or by tokens), and neither quantity is available.
+func audioDurationAffectsCost(pricing *core.ModelPricing) bool {
+	if pricing == nil || pricing.PerRequest != nil {
 		return false
 	}
-	if pricing.PerRequest != nil {
-		return true
+	rates := []*float64{pricing.PerSecondInput, pricing.AudioInputPerMtok, pricing.AudioOutputPerMtok}
+	for _, rate := range rates {
+		if rate != nil && *rate != 0 {
+			return true
+		}
 	}
-	return imageCount > 0 && pricing.PerImage != nil
+	return tokenRatesAffectCost(pricing)
 }
 
 // tokenRatesAffectCost reports whether reported token usage would have changed
@@ -78,16 +109,22 @@ func tokenRatesAffectCost(pricing *core.ModelPricing) bool {
 // retainedMissingUsageCaveat keeps a stored missing-usage caveat across
 // repricing: recalculation cannot conjure usage the provider never reported.
 // A caveat lifts once the new pricing determines the cost without that usage.
-func retainedMissingUsageCaveat(existing string, rawData map[string]any, pricing *core.ModelPricing) string {
+func retainedMissingUsageCaveat(existing string, outputTokens int, rawData map[string]any, pricing *core.ModelPricing) string {
 	// A prior recalculation may have joined the missing-usage caveat with its
 	// own caveats, so match by containment and return the canonical constant —
 	// the caller re-joins it with the fresh recalculation caveats.
 	switch {
-	case strings.Contains(existing, caveatImageMissingUsage):
-		if imageCostDetermined(pricing, extractInt(rawData, rawKeyImages)) {
+	case strings.Contains(existing, caveatImageMissingUsage),
+		strings.Contains(existing, caveatImageUnpricedOutput):
+		return imageCostCaveat(pricing, outputTokens, extractInt(rawData, rawKeyImages))
+	case strings.Contains(existing, caveatAudioMissingUsage):
+		if _, ok := extractFloat(rawData, rawKeyAudioSeconds); ok {
 			return ""
 		}
-		return caveatImageMissingUsage
+		if !audioDurationAffectsCost(pricing) {
+			return ""
+		}
+		return caveatAudioMissingUsage
 	case strings.Contains(existing, caveatEmbeddingMissingUsage):
 		if !tokenRatesAffectCost(pricing) {
 			return ""
@@ -300,11 +337,14 @@ func CalculateGranularCost(inputTokens, outputTokens int, rawData map[string]any
 		mappedKeys[rawKeyAudioOutputSeconds] = true
 	}
 
-	// Price generated images for per-image models (DALL·E). The count lives in
-	// RawData (see usage/images.go); token-billed image models carry no
-	// PerImage rate and are priced through the token paths above.
+	// Price generated images for per-image models (DALL·E, Imagen, grok-imagine).
+	// The count lives in RawData (see usage/images.go). PerImage and the output
+	// token rate are two expressions of the same charge — the catalog carries
+	// both for Gemini image models and gpt-image-1, where per_image is just the
+	// token price of one typical image — so a response that reported generated
+	// tokens is priced by tokens alone and never also per image.
 	if pricing.PerImage != nil {
-		if count := extractInt(rawData, rawKeyImages); count > 0 {
+		if count := extractInt(rawData, rawKeyImages); count > 0 && outputTokens <= 0 {
 			outputCost += float64(count) * *pricing.PerImage
 			hasOutput = true
 		}

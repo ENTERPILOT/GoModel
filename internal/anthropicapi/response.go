@@ -124,18 +124,22 @@ func emptySignature() *string {
 	return &empty
 }
 
-// reasoningContent extracts the reasoning_content surfaced by providers (e.g.
-// the anthropic provider) in a response message's extra fields.
+// reasoningContent extracts the reasoning text surfaced by providers in a
+// response message's extra fields: "reasoning_content" (the anthropic
+// provider, DeepSeek, Fireworks) or "reasoning" (Groq, OpenRouter), matching
+// the member precedence the streaming codec uses.
 func reasoningContent(fields core.UnknownJSONFields) string {
-	raw := fields.Lookup("reasoning_content")
-	if len(raw) == 0 {
-		return ""
+	for _, member := range []string{"reasoning_content", "reasoning"} {
+		raw := fields.Lookup(member)
+		if len(raw) == 0 {
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(raw, &text); err == nil && text != "" {
+			return text
+		}
 	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
-		return ""
-	}
-	return text
+	return ""
 }
 
 // argumentsToRaw renders a tool-call arguments string as a JSON object value.

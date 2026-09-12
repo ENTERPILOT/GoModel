@@ -250,6 +250,26 @@ func TestFromChatResponseThinkingBlocks(t *testing.T) {
 			want:   `[{"type":"thinking","thinking":"Let me think.","signature":""},{"type":"text","text":"Hi"}]`,
 		},
 		{
+			name:   "the reasoning member alone still renders a thinking block",
+			fields: map[string]json.RawMessage{"reasoning": json.RawMessage(`"Let me think."`)},
+			want:   `[{"type":"thinking","thinking":"Let me think.","signature":""},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "reasoning_content wins over reasoning",
+			fields: map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`"Canonical."`),
+				"reasoning":         json.RawMessage(`"Vendor."`),
+			},
+			want: `[{"type":"thinking","thinking":"Canonical.","signature":""},{"type":"text","text":"Hi"}]`,
+		},
+		{
+			name: "a non-string reasoning member is ignored",
+			fields: map[string]json.RawMessage{
+				"reasoning": json.RawMessage(`{"effort":"high"}`),
+			},
+			want: `[{"type":"text","text":"Hi"}]`,
+		},
+		{
 			name: "another vendor's replay state is not thinking",
 			fields: map[string]json.RawMessage{
 				core.ExtraContentField: json.RawMessage(`{"google":{"thought_signature":"sig"}}`),

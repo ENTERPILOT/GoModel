@@ -95,6 +95,33 @@ func TestObserverRecordsHTTPErrorType(t *testing.T) {
 	}
 }
 
+func TestObserverCountsEmptyResponses(t *testing.T) {
+	hooks, _, reader := newTestHooks(t)
+	info := llmclient.EmptyResponseInfo{Provider: "openai-eu", ProviderType: "openai", Model: "gpt-5", Operation: "chat", Reason: llmclient.EmptyReasonNoChoices}
+	hooks.OnEmptyResponse(t.Context(), info)
+	hooks.OnEmptyResponse(t.Context(), info)
+
+	for _, scope := range collect(t, reader).ScopeMetrics {
+		for _, candidate := range scope.Metrics {
+			if candidate.Name != "gomodel.client.empty_responses" {
+				continue
+			}
+			sum, ok := candidate.Data.(metricdata.Sum[int64])
+			if !ok || len(sum.DataPoints) != 1 {
+				t.Fatalf("empty_responses data = %+v, want one int64 sum point", candidate.Data)
+			}
+			point := sum.DataPoints[0]
+			attrs := attributeMap(point.Attributes.ToSlice())
+			if point.Value != 2 || attrs["error.type"] != "no_choices" || attrs["gen_ai.provider.name"] != "openai" ||
+				attrs["gomodel.provider.name"] != "openai-eu" || attrs["gen_ai.request.model"] != "gpt-5" {
+				t.Fatalf("empty_responses point = %d %+v", point.Value, attrs)
+			}
+			return
+		}
+	}
+	t.Fatal("gomodel.client.empty_responses was not recorded")
+}
+
 func TestObserverDefersTelemetryWhenStreamIntentIsUncertain(t *testing.T) {
 	hooks, recorder, reader := newTestHooks(t)
 	call := llmclient.RequestInfo{Provider: "openai", Operation: "chat", Endpoint: "/chat/completions", StreamUncertain: true}
