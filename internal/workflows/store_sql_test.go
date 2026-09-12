@@ -178,7 +178,7 @@ func TestSQLStoreEnsureManagedDefaultGlobalLeavesOperatorVersionAlone(t *testing
 
 		active, err := store.ListActive(ctx)
 		require.NoError(t, err)
-		assert.Len(t, active, 1)
+		require.Len(t, active, 1)
 		assert.Equal(t, operator.ID, active[0].ID)
 	})
 }

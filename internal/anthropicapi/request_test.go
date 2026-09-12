@@ -784,7 +784,7 @@ func TestToChatRequestLenientDropsUnsupportedContent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "m", chat.Model)
 	assert.Len(t, chat.Tools, 1)
-	assert.Len(t, chat.Messages, 4)
+	require.Len(t, chat.Messages, 4)
 	assert.Equal(t, "sys", chat.Messages[0].Content)
 	assert.Equal(t, "found", chat.Messages[2].Content)
 	assert.Equal(t, "tool", chat.Messages[3].Role)

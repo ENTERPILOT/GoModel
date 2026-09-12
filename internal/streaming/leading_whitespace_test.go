@@ -44,7 +44,7 @@ func TestAssemble_AcceptsLeadingWhitespace(t *testing.T) {
 		{Data: []byte(`{"id":"c1","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)},
 	})
 	require.NoError(t, err)
-	assert.Len(t, chat.Choices, 1)
+	require.Len(t, chat.Choices, 1)
 	assert.Equal(t, "hi", chat.Choices[0].Message.Content, "chat assembled = %+v", chat)
 
 	resp, err := AssembleResponsesResponse([]Event{
@@ -52,7 +52,7 @@ func TestAssemble_AcceptsLeadingWhitespace(t *testing.T) {
 		{Name: "response.output_text.delta", Data: []byte(` {"type":"response.output_text.delta","output_index":0,"delta":"hi"}`)},
 	})
 	require.NoError(t, err)
-	assert.Len(t, resp.Output, 1)
-	assert.Len(t, resp.Output[0].Content, 1)
+	require.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output[0].Content, 1)
 	assert.Equal(t, "hi", resp.Output[0].Content[0].Text, "responses assembled = %+v", resp)
 }
