@@ -551,7 +551,7 @@ func TestUpstreamHeadersStayOnConfiguredOrigin(t *testing.T) {
 		Name: "headers", URL: origin.URL, Transport: "http", Enabled: true,
 		Headers: map[string]string{"Authorization": "Bearer upstream-secret"},
 	}, http.DefaultClient)
-	client := u.httpClientWithHeaders()
+	client := u.dialClient(&connectProbe{})
 	resp, err := client.Get(origin.URL + "/same-origin")
 	if err != nil {
 		t.Fatalf("same-origin request error = %v", err)
