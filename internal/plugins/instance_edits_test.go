@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 // editorPlugin is a mutating plugin whose configuration decides whether it
@@ -50,9 +51,8 @@ func TestInstanceEditsContent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.instance.EditsContent(); got != tt.want {
-				t.Fatalf("EditsContent() = %v, want %v", got, tt.want)
-			}
+			got := tt.instance.EditsContent()
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

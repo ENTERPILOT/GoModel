@@ -2,10 +2,10 @@ package usage
 
 import (
 	"fmt"
-	"reflect"
-	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -15,49 +15,37 @@ func TestMongoSessionUsagePipelinesArePagedAndExcludeCachedCost(t *testing.T) {
 		Limit:  12,
 		Offset: 7,
 	})
-	if err != nil {
-		t.Fatalf("mongoSessionUsagePipelines: %v", err)
-	}
-	if limit != 12 || offset != 7 {
-		t.Fatalf("pagination = %d/%d, want 12/7", limit, offset)
-	}
-	if len(dataPipeline) != 6 {
-		t.Fatalf("data pipeline stages = %d, want 6: %#v", len(dataPipeline), dataPipeline)
-	}
-	if len(countPipeline) != 4 {
-		t.Fatalf("count pipeline stages = %d, want 4: %#v", len(countPipeline), countPipeline)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 12, limit)
+	require.Equal(t, 7, offset)
+	require.Len(t, dataPipeline, 6)
+	require.Len(t, countPipeline, 4)
+
 	match := fmt.Sprint(dataPipeline[0])
-	if !strings.Contains(match, "scoped-session") || strings.Contains(match, "cache_type") {
-		t.Fatalf("match stage has unexpected scope: %s", match)
-	}
+	require.Contains(t, match, "scoped-session")
+	require.NotContains(t, match, "cache_type")
+
 	group := fmt.Sprint(dataPipeline[2])
 	for _, fragment := range []string{"provider_requests", CacheTypeExact, CacheTypeSemantic, "total_cost"} {
-		if !strings.Contains(group, fragment) {
-			t.Fatalf("group stage missing %q: %s", fragment, group)
-		}
+		require.Contains(t, group, fragment)
 	}
 	wantTail := bson.A{
 		bson.D{{Key: "$sort", Value: bson.D{{Key: "latest", Value: -1}, {Key: "_id", Value: 1}}}},
 		bson.D{{Key: "$skip", Value: 7}},
 		bson.D{{Key: "$limit", Value: 12}},
 	}
-	if !reflect.DeepEqual(dataPipeline[3:], wantTail) {
-		t.Fatalf("data pipeline tail = %#v, want %#v", dataPipeline[3:], wantTail)
-	}
+	require.Equal(t, wantTail, dataPipeline[3:])
+
 	wantCount := bson.D{{Key: "$count", Value: "count"}}
-	if !reflect.DeepEqual(countPipeline[3], wantCount) {
-		t.Fatalf("count stage = %#v, want %#v", countPipeline[3], wantCount)
-	}
+	require.Equal(t, wantCount, countPipeline[3])
 }
 
 func TestSessionCostPtrUsesZeroForCacheOnlySession(t *testing.T) {
-	if got := sessionCostPtr(0, 0, 123); got == nil || *got != 0 {
-		t.Fatalf("cache-only session cost = %v, want 0", got)
-	}
-	if got := sessionCostPtr(1, 0, 0); got != nil {
-		t.Fatalf("unpriced provider session cost = %v, want nil", got)
-	}
+	got := sessionCostPtr(0, 0, 123)
+	require.NotNil(t, got)
+	require.Equal(t, float64(0), *got)
+	got = sessionCostPtr(1, 0, 0)
+	require.Nil(t, got)
 }
 
 func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
@@ -65,9 +53,7 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 		CacheMode: CacheModeUncached,
 		Search:    "gpt",
 	})
-	if err != nil {
-		t.Fatalf("mongoUsageLogMatchFilters() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	regex := bson.D{{Key: "$regex", Value: "gpt"}, {Key: "$options", Value: "i"}}
 	want := bson.D{{Key: "$and", Value: bson.A{
@@ -86,9 +72,7 @@ func TestMongoUsageLogMatchFiltersAndSearchWithCacheMode(t *testing.T) {
 		}}},
 	}}}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mongoUsageLogMatchFilters() = %#v, want %#v", got, want)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestMongoUsageLogMatchFiltersLabel(t *testing.T) {
@@ -96,14 +80,10 @@ func TestMongoUsageLogMatchFiltersLabel(t *testing.T) {
 		CacheMode: CacheModeAll,
 		Label:     "team-alpha",
 	})
-	if err != nil {
-		t.Fatalf("mongoUsageLogMatchFilters() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	want := bson.D{{Key: "labels", Value: "team-alpha"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mongoUsageLogMatchFilters() = %#v, want %#v", got, want)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
@@ -113,9 +93,7 @@ func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
 		Provider:  "openai",
 		Label:     "team-alpha",
 	})
-	if err != nil {
-		t.Fatalf("mongoUsageMatchFilters() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// The provider clause matches provider or provider_name, so it is ANDed
 	// with the scalar filters.
@@ -130,9 +108,7 @@ func TestMongoUsageMatchFiltersDataFilters(t *testing.T) {
 		}}},
 	}}}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mongoUsageMatchFilters() = %#v, want %#v", got, want)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
@@ -140,9 +116,7 @@ func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 		CacheMode: CacheModeAll,
 		Search:    "gpt.4+",
 	})
-	if err != nil {
-		t.Fatalf("mongoUsageLogMatchFilters() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	regex := bson.D{{Key: "$regex", Value: `gpt\.4\+`}, {Key: "$options", Value: "i"}}
 	want := bson.D{{Key: "$or", Value: bson.A{
@@ -154,9 +128,7 @@ func TestMongoUsageLogMatchFiltersEscapesSearchRegex(t *testing.T) {
 		bson.D{{Key: "session_id", Value: regex}},
 	}}}
 
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("mongoUsageLogMatchFilters() = %#v, want %#v", got, want)
-	}
+	require.Equal(t, want, got)
 }
 
 // Locks the BSON-to-field mapping for the rewrite-savings columns on the
@@ -194,26 +166,20 @@ func TestMongoUsageLogRowDecodesRewriteSavings(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := bson.Marshal(tc.doc)
-			if err != nil {
-				t.Fatalf("bson.Marshal() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			var row mongoUsageLogRow
-			if err := bson.Unmarshal(raw, &row); err != nil {
-				t.Fatalf("bson.Unmarshal() error = %v", err)
-			}
+			err = bson.Unmarshal(raw, &row)
+			require.NoError(t, err)
+
 			entry := row.toUsageLogEntry()
-			if entry.RewriteTokensSaved != tc.wantTokens {
-				t.Errorf("RewriteTokensSaved = %d, want %d", entry.RewriteTokensSaved, tc.wantTokens)
-			}
-			switch {
-			case tc.wantCost == nil:
-				if entry.RewriteCostSaved != nil {
-					t.Errorf("RewriteCostSaved = %v, want nil", *entry.RewriteCostSaved)
-				}
-			case entry.RewriteCostSaved == nil:
-				t.Errorf("RewriteCostSaved = nil, want %v", *tc.wantCost)
-			case *entry.RewriteCostSaved != *tc.wantCost:
-				t.Errorf("RewriteCostSaved = %v, want %v", *entry.RewriteCostSaved, *tc.wantCost)
+			assert.Equal(t, tc.wantTokens, entry.RewriteTokensSaved)
+
+			if tc.wantCost == nil {
+				assert.Nil(t, entry.RewriteCostSaved)
+			} else {
+				require.NotNil(t, entry.RewriteCostSaved)
+				assert.Equal(t, *tc.wantCost, *entry.RewriteCostSaved)
 			}
 		})
 	}
@@ -227,30 +193,18 @@ func TestMongoUsageCacheStatsPipelineCanonicalUserPath(t *testing.T) {
 	params := UsageQueryParams{UserPath: "/team/alpha", Model: "gpt-5"}
 
 	pipeline, err := mongoUsageCacheStatsPipeline(params, true)
-	if err != nil {
-		t.Fatalf("mongoUsageCacheStatsPipeline returned error: %v", err)
-	}
-	if len(pipeline) != 4 {
-		t.Fatalf("expected 4 stages (match, addFields, canonical match, project), got %d: %#v", len(pipeline), pipeline)
-	}
+	require.NoError(t, err)
+	require.Len(t, pipeline, 4)
 
 	// Stage 1: base filters with the raw user_path condition cleared — the
 	// model filter stays, the subtree match moves to the canonical stage.
 	wantBase, err := mongoUsageMatchFilters(UsageQueryParams{Model: "gpt-5", CacheMode: CacheModeAll})
-	if err != nil {
-		t.Fatalf("mongoUsageMatchFilters returned error: %v", err)
-	}
-	if !reflect.DeepEqual(pipeline[0], bson.D{{Key: "$match", Value: wantBase}}) {
-		t.Fatalf("unexpected base match stage: %#v", pipeline[0])
-	}
+	require.NoError(t, err)
+	require.Equal(t, bson.D{{Key: "$match", Value: wantBase}}, pipeline[0])
 
 	// Stages 2-3: identical canonical stages to the aggregate's own.
-	if !reflect.DeepEqual(pipeline[1], mongoCanonicalUserPathAddFieldsStage()) {
-		t.Fatalf("unexpected addFields stage: %#v", pipeline[1])
-	}
-	if !reflect.DeepEqual(pipeline[2], mongoCanonicalUserPathMatchStage("/team/alpha")) {
-		t.Fatalf("unexpected canonical match stage: %#v", pipeline[2])
-	}
+	require.Equal(t, mongoCanonicalUserPathAddFieldsStage(), pipeline[1])
+	require.Equal(t, mongoCanonicalUserPathMatchStage("/team/alpha"), pipeline[2])
 }
 
 // Model/label folds keep filtering the raw user_path field, matching their
@@ -259,20 +213,12 @@ func TestMongoUsageCacheStatsPipelineRawUserPath(t *testing.T) {
 	params := UsageQueryParams{UserPath: "/team/alpha"}
 
 	pipeline, err := mongoUsageCacheStatsPipeline(params, false)
-	if err != nil {
-		t.Fatalf("mongoUsageCacheStatsPipeline returned error: %v", err)
-	}
-	if len(pipeline) != 2 {
-		t.Fatalf("expected 2 stages (match, project), got %d: %#v", len(pipeline), pipeline)
-	}
+	require.NoError(t, err)
+	require.Len(t, pipeline, 2)
 
 	wantParams := params
 	wantParams.CacheMode = CacheModeAll
 	want, err := mongoUsageMatchFilters(wantParams)
-	if err != nil {
-		t.Fatalf("mongoUsageMatchFilters returned error: %v", err)
-	}
-	if !reflect.DeepEqual(pipeline[0], bson.D{{Key: "$match", Value: want}}) {
-		t.Fatalf("unexpected match stage: %#v", pipeline[0])
-	}
+	require.NoError(t, err)
+	require.Equal(t, bson.D{{Key: "$match", Value: want}}, pipeline[0])
 }

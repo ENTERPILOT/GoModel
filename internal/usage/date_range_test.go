@@ -3,15 +3,16 @@ package usage
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildDateRange(t *testing.T) {
 	today := time.Date(2026, time.July, 7, 0, 0, 0, 0, time.UTC)
 	day := func(value string) time.Time {
 		parsed, err := time.ParseInLocation("2006-01-02", value, time.UTC)
-		if err != nil {
-			t.Fatalf("parse %q: %v", value, err)
-		}
+		require.NoError(t, err, "parse %q", value)
+
 		return parsed
 	}
 
@@ -41,17 +42,12 @@ func TestBuildDateRange(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			start, end, err := BuildDateRange(tt.startStr, tt.endStr, tt.days, time.UTC, today)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("BuildDateRange() = %s..%s, want error", start, end)
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("BuildDateRange() error = %v, want nil", err)
-			}
-			if !start.Equal(tt.wantStart) || !end.Equal(tt.wantEnd) {
-				t.Fatalf("BuildDateRange() = %s..%s, want %s..%s", start, end, tt.wantStart, tt.wantEnd)
-			}
+			require.NoError(t, err)
+			require.True(t, start.Equal(tt.wantStart))
+			require.True(t, end.Equal(tt.wantEnd), "BuildDateRange() = %s..%s, want %s..%s", start, end, tt.wantStart, tt.wantEnd)
 		})
 	}
 }
