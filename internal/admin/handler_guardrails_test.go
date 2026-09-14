@@ -152,11 +152,14 @@ func TestListGuardrailTypes(t *testing.T) {
 	assert.True(t, typeDef.Mutates)
 	assert.True(t, typeDef.Guardrail)
 
+	foundMaxTokens := false
 	for _, field := range typeDef.Fields {
 		if field.Key == "max_tokens" {
+			foundMaxTokens = true
 			assert.Equal(t, fmt.Sprint(defaults["max_tokens"]), fmt.Sprint(field.Default), "max_tokens field default disagrees with defaults")
 		}
 	}
+	assert.True(t, foundMaxTokens, "llm_based_altering fields = %#v, want a max_tokens field", typeDef.Fields)
 }
 
 func TestUpsertGuardrail(t *testing.T) {
