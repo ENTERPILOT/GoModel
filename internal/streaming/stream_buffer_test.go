@@ -3,6 +3,8 @@ package streaming
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestStreamBufferReadConsumeAndAppend(t *testing.T) {
@@ -12,22 +14,17 @@ func TestStreamBufferReadConsumeAndAppend(t *testing.T) {
 	buffer.AppendString("hello")
 
 	out := make([]byte, 2)
-	if n := buffer.Read(out); n != 2 {
-		t.Fatalf("Read() = %d, want 2", n)
-	}
-	if string(out) != "he" {
-		t.Fatalf("Read() data = %q, want %q", string(out), "he")
-	}
+	n := buffer.Read(out)
+	require.Equal(t, 2, n)
+	require.Equal(t, "he", string(out))
 
 	buffer.AppendString(" world")
-	if got := string(buffer.Unread()); got != "llo world" {
-		t.Fatalf("Unread() = %q, want %q", got, "llo world")
-	}
+	got := string(buffer.Unread())
+	require.Equal(t, "llo world", got)
 
 	buffer.Consume(4)
-	if got := string(buffer.Unread()); got != "world" {
-		t.Fatalf("Unread() after Consume() = %q, want %q", got, "world")
-	}
+	got = string(buffer.Unread())
+	require.Equal(t, "world", got)
 }
 
 func TestStreamBufferReleaseIsIdempotent(t *testing.T) {
@@ -36,36 +33,25 @@ func TestStreamBufferReleaseIsIdempotent(t *testing.T) {
 
 	buffer.Release()
 	buffer.Release()
-
-	if got := buffer.Len(); got != 0 {
-		t.Fatalf("Len() after Release() = %d, want 0", got)
-	}
-	if got := buffer.Unread(); got != nil {
-		t.Fatalf("Unread() after Release() = %v, want nil", got)
-	}
+	require.Zero(t, buffer.Len())
+	require.Nil(t, buffer.Unread(), "Unread() after Release()")
 }
 
 func TestStreamBufferReleaseKeepsOriginalPooledSliceAfterGrowth(t *testing.T) {
 	buffer := NewStreamBuffer(8)
 	pooled := buffer.pooled
-	if pooled == nil {
-		t.Fatal("pooled = nil, want original pooled handle")
-	}
+	require.NotNil(t, pooled)
+
 	originalCap := cap(*pooled)
 
 	buffer.AppendString(strings.Repeat("x", maxPooledStreamBufferSize+1))
-	if cap(buffer.data) <= maxPooledStreamBufferSize {
-		t.Fatalf("active buffer cap = %d, want oversized allocation", cap(buffer.data))
-	}
+	require.Greater(t, cap(buffer.data), maxPooledStreamBufferSize)
 
 	buffer.Release()
 
-	if *pooled == nil {
-		t.Fatal("pooled slice = nil, want original slice returned to pool")
-	}
-	if got := cap(*pooled); got != originalCap {
-		t.Fatalf("pooled cap = %d, want original cap %d", got, originalCap)
-	}
+	require.NotNil(t, *pooled)
+	got := cap(*pooled)
+	require.Equal(t, originalCap, got)
 }
 
 func TestStreamBufferReleaseRecyclesGrownBuffer(t *testing.T) {
@@ -75,30 +61,21 @@ func TestStreamBufferReleaseRecyclesGrownBuffer(t *testing.T) {
 
 	buffer.AppendString(strings.Repeat("x", defaultStreamBufferCapacity*4))
 	grownCap := cap(buffer.data)
-	if grownCap <= initialCap {
-		t.Fatalf("active buffer cap = %d, want growth beyond initial %d", grownCap, initialCap)
-	}
-	if grownCap > maxPooledStreamBufferSize {
-		t.Fatalf("test setup: grown cap %d must stay within pool bound %d", grownCap, maxPooledStreamBufferSize)
-	}
+	require.Greater(t, grownCap, initialCap)
+	require.LessOrEqual(t, grownCap, maxPooledStreamBufferSize)
 
 	buffer.Release()
-
-	if got := cap(*pooled); got != grownCap {
-		t.Fatalf("pooled cap = %d, want grown cap %d recycled into the pool", got, grownCap)
-	}
-	if got := len(*pooled); got != 0 {
-		t.Fatalf("pooled len = %d, want 0 after release", got)
-	}
+	got := cap(*pooled)
+	require.Equal(t, grownCap, got)
+	got = len(*pooled)
+	require.Equal(t, 0, got)
 }
 
 func TestNewStreamBufferKeepsPoolSlotInSyncWithInitialCapacity(t *testing.T) {
 	buffer := NewStreamBuffer(4 * defaultStreamBufferCapacity)
-	if got := cap(buffer.data); got < 4*defaultStreamBufferCapacity {
-		t.Fatalf("buffer cap = %d, want at least requested %d", got, 4*defaultStreamBufferCapacity)
-	}
-	if got, want := cap(*buffer.pooled), cap(buffer.data); got != want {
-		t.Fatalf("pool slot cap = %d, want %d — the slot must track the buffer actually allocated", got, want)
-	}
+	got := cap(buffer.data)
+	require.GreaterOrEqual(t, got, 4*defaultStreamBufferCapacity)
+
+	require.Equal(t, cap(buffer.data), cap(*buffer.pooled), "the pool slot must track the buffer actually allocated")
 	buffer.Release()
 }

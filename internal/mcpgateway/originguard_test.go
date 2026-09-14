@@ -2,13 +2,13 @@ package mcpgateway
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOriginGuardCheck(t *testing.T) {
@@ -201,9 +201,8 @@ func TestOriginGuardCheck(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			guard, err := newOriginGuard(tt.trusted)
-			if err != nil {
-				t.Fatalf("newOriginGuard(%v) error: %v", tt.trusted, err)
-			}
+			require.NoError(t, err)
+
 			req := httptest.NewRequest(tt.method, "/mcp", nil)
 			for key, value := range tt.headers {
 				if key == "Host" {
@@ -215,23 +214,17 @@ func TestOriginGuardCheck(t *testing.T) {
 
 			err = guard.check(req)
 			if tt.allowed {
-				if err != nil {
-					t.Fatalf("check() = %v, want nil", err)
-				}
+				require.NoError(t, err)
 				return
 			}
-			if err == nil {
-				t.Fatal("check() = nil, want a rejection")
-			}
+			require.Error(t, err)
+
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) {
-				t.Fatalf("check() = %T, want *core.GatewayError", err)
-			}
-			if gatewayErr.StatusCode != http.StatusForbidden {
-				t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusForbidden)
-			}
-			if origin := tt.headers["Origin"]; origin != "" && strings.Contains(gatewayErr.Message, origin) {
-				t.Fatalf("message echoes the rejected origin: %q", gatewayErr.Message)
+			require.ErrorAs(t, err, &gatewayErr)
+			require.Equal(t, http.StatusForbidden, gatewayErr.StatusCode)
+
+			if origin := tt.headers["Origin"]; origin != "" {
+				require.NotContains(t, gatewayErr.Message, origin, "message echoes the rejected origin")
 			}
 		})
 	}
@@ -246,23 +239,19 @@ func TestNewOriginGuardRejectsMalformedEntries(t *testing.T) {
 		"https://user@console.example.com", // userinfo
 	} {
 		t.Run(entry, func(t *testing.T) {
-			if _, err := newOriginGuard([]string{entry}); err == nil {
-				t.Fatalf("newOriginGuard(%q) = nil error, want a rejection", entry)
-			}
+			_, err := newOriginGuard([]string{entry})
+			require.Error(t, err)
 		})
 	}
 }
 
 func TestNewOriginGuardIgnoresBlankEntries(t *testing.T) {
 	guard, err := newOriginGuard([]string{"", "  "})
-	if err != nil {
-		t.Fatalf("newOriginGuard() error: %v", err)
-	}
+	require.NoError(t, err)
+
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	req.Header.Set("Origin", "http://attacker.example:8080")
-	if err := guard.check(req); err == nil {
-		t.Fatal("check() = nil, want a rejection")
-	}
+	require.Error(t, guard.check(req))
 }
 
 // nonLoopbackAddr is the local address of a gateway bound to all interfaces,
@@ -300,16 +289,13 @@ func TestServiceRejectsReboundRequestOnNonLoopbackBind(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	err := service.ServeHTTP(rec, req, "")
-	if err == nil {
-		t.Fatal("ServeHTTP() = nil, want a rejection; the rebound request established a session")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.StatusCode != http.StatusForbidden {
-		t.Fatalf("ServeHTTP() = %v, want a 403 *core.GatewayError", err)
-	}
-	if sessionID := rec.Header().Get("Mcp-Session-Id"); sessionID != "" {
-		t.Fatalf("rejected request was issued session %q", sessionID)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusForbidden, gatewayErr.StatusCode)
+	sessionID := rec.Header().Get("Mcp-Session-Id")
+	require.Empty(t, sessionID)
 }
 
 // TestServiceServesMCPClientOnNonLoopbackBind is the other half: the guard
@@ -323,13 +309,8 @@ func TestServiceServesMCPClientOnNonLoopbackBind(t *testing.T) {
 	req.Host = "gateway.internal:8080"
 
 	rec := httptest.NewRecorder()
-	if err := service.ServeHTTP(rec, req, ""); err != nil {
-		t.Fatalf("ServeHTTP() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if rec.Header().Get("Mcp-Session-Id") == "" {
-		t.Fatal("no Mcp-Session-Id issued to a legitimate MCP client")
-	}
+	err := service.ServeHTTP(rec, req, "")
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, "status = %d, want %d (body %q)", rec.Code, http.StatusOK, rec.Body.String())
+	require.NotEmpty(t, rec.Header().Get("Mcp-Session-Id"))
 }

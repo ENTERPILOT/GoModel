@@ -2,13 +2,12 @@ package ratelimit
 
 import (
 	"context"
-	"errors"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/require"
 )
 
 // memStore is a minimal in-memory Store for service tests.
@@ -133,13 +132,12 @@ func onPath(path string) Subjects { return Subjects{UserPath: path} }
 func newTestService(t *testing.T, rules ...Rule) *Service {
 	t.Helper()
 	store := &memStore{}
-	if err := store.UpsertRules(context.Background(), rules); err != nil {
-		t.Fatalf("seed rules: %v", err)
-	}
+	err := store.UpsertRules(context.Background(), rules)
+	require.NoError(t, err)
+
 	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(service.Close)
 	return service
 }
@@ -149,46 +147,36 @@ func TestServiceRejectsQuotaTemplatesWhenDisabled(t *testing.T) {
 		Scope: ScopeUserPath, Subject: "/customers", PerChild: true,
 		PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(10)),
 	}
-
-	if _, err := NewService(context.Background(), &memStore{rules: []Rule{template}}, WithQuotaTemplates(false)); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
-		t.Fatalf("NewService() error = %v, want ErrQuotaTemplatesUnavailable", err)
-	}
+	_, err := NewService(context.Background(), &memStore{rules: []Rule{template}}, WithQuotaTemplates(false))
+	require.ErrorIs(t, err, ErrQuotaTemplatesUnavailable)
 
 	store := &memStore{}
 	service, err := NewService(context.Background(), store, WithQuotaTemplates(false))
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
-	if err := service.UpsertRules(context.Background(), []Rule{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
-		t.Fatalf("UpsertRules() error = %v, want ErrQuotaTemplatesUnavailable", err)
-	}
-	if err := service.ReplaceConfigRules(context.Background(), []Rule{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
-		t.Fatalf("ReplaceConfigRules() error = %v, want ErrQuotaTemplatesUnavailable", err)
-	}
-	if len(store.rules) != 0 {
-		t.Fatalf("stored rules = %+v, want none", store.rules)
-	}
+	require.NoError(t, err)
+	err = service.UpsertRules(context.Background(), []Rule{template})
+	require.ErrorIs(t, err, ErrQuotaTemplatesUnavailable)
+	err = service.ReplaceConfigRules(context.Background(), []Rule{template})
+	require.ErrorIs(t, err, ErrQuotaTemplatesUnavailable)
+	require.Empty(t, store.rules)
 }
 
 func TestSeedConfiguredRulesCarriesPerChild(t *testing.T) {
 	store := &memStore{}
 	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	err = seedConfiguredRules(context.Background(), service, config.RateLimitsConfig{
 		UserPaths: []config.RateLimitUserPathConfig{{
 			Path: "/users", PerChild: true,
 			Limits: []config.RateLimitRuleConfig{{Period: "minute", MaxRequests: new(int64(100))}},
 		}},
 	})
-	if err != nil {
-		t.Fatalf("seedConfiguredRules() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	rules := service.Rules()
-	if len(rules) != 1 || !rules[0].PerChild || rules[0].Subject != "/users" {
-		t.Fatalf("seeded rules = %+v, want per-child /users", rules)
-	}
+	require.Len(t, rules, 1)
+	require.True(t, rules[0].PerChild)
+	require.Equal(t, "/users", rules[0].Subject)
 }
 
 // windowBase is aligned to every supported period, keeping sliding-window
@@ -203,26 +191,19 @@ func TestAcquireEnforcesRequestLimit(t *testing.T) {
 	})
 
 	for i := range 2 {
-		if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
-			t.Fatalf("Acquire() %d failed: %v", i, err)
-		}
+		_, err := service.Acquire(onPath("/team/alice"), windowBase)
+		require.NoError(t, err, "Acquire() %d failed: %v", i, err)
 	}
 	_, err := service.Acquire(onPath("/team/bob"), windowBase)
 	var exceeded *ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("Acquire() error = %v, want ExceededError", err)
-	}
-	if exceeded.Scope != ScopeRequests {
-		t.Fatalf("scope = %q, want requests", exceeded.Scope)
-	}
-	if exceeded.Limit != 2 {
-		t.Fatalf("limit = %d, want 2", exceeded.Limit)
-	}
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, ScopeRequests, exceeded.Scope)
+	require.Equal(t, int64(2), exceeded.Limit)
+
 	// Recovery can extend past the next boundary: the burst still weighs in
 	// as the previous window right after the rollover.
-	if exceeded.RetryAfter <= 0 || exceeded.RetryAfter > 2*time.Minute {
-		t.Fatalf("retry after = %s, want within (0, 2m]", exceeded.RetryAfter)
-	}
+	require.Greater(t, exceeded.RetryAfter, time.Duration(0))
+	require.LessOrEqual(t, exceeded.RetryAfter, 2*time.Minute)
 }
 
 // TestRetryAfterReflectsSlidingWindowRecovery pins Retry-After to the exact
@@ -235,26 +216,20 @@ func TestRetryAfterReflectsSlidingWindowRecovery(t *testing.T) {
 			MaxRequests:   new(int64(10)),
 		})
 		for i := range 10 {
-			if _, err := service.Acquire(onPath("/"), windowBase); err != nil {
-				t.Fatalf("Acquire() %d failed: %v", i, err)
-			}
+			_, err := service.Acquire(onPath("/"), windowBase)
+			require.NoError(t, err, "Acquire() %d failed: %v", i, err)
 		}
 		_, err := service.Acquire(onPath("/"), windowBase)
 		var exceeded *ExceededError
-		if !errors.As(err, &exceeded) {
-			t.Fatalf("Acquire() error = %v, want ExceededError", err)
-		}
+		require.ErrorAs(t, err, &exceeded)
+
 		// At the boundary (60s) the previous window still weighs 10*(60/60);
 		// one second later it decays to 9 and a request fits.
-		if exceeded.RetryAfter != 61*time.Second {
-			t.Fatalf("retry after = %s, want 61s", exceeded.RetryAfter)
-		}
-		if _, err := service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter-time.Second)); err == nil {
-			t.Fatal("Acquire() one second before Retry-After succeeded")
-		}
-		if _, err := service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter)); err != nil {
-			t.Fatalf("Acquire() at Retry-After failed: %v", err)
-		}
+		require.Equal(t, 61*time.Second, exceeded.RetryAfter)
+		_, err = service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter-time.Second))
+		require.Error(t, err)
+		_, err = service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter))
+		require.NoError(t, err)
 	})
 
 	t.Run("tokens overshoot", func(t *testing.T) {
@@ -268,18 +243,12 @@ func TestRetryAfterReflectsSlidingWindowRecovery(t *testing.T) {
 		service.RecordTokens(onPath("/"), 30, windowBase)
 		_, err := service.Acquire(onPath("/"), windowBase)
 		var exceeded *ExceededError
-		if !errors.As(err, &exceeded) {
-			t.Fatalf("Acquire() error = %v, want ExceededError", err)
-		}
-		if exceeded.RetryAfter != 101*time.Second {
-			t.Fatalf("retry after = %s, want 101s", exceeded.RetryAfter)
-		}
-		if _, err := service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter-time.Second)); err == nil {
-			t.Fatal("Acquire() one second before Retry-After succeeded")
-		}
-		if _, err := service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter)); err != nil {
-			t.Fatalf("Acquire() at Retry-After failed: %v", err)
-		}
+		require.ErrorAs(t, err, &exceeded)
+		require.Equal(t, 101*time.Second, exceeded.RetryAfter)
+		_, err = service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter-time.Second))
+		require.Error(t, err)
+		_, err = service.Acquire(onPath("/"), windowBase.Add(exceeded.RetryAfter))
+		require.NoError(t, err)
 	})
 }
 
@@ -291,21 +260,14 @@ func TestAcquireReportsLongestBlockingRule(t *testing.T) {
 		Rule{Subject: "/", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1))},
 		Rule{Subject: "/", PeriodSeconds: PeriodDaySeconds, MaxRequests: new(int64(1))},
 	)
-
-	if _, err := service.Acquire(onPath("/"), windowBase); err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
 	_, err := service.Acquire(onPath("/"), windowBase)
+	require.NoError(t, err)
+
+	_, err = service.Acquire(onPath("/"), windowBase)
 	var exceeded *ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("Acquire() error = %v, want ExceededError", err)
-	}
-	if exceeded.Rule.PeriodSeconds != PeriodDaySeconds {
-		t.Fatalf("exceeded rule period = %d, want day (longest recovery)", exceeded.Rule.PeriodSeconds)
-	}
-	if exceeded.RetryAfter <= time.Minute {
-		t.Fatalf("retry after = %s, want the day window's recovery", exceeded.RetryAfter)
-	}
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, PeriodDaySeconds, exceeded.Rule.PeriodSeconds)
+	require.Greater(t, exceeded.RetryAfter, time.Minute)
 }
 
 func TestAcquireRequestsShareSubtreeCounter(t *testing.T) {
@@ -314,17 +276,13 @@ func TestAcquireRequestsShareSubtreeCounter(t *testing.T) {
 		PeriodSeconds: PeriodMinuteSeconds,
 		MaxRequests:   new(int64(1)),
 	})
-
-	if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
-	if _, err := service.Acquire(onPath("/team/bob"), windowBase); err == nil {
-		t.Fatal("Acquire() for sibling under the same rule succeeded, want rejection")
-	}
+	_, err := service.Acquire(onPath("/team/alice"), windowBase)
+	require.NoError(t, err)
+	_, err = service.Acquire(onPath("/team/bob"), windowBase)
+	require.Error(t, err)
 	// A sibling path outside the rule subtree is unlimited.
-	if _, err := service.Acquire(onPath("/team-alpha"), windowBase); err != nil {
-		t.Fatalf("Acquire() outside subtree failed: %v", err)
-	}
+	_, err = service.Acquire(onPath("/team-alpha"), windowBase)
+	require.NoError(t, err)
 }
 
 func TestPerChildRuleIsolatesDirectChildrenAndSharesDescendants(t *testing.T) {
@@ -332,45 +290,37 @@ func TestPerChildRuleIsolatesDirectChildrenAndSharesDescendants(t *testing.T) {
 		Scope: ScopeUserPath, Subject: "/users", PerChild: true,
 		PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)),
 	})
+	_, err := service.Acquire(onPath("/users/alice/app"), windowBase)
+	require.NoError(t, err)
 
-	if _, err := service.Acquire(onPath("/users/alice/app"), windowBase); err != nil {
-		t.Fatalf("alice Acquire() failed: %v", err)
-	}
-	_, err := service.Acquire(onPath("/users/alice/other"), windowBase)
+	_, err = service.Acquire(onPath("/users/alice/other"), windowBase)
 	var exceeded *ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("second alice Acquire() error = %v, want ExceededError", err)
-	}
-	if exceeded.Rule.Subject != "/users" || exceeded.Rule.EffectiveSubject != "/users/alice" {
-		t.Fatalf("resolved exceeded rule = %+v", exceeded.Rule)
-	}
-	if _, err := service.Acquire(onPath("/users/bob/app"), windowBase); err != nil {
-		t.Fatalf("bob Acquire() failed, want independent counter: %v", err)
-	}
-	if _, err := service.Acquire(onPath("/users"), windowBase); err != nil {
-		t.Fatalf("template base Acquire() failed, want no match: %v", err)
-	}
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, "/users", exceeded.Rule.Subject)
+	require.Equal(t, "/users/alice", exceeded.Rule.EffectiveSubject, "resolved exceeded rule = %+v", exceeded.Rule)
+	_, err = service.Acquire(onPath("/users/bob/app"), windowBase)
+	require.NoError(t, err)
+	_, err = service.Acquire(onPath("/users"), windowBase)
+	require.NoError(t, err)
 
 	statuses := service.StatusesForUserPath("/users/alice/app", windowBase)
-	if len(statuses) != 1 || statuses[0].RequestsUsed != 1 || statuses[0].Rule.EffectiveSubject != "/users/alice" {
-		t.Fatalf("alice statuses = %+v", statuses)
-	}
-	if got := service.StatusesForUserPath("/users", windowBase); len(got) != 0 {
-		t.Fatalf("base statuses = %+v, want no template match", got)
-	}
-	global := service.Statuses(windowBase)
-	if len(global) != 1 || global[0].RequestsRemaining != nil || global[0].RequestsUsed != 0 {
-		t.Fatalf("global template status = %+v, want no invented aggregate", global)
-	}
+	require.Len(t, statuses, 1)
+	require.Equal(t, int64(1), statuses[0].RequestsUsed)
+	require.Equal(t, "/users/alice", statuses[0].Rule.EffectiveSubject)
+	got := service.StatusesForUserPath("/users", windowBase)
+	require.Empty(t, got)
 
-	if err := service.ResetRule(ScopeUserPath, "/users", PeriodMinuteSeconds); err != nil {
-		t.Fatalf("ResetRule() failed: %v", err)
-	}
+	global := service.Statuses(windowBase)
+	require.Len(t, global, 1)
+	require.Nil(t, global[0].RequestsRemaining)
+	require.Equal(t, int64(0), global[0].RequestsUsed)
+	err = service.ResetRule(ScopeUserPath, "/users", PeriodMinuteSeconds)
+	require.NoError(t, err)
+
 	for _, child := range []string{"/users/alice", "/users/bob"} {
 		got := service.StatusesForUserPath(child, windowBase)
-		if len(got) != 1 || got[0].RequestsUsed != 0 {
-			t.Fatalf("%s status after template reset = %+v", child, got)
-		}
+		require.Len(t, got, 1)
+		require.Equal(t, int64(0), got[0].RequestsUsed, "%s status after template reset = %+v", child, got)
 	}
 }
 
@@ -382,31 +332,18 @@ func TestPerChildExpiryCleanupIsBoundedAndPreservesStaticCounters(t *testing.T) 
 	now := time.Now().UTC()
 	for i := range maxExpiryCleanupBatch + 6 {
 		path := "/users/child-" + strconv.Itoa(i)
-		if _, err := service.Acquire(onPath(path), now); err != nil {
-			t.Fatalf("Acquire(%q) failed: %v", path, err)
-		}
+		_, err := service.Acquire(onPath(path), now)
+		require.NoError(t, err, "Acquire(%q) failed: %v", path, err)
 	}
 
 	limiter := service.limiter
 	limiter.mu.Lock()
 	cleanupAt := now.Add(3 * time.Hour).Unix()
-	if more := limiter.pruneCounterExpiries(cleanupAt); !more {
-		limiter.mu.Unlock()
-		t.Fatal("first cleanup reported no remaining due batch")
-	}
-	if got, want := len(limiter.requests), 7; got != want {
-		limiter.mu.Unlock()
-		t.Fatalf("request counters after first cleanup = %d, want %d", got, want)
-	}
-	if more := limiter.pruneCounterExpiries(cleanupAt); more {
-		limiter.mu.Unlock()
-		t.Fatal("second cleanup still reports due entries")
-	}
-	if got := len(limiter.requests); got != 1 {
-		limiter.mu.Unlock()
-		t.Fatalf("request counters after cleanup = %d, want one static counter", got)
-	}
-	limiter.mu.Unlock()
+	defer limiter.mu.Unlock()
+	require.True(t, limiter.pruneCounterExpiries(cleanupAt), "first cleanup reported no remaining due batch")
+	require.Len(t, limiter.requests, 7, "request counters after first cleanup")
+	require.False(t, limiter.pruneCounterExpiries(cleanupAt), "second cleanup still reports due entries")
+	require.Len(t, limiter.requests, 1, "only the static counter should remain after cleanup")
 }
 
 func TestAcquireSlidingWindowWeighsPreviousWindow(t *testing.T) {
@@ -417,28 +354,22 @@ func TestAcquireSlidingWindowWeighsPreviousWindow(t *testing.T) {
 	})
 
 	for i := range 10 {
-		if _, err := service.Acquire(onPath("/"), windowBase); err != nil {
-			t.Fatalf("Acquire() %d failed: %v", i, err)
-		}
+		_, err := service.Acquire(onPath("/"), windowBase)
+		require.NoError(t, err, "Acquire() %d failed: %v", i, err)
 	}
-	if _, err := service.Acquire(onPath("/"), windowBase); err == nil {
-		t.Fatal("Acquire() over limit succeeded")
-	}
+	_, err := service.Acquire(onPath("/"), windowBase)
+	require.Error(t, err)
 
 	// One second into the next window the previous window still weighs
 	// 10*(59/60) -> 9, so exactly one request fits.
 	next := windowBase.Add(61 * time.Second)
-	if _, err := service.Acquire(onPath("/"), next); err != nil {
-		t.Fatalf("Acquire() at window boundary failed: %v", err)
-	}
-	if _, err := service.Acquire(onPath("/"), next); err == nil {
-		t.Fatal("Acquire() succeeded, want sliding-window rejection")
-	}
-
+	_, err = service.Acquire(onPath("/"), next)
+	require.NoError(t, err)
+	_, err = service.Acquire(onPath("/"), next)
+	require.Error(t, err)
 	// Two full windows later all history is gone.
-	if _, err := service.Acquire(onPath("/"), windowBase.Add(3*time.Minute)); err != nil {
-		t.Fatalf("Acquire() after windows expired failed: %v", err)
-	}
+	_, err = service.Acquire(onPath("/"), windowBase.Add(3*time.Minute))
+	require.NoError(t, err)
 }
 
 func TestTokenLimitIsPostAccounted(t *testing.T) {
@@ -447,26 +378,19 @@ func TestTokenLimitIsPostAccounted(t *testing.T) {
 		PeriodSeconds: PeriodMinuteSeconds,
 		MaxTokens:     new(int64(100)),
 	})
-
 	// Tokens are unknown before the response: the first request passes.
-	if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
+	_, err := service.Acquire(onPath("/team/alice"), windowBase)
+	require.NoError(t, err)
+
 	service.RecordTokens(onPath("/team/alice"), 150, windowBase)
 
-	_, err := service.Acquire(onPath("/team/alice"), windowBase.Add(time.Second))
+	_, err = service.Acquire(onPath("/team/alice"), windowBase.Add(time.Second))
 	var exceeded *ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("Acquire() error = %v, want ExceededError", err)
-	}
-	if exceeded.Scope != ScopeTokens {
-		t.Fatalf("scope = %q, want tokens", exceeded.Scope)
-	}
-
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, ScopeTokens, exceeded.Scope)
 	// The token window rolls over like the request window.
-	if _, err := service.Acquire(onPath("/team/alice"), windowBase.Add(3*time.Minute)); err != nil {
-		t.Fatalf("Acquire() after token window expired failed: %v", err)
-	}
+	_, err = service.Acquire(onPath("/team/alice"), windowBase.Add(3*time.Minute))
+	require.NoError(t, err)
 }
 
 func TestConcurrencyLimitHeldUntilRelease(t *testing.T) {
@@ -477,28 +401,21 @@ func TestConcurrencyLimitHeldUntilRelease(t *testing.T) {
 	})
 
 	first, err := service.Acquire(onPath("/team/alice"), windowBase)
-	if err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	_, err = service.Acquire(onPath("/team/bob"), windowBase)
 	var exceeded *ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("Acquire() error = %v, want ExceededError", err)
-	}
-	if exceeded.Scope != ScopeConcurrency {
-		t.Fatalf("scope = %q, want concurrency", exceeded.Scope)
-	}
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, ScopeConcurrency, exceeded.Scope)
 
 	first.Release()
 	first.Release() // idempotent: must not free a second slot
 
 	second, err := service.Acquire(onPath("/team/bob"), windowBase)
-	if err != nil {
-		t.Fatalf("Acquire() after release failed: %v", err)
-	}
-	if _, err := service.Acquire(onPath("/team/carol"), windowBase); err == nil {
-		t.Fatal("Acquire() succeeded, want concurrency rejection after single release")
-	}
+	require.NoError(t, err)
+	_, err = service.Acquire(onPath("/team/carol"), windowBase)
+	require.Error(t, err)
+
 	second.Release()
 }
 
@@ -509,28 +426,17 @@ func TestAcquireHeadersReportMostConstrainedRule(t *testing.T) {
 	)
 
 	reservation, err := service.Acquire(onPath("/team/alice"), windowBase)
-	if err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	headers := reservation.Headers()
-	if !headers.HasRequests {
-		t.Fatal("HasRequests = false, want true")
-	}
-	if headers.RequestLimit != 5 {
-		t.Fatalf("request limit = %d, want 5 (most constrained)", headers.RequestLimit)
-	}
-	if headers.RequestRemaining != 4 {
-		t.Fatalf("request remaining = %d, want 4", headers.RequestRemaining)
-	}
-	if !headers.HasTokens {
-		t.Fatal("HasTokens = false, want true")
-	}
-	if headers.TokenLimit != 1000 || headers.TokenRemaining != 1000 {
-		t.Fatalf("token limit/remaining = %d/%d, want 1000/1000", headers.TokenLimit, headers.TokenRemaining)
-	}
-	if headers.RequestResetAfter <= 0 || headers.RequestResetAfter > time.Minute {
-		t.Fatalf("request reset = %s, want within (0, 1m]", headers.RequestResetAfter)
-	}
+	require.True(t, headers.HasRequests)
+	require.Equal(t, int64(5), headers.RequestLimit)
+	require.Equal(t, int64(4), headers.RequestRemaining)
+	require.True(t, headers.HasTokens)
+	require.Equal(t, int64(1000), headers.TokenLimit)
+	require.Equal(t, int64(1000), headers.TokenRemaining)
+	require.Greater(t, headers.RequestResetAfter, time.Duration(0))
+	require.LessOrEqual(t, headers.RequestResetAfter, time.Minute)
 }
 
 func TestAcquireWithoutMatchingRulesIsUnlimited(t *testing.T) {
@@ -542,12 +448,8 @@ func TestAcquireWithoutMatchingRulesIsUnlimited(t *testing.T) {
 
 	for i := range 5 {
 		reservation, err := service.Acquire(onPath("/other"), windowBase)
-		if err != nil {
-			t.Fatalf("Acquire() %d failed: %v", i, err)
-		}
-		if reservation.Headers().HasRequests {
-			t.Fatal("headers set for unmatched path")
-		}
+		require.NoError(t, err, "Acquire() %d failed: %v", i, err)
+		require.False(t, reservation.Headers().HasRequests)
 	}
 }
 
@@ -558,17 +460,15 @@ func TestRejectedAcquireDoesNotConsumeCounters(t *testing.T) {
 	)
 
 	held, err := service.Acquire(onPath("/team"), windowBase)
-	if err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
+	require.NoError(t, err)
 	// Concurrency breach: the request-window counter must stay untouched.
-	if _, err := service.Acquire(onPath("/team"), windowBase); err == nil {
-		t.Fatal("Acquire() succeeded, want concurrency rejection")
-	}
+	_, err = service.Acquire(onPath("/team"), windowBase)
+	require.Error(t, err)
+
 	statuses := service.Statuses(windowBase)
 	for _, status := range statuses {
-		if status.Rule.PeriodSeconds == PeriodMinuteSeconds && status.RequestsUsed != 1 {
-			t.Fatalf("requests used = %d, want 1 (rejected attempt must not count)", status.RequestsUsed)
+		if status.Rule.PeriodSeconds == PeriodMinuteSeconds {
+			require.Equal(t, int64(1), status.RequestsUsed, "rejected attempt must not count")
 		}
 	}
 	held.Release()
@@ -581,42 +481,35 @@ func TestStatusesAndResets(t *testing.T) {
 		MaxRequests:   new(int64(2)),
 		MaxTokens:     new(int64(100)),
 	})
+	_, err := service.Acquire(onPath("/team"), windowBase)
+	require.NoError(t, err)
 
-	if _, err := service.Acquire(onPath("/team"), windowBase); err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
 	service.RecordTokens(onPath("/team"), 40, windowBase)
 
 	statuses := service.Statuses(windowBase)
-	if len(statuses) != 1 {
-		t.Fatalf("statuses = %d, want 1", len(statuses))
-	}
-	status := statuses[0]
-	if status.RequestsUsed != 1 || status.RequestsRemaining == nil || *status.RequestsRemaining != 1 {
-		t.Fatalf("requests used/remaining = %d/%v, want 1/1", status.RequestsUsed, status.RequestsRemaining)
-	}
-	if status.TokensUsed != 40 || status.TokensRemaining == nil || *status.TokensRemaining != 60 {
-		t.Fatalf("tokens used/remaining = %d/%v, want 40/60", status.TokensUsed, status.TokensRemaining)
-	}
-	if status.WindowStart.IsZero() || !status.WindowEnd.Equal(status.WindowStart.Add(time.Minute)) {
-		t.Fatalf("window = %s..%s, want one minute", status.WindowStart, status.WindowEnd)
-	}
+	require.Len(t, statuses, 1)
 
-	if err := service.ResetRule(ScopeUserPath, "/team", PeriodMinuteSeconds); err != nil {
-		t.Fatalf("ResetRule() failed: %v", err)
-	}
+	status := statuses[0]
+	require.Equal(t, int64(1), status.RequestsUsed)
+	require.NotNil(t, status.RequestsRemaining)
+	require.Equal(t, int64(1), *status.RequestsRemaining)
+	require.Equal(t, int64(40), status.TokensUsed)
+	require.NotNil(t, status.TokensRemaining)
+	require.Equal(t, int64(60), *status.TokensRemaining)
+	require.False(t, status.WindowStart.IsZero())
+	require.True(t, status.WindowEnd.Equal(status.WindowStart.Add(time.Minute)), "window = %s..%s, want one minute", status.WindowStart, status.WindowEnd)
+	err = service.ResetRule(ScopeUserPath, "/team", PeriodMinuteSeconds)
+	require.NoError(t, err)
+
 	status = service.Statuses(windowBase)[0]
-	if status.RequestsUsed != 0 || status.TokensUsed != 0 {
-		t.Fatalf("after reset used = %d/%d, want 0/0", status.RequestsUsed, status.TokensUsed)
-	}
+	require.Equal(t, int64(0), status.RequestsUsed)
+	require.Equal(t, int64(0), status.TokensUsed)
 
 	service.RecordTokens(onPath("/team"), 40, windowBase)
-	if err := service.ResetAll(); err != nil {
-		t.Fatalf("ResetAll() failed: %v", err)
-	}
-	if status := service.Statuses(windowBase)[0]; status.TokensUsed != 0 {
-		t.Fatalf("after reset-all tokens used = %d, want 0", status.TokensUsed)
-	}
+	err = service.ResetAll()
+	require.NoError(t, err)
+	status = service.Statuses(windowBase)[0]
+	require.Equal(t, int64(0), status.TokensUsed)
 }
 
 func TestStatusesForUserPathFiltersByScopeAndSubtree(t *testing.T) {
@@ -626,90 +519,64 @@ func TestStatusesForUserPathFiltersByScopeAndSubtree(t *testing.T) {
 		Rule{Subject: "/other", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(5))},
 		Rule{Scope: ScopeProvider, Subject: "openai", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(100))},
 	)
-
-	if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
+	_, err := service.Acquire(onPath("/team/alice"), windowBase)
+	require.NoError(t, err)
 
 	statuses := service.StatusesForUserPath("/team/alice", windowBase)
-	if len(statuses) != 2 {
-		t.Fatalf("statuses = %d, want 2 (sibling and provider rules excluded)", len(statuses))
-	}
+	require.Len(t, statuses, 2)
+
 	bySubject := map[string]Status{}
 	for _, status := range statuses {
-		if status.Rule.Scope != ScopeUserPath {
-			t.Fatalf("scope = %q, want user_path", status.Rule.Scope)
-		}
+		require.Equal(t, ScopeUserPath, status.Rule.Scope)
+
 		bySubject[status.Rule.Subject] = status
 	}
 	team, ok := bySubject["/team"]
-	if !ok {
-		t.Fatal("missing ancestor rule /team")
-	}
-	if team.RequestsUsed != 1 || team.RequestsRemaining == nil || *team.RequestsRemaining != 4 {
-		t.Fatalf("/team used/remaining = %d/%v, want 1/4", team.RequestsUsed, team.RequestsRemaining)
-	}
-	alice, ok := bySubject["/team/alice"]
-	if !ok {
-		t.Fatal("missing exact rule /team/alice")
-	}
-	if alice.InFlight != 1 {
-		t.Fatalf("/team/alice in-flight = %d, want 1", alice.InFlight)
-	}
+	require.True(t, ok)
+	require.Equal(t, int64(1), team.RequestsUsed)
+	require.NotNil(t, team.RequestsRemaining)
+	require.Equal(t, int64(4), *team.RequestsRemaining)
 
-	if got := service.StatusesForUserPath("/unlimited", windowBase); len(got) != 0 {
-		t.Fatalf("statuses for unmatched path = %d, want 0", len(got))
-	}
+	alice, ok := bySubject["/team/alice"]
+	require.True(t, ok)
+	require.Equal(t, int64(1), alice.InFlight)
+	got := service.StatusesForUserPath("/unlimited", windowBase)
+	require.Empty(t, got)
+
 	var nilService *Service
-	if got := nilService.StatusesForUserPath("/team", windowBase); got != nil {
-		t.Fatalf("nil service statuses = %v, want nil", got)
-	}
-	if got := service.StatusesForUserPath("/te:am", windowBase); got != nil {
-		t.Fatalf("invalid path statuses = %v, want nil", got)
-	}
-	if got := service.StatusesForUserPath("/team/alice", time.Time{}); len(got) != 2 {
-		t.Fatalf("zero-now statuses = %d, want 2 (defaults to current time)", len(got))
-	}
+	got = nilService.StatusesForUserPath("/team", windowBase)
+	require.Nil(t, got)
+	got = service.StatusesForUserPath("/te:am", windowBase)
+	require.Nil(t, got)
+	got = service.StatusesForUserPath("/team/alice", time.Time{})
+	require.Len(t, got, 2)
 }
 
 func TestUpsertDeleteAndHasTokenRules(t *testing.T) {
 	service := newTestService(t)
-	if service.HasTokenRules() {
-		t.Fatal("HasTokenRules() = true for empty service")
-	}
-	if err := service.UpsertRules(context.Background(), []Rule{
+	require.False(t, service.HasTokenRules())
+	err := service.UpsertRules(context.Background(), []Rule{
 		{Subject: "/team", PeriodSeconds: PeriodMinuteSeconds, MaxTokens: new(int64(100)), Source: SourceManual},
-	}); err != nil {
-		t.Fatalf("UpsertRules() failed: %v", err)
-	}
-	if !service.HasTokenRules() {
-		t.Fatal("HasTokenRules() = false, want true")
-	}
-	if err := service.DeleteRule(context.Background(), ScopeUserPath, "/team", PeriodMinuteSeconds); err != nil {
-		t.Fatalf("DeleteRule() failed: %v", err)
-	}
-	if len(service.Rules()) != 0 {
-		t.Fatalf("rules = %d, want 0", len(service.Rules()))
-	}
-	if err := service.DeleteRule(context.Background(), ScopeUserPath, "/team", PeriodMinuteSeconds); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("DeleteRule() error = %v, want ErrNotFound", err)
-	}
+	})
+	require.NoError(t, err)
+	require.True(t, service.HasTokenRules())
+	err = service.DeleteRule(context.Background(), ScopeUserPath, "/team", PeriodMinuteSeconds)
+	require.NoError(t, err)
+	require.Empty(t, service.Rules())
+	err = service.DeleteRule(context.Background(), ScopeUserPath, "/team", PeriodMinuteSeconds)
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestNilServiceIsSafe(t *testing.T) {
 	var service *Service
 	reservation, err := service.Acquire(onPath("/team"), windowBase)
-	if err != nil {
-		t.Fatalf("nil service Acquire() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	reservation.Release()
 	service.RecordTokens(onPath("/team"), 10, windowBase)
-	if statuses := service.Statuses(windowBase); statuses != nil {
-		t.Fatalf("nil service Statuses() = %v, want nil", statuses)
-	}
-	if !service.routeAvailableAt("openai", "openai/gpt-4o", windowBase) {
-		t.Fatal("nil service RouteAvailable() = false, want true")
-	}
+	statuses := service.Statuses(windowBase)
+	require.Nil(t, statuses)
+	require.True(t, service.routeAvailableAt("openai", "openai/gpt-4o", windowBase))
 }
 
 func TestProviderScopedRules(t *testing.T) {
@@ -721,30 +588,23 @@ func TestProviderScopedRules(t *testing.T) {
 	})
 
 	route := Subjects{UserPath: "/team/alice", Provider: "openai", Model: "openai/gpt-4o"}
-	if _, err := service.Acquire(route, windowBase); err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
+	_, err := service.Acquire(route, windowBase)
+	require.NoError(t, err)
+
 	// The provider counter is shared across consumers and models.
 	other := Subjects{UserPath: "/other", Provider: "OpenAI", Model: "openai/gpt-4o-mini"}
-	_, err := service.Acquire(other, windowBase)
+	_, err = service.Acquire(other, windowBase)
 	var exceeded *ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("Acquire() error = %v, want ExceededError", err)
-	}
-	if exceeded.Rule.Scope != ScopeProvider {
-		t.Fatalf("rule scope = %q, want provider", exceeded.Rule.Scope)
-	}
-	if msg := exceeded.Error(); !strings.Contains(msg, "provider openai") {
-		t.Fatalf("error = %q, want provider subject label", msg)
-	}
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, ScopeProvider, exceeded.Rule.Scope)
+	msg := exceeded.Error()
+	require.Contains(t, msg, "provider openai")
 	// Another provider is unaffected.
-	if _, err := service.Acquire(Subjects{UserPath: "/team", Provider: "anthropic", Model: "anthropic/claude"}, windowBase); err != nil {
-		t.Fatalf("Acquire() for other provider failed: %v", err)
-	}
+	_, err = service.Acquire(Subjects{UserPath: "/team", Provider: "anthropic", Model: "anthropic/claude"}, windowBase)
+	require.NoError(t, err)
 	// Requests with no resolved route (batch) skip provider rules.
-	if _, err := service.Acquire(onPath("/team/alice"), windowBase); err != nil {
-		t.Fatalf("Acquire() without route failed: %v", err)
-	}
+	_, err = service.Acquire(onPath("/team/alice"), windowBase)
+	require.NoError(t, err)
 }
 
 func TestModelScopedRules(t *testing.T) {
@@ -755,15 +615,12 @@ func TestModelScopedRules(t *testing.T) {
 			PeriodSeconds: PeriodMinuteSeconds,
 			MaxRequests:   new(int64(1)),
 		})
-		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o"}, windowBase); err != nil {
-			t.Fatalf("Acquire() failed: %v", err)
-		}
-		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "azure", Model: "GPT-4o"}, windowBase); err == nil {
-			t.Fatal("Acquire() for same model via other provider succeeded, want shared counter rejection")
-		}
-		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o-mini"}, windowBase); err != nil {
-			t.Fatalf("Acquire() for different model failed: %v", err)
-		}
+		_, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o"}, windowBase)
+		require.NoError(t, err)
+		_, err = service.Acquire(Subjects{UserPath: "/", Provider: "azure", Model: "GPT-4o"}, windowBase)
+		require.Error(t, err)
+		_, err = service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o-mini"}, windowBase)
+		require.NoError(t, err)
 	})
 
 	t.Run("qualified subject pins one provider", func(t *testing.T) {
@@ -774,16 +631,13 @@ func TestModelScopedRules(t *testing.T) {
 			MaxRequests:   new(int64(1)),
 		})
 		// Matches the qualified model, and the bare model when the provider agrees.
-		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "gpt-4o"}, windowBase); err != nil {
-			t.Fatalf("Acquire() failed: %v", err)
-		}
-		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o"}, windowBase); err == nil {
-			t.Fatal("Acquire() succeeded, want shared counter rejection")
-		}
+		_, err := service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "gpt-4o"}, windowBase)
+		require.NoError(t, err)
+		_, err = service.Acquire(Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o"}, windowBase)
+		require.Error(t, err)
 		// The same model id on another provider is a different subject.
-		if _, err := service.Acquire(Subjects{UserPath: "/", Provider: "azure", Model: "gpt-4o"}, windowBase); err != nil {
-			t.Fatalf("Acquire() for other provider failed: %v", err)
-		}
+		_, err = service.Acquire(Subjects{UserPath: "/", Provider: "azure", Model: "gpt-4o"}, windowBase)
+		require.NoError(t, err)
 	})
 }
 
@@ -796,32 +650,22 @@ func TestRouteAvailableProbesWithoutConsuming(t *testing.T) {
 
 	// Probing repeatedly consumes nothing.
 	for i := range 3 {
-		if !service.routeAvailableAt("openai", "openai/gpt-4o", windowBase) {
-			t.Fatalf("RouteAvailable() probe %d = false, want true", i)
-		}
+		require.True(t, service.routeAvailableAt("openai", "openai/gpt-4o", windowBase), "RouteAvailable() probe %d = false, want true", i)
 	}
 
 	held, err := service.Acquire(Subjects{UserPath: "/other", Provider: "openai", Model: "openai/gpt-4o"}, windowBase)
-	if err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
-	// The request window is exhausted and the concurrency slot is held.
-	if service.routeAvailableAt("openai", "openai/gpt-4o", windowBase) {
-		t.Fatal("RouteAvailable() = true for saturated provider, want false")
-	}
-	if !service.routeAvailableAt("anthropic", "anthropic/claude", windowBase) {
-		t.Fatal("RouteAvailable() = false for unlimited provider, want true")
-	}
-	held.Release()
+	require.NoError(t, err)
 
+	// The request window is exhausted and the concurrency slot is held.
+	require.False(t, service.routeAvailableAt("openai", "openai/gpt-4o", windowBase))
+	require.True(t, service.routeAvailableAt("anthropic", "anthropic/claude", windowBase))
+
+	held.Release()
 	// User-path saturation must not affect route availability: switching
 	// targets cannot relieve a consumer limit.
-	if _, err := service.Acquire(onPath("/team/app"), windowBase); err != nil {
-		t.Fatalf("Acquire() failed: %v", err)
-	}
-	if !service.routeAvailableAt("anthropic", "anthropic/claude", windowBase) {
-		t.Fatal("RouteAvailable() = false after user-path saturation, want true")
-	}
+	_, err = service.Acquire(onPath("/team/app"), windowBase)
+	require.NoError(t, err)
+	require.True(t, service.routeAvailableAt("anthropic", "anthropic/claude", windowBase))
 }
 
 func TestRecordTokensChargesProviderAndModelWindows(t *testing.T) {
@@ -837,18 +681,10 @@ func TestRecordTokensChargesProviderAndModelWindows(t *testing.T) {
 	for _, status := range service.Statuses(windowBase) {
 		byScope[status.Rule.Scope] = status
 	}
-	if byScope[ScopeProvider].TokensUsed != 60 {
-		t.Fatalf("provider tokens used = %d, want 60", byScope[ScopeProvider].TokensUsed)
-	}
-	if byScope[ScopeModel].TokensUsed != 60 {
-		t.Fatalf("model tokens used = %d, want 60", byScope[ScopeModel].TokensUsed)
-	}
+	require.Equal(t, int64(60), byScope[ScopeProvider].TokensUsed)
+	require.Equal(t, int64(60), byScope[ScopeModel].TokensUsed)
 
 	// The model window (limit 50) is exhausted; the provider window is not.
-	if service.routeAvailableAt("openai", "openai/gpt-4o", windowBase) {
-		t.Fatal("RouteAvailable() = true for token-exhausted model, want false")
-	}
-	if !service.routeAvailableAt("openai", "openai/gpt-4o-mini", windowBase) {
-		t.Fatal("RouteAvailable() = false for other model, want true")
-	}
+	require.False(t, service.routeAvailableAt("openai", "openai/gpt-4o", windowBase))
+	require.True(t, service.routeAvailableAt("openai", "openai/gpt-4o-mini", windowBase))
 }
