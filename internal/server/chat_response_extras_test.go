@@ -2,14 +2,13 @@ package server
 
 import (
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 // TestChatCompletion_RelaysProviderExtraResponseMembers pins that the
@@ -33,20 +32,13 @@ func TestChatCompletion_RelaysProviderExtraResponseMembers(t *testing.T) {
 		},
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	if err := NewHandler(mock, nil, nil, nil).ChatCompletion(e.NewContext(req, rec)); err != nil {
-		t.Fatalf("handler returned error: %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
+	c, rec := echotest.Post(t, "/v1/chat/completions", `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}`)
+	err := NewHandler(mock, nil, nil, nil).ChatCompletion(c)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	body := rec.Body.String()
 	for _, want := range []string{`"citations":["https://example.com"]`, `"native_finish_reason":"end_turn"`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("response missing %s:\n%s", want, body)
-		}
+		require.Contains(t, body, want)
 	}
 }
