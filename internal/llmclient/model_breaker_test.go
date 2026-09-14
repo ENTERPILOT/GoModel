@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestModelBreakerStorageBounded(t *testing.T) {
@@ -26,24 +26,19 @@ func TestModelBreakerStorageBounded(t *testing.T) {
 	for i := range maxModelBreakers * 2 {
 		model := fmt.Sprintf("caller-model-%d", i)
 		breaker := client.breakerForModel(model)
-		if breaker == nil {
-			t.Fatal("idle entries should be evicted")
-		}
+		require.NotNil(t, breaker)
+
 		client.releaseModelBreaker(model, breaker)
 	}
-	if len(client.modelBreakers) > maxModelBreakers {
-		t.Fatal("unbounded storage")
-	}
-	if client.breakerForModel("busy") != busy || client.breakerForModel("open") != open {
-		t.Fatal("evicted protected state")
-	}
+	require.LessOrEqual(t, len(client.modelBreakers), maxModelBreakers)
+	require.Same(t, busy, client.breakerForModel("busy"))
+	require.Same(t, open, client.breakerForModel("open"))
+
 	// Expired idle state is removed on the next new model lookup.
 	key := sha256.Sum256([]byte(fmt.Sprintf("caller-model-%d", maxModelBreakers*2-1)))
 	client.modelBreakers[key].lastUsed = time.Now().Add(-modelBreakerIdleTTL - time.Second)
 	client.breakerForModel("new")
-	if client.modelBreakers[key] != nil {
-		t.Fatal("expired entry retained")
-	}
+	require.Nil(t, client.modelBreakers[key])
 }
 
 func TestModelBreakerCapacityRejectsWithoutBypassingProtection(t *testing.T) {
@@ -54,23 +49,17 @@ func TestModelBreakerCapacityRejectsWithoutBypassingProtection(t *testing.T) {
 		client.breakerForModel(fmt.Sprint(i))
 	}
 	_, err := client.DoRaw(t.Context(), Request{Model: "overflow", Method: "GET", Endpoint: "/test"})
-	if err == nil || !strings.Contains(err.Error(), "capacity exhausted") {
-		t.Fatalf("error=%v", err)
-	}
-	if !strings.Contains(err.Error(), "provider test") {
-		t.Fatalf("error=%v, want provider name", err)
-	}
-	if len(client.modelBreakers) != maxModelBreakers {
-		t.Fatal("capacity exceeded")
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "capacity exhausted")
+	require.Contains(t, err.Error(), "provider test")
+	require.Len(t, client.modelBreakers, maxModelBreakers)
 }
 
 func TestFailAfterRetriesIncludesProviderName(t *testing.T) {
 	client := New(DefaultConfig("test", ""), nil)
 	err := client.failAfterRetries(requestScope{})
-	if err == nil || !strings.Contains(err.Error(), "request failed after retries for provider test") {
-		t.Fatalf("error=%v", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "request failed after retries for provider test")
 }
 
 func TestUnknownModelUsesProviderBreaker(t *testing.T) {
@@ -78,12 +67,10 @@ func TestUnknownModelUsesProviderBreaker(t *testing.T) {
 	cfg.CircuitBreaker.Scope = "model"
 	client := New(cfg, nil)
 	scope, err := client.beginRequest(t.Context(), Request{}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scope.breaker != client.circuitBreaker || len(client.modelBreakers) != 0 {
-		t.Fatal("unknown model allocated a model breaker")
-	}
+	require.NoError(t, err)
+	require.Same(t, client.circuitBreaker, scope.breaker)
+	require.Empty(t, client.modelBreakers)
+
 	client.finishRequest(scope, 200, nil)
 }
 
@@ -102,9 +89,8 @@ func TestInvalidProgrammaticPolicyNeverReachesUpstream(t *testing.T) {
 				cfg.CircuitBreaker.Scope = "oops"
 			}
 			_, err := New(cfg, nil).DoRaw(t.Context(), Request{Method: "GET", Endpoint: "/test"})
-			if err == nil || !strings.Contains(err.Error(), "invalid resilience configuration") {
-				t.Fatalf("error=%v", err)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid resilience configuration")
 		})
 	}
 }
@@ -129,16 +115,13 @@ func TestModelBreakerHalfOpenRecoveryIsPerModel(t *testing.T) {
 		return client.Do(t.Context(), Request{Method: "GET", Endpoint: "/" + model, Model: model}, nil)
 	}
 
-	if err := request("model1"); err == nil {
-		t.Fatal("expected the upstream failure")
-	}
-	if err := request("model1"); err == nil || !strings.Contains(err.Error(), "circuit breaker is open") {
-		t.Fatalf("error=%v, want the open model1 breaker to short-circuit", err)
-	}
-	// A healthy sibling model keeps serving traffic on its own breaker.
-	if err := request("model2"); err != nil {
-		t.Fatal(err)
-	}
+	require.Error(t, request("model1"))
+	err := request("model1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "circuit breaker is open")
+	err = // A healthy sibling model keeps serving traffic on its own breaker.
+		request("model2")
+	require.NoError(t, err)
 
 	failing = false
 	breaker := client.breakerForModel("model1")
@@ -146,16 +129,13 @@ func TestModelBreakerHalfOpenRecoveryIsPerModel(t *testing.T) {
 	breaker.mu.Lock()
 	breaker.lastFailure = time.Now().Add(-cfg.CircuitBreaker.Timeout - time.Second)
 	breaker.mu.Unlock()
-
-	if err := request("model1"); err != nil {
-		t.Fatalf("half-open probe should have been admitted: %v", err)
-	}
-	if got := breaker.State(); got != "closed" {
-		t.Fatalf("model1 breaker state=%s, want closed after a successful probe", got)
-	}
-	if model2 := client.breakerForModel("model2"); model2 == breaker || model2.State() != "closed" {
-		t.Fatal("model2 must keep an independent, closed breaker")
-	}
+	err = request("model1")
+	require.NoError(t, err)
+	got := breaker.State()
+	require.Equal(t, "closed", got)
+	model2 := client.breakerForModel("model2")
+	require.NotSame(t, breaker, model2)
+	require.Equal(t, "closed", model2.State())
 }
 
 func TestModelBreakerKeyedByRequestBodyModel(t *testing.T) {
@@ -164,51 +144,37 @@ func TestModelBreakerKeyedByRequestBodyModel(t *testing.T) {
 	client := New(cfg, nil)
 
 	first, err := client.beginRequest(t.Context(), Request{Body: &core.ChatRequest{Model: "body-model"}}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.requestInfo.Model != "body-model" {
-		t.Fatalf("model=%q, want it recovered from the request body", first.requestInfo.Model)
-	}
-	if first.breaker == client.circuitBreaker {
-		t.Fatal("a body-derived model must get its own breaker")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "body-model", first.requestInfo.Model)
+	require.NotSame(t, client.circuitBreaker, first.breaker)
+
 	client.finishRequest(first, http.StatusOK, nil)
 
 	// An explicit Request.Model wins over the body, and distinct models stay apart.
 	labelled, err := client.beginRequest(t.Context(), Request{Model: "explicit", Body: &core.ChatRequest{Model: "body-model"}}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if labelled.requestInfo.Model != "explicit" || labelled.breaker == first.breaker {
-		t.Fatalf("model=%q shared breaker=%v", labelled.requestInfo.Model, labelled.breaker == first.breaker)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "explicit", labelled.requestInfo.Model)
+	require.NotSame(t, first.breaker, labelled.breaker)
+
 	client.finishRequest(labelled, http.StatusOK, nil)
 
 	repeat, err := client.beginRequest(t.Context(), Request{Body: &core.ChatRequest{Model: "body-model"}}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repeat.breaker != first.breaker {
-		t.Fatal("the same model must reuse its breaker")
-	}
+	require.NoError(t, err)
+	require.Same(t, first.breaker, repeat.breaker)
+
 	client.finishRequest(repeat, http.StatusOK, nil)
-	if len(client.modelBreakers) != 2 {
-		t.Fatalf("breakers=%d, want one per distinct model", len(client.modelBreakers))
-	}
+	require.Len(t, client.modelBreakers, 2)
 }
 
 func TestProviderScopeKeepsASingleBreaker(t *testing.T) {
 	cfg := DefaultConfig("test", "")
 	client := New(cfg, nil)
 	for _, model := range []string{"model1", "model2"} {
-		if got := client.breakerForModel(model); got != client.circuitBreaker {
-			t.Fatalf("%s must share the provider breaker under the default scope", model)
-		}
+		got := client.breakerForModel(model)
+		require.Same(t, client.circuitBreaker, got, "%s must share the provider breaker under the default scope", model)
+
 		// Releasing the provider breaker is a no-op, not a bad bookkeeping entry.
 		client.releaseModelBreaker(model, client.circuitBreaker)
 	}
-	if len(client.modelBreakers) != 0 {
-		t.Fatalf("breakers=%d, want none outside model scope", len(client.modelBreakers))
-	}
+	require.Empty(t, client.modelBreakers)
 }

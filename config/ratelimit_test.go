@@ -1,10 +1,9 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoadRateLimitEnvCompactSyntax(t *testing.T) {
@@ -14,44 +13,34 @@ func TestLoadRateLimitEnvCompactSyntax(t *testing.T) {
 		t.Setenv("SET_RATE_LIMIT_TEAM__ALPHA", "rpm=100,tpm=50000,rpd=1000,concurrent=10")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		entries := result.Config.RateLimits.UserPaths
-		if len(entries) != 1 {
-			t.Fatalf("expected 1 rate limit user path, got %d", len(entries))
-		}
-		if got, want := entries[0].Path, "/team/alpha"; got != want {
-			t.Fatalf("rate limit env path = %q, want %q", got, want)
-		}
+		require.Len(t, entries, 1)
+		require.Equal(t, "/team/alpha", entries[0].Path)
 		limits := entries[0].Limits
-		if len(limits) != 3 {
-			t.Fatalf("expected 3 limits (minute, day, concurrent), got %d: %+v", len(limits), limits)
-		}
+		require.Len(t, limits, 3)
 
 		byPeriod := map[int64]RateLimitRuleConfig{}
 		for _, limit := range limits {
-			if limit.PeriodSeconds == nil {
-				t.Fatalf("limit %+v missing resolved period seconds", limit)
-			}
+			require.NotNil(t, limit.PeriodSeconds, "limit %+v missing resolved period seconds", limit)
+
 			byPeriod[*limit.PeriodSeconds] = limit
 		}
 		minute := byPeriod[60]
-		if minute.MaxRequests == nil || *minute.MaxRequests != 100 {
-			t.Fatalf("minute max_requests = %v, want 100", minute.MaxRequests)
-		}
-		if minute.MaxTokens == nil || *minute.MaxTokens != 50000 {
-			t.Fatalf("minute max_tokens = %v, want 50000", minute.MaxTokens)
-		}
+		require.NotNil(t, minute.MaxRequests)
+		require.Equal(t, int64(100), *minute.MaxRequests)
+		require.NotNil(t, minute.MaxTokens)
+		require.Equal(t, int64(50000), *minute.MaxTokens)
+
 		day := byPeriod[86400]
-		if day.MaxRequests == nil || *day.MaxRequests != 1000 || day.MaxTokens != nil {
-			t.Fatalf("day limit = %+v, want 1000 requests only", day)
-		}
+		require.NotNil(t, day.MaxRequests)
+		require.Equal(t, int64(1000), *day.MaxRequests)
+		require.Nil(t, day.MaxTokens, "day limit = %+v, want 1000 requests only", day)
+
 		concurrent := byPeriod[0]
-		if concurrent.MaxRequests == nil || *concurrent.MaxRequests != 10 {
-			t.Fatalf("concurrent limit = %+v, want 10", concurrent)
-		}
+		require.NotNil(t, concurrent.MaxRequests)
+		require.Equal(t, int64(10), *concurrent.MaxRequests, "concurrent limit = %+v, want 10", concurrent)
 	})
 }
 
@@ -62,27 +51,21 @@ func TestLoadRateLimitEnvJSONSyntax(t *testing.T) {
 		t.Setenv("SET_RATE_LIMIT_", `[{"period":"minute","max_requests":50,"per_child":true},{"period_seconds":7200,"max_tokens":900}]`)
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		entries := result.Config.RateLimits.UserPaths
-		if len(entries) != 1 || entries[0].Path != "/" {
-			t.Fatalf("entries = %+v, want single root entry", entries)
-		}
+		require.Len(t, entries, 1)
+		require.Equal(t, "/", entries[0].Path)
+
 		limits := entries[0].Limits
-		if len(limits) != 2 {
-			t.Fatalf("limits = %d, want 2", len(limits))
-		}
-		if limits[0].PeriodSeconds == nil || *limits[0].PeriodSeconds != 60 || *limits[0].MaxRequests != 50 {
-			t.Fatalf("first limit = %+v, want minute/50", limits[0])
-		}
-		if !limits[0].PerChild {
-			t.Fatal("first limit per_child = false, want true")
-		}
-		if limits[1].PeriodSeconds == nil || *limits[1].PeriodSeconds != 7200 || *limits[1].MaxTokens != 900 {
-			t.Fatalf("second limit = %+v, want 7200s/900 tokens", limits[1])
-		}
+		require.Len(t, limits, 2)
+		require.NotNil(t, limits[0].PeriodSeconds)
+		require.Equal(t, int64(60), *limits[0].PeriodSeconds)
+		require.Equal(t, int64(50), *limits[0].MaxRequests, "first limit = %+v, want minute/50", limits[0])
+		require.True(t, limits[0].PerChild)
+		require.NotNil(t, limits[1].PeriodSeconds)
+		require.Equal(t, int64(7200), *limits[1].PeriodSeconds)
+		require.Equal(t, int64(900), *limits[1].MaxTokens, "second limit = %+v, want 7200s/900 tokens", limits[1])
 	})
 }
 
@@ -99,17 +82,11 @@ rate_limits:
         - period: minute
           max_requests: 100
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
-			t.Fatalf("write config.yaml: %v", err)
-		}
-		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		result := loadConfigYAML(t, dir, yamlConfig)
+
 		entry := result.Config.RateLimits.UserPaths[0]
-		if entry.Path != "/customers" || !entry.PerChild {
-			t.Fatalf("rate-limit YAML entry = %+v, want per-child /customers", entry)
-		}
+		require.Equal(t, "/customers", entry.Path)
+		require.True(t, entry.PerChild, "rate-limit YAML entry = %+v, want per-child /customers", entry)
 	})
 }
 
@@ -140,9 +117,8 @@ func TestValidateRateLimitConfigRejectsPerChildOutsideUserPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateRateLimitConfig(&tt.cfg)
-			if err == nil || err.Error() != tt.want {
-				t.Fatalf("validateRateLimitConfig() error = %v, want %q", err, tt.want)
-			}
+			require.Error(t, err)
+			require.Equal(t, tt.want, err.Error())
 		})
 	}
 }
@@ -163,26 +139,19 @@ rate_limits:
         - period: minute
           max_requests: 2
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yamlConfig)
+
 		t.Setenv("SET_RATE_LIMIT_TEAM__ALPHA", "rpm=50")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		entries := result.Config.RateLimits.UserPaths
-		if len(entries) != 2 {
-			t.Fatalf("expected 2 rate limit user paths, got %d: %+v", len(entries), entries)
-		}
-		if entries[0].Path != "/team/beta" || *entries[0].Limits[0].MaxRequests != 2 {
-			t.Fatalf("unrelated YAML entry changed: %+v", entries[0])
-		}
-		if entries[1].Path != "/team/alpha" || *entries[1].Limits[0].MaxRequests != 50 {
-			t.Fatalf("env entry did not replace YAML entry: %+v", entries[1])
-		}
+		require.Len(t, entries, 2)
+		require.Equal(t, "/team/beta", entries[0].Path)
+		require.Equal(t, int64(2), *entries[0].Limits[0].MaxRequests, "unrelated YAML entry changed: %+v", entries[0])
+		require.Equal(t, "/team/alpha", entries[1].Path)
+		require.Equal(t, int64(50), *entries[1].Limits[0].MaxRequests, "env entry did not replace YAML entry: %+v", entries[1])
 	})
 }
 
@@ -207,9 +176,8 @@ rate_limits:
         - period: minute
           max_tokens: 90000
 `
-		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yamlConfig), 0644); err != nil {
-			t.Fatalf("Failed to write config.yaml: %v", err)
-		}
+		writeConfigYAML(t, dir, yamlConfig)
+
 		// The env entry replaces the whole YAML entry with the same provider,
 		// and the distinct prefix keeps it out of the user-path suffix space.
 		t.Setenv("SET_PROVIDER_RATE_LIMIT_OPENAI", "rpm=500,tpm=100000,concurrent=20")
@@ -217,38 +185,30 @@ rate_limits:
 		t.Setenv("SET_PROVIDER_RATE_LIMIT_OPENAI_EAST", "rpm=100")
 
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
+		require.NoError(t, err)
 
 		providers := result.Config.RateLimits.Providers
-		if len(providers) != 3 {
-			t.Fatalf("providers = %d, want 3: %+v", len(providers), providers)
-		}
+		require.Len(t, providers, 3)
+
 		byName := map[string]RateLimitProviderConfig{}
 		for _, entry := range providers {
 			byName[entry.Name] = entry
 		}
-		if entry := byName["anthropic"]; *entry.Limits[0].MaxRequests != 2 {
-			t.Fatalf("unrelated YAML provider changed: %+v", entry)
-		}
-		if entry := byName["openai"]; len(entry.Limits) != 2 {
-			t.Fatalf("env provider entry = %+v, want openai with minute+concurrent limits", entry)
-		}
-		if entry, ok := byName["openai-east"]; !ok || *entry.Limits[0].MaxRequests != 100 {
-			t.Fatalf("providers = %+v, want openai-east from underscore suffix", providers)
-		}
-		if result.Config.RateLimits.UserPaths != nil {
-			t.Fatalf("user paths = %+v, want none (provider env must not leak into paths)", result.Config.RateLimits.UserPaths)
-		}
+		entry := byName["anthropic"]
+		require.Equal(t, int64(2), *entry.Limits[0].MaxRequests, "unrelated YAML provider changed: %+v", entry)
+		entry = byName["openai"]
+		require.Len(t, entry.Limits, 2, "env provider entry = %+v, want openai with minute+concurrent limits", entry)
+		entry, ok := byName["openai-east"]
+		require.True(t, ok)
+		require.Equal(t, int64(100), *entry.Limits[0].MaxRequests, "providers = %+v, want openai-east from underscore suffix", providers)
+		require.Nil(t, result.Config.RateLimits.UserPaths)
 
 		models := result.Config.RateLimits.Models
-		if len(models) != 1 || models[0].Model != "openai/gpt-4o" {
-			t.Fatalf("models = %+v, want openai/gpt-4o", models)
-		}
-		if models[0].Limits[0].PeriodSeconds == nil || *models[0].Limits[0].PeriodSeconds != 60 || *models[0].Limits[0].MaxTokens != 90000 {
-			t.Fatalf("model limit = %+v, want minute/90000 tokens", models[0].Limits[0])
-		}
+		require.Len(t, models, 1)
+		require.Equal(t, "openai/gpt-4o", models[0].Model)
+		require.NotNil(t, models[0].Limits[0].PeriodSeconds)
+		require.Equal(t, int64(60), *models[0].Limits[0].PeriodSeconds)
+		require.Equal(t, int64(90000), *models[0].Limits[0].MaxTokens, "model limit = %+v, want minute/90000 tokens", models[0].Limits[0])
 	})
 }
 
@@ -257,10 +217,9 @@ func TestLoadRateLimitEnvRejectsUnknownName(t *testing.T) {
 
 	withTempDir(t, func(string) {
 		t.Setenv("SET_RATE_LIMIT_TEAM", "rps=10")
-
-		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "rps") {
-			t.Fatalf("Load() error = %v, want unknown-name error naming rps", err)
-		}
+		_, err := Load()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "rps")
 	})
 }
 
@@ -428,19 +387,15 @@ rate_limits:
 		t.Run(tt.name, func(t *testing.T) {
 			clearAllConfigEnvVars(t)
 			withTempDir(t, func(dir string) {
-				if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.yaml), 0644); err != nil {
-					t.Fatalf("Failed to write config.yaml: %v", err)
-				}
+				writeConfigYAML(t, dir, tt.yaml)
+
 				_, err := Load()
 				if tt.wantErr == "" {
-					if err != nil {
-						t.Fatalf("Load() failed: %v", err)
-					}
+					require.NoError(t, err)
 					return
 				}
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("Load() error = %v, want containing %q", err, tt.wantErr)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.wantErr)
 			})
 		})
 	}
@@ -451,26 +406,16 @@ func TestRateLimitsEnabledByDefaultAndTogglable(t *testing.T) {
 
 	withTempDir(t, func(string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if !result.Config.RateLimits.Enabled {
-			t.Fatal("rate limits should be enabled by default")
-		}
-		if result.Config.RateLimits.FlushInterval != 1 {
-			t.Fatalf("FlushInterval = %d, want 1", result.Config.RateLimits.FlushInterval)
-		}
+		require.NoError(t, err)
+		require.True(t, result.Config.RateLimits.Enabled)
+		require.Equal(t, 1, result.Config.RateLimits.FlushInterval)
 	})
 
 	withTempDir(t, func(string) {
 		t.Setenv("RATE_LIMITS_ENABLED", "false")
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.RateLimits.Enabled {
-			t.Fatal("RATE_LIMITS_ENABLED=false was not applied")
-		}
+		require.NoError(t, err)
+		require.False(t, result.Config.RateLimits.Enabled)
 	})
 }
 
@@ -480,29 +425,21 @@ func TestRateLimitsFlushIntervalEnv(t *testing.T) {
 	withTempDir(t, func(string) {
 		t.Setenv("RATE_LIMITS_FLUSH_INTERVAL", "0")
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.RateLimits.FlushInterval != 0 {
-			t.Fatalf("FlushInterval = %d, want 0", result.Config.RateLimits.FlushInterval)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 0, result.Config.RateLimits.FlushInterval)
 	})
 
 	clearAllConfigEnvVars(t)
 	withTempDir(t, func(string) {
 		t.Setenv("RATE_LIMITS_FLUSH_INTERVAL", "-1")
-		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "flush_interval") {
-			t.Fatalf("Load() error = %v, want flush_interval", err)
-		}
+		_, err := Load()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "flush_interval")
 	})
 }
 
 func TestParseRateLimitEnvLimits_RejectsUnknownField(t *testing.T) {
 	_, err := parseRateLimitEnvLimits(`[{"period":"minute","max_requsts":100}]`, true)
-	if err == nil {
-		t.Fatal("parseRateLimitEnvLimits() error = nil, want unknown-field error")
-	}
-	if !strings.Contains(err.Error(), "max_requsts") {
-		t.Fatalf("parseRateLimitEnvLimits() error = %q, want it to name the unknown field", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "max_requsts")
 }

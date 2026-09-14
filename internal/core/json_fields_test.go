@@ -7,6 +7,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractUnknownJSONFields_PreservesNestedValues(t *testing.T) {
@@ -18,24 +20,15 @@ func TestExtractUnknownJSONFields_PreservesNestedValues(t *testing.T) {
 	}`)
 
 	fields, err := extractUnknownJSONFields(data, "known")
-	if err != nil {
-		t.Fatalf("extractUnknownJSONFields() error = %v", err)
-	}
-
-	if fields.IsEmpty() {
-		t.Fatal("expected unknown fields")
-	}
-	if got := fields.Lookup("x_bool"); !bytes.Equal(got, []byte("true")) {
-		t.Fatalf("x_bool = %s, want true", got)
-	}
+	require.NoError(t, err)
+	require.False(t, fields.IsEmpty())
+	got := fields.Lookup("x_bool")
+	require.Equal(t, json.RawMessage("true"), got)
 
 	var nested map[string]any
-	if err := json.Unmarshal(fields.Lookup("x_object"), &nested); err != nil {
-		t.Fatalf("failed to unmarshal x_object: %v", err)
-	}
-	if nested["text"] != "hello" {
-		t.Fatalf("x_object.text = %#v, want hello", nested["text"])
-	}
+	err = json.Unmarshal(fields.Lookup("x_object"), &nested)
+	require.NoError(t, err)
+	require.Equal(t, "hello", nested["text"])
 }
 
 func TestExtractUnknownJSONFields_HandlesEscapedStrings(t *testing.T) {
@@ -46,31 +39,21 @@ func TestExtractUnknownJSONFields_HandlesEscapedStrings(t *testing.T) {
 	}`)
 
 	fields, err := extractUnknownJSONFields(data, "model")
-	if err != nil {
-		t.Fatalf("extractUnknownJSONFields() error = %v", err)
-	}
-
-	if got := fields.Lookup("x_text"); !bytes.Equal(got, []byte(`"quote: \"ok\" and slash \\\\"`)) {
-		t.Fatalf("x_text = %s", got)
-	}
-	if got := fields.Lookup("x_json"); !bytes.Equal(got, []byte(`"{\"embedded\":true}"`)) {
-		t.Fatalf("x_json = %s", got)
-	}
+	require.NoError(t, err)
+	got := fields.Lookup("x_text")
+	require.Equal(t, json.RawMessage(`"quote: \"ok\" and slash \\\\"`), got)
+	got = fields.Lookup("x_json")
+	require.Equal(t, json.RawMessage(`"{\"embedded\":true}"`), got)
 }
 
 func TestExtractUnknownJSONFields_PreservesDuplicateUnknownKeys(t *testing.T) {
 	data := []byte(`{"known":"value","x_meta":1,"x_meta":2}`)
 
 	fields, err := extractUnknownJSONFields(data, "known")
-	if err != nil {
-		t.Fatalf("extractUnknownJSONFields() error = %v", err)
-	}
-	if got := string(fields.raw); got != `{"x_meta":1,"x_meta":2}` {
-		t.Fatalf("raw = %s, want duplicate keys preserved", got)
-	}
-	if got := fields.Lookup("x_meta"); !bytes.Equal(got, []byte("1")) {
-		t.Fatalf("Lookup(x_meta) = %s, want first duplicate value", got)
-	}
+	require.NoError(t, err)
+	got := string(fields.raw)
+	require.Equal(t, `{"x_meta":1,"x_meta":2}`, got)
+	require.Equal(t, json.RawMessage("1"), fields.Lookup("x_meta"), "first duplicate value wins")
 }
 
 func TestUnknownJSONFieldsFromMap_EmptyRawValueEncodesAsNull(t *testing.T) {
@@ -78,13 +61,10 @@ func TestUnknownJSONFieldsFromMap_EmptyRawValueEncodesAsNull(t *testing.T) {
 		"x_nil": nil,
 		"x_set": json.RawMessage(`true`),
 	})
-
-	if got := fields.Lookup("x_nil"); !bytes.Equal(got, []byte("null")) {
-		t.Fatalf("x_nil = %q, want null", got)
-	}
-	if got := fields.Lookup("x_set"); !bytes.Equal(got, []byte("true")) {
-		t.Fatalf("x_set = %q, want true", got)
-	}
+	got := fields.Lookup("x_nil")
+	require.Equal(t, json.RawMessage("null"), got)
+	got = fields.Lookup("x_set")
+	require.Equal(t, json.RawMessage("true"), got)
 }
 
 func TestUnknownJSONFieldsWithoutRemovesOnlyNamedMembers(t *testing.T) {
@@ -92,20 +72,14 @@ func TestUnknownJSONFieldsWithoutRemovesOnlyNamedMembers(t *testing.T) {
 		[]byte(`{"known":true,"cache_control":{"type":"ephemeral"},"x":1,"x":2}`),
 		"known",
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	filtered := fields.Without("cache_control")
-	if got := filtered.Lookup("cache_control"); got != nil {
-		t.Fatalf("cache_control = %s, want removed", got)
-	}
-	if got := string(filtered.raw); got != `{"x":1,"x":2}` {
-		t.Fatalf("filtered raw = %s, want duplicate unrelated fields preserved", got)
-	}
-	if got := fields.Lookup("cache_control"); got == nil {
-		t.Fatal("original fields were mutated")
-	}
+	got := filtered.Lookup("cache_control")
+	require.Nil(t, got)
+	require.Equal(t, `{"x":1,"x":2}`, string(filtered.raw), "duplicate unrelated fields must be preserved")
+	got = fields.Lookup("cache_control")
+	require.NotNil(t, got)
 }
 
 func TestMergeUnknownJSONFields_AddsAndOverrides(t *testing.T) {
@@ -118,19 +92,13 @@ func TestMergeUnknownJSONFields_AddsAndOverrides(t *testing.T) {
 		"override": json.RawMessage(`"new"`),
 		"added":    json.RawMessage(`true`),
 	})
-	if err != nil {
-		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
-	}
-
-	if got := merged.Lookup("keep"); !bytes.Equal(got, []byte(`1`)) {
-		t.Fatalf("keep = %q, want 1", got)
-	}
-	if got := merged.Lookup("override"); !bytes.Equal(got, []byte(`"new"`)) {
-		t.Fatalf("override = %q, want \"new\"", got)
-	}
-	if got := merged.Lookup("added"); !bytes.Equal(got, []byte(`true`)) {
-		t.Fatalf("added = %q, want true", got)
-	}
+	require.NoError(t, err)
+	got := merged.Lookup("keep")
+	require.Equal(t, json.RawMessage(`1`), got)
+	got = merged.Lookup("override")
+	require.Equal(t, json.RawMessage(`"new"`), got)
+	got = merged.Lookup("added")
+	require.Equal(t, json.RawMessage(`true`), got)
 }
 
 func TestMergeUnknownJSONFields_PreservesRawBaseMembers(t *testing.T) {
@@ -142,25 +110,15 @@ func TestMergeUnknownJSONFields_PreservesRawBaseMembers(t *testing.T) {
 		"override": json.RawMessage(`"new"`),
 		"added":    json.RawMessage(`true`),
 	})
-	if err != nil {
-		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
-	}
-
-	if bytes.Count(merged.raw, []byte(`"dup"`)) != 2 {
-		t.Fatalf("merged raw = %s, want duplicate dup keys preserved", merged.raw)
-	}
-	if bytes.Contains(merged.raw, []byte(`"override":"old"`)) {
-		t.Fatalf("merged raw = %s, old override value should be removed", merged.raw)
-	}
-	if got := merged.Lookup("dup"); !bytes.Equal(got, []byte(`"first"`)) {
-		t.Fatalf("dup = %s, want first duplicate value", got)
-	}
-	if got := merged.Lookup("override"); !bytes.Equal(got, []byte(`"new"`)) {
-		t.Fatalf("override = %s, want new value", got)
-	}
-	if got := merged.Lookup("added"); !bytes.Equal(got, []byte(`true`)) {
-		t.Fatalf("added = %s, want true", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 2, bytes.Count(merged.raw, []byte(`"dup"`)), "merged raw = %s, want duplicate dup keys preserved", merged.raw)
+	require.False(t, bytes.Contains(merged.raw, []byte(`"override":"old"`)), "merged raw = %s, old override value should be removed", merged.raw)
+	got := merged.Lookup("dup")
+	require.Equal(t, json.RawMessage(`"first"`), got)
+	got = merged.Lookup("override")
+	require.Equal(t, json.RawMessage(`"new"`), got)
+	got = merged.Lookup("added")
+	require.Equal(t, json.RawMessage(`true`), got)
 }
 
 func TestMergeUnknownJSONFields_ErrorPaths(t *testing.T) {
@@ -194,9 +152,8 @@ func TestMergeUnknownJSONFields_ErrorPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := MergeUnknownJSONFields(tt.base, tt.additions); err == nil {
-				t.Fatal("MergeUnknownJSONFields() error = nil, want error")
-			}
+			_, err := MergeUnknownJSONFields(tt.base, tt.additions)
+			require.Error(t, err)
 		})
 	}
 }
@@ -205,12 +162,8 @@ func TestMergeUnknownJSONFields_NoAdditionsReturnsBase(t *testing.T) {
 	base := UnknownJSONFieldsFromMap(map[string]json.RawMessage{"a": json.RawMessage(`1`)})
 
 	merged, err := MergeUnknownJSONFields(base, nil)
-	if err != nil {
-		t.Fatalf("MergeUnknownJSONFields() error = %v", err)
-	}
-	if !bytes.Equal(merged.Lookup("a"), []byte(`1`)) {
-		t.Fatalf("a = %q, want 1", merged.Lookup("a"))
-	}
+	require.NoError(t, err)
+	require.Equal(t, json.RawMessage(`1`), merged.Lookup("a"))
 }
 
 // extractUnknownJSONFields assumes its input is already valid JSON: every
@@ -240,9 +193,7 @@ func TestUnmarshalJSON_RejectsInvalidJSONSyntax(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var req ChatRequest
-			if err := req.UnmarshalJSON([]byte(tt.body)); err == nil {
-				t.Fatalf("ChatRequest.UnmarshalJSON(%q) error = nil, want syntax error", tt.body)
-			}
+			require.Error(t, req.UnmarshalJSON([]byte(tt.body)), "ChatRequest.UnmarshalJSON(%q) error = nil, want syntax error", tt.body)
 		})
 	}
 }
@@ -266,17 +217,15 @@ func TestDecoderLeniencyIsBounded(t *testing.T) {
 	for _, tt := range accepted {
 		t.Run(tt.name, func(t *testing.T) {
 			var req ChatRequest
-			if err := req.UnmarshalJSON([]byte(tt.body)); err != nil {
-				t.Fatalf("ChatRequest.UnmarshalJSON(%q) error = %v, want accepted", tt.body, err)
-			}
+			err := req.UnmarshalJSON([]byte(tt.body))
+			require.NoError(t, err)
 		})
 	}
 }
 
 func TestMergedJSONObjectCap_Overflow(t *testing.T) {
-	if _, err := mergedJSONObjectCap(math.MaxInt, 2); err == nil {
-		t.Fatal("mergedJSONObjectCap() error = nil, want overflow error")
-	}
+	_, err := mergedJSONObjectCap(math.MaxInt, 2)
+	require.Error(t, err)
 }
 
 func TestCloneOptionalJSONObject(t *testing.T) {
@@ -296,12 +245,12 @@ func TestCloneOptionalJSONObject(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := CloneOptionalJSONObject(tt.raw)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("CloneOptionalJSONObject() error = %v, wantErr %v", err, tt.wantErr)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
 			}
-			if string(got) != tt.want {
-				t.Fatalf("CloneOptionalJSONObject() = %s, want %s", got, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(got))
 		})
 	}
 }
@@ -315,13 +264,9 @@ func TestExtractUnknownJSONFields_DoesNotRetainBodySizedCapacity(t *testing.T) {
 		strings.Repeat("x", 1<<20))
 
 	fields, err := extractUnknownJSONFields([]byte(body), "model", "messages")
-	if err != nil {
-		t.Fatalf("extractUnknownJSONFields() error = %v", err)
-	}
-	if got := string(fields.raw); got != `{"custom_flag":true}` {
-		t.Fatalf("raw = %q, want custom_flag only", got)
-	}
-	if c := cap(fields.raw); c > 4096 {
-		t.Fatalf("retained capacity = %d bytes for %d bytes of extras, want small", c, len(fields.raw))
-	}
+	require.NoError(t, err)
+	got := string(fields.raw)
+	require.Equal(t, `{"custom_flag":true}`, got)
+	c := cap(fields.raw)
+	require.LessOrEqual(t, c, 4096)
 }

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +16,8 @@ import (
 
 	goconfig "github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClient_Do_Success(t *testing.T) {
@@ -41,21 +42,16 @@ func TestClient_Do_Success(t *testing.T) {
 		Endpoint: "/test",
 	}, &result)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Message != "hello" {
-		t.Errorf("expected message 'hello', got '%s'", result.Message)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "hello", result.Message)
 }
 
 func TestClient_Do_WithRequestBody(t *testing.T) {
 	var receivedBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Errorf("expected Content-Type 'application/json', got '%s'", r.Header.Get("Content-Type"))
-		}
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &receivedBody)
 		w.Header().Set("Content-Type", "application/json")
@@ -73,12 +69,8 @@ func TestClient_Do_WithRequestBody(t *testing.T) {
 		Body:     requestBody,
 	}, &result)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if receivedBody["input"] != "test" {
-		t.Errorf("expected input 'test', got '%v'", receivedBody["input"])
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "test", receivedBody["input"])
 }
 
 func TestClient_Do_Headers(t *testing.T) {
@@ -106,15 +98,9 @@ func TestClient_Do_Headers(t *testing.T) {
 		},
 	}, nil)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if receivedHeaders.Get("Authorization") != "Bearer token" {
-		t.Errorf("expected Authorization header 'Bearer token', got '%s'", receivedHeaders.Get("Authorization"))
-	}
-	if receivedHeaders.Get("X-Custom") != "custom-value" {
-		t.Errorf("expected X-Custom header 'custom-value', got '%s'", receivedHeaders.Get("X-Custom"))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer token", receivedHeaders.Get("Authorization"))
+	assert.Equal(t, "custom-value", receivedHeaders.Get("X-Custom"))
 }
 
 func TestClient_Do_ErrorParsing(t *testing.T) {
@@ -167,16 +153,11 @@ func TestClient_Do_ErrorParsing(t *testing.T) {
 				Endpoint: "/test",
 			}, nil)
 
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
+			require.Error(t, err)
+
 			gatewayErr, ok := err.(*core.GatewayError)
-			if !ok {
-				t.Fatalf("expected GatewayError, got %T", err)
-			}
-			if gatewayErr.Type != tt.wantType {
-				t.Errorf("expected error type %s, got %s", tt.wantType, gatewayErr.Type)
-			}
+			require.True(t, ok)
+			assert.Equal(t, tt.wantType, gatewayErr.Type)
 		})
 	}
 }
@@ -210,15 +191,9 @@ func TestClient_Do_Retries(t *testing.T) {
 		Endpoint: "/test",
 	}, &result)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success to be true")
-	}
-	if attempts.Load() != 3 {
-		t.Errorf("expected 3 attempts, got %d", attempts.Load())
-	}
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+	assert.Equal(t, int32(3), attempts.Load())
 }
 
 func TestClient_Do_RetriesContinueAfterCircuitTrips(t *testing.T) {
@@ -258,15 +233,10 @@ func TestClient_Do_RetriesContinueAfterCircuitTrips(t *testing.T) {
 		Endpoint: "/test",
 	}, &result)
 
-	if err != nil {
-		t.Fatalf("expected retries to continue after circuit trips, got: %v", err)
-	}
-	if !result.Success {
-		t.Fatal("expected success response after retries")
-	}
-	if got := attempts.Load(); got != 3 {
-		t.Fatalf("expected request to use full retry budget after circuit trips, got %d attempts", got)
-	}
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	got := attempts.Load()
+	require.Equal(t, int32(3), got)
 }
 
 func TestClient_Do_RetriesExhausted(t *testing.T) {
@@ -290,13 +260,10 @@ func TestClient_Do_RetriesExhausted(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 
-	if err == nil {
-		t.Fatal("expected error after retries exhausted")
-	}
+	require.Error(t, err)
+
 	// 1 initial + 2 retries = 3 attempts
-	if attempts.Load() != 3 {
-		t.Errorf("expected 3 attempts, got %d", attempts.Load())
-	}
+	assert.Equal(t, int32(3), attempts.Load())
 }
 
 // TestClient_DoRaw_Success tests DoRaw directly to ensure raw response handling works correctly
@@ -316,19 +283,10 @@ func TestClient_DoRaw_Success(t *testing.T) {
 		Endpoint: "/test",
 	})
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("expected response, got nil")
-		return
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status 200, got %d", resp.StatusCode)
-	}
-	if !strings.Contains(string(resp.Body), "raw") {
-		t.Errorf("expected body to contain 'raw', got: %s", string(resp.Body))
-	}
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, string(resp.Body), "raw")
 }
 
 // TestClient_DoRaw_Error tests DoRaw error handling
@@ -348,19 +306,12 @@ func TestClient_DoRaw_Error(t *testing.T) {
 		Endpoint: "/test",
 	})
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if resp != nil {
-		t.Error("expected nil response on error")
-	}
+	require.Error(t, err)
+	assert.Nil(t, resp)
+
 	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeInvalidRequest {
-		t.Errorf("expected error type %s, got %s", core.ErrorTypeInvalidRequest, gatewayErr.Type)
-	}
+	require.True(t, ok)
+	assert.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 }
 
 // TestClient_DoRaw_WithRetries tests that DoRaw properly handles retries
@@ -390,15 +341,9 @@ func TestClient_DoRaw_WithRetries(t *testing.T) {
 		Endpoint: "/test",
 	})
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status 200, got %d", resp.StatusCode)
-	}
-	if attempts.Load() != 2 {
-		t.Errorf("expected 2 attempts, got %d", attempts.Load())
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestClient_DoRaw_DoesNotRetryRawBodyReader(t *testing.T) {
@@ -425,15 +370,10 @@ func TestClient_DoRaw_DoesNotRetryRawBodyReader(t *testing.T) {
 			"Content-Type": {"application/json"},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if resp != nil {
-		t.Fatalf("expected nil response, got %+v", resp)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("attempts = %d, want 1", got)
-	}
+	require.Error(t, err)
+	require.Nil(t, resp)
+	got := attempts.Load()
+	require.Equal(t, int32(1), got)
 }
 
 func TestClient_DoPassthrough_WithRetries(t *testing.T) {
@@ -461,24 +401,16 @@ func TestClient_DoPassthrough_WithRetries(t *testing.T) {
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
 	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read body: %v", err)
-	}
-	if got := string(body); got != `{"ok":true}` {
-		t.Fatalf("body = %q, want success response", got)
-	}
-	if got := attempts.Load(); got != 3 {
-		t.Fatalf("attempts = %d, want 3", got)
-	}
+	require.NoError(t, err)
+	require.JSONEq(t, `{"ok":true}`, string(body))
+	require.Equal(t, int32(3), attempts.Load())
 }
 
 func TestClient_DoPassthrough_ReturnsLastRetryableResponseAfterRetries(t *testing.T) {
@@ -504,24 +436,16 @@ func TestClient_DoPassthrough_ReturnsLastRetryableResponseAfterRetries(t *testin
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", resp.StatusCode)
-	}
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+
 	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read body: %v", err)
-	}
-	if got := string(body); got != `{"attempt":3}` {
-		t.Fatalf("body = %q, want final retry response", got)
-	}
-	if got := attempts.Load(); got != 3 {
-		t.Fatalf("attempts = %d, want 3", got)
-	}
+	require.NoError(t, err)
+	require.JSONEq(t, `{"attempt":3}`, string(body))
+	require.Equal(t, int32(3), attempts.Load())
 }
 
 func TestClient_DoPassthrough_HTTPTimeoutDoesNotRetry(t *testing.T) {
@@ -556,22 +480,15 @@ func TestClient_DoPassthrough_HTTPTimeoutDoesNotRetry(t *testing.T) {
 	if resp != nil {
 		_ = resp.Body.Close()
 	}
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
-		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("upstream attempts = %d, want 1 for client-side timeout", got)
-	}
-	if state := client.circuitBreaker.State(); state != "closed" {
-		t.Fatalf("circuit state = %q, want closed after one logical timeout", state)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusGatewayTimeout, gatewayErr.StatusCode)
+	got := attempts.Load()
+	require.Equal(t, int32(1), got)
+	state := client.circuitBreaker.State()
+	require.Equal(t, "closed", state)
 }
 
 func TestClient_DoPassthrough_DoesNotRetryNonReplaySafeMethod(t *testing.T) {
@@ -599,17 +516,13 @@ func TestClient_DoPassthrough_DoesNotRetryNonReplaySafeMethod(t *testing.T) {
 		RawBody:  []byte(`{"hello":"world"}`),
 		Headers:  http.Header{"Content-Type": {"application/json"}},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want 429", resp.StatusCode)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("attempts = %d, want 1", got)
-	}
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	got := attempts.Load()
+	require.Equal(t, int32(1), got)
 }
 
 func TestClient_DoPassthrough_RetriesWhenIdempotencyKeyPresent(t *testing.T) {
@@ -645,17 +558,13 @@ func TestClient_DoPassthrough_RetriesWhenIdempotencyKeyPresent(t *testing.T) {
 			"Idempotency-Key": {"req-123"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if got := attempts.Load(); got != 3 {
-		t.Fatalf("attempts = %d, want 3", got)
-	}
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	got := attempts.Load()
+	require.Equal(t, int32(3), got)
 }
 
 func TestClient_DoStream_Success(t *testing.T) {
@@ -674,19 +583,13 @@ func TestClient_DoStream_Success(t *testing.T) {
 		Endpoint: "/stream",
 		Body:     map[string]bool{"stream": true},
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
 
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-
-	if !strings.Contains(string(body), "chunk") {
-		t.Errorf("expected body to contain 'chunk', got: %s", string(body))
-	}
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "chunk")
 }
 
 func TestClient_DoPassthrough_FirstChunkHookUsesOpaqueStreamBody(t *testing.T) {
@@ -707,27 +610,23 @@ func TestClient_DoPassthrough_FirstChunkHookUsesOpaqueStreamBody(t *testing.T) {
 		Model:     "command-r",
 		Stream:    true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
-	if firstChunk.Duration != 0 {
-		t.Fatal("first chunk hook fired at passthrough response headers")
-	}
-	if _, err := io.ReadAll(resp.Body); err != nil {
-		t.Fatal(err)
-	}
-	if firstChunk.Operation != OperationChat || firstChunk.Model != "command-r" || !firstChunk.Stream {
-		t.Fatalf("first chunk = %+v, want streaming command-r chat", firstChunk)
-	}
+	require.Equal(t, time.Duration(0), firstChunk.Duration)
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, OperationChat, firstChunk.Operation)
+	require.Equal(t, "command-r", firstChunk.Model)
+	require.True(t, firstChunk.Stream, "first chunk = %+v, want streaming command-r chat", firstChunk)
 }
 
 func TestClient_DoPassthrough_FirstChunkHookUsesSuccessfulSSEContentType(t *testing.T) {
 	body := `{"padding":"` + strings.Repeat("x", 65*1024) + `","stream":true}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.Copy(io.Discard, r.Body); err != nil {
-			t.Errorf("read request body: %v", err)
-		}
+		_, err := io.Copy(io.Discard, r.Body)
+		assert.NoError(t, err)
+
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = w.Write([]byte("data: passthrough\n\n"))
 	}))
@@ -745,19 +644,15 @@ func TestClient_DoPassthrough_FirstChunkHookUsesSuccessfulSSEContentType(t *test
 		Operation:     OperationChat,
 		RawBodyReader: io.NopCloser(strings.NewReader(body)),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer resp.Body.Close()
-	if len(firstChunks) != 0 {
-		t.Fatalf("first chunk hook fired at response headers: %+v", firstChunks)
-	}
-	if _, err := io.ReadAll(resp.Body); err != nil {
-		t.Fatal(err)
-	}
-	if len(firstChunks) != 1 || !firstChunks[0].Stream || firstChunks[0].Operation != OperationChat {
-		t.Fatalf("first chunk observations = %+v, want one streaming chat observation", firstChunks)
-	}
+	require.Empty(t, firstChunks)
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Len(t, firstChunks, 1)
+	require.True(t, firstChunks[0].Stream)
+	require.Equal(t, OperationChat, firstChunks[0].Operation)
 }
 
 func TestClient_DoPassthrough_ErrorResponseDoesNotFireFirstChunkHook(t *testing.T) {
@@ -780,16 +675,12 @@ func TestClient_DoPassthrough_ErrorResponseDoesNotFireFirstChunkHook(t *testing.
 				Endpoint: "/chat/completions",
 				Stream:   true,
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			defer resp.Body.Close()
-			if _, err := io.ReadAll(resp.Body); err != nil {
-				t.Fatal(err)
-			}
-			if firstChunks != 0 {
-				t.Fatalf("first chunk hook calls = %d, want 0", firstChunks)
-			}
+			_, err = io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, 0, firstChunks)
 		})
 	}
 }
@@ -813,26 +704,20 @@ func TestClient_DoStream_FirstChunkHookWaitsForBodyBytes(t *testing.T) {
 		Operation: OperationChat,
 		Body:      map[string]bool{"stream": true},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
-	if len(firstChunks) != 0 {
-		t.Fatalf("first chunk hook fired at response headers: %+v", firstChunks)
-	}
+	require.Empty(t, firstChunks)
+
 	buf := make([]byte, 1)
-	if _, err := stream.Read(buf); err != nil {
-		t.Fatal(err)
-	}
-	if len(firstChunks) != 1 || firstChunks[0].Operation != OperationChat || !firstChunks[0].Stream {
-		t.Fatalf("first chunk observations = %+v, want one streaming chat observation", firstChunks)
-	}
-	if _, err := io.ReadAll(stream); err != nil {
-		t.Fatal(err)
-	}
-	if len(firstChunks) != 1 {
-		t.Fatalf("first chunk hook fired %d times, want once", len(firstChunks))
-	}
+	_, err = stream.Read(buf)
+	require.NoError(t, err)
+	require.Len(t, firstChunks, 1)
+	require.Equal(t, OperationChat, firstChunks[0].Operation)
+	require.True(t, firstChunks[0].Stream)
+	_, err = io.ReadAll(stream)
+	require.NoError(t, err)
+	require.Len(t, firstChunks, 1)
 }
 
 func TestClient_DoStream_Error(t *testing.T) {
@@ -849,16 +734,11 @@ func TestClient_DoStream_Error(t *testing.T) {
 		Endpoint: "/stream",
 	})
 
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
+
 	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.Type != core.ErrorTypeAuthentication {
-		t.Errorf("expected error type %s, got %s", core.ErrorTypeAuthentication, gatewayErr.Type)
-	}
+	require.True(t, ok)
+	assert.Equal(t, core.ErrorTypeAuthentication, gatewayErr.Type)
 }
 
 // TestClient_BuildErrorDoesNotRetryOrChargeBreaker verifies that caller-side
@@ -955,27 +835,19 @@ func TestClient_BuildErrorDoesNotRetryOrChargeBreaker(t *testing.T) {
 				st.preSeed(client.circuitBreaker)
 
 				err := e.call(t, client)
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
+				require.Error(t, err)
+
 				var gwErr *core.GatewayError
-				if !errors.As(err, &gwErr) {
-					t.Fatalf("expected *core.GatewayError, got %T: %v", err, err)
-				}
-				if gwErr.Type != core.ErrorTypeInvalidRequest {
-					t.Errorf("error type = %s, want %s", gwErr.Type, core.ErrorTypeInvalidRequest)
-				}
-				if got := attempts.Load(); got != 0 {
-					t.Errorf("server received %d attempts; want 0 (build errors must not be retried)", got)
-				}
-				if state := client.circuitBreaker.State(); state != st.wantState {
-					t.Errorf("breaker state = %q; want %q (build errors must not advance the breaker)", state, st.wantState)
-				}
-				// A consumed half-open probe slot must be released, or the
-				// breaker rejects every request from here on.
-				if _, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}); err != nil {
-					t.Errorf("follow-up request after build error failed: %v (probe slot leaked)", err)
-				}
+				require.ErrorAs(t, err, &gwErr)
+				assert.Equal(t, core.ErrorTypeInvalidRequest, gwErr.Type)
+				got := attempts.Load()
+				assert.Equal(t, int32(0), got)
+				state := client.circuitBreaker.State()
+				assert.Equal(t, st.wantState, state)
+				_, err = // A consumed half-open probe slot must be released, or the
+					// breaker rejects every request from here on.
+					client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
+				assert.NoError(t, err)
 			})
 		}
 	}
@@ -1027,19 +899,12 @@ func TestRequest_Validation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := client.buildRequest(context.Background(), tt.request)
 
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-					return
-				}
-				if !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("expected error to contain '%s', got: %v", tt.errContains, err)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
 			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.errContains)
 		})
 	}
 }
@@ -1078,27 +943,16 @@ func TestCircuitBreaker_OpensAfterFailures(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 
-	if err == nil {
-		t.Fatal("expected circuit breaker error")
-	}
+	require.Error(t, err)
+
 	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("expected status %d, got %d", http.StatusServiceUnavailable, gatewayErr.StatusCode)
-	}
-	if !strings.Contains(gatewayErr.Message, "circuit breaker") {
-		t.Errorf("expected circuit breaker message, got: %s", gatewayErr.Message)
-	}
-	if !strings.Contains(gatewayErr.Message, "provider test") {
-		t.Errorf("expected circuit breaker message to identify provider, got: %s", gatewayErr.Message)
-	}
+	require.True(t, ok)
+	assert.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode)
+	assert.Contains(t, gatewayErr.Message, "circuit breaker")
+	assert.Contains(t, gatewayErr.Message, "provider test")
 
 	// Should have made exactly 3 requests (threshold)
-	if attempts.Load() != 3 {
-		t.Errorf("expected 3 attempts before circuit opened, got %d", attempts.Load())
-	}
+	assert.Equal(t, int32(3), attempts.Load())
 }
 
 func TestCircuitBreaker_ClosesAfterTimeout(t *testing.T) {
@@ -1140,9 +994,7 @@ func TestCircuitBreaker_ClosesAfterTimeout(t *testing.T) {
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	}, nil)
-	if err == nil {
-		t.Fatal("expected circuit to be open")
-	}
+	require.Error(t, err)
 
 	// Wait for timeout
 	time.Sleep(100 * time.Millisecond)
@@ -1159,12 +1011,8 @@ func TestCircuitBreaker_ClosesAfterTimeout(t *testing.T) {
 		Endpoint: "/test",
 	}, &result)
 
-	if err != nil {
-		t.Fatalf("expected success after timeout, got: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success to be true")
-	}
+	require.NoError(t, err)
+	assert.True(t, result.Success)
 }
 
 // TestCircuitBreaker_HalfOpenPreventsThunderingHerd tests that only one request
@@ -1240,9 +1088,7 @@ func TestCircuitBreaker_HalfOpenPreventsThunderingHerd(t *testing.T) {
 
 	// In half-open state, only one request should be allowed through initially
 	// After it succeeds, the circuit closes and more requests can go through
-	if successes == 0 {
-		t.Error("expected at least one successful request")
-	}
+	assert.NotZero(t, successes)
 
 	// Most requests should be rejected by the circuit breaker
 	if rejections == 0 && successes == 10 {
@@ -1286,45 +1132,28 @@ func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	}, nil)
-	if err == nil {
-		t.Fatal("expected provider error from half-open probe")
-	}
+	require.Error(t, err)
 
 	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, gatewayErr.StatusCode)
-	}
-	if strings.Contains(gatewayErr.Message, "circuit breaker is open") {
-		t.Fatalf("expected original upstream error, got circuit breaker error: %s", gatewayErr.Message)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("expected exactly 1 upstream attempt in half-open state, got %d", got)
-	}
-	if state := client.circuitBreaker.State(); state != "open" {
-		t.Fatalf("expected circuit to reopen after failed half-open probe, got %q", state)
-	}
+	require.True(t, ok)
+	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode)
+	require.False(t, strings.Contains(gatewayErr.Message, "circuit breaker is open"), "expected original upstream error, got circuit breaker error: %s", gatewayErr.Message)
+	got := attempts.Load()
+	require.Equal(t, int32(1), got)
+	state := client.circuitBreaker.State()
+	require.Equal(t, "open", state)
 
 	err = client.Do(context.Background(), Request{
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	}, nil)
-	if err == nil {
-		t.Fatal("expected circuit breaker rejection after failed half-open probe")
-	}
+	require.Error(t, err)
 
 	gatewayErr, ok = err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
-		t.Fatalf("expected circuit breaker error after failed half-open probe, got %s", gatewayErr.Message)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("expected follow-up request to be blocked without another upstream attempt, got %d attempts", got)
-	}
+	require.True(t, ok)
+	require.Contains(t, gatewayErr.Message, "circuit breaker is open")
+	got = attempts.Load()
+	require.Equal(t, int32(1), got)
 }
 
 func TestCircuitBreaker_HalfOpenProbeResolvesOnClientError(t *testing.T) {
@@ -1359,33 +1188,23 @@ func TestCircuitBreaker_HalfOpenProbeResolvesOnClientError(t *testing.T) {
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	})
-	if err == nil {
-		t.Fatal("expected provider error from half-open probe")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, gatewayErr.StatusCode)
-	}
-	if state := client.circuitBreaker.State(); state != "closed" {
-		t.Fatalf("expected circuit to close after non-retryable probe, got %q", state)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("expected 1 upstream attempt, got %d", got)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.StatusCode)
+	state := client.circuitBreaker.State()
+	require.Equal(t, "closed", state)
+	got := attempts.Load()
+	require.Equal(t, int32(1), got)
 
 	_, err = client.DoRaw(context.Background(), Request{
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	})
-	if err == nil {
-		t.Fatal("expected provider error on follow-up request")
-	}
-	if got := attempts.Load(); got != 2 {
-		t.Fatalf("expected follow-up request to reach upstream, got %d attempts", got)
-	}
+	require.Error(t, err)
+	got = attempts.Load()
+	require.Equal(t, int32(2), got)
 }
 
 func TestCircuitBreaker_ExcludedRateLimitDoesNotOpenCircuit(t *testing.T) {
@@ -1414,25 +1233,16 @@ func TestCircuitBreaker_ExcludedRateLimitDoesNotOpenCircuit(t *testing.T) {
 			Method:   http.MethodGet,
 			Endpoint: "/test",
 		}, nil)
-		if err == nil {
-			t.Fatalf("attempt %d: expected rate limit error", i+1)
-		}
+		require.Error(t, err)
 
 		var gatewayErr *core.GatewayError
-		if !errors.As(err, &gatewayErr) {
-			t.Fatalf("attempt %d: expected GatewayError, got %T", i+1, err)
-		}
-		if gatewayErr.StatusCode != http.StatusTooManyRequests {
-			t.Fatalf("attempt %d: status = %d, want %d", i+1, gatewayErr.StatusCode, http.StatusTooManyRequests)
-		}
+		require.ErrorAs(t, err, &gatewayErr, "attempt %d: expected GatewayError, got %T", i+1, err)
+		require.Equal(t, http.StatusTooManyRequests, gatewayErr.StatusCode, "attempt %d: status", i+1)
 	}
-
-	if state := client.circuitBreaker.State(); state != "closed" {
-		t.Fatalf("expected circuit to remain closed after rate limits, got %q", state)
-	}
-	if got := attempts.Load(); got != 2 {
-		t.Fatalf("expected both requests to reach upstream, got %d attempts", got)
-	}
+	state := client.circuitBreaker.State()
+	require.Equal(t, "closed", state)
+	got := attempts.Load()
+	require.Equal(t, int32(2), got)
 }
 
 func TestCircuitBreaker_HalfOpenProbeReopensOnRateLimit(t *testing.T) {
@@ -1467,53 +1277,36 @@ func TestCircuitBreaker_HalfOpenProbeReopensOnRateLimit(t *testing.T) {
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	}, nil)
-	if err == nil {
-		t.Fatal("expected rate limit error from half-open probe")
-	}
+	require.Error(t, err)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, http.StatusTooManyRequests)
-	}
-	if state := client.circuitBreaker.State(); state != "open" {
-		t.Fatalf("expected circuit to reopen after rate-limited probe, got %q", state)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusTooManyRequests, gatewayErr.StatusCode)
+	state := client.circuitBreaker.State()
+	require.Equal(t, "open", state)
 
 	err = client.Do(context.Background(), Request{
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	}, nil)
-	if err == nil {
-		t.Fatal("expected circuit breaker rejection after rate-limited half-open probe")
-	}
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
-		t.Fatalf("expected circuit breaker error after rate-limited half-open probe, got %s", gatewayErr.Message)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("expected follow-up request to be blocked without another upstream attempt, got %d attempts", got)
-	}
+	require.Error(t, err)
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Contains(t, gatewayErr.Message, "circuit breaker is open")
+	got := attempts.Load()
+	require.Equal(t, int32(1), got)
 }
 
 func TestCircuitBreaker_State(t *testing.T) {
 	cb := newCircuitBreaker(3, 2, time.Minute)
-
-	if state := cb.State(); state != "closed" {
-		t.Errorf("expected initial state 'closed', got '%s'", state)
-	}
+	state := cb.State()
+	assert.Equal(t, "closed", state)
 
 	// Record failures to open circuit
 	for range 3 {
 		cb.RecordFailure()
 	}
-	if state := cb.State(); state != "open" {
-		t.Errorf("expected state 'open' after failures, got '%s'", state)
-	}
+	state = cb.State()
+	assert.Equal(t, "open", state)
 }
 
 // ResponseInfo carries the breaker state to observability hooks — including
@@ -1548,23 +1341,15 @@ func TestCircuitBreaker_StateReportedToHooks(t *testing.T) {
 	_, _ = client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
 
 	want := []string{"open", "open"}
-	if len(states) != len(want) {
-		t.Fatalf("hook fired %d times, want %d (states: %v)", len(states), len(want), states)
-	}
-	for i := range want {
-		if states[i] != want[i] {
-			t.Fatalf("CircuitState[%d] = %q, want %q", i, states[i], want[i])
-		}
-	}
+	require.Equal(t, want, states)
 
 	// Without a breaker the field stays empty.
 	states = nil
 	config.CircuitBreaker = goconfig.CircuitBreakerConfig{}
 	plain := New(config, nil)
 	_, _ = plain.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
-	if len(states) != 1 || states[0] != "" {
-		t.Fatalf("CircuitState without breaker = %v, want one empty entry", states)
-	}
+	require.Len(t, states, 1)
+	require.Empty(t, states[0])
 }
 
 func TestCircuitBreakerDisabledNeverShortCircuits(t *testing.T) {
@@ -1607,25 +1392,18 @@ func TestCircuitBreakerDisabledNeverShortCircuits(t *testing.T) {
 			config.CircuitBreaker = tt.cb
 			client := New(config, nil)
 
-			if client.circuitBreaker != nil {
-				t.Fatal("expected no circuit breaker")
-			}
+			require.Nil(t, client.circuitBreaker)
 
 			// Every request must reach the upstream: an active breaker with
 			// FailureThreshold=1 would fail fast from the second request onwards.
 			const attempts = 3
 			for i := range attempts {
 				_, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
-				if err == nil {
-					t.Fatalf("attempt %d: expected upstream 500 error", i+1)
-				}
-				if strings.Contains(err.Error(), "circuit breaker is open") {
-					t.Fatalf("attempt %d: request was short-circuited by a disabled breaker: %v", i+1, err)
-				}
+				require.Error(t, err)
+				require.False(t, strings.Contains(err.Error(), "circuit breaker is open"), "attempt %d: request was short-circuited by a disabled breaker: %v", i+1, err)
 			}
-			if got := requests.Load(); got != attempts {
-				t.Fatalf("upstream requests = %d, want %d", got, attempts)
-			}
+			got := requests.Load()
+			require.Equal(t, int32(attempts), got)
 		})
 	}
 }
@@ -1658,17 +1436,13 @@ func TestCircuitBreaker_CanceledHalfOpenProbeReleasesSlot(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := client.DoRaw(canceled, Request{Method: http.MethodGet, Endpoint: "/test"}); err == nil {
-		t.Fatal("expected error from canceled context")
-	}
-
-	if state := cb.State(); state != "half-open" {
-		t.Fatalf("breaker state = %q; want half-open (cancellation is not a provider failure)", state)
-	}
-	// The slot must be free again so the next request can be the probe.
-	if _, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}); err != nil {
-		t.Fatalf("probe after canceled probe failed: %v (probe slot leaked)", err)
-	}
+	_, err := client.DoRaw(canceled, Request{Method: http.MethodGet, Endpoint: "/test"})
+	require.Error(t, err)
+	state := cb.State()
+	require.Equal(t, "half-open", state)
+	_, err = // The slot must be free again so the next request can be the probe.
+		client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
+	require.NoError(t, err)
 }
 
 // Client disconnects while a stream is being established must not be charged
@@ -1693,18 +1467,14 @@ func TestCircuitBreaker_ClientCancellationDoesNotTrip(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := client.DoStream(canceled, Request{Method: http.MethodPost, Endpoint: "/test", Body: map[string]string{"k": "v"}}); err == nil {
-		t.Fatal("expected error from canceled context")
-	}
-
-	if state := client.circuitBreaker.State(); state != "closed" {
-		t.Fatalf("breaker state = %q; want closed (client cancellation must not count as a provider failure)", state)
-	}
+	_, err := client.DoStream(canceled, Request{Method: http.MethodPost, Endpoint: "/test", Body: map[string]string{"k": "v"}})
+	require.Error(t, err)
+	state := client.circuitBreaker.State()
+	require.Equal(t, "closed", state)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/test", Body: map[string]string{"k": "v"}})
-	if err != nil {
-		t.Fatalf("live stream after cancellation failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	_ = stream.Close()
 }
 
@@ -1726,9 +1496,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 
-	if err == nil {
-		t.Fatal("expected context cancellation error")
-	}
+	require.Error(t, err)
 }
 
 func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
@@ -1748,20 +1516,12 @@ func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
+	require.Error(t, err)
 
 	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
-		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
-	}
-	if !strings.Contains(gatewayErr.Message, "failed to send request") {
-		t.Fatalf("Message = %q, want send-request timeout context", gatewayErr.Message)
-	}
+	require.True(t, ok)
+	require.Equal(t, http.StatusGatewayTimeout, gatewayErr.StatusCode)
+	require.Contains(t, gatewayErr.Message, "failed to send request")
 }
 
 func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
@@ -1794,22 +1554,15 @@ func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
-		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
-	}
-	if got := attempts.Load(); got != 1 {
-		t.Fatalf("upstream attempts = %d, want 1 for client-side timeout", got)
-	}
-	if state := client.circuitBreaker.State(); state != "closed" {
-		t.Fatalf("circuit state = %q, want closed after one logical timeout", state)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusGatewayTimeout, gatewayErr.StatusCode)
+	got := attempts.Load()
+	require.Equal(t, int32(1), got)
+	state := client.circuitBreaker.State()
+	require.Equal(t, "closed", state)
 }
 
 func TestCircuitBreakerCountsRetriedRequestOnce(t *testing.T) {
@@ -1841,40 +1594,27 @@ func TestCircuitBreakerCountsRetriedRequestOnce(t *testing.T) {
 			Method:   http.MethodGet,
 			Endpoint: "/test",
 		}, nil)
-		if err == nil {
-			t.Fatalf("request %d: expected provider error", i+1)
-		}
+		require.Error(t, err)
+
 		var gatewayErr *core.GatewayError
-		if !errors.As(err, &gatewayErr) {
-			t.Fatalf("request %d: expected GatewayError, got %T", i+1, err)
-		}
-		if gatewayErr.StatusCode != http.StatusServiceUnavailable {
-			t.Fatalf("request %d: status = %d, want %d", i+1, gatewayErr.StatusCode, http.StatusServiceUnavailable)
-		}
+		require.ErrorAs(t, err, &gatewayErr, "request %d: expected GatewayError, got %T", i+1, err)
+		require.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode, "request %d: status", i+1)
 
 		wantAttempts := int32((i + 1) * (cfg.Retry.MaxRetries + 1))
-		if got := attempts.Load(); got != wantAttempts {
-			t.Fatalf("request %d: upstream attempts = %d, want %d", i+1, got, wantAttempts)
-		}
+		got := attempts.Load()
+		require.Equal(t, wantAttempts, got, "request %d: upstream attempts", i+1)
 	}
 
 	err := client.Do(context.Background(), Request{
 		Method:   http.MethodGet,
 		Endpoint: "/test",
 	}, nil)
-	if err == nil {
-		t.Fatal("expected circuit breaker rejection")
-	}
+	require.Error(t, err)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if !strings.Contains(gatewayErr.Message, "circuit breaker is open") {
-		t.Fatalf("expected circuit breaker error, got %s", gatewayErr.Message)
-	}
-	if got, want := attempts.Load(), int32(2*(cfg.Retry.MaxRetries+1)); got != want {
-		t.Fatalf("upstream attempts after circuit rejection = %d, want %d", got, want)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Contains(t, gatewayErr.Message, "circuit breaker is open")
+	require.Equal(t, int32(2*(cfg.Retry.MaxRetries+1)), attempts.Load(), "upstream attempts after circuit rejection")
 }
 
 func TestClient_Do_BodyReadTimeoutReturnsGatewayTimeout(t *testing.T) {
@@ -1898,63 +1638,35 @@ func TestClient_Do_BodyReadTimeoutReturnsGatewayTimeout(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
+	require.Error(t, err)
 
 	gatewayErr, ok := err.(*core.GatewayError)
-	if !ok {
-		t.Fatalf("expected GatewayError, got %T", err)
-	}
-	if gatewayErr.StatusCode != http.StatusGatewayTimeout {
-		t.Fatalf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusGatewayTimeout)
-	}
-	if !strings.Contains(gatewayErr.Message, "failed to read response") {
-		t.Fatalf("Message = %q, want read-response timeout context", gatewayErr.Message)
-	}
+	require.True(t, ok)
+	require.Equal(t, http.StatusGatewayTimeout, gatewayErr.StatusCode)
+	require.Contains(t, gatewayErr.Message, "failed to read response")
 }
 
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig("test-provider", "https://api.test.com")
 
-	if config.ProviderName != "test-provider" {
-		t.Errorf("expected provider name 'test-provider', got '%s'", config.ProviderName)
-	}
-	if config.BaseURL != "https://api.test.com" {
-		t.Errorf("expected base URL 'https://api.test.com', got '%s'", config.BaseURL)
-	}
-	if config.Retry.MaxRetries != 3 {
-		t.Errorf("expected MaxRetries 3, got %d", config.Retry.MaxRetries)
-	}
-	if config.Retry.InitialBackoff != 1*time.Second {
-		t.Errorf("expected InitialBackoff 1s, got %v", config.Retry.InitialBackoff)
-	}
-	if config.Retry.JitterFactor != 0.1 {
-		t.Errorf("expected JitterFactor 0.1, got %v", config.Retry.JitterFactor)
-	}
-	if config.CircuitBreaker.FailureThreshold != 5 {
-		t.Errorf("expected CircuitBreaker.FailureThreshold=5, got %d", config.CircuitBreaker.FailureThreshold)
-	}
-	if config.CircuitBreaker.SuccessThreshold != 2 {
-		t.Errorf("expected CircuitBreaker.SuccessThreshold=2, got %d", config.CircuitBreaker.SuccessThreshold)
-	}
-	if config.CircuitBreaker.Timeout != 30*time.Second {
-		t.Errorf("expected CircuitBreaker.Timeout=30s, got %v", config.CircuitBreaker.Timeout)
-	}
+	assert.Equal(t, "test-provider", config.ProviderName)
+	assert.Equal(t, "https://api.test.com", config.BaseURL)
+	assert.Equal(t, 3, config.Retry.MaxRetries)
+	assert.Equal(t, 1*time.Second, config.Retry.InitialBackoff)
+	assert.Equal(t, 0.1, config.Retry.JitterFactor)
+	assert.Equal(t, 5, config.CircuitBreaker.FailureThreshold)
+	assert.Equal(t, 2, config.CircuitBreaker.SuccessThreshold)
+	assert.Equal(t, 30*time.Second, config.CircuitBreaker.Timeout)
 }
 
 func TestClient_SetBaseURL(t *testing.T) {
 	client := New(DefaultConfig("test", "https://original.com"), nil)
 
-	if client.BaseURL() != "https://original.com" {
-		t.Errorf("expected base URL 'https://original.com', got '%s'", client.BaseURL())
-	}
+	assert.Equal(t, "https://original.com", client.BaseURL())
 
 	client.SetBaseURL("https://new.com")
 
-	if client.BaseURL() != "https://new.com" {
-		t.Errorf("expected base URL 'https://new.com', got '%s'", client.BaseURL())
-	}
+	assert.Equal(t, "https://new.com", client.BaseURL())
 }
 
 // TestClient_SetBaseURL_Concurrent tests thread-safety of SetBaseURL
@@ -1996,13 +1708,10 @@ func TestClient_NonRetryableErrors(t *testing.T) {
 		Endpoint: "/test",
 	}, nil)
 
-	if err == nil {
-		t.Fatal("expected error")
-	}
+	require.Error(t, err)
+
 	// Should NOT retry on 400 errors
-	if attempts.Load() != 1 {
-		t.Errorf("expected 1 attempt (no retries on 400), got %d", attempts.Load())
-	}
+	assert.Equal(t, int32(1), attempts.Load())
 }
 
 func TestBackoffCalculation(t *testing.T) {
@@ -2027,9 +1736,7 @@ func TestBackoffCalculation(t *testing.T) {
 
 	for _, tt := range tests {
 		result := client.calculateBackoff(tt.attempt)
-		if result != tt.expected {
-			t.Errorf("attempt %d: expected backoff %v, got %v", tt.attempt, tt.expected, result)
-		}
+		assert.Equal(t, tt.expected, result, "attempt %d", tt.attempt)
 	}
 }
 
@@ -2045,9 +1752,8 @@ func TestBackoffCalculation_WithJitter(t *testing.T) {
 	// With 50% jitter on 100ms base, result should be between 50ms and 150ms
 	for range 100 {
 		result := client.calculateBackoff(1)
-		if result < 50*time.Millisecond || result > 150*time.Millisecond {
-			t.Errorf("backoff %v outside expected range [50ms, 150ms]", result)
-		}
+		assert.GreaterOrEqual(t, result, 50*time.Millisecond)
+		assert.LessOrEqual(t, result, 150*time.Millisecond)
 	}
 }
 
@@ -2090,12 +1796,8 @@ func TestWaitForRetry_ContextCancelled(t *testing.T) {
 			start := time.Now()
 			err := client.waitForRetry(ctx, tt.attempt)
 			elapsed := time.Since(start)
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("waitForRetry() error = %v, want %v", err, tt.want)
-			}
-			if elapsed > time.Second {
-				t.Fatalf("waitForRetry() took %v, expected a return well before the backoff", elapsed)
-			}
+			require.ErrorIs(t, err, tt.want)
+			require.LessOrEqual(t, elapsed, time.Second)
 		})
 	}
 }
@@ -2120,12 +1822,8 @@ func TestPreTransportErrorsCloseRawBodyReader(t *testing.T) {
 			Endpoint:      "/files",
 			RawBodyReader: reader,
 		})
-		if err == nil {
-			t.Fatal("DoRaw() error = nil, want build error")
-		}
-		if !reader.closed.Load() {
-			t.Fatal("RawBodyReader not closed on request build error")
-		}
+		require.Error(t, err)
+		require.True(t, reader.closed.Load())
 	})
 
 	t.Run("circuit breaker open", func(t *testing.T) {
@@ -2143,30 +1841,22 @@ func TestPreTransportErrorsCloseRawBodyReader(t *testing.T) {
 			Timeout:          time.Minute,
 		}
 		client := New(config, nil)
-
-		// Trip the breaker with one failing request.
-		if _, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"}); err == nil {
-			t.Fatal("expected failure to trip the breaker")
-		}
+		_, err := // Trip the breaker with one failing request.
+			client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
+		require.Error(t, err)
 
 		// A pipe-backed upload rejected by the open breaker never reaches the
 		// transport; the client must close the reader so the producer
 		// goroutine (and the buffers it pins) can exit.
 		reader := &recordingReadCloser{Reader: strings.NewReader("upload payload")}
-		_, err := client.DoRaw(context.Background(), Request{
+		_, err = client.DoRaw(context.Background(), Request{
 			Method:        http.MethodPost,
 			Endpoint:      "/files",
 			RawBodyReader: reader,
 		})
-		if err == nil {
-			t.Fatal("DoRaw() error = nil, want circuit breaker open")
-		}
-		if !strings.Contains(err.Error(), "circuit breaker is open") {
-			t.Fatalf("DoRaw() error = %v, want circuit breaker open", err)
-		}
-		if !reader.closed.Load() {
-			t.Fatal("RawBodyReader not closed when the circuit breaker rejected the request")
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "circuit breaker is open")
+		require.True(t, reader.closed.Load())
 	})
 }
 
@@ -2196,18 +1886,13 @@ func TestClient_DoPassthrough_ResolvesUncertainStreamIntentFromResponse(t *testi
 			resp, err := client.DoPassthrough(context.Background(), Request{
 				Method: http.MethodPost, Endpoint: "/chat/completions", Operation: OperationChat, StreamUncertain: true,
 			})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
+
 			_ = resp.Body.Close()
 
-			if len(ends) != 1 {
-				t.Fatalf("OnRequestEnd fired %d times, want 1", len(ends))
-			}
-			if ends[0].StreamUncertain || ends[0].Stream != tt.wantStream {
-				t.Fatalf("OnRequestEnd stream state = (stream=%v, uncertain=%v), want (stream=%v, uncertain=false)",
-					ends[0].Stream, ends[0].StreamUncertain, tt.wantStream)
-			}
+			require.Len(t, ends, 1)
+			require.False(t, ends[0].StreamUncertain)
+			require.Equal(t, tt.wantStream, ends[0].Stream)
 		})
 	}
 }
@@ -2231,20 +1916,17 @@ func TestClient_DoPassthrough_ReportsStreamThatEndsBeforeFirstChunk(t *testing.T
 	resp, err := client.DoPassthrough(context.Background(), Request{
 		Method: http.MethodPost, Endpoint: "/chat/completions", Operation: OperationChat, Stream: true,
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, err := io.ReadAll(resp.Body); err != nil {
-		t.Fatalf("read body: %v", err)
-	}
+	require.NoError(t, err)
+	_, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
 	_ = resp.Body.Close()
 
-	if len(firstChunks) != 0 {
-		t.Fatalf("OnStreamFirstChunk fired for an empty stream: %+v", firstChunks)
-	}
-	if len(empties) != 1 || !empties[0].Stream || empties[0].StatusCode != http.StatusOK || !errors.Is(empties[0].Error, io.EOF) {
-		t.Fatalf("OnStreamEmpty = %+v, want one successful-status EOF report", empties)
-	}
+	require.Empty(t, firstChunks)
+	require.Len(t, empties, 1)
+	require.True(t, empties[0].Stream)
+	require.Equal(t, http.StatusOK, empties[0].StatusCode)
+	require.ErrorIs(t, empties[0].Error, io.EOF)
 }
 
 func TestClient_Do_EmbeddedErrorBody(t *testing.T) {
@@ -2270,28 +1952,15 @@ func TestClient_Do_EmbeddedErrorBody(t *testing.T) {
 	}, &result)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %v", err)
-	}
-	if gatewayErr.StatusCode != http.StatusUnauthorized {
-		t.Errorf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusUnauthorized)
-	}
-	if gatewayErr.Type != core.ErrorTypeAuthentication {
-		t.Errorf("Type = %v, want %v", gatewayErr.Type, core.ErrorTypeAuthentication)
-	}
-	if gatewayErr.Message != "invalid key" {
-		t.Errorf("Message = %q, want %q", gatewayErr.Message, "invalid key")
-	}
-	if gatewayErr.ResponseHeaders == nil {
-		t.Error("expected upstream response headers attached for audit")
-	}
-	if !errors.Is(err, core.ErrEmbeddedInSuccess) {
-		t.Error("expected error to wrap core.ErrEmbeddedInSuccess")
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusUnauthorized, gatewayErr.StatusCode)
+	assert.Equal(t, core.ErrorTypeAuthentication, gatewayErr.Type)
+	assert.Equal(t, "invalid key", gatewayErr.Message)
+	assert.NotNil(t, gatewayErr.ResponseHeaders)
+	assert.ErrorIs(t, err, core.ErrEmbeddedInSuccess)
+
 	// An embedded 401 is not retryable, exactly like a genuine 401 status.
-	if attempts.Load() != 1 {
-		t.Errorf("expected 1 attempt, got %d", attempts.Load())
-	}
+	assert.Equal(t, int32(1), attempts.Load())
 }
 
 func TestClient_Do_EmbeddedErrorRetriesRetryableStatus(t *testing.T) {
@@ -2321,15 +1990,9 @@ func TestClient_Do_EmbeddedErrorRetriesRetryableStatus(t *testing.T) {
 		Endpoint: "/test",
 	}, &result)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.Success {
-		t.Error("expected success after retrying past the embedded 429")
-	}
-	if attempts.Load() != 2 {
-		t.Errorf("expected 2 attempts, got %d", attempts.Load())
-	}
+	require.NoError(t, err)
+	assert.True(t, result.Success)
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestClient_Do_EmbeddedErrorWithoutCodeMapsToBadGateway(t *testing.T) {
@@ -2350,18 +2013,10 @@ func TestClient_Do_EmbeddedErrorWithoutCodeMapsToBadGateway(t *testing.T) {
 	}, nil)
 
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) {
-		t.Fatalf("expected GatewayError, got %v", err)
-	}
-	if gatewayErr.StatusCode != http.StatusBadGateway {
-		t.Errorf("StatusCode = %d, want %d", gatewayErr.StatusCode, http.StatusBadGateway)
-	}
-	if gatewayErr.Type != core.ErrorTypeProvider {
-		t.Errorf("Type = %v, want %v", gatewayErr.Type, core.ErrorTypeProvider)
-	}
-	if gatewayErr.Message != "upstream disconnected" {
-		t.Errorf("Message = %q, want %q", gatewayErr.Message, "upstream disconnected")
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, http.StatusBadGateway, gatewayErr.StatusCode)
+	assert.Equal(t, core.ErrorTypeProvider, gatewayErr.Type)
+	assert.Equal(t, "upstream disconnected", gatewayErr.Message)
 }
 
 func TestClient_DoStream_EmbeddedErrorOpensCircuitBreaker(t *testing.T) {
@@ -2392,29 +2047,21 @@ func TestClient_DoStream_EmbeddedErrorOpensCircuitBreaker(t *testing.T) {
 
 	for i := 1; i <= 2; i++ {
 		stream, err := client.DoStream(context.Background(), streamReq)
-		if stream != nil || err == nil {
-			t.Fatalf("call %d: expected error and nil stream, got stream=%v err=%v", i, stream, err)
-		}
+		require.Nil(t, stream)
+		require.Error(t, err)
+
 		var gatewayErr *core.GatewayError
-		if !errors.As(err, &gatewayErr) {
-			t.Fatalf("call %d: expected GatewayError, got %v", i, err)
-		}
-		if gatewayErr.StatusCode != http.StatusServiceUnavailable {
-			t.Errorf("call %d: StatusCode = %d, want %d", i, gatewayErr.StatusCode, http.StatusServiceUnavailable)
-		}
-		if lastInfo.StatusCode != http.StatusServiceUnavailable || lastInfo.Error == nil {
-			t.Errorf("call %d: hook recorded status=%d error=%v, want mapped failure", i, lastInfo.StatusCode, lastInfo.Error)
-		}
+		require.ErrorAs(t, err, &gatewayErr, "call %d: expected GatewayError, got %v", i, err)
+		assert.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode, "call %d: StatusCode", i)
+		assert.Equal(t, http.StatusServiceUnavailable, lastInfo.StatusCode)
+		assert.Error(t, lastInfo.Error, "call %d: hook recorded status=%d error=%v, want mapped failure", i, lastInfo.StatusCode, lastInfo.Error)
 	}
 
 	// Two embedded failures reach the threshold: the third request must fail
 	// fast without reaching the upstream.
-	if _, err := client.DoStream(context.Background(), streamReq); err == nil {
-		t.Fatal("expected circuit breaker error, got nil")
-	}
-	if attempts.Load() != 2 {
-		t.Errorf("expected 2 upstream requests (breaker open on third), got %d", attempts.Load())
-	}
+	_, err := client.DoStream(context.Background(), streamReq)
+	require.Error(t, err)
+	assert.Equal(t, int32(2), attempts.Load())
 }
 
 func TestClient_DoStream_BufferedCompletionPassesThrough(t *testing.T) {
@@ -2428,18 +2075,13 @@ func TestClient_DoStream_BufferedCompletionPassesThrough(t *testing.T) {
 	client := New(DefaultConfig("test", server.URL), nil)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
 
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-	if string(got) != body {
-		t.Errorf("buffered completion altered by inspection.\n got: %q\nwant: %q", string(got), body)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, body, string(got))
 }
 
 func TestClient_DoStream_NonObjectJSONStreamsThrough(t *testing.T) {
@@ -2455,18 +2097,13 @@ func TestClient_DoStream_NonObjectJSONStreamsThrough(t *testing.T) {
 	client := New(DefaultConfig("test", server.URL), nil)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
 
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-	if string(got) != body {
-		t.Errorf("stream altered by inspection.\n got: %q\nwant: %q", string(got), body)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, body, string(got))
 }
 
 func TestClient_DoStream_OversizedBufferedJSONStreamsThrough(t *testing.T) {
@@ -2483,18 +2120,13 @@ func TestClient_DoStream_OversizedBufferedJSONStreamsThrough(t *testing.T) {
 	client := New(DefaultConfig("test", server.URL), nil)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
 
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-	if string(got) != body {
-		t.Errorf("oversized body altered: got %d bytes, want %d", len(got), len(body))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, body, string(got))
 }
 
 func TestClient_DoStream_BufferedReadErrorPropagates(t *testing.T) {
@@ -2512,18 +2144,13 @@ func TestClient_DoStream_BufferedReadErrorPropagates(t *testing.T) {
 	client := New(DefaultConfig("test", server.URL), nil)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
 
 	got, err := io.ReadAll(stream)
-	if err == nil {
-		t.Fatal("expected the mid-body read failure to propagate, got clean EOF")
-	}
-	if string(got) != partial {
-		t.Errorf("partial bytes altered.\n got: %q\nwant: %q", string(got), partial)
-	}
+	require.Error(t, err)
+	assert.Equal(t, partial, string(got))
 }
 
 func TestClient_DoStream_OpenJSONStreamReturnsWithoutWaitingForEOF(t *testing.T) {
@@ -2546,19 +2173,14 @@ func TestClient_DoStream_OpenJSONStreamReturnsWithoutWaitingForEOF(t *testing.T)
 	client := New(DefaultConfig("test", server.URL), nil)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
 	close(streamReturned)
 
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-	if string(got) != first+second {
-		t.Errorf("stream altered.\n got: %q\nwant: %q", string(got), first+second)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, first+second, string(got))
 }
 
 func TestClient_DoStream_ErrorShapedFirstFrameWithTrailerStreamsThrough(t *testing.T) {
@@ -2575,18 +2197,13 @@ func TestClient_DoStream_ErrorShapedFirstFrameWithTrailerStreamsThrough(t *testi
 	client := New(DefaultConfig("test", server.URL), nil)
 
 	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
-	if err != nil {
-		t.Fatalf("expected the JSONL body to stream through, got error: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer stream.Close()
 
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("failed to read stream: %v", err)
-	}
-	if string(got) != body {
-		t.Errorf("stream altered.\n got: %q\nwant: %q", string(got), body)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, body, string(got))
 }
 
 func TestClient_DoStream_EmbeddedErrorReturnsBeforeBodyCloses(t *testing.T) {
@@ -2612,9 +2229,8 @@ func TestClient_DoStream_EmbeddedErrorReturnsBeforeBodyCloses(t *testing.T) {
 		t.Fatal("expected the embedded error, got a stream")
 	}
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("expected a 503 gateway error, got %v", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode)
 }
 
 func TestClient_DoStream_ErrorObjectWithLyingContentLengthStillFails(t *testing.T) {
@@ -2635,9 +2251,7 @@ func TestClient_DoStream_ErrorObjectWithLyingContentLengthStillFails(t *testing.
 		_ = stream.Close()
 		t.Fatal("expected the embedded error, got a stream")
 	}
-	if !errors.Is(err, core.ErrEmbeddedInSuccess) {
-		t.Fatalf("expected an embedded provider error, got %v", err)
-	}
+	require.ErrorIs(t, err, core.ErrEmbeddedInSuccess)
 }
 
 func TestBufferedTrailerIsBlank(t *testing.T) {
@@ -2653,12 +2267,12 @@ func TestBufferedTrailerIsBlank(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := bufio.NewReader(strings.NewReader("x" + tt.buffered))
-			if _, err := r.ReadByte(); err != nil { // fill the buffer, consume the sentinel
-				t.Fatal(err)
-			}
-			if got := bufferedTrailerIsBlank(r); got != tt.want {
-				t.Errorf("got %v, want %v", got, tt.want)
-			}
+			_, err := r.ReadByte()
+			require.NoError(t, err)
+			got := // fill the buffer, consume the sentinel
+
+				bufferedTrailerIsBlank(r)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -2718,15 +2332,9 @@ func TestReadFirstJSONObject(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			head, complete, err := readFirstJSONObject(bufio.NewReader(strings.NewReader(tt.input)), tt.limit)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if string(head) != tt.wantHead {
-				t.Errorf("head = %q, want %q", head, tt.wantHead)
-			}
-			if complete != tt.wantComplete {
-				t.Errorf("complete = %v, want %v", complete, tt.wantComplete)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantHead, string(head))
+			assert.Equal(t, tt.wantComplete, complete)
 		})
 	}
 }
@@ -2746,9 +2354,8 @@ func TestFirstNonSpaceByte(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := firstNonSpaceByte(bufio.NewReader(strings.NewReader(tt.input)), tt.max); got != tt.want {
-				t.Errorf("firstNonSpaceByte = %q, want %q", got, tt.want)
-			}
+			got := firstNonSpaceByte(bufio.NewReader(strings.NewReader(tt.input)), tt.max)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
