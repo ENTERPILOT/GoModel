@@ -146,7 +146,7 @@ func TestAdaptChatRequest_DoesNotPadWithoutTools(t *testing.T) {
 		}},
 	}
 
-	adapted, err := adaptChatRequest(req)
+	adapted, err := adaptChatRequest(JSONSchemaDowngrade)(req)
 	if err != nil {
 		t.Fatalf("adaptChatRequest() error = %v", err)
 	}
