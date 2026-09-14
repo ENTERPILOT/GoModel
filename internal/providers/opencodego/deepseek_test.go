@@ -3,11 +3,15 @@ package opencodego
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
 func TestChatCompletion_AppliesDeepSeekCompatibilityToDeepSeekModels(t *testing.T) {
@@ -23,12 +27,10 @@ func TestChatCompletion_AppliesDeepSeekCompatibilityToDeepSeekModels(t *testing.
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got map[string]any
-			server := captureBody(t, &got)
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 			var req core.ChatRequest
-			if err := json.Unmarshal(fmt.Appendf(nil, `{
+			require.NoError(t, json.Unmarshal(fmt.Appendf(nil, `{
 				"model":%q,
 				"messages":[
 					{"role":"user","content":"hi"},
@@ -37,16 +39,15 @@ func TestChatCompletion_AppliesDeepSeekCompatibilityToDeepSeekModels(t *testing.
 				],
 				"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],
 				"response_format":{"type":"json_schema","json_schema":{"name":"weather","schema":{"type":"object"}}}
-			}`, tt.model), &req); err != nil {
-				t.Fatalf("json.Unmarshal() error = %v", err)
-			}
+			}`, tt.model), &req))
 
-			if _, err := newTestProvider(server.URL, server.Client()).ChatCompletion(context.Background(), &req); err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
+			_, err := newTestProvider(server.URL, server.Client()).ChatCompletion(context.Background(), &req)
+			require.NoError(t, err)
 
+			got := capture.Last(t).JSON(t)
 			format, _ := got["response_format"].(map[string]any)
 			messages, _ := got["messages"].([]any)
+			require.NotEmpty(t, messages)
 			var assistant map[string]any
 			for _, raw := range messages {
 				if message, _ := raw.(map[string]any); message["role"] == "assistant" {
@@ -56,26 +57,14 @@ func TestChatCompletion_AppliesDeepSeekCompatibilityToDeepSeekModels(t *testing.
 			first, _ := messages[0].(map[string]any)
 
 			if tt.wantAdapted {
-				if format["type"] != "json_object" {
-					t.Errorf("response_format = %#v, want json_object", format)
-				}
-				if first["role"] != "system" {
-					t.Errorf("messages[0] = %#v, want schema instruction", first)
-				}
-				if assistant["reasoning_content"] != " " {
-					t.Errorf("assistant reasoning_content = %#v, want one space", assistant["reasoning_content"])
-				}
+				assert.Equal(t, "json_object", format["type"], "response_format = %#v", format)
+				assert.Equal(t, "system", first["role"], "messages[0] = %#v, want schema instruction", first)
+				assert.Equal(t, " ", assistant["reasoning_content"], "assistant reasoning_content should be one space")
 				return
 			}
-			if format["type"] != "json_schema" {
-				t.Errorf("response_format = %#v, want json_schema forwarded", format)
-			}
-			if len(messages) != 3 {
-				t.Errorf("messages = %#v, want the client messages only", messages)
-			}
-			if _, ok := assistant["reasoning_content"]; ok {
-				t.Errorf("assistant = %#v, want no reasoning_content", assistant)
-			}
+			assert.Equal(t, "json_schema", format["type"], "response_format = %#v, want json_schema forwarded", format)
+			assert.Len(t, messages, 3, "want the client messages only")
+			assert.NotContains(t, assistant, "reasoning_content")
 		})
 	}
 }
