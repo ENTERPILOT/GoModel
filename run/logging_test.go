@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseLogLevel(t *testing.T) {
@@ -34,12 +36,8 @@ func TestParseLogLevel(t *testing.T) {
 			t.Parallel()
 
 			got, err := parseLogLevel(tt.input)
-			if err != nil {
-				t.Fatalf("parseLogLevel(%q) error = %v", tt.input, err)
-			}
-			if got != tt.want {
-				t.Fatalf("parseLogLevel(%q) = %v, want %v", tt.input, got, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got, "parseLogLevel(%q) = %v, want %v", tt.input, got, tt.want)
 		})
 	}
 }
@@ -67,19 +65,15 @@ func TestNewLogHandlerFormatSelection(t *testing.T) {
 
 			handler := newLogHandler(io.Discard, tt.isTTY, tt.format, slog.LevelInfo)
 			_, gotJSON := handler.(*slog.JSONHandler)
-			if gotJSON != tt.wantJSON {
-				t.Fatalf("newLogHandler(isTTY=%v, format=%q) json = %v, want %v", tt.isTTY, tt.format, gotJSON, tt.wantJSON)
-			}
+			require.Equal(t, tt.wantJSON, gotJSON, "newLogHandler(isTTY=%v, format=%q) json = %v, want %v", tt.isTTY, tt.format, gotJSON, tt.wantJSON)
 		})
 	}
 }
 
 func TestParseLogLevelInvalid(t *testing.T) {
 	t.Parallel()
-
-	if _, err := parseLogLevel("trace"); err == nil {
-		t.Fatal("parseLogLevel(trace) should fail")
-	}
+	_, err := parseLogLevel("trace")
+	require.Error(t, err)
 }
 
 func TestNewLogHandlerUsesConfiguredLevel(t *testing.T) {
@@ -100,15 +94,9 @@ func TestNewLogHandlerUsesConfiguredLevel(t *testing.T) {
 			t.Parallel()
 
 			handler := newLogHandler(io.Discard, tt.isTTY, tt.format, slog.LevelWarn)
-			if handler.Enabled(ctx, slog.LevelInfo) {
-				t.Fatal("handler.Enabled(info) = true, want false")
-			}
-			if !handler.Enabled(ctx, slog.LevelWarn) {
-				t.Fatal("handler.Enabled(warn) = false, want true")
-			}
-			if !handler.Enabled(ctx, slog.LevelError) {
-				t.Fatal("handler.Enabled(error) = false, want true")
-			}
+			require.False(t, handler.Enabled(ctx, slog.LevelInfo))
+			require.True(t, handler.Enabled(ctx, slog.LevelWarn))
+			require.True(t, handler.Enabled(ctx, slog.LevelError))
 		})
 	}
 }
@@ -130,9 +118,8 @@ func TestNewLogHandlerEscapesAttrValues(t *testing.T) {
 			logger.Info("request failed", "request_id", hostile)
 
 			out := buf.String()
-			if strings.Count(out, "\n") != 1 || strings.Contains(out, "\x1b") {
-				t.Fatalf("%s handler leaked control characters: %q", format, out)
-			}
+			require.Equal(t, 1, strings.Count(out, "\n"))
+			require.NotContains(t, out, "\x1b", "%s handler leaked control characters: %q", format, out)
 		})
 	}
 }

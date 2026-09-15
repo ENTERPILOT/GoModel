@@ -1,9 +1,10 @@
 package pluginapi
 
 import (
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestPromptTextTargets(t *testing.T) {
@@ -21,20 +22,16 @@ func TestPromptTextTargets(t *testing.T) {
 		{MessageID: "m3", Role: RoleTool, Part: 0, CallID: "call_1", ResultPart: 2, Text: "later sun"},
 		{MessageID: "m4", Role: RoleUser, Part: 0, Text: "thanks"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("TextTargets() = %+v\nwant %+v", got, want)
-	}
+	require.Equal(t, want, got)
 
 	users := p.TextTargets(RoleUser)
-	if len(users) != 2 || users[0].Text != "weather?" || users[1].Text != "thanks" {
-		t.Fatalf("TextTargets(user) = %+v", users)
-	}
-	if got := p.TextTargets(RoleSystem, RoleTool); len(got) != 3 {
-		t.Fatalf("TextTargets(system, tool) = %+v", got)
-	}
-	if got := p.TextTargets(RoleDeveloper); got != nil {
-		t.Fatalf("TextTargets(developer) = %+v, want nil", got)
-	}
+	require.Len(t, users, 2)
+	require.Equal(t, "weather?", users[0].Text)
+	require.Equal(t, "thanks", users[1].Text)
+	got = p.TextTargets(RoleSystem, RoleTool)
+	require.Len(t, got, 3)
+	got = p.TextTargets(RoleDeveloper)
+	require.Nil(t, got)
 }
 
 func TestPromptSetTargetText(t *testing.T) {
@@ -43,30 +40,25 @@ func TestPromptSetTargetText(t *testing.T) {
 	targets := p.TextTargets()
 
 	for _, target := range targets {
-		if err := p.SetTargetText(target, strings.ToUpper(target.Text)); err != nil {
-			t.Fatalf("SetTargetText(%+v) error = %v", target, err)
-		}
+		err := p.SetTargetText(target, strings.ToUpper(target.Text))
+		require.NoError(t, err)
 	}
-	if got := p.Messages[1].Parts[0].Text; got != "WEATHER?" {
-		t.Fatalf("user text = %q", got)
-	}
+	got := p.Messages[1].Parts[0].Text
+	require.Equal(t, "WEATHER?", got)
+
 	result := p.Messages[3].Parts[0].ToolResult.Parts
-	if result[0].Text != "RAIN" || result[1].Text != "LATER SUN" {
-		t.Fatalf("tool result parts = %+v; successive edits must compose", result)
-	}
+	require.Equal(t, "RAIN", result[0].Text)
+	require.Equal(t, "LATER SUN", result[1].Text, "tool result parts = %+v; successive edits must compose", result)
+
 	changes := p.Changes()
 	for _, id := range []string{"m0", "m1", "m3", "m4"} {
-		if changes.Messages[id] != ChangeEdited {
-			t.Fatalf("message %s change = %q, want edited", id, changes.Messages[id])
-		}
+		require.Equal(t, ChangeEdited, changes.Messages[id], "message %s change = %q, want edited", id, changes.Messages[id])
 	}
-	if _, ok := changes.Messages["m2"]; ok {
-		t.Fatal("untouched message m2 was marked")
-	}
+	_, ok := changes.Messages["m2"]
+	require.False(t, ok)
+
 	for _, target := range p.TextTargets() {
-		if target.Text != strings.ToUpper(target.Text) {
-			t.Fatalf("relisted target %+v does not reflect the edit", target)
-		}
+		require.Equal(t, strings.ToUpper(target.Text), target.Text, "relisted target %+v does not reflect the edit", target)
 	}
 }
 
@@ -95,14 +87,11 @@ func TestPromptSetTargetTextErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := p.SetTargetText(tt.target, "x")
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("error = %v, want containing %q", err, tt.want)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
 		})
 	}
-	if p.Changes().Dirty {
-		t.Fatal("failed edits must not mark the prompt dirty")
-	}
+	require.False(t, p.Changes().Dirty)
 }
 
 func TestCompletionTextTargets(t *testing.T) {
@@ -117,28 +106,20 @@ func TestCompletionTextTargets(t *testing.T) {
 		{Choice: 0, Role: RoleAssistant, Part: 2, Text: " there"},
 		{Choice: 2, Role: RoleAssistant, Part: 0, Text: "bye"},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("TextTargets() = %+v\nwant %+v", got, want)
-	}
+	require.Equal(t, want, got)
+
 	for _, target := range got {
-		if err := c.SetTargetText(target, strings.ToUpper(target.Text)); err != nil {
-			t.Fatalf("SetTargetText(%+v) error = %v", target, err)
-		}
+		err := c.SetTargetText(target, strings.ToUpper(target.Text))
+		require.NoError(t, err)
 	}
-	if c.Text(0) != "HELLO THERE" || c.Text(2) != "BYE" {
-		t.Fatalf("texts = %q, %q", c.Text(0), c.Text(2))
-	}
+	require.Equal(t, "HELLO THERE", c.Text(0))
+	require.Equal(t, "BYE", c.Text(2))
+
 	changes := c.Changes()
-	if changes.Messages["choice:0"] != ChangeEdited || changes.Messages["choice:2"] != ChangeEdited {
-		t.Fatalf("changes = %+v", changes.Messages)
-	}
-	if _, ok := changes.Messages["choice:1"]; ok {
-		t.Fatal("untouched choice 1 was marked")
-	}
-	if err := c.SetTargetText(TextTarget{Choice: 1, Part: 0}, "x"); err == nil {
-		t.Fatal("editing a tool call part must fail")
-	}
-	if err := c.SetTargetText(TextTarget{Choice: 7}, "x"); err == nil {
-		t.Fatal("editing a missing choice must fail")
-	}
+	require.Equal(t, ChangeEdited, changes.Messages["choice:0"])
+	require.Equal(t, ChangeEdited, changes.Messages["choice:2"], "changes = %+v", changes.Messages)
+	_, ok := changes.Messages["choice:1"]
+	require.False(t, ok)
+	require.Error(t, c.SetTargetText(TextTarget{Choice: 1, Part: 0}, "x"))
+	require.Error(t, c.SetTargetText(TextTarget{Choice: 7}, "x"))
 }

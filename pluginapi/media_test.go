@@ -2,8 +2,10 @@ package pluginapi
 
 import (
 	"encoding/base64"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecodeMedia(t *testing.T) {
@@ -28,9 +30,9 @@ func TestDecodeMedia(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			data, mediaType, ok := tt.part.DecodeMedia()
-			if ok != tt.wantOK || string(data) != string(tt.want) || mediaType != tt.wantType {
-				t.Fatalf("DecodeMedia() = %q, %q, %v; want %q, %q, %v", data, mediaType, ok, tt.want, tt.wantType, tt.wantOK)
-			}
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, string(tt.want), string(data))
+			require.Equal(t, tt.wantType, mediaType, "DecodeMedia() = %q, %q, %v; want %q, %q, %v", data, mediaType, ok, tt.want, tt.wantType, tt.wantOK)
 		})
 	}
 }
@@ -40,29 +42,31 @@ func TestPromptSetMedia(t *testing.T) {
 	p := toolPrompt()
 	p.Messages[1].Parts[1].Raw = []byte(`{"type":"input_image","image_url":"https://x/y.png"}`)
 	p.Messages = append(p.Messages, Message{ID: "m5", Role: RoleUser, Parts: []Part{{Kind: PartAudio, Data: []byte("AAAA"), MediaType: "audio/wav"}}})
+	err := p.SetMedia("m1", 1, "image/jpeg", redacted)
+	require.NoError(t, err)
 
-	if err := p.SetMedia("m1", 1, "image/jpeg", redacted); err != nil {
-		t.Fatal(err)
-	}
 	img := p.Messages[1].Parts[1]
-	if img.URL != "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(redacted) || img.MediaType != "image/jpeg" || img.Data != nil || img.Raw != nil {
-		t.Fatalf("image part after SetMedia = %+v", img)
-	}
-	if data, mediaType, ok := img.DecodeMedia(); !ok || string(data) != string(redacted) || mediaType != "image/jpeg" {
-		t.Fatalf("DecodeMedia() after SetMedia = %q, %q, %v", data, mediaType, ok)
-	}
+	require.Equal(t, "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString(redacted), img.URL)
+	require.Equal(t, "image/jpeg", img.MediaType)
+	require.Nil(t, img.Data)
+	require.Nil(t, img.Raw, "image part after SetMedia = %+v", img)
+	data, mediaType, ok := img.DecodeMedia()
+	require.True(t, ok)
+	require.Equal(t, string(redacted), string(data))
+	require.Equal(t, "image/jpeg", mediaType, "DecodeMedia() after SetMedia = %q, %q, %v", data, mediaType, ok)
+	err = p.SetMedia("m5", 0, " audio/mp3 ", redacted)
+	require.NoError(t, err)
 
-	if err := p.SetMedia("m5", 0, " audio/mp3 ", redacted); err != nil {
-		t.Fatal(err)
-	}
 	audio := p.Messages[5].Parts[0]
-	if string(audio.Data) != base64.StdEncoding.EncodeToString(redacted) || audio.MediaType != "audio/mp3" || audio.URL != "" {
-		t.Fatalf("audio part after SetMedia = %+v", audio)
-	}
+	require.Equal(t, base64.StdEncoding.EncodeToString(redacted), string(audio.Data))
+	require.Equal(t, "audio/mp3", audio.MediaType)
+	require.Empty(t, audio.URL, "audio part after SetMedia = %+v", audio)
+
 	ch := p.Changes()
-	if !ch.Dirty || ch.Messages["m1"] != ChangeEdited || ch.Messages["m5"] != ChangeEdited || len(ch.Messages) != 2 {
-		t.Fatalf("changes = %+v", ch)
-	}
+	require.True(t, ch.Dirty)
+	require.Equal(t, ChangeEdited, ch.Messages["m1"])
+	require.Equal(t, ChangeEdited, ch.Messages["m5"])
+	require.Len(t, ch.Messages, 2, "changes = %+v", ch)
 }
 
 func TestPromptSetMediaErrors(t *testing.T) {
@@ -88,15 +92,10 @@ func TestPromptSetMediaErrors(t *testing.T) {
 			p := toolPrompt()
 			p.Messages = append(p.Messages, Message{ID: "m5", Role: RoleUser, Parts: []Part{{Kind: PartAudio, Data: []byte("AAAA"), MediaType: "audio/wav"}}})
 			err := p.SetMedia(tt.msgID, tt.partIdx, tt.mediaType, tt.data)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("err = %v, want containing %q", err, tt.want)
-			}
-			if p.Changes().Dirty {
-				t.Error("failed edit must not dirty the prompt")
-			}
-			if p.Messages[1].Parts[1].URL != "https://x/y.png" {
-				t.Error("failed edit must leave the part alone")
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
+			assert.False(t, p.Changes().Dirty)
+			assert.Equal(t, "https://x/y.png", p.Messages[1].Parts[1].URL)
 		})
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/streaming"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -249,14 +250,11 @@ func newRoutedBenchServerWithResolver(tb testing.TB, modelCount int, resolver se
 
 	registry := providers.NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(&benchProvider{models: models}, "mock", "mock")
-	if err := registry.Initialize(context.Background()); err != nil {
-		tb.Fatalf("registry initialize: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(tb, err)
 
 	router, err := providers.NewRouter(registry)
-	if err != nil {
-		tb.Fatalf("new router: %v", err)
-	}
+	require.NoError(tb, err)
 
 	return server.New(router, &server.Config{LogOnlyModelInteractions: true, ModelResolver: resolver})
 }
@@ -394,9 +392,7 @@ func TestFormatPerfGuardResult(t *testing.T) {
 		"allocs/op=114/150",
 		"bytes/op=13654/18432",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("formatPerfGuardResult() = %q, want substring %q", got, want)
-		}
+		require.Contains(t, got, want)
 	}
 }
 
@@ -509,13 +505,8 @@ func TestHotPathPerfGuard(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := testing.Benchmark(tc.bench)
 			t.Log(formatPerfGuardResult(tc.name, result, tc.maxAllocs, tc.maxBytes))
-
-			if got := result.AllocsPerOp(); got > tc.maxAllocs {
-				t.Fatalf("allocs/op = %d, want <= %d", got, tc.maxAllocs)
-			}
-			if got := result.AllocedBytesPerOp(); got > tc.maxBytes {
-				t.Fatalf("bytes/op = %d, want <= %d", got, tc.maxBytes)
-			}
+			require.LessOrEqual(t, result.AllocsPerOp(), tc.maxAllocs, "allocs/op")
+			require.LessOrEqual(t, result.AllocedBytesPerOp(), tc.maxBytes, "bytes/op")
 		})
 	}
 }

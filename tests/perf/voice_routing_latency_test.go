@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/providers"
 	openai_provider "github.com/enterpilot/gomodel/internal/providers/openai"
@@ -38,13 +39,11 @@ func TestVoiceRoutingLatency(t *testing.T) {
 	}, providers.ProviderOptions{})
 	registry := providers.NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(provider, "mock-openai", "openai")
-	if err := registry.Initialize(context.Background()); err != nil {
-		t.Fatalf("initialize mock provider: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(t, err)
+
 	router, err := providers.NewRouter(registry)
-	if err != nil {
-		t.Fatalf("create router: %v", err)
-	}
+	require.NoError(t, err)
 
 	gateway := httptest.NewServer(server.New(router, &server.Config{
 		LogOnlyModelInteractions: true,
@@ -114,19 +113,16 @@ func transcriptionBody(tb testing.TB) ([]byte, string) {
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("model", "gpt-4o-transcribe"); err != nil {
-		tb.Fatalf("write model field: %v", err)
-	}
+	err := writer.WriteField("model", "gpt-4o-transcribe")
+	require.NoError(tb, err)
+
 	file, err := writer.CreateFormFile("file", "sample.wav")
-	if err != nil {
-		tb.Fatalf("create audio field: %v", err)
-	}
-	if _, err := file.Write([]byte("mock-wave-data")); err != nil {
-		tb.Fatalf("write audio field: %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		tb.Fatalf("close multipart body: %v", err)
-	}
+	require.NoError(tb, err)
+	_, err = file.Write([]byte("mock-wave-data"))
+	require.NoError(tb, err)
+	err = writer.Close()
+	require.NoError(tb, err)
+
 	return body.Bytes(), writer.FormDataContentType()
 }
 
@@ -158,23 +154,20 @@ func timedHTTPRequest(t *testing.T, client *http.Client, url, contentType string
 	t.Helper()
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("create request: %v", err)
-	}
+	require.NoError(t, err)
+
 	req.Header.Set("Content-Type", contentType)
 
 	started := time.Now()
 	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("request %s: %v", url, err)
-	}
+	require.NoError(t, err, "request %s: %v", url, err)
+
 	defer resp.Body.Close()
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		t.Fatalf("read response from %s: %v", url, err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		t.Fatalf("request %s returned %s", url, resp.Status)
-	}
+	_, err = io.Copy(io.Discard, resp.Body)
+	require.NoError(t, err, "read response from %s: %v", url, err)
+	require.GreaterOrEqual(t, resp.StatusCode, http.StatusOK)
+	require.Less(t, resp.StatusCode, http.StatusMultipleChoices, "request %s returned %s", url, resp.Status)
+
 	return time.Since(started)
 }
 
@@ -208,9 +201,8 @@ func timedWebsocketDial(t *testing.T, url string) time.Duration {
 	started := time.Now()
 	conn, _, err := websocket.Dial(context.Background(), url, nil)
 	duration := time.Since(started)
-	if err != nil {
-		t.Fatalf("websocket dial %s: %v", url, err)
-	}
+	require.NoError(t, err, "websocket dial %s: %v", url, err)
+
 	_ = conn.CloseNow()
 	return duration
 }
@@ -219,9 +211,7 @@ func assertVoiceRoutingOverhead(t *testing.T, direct, routed, pairedOverhead tim
 	t.Helper()
 
 	t.Logf("direct_p50=%s routed_p50=%s paired_gomodel_overhead_p50=%s threshold=%s", direct, routed, pairedOverhead, maxVoiceRoutingOverhead)
-	if pairedOverhead > maxVoiceRoutingOverhead {
-		t.Fatalf("GoModel median paired routing overhead = %s, want <= %s", pairedOverhead, maxVoiceRoutingOverhead)
-	}
+	require.LessOrEqual(t, pairedOverhead, maxVoiceRoutingOverhead)
 }
 
 func median(samples []time.Duration) time.Duration {

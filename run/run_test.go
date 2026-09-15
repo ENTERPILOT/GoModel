@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunVersionSkipsSetup(t *testing.T) {
@@ -32,18 +34,10 @@ func TestRunVersionSkipsSetup(t *testing.T) {
 			return nil
 		},
 	})
-	if err != nil {
-		t.Fatalf("Run(--version) error = %v", err)
-	}
-	if setupCalled {
-		t.Error("Setup must not run for --version")
-	}
-	if setupConfigCalled {
-		t.Error("SetupConfig must not run for --version")
-	}
-	if !strings.HasPrefix(stdout.String(), "gomodel-test ") {
-		t.Errorf("version output = %q, want prefix %q", stdout.String(), "gomodel-test ")
-	}
+	require.NoError(t, err)
+	assert.False(t, setupCalled)
+	assert.False(t, setupConfigCalled)
+	assert.True(t, strings.HasPrefix(stdout.String(), "gomodel-test "), "version output = %q, want prefix %q", stdout.String(), "gomodel-test ")
 }
 
 func TestConfigHooksRunSetupOnceThenReloadForEveryLaterGeneration(t *testing.T) {
@@ -65,19 +59,16 @@ func TestConfigHooksRunSetupOnceThenReloadForEveryLaterGeneration(t *testing.T) 
 	result := &config.LoadResult{Config: &config.Config{}}
 	for i, wantErr := range []error{nil, nil, rejected} {
 		err := configure(result)
-		if !errors.Is(err, wantErr) {
-			t.Fatalf("generation %d: error = %v, want %v", i+1, err, wantErr)
-		}
+		require.ErrorIs(t, err, wantErr, "generation %d", i)
 	}
-	if setups != 1 || reloads != 2 {
-		t.Fatalf("SetupConfig ran %d times and ReloadConfig %d, want 1 and 2", setups, reloads)
-	}
+	require.Equal(t, 1, setups)
+	require.Equal(t, 2, reloads)
+
 	// Without hooks every generation passes.
 	noHooks := configHooks(t.Context(), Options{})
 	for generation := 1; generation <= 2; generation++ {
-		if err := noHooks(result); err != nil {
-			t.Fatalf("no hooks, generation %d: %v", generation, err)
-		}
+		err := noHooks(result)
+		require.NoError(t, err, "no hooks, generation %d: %v", generation, err)
 	}
 }
 
@@ -91,18 +82,14 @@ func TestRunSetupConfigReceivesLoadedConfiguration(t *testing.T) {
 		Stderr: io.Discard,
 		SetupConfig: func(_ context.Context, result *config.LoadResult) error {
 			called = true
-			if result == nil || result.Config == nil {
-				t.Fatal("SetupConfig received nil configuration")
-			}
+			require.NotNil(t, result)
+			require.NotNil(t, result.Config)
+
 			return wantErr
 		},
 	})
-	if !called {
-		t.Fatal("SetupConfig was not called")
-	}
-	if !errors.Is(err, wantErr) {
-		t.Fatalf("Run error = %v, want wrapped sentinel", err)
-	}
+	require.True(t, called)
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestRunUsageErrorExitCode(t *testing.T) {
@@ -111,12 +98,9 @@ func TestRunUsageErrorExitCode(t *testing.T) {
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	})
-	if err == nil {
-		t.Fatal("expected a usage error")
-	}
-	if got := ExitCode(err); got != 2 {
-		t.Errorf("ExitCode = %d, want 2", got)
-	}
+	require.Error(t, err)
+	got := ExitCode(err)
+	assert.Equal(t, 2, got)
 }
 
 func TestRunHelpIsNotAnError(t *testing.T) {
@@ -125,12 +109,9 @@ func TestRunHelpIsNotAnError(t *testing.T) {
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	})
-	if err != nil {
-		t.Fatalf("Run(--help) error = %v, want nil", err)
-	}
-	if got := ExitCode(err); got != 0 {
-		t.Errorf("ExitCode = %d, want 0", got)
-	}
+	require.NoError(t, err)
+	got := ExitCode(err)
+	assert.Equal(t, 0, got)
 }
 
 // TestRunHealthAndReadyDispatch exercises the --health/--ready short-circuit
@@ -138,9 +119,8 @@ func TestRunHelpIsNotAnError(t *testing.T) {
 // surface probe failures as non-usage errors (exit code 1).
 func TestRunHealthAndReadyDispatch(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
+	require.NoError(t, err)
+
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -159,13 +139,12 @@ func TestRunHealthAndReadyDispatch(t *testing.T) {
 	t.Setenv("PORT", port)
 
 	for _, flag := range []string{"--health", "--ready"} {
-		if err := Run(context.Background(), Options{
+		err := Run(context.Background(), Options{
 			Args:   []string{flag},
 			Stdout: io.Discard,
 			Stderr: io.Discard,
-		}); err != nil {
-			t.Errorf("Run(%s) against healthy gateway = %v, want nil", flag, err)
-		}
+		})
+		assert.NoError(t, err, "Run(%s) against healthy gateway = %v, want nil", flag, err)
 	}
 
 	// An unreachable gateway must surface as a non-usage error (exit code 1).
@@ -181,8 +160,7 @@ func TestRunHealthAndReadyDispatch(t *testing.T) {
 			t.Errorf("Run(%s) against closed port = nil, want error", flag)
 			continue
 		}
-		if got := ExitCode(err); got != 1 {
-			t.Errorf("ExitCode(Run(%s) error) = %d, want 1", flag, got)
-		}
+		got := ExitCode(err)
+		assert.Equal(t, 1, got, "ExitCode(Run(%s) error) = %d, want 1", flag, got)
 	}
 }

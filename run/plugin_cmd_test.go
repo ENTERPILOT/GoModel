@@ -13,6 +13,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/pluginload"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // raceEnabled is set by race_test.go; plugins built without -race cannot be
@@ -21,20 +23,18 @@ var raceEnabled = false
 
 func TestParseCLI_PluginSubcommand(t *testing.T) {
 	opts, err := parseCLI("gomodel", []string{"plugin", "inspect", "x.so"}, io.Discard)
-	if err != nil {
-		t.Fatalf("parseCLI(plugin ...) error = %v", err)
-	}
-	if got := strings.Join(opts.PluginArgs, " "); got != "inspect x.so" {
-		t.Fatalf("PluginArgs = %q, want %q", got, "inspect x.so")
-	}
+	require.NoError(t, err)
+	got := strings.Join(opts.PluginArgs, " ")
+	require.Equal(t, "inspect x.so", got)
+
 	opts, err = parseCLI("gomodel", []string{"plugin"}, io.Discard)
-	if err != nil || opts.PluginArgs == nil || len(opts.PluginArgs) != 0 {
-		t.Fatalf("parseCLI(plugin) = %+v, %v; want empty non-nil PluginArgs", opts, err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, opts.PluginArgs)
+	require.Empty(t, opts.PluginArgs, "parseCLI(plugin) = %+v, %v; want empty non-nil PluginArgs", opts, err)
+
 	opts, err = parseCLI("gomodel", []string{"--version"}, io.Discard)
-	if err != nil || opts.PluginArgs != nil {
-		t.Fatalf("parseCLI(--version).PluginArgs = %v, want nil", opts.PluginArgs)
-	}
+	require.NoError(t, err)
+	require.Nil(t, opts.PluginArgs)
 }
 
 func TestRunPluginCommand_Usage(t *testing.T) {
@@ -58,9 +58,9 @@ func TestRunPluginCommand_Usage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			err := runPluginCommand(context.Background(), "gomodel", tt.args, &stdout, &stderr)
-			if got := ExitCode(err); got != tt.wantCode {
-				t.Fatalf("ExitCode() = %d (err %v), want %d", got, err, tt.wantCode)
-			}
+			got := ExitCode(err)
+			require.Equal(t, tt.wantCode, got)
+
 			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
 				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
 			}
@@ -81,12 +81,8 @@ func TestRun_DispatchesPluginSubcommand(t *testing.T) {
 		Stderr: &stderr,
 		Setup:  func(context.Context) error { t.Error("Setup must not run for plugin subcommands"); return nil },
 	})
-	if err != nil {
-		t.Fatalf("Run(plugin help) error = %v", err)
-	}
-	if !strings.Contains(stdout.String(), "plugin inspect") {
-		t.Fatalf("stdout = %q", stdout.String())
-	}
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "plugin inspect")
 }
 
 func TestParsePluginBuildArgs(t *testing.T) {
@@ -108,17 +104,13 @@ func TestParsePluginBuildArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opts, err := parsePluginBuildArgs("gomodel", tt.args, io.Discard)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("error = nil, want error")
-				}
+				require.Error(t, err)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("error = %v", err)
-			}
-			if opts.Dir != tt.wantDir || opts.Out != tt.wantOut {
-				t.Fatalf("opts = %+v, want dir %q out %q", opts, tt.wantDir, tt.wantOut)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantDir, opts.Dir)
+			require.Equal(t, tt.wantOut, opts.Out, "opts = %+v, want dir %q out %q", opts, tt.wantDir, tt.wantOut)
 		})
 	}
 }
@@ -126,37 +118,31 @@ func TestParsePluginBuildArgs(t *testing.T) {
 func TestBuildInfoOverlay(t *testing.T) {
 	src := buildInfoSource(pluginapi.BuildInfo{GoVersion: "go1.99.0", PluginAPIVersion: "9.9.9"})
 	for _, want := range []string{"package main", `"github.com/enterpilot/gomodel/pluginapi"`, `var GoModelBuildInfo = pluginapi.BuildInfo{GoVersion: "go1.99.0", PluginAPIVersion: "9.9.9"}`, "DO NOT EDIT"} {
-		if !strings.Contains(src, want) {
-			t.Errorf("generated source lacks %q:\n%s", want, src)
-		}
+		assert.Contains(t, src, want)
 	}
 
 	dir := t.TempDir()
 	overlay, cleanup, err := writeBuildInfoOverlay(dir, pluginload.HostBuildInfo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer cleanup()
 	data, err := os.ReadFile(overlay)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	virtual := filepath.Join(dir, buildInfoFile)
-	if !strings.Contains(string(data), `"Replace"`) || !strings.Contains(string(data), virtual) {
-		t.Fatalf("overlay = %s", data)
-	}
+	require.Contains(t, string(data), `"Replace"`)
+	require.Contains(t, string(data), virtual, "overlay = %s", data)
+
 	cleanup()
-	if _, err := os.Stat(overlay); !os.IsNotExist(err) {
-		t.Fatalf("cleanup left %s (err %v)", overlay, err)
-	}
+	_, err = os.Stat(overlay)
+	require.True(t, os.IsNotExist(err), "cleanup left %s (err %v)", overlay, err)
 }
 
 func TestDeclaresBuildInfo(t *testing.T) {
 	write := func(dir, name, content string) {
 		t.Helper()
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)
+		require.NoError(t, err)
 	}
 	tests := []struct {
 		name  string
@@ -176,19 +162,14 @@ func TestDeclaresBuildInfo(t *testing.T) {
 				write(dir, name, content)
 			}
 			got, err := declaresBuildInfo(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != tt.want {
-				t.Fatalf("declaresBuildInfo() = %t, want %t", got, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 	dir := t.TempDir()
 	write(dir, "broken.go", "package main\n\nvar = \n")
-	if _, err := declaresBuildInfo(dir); err == nil {
-		t.Fatal("declaresBuildInfo(broken) error = nil")
-	}
+	_, err := declaresBuildInfo(dir)
+	require.Error(t, err)
 }
 
 func TestWriteManifest(t *testing.T) {
@@ -206,15 +187,12 @@ func TestWriteManifest(t *testing.T) {
 		SingleInstance: true,
 	})
 	for _, want := range []string{"name  ", "x\n", "prompt, response", "go1.27.1, pluginapi 0.1.0", "one (GoModelPlugin is a variable)", "keywords", "textarea", "true", "action", "route", "block"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("output lacks %q:\n%s", want, out.String())
-		}
+		assert.Contains(t, out.String(), want)
 	}
 	out.Reset()
 	writeManifest(&out, pluginload.Loaded{Manifest: pluginapi.Manifest{Name: "bare"}})
-	if !strings.Contains(out.String(), "no GoModelBuildInfo") || !strings.Contains(out.String(), "config       -") {
-		t.Errorf("bare output:\n%s", out.String())
-	}
+	assert.Contains(t, out.String(), "no GoModelBuildInfo")
+	assert.Contains(t, out.String(), "config       -")
 }
 
 // TestPluginBuildAndInspect builds the loader fixture through the CLI and
@@ -229,30 +207,24 @@ func TestPluginBuildAndInspect(t *testing.T) {
 		t.Skip("CGO_ENABLED=0 or go unavailable")
 	}
 	fixture, err := filepath.Abs("../internal/pluginload/testdata/fixture")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	out := filepath.Join(t.TempDir(), "fixture.so")
 
 	var stdout, stderr bytes.Buffer
 	err = runPluginCommand(context.Background(), "gomodel", []string{"build", "-o", out, fixture}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("plugin build error = %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "host: "+runtime.Version()) || !strings.Contains(stdout.String(), "built "+out) {
-		t.Fatalf("build stdout = %q", stdout.String())
-	}
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "host: "+runtime.Version())
+	require.Contains(t, stdout.String(), "built "+out)
 
 	stdout.Reset()
-	if err := runPluginCommand(context.Background(), "gomodel", []string{"inspect", out}, &stdout, &stderr); err != nil {
-		t.Fatalf("plugin inspect error = %v", err)
-	}
+	err = runPluginCommand(context.Background(), "gomodel", []string{"inspect", out}, &stdout, &stderr)
+	require.NoError(t, err)
+
 	// The fixture declares its own GoModelBuildInfo, so the overlay must not
 	// have replaced it.
 	for _, want := range []string{"fixture", "1.2.3", "prompt", "go-fixture, pluginapi " + pluginapi.Version, "greeting"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("inspect output lacks %q:\n%s", want, stdout.String())
-		}
+		assert.Contains(t, stdout.String(), want)
 	}
 
 	// A package without the symbol gets it stamped through the overlay. The
@@ -260,29 +232,23 @@ func TestPluginBuildAndInspect(t *testing.T) {
 	// the fixture's testdata tree (skipped by ./... patterns) rather than a
 	// temp dir.
 	src, err := os.ReadFile(filepath.Join(fixture, "main.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	stripped := strings.Replace(string(src), "var GoModelBuildInfo = pluginapi.BuildInfo{", "var unusedBuildInfo = pluginapi.BuildInfo{", 1)
 	inModule := filepath.Join(fixture, "..", "stamped-"+filepath.Base(t.TempDir()))
-	if err := os.MkdirAll(inModule, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	err = os.MkdirAll(inModule, 0o755)
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = os.RemoveAll(inModule) })
-	if err := os.WriteFile(filepath.Join(inModule, "main.go"), []byte(stripped), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	err = os.WriteFile(filepath.Join(inModule, "main.go"), []byte(stripped), 0o644)
+	require.NoError(t, err)
 
 	out2 := filepath.Join(t.TempDir(), "stamped.so")
 	stdout.Reset()
-	if err := runPluginCommand(context.Background(), "gomodel", []string{"build", "-o", out2, inModule}, &stdout, &stderr); err != nil {
-		t.Fatalf("plugin build (stamped) error = %v\nstderr: %s", err, stderr.String())
-	}
+	err = runPluginCommand(context.Background(), "gomodel", []string{"build", "-o", out2, inModule}, &stdout, &stderr)
+	require.NoError(t, err)
+
 	loaded, err := pluginload.Open(out2)
-	if err != nil {
-		t.Fatalf("Open(stamped) error = %v", err)
-	}
-	if loaded.BuildInfo != pluginload.HostBuildInfo {
-		t.Fatalf("stamped BuildInfo = %+v, want %+v", loaded.BuildInfo, pluginload.HostBuildInfo)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginload.HostBuildInfo, loaded.BuildInfo)
 }
