@@ -32,7 +32,7 @@ func TestSQLStoreRoundTrip(t *testing.T) {
 
 		got, err := store.GetRules(ctx)
 		require.NoError(t, err)
-		require.Equal(t, len(want), len(got))
+		require.Len(t, got, len(want))
 
 		for i := range want {
 			assert.Equal(t, want[i], got[i], "rule %d = %+v, want %+v", i, got[i], want[i])

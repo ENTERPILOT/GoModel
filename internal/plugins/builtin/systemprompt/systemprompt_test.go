@@ -85,7 +85,7 @@ func TestParseConfigAndSummarize(t *testing.T) {
 	long := strings.Repeat("a", 100)
 	got = p.Summarize(json.RawMessage(`{"content":"` + long + `"}`))
 	require.True(t, strings.HasSuffix(got, "..."))
-	require.Equal(t, len("inject • ")+72, len(got), "Summarize(long) = %q", got)
+	require.Len(t, got, len("inject • ")+72, "Summarize(long) = %q", got)
 	require.Empty(t, p.Summarize(json.RawMessage(`{}`)))
 
 	m := p.Manifest()

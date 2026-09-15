@@ -261,10 +261,10 @@ func TestSticky_EvictsSoonestAtCapacity(t *testing.T) {
 		stickyAssign(sticky, "smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
-	require.Equal(t, sticky.capacity, len(sticky.entries))
+	require.Len(t, sticky.entries, sticky.capacity)
 
 	stickyAssign(sticky, "smart", "one-more", "openai/gpt-4o")
-	require.Equal(t, sticky.capacity, len(sticky.entries))
+	require.Len(t, sticky.entries, sticky.capacity)
 	// The oldest pin was evicted; the newest survives.
 	got := stickyProbe(sticky, "smart", "one-more")
 	require.NotEmpty(t, got)
@@ -310,7 +310,7 @@ func TestSticky_RepinRespectsCapacity(t *testing.T) {
 		sticky.repin("smart", "sess-"+strconv.Itoa(i), "", "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
-	require.Equal(t, sticky.capacity, len(sticky.entries))
+	require.Len(t, sticky.entries, sticky.capacity)
 	got := stickyProbe(sticky, "smart", "sess-0")
 	require.Empty(t, got)
 }

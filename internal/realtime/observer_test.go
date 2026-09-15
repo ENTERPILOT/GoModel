@@ -46,7 +46,7 @@ func TestObserveTapsFramesUntilClose(t *testing.T) {
 		seen = append(seen, string(frame))
 	})
 	require.NoError(t, err)
-	require.Equal(t, len(frames), len(seen))
+	require.Len(t, seen, len(frames))
 
 	for i := range frames {
 		assert.Equal(t, frames[i], seen[i], "frame %d = %q, want %q", i, seen[i], frames[i])

@@ -244,7 +244,7 @@ func TestNoJudgeReplyChoices(t *testing.T) {
 	host := plugintest.NewHost() // returns a completion without choices
 	p := newPlugin(t, `{"model": "a/b", "on_unclear": "block"}`, host)
 	d, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionBlock, d.Action)
 	assert.Equal(t, CodeUnclear, d.Code)
 }
@@ -355,7 +355,7 @@ func TestInferenceError(t *testing.T) {
 	boom := errors.New("provider down")
 	p := newPlugin(t, `{"model": "a/b"}`, &plugintest.Host{Err: boom})
 	_, err := p.OnPrompt(context.Background(), plugintest.Exchange(prompt(), nil))
-	assert.ErrorIs(t, err, boom)
+	require.ErrorIs(t, err, boom)
 	assert.Contains(t, err.Error(), "judge call failed")
 }
 
@@ -380,7 +380,7 @@ func TestEmptyContentSkipsJudge(t *testing.T) {
 			} else {
 				d, err = p.OnPrompt(context.Background(), tt.x)
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, pluginapi.ActionAllow, d.Action)
 		})
 	}
@@ -439,7 +439,7 @@ func TestNilValues(t *testing.T) {
 	host := &plugintest.Host{Replies: []string{`{"verdict":"allow"}`}}
 	p := newPlugin(t, `{"model": "a/b"}`, host)
 	d, err := p.OnPrompt(context.Background(), &pluginapi.Exchange{Prompt: prompt()})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionAllow, d.Action)
 }
 
@@ -450,7 +450,7 @@ func TestStream(t *testing.T) {
 
 	x := plugintest.Exchange(nil, nil)
 	d, err := p.OnStreamEvent(context.Background(), x, &pluginapi.StreamEvent{Kind: pluginapi.EventTextDelta, Text: "x"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.StreamPass, d.Action)
 
 	d2, err := p.OnStreamEnd(context.Background(), x)

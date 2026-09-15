@@ -71,8 +71,8 @@ func TestNew_PluginSystemFlag(t *testing.T) {
 			require.Equal(t, tt.want, app.routeStrategies != nil)
 			require.Equal(t, tt.want, app.guardrails != nil, "catalog=%v resolver=%v guardrails=%v, want all %v", app.pluginCatalog != nil, app.routeStrategies != nil, app.guardrails != nil, tt.want)
 
-			if tt.want && app.guardrails.Service == nil {
-				t.Fatal("guardrails service missing with the plugin system on")
+			if tt.want {
+				require.NotNil(t, app.guardrails.Service, "guardrails service missing with the plugin system on")
 			}
 		})
 	}

@@ -146,7 +146,7 @@ func TestSQLStoreGetAndDeleteMissingReturnNotFound(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
 		ctx := context.Background()
 		_, err := store.Get(ctx, "absent")
-		assert.ErrorIs(t, err, ErrNotFound)
+		require.ErrorIs(t, err, ErrNotFound)
 		err = store.Delete(ctx, "absent")
 		assert.ErrorIs(t, err, ErrNotFound)
 	})

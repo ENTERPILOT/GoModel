@@ -115,7 +115,7 @@ func TestLogger(t *testing.T) {
 	}
 entriesReady:
 
-	assert.NoError(t, logger.Close())
+	require.NoError(t, logger.Close())
 
 	// Verify store was closed
 	assert.True(t, store.closed)
@@ -153,7 +153,7 @@ func TestLoggerClose(t *testing.T) {
 		})
 	}
 	// Close immediately - should flush pending entries
-	assert.NoError(t, logger.Close())
+	require.NoError(t, logger.Close())
 
 	// Verify all entries were flushed
 	entries := store.getEntries()

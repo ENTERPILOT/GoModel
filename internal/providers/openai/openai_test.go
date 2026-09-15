@@ -593,7 +593,7 @@ func TestCancelledContextReturnsError(t *testing.T) {
 		Model:    "gpt-4o",
 		Messages: []core.Message{{Role: "user", Content: "Hello"}},
 	})
-	assert.Error(t, err, "ChatCompletion")
+	require.Error(t, err, "ChatCompletion")
 
 	_, err = provider.Responses(ctx, &core.ResponsesRequest{Model: "gpt-4o", Input: "Hello"})
 	assert.Error(t, err, "Responses")

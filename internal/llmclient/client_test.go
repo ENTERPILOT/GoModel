@@ -1137,7 +1137,7 @@ func TestCircuitBreaker_HalfOpenProbeDoesNotRetry(t *testing.T) {
 	gatewayErr, ok := err.(*core.GatewayError)
 	require.True(t, ok)
 	require.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode)
-	require.False(t, strings.Contains(gatewayErr.Message, "circuit breaker is open"), "expected original upstream error, got circuit breaker error: %s", gatewayErr.Message)
+	require.NotContains(t, gatewayErr.Message, "circuit breaker is open", "expected original upstream error, got circuit breaker error: %s", gatewayErr.Message)
 	got := attempts.Load()
 	require.Equal(t, int32(1), got)
 	state := client.circuitBreaker.State()
@@ -1400,7 +1400,7 @@ func TestCircuitBreakerDisabledNeverShortCircuits(t *testing.T) {
 			for i := range attempts {
 				_, err := client.DoRaw(context.Background(), Request{Method: http.MethodGet, Endpoint: "/test"})
 				require.Error(t, err)
-				require.False(t, strings.Contains(err.Error(), "circuit breaker is open"), "attempt %d: request was short-circuited by a disabled breaker: %v", i+1, err)
+				require.NotContains(t, err.Error(), "circuit breaker is open", "attempt %d: request was short-circuited by a disabled breaker: %v", i+1, err)
 			}
 			got := requests.Load()
 			require.Equal(t, int32(attempts), got)
@@ -1963,7 +1963,7 @@ func TestClient_Do_EmbeddedErrorBody(t *testing.T) {
 	assert.Equal(t, core.ErrorTypeAuthentication, gatewayErr.Type)
 	assert.Equal(t, "invalid key", gatewayErr.Message)
 	assert.NotNil(t, gatewayErr.ResponseHeaders)
-	assert.ErrorIs(t, err, core.ErrEmbeddedInSuccess)
+	require.ErrorIs(t, err, core.ErrEmbeddedInSuccess)
 
 	// An embedded 401 is not retryable, exactly like a genuine 401 status.
 	assert.Equal(t, int32(1), attempts.Load())
@@ -2060,7 +2060,7 @@ func TestClient_DoStream_EmbeddedErrorOpensCircuitBreaker(t *testing.T) {
 		require.ErrorAs(t, err, &gatewayErr, "call %d: expected GatewayError, got %v", i, err)
 		assert.Equal(t, http.StatusServiceUnavailable, gatewayErr.StatusCode, "call %d: StatusCode", i)
 		assert.Equal(t, http.StatusServiceUnavailable, lastInfo.StatusCode)
-		assert.Error(t, lastInfo.Error, "call %d: hook recorded status=%d error=%v, want mapped failure", i, lastInfo.StatusCode, lastInfo.Error)
+		require.Error(t, lastInfo.Error, "call %d: hook recorded status=%d error=%v, want mapped failure", i, lastInfo.StatusCode, lastInfo.Error)
 	}
 
 	// Two embedded failures reach the threshold: the third request must fail
