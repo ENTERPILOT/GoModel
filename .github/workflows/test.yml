@@ -96,113 +96,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # The unit suite runs as four shards so the long-pole packages
-  # (internal/server, internal/providers) do not serialise behind the rest.
-  # Shards that open PostgreSQL get a service container; without one
-  # GOMODEL_TEST_POSTGRES_URL is unset, every PostgreSQL subtest skips, and CI
-  # stays green while covering only SQLite. Pull requests skip -race (see
-  # unit-tests-race) and upload one coverage profile per shard.
+  # One job for the whole unit suite plus the contract replay suite (an
+  # in-memory suite behind a build tag). PostgreSQL is a service container;
+  # without it GOMODEL_TEST_POSTGRES_URL is unset, every PostgreSQL subtest
+  # skips, and CI stays green while covering only SQLite. Pull requests run
+  # without the race detector; pushes to main run under -race.
   unit-tests:
-    name: Unit (${{ matrix.name }})
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        # Mirrors Docker Hub's official image. Anonymous pulls of
-        # registry-1.docker.io intermittently time out on GitHub runners.
-        # An empty image string means "no service", which is how shards
-        # that never open a database skip the container.
-        image: ${{ matrix.postgres && 'public.ecr.aws/docker/library/postgres:18-alpine' || '' }}
-        env:
-          POSTGRES_USER: gomodel
-          POSTGRES_PASSWORD: gomodel
-          POSTGRES_DB: gomodel
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U gomodel -d gomodel"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: server
-            packages: ./internal/server/...
-            postgres: false
-          - name: providers
-            packages: ./internal/providers/...
-            postgres: true
-          - name: stores
-            packages: >-
-              ./internal/admin/... ./internal/auditlog/... ./internal/authkeys/...
-              ./internal/batch/... ./internal/budget/... ./internal/conversationstore/...
-              ./internal/filestore/... ./internal/guardrails/... ./internal/mcpgateway/...
-              ./internal/pricingoverrides/... ./internal/ratelimit/... ./internal/responsestore/...
-              ./internal/runtimesettings/... ./internal/storage/... ./internal/tagging/...
-              ./internal/usage/... ./internal/users/... ./internal/virtualmodels/...
-              ./internal/workflows/...
-            postgres: true
-          # Everything the other shards do not own, plus the contract replay
-          # suite: it is an in-memory unit suite behind a build tag and does
-          # not need a runner of its own.
-          - name: core
-            packages: core
-            postgres: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Restore Go caches
-        uses: ./.github/actions/go-cache
-        with:
-          key: unit-${{ matrix.name }}
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false
-
-      - name: Stub the dashboard bundle
-        run: make frontend-stub
-
-      - name: Resolve shard packages
-        id: shard
-        run: |
-          if [ "${{ matrix.packages }}" = "core" ]; then
-            pkgs=$(go list ./cmd/... ./config/... ./ext/... ./internal/... ./run/... \
-              | grep -v -E '/internal/(server|providers|admin|auditlog|authkeys|batch|budget|conversationstore|filestore|guardrails|mcpgateway|pricingoverrides|ratelimit|responsestore|runtimesettings|storage|tagging|usage|users|virtualmodels|workflows)(/|$)' \
-              | tr '\n' ' ')
-            echo "packages=$pkgs ./tests/contract/..." >> "$GITHUB_OUTPUT"
-            echo "tags=-tags=contract" >> "$GITHUB_OUTPUT"
-          else
-            echo "packages=${{ matrix.packages }}" >> "$GITHUB_OUTPUT"
-            echo "tags=" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Run tests
-        run: go test ${{ env.GO_TEST_SHORT }} ${{ steps.shard.outputs.tags }} -coverprofile=coverage-${{ matrix.name }}.out -timeout=10m ${{ steps.shard.outputs.packages }}
-        env:
-          # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
-          # so pointing it at a configured application database is opt-in.
-          GOMODEL_TEST_POSTGRES_URL: ${{ matrix.postgres && 'postgres://gomodel:gomodel@localhost:5432/gomodel' || '' }}
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
-        with:
-          files: ./coverage-${{ matrix.name }}.out
-          flags: ${{ matrix.name }}
-          fail_ci_if_error: false
-        continue-on-error: true
-
-  # The race detector doubles the compile and run time, so pull requests skip
-  # it and pushes to main run the whole suite under -race once, unsharded.
-  # Nothing waits on this job.
-  unit-tests-race:
-    name: Unit (race)
-    if: github.event_name == 'push'
+    name: Unit Tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -228,7 +128,7 @@ jobs:
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
         with:
-          key: unit-race
+          key: unit
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -240,15 +140,19 @@ jobs:
         run: make frontend-stub
 
       - name: Run tests
-        run: go test -race -coverprofile=coverage.out -timeout=15m ./cmd/... ./config/... ./ext/... ./internal/... ./run/...
+        run: >-
+          go test ${{ env.GO_TEST_SHORT }} ${{ github.event_name == 'push' && '-race' || '' }}
+          -tags=contract -coverprofile=coverage.out -timeout=15m
+          ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/contract/...
         env:
+          # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
+          # so pointing it at a configured application database is opt-in.
           GOMODEL_TEST_POSTGRES_URL: postgres://gomodel:gomodel@localhost:5432/gomodel
 
       - name: Upload coverage
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         with:
           files: ./coverage.out
-          flags: race
           fail_ci_if_error: false
         continue-on-error: true
 
@@ -277,35 +181,15 @@ jobs:
       - name: Run tests
         run: go test ${{ env.GO_TEST_SHORT }} -tags=e2e -timeout=5m ./tests/e2e/...
 
-  # PostgreSQL is a service container (the harness connects to it through
-  # GOMODEL_INTEGRATION_POSTGRES_URL). The suite brings up its own MongoDB
-  # replica set in TestMain because a service container cannot pass
-  # --replSet; its image is pre-pulled in the background while Go sets up and
-  # compiles, and the harness pulls it itself if that did not finish.
+  # The suite pulls and starts its own PostgreSQL and MongoDB containers in
+  # TestMain (MongoDB as a replica set, which a service container cannot be).
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:16-alpine
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: gomodel_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U test -d gomodel_test"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-
-      - name: Pre-pull MongoDB
-        run: setsid nohup docker pull public.ecr.aws/docker/library/mongo:7 > /dev/null 2>&1 &
 
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
@@ -323,10 +207,6 @@ jobs:
 
       - name: Run tests
         run: go test -tags=integration -timeout=10m ./tests/integration/...
-        env:
-          # Honoured once the harness supports external databases; older
-          # harness revisions ignore it and start their own container.
-          GOMODEL_INTEGRATION_POSTGRES_URL: postgres://test:test@localhost:5432/gomodel_test?sslmode=disable
 
   performance:
     name: Performance Guard
