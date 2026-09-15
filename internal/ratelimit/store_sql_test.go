@@ -60,6 +60,65 @@ func TestSQLStoreRoundTripsNullableLimits(t *testing.T) {
 	})
 }
 
+// The folded subject stays the key; the written spelling survives the round
+// trip so breaches and listings can name a provider that exists.
+func TestSQLStoreRoundTripsSubjectDisplay(t *testing.T) {
+	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+		ctx := context.Background()
+
+		err := store.UpsertRules(ctx, []Rule{
+			{Scope: ScopeProvider, Subject: "mockA", PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)), Source: SourceManual},
+		})
+		require.NoError(t, err)
+
+		rules, err := store.ListRules(ctx)
+		require.NoError(t, err)
+		require.Len(t, rules, 1)
+		require.Equal(t, "mocka", rules[0].Subject, "subject must be the folded match key")
+		require.Equal(t, "mockA", rules[0].DisplaySubject())
+	})
+}
+
+// subject_display follows the same source precedence as the limits: a config
+// re-seed may not re-spell a subject an operator edited by hand.
+func TestSQLStoreSubjectDisplayPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		storedSpell string
+		storedSrc   string
+		nextSpell   string
+		nextSrc     string
+		want        string
+	}{
+		{name: "config over config", storedSpell: "mockA", storedSrc: SourceConfig, nextSpell: "MOCKA", nextSrc: SourceConfig, want: "MOCKA"},
+		{name: "config over manual", storedSpell: "mockA", storedSrc: SourceManual, nextSpell: "MOCKA", nextSrc: SourceConfig, want: "mockA"},
+		{name: "manual over config", storedSpell: "mockA", storedSrc: SourceConfig, nextSpell: "MOCKA", nextSrc: SourceManual, want: "MOCKA"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+				ctx := context.Background()
+
+				err := store.UpsertRules(ctx, []Rule{
+					{Scope: ScopeProvider, Subject: tt.storedSpell, PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)), Source: tt.storedSrc},
+				})
+				require.NoError(t, err)
+
+				err = store.UpsertRules(ctx, []Rule{
+					{Scope: ScopeProvider, Subject: tt.nextSpell, PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(2)), Source: tt.nextSrc},
+				})
+				require.NoError(t, err, "second UpsertRules")
+
+				rules, err := store.ListRules(ctx)
+				require.NoError(t, err)
+				require.Len(t, rules, 1, "rules = %+v", rules)
+				require.Equal(t, "mocka", rules[0].Subject, "subject must be the folded match key")
+				require.Equal(t, tt.want, rules[0].DisplaySubject())
+			})
+		})
+	}
+}
+
 func TestSQLStoreDeleteRule(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()

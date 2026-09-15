@@ -17,6 +17,7 @@ const sqlRateLimitsSchema = `
 	CREATE TABLE IF NOT EXISTS rate_limits (
 		scope TEXT NOT NULL DEFAULT 'user_path',
 		subject TEXT NOT NULL,
+		subject_display TEXT NOT NULL DEFAULT '',
 		per_child ` + sqlx.TypeBool + ` NOT NULL DEFAULT FALSE,
 		period_seconds ` + sqlx.TypeInt64 + ` NOT NULL,
 		max_requests ` + sqlx.TypeInt64 + `,
@@ -52,9 +53,10 @@ type SQLStore struct {
 // a column is only overwritten when the incoming or stored row is manual, or
 // when both are config-sourced.
 const upsertRuleSQL = `
-	INSERT INTO rate_limits (scope, subject, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	INSERT INTO rate_limits (scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(scope, subject, period_seconds) DO UPDATE SET
+		subject_display = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.subject_display ELSE rate_limits.subject_display END,
 		per_child = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.per_child ELSE rate_limits.per_child END,
 		max_requests = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.max_requests ELSE rate_limits.max_requests END,
 		max_tokens = CASE WHEN excluded.source = ? OR rate_limits.source = ? THEN excluded.max_tokens ELSE rate_limits.max_tokens END,
@@ -76,6 +78,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 	}
 	if err := sqlx.AddColumns(ctx, db,
 		`ALTER TABLE rate_limits ADD COLUMN per_child `+sqlx.TypeBool+` NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE rate_limits ADD COLUMN subject_display TEXT NOT NULL DEFAULT ''`,
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate rate_limits table: %w", err)
 	}
@@ -90,7 +93,7 @@ func NewSQLStore(ctx context.Context, db sqlx.DB) (*SQLStore, error) {
 
 func (s *SQLStore) ListRules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT scope, subject, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at
+		SELECT scope, subject, subject_display, per_child, period_seconds, max_requests, max_tokens, source, created_at, updated_at
 		FROM rate_limits
 		ORDER BY scope ASC, subject ASC, period_seconds ASC
 	`)
@@ -278,6 +281,7 @@ func upsertRules(ctx context.Context, q sqlx.Querier, rules []Rule) error {
 		_, err := q.Exec(ctx, upsertRuleSQL,
 			rule.Scope,
 			rule.Subject,
+			rule.SubjectDisplay,
 			rule.PerChild,
 			rule.PeriodSeconds,
 			nullableInt64(rule.MaxRequests),
@@ -285,6 +289,7 @@ func upsertRules(ctx context.Context, q sqlx.Querier, rules []Rule) error {
 			rule.Source,
 			rule.CreatedAt.Unix(),
 			rule.UpdatedAt.Unix(),
+			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
 			SourceManual, SourceConfig,
@@ -306,6 +311,7 @@ func scanSQLRule(scanner sqlx.Row) (Rule, error) {
 	if err := scanner.Scan(
 		&rule.Scope,
 		&rule.Subject,
+		&rule.SubjectDisplay,
 		&rule.PerChild,
 		&rule.PeriodSeconds,
 		&maxRequests,

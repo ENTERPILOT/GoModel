@@ -50,9 +50,12 @@ func TestDispatchChatCompletionEmptyChoices(t *testing.T) {
 				}),
 			})
 			workflow := &core.Workflow{
-				Endpoint:   core.DescribeEndpoint("POST", "/v1/chat/completions"),
-				Resolution: &core.RequestModelResolution{ResolvedSelector: core.ModelSelector{Provider: "cloudflare", Model: "model1"}},
-				Policy:     &core.ResolvedWorkflowPolicy{Features: core.WorkflowFeatures{Failover: true}},
+				Endpoint: core.DescribeEndpoint("POST", "/v1/chat/completions"),
+				Resolution: &core.RequestModelResolution{
+					ResolvedSelector: core.ModelSelector{Provider: "cloudflare", Model: "model1"},
+					ProviderName:     "cloudflare-eu",
+				},
+				Policy: &core.ResolvedWorkflowPolicy{Features: core.WorkflowFeatures{Failover: true}},
 			}
 
 			response, _, err := orchestrator.DispatchChatCompletion(context.Background(), workflow, &core.ChatRequest{Model: "model1"})
@@ -65,6 +68,9 @@ func TestDispatchChatCompletionEmptyChoices(t *testing.T) {
 				require.ErrorAs(t, err, &gatewayErr)
 				require.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
 				require.Equal(t, "provider returned no choices", gatewayErr.Message)
+				// The configured instance, not the provider type the
+				// response body carries.
+				require.Equal(t, "cloudflare-eu", gatewayErr.Provider)
 			}
 			require.Equal(t, tt.wantCalls, calls)
 		})

@@ -1527,7 +1527,7 @@ func TestClient_Do_HTTPTimeoutReturnsGatewayTimeout(t *testing.T) {
 	gatewayErr, ok := err.(*core.GatewayError)
 	require.True(t, ok)
 	require.Equal(t, http.StatusGatewayTimeout, gatewayErr.StatusCode)
-	require.Contains(t, gatewayErr.Message, "failed to send request")
+	require.Equal(t, "provider request timed out", gatewayErr.Message)
 }
 
 func TestClient_Do_HTTPTimeoutDoesNotRetry(t *testing.T) {
@@ -1649,7 +1649,7 @@ func TestClient_Do_BodyReadTimeoutReturnsGatewayTimeout(t *testing.T) {
 	gatewayErr, ok := err.(*core.GatewayError)
 	require.True(t, ok)
 	require.Equal(t, http.StatusGatewayTimeout, gatewayErr.StatusCode)
-	require.Contains(t, gatewayErr.Message, "failed to read response")
+	require.Equal(t, "timed out reading provider response", gatewayErr.Message)
 }
 
 func TestDefaultConfig(t *testing.T) {

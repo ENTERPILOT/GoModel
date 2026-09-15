@@ -210,18 +210,18 @@ func (o *InferenceOrchestrator) executeResponses(
 // in front of call. The attempt's provider type comes from the request's own
 // selector, which the primary carries after resolution and a failover clone
 // carries from its target, falling back to the workflow's provider type.
-func patchedResponsesCall[T any](o *InferenceOrchestrator, workflow *core.Workflow, call func(context.Context, *core.ResponsesRequest) (T, error)) func(context.Context, *core.ResponsesRequest) (T, error) {
+func patchedResponsesCall[T any](o *InferenceOrchestrator, workflow *core.Workflow, call func(context.Context, *core.ResponsesRequest, string) (T, error)) func(context.Context, *core.ResponsesRequest, string) (T, error) {
 	if o.responsesAttemptPatcher == nil {
 		return call
 	}
-	return func(ctx context.Context, req *core.ResponsesRequest) (T, error) {
+	return func(ctx context.Context, req *core.ResponsesRequest, providerName string) (T, error) {
 		providerType := o.ProviderTypeForSelector(core.ModelSelector{Model: req.Model, Provider: req.Provider}, ProviderTypeFromWorkflow(workflow))
 		patched, err := o.responsesAttemptPatcher.PatchResponsesAttempt(ctx, req, providerType)
 		if err != nil {
 			var zero T
 			return zero, err
 		}
-		return call(ctx, patched)
+		return call(ctx, patched, providerName)
 	}
 }
 
@@ -342,12 +342,12 @@ func executeTranslatedProviderRequest[Req any, Resp any](
 	req Req,
 	model, provider string,
 	cloneForSelector func(Req, core.ModelSelector) Req,
-	call func(context.Context, Req) (Resp, error),
+	call func(context.Context, Req, string) (Resp, error),
 	responseProvider func(Resp) string,
 ) (Resp, ExecutionMeta, error) {
 	return executeTranslatedWithFailover(ctx, o, workflow, req, model, provider, cloneForSelector,
-		func(ctx context.Context, req Req) (Resp, string, error) {
-			resp, err := call(ctx, req)
+		func(ctx context.Context, req Req, providerName string) (Resp, string, error) {
+			resp, err := call(ctx, req, providerName)
 			if err != nil {
 				var zero Resp
 				return zero, "", err
@@ -365,7 +365,7 @@ func streamTranslatedProviderRequest[Req any](
 	model, provider string,
 	providerType, providerName, usageModel string,
 	cloneForSelector func(Req, core.ModelSelector) Req,
-	call func(context.Context, Req) (io.ReadCloser, error),
+	call func(context.Context, Req, string) (io.ReadCloser, error),
 ) (io.ReadCloser, ExecutionMeta, error) {
 	started := time.Now()
 	var stream io.ReadCloser
@@ -373,25 +373,25 @@ func streamTranslatedProviderRequest[Req any](
 	// the provider call and enters the failover sweep with its stored 429.
 	err := core.PrimaryRouteSaturated(ctx)
 	if err == nil {
-		stream, err = call(ctx, req)
+		stream, err = call(ctx, req, providerName)
 		if err == nil && stream != nil {
 			recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, currentSelectorForWorkflow(workflow, model, provider), started, nil))
 			return stream, ExecutionMeta{ProviderType: providerType, ProviderName: providerName, Model: usageModel}, nil
 		}
 		if err == nil {
-			err = emptyProviderStreamError(providerType)
+			err = emptyProviderStreamError(providerName)
 		}
 	}
 	recordProviderAttempt(ctx, providerAttemptFromResult(AttemptKindPrimary, providerType, providerName, currentSelectorForWorkflow(workflow, model, provider), started, err))
 
 	return tryFailoverStream(ctx, o, workflow, model, provider, err,
 		func(selector core.ModelSelector, providerType, providerName string) (io.ReadCloser, string, string, error) {
-			stream, err := call(ctx, cloneForSelector(req, selector))
+			stream, err := call(ctx, cloneForSelector(req, selector), providerName)
 			if err != nil {
 				return nil, "", "", err
 			}
 			if stream == nil {
-				return nil, "", "", emptyProviderStreamError(providerType)
+				return nil, "", "", emptyProviderStreamError(providerName)
 			}
 			return stream, providerType, selector.Model, nil
 		},
@@ -408,45 +408,49 @@ func (o *InferenceOrchestrator) validateProviderAndRequest(requestPresent bool, 
 	return nil
 }
 
-func (o *InferenceOrchestrator) chatCompletionProviderCall(ctx context.Context, req *core.ChatRequest) (*core.ChatResponse, error) {
+// The provider name of the attempt — not the provider type the response body
+// carries — names these gateway-raised errors, so an operator running two
+// instances of one type can tell which instance answered (see
+// ResolvedProviderName).
+func (o *InferenceOrchestrator) chatCompletionProviderCall(ctx context.Context, req *core.ChatRequest, providerName string) (*core.ChatResponse, error) {
 	resp, err := o.provider.ChatCompletion(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	if resp == nil {
-		return nil, emptyProviderResponseError("")
+		return nil, emptyProviderResponseError(providerName)
 	}
 	if len(resp.Choices) == 0 {
-		return nil, core.NewNoChoicesProviderError(resp.Provider)
+		return nil, core.NewNoChoicesProviderError(providerName)
 	}
 	return resp, nil
 }
 
-func (o *InferenceOrchestrator) responsesProviderCall(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
+func (o *InferenceOrchestrator) responsesProviderCall(ctx context.Context, req *core.ResponsesRequest, providerName string) (*core.ResponsesResponse, error) {
 	resp, err := o.provider.Responses(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	if resp == nil {
-		return nil, emptyProviderResponseError("")
+		return nil, emptyProviderResponseError(providerName)
 	}
 	return resp, nil
 }
 
-func (o *InferenceOrchestrator) streamChatCompletionProviderCall(ctx context.Context, req *core.ChatRequest) (io.ReadCloser, error) {
+func (o *InferenceOrchestrator) streamChatCompletionProviderCall(ctx context.Context, req *core.ChatRequest, _ string) (io.ReadCloser, error) {
 	return o.provider.StreamChatCompletion(ctx, req)
 }
 
-func (o *InferenceOrchestrator) streamResponsesProviderCall(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
+func (o *InferenceOrchestrator) streamResponsesProviderCall(ctx context.Context, req *core.ResponsesRequest, _ string) (io.ReadCloser, error) {
 	return o.provider.StreamResponses(ctx, req)
 }
 
-func emptyProviderResponseError(providerType string) *core.GatewayError {
-	return core.NewEmptyProviderResponseError(providerType)
+func emptyProviderResponseError(provider string) *core.GatewayError {
+	return core.NewEmptyProviderResponseError(provider)
 }
 
-func emptyProviderStreamError(providerType string) *core.GatewayError {
-	return core.NewProviderError(providerType, http.StatusBadGateway, "provider returned empty stream", nil)
+func emptyProviderStreamError(provider string) *core.GatewayError {
+	return core.NewProviderError(provider, http.StatusBadGateway, "provider returned empty stream", nil)
 }
 
 func chatResponseModel(resp *core.ChatResponse) string {
@@ -504,7 +508,7 @@ func (o *InferenceOrchestrator) executeEmbeddings(
 	resp, err := o.provider.Embeddings(ctx, req)
 	if err == nil {
 		if resp == nil {
-			return nil, "", "", emptyProviderResponseError(providerType)
+			return nil, "", "", emptyProviderResponseError(providerName)
 		}
 		return resp, ResponseProviderType(providerType, resp.Provider), providerName, nil
 	}

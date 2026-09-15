@@ -129,6 +129,36 @@ func TestEnforceRateLimitBreachReturns429WithHeaders(t *testing.T) {
 	require.Equal(t, "1", headers.Get("x-ratelimit-limit-requests"))
 }
 
+// A concurrency breach reports the same limit/remaining headers as a window
+// breach; only the reset header is absent, because an in-flight gauge has no
+// window to reset.
+func TestEnforceRateLimitConcurrencyBreachSendsRequestHeaders(t *testing.T) {
+	maxRequests := int64(1)
+	service := newTestRateLimitService(t, ratelimit.Rule{
+		Subject:       "/team",
+		PeriodSeconds: ratelimit.PeriodConcurrent,
+		MaxRequests:   &maxRequests,
+	})
+
+	c, _ := newRateLimitTestContext(t, "/team/alice")
+	release, err := enforceRateLimit(c, service, rateLimitRoute{})
+	require.NoError(t, err)
+	defer release()
+
+	c2, _ := newRateLimitTestContext(t, "/team/alice")
+	_, err = enforceRateLimit(c2, service, rateLimitRoute{})
+	require.Error(t, err, "second in-flight request admitted, want breach")
+
+	headerErr, ok := err.(*gatewayErrorWithResponseHeaders)
+	require.True(t, ok, "error %T does not carry response headers", err)
+
+	headers := headerErr.ResponseHeaders()
+	require.Equal(t, "1", headers.Get("x-ratelimit-limit-requests"))
+	require.Equal(t, "0", headers.Get("x-ratelimit-remaining-requests"))
+	require.Empty(t, headers.Get("x-ratelimit-reset-requests"), "no reset header for a concurrency breach")
+	require.NotEmpty(t, headers.Get("Retry-After"))
+}
+
 func TestEnforceRateLimitDefaultsToRootPath(t *testing.T) {
 	service := newTestRateLimitService(t, rateLimitRuleWithRequests("/", 1))
 

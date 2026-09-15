@@ -224,16 +224,19 @@ func TestRateLimitEndpointsProviderAndModelScopes(t *testing.T) {
 	require.Len(t, body.RateLimits, 1)
 
 	item := body.RateLimits[0]
+	// Matching is case-insensitive, but the rule is reported with the
+	// spelling it was written with: the folded key names no configured
+	// provider.
 	assert.Equal(t, "provider", item.Scope)
-	assert.Equal(t, "openai", item.Subject, "subject must be normalized to lowercase")
+	assert.Equal(t, "OpenAI", item.Subject, "subject must keep the spelling it was written with")
 	assert.Empty(t, item.UserPath)
 
 	// The rule gates routes immediately.
 	_, err = service.Acquire(ratelimit.Subjects{UserPath: "/", Provider: "openai", Model: "openai/gpt-4o"}, rateLimitTestNow)
 	require.NoError(t, err)
 
-	// A model rule for the same period coexists; mixed-case subjects are
-	// stored lowercase and match lowercase live routes.
+	// A model rule for the same period coexists; mixed-case subjects match
+	// lowercase live routes and keep their written spelling.
 	modelCtx, modelRec := echotest.Request(t, http.MethodPut, "/admin/rate-limits", `{"scope":"model","subject":"OpenAI/GPT-4o","limit_key":{"period":"minute"},"max_tokens":90000}`)
 	err = h.UpsertRateLimit(modelCtx)
 	require.NoError(t, err)
@@ -247,7 +250,7 @@ func TestRateLimitEndpointsProviderAndModelScopes(t *testing.T) {
 			modelSubjects = append(modelSubjects, item.Subject)
 		}
 	}
-	assert.Equal(t, []string{"openai/gpt-4o"}, modelSubjects)
+	assert.Equal(t, []string{"OpenAI/GPT-4o"}, modelSubjects)
 
 	service.RecordTokens(ratelimit.Subjects{UserPath: "/", Provider: "openai", Model: "gpt-4o"}, 90000, rateLimitTestNow)
 	_, err = service.Acquire(ratelimit.Subjects{UserPath: "/", Provider: "openai", Model: "gpt-4o"}, rateLimitTestNow)

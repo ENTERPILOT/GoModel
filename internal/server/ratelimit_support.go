@@ -198,6 +198,13 @@ func rateLimitBreachHeaders(exceeded *ratelimit.ExceededError) http.Header {
 		headers.Set(rateLimitLimitTokensHeader, limit)
 		headers.Set(rateLimitRemainingTokensHeader, "0")
 		headers.Set(rateLimitResetTokensHeader, reset)
+	case ratelimit.ScopeConcurrency:
+		// An in-flight gauge has no window: the cap and the zero headroom are
+		// well defined, a reset time is not — a slot frees when a request
+		// finishes. Retry-After carries the retry hint instead, so
+		// x-ratelimit-reset-requests is deliberately omitted here.
+		headers.Set(rateLimitLimitRequestsHeader, limit)
+		headers.Set(rateLimitRemainingRequestsHeader, "0")
 	}
 	return headers
 }

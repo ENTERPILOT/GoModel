@@ -177,6 +177,49 @@ func TestClassifyBulkWriteError(t *testing.T) {
 	}
 }
 
+// TestMongoDBStoreSubjectDisplayPrecedence is the MongoDB half of
+// TestSQLStoreSubjectDisplayPrecedence: the folded subject stays the key, and a
+// config re-seed may not re-spell a subject an operator edited by hand.
+func TestMongoDBStoreSubjectDisplayPrecedence(t *testing.T) {
+	tests := []struct {
+		name        string
+		storedSpell string
+		storedSrc   string
+		nextSpell   string
+		nextSrc     string
+		want        string
+	}{
+		{name: "config over config", storedSpell: "mockA", storedSrc: SourceConfig, nextSpell: "MOCKA", nextSrc: SourceConfig, want: "MOCKA"},
+		{name: "config over manual", storedSpell: "mockA", storedSrc: SourceManual, nextSpell: "MOCKA", nextSrc: SourceConfig, want: "mockA"},
+		{name: "manual over config", storedSpell: "mockA", storedSrc: SourceConfig, nextSpell: "MOCKA", nextSrc: SourceManual, want: "MOCKA"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+				ctx := context.Background()
+				store, err := NewMongoDBStore(ctx, db)
+				require.NoError(t, err)
+
+				err = store.UpsertRules(ctx, []Rule{
+					{Scope: ScopeProvider, Subject: tt.storedSpell, PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(1)), Source: tt.storedSrc},
+				})
+				require.NoError(t, err)
+
+				err = store.UpsertRules(ctx, []Rule{
+					{Scope: ScopeProvider, Subject: tt.nextSpell, PeriodSeconds: PeriodMinuteSeconds, MaxRequests: new(int64(2)), Source: tt.nextSrc},
+				})
+				require.NoError(t, err, "second UpsertRules")
+
+				rules, err := store.ListRules(ctx)
+				require.NoError(t, err)
+				require.Len(t, rules, 1, "rules = %+v", rules)
+				require.Equal(t, "mocka", rules[0].Subject, "subject must be the folded match key")
+				require.Equal(t, tt.want, rules[0].DisplaySubject())
+			})
+		})
+	}
+}
+
 // A MongoDB database written before rule scopes existed carries a unique index
 // on (user_path, period_seconds). Unsetting user_path collapses every migrated
 // document of the same period onto one index key, so the legacy index has to go

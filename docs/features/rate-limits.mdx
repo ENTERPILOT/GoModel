@@ -162,7 +162,9 @@ on `/` applies to all traffic.
 Provider rules match the resolved provider instance by name. Model rules
 match the executed model: a provider-qualified subject (`openai/gpt-4o`)
 covers one provider's model, a bare subject (`gpt-4o`) covers that model on
-any provider. Matching is case-insensitive.
+any provider. Matching is case-insensitive, and the rule keeps the spelling
+you wrote it with — a rule on provider `openai-EU` is listed and reported as
+`openai-EU`, while still matching the route however it is cased.
 
 **A rule owns one shared counter for its whole subject.** A `100 rpm` rule on
 `/team` allows 100 requests per minute across everything under `/team`
@@ -255,6 +257,13 @@ with status `429` and a `Retry-After` header holding the seconds until a
 retry would actually be admitted under the sliding window (which can extend
 past the next window boundary). OpenAI SDKs back off automatically on this
 shape.
+
+The breach also carries the `x-ratelimit-*` headers for the limit that was
+hit: `limit`/`remaining`/`reset` for a request or token window. A
+**concurrency** breach sends `x-ratelimit-limit-requests` and
+`x-ratelimit-remaining-requests` (always `0`) but no
+`x-ratelimit-reset-requests`: an in-flight gauge has no window to reset — a
+slot frees when a request finishes, which is what `Retry-After` estimates.
 
 Successful responses on limited paths carry OpenAI-style headers from the
 most-constrained matching rule:
