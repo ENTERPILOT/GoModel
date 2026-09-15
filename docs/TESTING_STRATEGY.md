@@ -31,15 +31,19 @@ that is reachable:
 | MongoDB | `mongotest.Run` | `MONGO_TEST_DSN` set (CI: `tools/ci/mongo-replset.sh`) |
 
 Without the variable the backend's subtest skips, so a green run without
-PostgreSQL or MongoDB covers SQLite only. CI sets both on the shards that own
-stores. Locally:
+PostgreSQL or MongoDB covers SQLite only. A variable that is set but points at
+an unreachable server fails the run. CI sets both in the unit job. Locally:
 
 ```bash
-# single-node replica set (the guardrails and workflows stores use transactions)
-MONGO_PORT=27217 sh tools/ci/mongo-replset.sh start && MONGO_PORT=27217 sh tools/ci/mongo-replset.sh wait
-MONGO_TEST_DSN='mongodb://localhost:27217/?replicaSet=rs&directConnection=true' go test ./internal/...
+# single-node replica set on 127.0.0.1:27017 (the guardrails and workflows
+# stores use transactions, so a plain mongod is not enough)
+sh tools/ci/mongo-replset.sh start && sh tools/ci/mongo-replset.sh wait
+MONGO_TEST_DSN='mongodb://localhost:27017/?replicaSet=rs&directConnection=true' go test ./internal/...
 docker rm -f gomodel-mongo
 ```
+
+Set `MONGO_PORT` only when 27017 is already taken, for example by the
+`docker compose` MongoDB, and use the same port in `MONGO_TEST_DSN`.
 
 ## Test Architecture Overview
 

@@ -10,7 +10,8 @@
 #   mongo-replset.sh wait    block until the container runs, initiate the
 #                            replica set, and wait for a primary
 #
-# MONGO_PORT (default 27017) picks the published port; MONGO_WAIT_SECONDS
+# The server has no authentication, so the port is published on loopback
+# only. MONGO_PORT (default 27017) picks the port; MONGO_WAIT_SECONDS
 # (default 180) bounds the wait.
 #
 # The suites read MONGO_TEST_DSN; the workflow sets it to
@@ -34,9 +35,9 @@ start)
 	# setsid puts the pull in its own session so it survives the calling step
 	# ending; macOS has no setsid, so fall back to nohup alone there.
 	if command -v setsid >/dev/null 2>&1; then
-		setsid nohup sh -c "docker run -d --rm --name $name -p $port:27017 $image --replSet rs --bind_ip_all" >"$log" 2>&1 &
+		setsid nohup sh -c "docker run -d --rm --name $name -p 127.0.0.1:$port:27017 $image --replSet rs --bind_ip_all" >"$log" 2>&1 &
 	else
-		nohup sh -c "docker run -d --rm --name $name -p $port:27017 $image --replSet rs --bind_ip_all" >"$log" 2>&1 &
+		nohup sh -c "docker run -d --rm --name $name -p 127.0.0.1:$port:27017 $image --replSet rs --bind_ip_all" >"$log" 2>&1 &
 	fi
 	echo "mongo-replset: starting $name in the background"
 	;;
