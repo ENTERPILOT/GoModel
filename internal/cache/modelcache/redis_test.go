@@ -101,7 +101,7 @@ func TestRedisModelCache_CloseClosesOwnedStore(t *testing.T) {
 	assert.Equal(t, 1, spy.closeCalls)
 	err = // Second Close must not panic or error.
 		c.Close()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 2, spy.closeCalls)
 }
 

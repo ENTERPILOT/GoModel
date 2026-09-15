@@ -70,9 +70,7 @@ func TestMergeMetadata_DoesNotMutateInputs(t *testing.T) {
 		Capabilities: map[string]bool{"tools": true},
 	}
 	_ = MergeMetadata(base, override)
-	if base.Capabilities["tools"] {
-		t.Error("base.Capabilities[tools] mutated")
-	}
+	assert.False(t, base.Capabilities["tools"], "base.Capabilities[tools] mutated")
 	assert.True(t, override.Capabilities["tools"])
 }
 

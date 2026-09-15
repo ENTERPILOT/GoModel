@@ -170,14 +170,14 @@ func TestValidateCredential_VertexFieldsNeedAnExplicitBackend(t *testing.T) {
 	explicit := ambiguous
 	explicit.Backend = "vertex"
 	err := validateCredential(explicit, schema)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// With a key the row resolves and runs, so the adapter's own inference
 	// takes it from there.
 	keyed := ambiguous
 	keyed.APIKeys = []string{"AIza-real"}
 	err = validateCredential(keyed, schema)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// A type with no backend field to set is never asked to set one.
 	vertexOnly := credentialSchema("vertex", DiscoveryConfig{
@@ -247,7 +247,7 @@ func TestCredentialsService_UpsertRejectsAnIncompleteRowWithoutStoringIt(t *test
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "no-key", Type: "test", Enabled: true})
 	assertCredentialField(t, err, CredentialFieldAPIKeys)
 	_, err = store.Get(ctx, "no-key")
-	assert.ErrorIs(t, err, ErrCredentialNotFound)
+	require.ErrorIs(t, err, ErrCredentialNotFound)
 	assert.Equal(t, 0, registry.ProviderCount())
 }
 
@@ -288,7 +288,7 @@ func TestCredentialsService_CredentialSchemasCoverEveryRegisteredType(t *testing
 	require.NoError(t, err)
 
 	schemas := svc.CredentialSchemas()
-	require.Equal(t, len(factory.RegisteredTypes()), len(schemas))
+	require.Len(t, schemas, len(factory.RegisteredTypes()))
 	assert.True(t, svc.CredentialSchema("a").Accepts(CredentialFieldAPIKeys))
 	assert.True(t, svc.CredentialSchema("unknown").Accepts(CredentialFieldModels))
 }

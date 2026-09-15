@@ -381,7 +381,7 @@ func TestConvertResponsesRequestToChat_AcceptsAnnotationOnlyInclude(t *testing.T
 			require.Len(t, chatReq.Messages, 1)
 			require.Equal(t, "Hello", chatReq.Messages[0].Content)
 			require.True(t, chatReq.ExtraFields.IsEmpty(), "ExtraFields = %#v, want include dropped rather than forwarded", chatReq.ExtraFields)
-			require.Equal(t, len(tt.include), len(req.Include), "req.Include = %#v, want the caller's request left unmutated", req.Include)
+			require.Len(t, req.Include, len(tt.include), "req.Include = %#v, want the caller's request left unmutated", req.Include)
 		})
 	}
 }

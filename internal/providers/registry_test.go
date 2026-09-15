@@ -171,7 +171,7 @@ func TestModelRegistry(t *testing.T) {
 		require.NotNil(t, model)
 		require.Equal(t, "model", model.Model.Object)
 		require.Equal(t, "test", model.Model.OwnedBy)
-		require.Greater(t, model.Model.Created, int64(0))
+		require.Positive(t, model.Model.Created)
 
 		snapshots := registry.ProviderRuntimeSnapshots()
 		require.Len(t, snapshots, 1)
@@ -253,7 +253,7 @@ func TestModelRegistry(t *testing.T) {
 
 		configured := registry.GetModel("configured-model")
 		require.NotNil(t, configured)
-		require.Greater(t, configured.Model.Created, int64(0))
+		require.Positive(t, configured.Model.Created)
 		require.Equal(t, "test-type", configured.Model.OwnedBy)
 
 		snapshots := registry.ProviderRuntimeSnapshots()
@@ -1965,7 +1965,7 @@ func TestGetCategoryCounts(t *testing.T) {
 	counts := registry.GetCategoryCounts()
 
 	// Should have entries for all categories
-	require.Equal(t, len(core.AllCategories()), len(counts))
+	require.Len(t, counts, len(core.AllCategories()))
 
 	// Verify specific counts
 	countMap := make(map[core.ModelCategory]int)

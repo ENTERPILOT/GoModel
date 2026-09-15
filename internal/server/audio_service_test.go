@@ -532,7 +532,7 @@ func TestAudioTranscription_LogsUploadedAudioWhenEnabled(t *testing.T) {
 	require.Equal(t, "audio/mpeg", body.ContentType, "expected stored audio/mpeg (from .mp3 extension), got %+v", body)
 
 	decoded, err := base64.StdEncoding.DecodeString(body.Data)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "uploaded-audio-bytes", string(decoded))
 	assert.Equal(t, "gpt-4o-transcribe", body.Meta["model"])
 	assert.Equal(t, "en", body.Meta["language"], "upload metadata mismatch: %+v", body.Meta)
@@ -776,7 +776,7 @@ func TestAudioSpeech_LogsAudioBodiesWhenEnabled(t *testing.T) {
 	require.Equal(t, "base64", respBody.Encoding, "expected stored base64 audio, got %+v", respBody)
 
 	decoded, err := base64.StdEncoding.DecodeString(respBody.Data)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "synthetic-audio", string(decoded))
 }
 

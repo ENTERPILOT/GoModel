@@ -129,7 +129,7 @@ func TestTransformedSSEStream_PassThroughIsByteIdentical(t *testing.T) {
 			assert.Equal(t, i, ev.Seq)
 		}
 		err = stream.Close()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, upstream.closed)
 	}
 }
@@ -169,7 +169,7 @@ func TestTransformedSSEStream_ReplaceAndDrop(t *testing.T) {
 	assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
 	assert.Contains(t, out, ": keep-alive\n\n")
 	require.Len(t, reported, 1)
-	assert.ErrorIs(t, reported[0], ErrNotTextEvent)
+	require.ErrorIs(t, reported[0], ErrNotTextEvent)
 
 	resp, err := AssembleChatResponse(decodeChatEvents(t, got))
 	require.NoError(t, err)
@@ -248,7 +248,7 @@ func TestTransformedSSEStream_TransformerErrorFailsClosed(t *testing.T) {
 			assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
 			assert.Equal(t, 1, strings.Count(out, "[DONE]"), "exactly one [DONE] expected:\n%s", out)
 			require.Len(t, reported, 1)
-			assert.ErrorIs(t, reported[0], boom)
+			require.ErrorIs(t, reported[0], boom)
 			assert.True(t, upstream.closed)
 		})
 	}
@@ -278,7 +278,7 @@ func TestTransformedSSEStream_UpstreamWithoutDoneStillCallsOnEnd(t *testing.T) {
 	input := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n"
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(input)), ChatCodec(), tr, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, input, string(got))
 	assert.True(t, ended)
 }
@@ -516,7 +516,7 @@ func TestTransformedSSEStream_OversizedEventFailsClosed(t *testing.T) {
 			assert.NotContains(t, out, "after", "uninspected content leaked:\n%s", out)
 			assert.Contains(t, out, `"code":"event_too_large"`)
 			assert.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"))
-			assert.ErrorIs(t, reported, ErrEventTooLarge)
+			require.ErrorIs(t, reported, ErrEventTooLarge)
 			assert.Empty(t, tr.seen)
 			assert.True(t, upstream.closed)
 		})

@@ -164,7 +164,7 @@ func TestSQLConversationMergeMetadataRejectsOversizedResult(t *testing.T) {
 
 		got, err := store.Get(context.Background(), conv.Conversation.ID)
 		require.NoError(t, err)
-		require.Equal(t, core.MaxConversationMetadataPairs, len(got.Conversation.Metadata))
+		require.Len(t, got.Conversation.Metadata, core.MaxConversationMetadataPairs)
 	})
 }
 

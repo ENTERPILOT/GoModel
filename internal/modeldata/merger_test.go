@@ -240,7 +240,7 @@ func TestResolve_SetsCategoriesFromModes(t *testing.T) {
 		t.Run(tt.modelID, func(t *testing.T) {
 			meta := Resolve(list, "openai", tt.modelID)
 			require.NotNil(t, meta, "expected non-nil metadata")
-			require.Equal(t, len(tt.wantCats), len(meta.Categories), "Categories = %v, want %v", meta.Categories, tt.wantCats)
+			require.Len(t, meta.Categories, len(tt.wantCats), "Categories = %v, want %v", meta.Categories, tt.wantCats)
 
 			for i, c := range meta.Categories {
 				assert.Equal(t, tt.wantCats[i], c, "Categories[%d] = %q, want %q", i, c, tt.wantCats[i])

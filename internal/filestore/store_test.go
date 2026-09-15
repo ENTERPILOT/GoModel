@@ -145,7 +145,7 @@ func TestStoreDeleteRemovesMapping(t *testing.T) {
 func TestStoreRejectsIncompleteMapping(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-		assert.Error(t, store.Upsert(ctx, &StoredFile{ProviderType: "openai"}))
+		require.Error(t, store.Upsert(ctx, &StoredFile{ProviderType: "openai"}))
 		assert.Error(t, store.Upsert(ctx, &StoredFile{ID: "file-1"}))
 	})
 }

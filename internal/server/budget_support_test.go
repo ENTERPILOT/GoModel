@@ -185,7 +185,7 @@ func TestBudgetExceededResponseIncludesRetryAfter(t *testing.T) {
 
 	seconds, parseErr := strconv.Atoi(retryAfter)
 	require.NoError(t, parseErr, "Retry-After = %q, want delay seconds", retryAfter)
-	require.Greater(t, seconds, 0)
+	require.Positive(t, seconds)
 	require.LessOrEqual(t, seconds, 300)
 }
 

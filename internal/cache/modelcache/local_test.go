@@ -128,7 +128,7 @@ func TestModelCacheSerialization(t *testing.T) {
 		var restored ModelCache
 		err = json.Unmarshal(data, &restored)
 		require.NoError(t, err)
-		require.Equal(t, len(original.Providers), len(restored.Providers))
+		require.Len(t, restored.Providers, len(original.Providers))
 
 		openai, ok := restored.Providers["openai-main"]
 		require.True(t, ok)

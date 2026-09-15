@@ -56,5 +56,5 @@ func TestRouterCountMessagesTokens_PropagatesProviderError(t *testing.T) {
 
 	_, err := router.CountMessagesTokens(context.Background(), "anthropic/claude-haiku-4-5", []byte(`{"messages":[]}`))
 	require.ErrorIs(t, err, upstream)
-	require.False(t, errors.Is(err, core.ErrMessagesTokenCountUnsupported))
+	require.NotErrorIs(t, err, core.ErrMessagesTokenCountUnsupported)
 }

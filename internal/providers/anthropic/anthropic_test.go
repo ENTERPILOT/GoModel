@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -773,7 +772,6 @@ func TestListModels(t *testing.T) {
 	assert.Equal(t, "1000", sent.Query.Get("limit"))
 	assert.NotEmpty(t, sent.Header.Get("x-api-key"))
 	assert.Equal(t, anthropicAPIVersion, sent.Header.Get("anthropic-version"))
-
 	assert.Equal(t, "list", resp.Object)
 	assert.Len(t, resp.Data, 3)
 
@@ -1169,27 +1167,22 @@ func TestConvertToAnthropicRequest_ResponseFormat(t *testing.T) {
 					"response_format": tt.responseFormat,
 				}),
 			})
-			if err != nil {
-				t.Fatalf("convertToAnthropicRequest() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			system, _ := result.System.(string)
-			if got := strings.Contains(system, "single valid JSON object"); got != tt.wantJSONPrompt {
-				t.Errorf("system instruction present = %v, want %v (system = %q)", got, tt.wantJSONPrompt, system)
-			}
+			got := strings.Contains(system, "single valid JSON object")
+			assert.Equal(t, tt.wantJSONPrompt, got, "system instruction present = %v, want %v (system = %q)", got, tt.wantJSONPrompt, system)
 
 			if tt.wantSchema == nil {
-				if result.OutputConfig != nil && result.OutputConfig.Format != nil {
-					t.Fatalf("OutputConfig.Format = %+v, want nil", result.OutputConfig.Format)
+				if result.OutputConfig != nil {
+					require.Nil(t, result.OutputConfig.Format, "OutputConfig.Format")
 				}
 				return
 			}
-			if result.OutputConfig == nil || result.OutputConfig.Format == nil {
-				t.Fatal("OutputConfig.Format = nil, want a json_schema format")
-			}
-			if result.OutputConfig.Format.Type != "json_schema" {
-				t.Errorf("Format.Type = %q, want %q", result.OutputConfig.Format.Type, "json_schema")
-			}
+			require.NotNil(t, result.OutputConfig)
+			require.NotNil(t, result.OutputConfig.Format)
+			assert.Equal(t, "json_schema", result.OutputConfig.Format.Type)
+
 			assertJSONEqual(t, result.OutputConfig.Format.Schema, tt.wantSchema)
 		})
 	}
@@ -1211,15 +1204,10 @@ func TestConvertToAnthropicRequest_ResponseFormatKeepsTools(t *testing.T) {
 				`"schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}`),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if len(result.Tools) != 1 {
-		t.Fatalf("Tools = %d, want 1", len(result.Tools))
-	}
-	if result.OutputConfig == nil || result.OutputConfig.Format == nil {
-		t.Fatal("OutputConfig.Format = nil, want a json_schema format alongside the tools")
-	}
+	require.NoError(t, err)
+	require.Len(t, result.Tools, 1)
+	require.NotNil(t, result.OutputConfig)
+	require.NotNil(t, result.OutputConfig.Format)
 }
 
 func TestConvertToAnthropicRequest_ResponseFormatKeepsEffort(t *testing.T) {
@@ -1232,18 +1220,10 @@ func TestConvertToAnthropicRequest_ResponseFormatKeepsEffort(t *testing.T) {
 				`"schema":{"type":"object","properties":{"answer":{"type":"string"}}}}}`),
 		}),
 	})
-	if err != nil {
-		t.Fatalf("convertToAnthropicRequest() error = %v", err)
-	}
-	if result.OutputConfig == nil {
-		t.Fatal("OutputConfig = nil")
-	}
-	if result.OutputConfig.Effort != "high" {
-		t.Errorf("OutputConfig.Effort = %q, want %q", result.OutputConfig.Effort, "high")
-	}
-	if result.OutputConfig.Format == nil {
-		t.Error("OutputConfig.Format = nil, want a json_schema format")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, result.OutputConfig)
+	assert.Equal(t, "high", result.OutputConfig.Effort)
+	assert.NotNil(t, result.OutputConfig.Format)
 }
 
 func TestSanitizeAnthropicSchema(t *testing.T) {
@@ -1322,13 +1302,13 @@ func TestSanitizeAnthropicSchema(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var input map[string]any
-			if err := json.Unmarshal([]byte(tt.input), &input); err != nil {
-				t.Fatalf("invalid test input: %v", err)
-			}
+			err := json.Unmarshal([]byte(tt.input), &input)
+			require.NoError(t, err)
+
 			var want map[string]any
-			if err := json.Unmarshal([]byte(tt.want), &want); err != nil {
-				t.Fatalf("invalid test expectation: %v", err)
-			}
+			err = json.Unmarshal([]byte(tt.want), &want)
+			require.NoError(t, err)
+
 			assertJSONEqual(t, sanitizeAnthropicSchema(input), want)
 		})
 	}
@@ -1337,23 +1317,17 @@ func TestSanitizeAnthropicSchema(t *testing.T) {
 func assertJSONEqual(t *testing.T, got, want any) {
 	t.Helper()
 	gotJSON, err := json.Marshal(got)
-	if err != nil {
-		t.Fatalf("marshal got: %v", err)
-	}
+	require.NoError(t, err)
+
 	wantJSON, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("marshal want: %v", err)
-	}
+	require.NoError(t, err)
+
 	var gotAny, wantAny any
-	if err := json.Unmarshal(gotJSON, &gotAny); err != nil {
-		t.Fatalf("unmarshal got: %v", err)
-	}
-	if err := json.Unmarshal(wantJSON, &wantAny); err != nil {
-		t.Fatalf("unmarshal want: %v", err)
-	}
-	if !reflect.DeepEqual(gotAny, wantAny) {
-		t.Errorf("got %s, want %s", gotJSON, wantJSON)
-	}
+	err = json.Unmarshal(gotJSON, &gotAny)
+	require.NoError(t, err)
+	err = json.Unmarshal(wantJSON, &wantAny)
+	require.NoError(t, err)
+	assert.Equal(t, wantAny, gotAny, "got %s, want %s", gotJSON, wantJSON)
 }
 
 func TestConvertToAnthropicRequest_IgnoresNoopChatExtras(t *testing.T) {
@@ -1579,7 +1553,6 @@ func TestConvertToAnthropicRequest_RejectsTrailingToolArgumentContent(t *testing
 	require.ErrorAs(t, err, &gatewayErr)
 	require.Equal(t, core.ErrorTypeInvalidRequest, gatewayErr.Type)
 	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
-
 	assert.True(t,
 		strings.Contains(gatewayErr.Message, "invalid character") || strings.Contains(gatewayErr.Message, "exactly one JSON object"),
 		"error message = %q, want trailing content validation", gatewayErr.Message)
@@ -1752,7 +1725,7 @@ func TestConvertOpenAIToolsToAnthropic(t *testing.T) {
 
 				return
 			}
-			require.Equal(t, tt.wantLen, len(result))
+			require.Len(t, result, tt.wantLen)
 
 			if tt.checkFn != nil {
 				tt.checkFn(t, result)
@@ -1875,7 +1848,7 @@ func TestConvertToAnthropicRequest_FilePartsBecomeDocuments(t *testing.T) {
 			{Type: "file", File: &core.FileContent{FileData: "data:image/png;base64,aGVsbG8="}},
 		}}},
 	})
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	for _, file := range []core.FileContent{
 		{FileURL: "ftp://example.com/a.pdf"},
