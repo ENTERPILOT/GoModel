@@ -2,6 +2,7 @@ package mcpgateway
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,5 +100,55 @@ func TestUpstreamConnectKeepsSessionLossDiagnosis(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `connect to mcp server "alpha"`) {
 		t.Fatalf("error = %q, want the connect wrapper", err)
+	}
+}
+
+// TestUpstreamSSEConnectNamesMissingEndpoint covers the legacy SSE transport,
+// whose handshake is a GET: a 404 there must get the same URL hint.
+func TestUpstreamSSEConnectNamesMissingEndpoint(t *testing.T) {
+	ts := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(ts.Close)
+
+	u := newUpstream(testSpec("alpha", ts.URL+"/sse", func(spec *ServerSpec) { spec.Transport = "sse" }), ts.Client())
+	err := u.refresh(context.Background())
+	if err == nil {
+		t.Fatalf("refresh() against a non-MCP path should error")
+	}
+	if !strings.Contains(err.Error(), ts.URL+" answered HTTP 404 Not Found") {
+		t.Fatalf("error = %q, want the missing-endpoint hint", err)
+	}
+}
+
+// TestUpstreamConnectRedactsTransportFailure covers a dial that never gets
+// a response: the HTTP client's error carries the full URL, and everything
+// but the origin must be stripped before it reaches logs or the dashboard.
+func TestUpstreamConnectRedactsTransportFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	for _, transport := range []string{"http", "sse"} {
+		t.Run(transport, func(t *testing.T) {
+			url := "http://user:user-secret@" + addr + "/path-secret?token=query-secret"
+			u := newUpstream(testSpec("alpha", url, func(spec *ServerSpec) { spec.Transport = transport }), nil)
+			err := u.refresh(context.Background())
+			if err == nil {
+				t.Fatalf("refresh() against a closed port should error")
+			}
+			if !strings.Contains(err.Error(), "http://"+addr) {
+				t.Fatalf("error = %q, want the origin kept", err)
+			}
+			for _, leak := range []string{"user", "path-secret", "query-secret"} {
+				if strings.Contains(err.Error(), leak) {
+					t.Fatalf("error = %q leaks %q from the URL", err, leak)
+				}
+			}
+			if view := u.view(); strings.Contains(view.LastError, "secret") {
+				t.Fatalf("LastError = %q leaks the URL", view.LastError)
+			}
+		})
 	}
 }

@@ -153,8 +153,8 @@ forces a redial.
 
 A last error of `no MCP endpoint at that path` means the URL answered the
 handshake with HTTP 404 or 405: something listens there, but not an MCP
-server. Servers mount their endpoint under different paths, so `url` must
-include it — for example `http://localhost:18080/http` for mcp-devtools or
+endpoint at that path. Servers mount their endpoint under different paths, so
+`url` must include it — for example `http://localhost:18080/http` for mcp-devtools or
 `http://localhost:3000/v2/mcp` for self-hosted Firecrawl. Stateless servers
 (no `Mcp-Session-Id`) need no extra configuration.
 
