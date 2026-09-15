@@ -81,9 +81,7 @@ func TestGeminiReplayListModels(t *testing.T) {
 }
 
 func TestGeminiReplayResponses(t *testing.T) {
-	if !goldenFileExists(t, "golden/gemini/responses.golden.json") {
-		t.Fatalf("missing golden file golden/gemini/responses.golden.json; run `make record-api` then `RECORD=1 go test -v -tags=contract -timeout=5m ./tests/contract/...`")
-	}
+	require.True(t, goldenFileExists(t, "golden/gemini/responses.golden.json"))
 
 	provider := newGeminiReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/chat/completions"): jsonFixtureRoute(t, "gemini/chat_completion.json"),

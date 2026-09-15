@@ -2,7 +2,6 @@ package pluginapi
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -68,16 +67,12 @@ func TestConfigReaders(t *testing.T) {
 	got = c.Lines("lines")
 	assert.Equal(t, []string{"one", "", "# two"}, got)
 
-	if got := c.Roles("roles"); !reflect.DeepEqual(got, map[Role]bool{RoleSystem: true, RoleDeveloper: true, RoleUser: true}) {
-		t.Errorf("Roles = %v", got)
-	}
-	if got := c.Roles("missing", RoleUser); !reflect.DeepEqual(got, map[Role]bool{RoleUser: true}) {
-		t.Errorf("Roles default = %v", got)
-	}
+	assert.Equal(t, map[Role]bool{RoleSystem: true, RoleDeveloper: true, RoleUser: true}, c.Roles("roles"), "Roles")
+	assert.Equal(t, map[Role]bool{RoleUser: true}, c.Roles("missing", RoleUser), "Roles default")
 	assert.NotNil(t, c.Raw("name"))
 	assert.Nil(t, c.Raw("missing"))
 	err := c.Err()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	c = parse(t, `{"list": [" a ", "", "b"], "lines": ["x", "y"], "roles": [], "flag": false, "n": ""}`)
 	got = c.List("list")
@@ -85,9 +80,7 @@ func TestConfigReaders(t *testing.T) {
 	got = c.Lines("lines")
 	assert.Equal(t, []string{"x", "y"}, got)
 
-	if got := c.Roles("roles", RoleUser); len(got) != 0 {
-		t.Errorf("Roles empty = %v", got)
-	}
+	assert.Empty(t, c.Roles("roles", RoleUser), "Roles empty")
 	assert.False(t, c.Bool("flag"))
 	assert.Equal(t, 5, c.Int("n", 5, 0, 9))
 }
