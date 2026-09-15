@@ -202,6 +202,13 @@ func (c *Client) DoStream(ctx context.Context, req Request) (io.ReadCloser, erro
 		c.completeScope(scope, embedded.StatusCode, providerErr, nil)
 		return nil, providerErr
 	}
+	// An empty stream, or one whose first SSE event is an error, fails here
+	// for the same reason: before headers are committed, so it can fail over.
+	if startErr := interceptStreamStart(c.config.ProviderName, resp); startErr != nil {
+		providerErr := attachResponseHeaders(startErr, resp.Header)
+		c.completeScope(scope, startErr.StatusCode, providerErr, nil)
+		return nil, providerErr
+	}
 
 	// The stream can outlive the request by minutes while transport internals
 	// keep resp.Request reachable. GetBody closes over the fully marshaled
