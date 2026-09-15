@@ -172,7 +172,7 @@ func TestResponsesStreaming(t *testing.T) {
 		assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 
 		events := readResponsesStream(t, resp.Body)
-		require.Greater(t, len(events), 0)
+		require.NotEmpty(t, events)
 		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed or response.done event")
 		assert.True(t, hasResponsesDoneMarker(events), "Should receive [DONE] marker")
 	})
@@ -196,7 +196,7 @@ func TestResponsesStreaming(t *testing.T) {
 		assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
 
 		events := readResponsesStream(t, resp.Body)
-		require.Greater(t, len(events), 0, "Should receive at least one SSE event")
+		require.NotEmpty(t, events, "Should receive at least one SSE event")
 		assert.True(t, hasResponsesCompletedEvent(events), "Should receive response.completed or response.done event")
 		assert.True(t, hasResponsesDoneMarker(events), "Should receive [DONE] marker")
 
@@ -315,7 +315,7 @@ func TestResponsesErrors(t *testing.T) {
 
 		upstream := requireRecordedResponsesRequest(t)
 		assert.Equal(t, "gpt-4.1", upstream.Model)
-		assert.Equal(t, "", upstream.Input, "empty input must be forwarded as empty string, not coerced")
+		assert.Empty(t, upstream.Input, "empty input must be forwarded as empty string, not coerced")
 	})
 
 	t.Run("invalid model", func(t *testing.T) {
@@ -343,8 +343,8 @@ func TestResponsesUsage(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&respBody))
 
 	require.NotNil(t, respBody.Usage)
-	assert.Greater(t, respBody.Usage.InputTokens, 0)
-	assert.Greater(t, respBody.Usage.OutputTokens, 0)
+	assert.Positive(t, respBody.Usage.InputTokens)
+	assert.Positive(t, respBody.Usage.OutputTokens)
 	assert.Equal(t, respBody.Usage.InputTokens+respBody.Usage.OutputTokens, respBody.Usage.TotalTokens)
 }
 

@@ -194,7 +194,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		entry := entries[0]
 		assert.NotEmpty(t, entry.ID)
 		assert.NotZero(t, entry.Timestamp)
-		assert.Greater(t, entry.DurationNs, int64(0))
+		assert.Positive(t, entry.DurationNs)
 		assert.Equal(t, http.StatusOK, entry.StatusCode)
 		assert.Equal(t, "POST", entry.Method)
 		assert.Equal(t, "/v1/chat/completions", entry.Path)
@@ -321,7 +321,7 @@ func TestAuditLogMiddleware(t *testing.T) {
 		// Wait a bit and verify no API entries were logged
 		time.Sleep(500 * time.Millisecond)
 		entries := store.GetAPIEntries()
-		assert.Len(t, entries, 0, "Expected no API log entries when logging is disabled")
+		assert.Empty(t, entries, "Expected no API log entries when logging is disabled")
 	})
 
 	t.Run("hashes API key for identification", func(t *testing.T) {
@@ -471,7 +471,7 @@ func TestAuditLogStreaming(t *testing.T) {
 		entry := entries[0]
 
 		// Verify duration is captured (should be > 0 since streaming takes time)
-		assert.Greater(t, entry.DurationNs, int64(0), "DurationNs should be captured for streaming requests")
+		assert.Positive(t, entry.DurationNs, "DurationNs should be captured for streaming requests")
 		// Duration should be reasonable (less than 10 seconds for this test)
 		assert.Less(t, entry.DurationNs, int64(10*time.Second), "DurationNs should be reasonable")
 	})
@@ -630,7 +630,7 @@ func TestAuditLogErrorCapture(t *testing.T) {
 		assert.Equal(t, "/v1/chat/completions", entry.Path)
 		assert.Equal(t, "unsupported-model-xyz", entry.RequestedModel)
 		assert.Equal(t, "not_found_error", entry.ErrorType)
-		assert.Equal(t, "", entry.Provider)
+		assert.Empty(t, entry.Provider)
 	})
 
 	t.Run("logs unsupported passthrough provider requests", func(t *testing.T) {
