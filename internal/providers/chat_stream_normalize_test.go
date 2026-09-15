@@ -4,6 +4,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // errAfterReadCloser yields its data once, then fails — simulating a connection
@@ -34,23 +36,14 @@ func TestEnsureChatCompletionSSE_ConvertsBufferedJSON(t *testing.T) {
 	stream := io.NopCloser(strings.NewReader(body))
 
 	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
 
 	out := string(got)
-	if !strings.HasPrefix(out, "data: {") {
-		t.Fatalf("expected SSE data framing, got %q", out)
-	}
-	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Fatalf("expected terminal done marker, got %q", out)
-	}
-	if !strings.Contains(out, `"object":"chat.completion.chunk"`) {
-		t.Fatalf("expected object rewritten to chunk, got %q", out)
-	}
-	if !strings.Contains(out, `"delta":`) || strings.Contains(out, `"message":`) {
-		t.Fatalf("expected message rewritten to delta, got %q", out)
-	}
+	require.True(t, strings.HasPrefix(out, "data: {"), "expected SSE data framing, got %q", out)
+	require.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "expected terminal done marker, got %q", out)
+	require.Contains(t, out, `"object":"chat.completion.chunk"`)
+	require.Contains(t, out, `"delta":`)
+	require.NotContains(t, out, `"message":`)
 }
 
 func TestEnsureChatCompletionSSE_PassesThroughRealSSE(t *testing.T) {
@@ -63,12 +56,8 @@ func TestEnsureChatCompletionSSE_PassesThroughRealSSE(t *testing.T) {
 	stream := &chunkedReadCloser{chunks: chunks}
 
 	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
-	if string(got) != original {
-		t.Fatalf("expected genuine SSE passed through unchanged.\n got: %q\nwant: %q", string(got), original)
-	}
+	require.NoError(t, err)
+	require.Equal(t, original, string(got))
 }
 
 func TestEnsureChatCompletionSSE_PassesThroughSSEWithLeadingComment(t *testing.T) {
@@ -77,12 +66,8 @@ func TestEnsureChatCompletionSSE_PassesThroughSSEWithLeadingComment(t *testing.T
 	stream := io.NopCloser(strings.NewReader(body))
 
 	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
-	if string(got) != body {
-		t.Fatalf("expected comment-prefixed SSE unchanged, got %q", string(got))
-	}
+	require.NoError(t, err)
+	require.Equal(t, body, string(got))
 }
 
 func TestEnsureChatCompletionSSE_PreservesPartialBodyOnReadError(t *testing.T) {
@@ -92,20 +77,13 @@ func TestEnsureChatCompletionSSE_PreservesPartialBodyOnReadError(t *testing.T) {
 	stream := &errAfterReadCloser{data: []byte(partial), err: io.ErrUnexpectedEOF}
 
 	got, err := io.ReadAll(EnsureChatCompletionSSE(stream))
-	if err != nil {
-		t.Fatalf("read stream: %v", err)
-	}
+	require.NoError(t, err)
+
 	out := string(got)
-	if !strings.Contains(out, "Hel") {
-		t.Fatalf("expected partial content preserved, got %q", out)
-	}
-	if !strings.HasSuffix(out, "data: [DONE]\n\n") {
-		t.Fatalf("expected terminal done marker, got %q", out)
-	}
+	require.Contains(t, out, "Hel")
+	require.True(t, strings.HasSuffix(out, "data: [DONE]\n\n"), "expected terminal done marker, got %q", out)
 }
 
 func TestEnsureChatCompletionSSE_NilStream(t *testing.T) {
-	if EnsureChatCompletionSSE(nil) != nil {
-		t.Fatal("expected nil for nil stream")
-	}
+	require.Nil(t, EnsureChatCompletionSSE(nil))
 }

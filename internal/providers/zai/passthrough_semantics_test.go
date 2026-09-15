@@ -4,20 +4,20 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPassthroughSemanticEnricherUsesZAIType(t *testing.T) {
 	enricher := Registration.PassthroughSemanticEnricher
-	if enricher == nil {
-		t.Fatal("registration passthrough enricher is nil")
-	}
-	if got := enricher.ProviderType(); got != "zai" {
-		t.Fatalf("ProviderType() = %q, want zai", got)
-	}
+	require.NotNil(t, enricher)
+	got := enricher.ProviderType()
+	require.Equal(t, "zai", got)
+
 	info := enricher.Enrich(nil, nil, &core.PassthroughRouteInfo{
 		Provider: "zai", NormalizedEndpoint: "embeddings",
 	})
-	if info == nil || info.GenAIOperation != "embeddings" || info.SemanticOperation != "zai.embeddings" || info.AuditPath != "/v1/embeddings" {
-		t.Fatalf("enriched info = %+v, want Z.ai embedding semantics", info)
-	}
+	require.NotNil(t, info)
+	require.Equal(t, "embeddings", info.GenAIOperation)
+	require.Equal(t, "zai.embeddings", info.SemanticOperation)
+	require.Equal(t, "/v1/embeddings", info.AuditPath)
 }

@@ -3,9 +3,10 @@ package authkeys
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 type testStore struct {
@@ -97,50 +98,27 @@ func (s *testStore) Close() error { return nil }
 
 func TestServiceCreateAuthenticateAndDeactivate(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if service.Enabled() {
-		t.Fatal("Enabled() = true, want false before any keys exist")
-	}
+	require.NoError(t, err)
+	require.False(t, service.Enabled())
 
 	issued, err := service.Create(context.Background(), CreateInput{Name: "primary"})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if issued == nil {
-		t.Fatal("Create() = nil, want issued key")
-		return
-	}
-	if len(issued.Value) <= len(TokenPrefix) || issued.Value[:len(TokenPrefix)] != TokenPrefix {
-		t.Fatalf("issued value = %q, want %q prefix", issued.Value, TokenPrefix)
-	}
-	if !service.Enabled() {
-		t.Fatal("Enabled() = false, want true after create")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, issued)
+	require.Greater(t, len(issued.Value), len(TokenPrefix))
+	require.Equal(t, TokenPrefix, issued.Value[:len(TokenPrefix)])
+	require.True(t, service.Enabled())
 
 	authKeyID, err := service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if authKeyID.ID != issued.ID {
-		t.Fatalf("Authenticate() id = %q, want %q", authKeyID.ID, issued.ID)
-	}
-
-	if err := service.Deactivate(context.Background(), issued.ID); err != nil {
-		t.Fatalf("Deactivate() error = %v", err)
-	}
-	if _, err := service.Authenticate(context.Background(), issued.Value); err != ErrInactive {
-		t.Fatalf("Authenticate() after deactivate error = %v, want %v", err, ErrInactive)
-	}
+	require.NoError(t, err)
+	require.Equal(t, issued.ID, authKeyID.ID)
+	err = service.Deactivate(context.Background(), issued.ID)
+	require.NoError(t, err)
+	_, err = service.Authenticate(context.Background(), issued.Value)
+	require.ErrorIs(t, err, ErrInactive)
 
 	views := service.ListViews()
-	if len(views) != 1 {
-		t.Fatalf("ListViews() len = %d, want 1", len(views))
-	}
-	if views[0].Active {
-		t.Fatal("ListViews()[0].Active = true, want false after deactivation")
-	}
+	require.Len(t, views, 1)
+	require.False(t, views[0].Active)
 }
 
 func TestServiceAuthenticateExpiredKey(t *testing.T) {
@@ -156,16 +134,11 @@ func TestServiceAuthenticateExpiredKey(t *testing.T) {
 		UpdatedAt:     time.Now().UTC().Add(-2 * time.Hour),
 	}
 	service, err := NewService(newTestStore(key))
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-
-	if _, err := service.Authenticate(context.Background(), TokenPrefix+"secret"); err != ErrExpired {
-		t.Fatalf("Authenticate() error = %v, want %v", err, ErrExpired)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+	require.ErrorIs(t, err, ErrExpired)
 }
 
 func TestServiceAuthenticateRechecksStaleActiveSnapshot(t *testing.T) {
@@ -181,41 +154,31 @@ func TestServiceAuthenticateRechecksStaleActiveSnapshot(t *testing.T) {
 		UpdatedAt:     time.Now().UTC().Add(-2 * time.Hour),
 	}
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	service.snapshot = snapshot{
 		order:        []string{key.ID},
 		byID:         map[string]AuthKey{key.ID: key},
 		bySecretHash: map[string]AuthKey{key.SecretHash: key},
 		activeByHash: map[string]AuthKey{key.SecretHash: key},
 	}
-
-	if _, err := service.Authenticate(context.Background(), TokenPrefix+"secret"); err != ErrExpired {
-		t.Fatalf("Authenticate() error = %v, want %v", err, ErrExpired)
-	}
+	_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+	require.ErrorIs(t, err, ErrExpired)
 }
 
 func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T) {
 	t.Run("create still succeeds when refresh reconciliation fails", func(t *testing.T) {
 		store := newTestStore()
 		service, err := NewService(store)
-		if err != nil {
-			t.Fatalf("NewService() error = %v", err)
-		}
+		require.NoError(t, err)
 
 		store.listErr = errors.New("transient list failure")
 		issued, err := service.Create(context.Background(), CreateInput{Name: "primary"})
-		if err != nil {
-			t.Fatalf("Create() error = %v", err)
-		}
-		if issued == nil {
-			t.Fatal("Create() = nil, want issued key")
-			return
-		}
-		if got, err := service.Authenticate(context.Background(), issued.Value); err != nil || got.ID != issued.ID {
-			t.Fatalf("Authenticate() = (%q, %v), want (%q, nil)", got.ID, err, issued.ID)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, issued)
+		got, err := service.Authenticate(context.Background(), issued.Value)
+		require.NoError(t, err)
+		require.Equal(t, issued.ID, got.ID)
 	})
 
 	t.Run("deactivate still succeeds when refresh reconciliation fails", func(t *testing.T) {
@@ -230,217 +193,135 @@ func TestServiceWriteOperationsIgnoreRefreshReconciliationFailures(t *testing.T)
 		}
 		store := newTestStore(key)
 		service, err := NewService(store)
-		if err != nil {
-			t.Fatalf("NewService() error = %v", err)
-		}
-		if err := service.Refresh(context.Background()); err != nil {
-			t.Fatalf("Refresh() error = %v", err)
-		}
+		require.NoError(t, err)
+		err = service.Refresh(context.Background())
+		require.NoError(t, err)
 
 		store.listErr = errors.New("transient list failure")
-		if err := service.Deactivate(context.Background(), key.ID); err != nil {
-			t.Fatalf("Deactivate() error = %v", err)
-		}
-		if _, err := service.Authenticate(context.Background(), TokenPrefix+"secret"); err != ErrInactive {
-			t.Fatalf("Authenticate() error = %v, want %v", err, ErrInactive)
-		}
+		err = service.Deactivate(context.Background(), key.ID)
+		require.NoError(t, err)
+		_, err = service.Authenticate(context.Background(), TokenPrefix+"secret")
+		require.ErrorIs(t, err, ErrInactive)
 	})
 }
 
 func TestServiceCreateNormalizesUserPathAndReturnsItOnAuthenticate(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	issued, err := service.Create(context.Background(), CreateInput{
 		Name:     "scoped",
 		UserPath: " team//alpha/service/ ",
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if issued.UserPath != "/team/alpha/service" {
-		t.Fatalf("issued.UserPath = %q, want /team/alpha/service", issued.UserPath)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/team/alpha/service", issued.UserPath)
 
 	authenticated, err := service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if authenticated.UserPath != "/team/alpha/service" {
-		t.Fatalf("Authenticate().UserPath = %q, want /team/alpha/service", authenticated.UserPath)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/team/alpha/service", authenticated.UserPath)
 }
 
 func TestServiceCreateNormalizesLabelsAndReturnsThemOnAuthenticate(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	issued, err := service.Create(context.Background(), CreateInput{
 		Name:   "labelled",
 		Labels: []string{" team-a ", "batch", "team-a", ""},
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	want := []string{"team-a", "batch"}
-	if !reflect.DeepEqual(issued.Labels, want) {
-		t.Fatalf("issued.Labels = %v, want %v", issued.Labels, want)
-	}
+	require.Equal(t, want, issued.Labels)
 
 	authenticated, err := service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if !reflect.DeepEqual(authenticated.Labels, want) {
-		t.Fatalf("Authenticate().Labels = %v, want %v", authenticated.Labels, want)
-	}
+	require.NoError(t, err)
+	require.Equal(t, want, authenticated.Labels)
 }
 
 func TestServiceUpdateLabelsAppliesImmediatelyToAuthenticate(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	issued, err := service.Create(context.Background(), CreateInput{
 		Name:   "labelled",
 		Labels: []string{"old"},
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	view, err := service.UpdateLabels(context.Background(), issued.ID, []string{" new-a ", "new-b", "new-a", ""})
-	if err != nil {
-		t.Fatalf("UpdateLabels() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	want := []string{"new-a", "new-b"}
-	if !reflect.DeepEqual(view.Labels, want) {
-		t.Fatalf("UpdateLabels().Labels = %v, want %v", view.Labels, want)
-	}
+	require.Equal(t, want, view.Labels)
 
 	authenticated, err := service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if !reflect.DeepEqual(authenticated.Labels, want) {
-		t.Fatalf("Authenticate().Labels = %v, want %v", authenticated.Labels, want)
-	}
+	require.NoError(t, err)
+	require.Equal(t, want, authenticated.Labels)
 
 	cleared, err := service.UpdateLabels(context.Background(), issued.ID, nil)
-	if err != nil {
-		t.Fatalf("UpdateLabels(clear) error = %v", err)
-	}
-	if cleared.Labels != nil {
-		t.Fatalf("UpdateLabels(clear).Labels = %v, want nil", cleared.Labels)
-	}
+	require.NoError(t, err)
+	require.Nil(t, cleared.Labels)
+
 	authenticated, err = service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() after clear error = %v", err)
-	}
-	if authenticated.Labels != nil {
-		t.Fatalf("Authenticate().Labels after clear = %v, want nil", authenticated.Labels)
-	}
+	require.NoError(t, err)
+	require.Nil(t, authenticated.Labels)
 }
 
 func TestServiceDashboardAccessLifecycle(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	issued, err := service.Create(context.Background(), CreateInput{
 		Name:            "ops",
 		DashboardAccess: true,
 	})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if !issued.DashboardAccess {
-		t.Fatal("Create().DashboardAccess = false, want true")
-	}
+	require.NoError(t, err)
+	require.True(t, issued.DashboardAccess)
 
 	authenticated, err := service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if !authenticated.DashboardAccess {
-		t.Fatal("Authenticate().DashboardAccess = false, want true")
-	}
+	require.NoError(t, err)
+	require.True(t, authenticated.DashboardAccess)
 
 	view, err := service.UpdateDashboardAccess(context.Background(), issued.ID, false)
-	if err != nil {
-		t.Fatalf("UpdateDashboardAccess() error = %v", err)
-	}
-	if view.DashboardAccess {
-		t.Fatal("UpdateDashboardAccess(revoke).DashboardAccess = true, want false")
-	}
+	require.NoError(t, err)
+	require.False(t, view.DashboardAccess)
 
 	authenticated, err = service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() after revoke error = %v", err)
-	}
-	if authenticated.DashboardAccess {
-		t.Fatal("Authenticate().DashboardAccess after revoke = true, want false")
-	}
-
-	if _, err := service.UpdateDashboardAccess(context.Background(), "missing", true); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("UpdateDashboardAccess(missing) error = %v, want %v", err, ErrNotFound)
-	}
+	require.NoError(t, err)
+	require.False(t, authenticated.DashboardAccess)
+	_, err = service.UpdateDashboardAccess(context.Background(), "missing", true)
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestServiceCreateDefaultsToNoDashboardAccess(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	issued, err := service.Create(context.Background(), CreateInput{Name: "plain"})
-	if err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-	if issued.DashboardAccess {
-		t.Fatal("Create().DashboardAccess = true, want false by default")
-	}
+	require.NoError(t, err)
+	require.False(t, issued.DashboardAccess)
 
 	authenticated, err := service.Authenticate(context.Background(), issued.Value)
-	if err != nil {
-		t.Fatalf("Authenticate() error = %v", err)
-	}
-	if authenticated.DashboardAccess {
-		t.Fatal("Authenticate().DashboardAccess = true, want false by default")
-	}
+	require.NoError(t, err)
+	require.False(t, authenticated.DashboardAccess)
 }
 
 func TestServiceUpdateLabelsUnknownKeyReturnsNotFound(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-
-	if _, err := service.UpdateLabels(context.Background(), "missing", []string{"x"}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("UpdateLabels() error = %v, want %v", err, ErrNotFound)
-	}
+	require.NoError(t, err)
+	_, err = service.UpdateLabels(context.Background(), "missing", []string{"x"})
+	require.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestServiceCreateRejectsInvalidUserPath(t *testing.T) {
 	service, err := NewService(newTestStore())
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = service.Create(context.Background(), CreateInput{
 		Name:     "invalid",
 		UserPath: "/team/../alpha",
 	})
-	if err == nil {
-		t.Fatal("Create() error = nil, want validation error")
-	}
-	if !IsValidationError(err) {
-		t.Fatalf("Create() error = %T, want validation error", err)
-	}
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 }

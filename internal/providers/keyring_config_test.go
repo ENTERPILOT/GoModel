@@ -5,6 +5,8 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // resolveKeys is a shorthand for the API key set the given provider ends up with.
@@ -12,9 +14,8 @@ func resolveKeys(t *testing.T, raw map[string]config.RawProviderConfig, provider
 	t.Helper()
 	got, _ := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
 	cfg, ok := got[provider]
-	if !ok {
-		t.Fatalf("provider %q not resolved; got %v", provider, got)
-	}
+	require.True(t, ok, "provider %q not resolved; got %v", provider, got)
+
 	return cfg
 }
 
@@ -68,17 +69,12 @@ func TestResolveProviders_NumberedAPIKeyEnvVars(t *testing.T) {
 
 			cfg := resolveKeys(t, map[string]config.RawProviderConfig{}, "openai")
 
-			if !equalStrings(cfg.APIKeys, tt.want) {
-				t.Errorf("APIKeys = %v, want %v", cfg.APIKeys, tt.want)
-			}
-			if cfg.APIKey != tt.want[0] {
-				t.Errorf("APIKey = %q, want the first key %q", cfg.APIKey, tt.want[0])
-			}
+			assert.True(t, equalStrings(cfg.APIKeys, tt.want), "APIKeys = %v, want %v", cfg.APIKeys, tt.want)
+			assert.Equal(t, tt.want[0], cfg.APIKey)
+
 			// A provider configured only through a numbered key still needs its
 			// default endpoint.
-			if cfg.BaseURL != "https://api.openai.com/v1" {
-				t.Errorf("BaseURL = %q, want the OpenAI default", cfg.BaseURL)
-			}
+			assert.Equal(t, "https://api.openai.com/v1", cfg.BaseURL)
 		})
 	}
 }
@@ -92,20 +88,16 @@ func TestResolveProviders_NumberedKeysOnSuffixedProviders(t *testing.T) {
 		t.Setenv("OPENAI_EU_API_KEY_2", "b")
 
 		cfg := resolveKeys(t, map[string]config.RawProviderConfig{}, "openai-eu")
-
-		if want := []string{"a", "b"}; !equalStrings(cfg.APIKeys, want) {
-			t.Errorf("APIKeys = %v, want %v", cfg.APIKeys, want)
-		}
+		want := []string{"a", "b"}
+		assert.True(t, equalStrings(cfg.APIKeys, want), "APIKeys = %v, want %v", cfg.APIKeys, want)
 	})
 
 	t.Run("suffix ending in a digit is not a rotation slot", func(t *testing.T) {
 		t.Setenv("OPENAI_REGION_2_API_KEY", "a")
 
 		cfg := resolveKeys(t, map[string]config.RawProviderConfig{}, "openai-region-2")
-
-		if want := []string{"a"}; !equalStrings(cfg.APIKeys, want) {
-			t.Errorf("APIKeys = %v, want %v", cfg.APIKeys, want)
-		}
+		want := []string{"a"}
+		assert.True(t, equalStrings(cfg.APIKeys, want), "APIKeys = %v, want %v", cfg.APIKeys, want)
 	})
 }
 
@@ -138,12 +130,8 @@ func TestResolveProviders_APIKeysFromYAML(t *testing.T) {
 
 			cfg := resolveKeys(t, map[string]config.RawProviderConfig{"openai": tt.raw}, "openai")
 
-			if !equalStrings(cfg.APIKeys, tt.want) {
-				t.Errorf("APIKeys = %v, want %v", cfg.APIKeys, tt.want)
-			}
-			if cfg.APIKey != tt.want[0] {
-				t.Errorf("APIKey = %q, want %q", cfg.APIKey, tt.want[0])
-			}
+			assert.True(t, equalStrings(cfg.APIKeys, tt.want), "APIKeys = %v, want %v", cfg.APIKeys, tt.want)
+			assert.Equal(t, tt.want[0], cfg.APIKey)
 		})
 	}
 }
@@ -173,13 +161,11 @@ func TestProviderEnvValues_HasAPIKeyMatchesAPIKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.v.hasAPIKey(); got != tt.want {
-				t.Errorf("hasAPIKey() = %v, want %v", got, tt.want)
-			}
+			got := tt.v.hasAPIKey()
+			assert.Equal(t, tt.want, got)
+
 			// The cheap probe must never disagree with the full key list.
-			if got, want := tt.v.hasAPIKey(), len(tt.v.apiKeys()) > 0; got != want {
-				t.Errorf("hasAPIKey() = %v, but len(apiKeys()) > 0 = %v", got, want)
-			}
+			assert.Equal(t, len(tt.v.apiKeys()) > 0, tt.v.hasAPIKey(), "hasAPIKey() disagrees with apiKeys()")
 		})
 	}
 }
@@ -193,10 +179,8 @@ func TestResolveProviders_ProviderWithOnlyUnresolvedKeysIsDropped(t *testing.T) 
 		"openai": {Type: "openai", APIKey: "${OPENAI_API_KEY}"},
 	}
 	got, _ := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
-
-	if _, ok := got["openai"]; ok {
-		t.Error("provider with no resolvable key should be dropped")
-	}
+	_, ok := got["openai"]
+	assert.False(t, ok)
 }
 
 // Env replaces the provider's whole key set rather than merging into it, so a
@@ -209,10 +193,8 @@ func TestResolveProviders_EnvKeysReplaceYAMLKeySet(t *testing.T) {
 		"openai": {Type: "openai", APIKeys: []string{"yaml-a", "yaml-b", "yaml-c"}},
 	}
 	cfg := resolveKeys(t, raw, "openai")
-
-	if want := []string{"env-a", "env-b"}; !equalStrings(cfg.APIKeys, want) {
-		t.Errorf("APIKeys = %v, want %v", cfg.APIKeys, want)
-	}
+	want := []string{"env-a", "env-b"}
+	assert.True(t, equalStrings(cfg.APIKeys, want), "APIKeys = %v, want %v", cfg.APIKeys, want)
 }
 
 // The factory hands every provider one shared ring, so all the clients a
@@ -227,22 +209,13 @@ func TestProviderFactory_CreateBuildsKeyring(t *testing.T) {
 			return nil
 		},
 	})
-
-	if _, err := factory.Create(ProviderConfig{Type: "openai", APIKey: "a", APIKeys: []string{"a", "b"}}); err != nil {
-		t.Fatalf("Create() error = %v", err)
-	}
-
-	if got.Keys.Len() != 2 {
-		t.Fatalf("opts.Keys.Len() = %d, want 2", got.Keys.Len())
-	}
-	if !got.Keys.Rotates() {
-		t.Error("opts.Keys.Rotates() = false, want true")
-	}
-	// The provider's own constructor key must not override the factory ring.
-	if key := got.Keyring("a").Next(); key != "a" {
-		t.Errorf("first key = %q, want a", key)
-	}
-	if key := got.Keyring("a").Next(); key != "b" {
-		t.Errorf("second key = %q, want b: the ring must be shared, not rebuilt", key)
-	}
+	_, err := factory.Create(ProviderConfig{Type: "openai", APIKey: "a", APIKeys: []string{"a", "b"}})
+	require.NoError(t, err)
+	require.Equal(t, 2, got.Keys.Len())
+	assert.True(t, got.Keys.Rotates())
+	key := // The provider's own constructor key must not override the factory ring.
+		got.Keyring("a").Next()
+	assert.Equal(t, "a", key)
+	key = got.Keyring("a").Next()
+	assert.Equal(t, "b", key)
 }

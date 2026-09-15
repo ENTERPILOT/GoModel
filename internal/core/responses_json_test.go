@@ -4,35 +4,30 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestResponsesRequestUnmarshalJSON_StringInput(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":"hello"}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if req.Model != "gpt-4o-mini" {
-		t.Fatalf("Model = %q, want gpt-4o-mini", req.Model)
-	}
+	err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":"hello"}`), &req)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-4o-mini", req.Model)
+
 	input, ok := req.Input.(string)
-	if !ok || input != "hello" {
-		t.Fatalf("Input = %#v, want string hello", req.Input)
-	}
+	require.True(t, ok)
+	require.Equal(t, "hello", input, "Input = %#v, want string hello", req.Input)
 }
 
 func TestResponsesRequestUnmarshalJSON_ArrayInput(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}]}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}]}`), &req)
+	require.NoError(t, err)
 
 	input, ok := req.Input.([]ResponsesInputElement)
-	if !ok || len(input) != 1 {
-		t.Fatalf("Input = %#v, want []ResponsesInputElement len=1", req.Input)
-	}
-	if input[0].Role != "user" {
-		t.Fatalf("Input[0].Role = %q, want user", input[0].Role)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 1, "Input = %#v, want []ResponsesInputElement len=1", req.Input)
+	require.Equal(t, "user", input[0].Role)
 }
 
 func TestResponsesRequestJSON_CanonicalizesToolObjectKeyOrder(t *testing.T) {
@@ -44,82 +39,62 @@ func TestResponsesRequestJSON_CanonicalizesToolObjectKeyOrder(t *testing.T) {
 	encoded := make([][]byte, len(bodies))
 	for i, body := range bodies {
 		var req ResponsesRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("json.Unmarshal(body %d) error = %v", i, err)
-		}
-		var err error
+		err := json.Unmarshal(body, &req)
+		require.NoError(t, err)
+
 		encoded[i], err = json.Marshal(req)
-		if err != nil {
-			t.Fatalf("json.Marshal(body %d) error = %v", i, err)
-		}
+		require.NoError(t, err)
 	}
-	if !bytes.Equal(encoded[0], encoded[1]) {
-		t.Fatalf("equivalent tool maps produced different provider shapes:\nfirst:  %s\nsecond: %s", encoded[0], encoded[1])
-	}
+	require.Equal(t, encoded[1], encoded[0])
 }
 
 func TestResponsesRequestUnmarshalJSON_ArrayInputFunctionCall(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
+	err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
 		{"type":"function_call","call_id":"call_123","name":"lookup_weather","arguments":"{\"city\":\"Warsaw\"}"},
 		{"type":"function_call_output","call_id":"call_123","output":{"temperature_c":21}}
-	]}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	]}`), &req)
+	require.NoError(t, err)
 
 	input, ok := req.Input.([]ResponsesInputElement)
-	if !ok || len(input) != 2 {
-		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
-	}
-	if input[0].Type != "function_call" || input[0].CallID != "call_123" || input[0].Name != "lookup_weather" {
-		t.Fatalf("Input[0] = %+v, want function_call with call_id=call_123 name=lookup_weather", input[0])
-	}
-	if input[0].Arguments != `{"city":"Warsaw"}` {
-		t.Fatalf("Input[0].Arguments = %q, want JSON string", input[0].Arguments)
-	}
-	if input[1].Type != "function_call_output" || input[1].CallID != "call_123" {
-		t.Fatalf("Input[1] = %+v, want function_call_output with call_id=call_123", input[1])
-	}
-	if input[1].Output != `{"temperature_c":21}` {
-		t.Fatalf("Input[1].Output = %q, want stringified JSON object", input[1].Output)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 2, "Input = %#v, want []ResponsesInputElement len=2", req.Input)
+	require.Equal(t, "function_call", input[0].Type)
+	require.Equal(t, "call_123", input[0].CallID)
+	require.Equal(t, "lookup_weather", input[0].Name, "Input[0] = %+v, want function_call with call_id=call_123 name=lookup_weather", input[0])
+	require.Equal(t, `{"city":"Warsaw"}`, input[0].Arguments)
+	require.Equal(t, "function_call_output", input[1].Type)
+	require.Equal(t, "call_123", input[1].CallID, "Input[1] = %+v, want function_call_output with call_id=call_123", input[1])
+	require.Equal(t, `{"temperature_c":21}`, input[1].Output)
 }
 
 func TestResponsesRequestUnmarshalJSON_FunctionCallAcceptsIDField(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
+	err := json.Unmarshal([]byte(`{"model":"gpt-4o-mini","input":[
 		{"type":"function_call","id":"call_456","name":"get_time","arguments":"{}"}
-	]}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	]}`), &req)
+	require.NoError(t, err)
 
 	input := req.Input.([]ResponsesInputElement)
-	if input[0].CallID != "call_456" {
-		t.Fatalf("Input[0].CallID = %q, want call_456 (from id field)", input[0].CallID)
-	}
+	require.Equal(t, "call_456", input[0].CallID)
 }
 
 func TestResponsesRequestUnmarshalJSON_PreservesToolCallingControls(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"gpt-4o-mini",
 		"input":"hello",
 		"tool_choice":{"type":"function","function":{"name":"lookup_weather"}},
 		"parallel_tool_calls":false
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	toolChoice, ok := req.ToolChoice.(map[string]any)
-	if !ok {
-		t.Fatalf("ToolChoice = %#v, want object", req.ToolChoice)
-	}
-	if typ, _ := toolChoice["type"].(string); typ != "function" {
-		t.Fatalf("ToolChoice.type = %#v, want function", toolChoice["type"])
-	}
-	if req.ParallelToolCalls == nil || *req.ParallelToolCalls {
-		t.Fatalf("ParallelToolCalls = %#v, want false", req.ParallelToolCalls)
-	}
+	require.True(t, ok, "ToolChoice = %#v, want object", req.ToolChoice)
+	typ, _ := toolChoice["type"].(string)
+	require.Equal(t, "function", typ)
+	require.NotNil(t, req.ParallelToolCalls)
+	require.False(t, *req.ParallelToolCalls)
 }
 
 func TestResponsesConversationRefMarshalJSON_UsesUpdatedID(t *testing.T) {
@@ -156,18 +131,14 @@ func TestResponsesConversationRefMarshalJSON_UsesUpdatedID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var ref ResponsesConversationRef
-			if err := json.Unmarshal([]byte(tt.raw), &ref); err != nil {
-				t.Fatalf("json.Unmarshal() error = %v", err)
-			}
+			err := json.Unmarshal([]byte(tt.raw), &ref)
+			require.NoError(t, err)
+
 			ref.ID = tt.id
 
 			body, err := json.Marshal(ref)
-			if err != nil {
-				t.Fatalf("json.Marshal() error = %v", err)
-			}
-			if !jsonEqual(body, []byte(tt.want)) {
-				t.Fatalf("body = %s, want JSON equivalent to %s", body, tt.want)
-			}
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(body))
 		})
 	}
 }
@@ -177,34 +148,8 @@ func TestResponsesConversationRefMarshalJSON_InvalidRaw(t *testing.T) {
 		ID:  "conv_new",
 		Raw: json.RawMessage(`{"id":`),
 	}
-
-	if _, err := json.Marshal(ref); err == nil {
-		t.Fatal("json.Marshal() error = nil, want invalid raw conversation error")
-	}
-}
-
-func jsonEqual(a, b []byte) bool {
-	var av any
-	if err := json.Unmarshal(a, &av); err != nil {
-		return false
-	}
-	var bv any
-	if err := json.Unmarshal(b, &bv); err != nil {
-		return false
-	}
-	return jsonValueEqual(av, bv)
-}
-
-func jsonValueEqual(a, b any) bool {
-	ab, err := json.Marshal(a)
-	if err != nil {
-		return false
-	}
-	bb, err := json.Marshal(b)
-	if err != nil {
-		return false
-	}
-	return bytes.Equal(ab, bb)
+	_, err := json.Marshal(ref)
+	require.Error(t, err)
 }
 
 func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
@@ -222,51 +167,37 @@ func TestResponsesRequestMarshalJSON_PreservesInput(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	inputRaw, ok := decoded["input"]
-	if !ok {
-		t.Fatalf("marshal output missing input: %s", string(body))
-	}
+	require.True(t, ok, "marshal output missing input: %s", string(body))
 
 	input, ok := inputRaw.([]any)
-	if !ok || len(input) != 1 {
-		t.Fatalf("decoded input = %#v, want []any len=1", inputRaw)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 1)
 
 	firstMsg, ok := input[0].(map[string]any)
-	if !ok {
-		t.Fatalf("first input item = %#v, want object", input[0])
-	}
-	if role, _ := firstMsg["role"].(string); role != "user" {
-		t.Fatalf("first input role = %#v, want user", firstMsg["role"])
-	}
+	require.True(t, ok, "first input item = %#v, want object", input[0])
+	role, _ := firstMsg["role"].(string)
+	require.Equal(t, "user", role)
 
 	contentRaw, ok := firstMsg["content"]
-	if !ok {
-		t.Fatalf("first input missing content: %#v", firstMsg)
-	}
+	require.True(t, ok, "first input missing content: %#v", firstMsg)
+
 	content, ok := contentRaw.([]any)
-	if !ok || len(content) != 1 {
-		t.Fatalf("first input content = %#v, want []any len=1", contentRaw)
-	}
+	require.True(t, ok)
+	require.Len(t, content, 1)
 
 	firstPart, ok := content[0].(map[string]any)
-	if !ok {
-		t.Fatalf("first content part = %#v, want object", content[0])
-	}
-	if typ, _ := firstPart["type"].(string); typ != "input_text" {
-		t.Fatalf("first content type = %#v, want input_text", firstPart["type"])
-	}
-	if text, _ := firstPart["text"].(string); text != "hello" {
-		t.Fatalf("first content text = %#v, want hello", firstPart["text"])
-	}
+	require.True(t, ok, "first content part = %#v, want object", content[0])
+	typ, _ := firstPart["type"].(string)
+	require.Equal(t, "input_text", typ)
+	text, _ := firstPart["text"].(string)
+	require.Equal(t, "hello", text)
 }
 
 func TestResponseUtilityRequestMarshalJSON_PreservesProvider(t *testing.T) {
@@ -295,41 +226,32 @@ func TestResponseUtilityRequestMarshalJSON_PreservesProvider(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body, err := json.Marshal(tt.req)
-			if err != nil {
-				t.Fatalf("json.Marshal() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			var decoded map[string]any
-			if err := json.Unmarshal(body, &decoded); err != nil {
-				t.Fatalf("json.Unmarshal() error = %v", err)
-			}
-			if decoded["provider"] != "openai_primary" {
-				t.Fatalf("provider = %#v, want openai_primary in %s", decoded["provider"], string(body))
-			}
+			err = json.Unmarshal(body, &decoded)
+			require.NoError(t, err)
+			require.Equal(t, "openai_primary", decoded["provider"], "provider = %#v, want openai_primary in %s", decoded["provider"], string(body))
 
 			switch original := tt.req.(type) {
 			case ResponseInputTokensRequest:
 				var roundTripped ResponseInputTokensRequest
-				if err := json.Unmarshal(body, &roundTripped); err != nil {
-					t.Fatalf("json.Unmarshal(ResponseInputTokensRequest) error = %v", err)
-				}
-				if roundTripped.Provider != original.Provider {
-					t.Fatalf("round-tripped provider = %q, want %q", roundTripped.Provider, original.Provider)
-				}
-				if input, ok := roundTripped.Input.(string); !ok || input != original.Input {
-					t.Fatalf("round-tripped input = %#v, want %#v", roundTripped.Input, original.Input)
-				}
+				err := json.Unmarshal(body, &roundTripped)
+				require.NoError(t, err)
+				require.Equal(t, original.Provider, roundTripped.Provider)
+				input, ok := roundTripped.Input.(string)
+				require.True(t, ok)
+				require.Equal(t, original.Input, input)
+
 			case ResponseCompactRequest:
 				var roundTripped ResponseCompactRequest
-				if err := json.Unmarshal(body, &roundTripped); err != nil {
-					t.Fatalf("json.Unmarshal(ResponseCompactRequest) error = %v", err)
-				}
-				if roundTripped.Provider != original.Provider {
-					t.Fatalf("round-tripped provider = %q, want %q", roundTripped.Provider, original.Provider)
-				}
-				if input, ok := roundTripped.Input.(string); !ok || input != original.Input {
-					t.Fatalf("round-tripped input = %#v, want %#v", roundTripped.Input, original.Input)
-				}
+				err := json.Unmarshal(body, &roundTripped)
+				require.NoError(t, err)
+				require.Equal(t, original.Provider, roundTripped.Provider)
+				input, ok := roundTripped.Input.(string)
+				require.True(t, ok)
+				require.Equal(t, original.Input, input)
+
 			default:
 				t.Fatalf("unexpected request type %T", tt.req)
 			}
@@ -417,14 +339,12 @@ func TestResponseUtilityRequestJSON_PreservesResponsesContextFields(t *testing.T
 	for _, tt := range utilityRequests {
 		t.Run(tt.name, func(t *testing.T) {
 			body, err := json.Marshal(tt.req)
-			if err != nil {
-				t.Fatalf("json.Marshal() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			var decoded map[string]any
-			if err := json.Unmarshal(body, &decoded); err != nil {
-				t.Fatalf("json.Unmarshal() error = %v", err)
-			}
+			err = json.Unmarshal(body, &decoded)
+			require.NoError(t, err)
+
 			for _, field := range []string{
 				"tools",
 				"tool_choice",
@@ -449,28 +369,24 @@ func TestResponseUtilityRequestJSON_PreservesResponsesContextFields(t *testing.T
 				"safety_identifier",
 				"future_field",
 			} {
-				if _, ok := decoded[field]; !ok {
-					t.Fatalf("decoded utility request missing %q: %s", field, string(body))
-				}
+				_, ok := decoded[field]
+				require.True(t, ok, "decoded utility request missing %q: %s", field, string(body))
 			}
 
 			switch tt.req.(type) {
 			case ResponseInputTokensRequest:
 				var roundTripped ResponseInputTokensRequest
-				if err := json.Unmarshal(body, &roundTripped); err != nil {
-					t.Fatalf("json.Unmarshal(ResponseInputTokensRequest) error = %v", err)
-				}
-				if roundTripped.PreviousResponseID != "resp_previous" || roundTripped.ExtraFields.Lookup("future_field") == nil {
-					t.Fatalf("round-tripped input token request lost context fields: %+v", roundTripped)
-				}
+				err := json.Unmarshal(body, &roundTripped)
+				require.NoError(t, err)
+				require.Equal(t, "resp_previous", roundTripped.PreviousResponseID)
+				require.NotNil(t, roundTripped.ExtraFields.Lookup("future_field"), "round-tripped input token request lost context fields: %+v", roundTripped)
+
 			case ResponseCompactRequest:
 				var roundTripped ResponseCompactRequest
-				if err := json.Unmarshal(body, &roundTripped); err != nil {
-					t.Fatalf("json.Unmarshal(ResponseCompactRequest) error = %v", err)
-				}
-				if roundTripped.PreviousResponseID != "resp_previous" || roundTripped.ExtraFields.Lookup("future_field") == nil {
-					t.Fatalf("round-tripped compact request lost context fields: %+v", roundTripped)
-				}
+				err := json.Unmarshal(body, &roundTripped)
+				require.NoError(t, err)
+				require.Equal(t, "resp_previous", roundTripped.PreviousResponseID)
+				require.NotNil(t, roundTripped.ExtraFields.Lookup("future_field"), "round-tripped compact request lost context fields: %+v", roundTripped)
 			}
 		})
 	}
@@ -489,26 +405,20 @@ func TestResponsesRequestMarshalJSON_PreservesToolCallingControls(t *testing.T) 
 		},
 		ParallelToolCalls: &parallelToolCalls,
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
 
 	toolChoice, ok := decoded["tool_choice"].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded tool_choice = %#v, want object", decoded["tool_choice"])
-	}
-	if typ, _ := toolChoice["type"].(string); typ != "function" {
-		t.Fatalf("decoded tool_choice.type = %#v, want function", toolChoice["type"])
-	}
+	require.True(t, ok, "decoded tool_choice = %#v, want object", decoded["tool_choice"])
+	typ, _ := toolChoice["type"].(string)
+	require.Equal(t, "function", typ)
+
 	parallel, ok := decoded["parallel_tool_calls"].(bool)
-	if !ok || parallel {
-		t.Fatalf("decoded parallel_tool_calls = %#v, want false", decoded["parallel_tool_calls"])
-	}
+	require.True(t, ok)
+	require.False(t, parallel)
 }
 
 func TestResponsesRequestMarshalJSON_PreservesTypedInputElementContent(t *testing.T) {
@@ -521,35 +431,27 @@ func TestResponsesRequestMarshalJSON_PreservesTypedInputElementContent(t *testin
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
 
 	input, ok := decoded["input"].([]any)
-	if !ok || len(input) != 1 {
-		t.Fatalf("decoded input = %#v, want []any len=1", decoded["input"])
-	}
+	require.True(t, ok)
+	require.Len(t, input, 1)
 
 	first, ok := input[0].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded first input item = %#v, want object", input[0])
-	}
-	if role, _ := first["role"].(string); role != "user" {
-		t.Fatalf("decoded role = %#v, want user", first["role"])
-	}
-	if content, _ := first["content"].(string); content != "hello" {
-		t.Fatalf("decoded content = %#v, want hello", first["content"])
-	}
+	require.True(t, ok, "decoded first input item = %#v, want object", input[0])
+	role, _ := first["role"].(string)
+	require.Equal(t, "user", role)
+	content, _ := first["content"].(string)
+	require.Equal(t, "hello", content)
 }
 
 func TestResponsesRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"gpt-4o-mini",
 		"input":[
 			{
@@ -566,53 +468,39 @@ func TestResponsesRequestJSON_PreservesUnknownNestedFields(t *testing.T) {
 				"strict":true
 			}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	input, ok := req.Input.([]ResponsesInputElement)
-	if !ok || len(input) != 2 {
-		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
-	}
-	if input[0].ExtraFields.Lookup("x_trace") == nil {
-		t.Fatal("input[0].x_trace missing from ExtraFields")
-	}
-	if input[1].ExtraFields.Lookup("strict") == nil {
-		t.Fatal("input[1].strict missing from ExtraFields")
-	}
+	require.True(t, ok)
+	require.Len(t, input, 2, "Input = %#v, want []ResponsesInputElement len=2", req.Input)
+	require.NotNil(t, input[0].ExtraFields.Lookup("x_trace"))
+	require.NotNil(t, input[1].ExtraFields.Lookup("strict"))
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	decodedInput, ok := decoded["input"].([]any)
-	if !ok || len(decodedInput) != 2 {
-		t.Fatalf("decoded input = %#v, want []any len=2", decoded["input"])
-	}
+	require.True(t, ok)
+	require.Len(t, decodedInput, 2, "decoded input = %#v, want []any len=2", decoded["input"])
+
 	firstInput, ok := decodedInput[0].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded input[0] = %#v, want object", decodedInput[0])
-	}
-	if _, ok := firstInput["x_trace"].(map[string]any); !ok {
-		t.Fatalf("decoded input[0].x_trace = %#v, want object", firstInput["x_trace"])
-	}
+	require.True(t, ok, "decoded input[0] = %#v, want object", decodedInput[0])
+	_, ok = firstInput["x_trace"].(map[string]any)
+	require.True(t, ok, "decoded input[0].x_trace = %#v, want object", firstInput["x_trace"])
+
 	secondInput, ok := decodedInput[1].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded input[1] = %#v, want object", decodedInput[1])
-	}
-	if secondInput["strict"] != true {
-		t.Fatalf("decoded input[1].strict = %#v, want true", secondInput["strict"])
-	}
+	require.True(t, ok, "decoded input[1] = %#v, want object", decodedInput[1])
+	require.Equal(t, true, secondInput["strict"])
 }
 
 func TestResponsesRequestJSON_PreservesUnknownInputItems(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"gpt-5-mini",
 		"input":[
 			{
@@ -621,86 +509,63 @@ func TestResponsesRequestJSON_PreservesUnknownInputItems(t *testing.T) {
 				"summary":[{"type":"summary_text","text":"Checked the facts."}]
 			}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	input, ok := req.Input.([]ResponsesInputElement)
-	if !ok || len(input) != 1 {
-		t.Fatalf("Input = %#v, want []ResponsesInputElement len=1", req.Input)
-	}
-	if input[0].Type != "reasoning" {
-		t.Fatalf("Input[0].Type = %q, want reasoning", input[0].Type)
-	}
-	if len(input[0].Raw) == 0 {
-		t.Fatal("Input[0].Raw missing for unknown input item")
-	}
+	require.True(t, ok)
+	require.Len(t, input, 1, "Input = %#v, want []ResponsesInputElement len=1", req.Input)
+	require.Equal(t, "reasoning", input[0].Type)
+	require.NotEmpty(t, input[0].Raw)
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	items := decoded["input"].([]any)
 	item := items[0].(map[string]any)
-	if item["type"] != "reasoning" || item["id"] != "rs_123" {
-		t.Fatalf("round-tripped item = %#v, want reasoning item", item)
-	}
-	if _, ok := item["summary"].([]any); !ok {
-		t.Fatalf("round-tripped summary = %#v, want array", item["summary"])
-	}
-	if _, ok := item["role"]; ok {
-		t.Fatalf("unknown item gained role field: %#v", item)
-	}
-	if _, ok := item["content"]; ok {
-		t.Fatalf("unknown item gained content field: %#v", item)
-	}
+	require.Equal(t, "reasoning", item["type"])
+	require.Equal(t, "rs_123", item["id"], "round-tripped item = %#v, want reasoning item", item)
+	_, ok = item["summary"].([]any)
+	require.True(t, ok, "round-tripped summary = %#v, want array", item["summary"])
+	_, ok = item["role"]
+	require.False(t, ok, "unknown item gained role field: %#v", item)
+	_, ok = item["content"]
+	require.False(t, ok, "unknown item gained content field: %#v", item)
 }
 
 func TestResponsesInputElementJSON_UnknownItemRoundTripHasNoDuplicateKeys(t *testing.T) {
 	var elem ResponsesInputElement
-	if err := json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err := json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem)
+	require.NoError(t, err)
 
 	body, err := json.Marshal(elem)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	// A decode→encode round trip must not duplicate the fields preserved in Raw.
 	for _, key := range []string{`"type"`, `"id"`, `"summary"`} {
-		if got := bytes.Count(body, []byte(key)); got != 1 {
-			t.Fatalf("key %s appears %d times in %s, want 1", key, got, body)
-		}
+		got := bytes.Count(body, []byte(key))
+		require.Equal(t, 1, got, "key %s appears %d times in %s, want 1", key, got, body)
 	}
 }
 
 func TestResponsesInputElementUnmarshalJSON_ResetsReceiver(t *testing.T) {
 	var elem ResponsesInputElement
-	if err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":"hi","x_trace":"old"}`), &elem); err != nil {
-		t.Fatalf("json.Unmarshal(message) error = %v", err)
-	}
-	if elem.Role != "user" || elem.Content == nil || elem.ExtraFields.Lookup("x_trace") == nil {
-		t.Fatalf("initial element = %+v, want populated message", elem)
-	}
-
-	if err := json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem); err != nil {
-		t.Fatalf("json.Unmarshal(reasoning) error = %v", err)
-	}
-	if elem.Type != "reasoning" {
-		t.Fatalf("Type = %q, want reasoning", elem.Type)
-	}
-	if elem.Role != "" || elem.Content != nil || !elem.ExtraFields.IsEmpty() {
-		t.Fatalf("stale typed fields remained after unknown item decode: %+v", elem)
-	}
-	if len(elem.Raw) == 0 {
-		t.Fatal("Raw missing for unknown item")
-	}
+	err := json.Unmarshal([]byte(`{"type":"message","role":"user","content":"hi","x_trace":"old"}`), &elem)
+	require.NoError(t, err)
+	require.Equal(t, "user", elem.Role)
+	require.NotNil(t, elem.Content)
+	require.NotNil(t, elem.ExtraFields.Lookup("x_trace"), "initial element = %+v, want populated message", elem)
+	err = json.Unmarshal([]byte(`{"type":"reasoning","id":"rs_123","summary":[]}`), &elem)
+	require.NoError(t, err)
+	require.Equal(t, "reasoning", elem.Type)
+	require.Empty(t, elem.Role)
+	require.Nil(t, elem.Content)
+	require.True(t, elem.ExtraFields.IsEmpty(), "stale typed fields remained after unknown item decode: %+v", elem)
+	require.NotEmpty(t, elem.Raw)
 }
 
 func TestResponsesInputElementMarshalJSON_MergesRawUnknownItemExtras(t *testing.T) {
@@ -713,48 +578,42 @@ func TestResponsesInputElementMarshalJSON_MergesRawUnknownItemExtras(t *testing.
 	}
 
 	body, err := json.Marshal(elem)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if decoded["type"] != "reasoning" || decoded["id"] != "rs_123" {
-		t.Fatalf("decoded item = %#v, want original raw reasoning item", decoded)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "reasoning", decoded["type"])
+	require.Equal(t, "rs_123", decoded["id"], "decoded item = %#v, want original raw reasoning item", decoded)
+
 	providerData, ok := decoded["provider_data"].(map[string]any)
-	if !ok || providerData["trace_id"] != "trace-1" {
-		t.Fatalf("provider_data = %#v, want merged trace id", decoded["provider_data"])
-	}
+	require.True(t, ok)
+	require.Equal(t, "trace-1", providerData["trace_id"], "provider_data = %#v, want merged trace id", decoded["provider_data"])
 }
 
 func TestResponsesOutputItemJSONPreservesReasoningFields(t *testing.T) {
 	raw := []byte(`{"id":"rs_123","type":"reasoning","summary":[],"encrypted_content":"opaque","provider_trace":{"id":"trace_1"}}`)
 	var item ResponsesOutputItem
-	if err := json.Unmarshal(raw, &item); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err := json.Unmarshal(raw, &item)
+	require.NoError(t, err)
+
 	body, err := json.Marshal(item)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(round trip) error = %v", err)
-	}
-	if _, ok := decoded["summary"].([]any); !ok || decoded["encrypted_content"] != "opaque" {
-		t.Fatalf("round-tripped item = %#v, want reasoning fields", decoded)
-	}
-	if trace, ok := decoded["provider_trace"].(map[string]any); !ok || trace["id"] != "trace_1" {
-		t.Fatalf("provider_trace = %#v, want trace_1", decoded["provider_trace"])
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+	_, ok := decoded["summary"].([]any)
+	require.True(t, ok)
+	require.Equal(t, "opaque", decoded["encrypted_content"], "round-tripped item = %#v, want reasoning fields", decoded)
+	trace, ok := decoded["provider_trace"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "trace_1", trace["id"], "provider_trace = %#v, want trace_1", decoded["provider_trace"])
 }
 
 func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"gpt-4o-mini",
 		"input":[
 			{
@@ -770,44 +629,33 @@ func TestResponsesRequestJSON_PreservesVariantSpecificUnknownFields(t *testing.T
 				"output":"{}"
 			}
 		]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	input, ok := req.Input.([]ResponsesInputElement)
-	if !ok || len(input) != 2 {
-		t.Fatalf("Input = %#v, want []ResponsesInputElement len=2", req.Input)
-	}
-	if input[0].ExtraFields.Lookup("id") == nil {
-		t.Fatal("message id missing from ExtraFields")
-	}
-	if input[1].ExtraFields.Lookup("name") == nil {
-		t.Fatal("function_call_output name missing from ExtraFields")
-	}
+	require.True(t, ok)
+	require.Len(t, input, 2, "Input = %#v, want []ResponsesInputElement len=2", req.Input)
+	require.NotNil(t, input[0].ExtraFields.Lookup("id"))
+	require.NotNil(t, input[1].ExtraFields.Lookup("name"))
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	items := decoded["input"].([]any)
 	message := items[0].(map[string]any)
-	if message["id"] != "msg_123" {
-		t.Fatalf("message.id = %#v, want msg_123", message["id"])
-	}
+	require.Equal(t, "msg_123", message["id"])
+
 	callOutput := items[1].(map[string]any)
-	if callOutput["name"] != "still-extra" {
-		t.Fatalf("function_call_output.name = %#v, want still-extra", callOutput["name"])
-	}
+	require.Equal(t, "still-extra", callOutput["name"])
 }
 
 func TestResponsesRequestJSON_PreservesAgentsSDKFields(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"gpt-5-mini",
 		"input":"hello",
 		"previous_response_id":"resp_previous",
@@ -829,96 +677,65 @@ func TestResponsesRequestJSON_PreservesAgentsSDKFields(t *testing.T) {
 				"name":"answer"
 			}
 		}
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if req.PreviousResponseID != "resp_previous" {
-		t.Fatalf("PreviousResponseID = %q, want resp_previous", req.PreviousResponseID)
-	}
-	if req.Store == nil || *req.Store {
-		t.Fatalf("Store = %#v, want false", req.Store)
-	}
-	if req.TopP == nil || *req.TopP != 0.8 {
-		t.Fatalf("TopP = %#v, want 0.8", req.TopP)
-	}
-	if req.TopLogprobs == nil || *req.TopLogprobs != 3 {
-		t.Fatalf("TopLogprobs = %#v, want 3", req.TopLogprobs)
-	}
-	if req.Text == nil {
-		t.Fatal("Text missing")
-	}
+	}`), &req)
+	require.NoError(t, err)
+	require.Equal(t, "resp_previous", req.PreviousResponseID)
+	require.NotNil(t, req.Store)
+	require.False(t, *req.Store)
+	require.NotNil(t, req.TopP)
+	require.Equal(t, 0.8, *req.TopP)
+	require.NotNil(t, req.TopLogprobs)
+	require.Equal(t, 3, *req.TopLogprobs)
+	require.NotNil(t, req.Text)
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
 
 	textField, ok := decoded["text"].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded text = %#v, want object", decoded["text"])
-	}
+	require.True(t, ok, "decoded text = %#v, want object", decoded["text"])
+
 	formatField, ok := textField["format"].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded text.format = %#v, want object", textField["format"])
-	}
-	if formatField["type"] != "json_schema" {
-		t.Fatalf("decoded text.format.type = %#v, want json_schema", formatField["type"])
-	}
-	if decoded["store"] != false {
-		t.Fatalf("decoded store = %#v, want false", decoded["store"])
-	}
-	if decoded["previous_response_id"] != "resp_previous" {
-		t.Fatalf("decoded previous_response_id = %#v, want resp_previous", decoded["previous_response_id"])
-	}
-	if decoded["conversation"] != "conv_123" {
-		t.Fatalf("decoded conversation = %#v, want conv_123", decoded["conversation"])
-	}
-	if decoded["service_tier"] != "flex" {
-		t.Fatalf("decoded service_tier = %#v, want flex", decoded["service_tier"])
-	}
+	require.True(t, ok, "decoded text.format = %#v, want object", textField["format"])
+	require.Equal(t, "json_schema", formatField["type"])
+	require.Equal(t, false, decoded["store"])
+	require.Equal(t, "resp_previous", decoded["previous_response_id"])
+	require.Equal(t, "conv_123", decoded["conversation"])
+	require.Equal(t, "flex", decoded["service_tier"])
 }
 
 func TestResponsesRequestJSON_PreservesConversationObjectShape(t *testing.T) {
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"gpt-5-mini",
 		"input":"hello",
 		"conversation":{"id":"conv_123","metadata":{"team":"alpha"}}
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if req.Conversation == nil || req.Conversation.ID != "conv_123" {
-		t.Fatalf("Conversation = %+v, want id conv_123", req.Conversation)
-	}
+	}`), &req)
+	require.NoError(t, err)
+	require.NotNil(t, req.Conversation)
+	require.Equal(t, "conv_123", req.Conversation.ID)
 
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+
 	conversation, ok := decoded["conversation"].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded conversation = %#v, want object", decoded["conversation"])
-	}
+	require.True(t, ok, "decoded conversation = %#v, want object", decoded["conversation"])
+
 	metadata, ok := conversation["metadata"].(map[string]any)
-	if !ok || metadata["team"] != "alpha" {
-		t.Fatalf("decoded conversation metadata = %#v, want team alpha", conversation["metadata"])
-	}
+	require.True(t, ok)
+	require.Equal(t, "alpha", metadata["team"], "decoded conversation metadata = %#v, want team alpha", conversation["metadata"])
 }
 
 func TestResponsesResponseJSON_AcceptsStructuredAnnotations(t *testing.T) {
 	var resp ResponsesResponse
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"id":"resp_123",
 		"object":"response",
 		"created_at":1677652288,
@@ -939,43 +756,31 @@ func TestResponsesResponseJSON_AcceptsStructuredAnnotations(t *testing.T) {
 				}]
 			}]
 		}]
-	}`), &resp); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &resp)
+	require.NoError(t, err)
+	require.Len(t, resp.Output, 1)
+	require.Len(t, resp.Output[0].Content, 1)
 
-	if len(resp.Output) != 1 || len(resp.Output[0].Content) != 1 {
-		t.Fatalf("unexpected output shape: %+v", resp.Output)
-	}
 	annotations := resp.Output[0].Content[0].Annotations
-	if len(annotations) != 1 {
-		t.Fatalf("len(Annotations) = %d, want 1", len(annotations))
-	}
+	require.Len(t, annotations, 1)
 
 	var annotation map[string]any
-	if err := json.Unmarshal(annotations[0], &annotation); err != nil {
-		t.Fatalf("json.Unmarshal(annotation) error = %v", err)
-	}
-	if annotation["type"] != "url_citation" {
-		t.Fatalf("annotation.type = %#v, want url_citation", annotation["type"])
-	}
+	err = json.Unmarshal(annotations[0], &annotation)
+	require.NoError(t, err)
+	require.Equal(t, "url_citation", annotation["type"])
 
 	body, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
 
 	output := decoded["output"].([]any)
 	content := output[0].(map[string]any)["content"].([]any)
 	roundTripAnnotations := content[0].(map[string]any)["annotations"].([]any)
 	firstAnnotation := roundTripAnnotations[0].(map[string]any)
-	if firstAnnotation["url"] != "https://example.com" {
-		t.Fatalf("roundTrip annotation.url = %#v, want https://example.com", firstAnnotation["url"])
-	}
+	require.Equal(t, "https://example.com", firstAnnotation["url"])
 }
 
 func TestResponsesInputElementMarshalJSON_FunctionCall(t *testing.T) {
@@ -987,31 +792,19 @@ func TestResponsesInputElementMarshalJSON_FunctionCall(t *testing.T) {
 	}
 
 	body, err := json.Marshal(elem)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if decoded["type"] != "function_call" {
-		t.Fatalf("type = %v, want function_call", decoded["type"])
-	}
-	if decoded["call_id"] != "call_123" {
-		t.Fatalf("call_id = %v, want call_123", decoded["call_id"])
-	}
-	if decoded["name"] != "lookup_weather" {
-		t.Fatalf("name = %v, want lookup_weather", decoded["name"])
-	}
-	// Must not emit message-specific fields.
-	if _, ok := decoded["role"]; ok {
-		t.Fatal("function_call should not emit role")
-	}
-	if _, ok := decoded["content"]; ok {
-		t.Fatal("function_call should not emit content")
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "function_call", decoded["type"])
+	require.Equal(t, "call_123", decoded["call_id"])
+	require.Equal(t, "lookup_weather", decoded["name"])
+	_, ok := // Must not emit message-specific fields.
+		decoded["role"]
+	require.False(t, ok)
+	_, ok = decoded["content"]
+	require.False(t, ok)
 }
 
 func TestResponsesInputElementMarshalJSON_FunctionCallOutput(t *testing.T) {
@@ -1022,24 +815,14 @@ func TestResponsesInputElementMarshalJSON_FunctionCallOutput(t *testing.T) {
 	}
 
 	body, err := json.Marshal(elem)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if decoded["type"] != "function_call_output" {
-		t.Fatalf("type = %v, want function_call_output", decoded["type"])
-	}
-	if decoded["call_id"] != "call_123" {
-		t.Fatalf("call_id = %v, want call_123", decoded["call_id"])
-	}
-	if decoded["output"] != `{"temperature_c":21}` {
-		t.Fatalf("output = %v, want JSON string", decoded["output"])
-	}
+	err = json.Unmarshal(body, &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "function_call_output", decoded["type"])
+	require.Equal(t, "call_123", decoded["call_id"])
+	require.Equal(t, `{"temperature_c":21}`, decoded["output"])
 }
 
 func TestResponsesInputElementRoundTrip(t *testing.T) {
@@ -1051,50 +834,37 @@ func TestResponsesInputElementRoundTrip(t *testing.T) {
 	]}`
 
 	var req ResponsesRequest
-	if err := json.Unmarshal([]byte(original), &req); err != nil {
-		t.Fatalf("unmarshal error = %v", err)
-	}
+	err := json.Unmarshal([]byte(original), &req)
+	require.NoError(t, err)
 
 	input, ok := req.Input.([]ResponsesInputElement)
-	if !ok || len(input) != 4 {
-		t.Fatalf("Input = %#v, want []ResponsesInputElement len=4", req.Input)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 4, "Input = %#v, want []ResponsesInputElement len=4", req.Input)
 
 	// Verify each element type.
-	if input[0].Type != "" || input[0].Role != "user" {
-		t.Fatalf("Input[0] = %+v, want message role=user", input[0])
-	}
-	if input[1].Type != "function_call" || input[1].Name != "lookup_weather" {
-		t.Fatalf("Input[1] = %+v, want function_call", input[1])
-	}
-	if input[2].Type != "function_call_output" || input[2].Output != `{"temperature_c":21}` {
-		t.Fatalf("Input[2] = %+v, want function_call_output", input[2])
-	}
-	if input[3].Role != "assistant" {
-		t.Fatalf("Input[3] = %+v, want message role=assistant", input[3])
-	}
+	require.Empty(t, input[0].Type)
+	require.Equal(t, "user", input[0].Role, "Input[0] = %+v, want message role=user", input[0])
+	require.Equal(t, "function_call", input[1].Type)
+	require.Equal(t, "lookup_weather", input[1].Name, "Input[1] = %+v, want function_call", input[1])
+	require.Equal(t, "function_call_output", input[2].Type)
+	require.Equal(t, `{"temperature_c":21}`, input[2].Output, "Input[2] = %+v, want function_call_output", input[2])
+	require.Equal(t, "assistant", input[3].Role, "Input[3] = %+v, want message role=assistant", input[3])
 
 	// Marshal and re-unmarshal to verify round-trip.
 	body, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("marshal error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var req2 ResponsesRequest
-	if err := json.Unmarshal(body, &req2); err != nil {
-		t.Fatalf("re-unmarshal error = %v", err)
-	}
+	err = json.Unmarshal(body, &req2)
+	require.NoError(t, err)
 
 	input2, ok := req2.Input.([]ResponsesInputElement)
-	if !ok || len(input2) != 4 {
-		t.Fatalf("round-trip Input = %#v, want []ResponsesInputElement len=4", req2.Input)
-	}
-	if input2[1].Type != "function_call" || input2[1].Arguments != `{"city":"Warsaw"}` {
-		t.Fatalf("round-trip Input[1] = %+v, want function_call with arguments preserved", input2[1])
-	}
-	if input2[2].Type != "function_call_output" || input2[2].Output != `{"temperature_c":21}` {
-		t.Fatalf("round-trip Input[2] = %+v, want function_call_output with output preserved", input2[2])
-	}
+	require.True(t, ok)
+	require.Len(t, input2, 4, "round-trip Input = %#v, want []ResponsesInputElement len=4", req2.Input)
+	require.Equal(t, "function_call", input2[1].Type)
+	require.Equal(t, `{"city":"Warsaw"}`, input2[1].Arguments, "round-trip Input[1] = %+v, want function_call with arguments preserved", input2[1])
+	require.Equal(t, "function_call_output", input2[2].Type)
+	require.Equal(t, `{"temperature_c":21}`, input2[2].Output, "round-trip Input[2] = %+v, want function_call_output with output preserved", input2[2])
 }
 
 func TestResponsesContentItemMarshalJSON_Annotations(t *testing.T) {
@@ -1113,12 +883,8 @@ func TestResponsesContentItemMarshalJSON_Annotations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := json.Marshal(tt.item)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			if string(got) != tt.want {
-				t.Fatalf("got %s, want %s", got, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(got))
 		})
 	}
 }
@@ -1132,34 +898,29 @@ func TestResponsesBlocksFromContentPartsKeepsVocabularyAndExtras(t *testing.T) {
 		{Type: "input_image", ImageURL: &ImageURLContent{URL: "https://example.com/a.png", Detail: "low"}},
 	}
 	blocks := ResponsesBlocksFromContentParts(parts)
-	if len(blocks) != 2 {
-		t.Fatalf("blocks = %v, want 2", blocks)
-	}
+	require.Len(t, blocks, 2)
+
 	text, _ := blocks[0].(map[string]any)
-	if text["type"] != "input_text" || text["text"] != "hello" || text["x_note"] != "keep" {
-		t.Fatalf("text block = %v", text)
-	}
+	require.Equal(t, "input_text", text["type"])
+	require.Equal(t, "hello", text["text"])
+	require.Equal(t, "keep", text["x_note"], "text block = %v", text)
+
 	image, _ := blocks[1].(map[string]any)
 	imageURL, _ := image["image_url"].(map[string]any)
-	if image["type"] != "input_image" || imageURL["url"] != "https://example.com/a.png" || imageURL["detail"] != "low" {
-		t.Fatalf("image block = %v", image)
-	}
+	require.Equal(t, "input_image", image["type"])
+	require.Equal(t, "https://example.com/a.png", imageURL["url"])
+	require.Equal(t, "low", imageURL["detail"], "image block = %v", image)
+
 	encoded, err := json.Marshal(blocks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(encoded, []byte(`"type":"text"`)) {
-		t.Fatalf("blocks serialized with Chat vocabulary: %s", encoded)
-	}
+	require.NoError(t, err)
+	require.False(t, bytes.Contains(encoded, []byte(`"type":"text"`)), "blocks serialized with Chat vocabulary: %s", encoded)
 }
 
 func TestResponsesBlocksFromContentPartsRejectsUnencodablePart(t *testing.T) {
-	if got := ResponsesBlocksFromContentParts([]ContentPart{{Type: "input_file"}}); got != nil {
-		t.Fatalf("expected nil for an unencodable part, got %v", got)
-	}
-	if got := ResponsesBlocksFromContentParts(nil); len(got) != 0 {
-		t.Fatalf("expected no blocks for no parts, got %v", got)
-	}
+	got := ResponsesBlocksFromContentParts([]ContentPart{{Type: "input_file"}})
+	require.Nil(t, got)
+	got = ResponsesBlocksFromContentParts(nil)
+	require.Empty(t, got)
 }
 
 func TestResponsesBlocksFromContentPartsKeepsLargeIntegersExact(t *testing.T) {
@@ -1171,12 +932,9 @@ func TestResponsesBlocksFromContentPartsKeepsLargeIntegersExact(t *testing.T) {
 		}),
 	}}
 	encoded, err := json.Marshal(ResponsesBlocksFromContentParts(parts))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	for _, want := range []string{`"x_id":9007199254740993`, `"x_ratio":0.1`} {
-		if !bytes.Contains(encoded, []byte(want)) {
-			t.Fatalf("blocks = %s, want %s", encoded, want)
-		}
+		require.Contains(t, string(encoded), want)
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyConfiguredProviderModels_BackfillsZeroCreatedForUpstreamMatch(t *testing.T) {
@@ -24,18 +25,11 @@ func TestApplyConfiguredProviderModels_BackfillsZeroCreatedForUpstreamMatch(t *t
 		123,
 	)
 
-	if reason != configuredProviderModelsAllowlist {
-		t.Fatalf("reason = %q, want %q", reason, configuredProviderModelsAllowlist)
-	}
-	if resp == nil || len(resp.Data) != 1 {
-		t.Fatalf("resp = %+v, want one configured model", resp)
-	}
-	if resp.Data[0].Created != 123 {
-		t.Fatalf("Created = %d, want fallback timestamp 123", resp.Data[0].Created)
-	}
-	if resp.Data[0].OwnedBy != "upstream" {
-		t.Fatalf("OwnedBy = %q, want upstream metadata preserved", resp.Data[0].OwnedBy)
-	}
+	require.Equal(t, configuredProviderModelsAllowlist, reason)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, int64(123), resp.Data[0].Created)
+	require.Equal(t, "upstream", resp.Data[0].OwnedBy)
 }
 
 func TestApplyConfiguredProviderModels_MergeAppendsMissingModels(t *testing.T) {
@@ -58,18 +52,15 @@ func TestApplyConfiguredProviderModels_MergeAppendsMissingModels(t *testing.T) {
 		123,
 	)
 
-	if reason != configuredProviderModelsMerge {
-		t.Fatalf("reason = %q, want %q", reason, configuredProviderModelsMerge)
-	}
-	if resp == nil || len(resp.Data) != 2 {
-		t.Fatalf("resp = %+v, want upstream model plus one synthesized entry", resp)
-	}
-	if resp.Data[0].ID != "listed-model" || resp.Data[0].OwnedBy != "upstream" || resp.Data[0].Created != 42 {
-		t.Fatalf("Data[0] = %+v, want upstream entry kept authoritative", resp.Data[0])
-	}
-	if resp.Data[1].ID != "unlisted-model" || resp.Data[1].OwnedBy != "test-type" || resp.Data[1].Created != 123 {
-		t.Fatalf("Data[1] = %+v, want synthesized configured entry", resp.Data[1])
-	}
+	require.Equal(t, configuredProviderModelsMerge, reason)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Data, 2)
+	require.Equal(t, "listed-model", resp.Data[0].ID)
+	require.Equal(t, "upstream", resp.Data[0].OwnedBy)
+	require.Equal(t, int64(42), resp.Data[0].Created, "Data[0] = %+v, want upstream entry kept authoritative", resp.Data[0])
+	require.Equal(t, "unlisted-model", resp.Data[1].ID)
+	require.Equal(t, "test-type", resp.Data[1].OwnedBy)
+	require.Equal(t, int64(123), resp.Data[1].Created, "Data[1] = %+v, want synthesized configured entry", resp.Data[1])
 }
 
 func TestApplyConfiguredProviderModels_MergeFallsBackWhenUpstreamFails(t *testing.T) {
@@ -94,12 +85,10 @@ func TestApplyConfiguredProviderModels_MergeFallsBackWhenUpstreamFails(t *testin
 				tt.err,
 				123,
 			)
-			if reason != tt.wantReason {
-				t.Fatalf("reason = %q, want %q", reason, tt.wantReason)
-			}
-			if resp == nil || len(resp.Data) != 1 || resp.Data[0].ID != "configured-model" {
-				t.Fatalf("resp = %+v, want configured fallback inventory", resp)
-			}
+			require.Equal(t, tt.wantReason, reason)
+			require.NotNil(t, resp)
+			require.Len(t, resp.Data, 1)
+			require.Equal(t, "configured-model", resp.Data[0].ID)
 		})
 	}
 }

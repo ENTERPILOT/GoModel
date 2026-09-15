@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -29,17 +30,11 @@ func TestDecodeBatchCreateRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req, err := DecodeBatchCreateRequest([]byte(tc.body))
 			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(req.Requests) != tc.items {
-				t.Fatalf("len(requests) = %d, want %d", len(req.Requests), tc.items)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tc.items, len(req.Requests))
 		})
 	}
 }
@@ -91,49 +86,38 @@ func TestToBatchRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := ToBatchRequest(tc.req)
 			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
-				}
+				require.ErrorContains(t, err, tc.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if out.Endpoint != "/v1/chat/completions" || out.CompletionWindow != "24h" {
-				t.Fatalf("endpoint/window = %q/%q", out.Endpoint, out.CompletionWindow)
-			}
-			if len(out.Requests) != 2 {
-				t.Fatalf("len(items) = %d, want 2", len(out.Requests))
-			}
+			require.NoError(t, err)
+			require.Equal(t, "/v1/chat/completions", out.Endpoint)
+			require.Equal(t, "24h", out.CompletionWindow)
+			require.Len(t, out.Requests, 2)
+
 			item := out.Requests[0]
-			if item.CustomID != "a" || item.Method != "POST" || item.URL != "/v1/chat/completions" {
-				t.Fatalf("item = %+v", item)
-			}
+			require.Equal(t, "a", item.CustomID)
+			require.Equal(t, "POST", item.Method)
+			require.Equal(t, "/v1/chat/completions", item.URL, "item = %+v", item)
+
 			var body map[string]any
-			if err := json.Unmarshal(item.Body, &body); err != nil {
-				t.Fatalf("item body: %v", err)
-			}
-			if body["model"] != "claude-haiku" || body["max_tokens"] != float64(32) {
-				t.Fatalf("translated body = %v", body)
-			}
+			err = json.Unmarshal(item.Body, &body)
+			require.NoError(t, err)
+			require.Equal(t, "claude-haiku", body["model"])
+			require.Equal(t, float64(32), body["max_tokens"], "translated body = %v", body)
 		})
 	}
 }
 
 func TestMessageBatchIDMapping(t *testing.T) {
-	if got := MessageBatchID("batch_123"); got != "msgbatch_123" {
-		t.Fatalf("MessageBatchID = %q", got)
-	}
-	if got := GatewayBatchID("msgbatch_123"); got != "batch_123" {
-		t.Fatalf("GatewayBatchID = %q", got)
-	}
+	got := MessageBatchID("batch_123")
+	require.Equal(t, "msgbatch_123", got)
+	got = GatewayBatchID("msgbatch_123")
+	require.Equal(t, "batch_123", got)
 	// Unprefixed IDs pass through unchanged in both directions.
-	if got := MessageBatchID("other_1"); got != "other_1" {
-		t.Fatalf("MessageBatchID passthrough = %q", got)
-	}
-	if got := GatewayBatchID("other_1"); got != "other_1" {
-		t.Fatalf("GatewayBatchID passthrough = %q", got)
-	}
+	got = MessageBatchID("other_1")
+	require.Equal(t, "other_1", got)
+	got = GatewayBatchID("other_1")
+	require.Equal(t, "other_1", got)
 }
 
 func TestFromBatchResponse(t *testing.T) {
@@ -198,40 +182,31 @@ func TestFromBatchResponse(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			out := FromBatchResponse(tc.batch)
-			if out.ID != "msgbatch_1" || out.Type != "message_batch" {
-				t.Fatalf("id/type = %q/%q", out.ID, out.Type)
-			}
-			if out.ProcessingStatus != tc.wantStatus {
-				t.Fatalf("processing_status = %q, want %q", out.ProcessingStatus, tc.wantStatus)
-			}
-			if out.RequestCounts != tc.wantCounts {
-				t.Fatalf("request_counts = %+v, want %+v", out.RequestCounts, tc.wantCounts)
-			}
-			if out.CreatedAt != "1970-01-01T00:16:40Z" {
-				t.Fatalf("created_at = %q", out.CreatedAt)
-			}
+			require.Equal(t, "msgbatch_1", out.ID)
+			require.Equal(t, "message_batch", out.Type)
+			require.Equal(t, tc.wantStatus, out.ProcessingStatus)
+			require.Equal(t, tc.wantCounts, out.RequestCounts)
+			require.Equal(t, "1970-01-01T00:16:40Z", out.CreatedAt)
+
 			// expires_at is created_at + the 24h completion window.
-			if out.ExpiresAt != "1970-01-02T00:16:40Z" {
-				t.Fatalf("expires_at = %q", out.ExpiresAt)
-			}
+			require.Equal(t, "1970-01-02T00:16:40Z", out.ExpiresAt)
+
 			if tc.wantResultsURL {
-				if out.ResultsURL == nil || *out.ResultsURL != "/v1/messages/batches/msgbatch_1/results" {
-					t.Fatalf("results_url = %v", out.ResultsURL)
-				}
-			} else if out.ResultsURL != nil {
-				t.Fatalf("results_url should be null while %s", tc.wantStatus)
+				require.NotNil(t, out.ResultsURL)
+				require.Equal(t, "/v1/messages/batches/msgbatch_1/results", *out.ResultsURL)
+			} else {
+				require.Nil(t, out.ResultsURL, "results_url should be null while %s", tc.wantStatus)
 			}
-			if tc.batch.CancellingAt != nil && out.CancelInitiatedAt == nil {
-				t.Fatal("cancel_initiated_at missing")
+			if tc.batch.CancellingAt != nil {
+				require.NotNil(t, out.CancelInitiatedAt, "cancel_initiated_at missing")
 			}
 			// ended_at reflects a provider-reported timestamp and is never
 			// fabricated at render time.
 			if tc.batch.CompletedAt != nil {
-				if out.EndedAt == nil || *out.EndedAt != "1970-01-01T00:33:20Z" {
-					t.Fatalf("ended_at = %v", out.EndedAt)
-				}
-			} else if out.EndedAt != nil {
-				t.Fatalf("ended_at fabricated without a provider timestamp: %v", *out.EndedAt)
+				require.NotNil(t, out.EndedAt)
+				require.Equal(t, "1970-01-01T00:33:20Z", *out.EndedAt)
+			} else {
+				require.Nil(t, out.EndedAt, "ended_at fabricated without a provider timestamp")
 			}
 		})
 	}
@@ -246,12 +221,10 @@ func TestFromBatchList(t *testing.T) {
 		},
 	}
 	out := FromBatchList(list)
-	if len(out.Data) != 2 || !out.HasMore {
-		t.Fatalf("list = %+v", out)
-	}
-	if *out.FirstID != "msgbatch_a" || *out.LastID != "msgbatch_b" {
-		t.Fatalf("first/last = %v/%v", *out.FirstID, *out.LastID)
-	}
+	require.Len(t, out.Data, 2)
+	require.True(t, out.HasMore, "list = %+v", out)
+	require.Equal(t, "msgbatch_a", *out.FirstID)
+	require.Equal(t, "msgbatch_b", *out.LastID)
 }
 
 func TestEncodeBatchResults(t *testing.T) {
@@ -280,13 +253,10 @@ func TestEncodeBatchResults(t *testing.T) {
 		},
 	}
 	payload, err := EncodeBatchResults(results)
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
+	require.NoError(t, err)
+
 	lines := strings.Split(strings.TrimSpace(string(payload)), "\n")
-	if len(lines) != 5 {
-		t.Fatalf("len(lines) = %d, want 5", len(lines))
-	}
+	require.Len(t, lines, 5)
 
 	decoded := make(map[string]map[string]any, len(lines))
 	for _, line := range lines {
@@ -294,38 +264,32 @@ func TestEncodeBatchResults(t *testing.T) {
 			CustomID string         `json:"custom_id"`
 			Result   map[string]any `json:"result"`
 		}
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			t.Fatalf("line %q: %v", line, err)
-		}
+		err := json.Unmarshal([]byte(line), &row)
+		require.NoError(t, err, "line %q: %v", line, err)
+
 		decoded[row.CustomID] = row.Result
 	}
 
 	for _, id := range []string{"typed", "mapped"} {
 		result := decoded[id]
-		if result["type"] != "succeeded" {
-			t.Fatalf("%s type = %v", id, result["type"])
-		}
+		require.Equal(t, "succeeded", result["type"], "%s type = %v", id, result["type"])
+
 		message := result["message"].(map[string]any)
-		if message["type"] != "message" || message["id"] != "msg_resp-1" {
-			t.Fatalf("%s message = %v", id, message)
-		}
+		require.Equal(t, "message", message["type"])
+		require.Equal(t, "msg_resp-1", message["id"], "%s message = %v", id, message)
+
 		content := message["content"].([]any)
-		if content[0].(map[string]any)["text"] != "hello" {
-			t.Fatalf("%s content = %v", id, content)
-		}
+		require.Equal(t, "hello", content[0].(map[string]any)["text"], "%s content = %v", id, content)
 	}
 
 	failed := decoded["failed"]
-	if failed["type"] != "errored" {
-		t.Fatalf("failed type = %v", failed["type"])
-	}
+	require.Equal(t, "errored", failed["type"])
+
 	envelope := failed["error"].(map[string]any)
 	inner := envelope["error"].(map[string]any)
-	if envelope["type"] != "error" || inner["type"] != "invalid_request_error" || inner["message"] != "bad item" {
-		t.Fatalf("failed envelope = %v", envelope)
-	}
-
-	if decoded["gone"]["type"] != "canceled" || decoded["late"]["type"] != "expired" {
-		t.Fatalf("canceled/expired mapping = %v / %v", decoded["gone"], decoded["late"])
-	}
+	require.Equal(t, "error", envelope["type"])
+	require.Equal(t, "invalid_request_error", inner["type"])
+	require.Equal(t, "bad item", inner["message"], "failed envelope = %v", envelope)
+	require.Equal(t, "canceled", decoded["gone"]["type"])
+	require.Equal(t, "expired", decoded["late"]["type"], "canceled/expired mapping = %v / %v", decoded["gone"], decoded["late"])
 }

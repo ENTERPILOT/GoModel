@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunPromptOrderingAndEdits(t *testing.T) {
@@ -34,26 +36,20 @@ func TestRunPromptOrderingAndEdits(t *testing.T) {
 		return pluginapi.Warn("looks_ok", "fine", map[string]any{"n": 1})
 	})
 	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{checker, 20}, {editor, 10}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	x := withPromptText(newExchange(), "hello")
 	outcome, err := chain.RunPrompt(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(order) != 2 || order[0] != "editor" || order[1] != "checker" {
-		t.Fatalf("order = %v", order)
-	}
-	if outcome.Decision.Action != pluginapi.ActionWarn || outcome.Instance != "checker" {
-		t.Fatalf("outcome = %+v", outcome)
-	}
-	if len(outcome.Records) != 2 || outcome.Records[0].Instance != "editor" {
-		t.Fatalf("records = %+v", outcome.Records)
-	}
-	if v, _ := x.Values.Get("editor.ran"); v != true {
-		t.Fatal("values not shared")
-	}
+	require.NoError(t, err)
+	require.Len(t, order, 2)
+	require.Equal(t, "editor", order[0])
+	require.Equal(t, "checker", order[1])
+	require.Equal(t, pluginapi.ActionWarn, outcome.Decision.Action)
+	require.Equal(t, "checker", outcome.Instance)
+	require.Len(t, outcome.Records, 2)
+	require.Equal(t, "editor", outcome.Records[0].Instance)
+	v, _ := x.Values.Get("editor.ran")
+	require.Equal(t, true, v)
 }
 
 // Edited is per instance: a mutator that edits is marked, a later mutator
@@ -72,33 +68,25 @@ func TestRunMarksOnlyTheInstanceThatEdited(t *testing.T) {
 	again := mk("again", true, func(x *pluginapi.Exchange) { _ = x.Prompt.SetText("m0", 0, "edited twice") })
 	reader := mk("reader", false, nil)
 	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{editor, 10}, {noop, 20}, {reader, 20}, {again, 30}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	outcome, err := chain.RunPrompt(context.Background(), withPromptText(newExchange(), "hello"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	want := map[string]bool{"editor": true, "noop": false, "reader": false, "again": true}
-	if len(outcome.Records) != len(want) {
-		t.Fatalf("records = %+v", outcome.Records)
-	}
+	require.Len(t, outcome.Records, len(want))
+
 	seen := make(map[string]bool, len(want))
 	for _, record := range outcome.Records {
 		expected, ok := want[record.Instance]
-		if !ok {
-			t.Errorf("unexpected record %q", record.Instance)
+		if !assert.True(t, ok, "unexpected record %q", record.Instance) {
 			continue
 		}
 		seen[record.Instance] = true
-		if record.Edited != expected {
-			t.Errorf("%s: edited = %v, want %v", record.Instance, record.Edited, expected)
-		}
+		assert.Equal(t, expected, record.Edited, "%s: edited", record.Instance)
 	}
 	for instance := range want {
-		if !seen[instance] {
-			t.Errorf("missing record %q", instance)
-		}
+		assert.True(t, seen[instance], "missing record %q", instance)
 	}
 }
 
@@ -118,20 +106,19 @@ func TestRunPromptObservedReportsEachEditInOrder(t *testing.T) {
 	noop := mk("noop", true, nil)
 	reader := mk("reader", false, nil)
 	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{first, 10}, {reader, 10}, {noop, 20}, {second, 30}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	var seen []string
 	observe := func(instance string, x *pluginapi.Exchange) {
 		seen = append(seen, instance+": "+x.Prompt.Messages[0].Text())
 	}
-	if _, err := chain.RunPromptObserved(context.Background(), withPromptText(newExchange(), "hello"), observe); err != nil {
-		t.Fatal(err)
-	}
+	_, err = chain.RunPromptObserved(context.Background(), withPromptText(newExchange(), "hello"), observe)
+	require.NoError(t, err)
+
 	want := []string{"first: hello one", "second: hello one two"}
-	if len(seen) != len(want) || seen[0] != want[0] || seen[1] != want[1] {
-		t.Fatalf("observed = %q, want %q", seen, want)
-	}
+	require.Len(t, seen, len(want))
+	require.Equal(t, want[0], seen[0])
+	require.Equal(t, want[1], seen[1])
 
 	// A mutator that edits and then fails closed is observed too, before
 	// the run returns its error.
@@ -140,16 +127,13 @@ func TestRunPromptObservedReportsEachEditInOrder(t *testing.T) {
 		return pluginapi.Allow(), errors.New("boom")
 	}}, InstanceSpec{FailMode: FailClosed})
 	chain, err = BuildChain(pluginapi.KindPrompt, []Ref{{failing, 10}, {second, 20}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	seen = nil
-	if _, err := chain.RunPromptObserved(context.Background(), withPromptText(newExchange(), "hello"), observe); err == nil {
-		t.Fatal("expected the fail-closed error")
-	}
-	if len(seen) != 1 || seen[0] != "failing: edited then failed" {
-		t.Fatalf("observed = %q, want the failing mutator's edit only", seen)
-	}
+	_, err = chain.RunPromptObserved(context.Background(), withPromptText(newExchange(), "hello"), observe)
+	require.Error(t, err)
+	require.Len(t, seen, 1)
+	require.Equal(t, "failing: edited then failed", seen[0])
 }
 
 func TestRunReadersConcurrentAndMergeSeverity(t *testing.T) {
@@ -180,31 +164,22 @@ func TestRunReadersConcurrentAndMergeSeverity(t *testing.T) {
 		{reader("block", pluginapi.Block(451, "policy", "blocked")), 10},
 		{never, 20},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	x := withPromptText(newExchange(), "hi")
 	outcome, err := chain.RunPrompt(context.Background(), x)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if atomic.LoadInt32(&maxInFlight) < 2 {
-		t.Fatalf("readers did not run concurrently (max in flight %d)", maxInFlight)
-	}
-	if outcome.Decision.Action != pluginapi.ActionBlock || outcome.Decision.Status != 451 || outcome.Instance != "block" {
-		t.Fatalf("outcome = %+v", outcome)
-	}
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, atomic.LoadInt32(&maxInFlight), int32(2), "readers did not run concurrently (max in flight %d)", maxInFlight)
+	require.Equal(t, pluginapi.ActionBlock, outcome.Decision.Action)
+	require.Equal(t, 451, outcome.Decision.Status)
+	require.Equal(t, "block", outcome.Instance)
+
 	for _, name := range []string{"warn", "respond", "block"} {
-		if _, ok := x.Values.Get(name); !ok {
-			t.Fatalf("value %s not merged back", name)
-		}
-		if x.Headers.Response.Get("X-"+name) != "1" {
-			t.Fatalf("header X-%s not merged back", name)
-		}
+		_, ok := x.Values.Get(name)
+		require.True(t, ok, "value %s not merged back", name)
+		require.Equal(t, "1", x.Headers.Response.Get("X-"+name), "header X-%s not merged back", name)
 	}
-	if len(outcome.Records) != 3 {
-		t.Fatalf("records = %d", len(outcome.Records))
-	}
+	require.Len(t, outcome.Records, 3)
 }
 
 func TestRunFailModesTimeoutsAndPanics(t *testing.T) {
@@ -251,26 +226,21 @@ func TestRunFailModesTimeoutsAndPanics(t *testing.T) {
 			inst := newTestInstance(tt.plugin, tt.spec)
 			after := newTestInstance(&fakePlugin{name: "after"}, InstanceSpec{})
 			chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{inst, 10}, {after, 20}})
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			outcome, err := chain.RunPrompt(context.Background(), withPromptText(newExchange(), "x"))
 			if tt.wantErr {
 				var pluginErr *PluginError
-				if !errors.As(err, &pluginErr) || pluginErr.Instance != tt.plugin.name {
-					t.Fatalf("error = %v, want PluginError for %s", err, tt.plugin.name)
-				}
-				if len(outcome.Records) != 1 || outcome.Records[0].Err == nil {
-					t.Fatalf("records = %+v", outcome.Records)
-				}
+				require.ErrorAs(t, err, &pluginErr)
+				require.Equal(t, tt.plugin.name, pluginErr.Instance)
+				require.Len(t, outcome.Records, 1)
+				require.Error(t, outcome.Records[0].Err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("error = %v, want nil (fail open)", err)
-			}
-			if outcome.Decision.Action != pluginapi.ActionAllow || len(outcome.Records) != 2 || outcome.Records[0].Err == nil {
-				t.Fatalf("outcome = %+v", outcome)
-			}
+			require.NoError(t, err)
+			require.Equal(t, pluginapi.ActionAllow, outcome.Decision.Action)
+			require.Len(t, outcome.Records, 2)
+			require.Error(t, outcome.Records[0].Err, "outcome = %+v", outcome)
 		})
 	}
 }
@@ -285,49 +255,47 @@ func TestRunResponseAndStreamEnd(t *testing.T) {
 		},
 	}, InstanceSpec{})
 	chain, err := BuildChain(pluginapi.KindResponse, []Ref{{inst, 1}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	outcome, err := chain.RunResponse(context.Background(), newExchange())
-	if err != nil || outcome.Decision.Action != pluginapi.ActionRespond || outcome.Decision.Response == nil {
-		t.Fatalf("RunResponse = %+v, %v (respond without completion must be normalized)", outcome, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionRespond, outcome.Decision.Action)
+	require.NotNil(t, outcome.Decision.Response, "RunResponse = %+v, %v (respond without completion must be normalized)", outcome, err)
+
 	stream, err := BuildChain(pluginapi.KindStream, []Ref{{inst, 1}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	outcome, err = stream.RunStreamEnd(context.Background(), newExchange())
-	if err != nil || outcome.Decision.Action != pluginapi.ActionBlock {
-		t.Fatalf("RunStreamEnd = %+v, %v", outcome, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionBlock, outcome.Decision.Action)
+
 	var empty *Chain
-	if outcome, err := empty.RunPrompt(context.Background(), newExchange()); err != nil || outcome.Decision.Action != pluginapi.ActionAllow {
-		t.Fatalf("empty chain = %+v, %v", outcome, err)
-	}
+	outcome, err = empty.RunPrompt(context.Background(), newExchange())
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.ActionAllow, outcome.Decision.Action)
 }
 
 func TestDecisionHelpers(t *testing.T) {
-	if MergeDecision(pluginapi.Warn("a", "", nil), pluginapi.Allow()).Action != pluginapi.ActionWarn {
-		t.Fatal("merge lowered severity")
-	}
+	require.Equal(t, pluginapi.ActionWarn, MergeDecision(pluginapi.Warn("a", "", nil), pluginapi.Allow()).Action)
+
 	blocked := BlockError(pluginapi.Block(0, "", ""), 400)
-	if blocked.HTTPStatusCode() != 400 || blocked.Code == nil || *blocked.Code != CodeBlocked || blocked.Message == "" {
-		t.Fatalf("BlockError defaults = %+v", blocked)
-	}
+	require.Equal(t, 400, blocked.HTTPStatusCode())
+	require.NotNil(t, blocked.Code)
+	require.Equal(t, CodeBlocked, *blocked.Code)
+	require.NotEmpty(t, blocked.Message)
+
 	custom := BlockError(pluginapi.Block(502, "x", "y"), 400)
-	if custom.HTTPStatusCode() != 502 || *custom.Code != "x" || custom.Message != "y" {
-		t.Fatalf("BlockError custom = %+v", custom)
-	}
+	require.Equal(t, 502, custom.HTTPStatusCode())
+	require.Equal(t, "x", *custom.Code)
+	require.Equal(t, "y", custom.Message)
+
 	failure := FailureError(errFake)
-	if failure.HTTPStatusCode() != 500 || *failure.Code != CodePluginFailure || failure.Message == errFake.Error() {
-		t.Fatalf("FailureError = %+v", failure)
-	}
-	if WarnHeaderValue(pluginapi.Warn("pii", "", nil)) != "warn; code=pii" {
-		t.Fatal("WarnHeaderValue wrong")
-	}
-	if DefaultBlockStatus(pluginapi.KindResponse) != 502 || DefaultBlockStatus(pluginapi.KindPrompt) != 400 {
-		t.Fatal("DefaultBlockStatus wrong")
-	}
+	require.Equal(t, 500, failure.HTTPStatusCode())
+	require.Equal(t, CodePluginFailure, *failure.Code)
+	require.NotEqual(t, errFake.Error(), failure.Message, "FailureError = %+v", failure)
+	require.Equal(t, "warn; code=pii", WarnHeaderValue(pluginapi.Warn("pii", "", nil)))
+	require.Equal(t, 502, DefaultBlockStatus(pluginapi.KindResponse))
+	require.Equal(t, 400, DefaultBlockStatus(pluginapi.KindPrompt))
 }
 
 func TestRunReadersEditRequestHeadersConcurrently(t *testing.T) {
@@ -343,23 +311,18 @@ func TestRunReadersEditRequestHeadersConcurrently(t *testing.T) {
 		{reader("remove", func(h http.Header) { h.Del("X-Debug") }), 10},
 		{reader("keep", func(h http.Header) { h.Set("X-Keep", h.Get("X-Keep")) }), 10},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	x := withPromptText(newExchange(), "hi")
 	x.Headers.Request = http.Header{"X-Debug": {"1"}, "X-Keep": {"same"}}
-	if _, err := chain.RunPrompt(context.Background(), x); err != nil {
-		t.Fatal(err)
-	}
-	if got := x.Headers.Request.Get("X-Team"); got != "platform" {
-		t.Fatalf("X-Team = %q, want platform", got)
-	}
-	if _, ok := x.Headers.Request["X-Debug"]; ok {
-		t.Fatal("X-Debug removed by a reader is still present")
-	}
-	if got := x.Headers.Request.Get("X-Keep"); got != "same" {
-		t.Fatalf("X-Keep = %q, want same", got)
-	}
+	_, err = chain.RunPrompt(context.Background(), x)
+	require.NoError(t, err)
+	got := x.Headers.Request.Get("X-Team")
+	require.Equal(t, "platform", got)
+	_, ok := x.Headers.Request["X-Debug"]
+	require.False(t, ok)
+	got = x.Headers.Request.Get("X-Keep")
+	require.Equal(t, "same", got)
 }
 
 // A mutator that outlives its timeout keeps writing the request's exchange.
@@ -379,27 +342,20 @@ func TestRunAbandonedMutatorIsReportedAbandoned(t *testing.T) {
 	}}
 	inst := newTestInstance(mutator, InstanceSpec{Timeout: 20 * time.Millisecond, FailMode: FailOpen})
 	chain, err := BuildChain(pluginapi.KindPrompt, []Ref{{inst, 10}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	_, err = chain.RunPrompt(context.Background(), withPromptText(newExchange(), "x"))
-	if !Abandoned(err) {
-		t.Fatalf("error = %v, want an abandoned failure even under fail_open", err)
-	}
+	require.True(t, Abandoned(err))
 }
 
 // A plugin may hand back any status; only 4xx and 5xx can be written.
 func TestBlockErrorClampsStatus(t *testing.T) {
 	for _, status := range []int{42, 200, 399, 600, 1000, -1} {
 		got := BlockError(pluginapi.Block(status, "x", "y"), 502)
-		if got.HTTPStatusCode() != 502 {
-			t.Errorf("status %d rendered as %d, want the phase default 502", status, got.HTTPStatusCode())
-		}
+		assert.Equal(t, 502, got.HTTPStatusCode(), "status %d rendered as %d, want the phase default 502", status, got.HTTPStatusCode())
 	}
-	if got := BlockError(pluginapi.Block(451, "x", "y"), 502); got.HTTPStatusCode() != 451 {
-		t.Errorf("status 451 rendered as %d", got.HTTPStatusCode())
-	}
-	if got := BlockError(pluginapi.Block(0, "x", "y"), 99); got.HTTPStatusCode() != 400 {
-		t.Errorf("unusable default rendered as %d, want 400", got.HTTPStatusCode())
-	}
+	got := BlockError(pluginapi.Block(451, "x", "y"), 502)
+	assert.Equal(t, 451, got.HTTPStatusCode())
+	got = BlockError(pluginapi.Block(0, "x", "y"), 99)
+	assert.Equal(t, 400, got.HTTPStatusCode())
 }

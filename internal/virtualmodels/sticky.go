@@ -28,9 +28,17 @@ type stickyPin struct {
 // the round-robin counters it is per-instance state: after a restart (or on
 // another replica) the first request of a session simply re-pins.
 type stickySessions struct {
-	mu      sync.Mutex
-	entries map[stickyKey]stickyPin
-	now     func() time.Time // injectable for tests; nil means time.Now
+	mu       sync.Mutex
+	entries  map[stickyKey]stickyPin
+	capacity int              // 0 means maxStickySessions; tests lower it
+	now      func() time.Time // injectable for tests; nil means time.Now
+}
+
+func (s *stickySessions) limit() int {
+	if s.capacity > 0 {
+		return s.capacity
+	}
+	return maxStickySessions
 }
 
 func (s *stickySessions) clock() time.Time {
@@ -131,7 +139,7 @@ func (s *stickySessions) setLocked(key stickyKey, qualified string, now time.Tim
 		s.entries = make(map[stickyKey]stickyPin)
 	}
 	s.pruneLocked(now)
-	if len(s.entries) >= maxStickySessions {
+	if len(s.entries) >= s.limit() {
 		s.evictSoonestLocked()
 	}
 	s.entries[key] = stickyPin{

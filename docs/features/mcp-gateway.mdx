@@ -151,6 +151,16 @@ immediately when the upstream sends a `list_changed` notification.
 **Reconnect** on the dashboard (or `POST /admin/mcp-servers/{slug}/reconnect`)
 forces a redial.
 
+A last error of `no MCP endpoint at that path` means the URL answered the
+handshake with HTTP 404: something listens there, but not an MCP endpoint at
+that path. Servers mount their endpoint under different paths, so `url` must
+include it — for example `http://localhost:18080/http` for mcp-devtools or
+`http://localhost:3000/v2/mcp` for self-hosted Firecrawl. A last error
+mentioning HTTP 405 means the path exists but rejects the handshake method,
+which is what a streamable HTTP endpoint answers when `transport` is `sse`
+(and an SSE endpoint when it is `http`): fix `transport` first, then the
+path. Stateless servers (no `Mcp-Session-Id`) need no extra configuration.
+
 ## Inspect a server's catalog
 
 The dashboard's catalog inspector (or

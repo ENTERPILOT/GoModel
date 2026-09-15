@@ -9,8 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/conversationstore"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type appendFailingConversationStore struct {
@@ -51,13 +54,10 @@ func createTestConversation(t *testing.T, srv http.Handler, body string) string 
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create conversation status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	var conv core.Conversation
-	if err := json.Unmarshal(rec.Body.Bytes(), &conv); err != nil {
-		t.Fatalf("decode conversation: %v", err)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	conv := echotest.Decode[core.Conversation](t, rec)
+
 	return conv.ID
 }
 
@@ -78,42 +78,33 @@ func TestResponsesWithConversation_ResolvesLocallyAndAppendsTurn(t *testing.T) {
 		`{"items":[{"type":"message","role":"user","content":[{"type":"input_text","text":"remember: zebra"}]}]}`)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","conversation":"`+convID+`"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("responses status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	forwarded := provider.capturedResponsesReq
-	if forwarded == nil {
-		t.Fatal("provider did not receive a responses request")
-	}
-	if forwarded.Conversation != nil {
-		t.Fatalf("conversation field must be stripped before dispatch, got %+v", forwarded.Conversation)
-	}
+	require.NotNil(t, forwarded)
+	require.Nil(t, forwarded.Conversation)
+
 	input, ok := forwarded.Input.([]any)
-	if !ok || len(input) != 2 {
-		t.Fatalf("forwarded input = %#v, want history + user message (2 items)", forwarded.Input)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 2)
+
 	history, ok := input[0].(map[string]any)
-	if !ok || history["role"] != "user" {
-		t.Fatalf("first forwarded item = %#v, want stored history item", input[0])
-	}
-	if _, hasID := history["id"]; hasID {
-		t.Fatalf("stored item id must be stripped before dispatch, got %#v", history)
-	}
+	require.True(t, ok)
+	require.Equal(t, "user", history["role"], "first forwarded item = %#v, want stored history item", input[0])
+	_, hasID := history["id"]
+	require.False(t, hasID, "stored item id must be stripped before dispatch, got %#v", history)
 
 	// Second turn: the conversation now holds initial item + turn input + output.
 	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"and again?","conversation":"`+convID+`"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("second responses status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	input, ok = provider.capturedResponsesReq.Input.([]any)
-	if !ok || len(input) != 4 {
-		t.Fatalf("second turn forwarded %d items, want 4 (3 history + 1 new input): %#v", len(input), provider.capturedResponsesReq.Input)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 4)
+
 	assistant, ok := input[2].(map[string]any)
-	if !ok || assistant["role"] != "assistant" {
-		t.Fatalf("third forwarded item = %#v, want appended assistant output", input[2])
-	}
+	require.True(t, ok)
+	require.Equal(t, "assistant", assistant["role"], "third forwarded item = %#v, want appended assistant output", input[2])
 }
 
 func TestResponsesWithConversation_UnknownIDReturns404(t *testing.T) {
@@ -121,15 +112,9 @@ func TestResponsesWithConversation_UnknownIDReturns404(t *testing.T) {
 	srv := New(provider, nil)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"hello","conversation":"conv_missing"}`)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d (%s), want 404", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "Conversation with id 'conv_missing' not found") {
-		t.Fatalf("body = %s, want conversation not found message", rec.Body.String())
-	}
-	if provider.capturedResponsesReq != nil {
-		t.Fatal("provider must not be called for an unknown conversation")
-	}
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "Conversation with id 'conv_missing' not found")
+	require.Nil(t, provider.capturedResponsesReq)
 }
 
 func TestResponsesWithConversation_RejectsPreviousResponseID(t *testing.T) {
@@ -139,9 +124,7 @@ func TestResponsesWithConversation_RejectsPreviousResponseID(t *testing.T) {
 
 	rec := postResponses(t, srv,
 		`{"model":"gpt-5-mini","input":"hello","conversation":"`+convID+`","previous_response_id":"resp_1"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d (%s), want 400", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 }
 
 func TestResponsesWithConversation_ObjectRefAndStringInputShapes(t *testing.T) {
@@ -151,13 +134,11 @@ func TestResponsesWithConversation_ObjectRefAndStringInputShapes(t *testing.T) {
 
 	rec := postResponses(t, srv,
 		`{"model":"gpt-5-mini","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}],"conversation":{"id":"`+convID+`"}}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	input, ok := provider.capturedResponsesReq.Input.([]any)
-	if !ok || len(input) != 1 {
-		t.Fatalf("forwarded input = %#v, want the single request item (empty history)", provider.capturedResponsesReq.Input)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 1)
 }
 
 func TestResponsesWithConversation_StreamingAppendsTurn(t *testing.T) {
@@ -175,23 +156,19 @@ func TestResponsesWithConversation_StreamingAppendsTurn(t *testing.T) {
 	convID := createTestConversation(t, srv, `{}`)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"start","conversation":"`+convID+`","stream":true}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("stream status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	// The streamed exchange (input + completed output) must now be history.
 	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"next","conversation":"`+convID+`"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("follow-up status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	input, ok := provider.capturedResponsesReq.Input.([]any)
-	if !ok || len(input) != 3 {
-		t.Fatalf("follow-up forwarded %d items, want 3 (streamed input + output + new input): %#v", len(input), provider.capturedResponsesReq.Input)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 3)
+
 	assistant, ok := input[1].(map[string]any)
-	if !ok || assistant["role"] != "assistant" {
-		t.Fatalf("second item = %#v, want streamed assistant output", input[1])
-	}
+	require.True(t, ok)
+	require.Equal(t, "assistant", assistant["role"], "second item = %#v, want streamed assistant output", input[1])
 }
 
 func TestResponsesWithConversation_StreamingAppendFailureSuppressesCompletion(t *testing.T) {
@@ -212,57 +189,47 @@ func TestResponsesWithConversation_StreamingAppendFailureSuppressesCompletion(t 
 	convID := createTestConversation(t, srv, `{}`)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"hello","conversation":"`+convID+`","stream":true}`)
-	if strings.Contains(rec.Body.String(), "response.completed") {
-		t.Fatalf("stream body = %s, must not report completion when persistence fails", rec.Body.String())
-	}
+	require.NotContains(t, rec.Body.String(), "response.completed", "stream body = %s, must not report completion when persistence fails", rec.Body.String())
 }
 
 func TestResponsesWithConversation_PreservesReasoningFieldsOnReplay(t *testing.T) {
 	provider := conversationTestProvider(t)
 	var response core.ResponsesResponse
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"id":"resp_reasoning","object":"response","model":"gpt-5-mini","status":"completed",
 		"output":[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"opaque"}]
-	}`), &response); err != nil {
-		t.Fatalf("decode reasoning response: %v", err)
-	}
+	}`), &response)
+	require.NoError(t, err)
+
 	provider.responsesResponse = &response
 	srv := New(provider, nil)
 	convID := createTestConversation(t, srv, `{}`)
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"first","conversation":"`+convID+`"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"second","conversation":"`+convID+`"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"first","conversation":"`+convID+`"}`); rec.Code != http.StatusOK {
-		t.Fatalf("first response status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"second","conversation":"`+convID+`"}`); rec.Code != http.StatusOK {
-		t.Fatalf("second response status = %d (%s)", rec.Code, rec.Body.String())
-	}
 	input, ok := provider.capturedResponsesReq.Input.([]any)
-	if !ok || len(input) != 3 {
-		t.Fatalf("replayed input = %#v, want first + reasoning + second", provider.capturedResponsesReq.Input)
-	}
+	require.True(t, ok)
+	require.Len(t, input, 3)
+
 	reasoning, ok := input[1].(map[string]any)
-	if !ok || reasoning["type"] != "reasoning" || reasoning["encrypted_content"] != "opaque" {
-		t.Fatalf("reasoning item = %#v, want lossless replay", input[1])
-	}
-	if _, ok := reasoning["summary"].([]any); !ok {
-		t.Fatalf("reasoning summary = %#v, want array", reasoning["summary"])
-	}
+	require.True(t, ok)
+	require.Equal(t, "reasoning", reasoning["type"])
+	require.Equal(t, "opaque", reasoning["encrypted_content"], "reasoning item = %#v, want lossless replay", input[1])
+	_, ok = reasoning["summary"].([]any)
+	require.True(t, ok, "reasoning summary = %#v, want array", reasoning["summary"])
 }
 
 func TestMergeConversationInputPreservesLargeUnknownIntegers(t *testing.T) {
 	merged, err := mergeConversationInput([]json.RawMessage{
 		json.RawMessage(`{"id":"future_1","type":"future_item","opaque_integer":9007199254740993}`),
 	}, nil)
-	if err != nil {
-		t.Fatalf("merge conversation input: %v", err)
-	}
+	require.NoError(t, err)
+
 	encoded, err := json.Marshal(merged)
-	if err != nil {
-		t.Fatalf("marshal merged input: %v", err)
-	}
-	if !strings.Contains(string(encoded), `"opaque_integer":9007199254740993`) {
-		t.Fatalf("merged input = %s, want exact large integer", encoded)
-	}
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"opaque_integer":9007199254740993`, "merged input = %s, want exact large integer", encoded)
 }
 
 func TestResponsesWithConversation_RemapsReusedProviderItemIDs(t *testing.T) {
@@ -273,50 +240,39 @@ func TestResponsesWithConversation_RemapsReusedProviderItemIDs(t *testing.T) {
 	returnedOutputIDs := make(map[string]struct{}, 3)
 	for _, input := range []string{"first", "second", "third"} {
 		rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"`+input+`","conversation":"`+convID+`"}`)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("response for %q status = %d (%s)", input, rec.Code, rec.Body.String())
-		}
-		var response core.ResponsesResponse
-		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || len(response.Output) != 1 {
-			t.Fatalf("decode response for %q: output=%v err=%v", input, response.Output, err)
-		}
+		require.Equal(t, http.StatusOK, rec.Code, "response for %q status = %d (%s)", input, rec.Code, rec.Body.String())
+
+		response := echotest.Decode[core.ResponsesResponse](t, rec)
+		require.Len(t, response.Output, 1)
+
 		returnedOutputIDs[response.Output[0].ID] = struct{}{}
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+convID+"/items?order=asc&limit=100", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	var list core.ConversationItemListResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("decode item list: %v", err)
-	}
-	if len(list.Data) != 6 {
-		t.Fatalf("items = %d, want three inputs and three outputs", len(list.Data))
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	list := echotest.Decode[core.ConversationItemListResponse](t, rec)
+	require.Len(t, list.Data, 6)
+
 	ids := make(map[string]struct{}, len(list.Data))
 	for _, raw := range list.Data {
 		id := responseInputItemID(raw)
-		if id == "" {
-			t.Fatalf("item has no id: %s", raw)
-		}
-		if _, duplicate := ids[id]; duplicate {
-			t.Fatalf("duplicate persisted item id %q in %s", id, rec.Body.String())
-		}
+		require.NotEmpty(t, id)
+		_, duplicate := ids[id]
+		require.False(t, duplicate)
+
 		ids[id] = struct{}{}
 	}
 	for id := range returnedOutputIDs {
-		if _, persisted := ids[id]; !persisted {
-			t.Fatalf("response output id %q was not persisted: %s", id, rec.Body.String())
-		}
+		_, persisted := ids[id]
+		require.True(t, persisted)
+
 		itemReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+convID+"/items/"+id, nil)
 		itemRec := httptest.NewRecorder()
 		srv.ServeHTTP(itemRec, itemReq)
-		if itemRec.Code != http.StatusOK {
-			t.Fatalf("retrieve returned output id %q status = %d (%s)", id, itemRec.Code, itemRec.Body.String())
-		}
+		require.Equal(t, http.StatusOK, itemRec.Code, "retrieve returned output id %q status = %d (%s)", id, itemRec.Code, itemRec.Body.String())
 	}
 }
 
@@ -327,22 +283,16 @@ func TestResponsesWithConversation_GeneratesMissingProviderOutputID(t *testing.T
 	convID := createTestConversation(t, srv, `{}`)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"hello","conversation":"`+convID+`"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("response status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	var response core.ResponsesResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || len(response.Output) != 1 {
-		t.Fatalf("decode response: output=%v err=%v", response.Output, err)
-	}
-	if response.Output[0].ID == "" {
-		t.Fatal("response output id is empty, want gateway-generated id")
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	response := echotest.Decode[core.ResponsesResponse](t, rec)
+	require.Len(t, response.Output, 1)
+	require.NotEmpty(t, response.Output[0].ID)
+
 	itemReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+convID+"/items/"+response.Output[0].ID, nil)
 	itemRec := httptest.NewRecorder()
 	srv.ServeHTTP(itemRec, itemReq)
-	if itemRec.Code != http.StatusOK {
-		t.Fatalf("retrieve generated output id status = %d (%s)", itemRec.Code, itemRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, itemRec.Code, itemRec.Body.String())
 }
 
 func TestResponsesWithConversation_AppendFailureReturnsError(t *testing.T) {
@@ -355,10 +305,6 @@ func TestResponsesWithConversation_AppendFailureReturnsError(t *testing.T) {
 	convID := createTestConversation(t, srv, `{}`)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"hello","conversation":"`+convID+`"}`)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("response status = %d (%s), want 500", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "failed to append conversation turn") {
-		t.Fatalf("response body = %s, want append failure", rec.Body.String())
-	}
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "failed to append conversation turn")
 }

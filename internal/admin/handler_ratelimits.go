@@ -75,10 +75,10 @@ func (h *Handler) UpsertRateLimit(c *echo.Context) error {
 		// is reported as.
 		SubjectDisplay: cmp.Or(strings.TrimSpace(req.Subject), strings.TrimSpace(req.UserPath)),
 		PerChild:       req.PerChild,
-		PeriodSeconds: periodSeconds,
-		MaxRequests:   req.MaxRequests,
-		MaxTokens:     req.MaxTokens,
-		Source:        ratelimit.SourceManual,
+		PeriodSeconds:  periodSeconds,
+		MaxRequests:    req.MaxRequests,
+		MaxTokens:      req.MaxTokens,
+		Source:         ratelimit.SourceManual,
 	})
 	if err != nil {
 		return handleError(c, core.NewInvalidRequestError(err.Error(), err))

@@ -2,27 +2,22 @@ package budget
 
 import (
 	"math"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplySettingValueIgnoresUnknownNonInteger(t *testing.T) {
 	settings := DefaultSettings()
-	if err := applySettingValue(&settings, "unknown_setting", "not-an-int"); err != nil {
-		t.Fatalf("applySettingValue() error = %v, want nil for unknown setting", err)
-	}
+	err := applySettingValue(&settings, "unknown_setting", "not-an-int")
+	require.NoError(t, err)
 }
 
 func TestApplySettingValueRejectsKnownNonInteger(t *testing.T) {
 	settings := DefaultSettings()
 	err := applySettingValue(&settings, settingDailyResetHour, "not-an-int")
-	if err == nil {
-		t.Fatal("applySettingValue() error = nil, want parse error")
-	}
-	if !strings.Contains(err.Error(), "must be an integer") {
-		t.Fatalf("applySettingValue() error = %v", err)
-	}
+	require.ErrorContains(t, err, "must be an integer")
 }
 
 func TestNormalizeBudgetRejectsNonFiniteAmount(t *testing.T) {
@@ -42,12 +37,7 @@ func TestNormalizeBudgetRejectsNonFiniteAmount(t *testing.T) {
 				PeriodSeconds: PeriodDailySeconds,
 				Amount:        tt.amount,
 			})
-			if err == nil {
-				t.Fatal("NormalizeBudget() error = nil, want non-finite amount error")
-			}
-			if !strings.Contains(err.Error(), "amount must be a finite number greater than 0") {
-				t.Fatalf("NormalizeBudget() error = %v, want finite amount validation", err)
-			}
+			require.ErrorContains(t, err, "amount must be a finite number greater than 0")
 		})
 	}
 }
@@ -146,44 +136,32 @@ func TestPeriodBoundsUsesConfiguredAnchors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			start, end := PeriodBounds(tt.now, tt.period, settings)
-			if !start.Equal(tt.wantStart) {
-				t.Fatalf("start = %s, want %s", start, tt.wantStart)
-			}
-			if !end.Equal(tt.wantEnd) {
-				t.Fatalf("end = %s, want %s", end, tt.wantEnd)
-			}
+			require.True(t, start.Equal(tt.wantStart), "start = %s, want %s", start, tt.wantStart)
+			require.True(t, end.Equal(tt.wantEnd), "end = %s, want %s", end, tt.wantEnd)
 		})
 	}
 }
 
 func TestCheckResultUsageRatio(t *testing.T) {
-	if got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 25}).UsageRatio(); got != 0.25 {
-		t.Fatalf("UsageRatio() = %v, want 0.25", got)
-	}
-	if got := (CheckResult{Budget: Budget{Amount: 0}, Spent: 25}).UsageRatio(); got != 0 {
-		t.Fatalf("UsageRatio() with zero amount = %v, want 0", got)
-	}
+	got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 25}).UsageRatio()
+	require.Equal(t, 0.25, got)
+	got = (CheckResult{Budget: Budget{Amount: 0}, Spent: 25}).UsageRatio()
+	require.Equal(t, float64(0), got)
 	// Deliberately unclamped: >1 signals an exceeded budget to the dashboard.
-	if got := (CheckResult{Budget: Budget{Amount: 100}, Spent: 150}).UsageRatio(); got != 1.5 {
-		t.Fatalf("UsageRatio() exceeded = %v, want 1.5", got)
-	}
+	got = (CheckResult{Budget: Budget{Amount: 100}, Spent: 150}).UsageRatio()
+	require.Equal(t, 1.5, got)
 }
 
 func TestCheckResultPeriodRatio(t *testing.T) {
 	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(10 * time.Hour)
 	result := CheckResult{PeriodStart: start, PeriodEnd: end}
-
-	if got := result.PeriodRatio(start.Add(5 * time.Hour)); got != 0.5 {
-		t.Fatalf("PeriodRatio(midpoint) = %v, want 0.5", got)
-	}
-	if got := result.PeriodRatio(start.Add(-time.Hour)); got != 0 {
-		t.Fatalf("PeriodRatio(before start) = %v, want 0 (clamped)", got)
-	}
-	if got := result.PeriodRatio(end.Add(time.Hour)); got != 1 {
-		t.Fatalf("PeriodRatio(after end) = %v, want 1 (clamped)", got)
-	}
-	if got := (CheckResult{PeriodStart: start, PeriodEnd: start}).PeriodRatio(start); got != 0 {
-		t.Fatalf("PeriodRatio(zero-length period) = %v, want 0", got)
-	}
+	got := result.PeriodRatio(start.Add(5 * time.Hour))
+	require.Equal(t, 0.5, got)
+	got = result.PeriodRatio(start.Add(-time.Hour))
+	require.Equal(t, float64(0), got)
+	got = result.PeriodRatio(end.Add(time.Hour))
+	require.Equal(t, float64(1), got)
+	got = (CheckResult{PeriodStart: start, PeriodEnd: start}).PeriodRatio(start)
+	require.Equal(t, float64(0), got)
 }

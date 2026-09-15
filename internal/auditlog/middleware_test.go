@@ -3,14 +3,15 @@ package auditlog
 import (
 	"maps"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 func TestApplyAuthenticationRefreshesLabelsFromContext(t *testing.T) {
@@ -19,9 +20,7 @@ func TestApplyAuthenticationRefreshesLabelsFromContext(t *testing.T) {
 
 	applyAuthentication(entry, ctx)
 
-	if got, want := strings.Join(entry.Data.Labels, ","), "from-header,from-key"; got != want {
-		t.Fatalf("entry.Data.Labels = %q, want %q", got, want)
-	}
+	require.Equal(t, []string{"from-header", "from-key"}, entry.Data.Labels)
 }
 
 func TestApplyAuthenticationKeepsLabelsWhenContextHasNone(t *testing.T) {
@@ -29,9 +28,7 @@ func TestApplyAuthenticationKeepsLabelsWhenContextHasNone(t *testing.T) {
 
 	applyAuthentication(entry, t.Context())
 
-	if got, want := strings.Join(entry.Data.Labels, ","), "from-header"; got != want {
-		t.Fatalf("entry.Data.Labels = %q, want %q", got, want)
-	}
+	require.Equal(t, []string{"from-header"}, entry.Data.Labels)
 }
 
 func TestApplyAuthenticationPersistsExtensionPrincipal(t *testing.T) {
@@ -40,12 +37,8 @@ func TestApplyAuthenticationPersistsExtensionPrincipal(t *testing.T) {
 
 	applyAuthentication(entry, ctx)
 
-	if entry.PrincipalID != "oidc:principal-1" {
-		t.Fatalf("PrincipalID = %q, want oidc:principal-1", entry.PrincipalID)
-	}
-	if entry.AuthMethod != "oidc" {
-		t.Fatalf("AuthMethod = %q, want oidc", entry.AuthMethod)
-	}
+	require.Equal(t, "oidc:principal-1", entry.PrincipalID)
+	require.Equal(t, "oidc", entry.AuthMethod)
 }
 
 func TestApplyAuthenticationDoesNotReplacePrincipalWithBlank(t *testing.T) {
@@ -54,16 +47,11 @@ func TestApplyAuthenticationDoesNotReplacePrincipalWithBlank(t *testing.T) {
 
 	applyAuthentication(entry, ctx)
 
-	if entry.PrincipalID != "existing-principal" {
-		t.Fatalf("PrincipalID = %q, want existing-principal", entry.PrincipalID)
-	}
+	require.Equal(t, "existing-principal", entry.PrincipalID)
 }
 
 func TestEnrichEntryWithWorkflow_PrefersProviderNameForResolvedModel(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/")
 
 	entry := &LogEntry{ID: "provider-name-prefill"}
 	c.Set(string(LogEntryKey), entry)
@@ -78,23 +66,13 @@ func TestEnrichEntryWithWorkflow_PrefersProviderNameForResolvedModel(t *testing.
 			ProviderName: "openai_test",
 		},
 	})
-
-	if got := entry.Provider; got != "openai" {
-		t.Fatalf("Provider = %q, want %q", got, "openai")
-	}
-	if got := entry.ProviderName; got != "openai_test" {
-		t.Fatalf("ProviderName = %q, want %q", got, "openai_test")
-	}
-	if got := entry.ResolvedModel; got != "openai_test/gpt-5-nano" {
-		t.Fatalf("ResolvedModel = %q, want %q", got, "openai_test/gpt-5-nano")
-	}
+	require.Equal(t, "openai", entry.Provider)
+	require.Equal(t, "openai_test", entry.ProviderName)
+	require.Equal(t, "openai_test/gpt-5-nano", entry.ResolvedModel)
 }
 
 func TestEnrichEntryWithWorkflow_PreservesExecutedFailoverRoute(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/")
 
 	// The handler already recorded the actual executed failover route and the
 	// failover snapshot before the middleware re-applies the workflow.
@@ -115,23 +93,13 @@ func TestEnrichEntryWithWorkflow_PreservesExecutedFailoverRoute(t *testing.T) {
 			ProviderName:     "anthropic",
 		},
 	})
-
-	if got := entry.ResolvedModel; got != "openai/gpt-5.5" {
-		t.Fatalf("ResolvedModel = %q, want openai/gpt-5.5 (executed route must not be clobbered to primary)", got)
-	}
-	if got := entry.Provider; got != "openai" {
-		t.Fatalf("Provider = %q, want openai", got)
-	}
-	if got := entry.ProviderName; got != "openai" {
-		t.Fatalf("ProviderName = %q, want openai", got)
-	}
+	require.Equal(t, "openai/gpt-5.5", entry.ResolvedModel)
+	require.Equal(t, "openai", entry.Provider)
+	require.Equal(t, "openai", entry.ProviderName)
 }
 
 func TestEnrichEntryWithWorkflow_FailoverSnapshotDoesNotSuppressMissingRouteFields(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Get(t, "/")
 
 	// A failover snapshot exists, but the executed route only populated the
 	// resolved model — provider/provider_name came back empty. The snapshot
@@ -151,16 +119,9 @@ func TestEnrichEntryWithWorkflow_FailoverSnapshotDoesNotSuppressMissingRouteFiel
 			ProviderName:     "anthropic",
 		},
 	})
-
-	if got := entry.ResolvedModel; got != "openai/gpt-5.5" {
-		t.Fatalf("ResolvedModel = %q, want openai/gpt-5.5 (recorded route must win)", got)
-	}
-	if got := entry.Provider; got != "anthropic" {
-		t.Fatalf("Provider = %q, want anthropic (workflow fills the empty field)", got)
-	}
-	if got := entry.ProviderName; got != "anthropic" {
-		t.Fatalf("ProviderName = %q, want anthropic (workflow fills the empty field)", got)
-	}
+	require.Equal(t, "openai/gpt-5.5", entry.ResolvedModel)
+	require.Equal(t, "anthropic", entry.Provider)
+	require.Equal(t, "anthropic", entry.ProviderName)
 }
 
 func TestMiddlewarePublishesStartedEventWithRedactedRequestHeaders(t *testing.T) {
@@ -171,38 +132,21 @@ func TestMiddlewarePublishesStartedEventWithRedactedRequestHeaders(t *testing.T)
 		},
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("X-Request-ID", "req-started")
-	req.Header.Set("Authorization", "Bearer secret")
-	req.Header.Set("X-Test", "visible")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithHeader("X-Request-ID", "req-started"), echotest.WithHeader("Authorization", "Bearer secret"), echotest.WithHeader("X-Test", "visible"))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
-		if len(logger.events) != 1 {
-			t.Fatalf("live events before handler = %d, want 1", len(logger.events))
-		}
+		require.Len(t, logger.events, 1)
+
 		return nil
 	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-	if len(logger.events) == 0 {
-		t.Fatal("no live events were published")
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.NotEmpty(t, logger.events)
 
 	started := logger.events[0]
-	if started.eventType != LiveEventAuditStarted {
-		t.Fatalf("first event type = %q, want %q", started.eventType, LiveEventAuditStarted)
-	}
-	if got := started.requestHeaders["Authorization"]; got != "[REDACTED]" {
-		t.Fatalf("Authorization header = %q, want [REDACTED]", got)
-	}
-	if got := started.requestHeaders["X-Test"]; got != "visible" {
-		t.Fatalf("X-Test header = %q, want visible", got)
-	}
+	require.Equal(t, LiveEventAuditStarted, started.eventType)
+	require.Equal(t, "[REDACTED]", started.requestHeaders["Authorization"])
+	require.Equal(t, "visible", started.requestHeaders["X-Test"])
 }
 
 func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) {
@@ -213,11 +157,10 @@ func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) 
 		},
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
 	trackedBody := &readCountCloser{reader: strings.NewReader(`{"model":"from-stream"}`)}
-	req.Body = trackedBody
-	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+	c.Request().Body = trackedBody
+	c.SetRequest(c.Request().WithContext(core.WithRequestSnapshot(c.Request().Context(), core.NewRequestSnapshot(
 		http.MethodPost,
 		"/v1/chat/completions",
 		nil,
@@ -228,9 +171,7 @@ func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) 
 		false,
 		"req-body",
 		nil,
-	)))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	))))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		EnrichEntryWithWorkflow(c, &core.Workflow{
@@ -241,29 +182,20 @@ func TestMiddlewarePublishesWorkflowUpdateWithCapturedRequestBody(t *testing.T) 
 				},
 			},
 		})
-		if len(logger.events) != 2 {
-			t.Fatalf("live events before handler completes = %d, want 2", len(logger.events))
-		}
+		require.Len(t, logger.events, 2)
+
 		return nil
 	})
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, 0, trackedBody.readCalls)
 
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-	if trackedBody.readCalls != 0 {
-		t.Fatalf("request body was read %d times, want 0", trackedBody.readCalls)
-	}
 	updated := logger.events[1]
-	if updated.eventType != LiveEventAuditUpdated {
-		t.Fatalf("second event type = %q, want %q", updated.eventType, LiveEventAuditUpdated)
-	}
+	require.Equal(t, LiveEventAuditUpdated, updated.eventType)
+
 	body, ok := BodyDocument(updated.requestBody).(map[string]any)
-	if !ok {
-		t.Fatalf("request body = %T, want JSON object", updated.requestBody)
-	}
-	if got := body["model"]; got != "from-snapshot" {
-		t.Fatalf("request body model = %#v, want from-snapshot", got)
-	}
+	require.True(t, ok, "request body = %T, want JSON object", updated.requestBody)
+	require.Equal(t, "from-snapshot", body["model"])
 }
 
 func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.T) {
@@ -274,9 +206,8 @@ func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.
 		},
 	}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req = req.WithContext(core.WithRequestSnapshot(req.Context(), core.NewRequestSnapshot(
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil)
+	c.SetRequest(c.Request().WithContext(core.WithRequestSnapshot(c.Request().Context(), core.NewRequestSnapshot(
 		http.MethodPost,
 		"/v1/chat/completions",
 		nil,
@@ -287,9 +218,7 @@ func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.
 		false,
 		"req-hidden",
 		nil,
-	)))
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	))))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		workflow := &core.Workflow{
@@ -301,32 +230,21 @@ func TestMiddlewareDoesNotPublishRequestBodyForAuditDisabledWorkflow(t *testing.
 			},
 		}
 		EnrichEntryWithWorkflow(c, workflow)
-		if got := core.GetWorkflow(c.Request().Context()); got != workflow {
-			t.Fatal("request context workflow was not synchronized")
-		}
-		if len(logger.events) != 2 {
-			t.Fatalf("live events before handler completes = %d, want 2", len(logger.events))
-		}
+		require.Equal(t, workflow, core.GetWorkflow(c.Request().Context()))
+		require.Len(t, logger.events, 2)
+
 		return nil
 	})
+	err := handler(c)
+	require.NoError(t, err)
+	require.Len(t, logger.events, 3)
+	body := logger.events[1].requestBody
+	require.Nil(t, body)
 
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-	if len(logger.events) != 3 {
-		t.Fatalf("live events after handler completes = %d, want 3", len(logger.events))
-	}
-	if body := logger.events[1].requestBody; body != nil {
-		t.Fatalf("audit-disabled workflow request body = %#v, want nil", body)
-	}
-	if removed := logger.events[2]; removed.eventType != LiveEventAuditRemoved {
-		t.Fatalf("third event type = %q, want %q", removed.eventType, LiveEventAuditRemoved)
-	} else if removed.requestBody != nil {
-		t.Fatalf("audit removed request body = %#v, want nil", removed.requestBody)
-	}
-	if logger.writes != 0 {
-		t.Fatalf("audit writes = %d, want 0", logger.writes)
-	}
+	removed := logger.events[2]
+	require.Equal(t, LiveEventAuditRemoved, removed.eventType)
+	require.Nil(t, removed.requestBody)
+	require.Equal(t, 0, logger.writes)
 }
 
 type capturedLiveEvent struct {
@@ -373,11 +291,7 @@ func (l *captureLiveLogger) PublishLiveEvent(eventType string, entry *LogEntry) 
 func TestMiddlewarePublishesRemovalWhenHandlerPanics(t *testing.T) {
 	logger := &captureLiveLogger{cfg: Config{Enabled: true}}
 
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	req.Header.Set("X-Request-ID", "req-panic")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, "/v1/chat/completions", nil, echotest.WithHeader("X-Request-ID", "req-panic"))
 
 	handler := Middleware(logger)(func(c *echo.Context) error {
 		panic("handler exploded")
@@ -387,20 +301,14 @@ func TestMiddlewarePublishesRemovalWhenHandlerPanics(t *testing.T) {
 	// audit middleware only publishes the terminal live event on the way out.
 	func() {
 		defer func() {
-			if r := recover(); r == nil {
-				t.Fatal("panic was swallowed by the audit middleware")
-			}
+			r := recover()
+			require.NotNil(t, r)
+
 		}()
 		_ = handler(c)
 	}()
 
-	if len(logger.events) != 2 {
-		t.Fatalf("live events = %d, want started + removed", len(logger.events))
-	}
-	if logger.events[0].eventType != LiveEventAuditStarted {
-		t.Fatalf("first event = %q, want %q", logger.events[0].eventType, LiveEventAuditStarted)
-	}
-	if logger.events[1].eventType != LiveEventAuditRemoved {
-		t.Fatalf("second event = %q, want %q (terminal event that evicts the live snapshot)", logger.events[1].eventType, LiveEventAuditRemoved)
-	}
+	require.Len(t, logger.events, 2)
+	require.Equal(t, LiveEventAuditStarted, logger.events[0].eventType)
+	require.Equal(t, LiveEventAuditRemoved, logger.events[1].eventType)
 }

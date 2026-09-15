@@ -27,6 +27,7 @@ doesn't support audio returns a clear error rather than mis-routing.
 | --- | --- |
 | `POST /v1/audio/speech` | Text-to-speech. Accepts a JSON body and returns **binary audio** in the requested `response_format`. |
 | `POST /v1/audio/transcriptions` | Speech-to-text. Accepts a `multipart/form-data` upload and returns JSON or plain text per `response_format`. |
+| `POST /v1/audio/translations` | Speech-to-English-text. Same upload shape as transcriptions, without `language` and `timestamp_granularities[]`. |
 
 JSON transcription and translation bodies are normalized to the OpenAI shape:
 Groq's vendor `x_groq` member is removed from `json` and `verbose_json`
@@ -156,6 +157,47 @@ JSON object; `text`, `srt`, and `vtt` return a `text/plain` body.
   also accepts the unbracketed `timestamp_granularities` for client compatibility.
 </Tip>
 
+## Parameter forwarding
+
+Any parameter GoModel does not name above is **forwarded to the provider
+unchanged**, so newer OpenAI options and provider-native extras work without
+waiting for a gateway release ([ADR-0011](https://github.com/ENTERPILOT/GoModel/blob/main/docs/adr/0011-field-forwarding-on-translated-paths.md)
+rule 1):
+
+- `/v1/audio/speech` — unknown JSON members (for example `stream_format`) are
+  merged back into the upstream body.
+- `/v1/audio/transcriptions` and `/v1/audio/translations` — unknown form values
+  (for example `include[]=logprobs`, `chunking_strategy`, `stream`) are written
+  into the upstream multipart body, repeated values included.
+
+The provider stays the authority on what it accepts: a field it rejects comes
+back as that provider's own error rather than a silent 200.
+
+Two things never travel: the fields GoModel controls itself (`model`, `file`,
+and the routing hint `provider`, plus the transcription options it re-emits —
+`language`, `prompt`, `response_format`, `temperature`, and both
+`timestamp_granularities[]` and its unbracketed alias
+`timestamp_granularities`), and extra **file** parts on a transcription
+upload; only the audio in `file` is sent.
+
+Forwarded values are not stored in the [audit log](/advanced/admin-endpoints):
+because they are arbitrary client input that may carry provider credentials,
+the entry records only the field **names** under `forwarded_fields`.
+
+<Note>
+  **Streaming is relayed, not streamed.** A forwarded `stream_format: "sse"`
+  (speech) or `stream: true` (transcription) makes the upstream answer with
+  server-sent events, and GoModel returns that body with its
+  `text/event-stream` Content-Type — but the bytes are buffered and delivered
+  in one piece, so a client sees the complete event sequence at the end of the
+  call rather than incrementally.
+</Note>
+
+<Note>
+  Forwarding applies to the OpenAI-compatible upstreams. Providers whose native
+  audio API GoModel translates (Xiaomi MiMo, Cohere, MiniMax, ElevenLabs) build
+  their own request shape and ignore extra parameters.
+</Note>
 ## Cost tracking
 
 Every `/v1/audio/*` call is recorded in [usage tracking](/features/cost-tracking)

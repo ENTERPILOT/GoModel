@@ -129,7 +129,14 @@ Opus 5, Sonnet 5, and Opus 4.8/4.7 — any value, including the OpenAI SDK
 default of `temperature: 1`, is rejected upstream with a 400. GoModel drops
 both fields for those models and logs the discarded values, so clients that
 always send a temperature keep working. Older models still receive them as
-sent.
+sent, with one exception below.
+
+Anthropic treats `temperature` and `top_p` as mutually exclusive on every
+model: a request carrying both is rejected with ``400 "`temperature` and
+`top_p` cannot both be specified for this model"``. Since OpenAI-compatible
+clients routinely fill in both defaults, GoModel forwards `temperature` and
+drops `top_p` (logging the discarded value) when it sees both. Send only
+`top_p` if that is the knob you want to control.
 
 Independently of the model, when extended thinking is engaged Anthropic
 requires `temperature = 1`. GoModel drops any other temperature value (and logs

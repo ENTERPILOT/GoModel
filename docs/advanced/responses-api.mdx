@@ -58,16 +58,25 @@ This enables:
   providers an id that is not stored (the previous response was sent with
   `store: false`), or belongs to another tenant, returns 404. Native
   Responses providers receive the id itself and resolve it on their side, so
-  they need no GoModel snapshot.
+  they need no GoModel snapshot. An id GoModel minted for a chat-translated
+  provider is replayed for them too, so a chain can move from Gemini or
+  Anthropic to OpenAI mid-conversation. Ownership is enforced on every
+  provider: an id whose stored response belongs to another
+  [user path](/features/user-path#object-ownership) returns 404 instead of
+  being resolved upstream, while an id GoModel never stored is still
+  forwarded.
 
 The replayed history, like the items of a gateway-managed `conversation`, is
 merged into the input before the prompt-phase [guardrails](/advanced/guardrails)
 run, so they check and rewrite it like any other input: a stored response
 holds what its client saw, and a [presidio](/advanced/guardrails#presidio)
 guardrail anonymizes the values it restored there again before the next turn
-reaches the provider. When guardrails run and a failover target is
-chat-translated, a native primary receives the replayed history instead of
-the id as well.
+reaches the provider. A native primary receives the replayed history instead
+of the id as well when a guardrail that rewrites content runs on the prompt
+(an instance configured only to flag or block does not count), or
+when a failover target is chat-translated. Without such a guardrail the id is
+forwarded untouched, so the provider keeps serving the chain from its own
+state.
 
 ## Background responses
 

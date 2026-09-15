@@ -6280,13 +6280,27 @@ const docTemplate = `{
                         "name": "model",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Anthropic API version, e.g. 2023-06-01. When present, the model and error bodies use the Anthropic envelopes instead of the OpenAI ones.",
+                        "name": "anthropic-version",
+                        "in": "header"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/core.Model"
+                            "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                            "oneOf": [
+                                {
+                                    "$ref": "#/definitions/core.Model"
+                                },
+                                {
+                                    "$ref": "#/definitions/anthropicapi.ModelInfo"
+                                }
+                            ]
                         }
                     },
                     "401": {
@@ -6298,13 +6312,29 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                            "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                            "oneOf": [
+                                {
+                                    "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                                },
+                                {
+                                    "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                                }
+                            ]
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
-                            "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                            "description": "OpenAI envelope by default; the Anthropic envelope when the request carries anthropic-version.",
+                            "oneOf": [
+                                {
+                                    "$ref": "#/definitions/core.OpenAIErrorEnvelope"
+                                },
+                                {
+                                    "$ref": "#/definitions/anthropicapi.ErrorResponse"
+                                }
+                            ]
                         }
                     }
                 },
@@ -8807,7 +8837,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "signature": {
-                    "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it.",
+                    "description": "Signature authenticates a thinking block. Anthropic requires it back\nverbatim when the conversation continues, so clients must echo it. Every\nthinking block carries the member, as the Anthropic schema requires;\nreasoning from a provider that does not sign its output is rendered with\nan empty signature. Hence the pointer: only a thinking block has one.",
                     "type": "string"
                 },
                 "text": {
@@ -10842,6 +10872,14 @@ const docTemplate = `{
                 }
             }
         },
+        "core.ResponsesIncompleteDetails": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "core.ResponsesOutputItem": {
             "type": "object",
             "properties": {
@@ -10990,6 +11028,14 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "incomplete_details": {
+                    "description": "IncompleteDetails explains a status of \"incomplete\": the model hit\nmax_output_tokens, was stopped by a content filter, or the upstream\nstream was interrupted.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/core.ResponsesIncompleteDetails"
+                        }
+                    ]
+                },
                 "model": {
                     "type": "string"
                 },
@@ -11011,7 +11057,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "description": "\"completed\", \"failed\", \"in_progress\"",
+                    "description": "\"completed\", \"incomplete\", \"failed\", \"in_progress\"",
                     "type": "string"
                 },
                 "usage": {
@@ -12338,6 +12384,33 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "anthropicapi.ModelInfo": {
+            "description": "One model in the Anthropic dialect, returned when the request carries anthropic-version.",
+            "type": "object",
+            "required": [
+                "created_at",
+                "display_name",
+                "id",
+                "type"
+            ],
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "model"
+                    ]
+                },
+                "id": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "created_at": {
                     "type": "string"
                 }
             }

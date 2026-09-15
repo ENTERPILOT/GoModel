@@ -1,14 +1,16 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestNewWorkflowSelector_DropsInvalidUserPath(t *testing.T) {
 	t.Parallel()
 
 	selector := NewWorkflowSelector("openai", "gpt-5", "/team/../alpha")
-	if selector.UserPath != "" {
-		t.Fatalf("UserPath = %q, want empty", selector.UserPath)
-	}
+	require.Empty(t, selector.UserPath)
 }
 
 func TestWorkflowFeaturesApplyUpperBound_DisablesBudgetWhenUsageDisabled(t *testing.T) {
@@ -42,12 +44,8 @@ func TestWorkflowFeaturesApplyUpperBound_DisablesBudgetWhenUsageDisabled(t *test
 			t.Parallel()
 
 			features := tt.base.ApplyUpperBound(tt.caps)
-			if features.Usage != tt.wantUsage {
-				t.Fatalf("ApplyUpperBound().Usage = %v, want %v", features.Usage, tt.wantUsage)
-			}
-			if features.Budget != tt.wantBudget {
-				t.Fatalf("ApplyUpperBound().Budget = %v, want %v", features.Budget, tt.wantBudget)
-			}
+			require.Equal(t, tt.wantUsage, features.Usage)
+			require.Equal(t, tt.wantBudget, features.Budget)
 		})
 	}
 }

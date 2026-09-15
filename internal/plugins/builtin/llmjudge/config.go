@@ -36,7 +36,11 @@ const (
 const (
 	DefaultMessage     = "This request was blocked by policy"
 	DefaultRespondText = "I can't help with that request."
-	DefaultMaxTokens   = 256
+	// DefaultMaxTokens is generous on purpose: a verdict is a few dozen
+	// tokens, but a reasoning judge model spends the cap on thinking first
+	// and returns no verdict at all when it runs out. Unused tokens cost
+	// nothing.
+	DefaultMaxTokens   = 2048
 	DefaultTemperature = 0.0
 )
 
