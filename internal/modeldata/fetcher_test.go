@@ -397,9 +397,9 @@ func TestFetchIfChanged_LocalFileErrors(t *testing.T) {
 	err = os.WriteFile(bad, []byte("not json"), 0o600)
 	require.NoError(t, err)
 	_, err = FetchIfChanged(context.Background(), bad, "")
-	assert.Error(t, err)
+	require.Error(t, err)
 	_, err = FetchIfChanged(context.Background(), dir, "")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not a regular file")
 }
 

@@ -27,7 +27,7 @@ func TestFetchIfChanged_LocalFIFODoesNotBlock(t *testing.T) {
 	}()
 	select {
 	case err := <-done:
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not a regular file")
 
 	case <-time.After(5 * time.Second):
