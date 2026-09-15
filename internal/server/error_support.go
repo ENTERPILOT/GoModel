@@ -68,12 +68,7 @@ func isClientClosedRequest(c *echo.Context, err error) bool {
 func recordClientClosedRequest(c *echo.Context, err error) *core.GatewayError {
 	gatewayErr := core.NewInvalidRequestErrorWithStatus(statusClientClosedRequest, "request canceled", err).
 		WithCode("request_canceled")
-	slog.Debug("request canceled by client",
-		"error", err,
-		"method", c.Request().Method,
-		"path", c.Request().URL.Path,
-		"request_id", requestIDFromContextOrHeader(c.Request()),
-	)
+	logHandledError(c, gatewayErr)
 	enrichAuditEntryWithProviderAttempts(c)
 	auditlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
 	return gatewayErr
@@ -251,7 +246,12 @@ func logHandledError(c *echo.Context, gatewayErr *core.GatewayError) {
 		)
 	}
 
-	if gatewayErr.HTTPStatusCode() >= http.StatusInternalServerError {
+	status := gatewayErr.HTTPStatusCode()
+	if status == statusClientClosedRequest {
+		slog.Debug("request canceled by client", attrs...)
+		return
+	}
+	if status >= http.StatusInternalServerError {
 		slog.Error("request failed", attrs...)
 		return
 	}

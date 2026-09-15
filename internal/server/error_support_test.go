@@ -185,6 +185,25 @@ func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
 	}
 }
 
+func TestHandleError_AuditMiddlewareRecordsClientCancellationStatus(t *testing.T) {
+	logger := &capturingAuditLogger{config: auditlog.Config{Enabled: true}}
+	c, rec := echotest.Post(t, "/v1/chat/completions", nil)
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	cancel()
+	c.SetRequest(c.Request().WithContext(ctx))
+
+	handler := auditlog.Middleware(logger)(func(c *echo.Context) error {
+		return handleError(c, fmt.Errorf("send request: %w", context.Canceled))
+	})
+
+	require.NoError(t, handler(c))
+	require.Len(t, logger.entries, 1)
+	entry := logger.entries[0]
+	assert.Equal(t, statusClientClosedRequest, rec.Code)
+	assert.Equal(t, statusClientClosedRequest, entry.StatusCode)
+	assert.Equal(t, "client_disconnected", entry.ErrorType)
+}
+
 func TestHandleRouteNotFound_AnthropicDialect(t *testing.T) {
 	c, rec := echotest.Post(t, "/v1/messages/batches", nil, echotest.WithHeader("anthropic-version", "2023-06-01"))
 	err := handleRouteNotFound(c)
