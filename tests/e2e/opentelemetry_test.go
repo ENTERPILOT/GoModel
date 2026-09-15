@@ -19,6 +19,8 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
 	"github.com/enterpilot/gomodel/run"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -44,27 +46,23 @@ func TestOpenTelemetryExport(t *testing.T) {
 		})
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("buffered call returned %d: %s", resp.StatusCode, body)
-		}
+		require.Equal(t, http.StatusOK, resp.StatusCode, "buffered call returned %d: %s", resp.StatusCode, body)
 
 		expected := map[string]any{
 			"gen_ai.operation.name": "chat",
 			"gen_ai.request.model":  "otel-buffered",
 			"gomodel.provider.name": "vllm-eu",
 		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.findSpan(func(span *tracepb.Span) bool {
 				return span.Name == "chat otel-buffered" && attributesContain(span.Attributes, expected)
 			}) != nil
-		}) {
-			t.Fatal("buffered GenAI client span was not exported")
-		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		}))
+
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.hasHistogramPoint("gen_ai.client.operation.duration", expected)
-		}) {
-			t.Fatal("buffered GenAI duration metric was not exported")
-		}
+		}))
+
 	})
 
 	t.Run("provider failure exports bounded error telemetry", func(t *testing.T) {
@@ -74,9 +72,7 @@ func TestOpenTelemetryExport(t *testing.T) {
 		})
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusTooManyRequests {
-			t.Fatalf("failed provider call returned %d, want 429", resp.StatusCode)
-		}
+		require.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 
 		expected := map[string]any{
 			"error.type":            "429",
@@ -84,24 +80,20 @@ func TestOpenTelemetryExport(t *testing.T) {
 			"gen_ai.request.model":  "otel-failure",
 			"gomodel.provider.name": "vllm-eu",
 		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.findSpan(func(span *tracepb.Span) bool {
 				return span.Name == "chat otel-failure" &&
 					attributesContain(span.Attributes, expected) &&
 					attributesContain(span.Attributes, map[string]any{"http.response.status_code": int64(http.StatusTooManyRequests)})
 			}) != nil
-		}) {
-			t.Fatal("failed GenAI client span was not exported")
-		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		}))
+
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.hasHistogramPoint("gen_ai.client.operation.duration", expected)
-		}) {
-			t.Fatal("failed GenAI duration metric was not exported")
-		}
+		}))
+
 		for _, secret := range []string{"failure-prompt-secret", "upstream-secret-never-export"} {
-			if collector.containsString(secret) {
-				t.Fatalf("failure detail %q appeared in telemetry", secret)
-			}
+			require.False(t, collector.containsString(secret), "failure detail %q appeared in telemetry", secret)
 		}
 	})
 
@@ -113,29 +105,27 @@ func TestOpenTelemetryExport(t *testing.T) {
 		})
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("[DONE]")) {
-			t.Fatalf("stream returned %d: %s", resp.StatusCode, body)
-		}
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Contains(t, string(body), string([]byte("[DONE]")))
+
 		expected := map[string]any{
 			"gen_ai.operation.name": "chat",
 			"gen_ai.request.model":  "otel-stream",
 			"gen_ai.request.stream": true,
 			"gomodel.provider.name": "vllm-eu",
 		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.hasHistogramPoint("gen_ai.client.operation.time_to_first_chunk", expected)
-		}) {
-			t.Fatal("time-to-first-chunk metric for a translated stream was not exported")
-		}
+		}))
+
 	})
 
 	t.Run("passthrough stream keeps GenAI metadata and joins the caller's trace", func(t *testing.T) {
 		secretPrompt := "prompt-secret-never-export"
 		body := fmt.Sprintf(`{"model":"otel-passthrough","padding":%q,"stream":true}`, secretPrompt+strings.Repeat("x", 70*1024))
 		req, err := http.NewRequest(http.MethodPost, gateway+"/p/vllm/chat/completions", bytes.NewBufferString(body))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-B3-TraceId", otelTraceID)
 		req.Header.Set("X-B3-SpanId", otelParentID)
@@ -145,14 +135,12 @@ func TestOpenTelemetryExport(t *testing.T) {
 		req.Host = "attacker-cardinality.example"
 
 		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("send passthrough stream: %v", err)
-		}
+		require.NoError(t, err)
+
 		responseBody, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK || !bytes.Contains(responseBody, []byte("[DONE]")) {
-			t.Fatalf("passthrough stream returned %d: %s", resp.StatusCode, responseBody)
-		}
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		require.Contains(t, string(responseBody), string([]byte("[DONE]")))
 
 		metricAttributes := map[string]any{
 			"gen_ai.operation.name": "chat",
@@ -160,53 +148,41 @@ func TestOpenTelemetryExport(t *testing.T) {
 			"gen_ai.request.stream": true,
 			"gomodel.provider.name": "vllm-eu",
 		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.hasHistogramPoint("gen_ai.client.operation.time_to_first_chunk", metricAttributes)
-		}) {
-			t.Fatal("time-to-first-chunk metric with passthrough metadata was not exported")
-		}
+		}))
 
 		var serverSpan *tracepb.Span
-		if !collector.waitFor(5*time.Second, func() bool {
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			serverSpan = collector.findSpan(func(span *tracepb.Span) bool {
 				return hex.EncodeToString(span.TraceId) == otelTraceID && span.Name == "POST /p/:provider/*"
 			})
 			return serverSpan != nil
-		}) {
-			t.Fatal("B3-parented passthrough server span was not exported")
-		}
-		if got := hex.EncodeToString(serverSpan.ParentSpanId); got != otelParentID {
-			t.Fatalf("server span parent = %s, want %s", got, otelParentID)
-		}
+		}))
+		got := hex.EncodeToString(serverSpan.ParentSpanId)
+		require.Equal(t, otelParentID, got)
+
 		for _, key := range []string{"client.address", "network.peer.address", "network.peer.port", "server.address", "server.port", "user_agent.original"} {
 			for _, attribute := range serverSpan.Attributes {
-				if attribute.Key == key {
-					t.Fatalf("privacy-sensitive span attribute %q was exported", key)
-				}
+				require.NotEqual(t, key, attribute.Key)
 			}
 		}
 		for _, secret := range []string{secretPrompt, "identity-secret-agent", "attacker-cardinality.example", "198.51.100.23"} {
-			if collector.containsString(secret) {
-				t.Fatalf("identity or prompt value %q appeared in telemetry", secret)
-			}
+			require.False(t, collector.containsString(secret), "identity or prompt value %q appeared in telemetry", secret)
 		}
 	})
 
 	t.Run("stream that ends before its first chunk is exported as a failure", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodPost, gateway+"/p/vllm/chat/completions", strings.NewReader(`{"model":"otel-empty-stream","stream":true}`))
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("send passthrough stream: %v", err)
-		}
+		require.NoError(t, err)
+
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("empty stream returned %d: %s", resp.StatusCode, body)
-		}
+		require.Equal(t, http.StatusOK, resp.StatusCode, "empty stream returned %d: %s", resp.StatusCode, body)
 
 		expected := map[string]any{
 			"error.type":            "empty_stream",
@@ -214,37 +190,31 @@ func TestOpenTelemetryExport(t *testing.T) {
 			"gen_ai.request.model":  "otel-empty-stream",
 			"gomodel.provider.name": "vllm-eu",
 		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.hasHistogramPoint("gen_ai.client.operation.duration", expected)
-		}) {
-			t.Fatal("empty stream did not export a failed duration metric")
-		}
-		if !collector.waitFor(5*time.Second, func() bool {
+		}))
+
+		require.True(t, collector.waitFor(5*time.Second, func() bool {
 			return collector.findSpan(func(span *tracepb.Span) bool {
 				return span.Name == "chat otel-empty-stream" && attributesContain(span.Attributes, expected)
 			}) != nil
-		}) {
-			t.Fatal("empty stream did not export a failure span")
-		}
+		}))
+
 	})
 
 	t.Run("operational endpoints are excluded", func(t *testing.T) {
 		for _, path := range []string{"/health", "/health/ready", "/monitoring/metrics", "/debug/pprof/"} {
 			resp, err := http.Get(gateway + path)
-			if err != nil {
-				t.Fatalf("GET %s: %v", path, err)
-			}
+			require.NoError(t, err, "GET %s: %v", path, err)
+
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("GET %s returned %d", path, resp.StatusCode)
-			}
+			require.Equal(t, http.StatusOK, resp.StatusCode, "GET %s returned %d", path, resp.StatusCode)
 		}
 		time.Sleep(200 * time.Millisecond)
 		for _, route := range []string{"GET /health", "GET /health/ready", "GET /monitoring/metrics", "GET /debug/pprof/"} {
-			if span := collector.findSpan(func(span *tracepb.Span) bool { return span.Name == route }); span != nil {
-				t.Fatalf("operational endpoint span %q was exported", route)
-			}
+			span := collector.findSpan(func(span *tracepb.Span) bool { return span.Name == route })
+			require.Nil(t, span)
 		}
 	})
 }
@@ -256,9 +226,8 @@ func startOTelGateway(t *testing.T, collectorURL, upstreamURL string) string {
 	t.Helper()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve port: %v", err)
-	}
+	require.NoError(t, err)
+
 	port := fmt.Sprintf("%d", listener.Addr().(*net.TCPAddr).Port)
 	_ = listener.Close()
 	gateway := "http://127.0.0.1:" + port
@@ -299,17 +268,15 @@ func startOTelGateway(t *testing.T, collectorURL, upstreamURL string) string {
 		cancel()
 		select {
 		case err := <-done:
-			if err != nil {
-				t.Errorf("gateway exited with error: %v", err)
-			}
+			assert.NoError(t, err)
+
 		case <-time.After(10 * time.Second):
 			t.Error("gateway shutdown timed out")
 		}
 	})
+	err = waitForServer(gateway + "/health")
+	require.NoError(t, err)
 
-	if err := waitForServer(gateway + "/health"); err != nil {
-		t.Fatalf("gateway failed to start: %v", err)
-	}
 	return gateway
 }
 

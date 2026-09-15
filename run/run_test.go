@@ -144,7 +144,7 @@ func TestRunHealthAndReadyDispatch(t *testing.T) {
 			Stdout: io.Discard,
 			Stderr: io.Discard,
 		})
-		assert.NoError(t, err, "Run(%s) against healthy gateway = %v, want nil", flag, err)
+		require.NoError(t, err, "Run(%s) against healthy gateway = %v, want nil", flag, err)
 	}
 
 	// An unreachable gateway must surface as a non-usage error (exit code 1).
