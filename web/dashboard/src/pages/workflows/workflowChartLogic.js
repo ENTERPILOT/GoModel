@@ -546,8 +546,11 @@ function workflowPrimaryRouteFromEntry(entry, source) {
   const requestedModel = String(entry.requested_model || entry.model || "").trim();
   const failover = workflowEntryFailover(entry);
   if (!(failover && failover.targetModel)) {
+    // The configured instance name tells two instances of one provider type
+    // apart; the type is the fallback for entries recorded without a name.
     return {
-      provider: String(entry.provider || "").trim() || null,
+      provider:
+        String(entry.provider_name || entry.provider || "").trim() || null,
       model: requestedModel || null,
     };
   }

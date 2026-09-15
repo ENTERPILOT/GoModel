@@ -28,6 +28,9 @@ var Registration = providers.Registration{
 type Provider struct {
 	client *llmclient.Client
 	keys   *providers.Keyring
+	// providerName is the configured instance name when the factory supplied
+	// one, the provider type otherwise.
+	providerName string
 }
 
 var _ core.Provider = (*Provider)(nil)
@@ -36,9 +39,9 @@ var _ core.PassthroughProvider = (*Provider)(nil)
 
 // New creates a Cohere provider using the shared resilience and observability settings.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
-	p := &Provider{keys: opts.Keyring(cfg.APIKey)}
+	p := &Provider{keys: opts.Keyring(cfg.APIKey), providerName: opts.ClientName("cohere")}
 	clientCfg := llmclient.Config{
-		ProviderName:   opts.ClientName("cohere"),
+		ProviderName:   p.providerName,
 		BaseURL:        providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
 		Retry:          opts.Resilience.Retry,
 		Hooks:          opts.Hooks,
@@ -53,7 +56,7 @@ func NewWithHTTPClient(apiKey, baseURL string, httpClient *http.Client, hooks ll
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	p := &Provider{keys: providers.NewKeyring(apiKey)}
+	p := &Provider{keys: providers.NewKeyring(apiKey), providerName: "cohere"}
 	cfg := llmclient.DefaultConfig("cohere", providers.ResolveBaseURL(baseURL, defaultBaseURL))
 	cfg.Hooks = hooks
 	p.client = llmclient.NewWithHTTPClient(httpClient, cfg, p.setHeaders)
@@ -151,12 +154,12 @@ func supportedModel(model modelInfo) bool {
 
 // Responses translates the OpenAI Responses API through Cohere chat.
 func (p *Provider) Responses(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesResponse, error) {
-	return providers.ResponsesViaChat(ctx, p, req, "cohere")
+	return providers.ResponsesViaChat(ctx, p, req, p.providerName)
 }
 
 // StreamResponses translates a streaming OpenAI Responses request through Cohere chat.
 func (p *Provider) StreamResponses(ctx context.Context, req *core.ResponsesRequest) (io.ReadCloser, error) {
-	return providers.StreamResponsesViaChat(ctx, p, req, "cohere")
+	return providers.StreamResponsesViaChat(ctx, p, req, p.providerName)
 }
 
 // Passthrough forwards a Cohere-native request without typed translation.

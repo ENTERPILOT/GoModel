@@ -30,6 +30,16 @@ providers, see [Responses compatibility](/advanced/responses-compatibility).
 | `POST /v1/responses/input_tokens` | Counts input tokens through the native provider utility endpoint when supported. |
 | `POST /v1/responses/compact` | Compacts a response input through the native provider utility endpoint when supported. |
 
+## Provider attribution
+
+Responses and chat completions carry a `provider` field naming the configured
+provider instance that served the request — its key under `providers` in
+`config.yaml`, not its `type`. Two instances of
+one type stay distinguishable: an instance named `deepseek-eu` of type
+`deepseek` reports `"provider": "deepseek-eu"`. Errors, circuit-breaker
+messages, and the dashboard's workflow chart name the same instance. A
+provider registered without a name reports its type.
+
 ## Stored responses
 
 For `POST /v1/responses` calls, unless the request sets `store: false`,
