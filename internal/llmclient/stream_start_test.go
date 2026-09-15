@@ -201,5 +201,5 @@ func TestClient_DoStream_EmptyStreamRecordsFailure(t *testing.T) {
 	_, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
 	require.Error(t, err)
 	assert.Equal(t, http.StatusBadGateway, lastInfo.StatusCode)
-	assert.Error(t, lastInfo.Error)
+	require.Error(t, lastInfo.Error)
 }
