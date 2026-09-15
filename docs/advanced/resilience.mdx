@@ -67,6 +67,14 @@ retry less than the table suggests:
   `GET`, `HEAD`, `OPTIONS`, `PUT`, or any request carrying an
   `Idempotency-Key` header.
 
+**Idempotency keys** reach the provider. When a client sends an
+`Idempotency-Key` header, GoModel forwards it unchanged on the provider call
+it makes for that request and on every retry of that call, so a provider that
+deduplicates by the key can recognize a replayed request. A failover attempt to another target sends a
+different request body, so it goes out without the key, and so do gateway-internal
+calls such as guardrail checks. Keys must be visible ASCII of at most 255
+characters; any other value is ignored.
+
 **Errors hidden behind HTTP 200** are unmasked before any of this applies.
 Some providers (OpenRouter is the best-known) answer `200 OK` with a bare
 `{"error": ...}` JSON body. GoModel detects such payloads and handles them as
