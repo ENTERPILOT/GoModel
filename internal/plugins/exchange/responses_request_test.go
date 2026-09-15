@@ -241,7 +241,7 @@ func TestResponsesOpaqueItemsPreserved(t *testing.T) {
 	req, p := responsesPrompt(t)
 	err := p.SetText("m4", 0, "fine")
 	require.NoError(t, err)
-	assert.Error(t, p.SetText("m3", 0, "x"))
+	require.Error(t, p.SetText("m3", 0, "x"))
 
 	applied, err := ApplyToResponsesRequest(req, p)
 	require.NoError(t, err)

@@ -259,7 +259,7 @@ func TestMetricsEndpointDoesNotCollideWithPprof(t *testing.T) {
 	pprofRec := httptest.NewRecorder()
 	srv.ServeHTTP(pprofRec, pprofReq)
 	require.Equal(t, http.StatusOK, pprofRec.Code)
-	require.False(t, strings.Contains(pprofRec.Body.String(), "# HELP go_"))
+	require.NotContains(t, pprofRec.Body.String(), "# HELP go_")
 }
 
 func TestOuterMiddlewarePanicIsRecovered(t *testing.T) {

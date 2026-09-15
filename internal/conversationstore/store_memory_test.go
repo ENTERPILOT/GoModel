@@ -219,7 +219,7 @@ func TestMemoryStoreMergeMetadataRejectsOversizedResult(t *testing.T) {
 
 	got, err := store.Get(context.Background(), conv.Conversation.ID)
 	require.NoError(t, err)
-	require.Equal(t, core.MaxConversationMetadataPairs, len(got.Conversation.Metadata))
+	require.Len(t, got.Conversation.Metadata, core.MaxConversationMetadataPairs)
 }
 
 func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
@@ -244,7 +244,7 @@ func TestMemoryStoreAppendItems_ConcurrentAppendsAllSurvive(t *testing.T) {
 
 	got, err := store.Get(context.Background(), "conv_race")
 	require.NoError(t, err)
-	require.Equal(t, writers, len(got.Items))
+	require.Len(t, got.Items, writers)
 
 	seen := make(map[int]int, writers)
 	for _, raw := range got.Items {

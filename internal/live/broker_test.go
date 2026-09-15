@@ -39,9 +39,7 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	got := sub.Replay[0].Type
 	require.Equal(t, EventUsageCompleted, got)
 
-	if got := sub.Replay[0].Seq; got != 2 {
-		t.Fatalf("replay seq = %d, want 2", got)
-	}
+	require.EqualValues(t, 2, sub.Replay[0].Seq, "replay seq")
 }
 
 func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
@@ -149,12 +147,8 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	require.Equal(t, EventAuditUpdated, got)
 
 	payload := eventPayload(t, sub.Replay[0])
-	if got := payload["method"]; got != "POST" {
-		t.Fatalf("snapshot method = %v, want POST", got)
-	}
-	if got := payload["provider"]; got != "openai" {
-		t.Fatalf("snapshot provider = %v, want openai", got)
-	}
+	require.Equal(t, "POST", payload["method"], "snapshot method")
+	require.Equal(t, "openai", payload["provider"], "snapshot provider")
 	got = sub.Replay[1].Type
 	require.Equal(t, EventUsageCompleted, got)
 }
@@ -406,9 +400,7 @@ func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 		RequestID: "req-closed",
 		Timestamp: time.Now(),
 	})
-	if got := b.LatestSeq(); got != 0 {
-		t.Fatalf("LatestSeq() = %d after close publish, want 0", got)
-	}
+	require.Zero(t, b.LatestSeq(), "LatestSeq() after close publish")
 
 	sub.Close()
 	b.Close()
@@ -953,4 +945,80 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 
 	defer subStale.Close()
 	require.True(t, subStale.Reset)
+}
+
+// benchAuditRequestLifecycle publishes the audit events one non-streaming chat
+// request emits with body and header capture on: audit.started, the
+// audit.updated events handlers raise while enriching the entry, then
+// audit.completed and audit.flushed. It is the per-request broker cost on
+// every request, whether or not a dashboard is connected.
+func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
+	// The subscriber buffer is far larger than the default so a drain
+	// goroutine that falls behind cannot get the subscriber dropped, which
+	// would silently turn the subscribed case into the idle one.
+	broker := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 1000, SubscriberBuffer: 1 << 16})
+	if subscribe {
+		sub := broker.Subscribe(0)
+		require.NotNil(b, sub)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for range sub.Events {
+			}
+		}()
+		b.Cleanup(func() {
+			sub.Close()
+			<-done
+		})
+	}
+
+	requestBody := auditlog.CaptureLoggedBody([]byte(`{"model":"gpt-4o-mini","messages":[{"role":"system","content":"You are a helpful assistant that answers briefly."},{"role":"user","content":"Summarise the attached incident report in three bullet points and suggest one follow-up action for the on-call engineer."}],"temperature":0.2,"max_tokens":256,"stream":false}`))
+	responseBody := auditlog.CaptureLoggedBody([]byte(`{"id":"chatcmpl-bench","object":"chat.completion","created":1700000000,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"- Database failover took 4 minutes\n- Alerts fired late\n- No data loss\nFollow-up: tune the replica lag alert."},"finish_reason":"stop"}],"usage":{"prompt_tokens":61,"completion_tokens":34,"total_tokens":95}}`))
+	requestHeaders := map[string]string{"Authorization": "[REDACTED]", "Content-Type": "application/json", "User-Agent": "openai-python/1.60.0"}
+	responseHeaders := map[string]string{"Content-Type": "application/json", "X-Request-Id": "req-bench"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		entry := &auditlog.LogEntry{
+			ID:        "audit-bench",
+			RequestID: "req-bench",
+			Timestamp: time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC),
+			Method:    "POST",
+			Path:      "/v1/chat/completions",
+			Data: &auditlog.LogData{
+				UserAgent:      "openai-python/1.60.0",
+				RequestHeaders: requestHeaders,
+				RequestBody:    requestBody,
+			},
+		}
+		broker.PublishAuditEvent(EventAuditStarted, entry)
+
+		entry.RequestedModel, entry.Provider = "gpt-4o-mini", "openai"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.AuthMethod = "master_key"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.ResolvedModel, entry.ProviderName = "openai/gpt-4o-mini", "openai"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+		entry.UserPath = "/team"
+		broker.PublishAuditEvent(EventAuditUpdated, entry)
+
+		entry.StatusCode, entry.DurationNs = 200, 812_000_000
+		entry.Data.ResponseHeaders = responseHeaders
+		entry.Data.ResponseBody = responseBody
+		broker.PublishAuditEvent(EventAuditCompleted, entry)
+		broker.PublishAuditEvent(EventAuditFlushed, entry)
+	}
+	b.StopTimer()
+	if subscribe && !broker.HasLiveSubscribers() {
+		b.Fatal("the subscriber was dropped during the run, so the idle path was measured")
+	}
+}
+
+func BenchmarkBrokerAuditRequestLifecycleNoSubscribers(b *testing.B) {
+	benchAuditRequestLifecycle(b, false)
+}
+
+func BenchmarkBrokerAuditRequestLifecycleWithSubscriber(b *testing.B) {
+	benchAuditRequestLifecycle(b, true)
 }

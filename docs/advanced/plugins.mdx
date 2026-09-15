@@ -16,7 +16,7 @@ plugin:
 
 | How | When to use it | Registered by |
 | --- | --- | --- |
-| **Built in** | Ships with GoModel: `system_prompt`, `llm_based_altering`, `string_replace`, `header_edit`, `llm_judge`, and the `cheapest_healthy` routing strategy | nothing to do |
+| **Built in** | Ships with GoModel: `system_prompt`, `llm_based_altering`, `string_replace`, `tag_replace`, `header_edit`, `llm_judge`, and the `cheapest_healthy` routing strategy | nothing to do |
 | **Compiled in** | You build your own binary from the `run` package | `ext.RegisterPlugin(func() pluginapi.Plugin { ... })` before `run.Run` |
 | **Shared object** (`.so`) | You run the stock binary and want to add code at startup | `plugins.load` in `config.yaml` (needs the cgo build, see [Shared-object plugins](#shared-object-plugins)) |
 
@@ -562,7 +562,8 @@ Notes for authors:
 - Set `Guardrail: true` when the plugin's instances are guardrails: policies
   applied to prompts, responses, or streams, whether they block, answer,
   warn, or rewrite. Every built-in traffic plugin sets it (`llm_judge`,
-  `string_replace`, `header_edit`, `system_prompt`, `llm_based_altering`);
+  `string_replace`, `tag_replace`, `header_edit`, `system_prompt`,
+  `llm_based_altering`);
   a routing strategy such as `cheapest_healthy` never touches traffic and
   leaves it false. The runtime ignores the flag; the dashboard marks
   guardrail plugins and their instances with a shield and lists them first.

@@ -272,9 +272,8 @@ func TestWorkflowRequestPatcherFailModes(t *testing.T) {
 			require.NotNil(t, gatewayErr.Code)
 			require.Equal(t, plugins.CodePluginFailure, *gatewayErr.Code)
 
-			if strings.Contains(gatewayErr.Message, "f") && strings.Contains(gatewayErr.Message, "classifier") {
-				t.Fatalf("client message leaks plugin details: %q", gatewayErr.Message)
-			}
+			leaks := strings.Contains(gatewayErr.Message, "f") && strings.Contains(gatewayErr.Message, "classifier")
+			require.False(t, leaks, "client message leaks plugin details: %q", gatewayErr.Message)
 		})
 	}
 }

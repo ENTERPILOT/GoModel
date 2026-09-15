@@ -328,7 +328,7 @@ func TestSQLStoreSumSpendChunksLargeBatches(t *testing.T) {
 
 	got, err := store.SumSpend(ctx, windows)
 	require.NoError(t, err)
-	require.Equal(t, total, len(got))
+	require.Len(t, got, total)
 
 	for i, spend := range got[:total-1] {
 		require.False(t, spend.HasUsage, "spend[%d] = %+v, want no usage", i, spend)

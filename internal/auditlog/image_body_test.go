@@ -36,7 +36,7 @@ func TestBuildImageUploadBody(t *testing.T) {
 		assert.True(t, src.Stored)
 		assert.Equal(t, "base64", src.Encoding, "input item should be stored: %+v", src)
 		decoded, err := base64.StdEncoding.DecodeString(src.Data)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "cat", string(decoded), "base64 did not round-trip: %q %v", decoded, err)
 		assert.Equal(t, "mask", msk.Role)
 		assert.True(t, msk.Stored)

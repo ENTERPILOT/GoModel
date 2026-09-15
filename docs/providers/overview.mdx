@@ -81,6 +81,11 @@ support, not every individual model capability exposed by an upstream provider.
   provider injects trusted inference-objective and user-path fairness headers.
 - **Z.ai GLM Coding Plan** — set
   `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`.
+- **Z.ai reasoning effort** — `reasoning.effort` (Chat Completions and
+  Responses) is sent as Z.ai's top-level `reasoning_effort`. GLM-5.3 and
+  GLM-5.3-Flash always think and accept only `low`, `high`, and `max`, so
+  `none` and `minimal` map to `low`, `medium` to `high`, and `xhigh` to `max`.
+  Other GLM models receive the level unchanged.
 - **Groq reasoning and transcriptions** — on the gpt-oss and qwen3 families
   GoModel defaults Groq's `reasoning_format` to `parsed`, so chain of thought
   arrives in `reasoning` instead of as inline `<think>…</think>` text inside

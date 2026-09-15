@@ -65,7 +65,7 @@ Test conventions:
 - Assert with `testify`: `require` for preconditions and anything a later line dereferences, `assert` for independent checks, `Same`/`NotSame` for pointer identity.
 - Build echo handler requests with `internal/echotest` instead of `httptest.NewRequest` plus `echo.New().NewContext`.
 - Fake upstream provider servers with `internal/providers/providertest` (`JSONServer`, `SSEServer`, `RouteServer`) and read what was sent from its capture.
-- A provider built on `openai.ChatCompatible` gets one `TestChatCompatibleContract` that calls `providertest.AssertChatCompatible`; add provider-specific tests only for behavior the contract does not cover.
+- A provider built on the shared OpenAI-compatible adapter gets one `TestChatCompatibleContract` that calls `providertest.AssertChatCompatible`; set `NativeResponses` when it forwards Responses to `/responses`. Add provider-specific tests only for behavior the contract does not cover.
 
 ## Documentation
 

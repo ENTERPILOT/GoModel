@@ -34,11 +34,8 @@ var _ core.Provider = (*Provider)(nil)
 // New creates a new Z.ai provider.
 func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Provider {
 	return &Provider{
-		ChatCompatible: openai.NewChatCompatible(cfg.APIKey, opts, openai.CompatibleProviderConfig{
-			ProviderName: "zai",
-			BaseURL:      providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL),
-		}),
-		keys: opts.Keyring(cfg.APIKey),
+		ChatCompatible: openai.NewChatCompatible(cfg.APIKey, opts, compatibleConfig(providers.ResolveBaseURL(cfg.BaseURL, defaultBaseURL))),
+		keys:           opts.Keyring(cfg.APIKey),
 	}
 }
 
@@ -46,10 +43,15 @@ func New(cfg providers.ProviderConfig, opts providers.ProviderOptions) core.Prov
 // If httpClient is nil, http.DefaultClient is used.
 func NewWithHTTPClient(apiKey string, baseURL string, httpClient *http.Client, hooks llmclient.Hooks) *Provider {
 	return &Provider{
-		ChatCompatible: openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, openai.CompatibleProviderConfig{
-			ProviderName: "zai",
-			BaseURL:      providers.ResolveBaseURL(baseURL, defaultBaseURL),
-		}),
-		keys: providers.NewKeyring(apiKey),
+		ChatCompatible: openai.NewChatCompatibleWithHTTPClient(apiKey, httpClient, hooks, compatibleConfig(providers.ResolveBaseURL(baseURL, defaultBaseURL))),
+		keys:           providers.NewKeyring(apiKey),
+	}
+}
+
+func compatibleConfig(baseURL string) openai.CompatibleProviderConfig {
+	return openai.CompatibleProviderConfig{
+		ProviderName:     "zai",
+		BaseURL:          baseURL,
+		AdaptChatRequest: adaptChatRequest,
 	}
 }

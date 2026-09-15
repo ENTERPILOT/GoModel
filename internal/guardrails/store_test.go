@@ -293,7 +293,7 @@ func TestStoreGetAndDeleteMissingReturnNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 		_, err := store.Get(ctx, "absent")
-		assert.ErrorIs(t, err, ErrNotFound)
+		require.ErrorIs(t, err, ErrNotFound)
 		err = store.Delete(ctx, "absent")
 		assert.ErrorIs(t, err, ErrNotFound)
 	})
