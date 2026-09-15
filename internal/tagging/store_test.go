@@ -3,6 +3,9 @@ package tagging
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStore_RoundTrip(t *testing.T) {
@@ -14,21 +17,14 @@ func TestStore_RoundTrip(t *testing.T) {
 			{Header: "X-Env", DoNotPass: true, Delimiter: "|"},
 			{Header: "X-Bare"},
 		}
-		if err := store.SaveRules(ctx, want); err != nil {
-			t.Fatalf("SaveRules: %v", err)
-		}
+		err := store.SaveRules(ctx, want)
+		require.NoError(t, err)
 
 		got, err := store.GetRules(ctx)
-		if err != nil {
-			t.Fatalf("GetRules: %v", err)
-		}
-		if len(got) != len(want) {
-			t.Fatalf("got %d rules, want %d", len(got), len(want))
-		}
+		require.NoError(t, err)
+		require.Len(t, got, len(want))
 		for i := range want {
-			if got[i] != want[i] {
-				t.Errorf("rule %d = %+v, want %+v", i, got[i], want[i])
-			}
+			assert.Equal(t, want[i], got[i], "rule %d", i)
 		}
 	})
 }
@@ -39,15 +35,13 @@ func TestStore_ManagedFlagIsNeverPersisted(t *testing.T) {
 
 		// Managed marks declarative config/env rules; a caller that saves one
 		// by mistake must not be able to make it read-only in the dashboard.
-		if err := store.SaveRules(ctx, []Rule{{Header: "X-Team", Managed: true}}); err != nil {
-			t.Fatalf("SaveRules: %v", err)
-		}
+		err := store.SaveRules(ctx, []Rule{{Header: "X-Team", Managed: true}})
+		require.NoError(t, err)
+
 		got, err := store.GetRules(ctx)
-		if err != nil {
-			t.Fatalf("GetRules: %v", err)
-		}
-		if len(got) != 1 || got[0].Managed {
-			t.Errorf("got %+v, want X-Team with Managed=false", got)
+		require.NoError(t, err)
+		if assert.Len(t, got, 1, "want X-Team only") {
+			assert.False(t, got[0].Managed, "got %+v, want X-Team with Managed=false", got)
 		}
 	})
 }
@@ -57,12 +51,8 @@ func TestStore_GetRulesEmptyWhenUnset(t *testing.T) {
 		// A store with nothing saved must read as "no operator rules", not as
 		// an error: it is the state of every fresh deployment.
 		got, err := store.GetRules(context.Background())
-		if err != nil {
-			t.Fatalf("GetRules: %v", err)
-		}
-		if len(got) != 0 {
-			t.Errorf("got %d rules, want none", len(got))
-		}
+		require.NoError(t, err)
+		assert.Empty(t, got)
 	})
 }
 
@@ -70,21 +60,17 @@ func TestStore_SaveReplacesPreviousRules(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
-		if err := store.SaveRules(ctx, []Rule{{Header: "X-One"}, {Header: "X-Two"}}); err != nil {
-			t.Fatalf("first SaveRules: %v", err)
-		}
+		err := store.SaveRules(ctx, []Rule{{Header: "X-One"}, {Header: "X-Two"}})
+		require.NoError(t, err, "first SaveRules")
 		// SaveRules replaces the whole set rather than merging, so a shorter
 		// second save must not leave the dropped rule behind.
-		if err := store.SaveRules(ctx, []Rule{{Header: "X-Three"}}); err != nil {
-			t.Fatalf("second SaveRules: %v", err)
-		}
+		err = store.SaveRules(ctx, []Rule{{Header: "X-Three"}})
+		require.NoError(t, err, "second SaveRules")
 
 		got, err := store.GetRules(ctx)
-		if err != nil {
-			t.Fatalf("GetRules: %v", err)
-		}
-		if len(got) != 1 || got[0].Header != "X-Three" {
-			t.Errorf("got %+v, want only X-Three", got)
+		require.NoError(t, err)
+		if assert.Len(t, got, 1, "want only X-Three, got %+v", got) {
+			assert.Equal(t, "X-Three", got[0].Header)
 		}
 	})
 }
@@ -95,20 +81,14 @@ func TestStore_SaveEmptyClearsRules(t *testing.T) {
 			runStoreSuite(t, func(t *testing.T, store Store) {
 				ctx := context.Background()
 
-				if err := store.SaveRules(ctx, []Rule{{Header: "X-One"}}); err != nil {
-					t.Fatalf("SaveRules: %v", err)
-				}
-				if err := store.SaveRules(ctx, empty); err != nil {
-					t.Fatalf("SaveRules(%s): %v", name, err)
-				}
+				err := store.SaveRules(ctx, []Rule{{Header: "X-One"}})
+				require.NoError(t, err)
+				err = store.SaveRules(ctx, empty)
+				require.NoError(t, err, "SaveRules(%s)", name)
 
 				got, err := store.GetRules(ctx)
-				if err != nil {
-					t.Fatalf("GetRules: %v", err)
-				}
-				if len(got) != 0 {
-					t.Errorf("got %+v, want none", got)
-				}
+				require.NoError(t, err)
+				assert.Empty(t, got)
 			})
 		})
 	}

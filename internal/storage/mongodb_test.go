@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 )
 
@@ -19,31 +22,25 @@ func TestNewMongoDBConnectsAndPings(t *testing.T) {
 	ctx := context.Background()
 
 	store, err := NewMongoDB(ctx, MongoDBConfig{URL: dsn, Database: "gomodel_test_storage_ping"})
-	if err != nil {
-		t.Fatalf("NewMongoDB: %v", err)
-	}
+	require.NoError(t, err)
+
 	checker, ok := store.(HealthChecker)
-	if !ok {
-		t.Fatalf("%T does not implement HealthChecker", store)
-	}
-	if err := checker.Ping(ctx); err != nil {
-		t.Errorf("Ping: %v", err)
-	}
-	if got := store.Database().Name(); got != "gomodel_test_storage_ping" {
-		t.Errorf("Database().Name() = %q, want gomodel_test_storage_ping", got)
-	}
-	if err := store.Close(); err != nil {
-		t.Errorf("Close: %v", err)
-	}
-	if err := checker.Ping(ctx); err == nil {
-		t.Error("Ping after Close = nil, want error")
-	}
+	require.True(t, ok, "%T does not implement HealthChecker", store)
+
+	err = checker.Ping(ctx)
+	assert.NoError(t, err, "Ping")
+	assert.Equal(t, "gomodel_test_storage_ping", store.Database().Name())
+
+	err = store.Close()
+	assert.NoError(t, err, "Close")
+
+	err = checker.Ping(ctx)
+	assert.Error(t, err, "Ping after Close should fail")
 }
 
 func TestNewMongoDBRequiresURL(t *testing.T) {
-	if _, err := NewMongoDB(context.Background(), MongoDBConfig{}); err == nil {
-		t.Fatal("NewMongoDB with empty URL = nil error, want error")
-	}
+	_, err := NewMongoDB(context.Background(), MongoDBConfig{})
+	require.Error(t, err, "NewMongoDB with empty URL should fail")
 }
 
 func TestResolveMongoDatabase(t *testing.T) {
@@ -106,9 +103,7 @@ func TestResolveMongoDatabase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveMongoDatabase(tt.cfg); got != tt.want {
-				t.Errorf("resolveMongoDatabase(%+v) = %q, want %q", tt.cfg, got, tt.want)
-			}
+			assert.Equal(t, tt.want, resolveMongoDatabase(tt.cfg), "resolveMongoDatabase(%+v)", tt.cfg)
 		})
 	}
 }

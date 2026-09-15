@@ -2,11 +2,11 @@ package conversationstore
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -21,9 +21,8 @@ func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
@@ -36,17 +35,15 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		store, err := NewMongoDBStore(db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
@@ -76,30 +73,25 @@ func TestSQLConversationExpiry(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
 
-		if err := store.Create(ctx, testStoredConversation("conv-2")); err != nil {
-			t.Fatalf("create conv-2: %v", err)
-		}
-		if _, err := store.db.Exec(ctx,
+		err := store.Create(ctx, testStoredConversation("conv-2"))
+		require.NoError(t, err, "create conv-2")
+
+		_, err = store.db.Exec(ctx,
 			"UPDATE conversation_snapshots SET expires_at = ? WHERE id = ?",
 			time.Now().Add(-time.Minute).Unix(), "conv-2",
-		); err != nil {
-			t.Fatalf("expire row: %v", err)
-		}
-		if _, err := store.Get(ctx, "conv-2"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("get expired err = %v, want ErrNotFound", err)
-		}
-		if err := store.AppendItems(ctx, "conv-2", []json.RawMessage{json.RawMessage(`{}`)}); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("append expired err = %v, want ErrNotFound", err)
-		}
-		if err := store.DeleteExpired(ctx); err != nil {
-			t.Fatalf("delete expired: %v", err)
-		}
+		)
+		require.NoError(t, err, "expire row")
+
+		_, err = store.Get(ctx, "conv-2")
+		require.ErrorIs(t, err, ErrNotFound, "get expired")
+		err = store.AppendItems(ctx, "conv-2", []json.RawMessage{json.RawMessage(`{}`)})
+		require.ErrorIs(t, err, ErrNotFound, "append expired")
+		err = store.DeleteExpired(ctx)
+		require.NoError(t, err)
+
 		var count int
-		if err := store.db.QueryRow(ctx, "SELECT COUNT(*) FROM conversation_snapshots").Scan(&count); err != nil {
-			t.Fatalf("count rows: %v", err)
-		}
-		if count != 0 {
-			t.Fatalf("rows after sweep = %d, want 0", count)
-		}
+		err = store.db.QueryRow(ctx, "SELECT COUNT(*) FROM conversation_snapshots").Scan(&count)
+		require.NoError(t, err)
+		require.Equal(t, 0, count, "rows after sweep")
 	})
 }

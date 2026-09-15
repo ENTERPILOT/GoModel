@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
@@ -16,7 +19,7 @@ import (
 func TestNewSQLStoreAddsMissingUserPathColumn(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE guardrail_definitions (
 				name TEXT PRIMARY KEY,
 				type TEXT NOT NULL,
@@ -24,32 +27,25 @@ func TestNewSQLStoreAddsMissingUserPathColumn(t *testing.T) {
 				config `+sqlx.TypeJSON+` NOT NULL,
 				created_at `+sqlx.TypeInt64+` NOT NULL,
 				updated_at `+sqlx.TypeInt64+` NOT NULL
-			)`); err != nil {
-			t.Fatalf("create pre-migration table: %v", err)
-		}
+			)`)
+		require.NoError(t, err, "create pre-migration table")
 
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
 
 		// Round-tripping a user path proves the column arrived, without
 		// reaching for engine-specific schema introspection.
-		if err := store.Upsert(ctx, Definition{
+		err = store.Upsert(ctx, Definition{
 			Name:     "after-migration",
 			Type:     "system_prompt",
 			UserPath: "/team/alpha",
 			Config:   []byte(`{"content":"be concise"}`),
-		}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
+		})
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "after-migration")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.UserPath != "/team/alpha" {
-			t.Errorf("UserPath = %q, want /team/alpha", got.UserPath)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "/team/alpha", got.UserPath)
 	})
 }
 
@@ -59,9 +55,8 @@ func TestNewSQLStoreIsIdempotent(t *testing.T) {
 		// Every restart re-runs the constructor, including the already-applied
 		// user_path migration.
 		for range 3 {
-			if _, err := NewSQLStore(ctx, db); err != nil {
-				t.Fatalf("NewSQLStore: %v", err)
-			}
+			_, err := NewSQLStore(ctx, db)
+			require.NoError(t, err)
 		}
 	})
 }
@@ -71,7 +66,7 @@ func TestNewSQLStoreIsIdempotent(t *testing.T) {
 func TestSQLStoreMigratesFailModeAndTimeoutColumns(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE guardrail_definitions (
 				name TEXT PRIMARY KEY,
 				type TEXT NOT NULL,
@@ -80,28 +75,24 @@ func TestSQLStoreMigratesFailModeAndTimeoutColumns(t *testing.T) {
 				config `+sqlx.TypeJSON+` NOT NULL,
 				created_at `+sqlx.TypeInt64+` NOT NULL,
 				updated_at `+sqlx.TypeInt64+` NOT NULL
-			)`); err != nil {
-			t.Fatalf("create pre-migration table: %v", err)
-		}
+			)`)
+		require.NoError(t, err, "create pre-migration table")
+
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
-		if err := store.Upsert(ctx, Definition{
+		require.NoError(t, err)
+
+		err = store.Upsert(ctx, Definition{
 			Name:      "timed",
 			Type:      "system_prompt",
 			FailMode:  "open",
 			TimeoutMS: 1500,
 			Config:    []byte(`{"content":"be concise"}`),
-		}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
+		})
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "timed")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.FailMode != "open" || got.TimeoutMS != 1500 {
-			t.Fatalf("fail_mode/timeout_ms = %q/%d, want open/1500", got.FailMode, got.TimeoutMS)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "open", got.FailMode)
+		assert.Equal(t, 1500, got.TimeoutMS)
 	})
 }

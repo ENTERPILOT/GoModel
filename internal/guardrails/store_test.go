@@ -3,11 +3,11 @@ package guardrails
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"reflect"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
@@ -21,17 +21,15 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		store, err := NewMongoDBStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
@@ -41,16 +39,7 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 // MongoDB document store both reorder keys and drop whitespace.
 func assertJSONEqual(t *testing.T, got json.RawMessage, want string) {
 	t.Helper()
-	var gotValue, wantValue any
-	if err := json.Unmarshal(got, &gotValue); err != nil {
-		t.Fatalf("config %q is not JSON: %v", got, err)
-	}
-	if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
-		t.Fatalf("want %q is not JSON: %v", want, err)
-	}
-	if !reflect.DeepEqual(gotValue, wantValue) {
-		t.Fatalf("config = %s, want %s", got, want)
-	}
+	require.JSONEq(t, want, string(got))
 }
 
 func TestStoreRoundTripsEveryField(t *testing.T) {
@@ -71,66 +60,48 @@ func TestStoreRoundTripsEveryField(t *testing.T) {
 		}
 		global := Definition{Name: "global", Type: "system_prompt", Config: []byte(`{"content":"y"}`)}
 		for _, definition := range []Definition{scoped, global} {
-			if err := store.Upsert(ctx, definition); err != nil {
-				t.Fatalf("Upsert(%s): %v", definition.Name, err)
-			}
+			err := store.Upsert(ctx, definition)
+			require.NoError(t, err, "Upsert(%s)", definition.Name)
 		}
 
 		got, err := store.Get(ctx, "scoped")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.Name != "scoped" || got.Type != "system_prompt" || got.Description != "team prompt" || got.UserPath != "/team/alpha" {
-			t.Errorf("identity = %q/%q/%q/%q", got.Name, got.Type, got.Description, got.UserPath)
-		}
-		if got.FailMode != "open" || got.TimeoutMS != 1500 {
-			t.Errorf("fail_mode/timeout_ms = %q/%d, want open/1500", got.FailMode, got.TimeoutMS)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "scoped", got.Name)
+		assert.Equal(t, "system_prompt", got.Type)
+		assert.Equal(t, "team prompt", got.Description)
+		assert.Equal(t, "/team/alpha", got.UserPath)
+		assert.Equal(t, "open", got.FailMode)
+		assert.Equal(t, 1500, got.TimeoutMS)
 		assertJSONEqual(t, got.Config, `{"content":"be concise","max_tokens":100,"tags":["a","b"]}`)
 		// A caller-supplied created_at is kept; updated_at is always stamped
 		// by the store. Both come back in UTC.
-		if !got.CreatedAt.Equal(created) {
-			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, created)
-		}
-		if got.UpdatedAt.Before(start) {
-			t.Errorf("UpdatedAt = %v, want >= %v", got.UpdatedAt, start)
-		}
-		if got.CreatedAt.Location() != time.UTC || got.UpdatedAt.Location() != time.UTC {
-			t.Errorf("timestamps not UTC: %v / %v", got.CreatedAt.Location(), got.UpdatedAt.Location())
-		}
+		assert.True(t, got.CreatedAt.Equal(created), "CreatedAt = %v, want %v", got.CreatedAt, created)
+		assert.False(t, got.UpdatedAt.Before(start), "UpdatedAt = %v, want >= %v", got.UpdatedAt, start)
+		assert.Equal(t, time.UTC, got.CreatedAt.Location(), "CreatedAt not UTC")
+		assert.Equal(t, time.UTC, got.UpdatedAt.Location(), "UpdatedAt not UTC")
 
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 2 {
-			t.Fatalf("len = %d, want 2", len(definitions))
-		}
+		require.NoError(t, err)
+		require.Len(t, definitions, 2)
 		// Ordered by name ascending.
-		if definitions[0].Name != "global" || definitions[1].Name != "scoped" {
-			t.Fatalf("names = %s, %s; want global, scoped", definitions[0].Name, definitions[1].Name)
-		}
-		if definitions[0].UserPath != "" || definitions[0].Description != "" || definitions[0].FailMode != "" || definitions[0].TimeoutMS != 0 {
-			t.Errorf("global row carries non-default optional fields: %+v", definitions[0])
-		}
-		if definitions[0].CreatedAt.IsZero() || definitions[0].CreatedAt.Before(start) {
-			t.Errorf("global CreatedAt = %v, want stamped >= %v", definitions[0].CreatedAt, start)
-		}
-		if !reflect.DeepEqual(definitions[1], *got) {
-			t.Errorf("List row = %+v, want Get result %+v", definitions[1], *got)
-		}
+		require.Equal(t, "global", definitions[0].Name)
+		require.Equal(t, "scoped", definitions[1].Name)
+		assert.Empty(t, definitions[0].UserPath, "global row carries non-default user path: %+v", definitions[0])
+		assert.Empty(t, definitions[0].Description, "global row carries non-default description: %+v", definitions[0])
+		assert.Empty(t, definitions[0].FailMode, "global row carries non-default fail mode: %+v", definitions[0])
+		assert.Zero(t, definitions[0].TimeoutMS, "global row carries non-default timeout: %+v", definitions[0])
+		assert.False(t, definitions[0].CreatedAt.IsZero(), "global CreatedAt not stamped")
+		assert.False(t, definitions[0].CreatedAt.Before(start), "global CreatedAt = %v, want stamped >= %v", definitions[0].CreatedAt, start)
+		assert.Equal(t, *got, definitions[1], "List row should match Get result")
 	})
 }
 
 func TestStoreListOnEmptyStore(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		definitions, err := store.List(context.Background())
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if definitions == nil || len(definitions) != 0 {
-			t.Fatalf("List = %#v, want empty non-nil slice", definitions)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, definitions, "List should return an empty non-nil slice")
+		require.Empty(t, definitions)
 	})
 }
 
@@ -138,48 +109,43 @@ func TestStoreListOrdersByName(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 		for _, name := range []string{"charlie", "alpha", "bravo"} {
-			if err := store.Upsert(ctx, Definition{Name: name, Type: "system_prompt"}); err != nil {
-				t.Fatalf("Upsert(%s): %v", name, err)
-			}
+			err := store.Upsert(ctx, Definition{Name: name, Type: "system_prompt"})
+			require.NoError(t, err, "Upsert(%s)", name)
 		}
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
+		require.NoError(t, err)
+
 		names := make([]string, 0, len(definitions))
 		for _, definition := range definitions {
 			names = append(names, definition.Name)
 		}
-		if want := []string{"alpha", "bravo", "charlie"}; !reflect.DeepEqual(names, want) {
-			t.Fatalf("names = %v, want %v", names, want)
-		}
+		require.Equal(t, []string{"alpha", "bravo", "charlie"}, names)
 	})
 }
 
 func TestStoreUpsertNormalizesIdentity(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-		if err := store.Upsert(ctx, Definition{
+		err := store.Upsert(ctx, Definition{
 			Name:        "  padded  ",
 			Type:        " System-Prompt ",
 			Description: "  desc  ",
 			UserPath:    "team/alpha/",
 			FailMode:    " Fail-Open ",
 			Config:      []byte(`{"content":"c"}`),
-		}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
+		})
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "padded")
-		if err != nil {
-			t.Fatalf("Get(padded): %v", err)
-		}
-		if got.Name != "padded" || got.Type != "system_prompt" || got.Description != "desc" || got.UserPath != "/team/alpha" || got.FailMode != "open" {
-			t.Fatalf("normalized = %+v", got)
-		}
+		require.NoError(t, err, "Get(padded)")
+		require.Equal(t, "padded", got.Name)
+		require.Equal(t, "system_prompt", got.Type)
+		require.Equal(t, "desc", got.Description)
+		require.Equal(t, "/team/alpha", got.UserPath)
+		require.Equal(t, "open", got.FailMode)
 		// Get trims the lookup name too.
-		if _, err := store.Get(ctx, "  padded "); err != nil {
-			t.Fatalf("Get(padded name): %v", err)
-		}
+		_, err = store.Get(ctx, "  padded ")
+		require.NoError(t, err, "Get(padded name)")
 	})
 }
 
@@ -189,13 +155,11 @@ func TestStoreEmptyConfigNormalizesToEmptyObject(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 		for _, config := range []json.RawMessage{nil, json.RawMessage(""), json.RawMessage("   ")} {
-			if err := store.Upsert(ctx, Definition{Name: "empty", Type: "system_prompt", Config: config}); err != nil {
-				t.Fatalf("Upsert(%q): %v", config, err)
-			}
+			err := store.Upsert(ctx, Definition{Name: "empty", Type: "system_prompt", Config: config})
+			require.NoError(t, err, "Upsert(%q)", config)
+
 			got, err := store.Get(ctx, "empty")
-			if err != nil {
-				t.Fatalf("Get: %v", err)
-			}
+			require.NoError(t, err)
 			assertJSONEqual(t, got.Config, `{}`)
 		}
 	})
@@ -210,13 +174,11 @@ func TestStoreNullConfigRoundTrip(t *testing.T) {
 			t.Skipf("drift: MongoDBStore normalizes a null config to {} while SQLStore returns null verbatim")
 		}
 		ctx := context.Background()
-		if err := store.Upsert(ctx, Definition{Name: "null", Type: "system_prompt", Config: json.RawMessage("null")}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
+		err := store.Upsert(ctx, Definition{Name: "null", Type: "system_prompt", Config: json.RawMessage("null")})
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "null")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
+		require.NoError(t, err)
 		assertJSONEqual(t, got.Config, `null`)
 	})
 }
@@ -225,47 +187,34 @@ func TestStoreUpsertOverwritesAndPreservesCreatedAt(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
-		if err := store.Upsert(ctx, Definition{
+		err := store.Upsert(ctx, Definition{
 			Name: "g", Type: "system_prompt", Description: "first", UserPath: "/team/alpha",
 			FailMode: "open", TimeoutMS: 1500, Config: []byte(`{"content":"c"}`),
-		}); err != nil {
-			t.Fatalf("first Upsert: %v", err)
-		}
+		})
+		require.NoError(t, err, "first Upsert")
+
 		created, err := store.Get(ctx, "g")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
+		require.NoError(t, err)
 
 		// A re-upsert replaces every field but created_at; optional fields
 		// left empty fall back to their defaults rather than lingering.
-		if err := store.Upsert(ctx, Definition{Name: "g", Type: "llm_based_altering", Config: []byte(`{"model":"openai/gpt-4o"}`)}); err != nil {
-			t.Fatalf("second Upsert: %v", err)
-		}
+		err = store.Upsert(ctx, Definition{Name: "g", Type: "llm_based_altering", Config: []byte(`{"model":"openai/gpt-4o"}`)})
+		require.NoError(t, err, "second Upsert")
+
 		updated, err := store.Get(ctx, "g")
-		if err != nil {
-			t.Fatalf("Get after update: %v", err)
-		}
-		if updated.Type != "llm_based_altering" {
-			t.Errorf("Type = %q, want llm_based_altering", updated.Type)
-		}
+		require.NoError(t, err, "Get after update")
+		assert.Equal(t, "llm_based_altering", updated.Type)
 		assertJSONEqual(t, updated.Config, `{"model":"openai/gpt-4o"}`)
-		if updated.Description != "" || updated.UserPath != "" || updated.FailMode != "" || updated.TimeoutMS != 0 {
-			t.Errorf("optional fields not reset: %+v", updated)
-		}
-		if !updated.CreatedAt.Equal(created.CreatedAt) {
-			t.Errorf("CreatedAt = %v, want %v preserved", updated.CreatedAt, created.CreatedAt)
-		}
-		if updated.UpdatedAt.Before(created.UpdatedAt) {
-			t.Errorf("UpdatedAt = %v, want >= %v", updated.UpdatedAt, created.UpdatedAt)
-		}
+		assert.Empty(t, updated.Description, "description not reset: %+v", updated)
+		assert.Empty(t, updated.UserPath, "user path not reset: %+v", updated)
+		assert.Empty(t, updated.FailMode, "fail mode not reset: %+v", updated)
+		assert.Zero(t, updated.TimeoutMS, "timeout not reset: %+v", updated)
+		assert.True(t, updated.CreatedAt.Equal(created.CreatedAt), "CreatedAt = %v, want %v preserved", updated.CreatedAt, created.CreatedAt)
+		assert.False(t, updated.UpdatedAt.Before(created.UpdatedAt), "UpdatedAt = %v, want >= %v", updated.UpdatedAt, created.UpdatedAt)
 
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 1 {
-			t.Errorf("len = %d after re-upsert, want 1", len(definitions))
-		}
+		require.NoError(t, err)
+		assert.Len(t, definitions, 1, "after re-upsert")
 	})
 }
 
@@ -282,17 +231,11 @@ func TestStoreUpsertRejectsInvalidDefinition(t *testing.T) {
 		ctx := context.Background()
 		for name, definition := range cases {
 			err := store.Upsert(ctx, definition)
-			if !IsValidationError(err) {
-				t.Errorf("%s: Upsert error = %v, want validation error", name, err)
-			}
+			assert.True(t, IsValidationError(err), "%s: Upsert error = %v, want validation error", name, err)
 		}
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 0 {
-			t.Errorf("len = %d after rejected upserts, want 0", len(definitions))
-		}
+		require.NoError(t, err)
+		assert.Empty(t, definitions, "after rejected upserts")
 	})
 }
 
@@ -306,17 +249,11 @@ func TestStoreUpsertManyIsAtomic(t *testing.T) {
 			{Name: "valid", Type: "system_prompt", Config: []byte(`{"content":"c"}`)},
 			{Name: "", Type: "system_prompt", Config: []byte(`{"content":"c"}`)},
 		})
-		if !IsValidationError(err) {
-			t.Fatalf("UpsertMany with an invalid definition error = %v, want validation error", err)
-		}
+		require.True(t, IsValidationError(err), "UpsertMany with an invalid definition error = %v, want validation error", err)
 
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 0 {
-			t.Errorf("len = %d after failed batch, want 0", len(definitions))
-		}
+		require.NoError(t, err)
+		assert.Empty(t, definitions, "after failed batch")
 	})
 }
 
@@ -324,51 +261,41 @@ func TestStoreUpsertManyCommits(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 
-		if err := store.UpsertMany(ctx, nil); err != nil {
-			t.Fatalf("UpsertMany(nil): %v", err)
-		}
-		if err := store.Upsert(ctx, Definition{Name: "a", Type: "system_prompt", Description: "old", Config: []byte(`{"content":"old"}`)}); err != nil {
-			t.Fatalf("Upsert(a): %v", err)
-		}
-		existing, err := store.Get(ctx, "a")
-		if err != nil {
-			t.Fatalf("Get(a): %v", err)
-		}
+		err := store.UpsertMany(ctx, nil)
+		require.NoError(t, err, "UpsertMany(nil)")
+		err = store.Upsert(ctx, Definition{Name: "a", Type: "system_prompt", Description: "old", Config: []byte(`{"content":"old"}`)})
+		require.NoError(t, err, "Upsert(a)")
 
-		if err := store.UpsertMany(ctx, []Definition{
+		existing, err := store.Get(ctx, "a")
+		require.NoError(t, err, "Get(a)")
+
+		err = store.UpsertMany(ctx, []Definition{
 			{Name: "a", Type: "system_prompt", Config: []byte(`{"content":"new"}`)},
 			{Name: "b", Type: "system_prompt", UserPath: "/team/beta", Config: []byte(`{"content":"c"}`)},
-		}); err != nil {
-			t.Fatalf("UpsertMany: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 2 || definitions[0].Name != "a" || definitions[1].Name != "b" {
-			t.Fatalf("List = %+v, want a then b", definitions)
-		}
+		require.NoError(t, err)
+		require.Len(t, definitions, 2)
+		require.Equal(t, "a", definitions[0].Name)
+		require.Equal(t, "b", definitions[1].Name)
 		// The batch overwrites like Upsert does: fields replaced, created_at kept.
 		assertJSONEqual(t, definitions[0].Config, `{"content":"new"}`)
-		if definitions[0].Description != "" || !definitions[0].CreatedAt.Equal(existing.CreatedAt) {
-			t.Errorf("a after batch = %+v, want description reset and CreatedAt %v", definitions[0], existing.CreatedAt)
-		}
-		if definitions[1].UserPath != "/team/beta" || definitions[1].CreatedAt.IsZero() {
-			t.Errorf("b after batch = %+v", definitions[1])
-		}
+		assert.Empty(t, definitions[0].Description, "a after batch = %+v, want description reset", definitions[0])
+		assert.True(t, definitions[0].CreatedAt.Equal(existing.CreatedAt), "a after batch = %+v, want CreatedAt %v", definitions[0], existing.CreatedAt)
+		assert.Equal(t, "/team/beta", definitions[1].UserPath, "b after batch = %+v", definitions[1])
+		assert.False(t, definitions[1].CreatedAt.IsZero(), "b after batch = %+v, want CreatedAt stamped", definitions[1])
 	})
 }
 
 func TestStoreGetAndDeleteMissingReturnNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-		if _, err := store.Get(ctx, "absent"); !errors.Is(err, ErrNotFound) {
-			t.Errorf("Get error = %v, want ErrNotFound", err)
-		}
-		if err := store.Delete(ctx, "absent"); !errors.Is(err, ErrNotFound) {
-			t.Errorf("Delete error = %v, want ErrNotFound", err)
-		}
+		_, err := store.Get(ctx, "absent")
+		assert.ErrorIs(t, err, ErrNotFound)
+		err = store.Delete(ctx, "absent")
+		assert.ErrorIs(t, err, ErrNotFound)
 	})
 }
 
@@ -376,26 +303,21 @@ func TestStoreDeleteRemovesDefinition(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 		for _, name := range []string{"g", "keep"} {
-			if err := store.Upsert(ctx, Definition{Name: name, Type: "system_prompt", Config: []byte(`{"content":"c"}`)}); err != nil {
-				t.Fatalf("Upsert(%s): %v", name, err)
-			}
+			err := store.Upsert(ctx, Definition{Name: name, Type: "system_prompt", Config: []byte(`{"content":"c"}`)})
+			require.NoError(t, err, "Upsert(%s)", name)
 		}
 		// Names are trimmed on the way in, so a padded delete must still match.
-		if err := store.Delete(ctx, "  g  "); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		if _, err := store.Get(ctx, "g"); !errors.Is(err, ErrNotFound) {
-			t.Errorf("Get after Delete = %v, want ErrNotFound", err)
-		}
-		if err := store.Delete(ctx, "g"); !errors.Is(err, ErrNotFound) {
-			t.Errorf("second Delete = %v, want ErrNotFound", err)
-		}
+		err := store.Delete(ctx, "  g  ")
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "g")
+		assert.ErrorIs(t, err, ErrNotFound, "Get after Delete")
+		err = store.Delete(ctx, "g")
+		assert.ErrorIs(t, err, ErrNotFound, "second Delete")
+
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 1 || definitions[0].Name != "keep" {
-			t.Errorf("List after Delete = %+v, want only keep", definitions)
+		require.NoError(t, err)
+		if assert.Len(t, definitions, 1, "List after Delete") {
+			assert.Equal(t, "keep", definitions[0].Name)
 		}
 	})
 }

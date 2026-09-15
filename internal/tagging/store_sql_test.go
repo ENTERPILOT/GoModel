@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
@@ -14,9 +16,8 @@ import (
 func newTestStore(t *testing.T, db sqlx.DB) *SQLStore {
 	t.Helper()
 	store, err := NewSQLStore(context.Background(), db)
-	if err != nil {
-		t.Fatalf("NewSQLStore: %v", err)
-	}
+	require.NoError(t, err)
+
 	return store
 }
 
@@ -31,9 +32,8 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 	})
 	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
 		store, err := NewMongoDBStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewMongoDBStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
@@ -43,25 +43,21 @@ func TestNewSQLStoreIsIdempotent(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		store := newTestStore(t, db)
-		if err := store.SaveRules(ctx, []Rule{{Header: "X-Keep"}}); err != nil {
-			t.Fatalf("SaveRules: %v", err)
-		}
+		err := store.SaveRules(ctx, []Rule{{Header: "X-Keep"}})
+		require.NoError(t, err)
 
 		// Constructing again is what every restart does; it must neither fail
 		// nor discard the saved rules.
 		second := newTestStore(t, db)
 		got, err := second.GetRules(ctx)
-		if err != nil {
-			t.Fatalf("GetRules: %v", err)
-		}
-		if len(got) != 1 || got[0].Header != "X-Keep" {
-			t.Errorf("got %+v, want X-Keep preserved", got)
+		require.NoError(t, err)
+		if assert.Len(t, got, 1, "want X-Keep preserved, got %+v", got) {
+			assert.Equal(t, "X-Keep", got[0].Header)
 		}
 	})
 }
 
 func TestNewSQLStoreRejectsNilDB(t *testing.T) {
-	if _, err := NewSQLStore(context.Background(), nil); err == nil {
-		t.Fatal("NewSQLStore(nil) = nil error, want failure")
-	}
+	_, err := NewSQLStore(context.Background(), nil)
+	require.Error(t, err, "NewSQLStore(nil) should fail")
 }
