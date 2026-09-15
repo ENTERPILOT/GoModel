@@ -312,6 +312,7 @@ opentelemetry:
 http:
   timeout: 600 # seconds (10 minutes)
   response_header_timeout: 600
+  stream_idle_timeout: 300 # seconds of silence allowed mid-stream before a stalled stream fails; 0 disables
 
 workflows:
   refresh_interval: 1m

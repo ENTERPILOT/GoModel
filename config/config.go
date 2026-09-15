@@ -189,6 +189,7 @@ func buildDefaultConfig() *Config {
 		HTTP: HTTPConfig{
 			Timeout:               600,
 			ResponseHeaderTimeout: 600,
+			StreamIdleTimeout:     300,
 		},
 		Failover: FailoverConfig{
 			Enabled:     true,

@@ -10,4 +10,9 @@ type HTTPConfig struct {
 
 	// ResponseHeaderTimeout is the time to wait for response headers in seconds (default: 600)
 	ResponseHeaderTimeout int `yaml:"response_header_timeout" env:"HTTP_RESPONSE_HEADER_TIMEOUT"`
+
+	// StreamIdleTimeout is the longest silence, in seconds, a streaming
+	// response may keep once its first bytes arrived before GoModel gives up
+	// on it (default: 300). 0 disables it.
+	StreamIdleTimeout int `yaml:"stream_idle_timeout" env:"HTTP_STREAM_IDLE_TIMEOUT"`
 }
