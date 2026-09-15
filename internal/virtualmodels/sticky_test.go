@@ -253,18 +253,18 @@ func TestSticky_PruneDropsDeletedSources(t *testing.T) {
 
 func TestSticky_EvictsSoonestAtCapacity(t *testing.T) {
 	t.Parallel()
-	sticky := &stickySessions{}
+	sticky := &stickySessions{capacity: 100}
 	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	sticky.now = func() time.Time { return current }
 
-	for i := range maxStickySessions {
+	for i := range sticky.capacity {
 		stickyAssign(sticky, "smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
-	require.Equal(t, maxStickySessions, len(sticky.entries))
+	require.Equal(t, sticky.capacity, len(sticky.entries))
 
 	stickyAssign(sticky, "smart", "one-more", "openai/gpt-4o")
-	require.Equal(t, maxStickySessions, len(sticky.entries))
+	require.Equal(t, sticky.capacity, len(sticky.entries))
 	// The oldest pin was evicted; the newest survives.
 	got := stickyProbe(sticky, "smart", "one-more")
 	require.NotEmpty(t, got)
@@ -302,15 +302,15 @@ func TestSticky_PinsWhenOnlyOneTargetSupported(t *testing.T) {
 // so it owes the same capacity bound as resolve.
 func TestSticky_RepinRespectsCapacity(t *testing.T) {
 	t.Parallel()
-	sticky := &stickySessions{}
+	sticky := &stickySessions{capacity: 100}
 	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	sticky.now = func() time.Time { return current }
 
-	for i := range maxStickySessions + 50 {
+	for i := range sticky.capacity + 50 {
 		sticky.repin("smart", "sess-"+strconv.Itoa(i), "", "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
-	require.Equal(t, maxStickySessions, len(sticky.entries))
+	require.Equal(t, sticky.capacity, len(sticky.entries))
 	got := stickyProbe(sticky, "smart", "sess-0")
 	require.Empty(t, got)
 }

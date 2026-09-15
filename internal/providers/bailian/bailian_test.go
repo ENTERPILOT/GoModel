@@ -11,6 +11,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/openai"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,9 +35,7 @@ const upstreamErrorJSON = `{"error":{"message":"bad request","type":"invalid_req
 
 // newTestProvider points a provider at the given upstream URL.
 func newTestProvider(baseURL string) *Provider {
-	p := NewWithHTTPClient("key", nil, llmclient.Hooks{})
-	p.SetBaseURL(baseURL)
-	return p
+	return New(providers.ProviderConfig{APIKey: "key", BaseURL: baseURL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 }
 
 func TestChatCompatibleContract(t *testing.T) {
@@ -220,11 +220,13 @@ func TestChatCompletion_UpstreamError(t *testing.T) {
 
 func TestChatCompletion_TransportFailure(t *testing.T) {
 	errTransport := errors.New("simulated transport failure")
-	provider := NewWithHTTPClient("key", &http.Client{
+	cfg := compatibleConfig(defaultBaseURL)
+	cfg.HTTPClient = &http.Client{
 		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errTransport
 		}),
-	}, llmclient.Hooks{})
+	}
+	provider := newProvider(openai.NewCompatibleProvider("key", providertest.Options(llmclient.Hooks{}), cfg), providers.NewKeyring("key"))
 
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "qwen3-max",

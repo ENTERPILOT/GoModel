@@ -289,7 +289,9 @@ func TestInit_NormalizesNilContext(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 }
 
-const unreachableRedisURL = "redis://127.0.0.1:1"
+// max_retries=-1 disables go-redis' reconnect backoff (0 means the default of 3): the port refuses instantly
+// and each of these tests would otherwise wait ~1.7s for three retries.
+const unreachableRedisURL = "redis://127.0.0.1:1?max_retries=-1"
 
 func TestInitCache_FallsBackToLocalWhenRedisUnreachable(t *testing.T) {
 	cacheDir := t.TempDir()

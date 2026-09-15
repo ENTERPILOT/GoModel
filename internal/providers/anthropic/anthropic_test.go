@@ -85,8 +85,7 @@ func TestGetBatchResults(t *testing.T) {
 			`{"custom_id":"err-1","result":{"type":"errored","error":{"type":"invalid_request_error","message":"bad request"}}}`,
 	)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	provider.setBatchResultEndpoints("batch_1", map[string]string{
 		"ok-1":  "/v1/responses",
 		"err-1": "/v1/chat/completions",
@@ -108,8 +107,7 @@ func TestGetBatchResultsWithHints(t *testing.T) {
 		`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
 	)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	resp, err := provider.GetBatchResultsWithHints(context.Background(), "batch_1", map[string]string{
 		"ok-1": "/v1/responses",
@@ -125,8 +123,7 @@ func TestGetBatchResultsWithHints_ExplicitEmptyHintsDoNotUseTransientHints(t *te
 		`{"custom_id":"ok-1","result":{"type":"succeeded","message":{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}}}`,
 	)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	provider.setBatchResultEndpoints("batch_1", map[string]string{
 		"ok-1": "/v1/responses",
 	})
@@ -239,8 +236,7 @@ func TestChatCompletion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ChatRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -373,8 +369,7 @@ data: {"type":"message_stop"}
 				_, _ = io.WriteString(w, tt.responseBody)
 			})
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ChatRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -421,8 +416,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -467,8 +461,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -558,8 +551,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -628,8 +620,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -690,8 +681,7 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -771,8 +761,7 @@ func TestListModels(t *testing.T) {
 		"has_more": false
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
@@ -871,8 +860,7 @@ func TestChatCompletionWithContext(t *testing.T) {
 		w.WriteHeader(http.StatusRequestTimeout)
 	})
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -2286,8 +2274,7 @@ func TestResponses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ResponsesRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -2327,8 +2314,7 @@ func TestResponsesWithArrayInput(t *testing.T) {
 		"usage": {"input_tokens": 10, "output_tokens": 5}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	req := &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2367,8 +2353,7 @@ func TestResponsesWithInstructions(t *testing.T) {
 		"usage": {"input_tokens": 10, "output_tokens": 5}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	req := &core.ResponsesRequest{
 		Model:        "claude-sonnet-4-5-20250929",
@@ -2454,8 +2439,7 @@ data: {"type":"message_stop"}
 				_, _ = io.WriteString(w, tt.responseBody)
 			})
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ResponsesRequest{
 				Model: "claude-sonnet-4-5-20250929",
@@ -2500,8 +2484,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2554,8 +2537,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2663,8 +2645,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2722,8 +2703,7 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"city\":\"War"}}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2856,8 +2836,7 @@ event: message_delta
 data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2912,8 +2891,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -2970,8 +2948,7 @@ event: message_stop
 data: {"type":"message_stop"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -3031,8 +3008,7 @@ event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"broken"}
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "claude-sonnet-4-5-20250929",
@@ -3060,8 +3036,7 @@ func TestResponsesWithContext(t *testing.T) {
 		w.WriteHeader(http.StatusRequestTimeout)
 	})
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately

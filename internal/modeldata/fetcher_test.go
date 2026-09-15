@@ -84,7 +84,11 @@ func TestFetch_InvalidJSON(t *testing.T) {
 
 func TestFetch_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
 		_, _ = w.Write([]byte("{}"))
 	}))
 	defer server.Close()
