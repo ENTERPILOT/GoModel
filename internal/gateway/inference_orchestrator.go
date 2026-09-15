@@ -76,6 +76,12 @@ type RequestMeta struct {
 	RequestID string
 	Endpoint  core.EndpointDescriptor
 	Workflow  *core.Workflow
+	// Admit, when set, runs as soon as the route is resolved and before any
+	// prompt-phase work. Guardrails run in that phase and can spend provider
+	// money (an llm_judge step issues its own inference), so the transport
+	// admits the request — rate limits and budgets — first. Returning an
+	// error aborts preparation with the resolved workflow attached.
+	Admit func(context.Context, *core.Workflow) error
 }
 
 // PreparedChatRequest is a translated chat request ready for cache lookup or execution.

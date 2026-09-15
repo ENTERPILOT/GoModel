@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -114,6 +115,42 @@ func enforceAdmission(c *echo.Context, limiter RateLimiter, checker BudgetChecke
 		return admission{release: noopRelease}, err
 	}
 	return admission{release: release, saturatedRoute: saturated}, nil
+}
+
+// requestAdmissionKey names the admission granted to the request on the Echo
+// context. A translated inference request can reach admission twice — once
+// before its prompt-phase guardrail chain and once from dispatch — and must be
+// counted only once.
+const requestAdmissionKey = "gomodel_request_admission"
+
+type grantedAdmission struct {
+	adm         admission
+	releaseOnce sync.Once
+}
+
+func (g *grantedAdmission) release() { g.releaseOnce.Do(g.adm.release) }
+
+// admitOnce runs the shared admission sequence for the request, or returns the
+// admission it already holds. releaseAdmission must run when the request
+// finishes.
+func admitOnce(c *echo.Context, limiter RateLimiter, checker BudgetChecker, route rateLimitRoute) (admission, error) {
+	if granted, ok := c.Get(requestAdmissionKey).(*grantedAdmission); ok {
+		return granted.adm, nil
+	}
+	adm, err := enforceAdmission(c, limiter, checker, route)
+	if err != nil {
+		return adm, err
+	}
+	c.Set(requestAdmissionKey, &grantedAdmission{adm: adm})
+	return adm, nil
+}
+
+// releaseAdmission returns the concurrency slots the request holds. It is safe
+// to call repeatedly and for a request that was never admitted.
+func releaseAdmission(c *echo.Context) {
+	if granted, ok := c.Get(requestAdmissionKey).(*grantedAdmission); ok {
+		granted.release()
+	}
 }
 
 // routeSaturationDeferrableToFailover returns the rejection when it may defer

@@ -151,6 +151,7 @@ func (b *bootstrap) initServerConfig() error {
 		RealtimeEnabled:                 appCfg.Server.RealtimeEnabled,
 		AuthVerifyEnabled:               appCfg.Server.AuthVerifyEnabled,
 		AllowPassthroughV1Alias:         &allowPassthroughV1Alias,
+		AllowUnguardedPassthrough:       appCfg.Server.AllowUnguardedPassthrough,
 		UserPathHeader:                  appCfg.Server.UserPathHeader,
 		SwaggerEnabled:                  b.swaggerEnabled,
 		Tagging:                         app.tagging.Service,

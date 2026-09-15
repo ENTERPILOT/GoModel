@@ -37,6 +37,13 @@ type ServerConfig struct {
 	// UserPathHeader is the inbound HTTP header used to read/write user paths.
 	// Default: X-GoModel-User-Path.
 	UserPathHeader string `yaml:"user_path_header" env:"USER_PATH_HEADER"`
+	// AllowUnguardedPassthrough lets /p/{provider}/... serve callers a guardrail
+	// workflow applies to. Passthrough forwards provider-native bodies
+	// untouched, so no guardrail chain runs on them; by default such a request
+	// is refused (403) instead of silently escaping the policy. Default: false.
+	// Turn it on only when passthrough traffic is trusted, or scope the
+	// guardrail workflow so it does not match those callers.
+	AllowUnguardedPassthrough bool `yaml:"allow_unguarded_passthrough" env:"ALLOW_UNGUARDED_PASSTHROUGH"`
 	// EnabledPassthroughProviders lists the provider types enabled on
 	// /p/{provider}/... passthrough routes. Default:
 	// ["openai", "anthropic", "openrouter", "kilo", "zai", "sglang", "vllm", "llmd", "deepseek"].
