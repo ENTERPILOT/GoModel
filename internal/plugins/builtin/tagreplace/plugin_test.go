@@ -76,7 +76,7 @@ func TestExpandTags(t *testing.T) {
 }
 
 func TestOnPromptRolesAndDetail(t *testing.T) {
-	p := newPlugin(t, "")
+	p := newPlugin(t, `{"roles": ["system", "user"]}`)
 	x, d := runPrompt(t, p,
 		plugintest.Text(pluginapi.RoleSystem, "s", "You are {{gomodel.resolved_model}}. Date: {{gomodel.date}}"),
 		plugintest.Text(pluginapi.RoleUser, "u", "which model? {{gomodel.requested_model}}"),
@@ -84,9 +84,20 @@ func TestOnPromptRolesAndDetail(t *testing.T) {
 	)
 	assert.Equal(t, "You are gpt-4o. Date: 2026-09-15", x.Prompt.Messages[0].Text())
 	assert.Equal(t, "which model? smart", x.Prompt.Messages[1].Text())
-	assert.Equal(t, "{{gomodel.resolved_model}}", x.Prompt.Messages[2].Text(), "assistant is not a default role")
+	assert.Equal(t, "{{gomodel.resolved_model}}", x.Prompt.Messages[2].Text(), "assistant is not a configured role")
 	assert.Equal(t, map[string]any{"replacements": 3}, d.Detail)
 	assert.True(t, x.Prompt.Changes().Dirty)
+}
+
+func TestDefaultRolesSkipUserMessages(t *testing.T) {
+	p := newPlugin(t, "")
+	x, d := runPrompt(t, p,
+		plugintest.Text(pluginapi.RoleDeveloper, "d", "{{gomodel.resolved_model}}"),
+		plugintest.Text(pluginapi.RoleUser, "u", "{{gomodel.label.team}}"),
+	)
+	assert.Equal(t, "gpt-4o", x.Prompt.Messages[0].Text())
+	assert.Equal(t, "{{gomodel.label.team}}", x.Prompt.Messages[1].Text())
+	assert.Equal(t, map[string]any{"replacements": 1}, d.Detail)
 }
 
 func TestOnPromptWithoutTagsLeavesPromptClean(t *testing.T) {
@@ -102,7 +113,7 @@ func TestOnPromptWithoutTagsLeavesPromptClean(t *testing.T) {
 
 func TestTimezone(t *testing.T) {
 	p := newPlugin(t, `{"timezone": "Asia/Tokyo"}`)
-	x, _ := runPrompt(t, p, plugintest.Text(pluginapi.RoleUser, "u", "{{gomodel.date}} {{gomodel.weekday}}"))
+	x, _ := runPrompt(t, p, plugintest.Text(pluginapi.RoleSystem, "s", "{{gomodel.date}} {{gomodel.weekday}}"))
 	assert.Equal(t, "2026-09-16 Wednesday", x.Prompt.Messages[0].Text())
 }
 
@@ -115,6 +126,7 @@ func TestInitErrors(t *testing.T) {
 		{"unknown key", `{"bogus": 1}`, `unknown field "bogus"`},
 		{"bad role", `{"roles": ["admin"]}`, `unknown role "admin"`},
 		{"bad timezone", `{"timezone": "Mars/Base"}`, "not a known IANA timezone"},
+		{"host timezone", `{"timezone": "Local"}`, "must be UTC or an IANA timezone"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -135,7 +147,7 @@ func TestManifestAndSummarize(t *testing.T) {
 	assert.True(t, ok)
 
 	s := p.(*Plugin)
-	assert.Equal(t, "system, user messages, UTC", s.Summarize(nil))
+	assert.Equal(t, "system messages, UTC", s.Summarize(nil))
 	assert.Equal(t, "tool messages, Europe/Warsaw", s.Summarize([]byte(`{"roles":["tool"],"timezone":"Europe/Warsaw"}`)))
 	assert.Empty(t, s.Summarize([]byte(`{"timezone":"nope"}`)))
 }

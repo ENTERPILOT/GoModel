@@ -40,8 +40,8 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		Guardrail:   true,
 		ConfigSchema: []pluginapi.Field{
 			{
-				Key: "roles", Label: "Prompt roles", Input: pluginapi.InputCheckboxes, Default: []string{"system", "user"},
-				Help:    "Which prompt messages tags are expanded in.",
+				Key: "roles", Label: "Prompt roles", Input: pluginapi.InputCheckboxes, Default: []string{"system"},
+				Help:    "Which prompt messages tags are expanded in. Adding user lets callers read request values such as labels.",
 				Options: pluginapi.RoleOptions(),
 			},
 			{
@@ -68,13 +68,17 @@ func decodeConfig(schema []pluginapi.Field, raw json.RawMessage) (map[pluginapi.
 	if err != nil {
 		return nil, nil, err
 	}
-	roles := cfg.Roles("roles", pluginapi.RoleSystem, pluginapi.RoleUser)
+	roles := cfg.Roles("roles", pluginapi.RoleSystem)
 	zone := strings.TrimSpace(cfg.String("timezone", DefaultTimezone))
 	if err := cfg.Err(); err != nil {
 		return nil, nil, err
 	}
 	if zone == "" {
 		zone = DefaultTimezone
+	}
+	// LoadLocation accepts "Local", the host zone, which varies by deployment.
+	if zone == "Local" {
+		return nil, nil, fmt.Errorf("%s: timezone %q must be UTC or an IANA timezone", Name, zone)
 	}
 	loc, err := time.LoadLocation(zone)
 	if err != nil {

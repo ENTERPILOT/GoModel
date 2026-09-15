@@ -382,7 +382,7 @@ well with `system_prompt`: put the tags in the system prompt and run
 | `{{gomodel.provider_type}}` | Provider type, for example `openai`. |
 | `{{gomodel.provider_name}}` | Provider instance name. |
 | `{{gomodel.user_path}}` | Effective user path. |
-| `{{gomodel.label.<key>}}` | Request label `<key>`, empty when not set. |
+| `{{gomodel.label.<key>}}` | Value of a `key=value` request label, empty when not set. |
 | `{{gomodel.request_id}}` | Gateway request ID. |
 | `{{gomodel.session_id}}` | Detected session ID, empty when none. |
 | `{{gomodel.date}}` | Current date, `2026-09-15`. |
@@ -396,8 +396,8 @@ Spaces inside the braces are allowed. Unknown tags are left as written.
 
 | Key | Required | Default | Description |
 | --- | -------- | ------- | ----------- |
-| `roles` | No | `["system", "user"]` | Prompt messages tags are expanded in: `system` (includes developer), `user`, `assistant`, `tool`. |
-| `timezone` | No | `UTC` | IANA timezone for the date and time tags, for example `Europe/Warsaw`. |
+| `roles` | No | `["system"]` | Prompt messages tags are expanded in: `system` (includes developer), `user`, `assistant`, `tool`. Adding `user` lets callers read request values such as labels and rewrites template text in their prompts. |
+| `timezone` | No | `UTC` | IANA timezone for the date and time tags, for example `Europe/Warsaw`. The host zone `Local` is rejected. |
 
 #### Example
 
