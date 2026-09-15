@@ -112,6 +112,7 @@ func TestApplyPluginsLoadEnvDelimiterBearingFilenames(t *testing.T) {
 		{"equals in filename", "equals=name.so", []PluginFileConfig{{File: "equals=name.so"}}},
 		{"digest on last equals", "f=oo.so=" + sha, []PluginFileConfig{{File: "f=oo.so", SHA256: sha}}},
 		{"short digest is filename", "file=deadbeef", []PluginFileConfig{{File: "file=deadbeef"}}},
+		{"non-hex 64-char suffix is filename", "file.so=" + strings.Repeat("a", 63) + "Z", []PluginFileConfig{{File: "file.so=" + strings.Repeat("a", 63) + "Z"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
