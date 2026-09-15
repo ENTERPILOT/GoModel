@@ -208,8 +208,10 @@ func TestRunStreamBufferedRespondAndPresetResponse(t *testing.T) {
 	res, err := RunStream(context.Background(), r, x, []*pluginapi.StreamEvent{
 		{Kind: pluginapi.EventReasoningDelta, Text: "hmm"}, TextDelta("a secret"),
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Text)
 	assert.Equal(t, "a [x]", res.Text[0])
+	require.NotEmpty(t, res.Response.Choices)
 	require.Len(t, res.Response.Choices[0].Message.Parts, 2)
 	assert.Equal(t, pluginapi.PartReasoning, res.Response.Choices[0].Message.Parts[0].Kind, "assembled = %+v, %v", res, err)
 
@@ -219,13 +221,16 @@ func TestRunStreamBufferedRespondAndPresetResponse(t *testing.T) {
 	x = Exchange(nil, preset)
 	res, err = RunStream(context.Background(), r, x, []*pluginapi.StreamEvent{TextDelta("ignored")})
 	require.NoError(t, err)
+	require.NotEmpty(t, res.Text)
 	assert.Equal(t, "keep", res.Text[0])
+	require.NotEmpty(t, res.Response.Choices)
 	assert.Equal(t, "length", res.Response.Choices[0].FinishReason, "preset = %+v, %v", res, err)
 
 	// A respond decision is what the client receives.
 	answer := &responder{}
 	res, err = RunStream(context.Background(), answer, Exchange(nil, nil), []*pluginapi.StreamEvent{TextDelta("anything")})
 	require.NoError(t, err)
+	require.NotEmpty(t, res.Text)
 	assert.Equal(t, "no", res.Text[0])
 	assert.Equal(t, pluginapi.ActionRespond, res.End.Action, "respond = %+v, %v", res, err)
 }
