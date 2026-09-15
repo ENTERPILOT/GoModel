@@ -44,6 +44,7 @@ func TestMergePricingDropsWindowRatesForOverriddenFields(t *testing.T) {
 	input := 0.5
 	merged := mergePricing(windowedBasePricing(), Pricing{InputPerMtok: &input})
 
+	require.NotNil(t, merged.InputPerMtok)
 	require.Equal(t, 0.5, *merged.InputPerMtok)
 	require.Len(t, merged.TimeWindows, 1)
 

@@ -120,10 +120,7 @@ func TestEnrich_ReverseCustomModelIDLookup(t *testing.T) {
 	Enrich(accessor, list)
 
 	meta := accessor.metadata["gpt-4o-2024-08-06"]
-	if meta == nil {
-		t.Fatal("expected gpt-4o-2024-08-06 to be enriched via reverse index")
-		return
-	}
+	require.NotNil(t, meta, "expected gpt-4o-2024-08-06 to be enriched via reverse index")
 	assert.Equal(t, "GPT-4o", meta.DisplayName)
 	require.NotNil(t, meta.Pricing)
 	require.NotNil(t, meta.Pricing.InputPerMtok)
@@ -155,10 +152,8 @@ func TestEnrich_ProviderModelOverride(t *testing.T) {
 	Enrich(accessor, list)
 
 	meta := accessor.metadata["gpt-4o"]
-	if meta == nil {
-		t.Fatal("expected gpt-4o to be enriched")
-		return
-	}
+	require.NotNil(t, meta, "expected gpt-4o to be enriched")
+	require.NotNil(t, meta.ContextWindow)
 	assert.Equal(t, 64000, *meta.ContextWindow)
 }
 
@@ -199,6 +194,7 @@ func TestEnrich_RepeatedPassesTrackCatalogUpdates(t *testing.T) {
 
 	Enrich(accessor, list)
 	got := accessor.metadata["gpt-4o"]
+	require.NotNil(t, got)
 	require.NotNil(t, got.ContextWindow)
 	require.Equal(t, 128000, *got.ContextWindow)
 
@@ -208,6 +204,7 @@ func TestEnrich_RepeatedPassesTrackCatalogUpdates(t *testing.T) {
 	list.Models["gpt-4o"] = ModelEntry{DisplayName: "GPT-4o", ContextWindow: new(200000)}
 	Enrich(accessor, list)
 	got = accessor.metadata["gpt-4o"]
+	require.NotNil(t, got)
 	require.NotNil(t, got.ContextWindow)
 	require.Equal(t, 200000, *got.ContextWindow)
 }
@@ -221,6 +218,7 @@ func TestEnrich_DropsCatalogFieldsWhenEntryDisappears(t *testing.T) {
 
 	Enrich(accessor, list)
 	got := accessor.metadata["gemma-3-4b-it"]
+	require.NotNil(t, got)
 	require.Equal(t, "Gemma 3 4B IT", got.DisplayName)
 
 	// The catalog drops the entry on a later refresh; its fields must go with

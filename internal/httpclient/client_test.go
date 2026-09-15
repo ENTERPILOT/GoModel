@@ -87,15 +87,9 @@ func TestNewHTTPClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := NewHTTPClient(tt.config)
 
-			if client == nil {
-				t.Fatal("Expected client to be non-nil")
-				return
-			}
+			require.NotNil(t, client, "Expected client to be non-nil")
 
-			if client.Transport == nil {
-				t.Fatal("Expected transport to be non-nil")
-				return
-			}
+			require.NotNil(t, client.Transport, "Expected transport to be non-nil")
 
 			transport, ok := client.Transport.(*http.Transport)
 			require.True(t, ok)
@@ -126,15 +120,9 @@ func TestNewHTTPClient(t *testing.T) {
 func TestNewDefaultHTTPClient(t *testing.T) {
 	client := NewDefaultHTTPClient()
 
-	if client == nil {
-		t.Fatal("Expected client to be non-nil")
-		return
-	}
+	require.NotNil(t, client, "Expected client to be non-nil")
 
-	if client.Transport == nil {
-		t.Fatal("Expected transport to be non-nil")
-		return
-	}
+	require.NotNil(t, client.Transport, "Expected transport to be non-nil")
 
 	transport, ok := client.Transport.(*http.Transport)
 	require.True(t, ok)

@@ -51,10 +51,7 @@ func TestRedisModelCache_GetSet(t *testing.T) {
 	got, err = c.Get(ctx)
 	require.NoError(t, err)
 
-	if got == nil {
-		t.Fatal("expected non-nil ModelCache")
-		return
-	}
+	require.NotNil(t, got, "expected non-nil ModelCache")
 	require.Len(t, got.Providers, 1)
 
 	p, ok := got.Providers["openai"]

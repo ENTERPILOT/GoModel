@@ -43,10 +43,7 @@ func TestLocalCache(t *testing.T) {
 		result, err = cache.Get(ctx)
 		require.NoError(t, err)
 
-		if result == nil {
-			t.Fatal("expected result, got nil")
-			return
-		}
+		require.NotNil(t, result, "expected result, got nil")
 		p, ok := result.Providers["openai"]
 		require.True(t, ok)
 		require.Len(t, p.Models, 1, "expected 1 model in openai provider, got %v", result.Providers)

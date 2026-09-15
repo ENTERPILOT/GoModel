@@ -168,7 +168,9 @@ func TestResponses_DowngradesJSONSchemaTextFormat(t *testing.T) {
 	messages, _ := gotBody["messages"].([]any)
 	first, _ := messages[0].(map[string]any)
 	require.Equal(t, "system", first["role"])
-	require.Contains(t, first["content"].(string), `{"type":"object"}`, "messages[0] = %#v, want schema instruction", first)
+	content, ok := first["content"].(string)
+	require.True(t, ok, "messages[0] = %#v, want string content", first)
+	require.Contains(t, content, `{"type":"object"}`, "messages[0] = %#v, want schema instruction", first)
 }
 
 func TestIsModel(t *testing.T) {

@@ -574,13 +574,15 @@ func TestBrokerAuditCompletedPreviewIncludesCapturedDetailData(t *testing.T) {
 	body, ok := data["request_body"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "gpt-test", body["model"], "request_body = %#v, want model", data["request_body"])
-	body = data["request_body"].(map[string]any)
-	require.Equal(t, "before", body["nested"].(map[string]any)["token"], "request_body nested = %#v, want original nested token", body["nested"])
+	nested, ok := body["nested"].(map[string]any)
+	require.True(t, ok, "request_body nested = %#v, want object", body["nested"])
+	require.Equal(t, "before", nested["token"], "request_body nested = %#v, want original nested token", nested)
 	body, ok = data["response_body"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, "chatcmpl-test", body["id"], "response_body = %#v, want response id", data["response_body"])
-	body = data["response_body"].(map[string]any)
-	require.Equal(t, float64(150), body["usage"].(map[string]any)["total_tokens"], "response_body usage = %#v, want original usage", body["usage"])
+	usage, ok := body["usage"].(map[string]any)
+	require.True(t, ok, "response_body usage = %#v, want object", body["usage"])
+	require.Equal(t, float64(150), usage["total_tokens"], "response_body usage = %#v, want original usage", usage)
 
 	// The replay ring keeps the detail without bodies, flagged as captured.
 	retained := eventPayload(t, b.events[0])
@@ -655,7 +657,7 @@ func TestBrokerAuditPreviewIncludesCompactAttempts(t *testing.T) {
 	primary, ok := attempts[0].(map[string]any)
 	require.True(t, ok, "attempt[0] = %T, want object", attempts[0])
 	require.Equal(t, auditlog.AttemptKindPrimary, primary["kind"])
-	require.Equal(t, float64(404), primary["status_code"].(float64), "attempt[0] = %#v, want failed primary metadata", primary)
+	require.Equal(t, float64(404), primary["status_code"], "attempt[0] = %#v, want failed primary metadata", primary)
 	_, present := primary["response_body"]
 	require.False(t, present, "live preview attempt should omit response_body, got %#v", primary)
 	_, present = primary["response_headers"]
@@ -739,7 +741,9 @@ func TestUsagePreviewIncludesRawData(t *testing.T) {
 	segments, ok := preview.RawData["segments"].([]any)
 	require.True(t, ok)
 	require.Len(t, segments, 1)
-	require.Equal(t, "cached", segments[0].(map[string]any)["kind"])
+	segment, ok := segments[0].(map[string]any)
+	require.True(t, ok, "segments[0] = %T, want object", segments[0])
+	require.Equal(t, "cached", segment["kind"])
 }
 
 func TestBrokerRingCapacityBoundedByReplayWindow(t *testing.T) {

@@ -210,10 +210,7 @@ func TestRefreshRuntime_SkipsDisabledVirtualModels(t *testing.T) {
 	require.NoError(t, err)
 
 	step := runtimeRefreshStepByName(report.Steps, "virtual_models")
-	if step == nil {
-		t.Fatalf("virtual_models step missing: %+v", report.Steps)
-		return
-	}
+	require.NotNil(t, step, "virtual_models step missing: %+v", report.Steps)
 	require.Equal(t, admin.RuntimeRefreshStatusSkipped, step.Status, "virtual_models step status = %q, want skipped; step=%+v", step.Status, *step)
 }
 

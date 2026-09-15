@@ -49,10 +49,7 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 	}
 
 	meta := Resolve(list, "openai", "gpt-4o")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata")
 
 	assert.Equal(t, "GPT-4o", meta.DisplayName)
 	assert.Equal(t, "Flagship model", meta.Description)
@@ -60,16 +57,18 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 	require.Len(t, meta.Modes, 1)
 	assert.Equal(t, "chat", meta.Modes[0])
 	assert.Len(t, meta.Tags, 2)
+	require.NotNil(t, meta.ContextWindow)
 	assert.Equal(t, 128000, *meta.ContextWindow)
+	require.NotNil(t, meta.MaxOutputTokens)
 	assert.Equal(t, 16384, *meta.MaxOutputTokens)
 	assert.True(t, meta.Capabilities["function_calling"])
 
-	if meta.Pricing == nil {
-		t.Fatal("expected non-nil pricing")
-		return
-	}
+	require.NotNil(t, meta.Pricing, "expected non-nil pricing")
 	assert.Equal(t, "USD", meta.Pricing.Currency)
+	require.NotNil(t, meta.Pricing)
+	require.NotNil(t, meta.Pricing.InputPerMtok)
 	assert.Equal(t, 2.50, *meta.Pricing.InputPerMtok)
+	require.NotNil(t, meta.Pricing.OutputPerMtok)
 	assert.Equal(t, 10.00, *meta.Pricing.OutputPerMtok)
 	got := meta.PricingSources["input_per_mtok"]
 	assert.Equal(t, core.ModelPricingSourceModelRegistry, got)
@@ -107,19 +106,21 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 	}
 
 	meta := Resolve(list, "azure", "gpt-4o")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata")
 
 	// Provider model should override context_window
+	require.NotNil(t, meta.ContextWindow)
 	assert.Equal(t, 64000, *meta.ContextWindow)
 
 	// max_output_tokens should come from base model (not overridden)
+	require.NotNil(t, meta.MaxOutputTokens)
 	assert.Equal(t, 16384, *meta.MaxOutputTokens)
 
 	// Pricing should be overridden
+	require.NotNil(t, meta.Pricing)
+	require.NotNil(t, meta.Pricing.InputPerMtok)
 	assert.Equal(t, 5.00, *meta.Pricing.InputPerMtok)
+	require.NotNil(t, meta.Pricing.OutputPerMtok)
 	assert.Equal(t, 15.00, *meta.Pricing.OutputPerMtok)
 	got := meta.PricingSources["input_per_mtok"]
 	assert.Equal(t, core.ModelPricingSourceModelRegistry, got)
@@ -149,10 +150,7 @@ func TestResolve_MapsRankingsIntoMetadata(t *testing.T) {
 	}
 
 	meta := Resolve(list, "openai", "gpt-4o")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata")
 	ranking, ok := meta.Rankings["chatbot_arena"]
 	require.True(t, ok)
 	require.NotNil(t, ranking.Elo)
@@ -180,12 +178,12 @@ func TestResolve_ProviderModelWithoutBaseModel(t *testing.T) {
 	}
 
 	meta := Resolve(list, "custom", "my-model")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata even without base model")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata even without base model")
 
+	require.NotNil(t, meta.ContextWindow)
 	assert.Equal(t, 32000, *meta.ContextWindow)
+	require.NotNil(t, meta.Pricing)
+	require.NotNil(t, meta.Pricing.InputPerMtok)
 	assert.Equal(t, 1.00, *meta.Pricing.InputPerMtok)
 }
 
@@ -201,10 +199,7 @@ func TestResolve_NilPricing(t *testing.T) {
 	}
 
 	meta := Resolve(list, "openai", "text-moderation")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata")
 	assert.Nil(t, meta.Pricing)
 }
 
@@ -244,10 +239,7 @@ func TestResolve_SetsCategoriesFromModes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.modelID, func(t *testing.T) {
 			meta := Resolve(list, "openai", tt.modelID)
-			if meta == nil {
-				t.Fatal("expected non-nil metadata")
-				return
-			}
+			require.NotNil(t, meta, "expected non-nil metadata")
 			require.Equal(t, len(tt.wantCats), len(meta.Categories), "Categories = %v, want %v", meta.Categories, tt.wantCats)
 
 			for i, c := range meta.Categories {
@@ -299,18 +291,14 @@ func TestResolve_ThreeLayerMerge(t *testing.T) {
 
 	// Direct provider (anthropic) - should use base model only
 	meta := Resolve(list, "anthropic", "claude-sonnet-4-20250514")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata")
+	require.NotNil(t, meta.MaxOutputTokens)
 	assert.Equal(t, 16384, *meta.MaxOutputTokens)
 
 	// Bedrock - should override max_output_tokens
 	meta = Resolve(list, "bedrock", "claude-sonnet-4-20250514")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata for bedrock")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata for bedrock")
+	require.NotNil(t, meta.MaxOutputTokens)
 	assert.Equal(t, 8192, *meta.MaxOutputTokens)
 
 	// DisplayName should still come from base
@@ -343,16 +331,12 @@ func TestResolve_ReverseCustomModelIDLookup(t *testing.T) {
 
 	// Resolve using the dated response model ID
 	meta := Resolve(list, "openai", "gpt-4o-2024-08-06")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata via reverse lookup")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata via reverse lookup")
 	assert.Equal(t, "GPT-4o", meta.DisplayName)
 
-	if meta.Pricing == nil {
-		t.Fatal("expected non-nil pricing via reverse lookup")
-		return
-	}
+	require.NotNil(t, meta.Pricing, "expected non-nil pricing via reverse lookup")
+	require.NotNil(t, meta.Pricing)
+	require.NotNil(t, meta.Pricing.InputPerMtok)
 	assert.Equal(t, 2.50, *meta.Pricing.InputPerMtok)
 }
 
@@ -420,6 +404,7 @@ func TestResolve_ReleaseDateSuffixFallback(t *testing.T) {
 			require.NotNil(t, meta)
 			require.NotNil(t, meta.Pricing)
 			require.NotNil(t, meta.Pricing.CachedInputPerMtok)
+			require.NotNil(t, meta.Pricing.InputPerMtok)
 			assert.Equal(t, 1.05, *meta.Pricing.InputPerMtok)
 			assert.Equal(t, 0.525, *meta.Pricing.CachedInputPerMtok)
 		})
@@ -494,16 +479,13 @@ func TestResolve_ReverseIndexWithProviderModelOverride(t *testing.T) {
 
 	// Reverse lookup should resolve and apply provider_model pricing override
 	meta := Resolve(list, "openai", "gpt-4o-2024-08-06")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata via reverse lookup")
-		return
-	}
-	if meta.Pricing == nil {
-		t.Fatal("expected non-nil pricing")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata via reverse lookup")
+	require.NotNil(t, meta.Pricing, "expected non-nil pricing")
 	// Should use the provider_model override, not the base model pricing
+	require.NotNil(t, meta.Pricing)
+	require.NotNil(t, meta.Pricing.InputPerMtok)
 	assert.Equal(t, 3.00, *meta.Pricing.InputPerMtok)
+	require.NotNil(t, meta.Pricing.OutputPerMtok)
 	assert.Equal(t, 12.00, *meta.Pricing.OutputPerMtok)
 }
 
@@ -540,10 +522,7 @@ func TestResolve_ModelAliasUsesProviderOverride(t *testing.T) {
 	list.buildReverseIndex()
 
 	meta := Resolve(list, "gemini", "claude-opus-4")
-	if meta == nil {
-		t.Fatal("expected non-nil metadata via model alias")
-		return
-	}
+	require.NotNil(t, meta, "expected non-nil metadata via model alias")
 	require.Equal(t, "Claude 4 Opus", meta.DisplayName)
 	require.NotNil(t, meta.ContextWindow)
 	require.Equal(t, 200000, *meta.ContextWindow)

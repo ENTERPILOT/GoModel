@@ -18,6 +18,7 @@ func TestMergeMetadata_NilOverride(t *testing.T) {
 	got := MergeMetadata(base, nil)
 	require.NotNil(t, got)
 	assert.Equal(t, "Base", got.DisplayName)
+	require.NotNil(t, got.ContextWindow)
 	assert.Equal(t, 1024, *got.ContextWindow)
 	assert.NotSame(t, base, got)
 }
@@ -95,6 +96,7 @@ func TestMergeMetadata_PassthroughDoesNotAlias(t *testing.T) {
 
 	assert.Equal(t, "chat", base.Modes[0], "base.Modes mutated through clone: %v", base.Modes)
 	assert.True(t, base.Capabilities["tools"])
+	require.NotNil(t, base.ContextWindow)
 	assert.Equal(t, 4096, *base.ContextWindow)
 	assert.Equal(t, "USD", base.Pricing.Currency)
 }
@@ -120,6 +122,7 @@ func TestMergeMetadata_MergedResultDoesNotAliasBase(t *testing.T) {
 
 	assert.Equal(t, "chat", base.Modes[0], "base.Modes aliased: %v", base.Modes)
 	assert.True(t, base.Capabilities["tools"])
+	require.NotNil(t, base.ContextWindow)
 	assert.Equal(t, 4096, *base.ContextWindow)
 	assert.Equal(t, "USD", base.Pricing.Currency)
 }
@@ -148,9 +151,13 @@ func TestMergeMetadata_OverrideRankingsDoNotAlias(t *testing.T) {
 	*got.Rankings["base-only"].Elo = 0
 	*got.Rankings["base-only"].Rank = 0
 
+	require.NotNil(t, override.Rankings["overridden"].Elo)
 	assert.Equal(t, 2000.0, *override.Rankings["overridden"].Elo)
+	require.NotNil(t, override.Rankings["overridden"].Rank)
 	assert.Equal(t, 1, *override.Rankings["overridden"].Rank)
+	require.NotNil(t, base.Rankings["base-only"].Elo)
 	assert.Equal(t, 1500.0, *base.Rankings["base-only"].Elo)
+	require.NotNil(t, base.Rankings["base-only"].Rank)
 	assert.Equal(t, 3, *base.Rankings["base-only"].Rank)
 }
 

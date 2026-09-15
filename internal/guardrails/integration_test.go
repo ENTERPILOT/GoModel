@@ -269,6 +269,7 @@ func TestWorkflowRequestPatcherFailModes(t *testing.T) {
 			var gatewayErr *core.GatewayError
 			require.ErrorAs(t, err, &gatewayErr)
 			require.Equal(t, http.StatusInternalServerError, gatewayErr.HTTPStatusCode())
+			require.NotNil(t, gatewayErr.Code)
 			require.Equal(t, plugins.CodePluginFailure, *gatewayErr.Code)
 
 			if strings.Contains(gatewayErr.Message, "f") && strings.Contains(gatewayErr.Message, "classifier") {

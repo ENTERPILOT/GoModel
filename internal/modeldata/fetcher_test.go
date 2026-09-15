@@ -40,14 +40,8 @@ func TestFetch_Success(t *testing.T) {
 	list, raw, err := Fetch(context.Background(), server.URL)
 	require.NoError(t, err)
 
-	if list == nil {
-		t.Fatal("expected non-nil list")
-		return
-	}
-	if raw == nil {
-		t.Fatal("expected non-nil raw bytes")
-		return
-	}
+	require.NotNil(t, list, "expected non-nil list")
+	require.NotNil(t, raw, "expected non-nil raw bytes")
 	assert.Equal(t, 1, list.Version)
 	assert.Len(t, list.Providers, 1)
 	assert.Len(t, list.Models, 1)
@@ -223,10 +217,7 @@ func TestParse_BuildsReverseIndex(t *testing.T) {
 	list, err := Parse(raw)
 	require.NoError(t, err)
 
-	if list.providerModelByActualID == nil {
-		t.Fatal("expected providerModelByActualID to be built")
-		return
-	}
+	require.NotNil(t, list.providerModelByActualID, "expected providerModelByActualID to be built")
 	compositeKey, ok := list.providerModelByActualID["openai/gpt-4o-2024-08-06"]
 	require.True(t, ok)
 	assert.Equal(t, "openai/gpt-4o", compositeKey)
