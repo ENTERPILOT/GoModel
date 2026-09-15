@@ -121,3 +121,59 @@ func TestClient_DoStream_IdleTimeoutAllowsHealthyStreams(t *testing.T) {
 		})
 	}
 }
+
+func TestClient_DoStream_IdleTimeoutIgnoresSlowConsumers(t *testing.T) {
+	// The provider sends the whole stream at once; the consumer pauses longer
+	// than the timeout between reads. Data already received is not silence.
+	t.Setenv("HTTP_STREAM_IDLE_TIMEOUT", "50ms")
+	server := pacedStreamServer(t, 0, pacedChunk{data: "data: {\"n\":1}\n\ndata: {\"n\":2}\n\ndata: [DONE]\n\n"})
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	require.NoError(t, err)
+	defer stream.Close()
+
+	var got []byte
+	buf := make([]byte, 8)
+	for {
+		n, err := stream.Read(buf)
+		got = append(got, buf[:n]...)
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		time.Sleep(80 * time.Millisecond)
+	}
+	assert.Contains(t, string(got), "data: [DONE]")
+}
+
+func TestIdleTimeoutBody_ConcurrentReadAndClose(t *testing.T) {
+	// Cancellation closes the stream while a drain goroutine reads it; run
+	// under -race, the timer must never be touched unsynchronized.
+	for range 200 {
+		reader, writer := io.Pipe()
+		body := &idleTimeoutBody{ReadCloser: reader, provider: "test", timeout: time.Hour}
+		go func() {
+			for {
+				if _, err := writer.Write([]byte("data")); err != nil {
+					return
+				}
+			}
+		}()
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			buf := make([]byte, 4)
+			for {
+				if _, err := body.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+
+		require.NoError(t, body.Close())
+		<-done
+		_ = writer.Close()
+	}
+}

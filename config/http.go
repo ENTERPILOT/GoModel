@@ -13,6 +13,8 @@ type HTTPConfig struct {
 
 	// StreamIdleTimeout is the longest silence, in seconds, a streaming
 	// response may keep once its first bytes arrived before GoModel gives up
-	// on it (default: 300). 0 disables it.
-	StreamIdleTimeout int `yaml:"stream_idle_timeout" env:"HTTP_STREAM_IDLE_TIMEOUT"`
+	// on it (default: 300). 0 disables it. The HTTP_STREAM_IDLE_TIMEOUT env var
+	// is read by internal/httpclient instead of the generic env overlay, so it
+	// accepts Go durations such as "2m" as well as seconds.
+	StreamIdleTimeout int `yaml:"stream_idle_timeout"`
 }

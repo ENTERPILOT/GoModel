@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,36 +28,60 @@ func (c *Client) withStreamIdleTimeout(body io.ReadCloser) io.ReadCloser {
 	return &idleTimeoutBody{ReadCloser: body, provider: c.config.ProviderName, timeout: timeout}
 }
 
-// idleTimeoutBody closes the upstream body when no bytes arrive for timeout,
-// which unblocks a pending Read; that Read then reports the stall as a 504
-// provider error instead of the transport's close error. Read and Close are
-// used from one goroutine; only the timer callback runs concurrently.
+// idleTimeoutBody closes the upstream body when a Read waits longer than
+// timeout for the provider, which unblocks that Read; it then reports the
+// stall as a 504 provider error instead of the transport's close error. The
+// timer runs only while a Read is blocked on the provider, so a consumer that
+// is slow between reads never trips it. Close may race with Read (stream
+// cancellation), so the timer is guarded.
 type idleTimeoutBody struct {
 	io.ReadCloser
 	provider string
 	timeout  time.Duration
-	timer    *time.Timer
-	stalled  atomic.Bool
+	started  bool // owned by the reading goroutine
+
+	mu      sync.Mutex
+	timer   *time.Timer
+	closed  bool
+	stalled atomic.Bool
 }
 
 func (b *idleTimeoutBody) Read(p []byte) (int, error) {
+	if b.started {
+		b.startWait()
+	}
 	n, err := b.ReadCloser.Read(p)
+	b.stopWait()
 	if b.stalled.Load() {
 		return n, core.NewProviderError(b.provider, http.StatusGatewayTimeout,
 			fmt.Sprintf("%s: no data for %s", errStreamStalled, b.timeout), errStreamStalled)
 	}
 	if n > 0 {
-		b.arm()
+		b.started = true
 	}
 	return n, err
 }
 
-func (b *idleTimeoutBody) arm() {
+// startWait arms the timer for one wait on the provider.
+func (b *idleTimeoutBody) startWait() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
 	if b.timer == nil {
 		b.timer = time.AfterFunc(b.timeout, b.fire)
 		return
 	}
 	b.timer.Reset(b.timeout)
+}
+
+func (b *idleTimeoutBody) stopWait() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.timer != nil {
+		b.timer.Stop()
+	}
 }
 
 func (b *idleTimeoutBody) fire() {
@@ -65,8 +90,11 @@ func (b *idleTimeoutBody) fire() {
 }
 
 func (b *idleTimeoutBody) Close() error {
+	b.mu.Lock()
+	b.closed = true
 	if b.timer != nil {
 		b.timer.Stop()
 	}
+	b.mu.Unlock()
 	return b.ReadCloser.Close()
 }

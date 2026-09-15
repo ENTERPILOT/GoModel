@@ -1176,6 +1176,16 @@ func TestLoad_HTTPConfig(t *testing.T) {
 		assert.Equal(t, 30, result.Config.HTTP.Timeout)
 		assert.Equal(t, 60, result.Config.HTTP.ResponseHeaderTimeout)
 	})
+
+	withTempDir(t, func(_ string) {
+		// internal/httpclient reads this one with duration parsing; the
+		// generic env overlay must not reject a Go duration as an integer.
+		t.Setenv("HTTP_STREAM_IDLE_TIMEOUT", "2m")
+
+		result, err := Load()
+		require.NoError(t, err)
+		assert.Equal(t, 300, result.Config.HTTP.StreamIdleTimeout)
+	})
 }
 
 func TestLoad_WorkflowRefreshInterval(t *testing.T) {
