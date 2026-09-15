@@ -125,3 +125,21 @@ option:
   `/v1/audio/transcriptions` is rejected.
 - Realtime voice-to-voice — MiniMax's conversational realtime schema is not
   OpenAI-compatible, so it is not exposed at `/v1/realtime`.
+
+## Image-to-image generation
+
+Send a multipart request to `/v1/images/edits` with `model=image-01` or
+`model=image-01-live`, a `prompt`, and uploaded `image` files. MiniMax uses the
+images as character portrait references; it does not perform masked edits.
+Use front-facing portraits in JPEG or PNG format, each smaller than 10 MB.
+
+The adapter sends the portraits as data URLs in `subject_reference` to MiniMax's
+`/v1/image_generation` endpoint using the configured regional base URL.
+`size=WIDTHxHEIGHT` maps to `width` and `height`. Native `aspect_ratio`, `width`,
+`height`, `seed`, `n`, and `prompt_optimizer` fields are also supported.
+`response_format=b64_json` maps to MiniMax's `base64` format and returns
+`data[].b64_json`; the default returns `data[].url` (links expire after 24 hours).
+Masks and unsupported edit fields return a validation error.
+
+See the [MiniMax image-to-image API](https://platform.minimax.io/docs/api-reference/image-generation-i2i)
+for model-specific parameter limits.
