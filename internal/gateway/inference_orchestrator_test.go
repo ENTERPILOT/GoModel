@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/require"
 )
 
 type usageCaptureLogger struct {
@@ -43,15 +44,11 @@ func TestInferenceOrchestratorLogUsageAssignsUserPathAndProviderName(t *testing.
 		return &usage.UsageEntry{ID: "usage-1"}
 	})
 
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
-	if got := logger.entries[0].UserPath; got != "/team/alpha" {
-		t.Fatalf("UserPath = %q, want /team/alpha", got)
-	}
-	if got := logger.entries[0].ProviderName; got != "primary-openai" {
-		t.Fatalf("ProviderName = %q, want primary-openai", got)
-	}
+	require.Len(t, logger.entries, 1)
+	got := logger.entries[0].UserPath
+	require.Equal(t, "/team/alpha", got)
+	got = logger.entries[0].ProviderName
+	require.Equal(t, "primary-openai", got)
 }
 
 func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t *testing.T) {
@@ -98,26 +95,15 @@ func TestExecuteChatCompletionPricesRequestedModelWhenResponseModelIsVersioned(t
 		"req-usage-pricing",
 		"/v1/chat/completions",
 	)
-	if err != nil {
-		t.Fatalf("ExecuteChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "gpt-4o-mini", pricing.model)
+	require.Equal(t, "openai", pricing.provider)
+	require.Len(t, logger.entries, 1)
 
-	if pricing.model != "gpt-4o-mini" {
-		t.Fatalf("pricing model = %q, want gpt-4o-mini", pricing.model)
-	}
-	if pricing.provider != "openai" {
-		t.Fatalf("pricing provider = %q, want openai", pricing.provider)
-	}
-	if len(logger.entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(logger.entries))
-	}
 	entry := logger.entries[0]
-	if entry.Model != "gpt-4o-mini-2024-07-18" {
-		t.Fatalf("usage model = %q, want provider response model", entry.Model)
-	}
-	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-perRequest) > 0.0000001 {
-		t.Fatalf("total cost = %v, want %f", entry.TotalCost, perRequest)
-	}
+	require.Equal(t, "gpt-4o-mini-2024-07-18", entry.Model)
+	require.NotNil(t, entry.TotalCost)
+	require.LessOrEqual(t, math.Abs(*entry.TotalCost-perRequest), 0.0000001, "total cost = %v, want %f", entry.TotalCost, perRequest)
 }
 
 func TestInferenceOrchestratorLogUsageSkipsWhenWorkflowDisablesUsage(t *testing.T) {
@@ -138,9 +124,7 @@ func TestInferenceOrchestratorLogUsageSkipsWhenWorkflowDisablesUsage(t *testing.
 		return &usage.UsageEntry{ID: "usage-1"}
 	})
 
-	if len(logger.entries) != 0 {
-		t.Fatalf("len(entries) = %d, want 0", len(logger.entries))
-	}
+	require.Empty(t, logger.entries)
 }
 
 func TestInferenceOrchestratorWithCacheRequestContextClearsInheritedGuardrailsHash(t *testing.T) {
@@ -161,18 +145,15 @@ func TestInferenceOrchestratorWithCacheRequestContextClearsInheritedGuardrailsHa
 	}
 
 	got := orchestrator.WithCacheRequestContext(ctx, workflow)
-	if hash := core.GetGuardrailsHash(got); hash != "" {
-		t.Fatalf("guardrails hash = %q, want cleared hash", hash)
-	}
+	hash := core.GetGuardrailsHash(got)
+	require.Empty(t, hash)
 }
 
 func TestInferenceOrchestratorProviderTypeForSelectorPrefersExplicitProvider(t *testing.T) {
 	orchestrator := NewInferenceOrchestrator(InferenceConfig{Provider: &providerTypeResolverStub{}})
 
 	got := orchestrator.ProviderTypeForSelector(core.ModelSelector{Provider: "azure", Model: "gpt-4o"}, "openai")
-	if got != "azure" {
-		t.Fatalf("ProviderTypeForSelector() = %q, want azure", got)
-	}
+	require.Equal(t, "azure", got)
 }
 
 func TestInferenceOrchestratorProviderTypeForSelectorCanonicalizesProviderNameSelectors(t *testing.T) {
@@ -185,23 +166,17 @@ func TestInferenceOrchestratorProviderTypeForSelectorCanonicalizesProviderNameSe
 	})
 
 	got := orchestrator.ProviderTypeForSelector(core.ModelSelector{Provider: "openai_test", Model: "gpt-4o"}, "anthropic")
-	if got != "openai" {
-		t.Fatalf("ProviderTypeForSelector() = %q, want openai", got)
-	}
+	require.Equal(t, "openai", got)
 }
 
 func TestQualifyModelWithProviderPrefixesSlashModelIDs(t *testing.T) {
 	got := QualifyModelWithProvider("openai/gpt-4o-mini", "openrouter")
-	if got != "openrouter/openai/gpt-4o-mini" {
-		t.Fatalf("QualifyModelWithProvider() = %q, want openrouter/openai/gpt-4o-mini", got)
-	}
+	require.Equal(t, "openrouter/openai/gpt-4o-mini", got)
 }
 
 func TestQualifyModelWithProviderKeepsAlreadyQualifiedModelIDs(t *testing.T) {
 	got := QualifyModelWithProvider("openrouter/openai/gpt-4o-mini", "openrouter")
-	if got != "openrouter/openai/gpt-4o-mini" {
-		t.Fatalf("QualifyModelWithProvider() = %q, want unchanged model", got)
-	}
+	require.Equal(t, "openrouter/openai/gpt-4o-mini", got)
 }
 
 type providerTypeResolverStub struct {

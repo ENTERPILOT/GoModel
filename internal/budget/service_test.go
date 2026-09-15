@@ -3,11 +3,11 @@ package budget
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeStore struct {
@@ -136,9 +136,8 @@ func TestServiceUnavailableOperationsReturnErrors(t *testing.T) {
 
 	for _, tt := range checks {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.run(); !errors.Is(err, ErrUnavailable) {
-				t.Fatalf("error = %v, want ErrUnavailable", err)
-			}
+			err := tt.run()
+			require.ErrorIs(t, err, ErrUnavailable)
 		})
 	}
 }
@@ -148,49 +147,33 @@ func TestServiceRejectsQuotaTemplatesWhenDisabled(t *testing.T) {
 		Scope: ScopeUserPath, Subject: "/customers", PerChild: true,
 		PeriodSeconds: PeriodDailySeconds, Amount: 10,
 	}
-
-	if _, err := NewService(context.Background(), &fakeStore{budgets: []Budget{template}}, WithQuotaTemplates(false)); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
-		t.Fatalf("NewService() error = %v, want ErrQuotaTemplatesUnavailable", err)
-	}
+	_, err := NewService(context.Background(), &fakeStore{budgets: []Budget{template}}, WithQuotaTemplates(false))
+	require.ErrorIs(t, err, ErrQuotaTemplatesUnavailable)
 
 	store := &fakeStore{}
 	service, err := NewService(context.Background(), store, WithQuotaTemplates(false))
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
-	if err := service.UpsertBudgets(context.Background(), []Budget{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
-		t.Fatalf("UpsertBudgets() error = %v, want ErrQuotaTemplatesUnavailable", err)
-	}
-	if err := service.ReplaceConfigBudgets(context.Background(), []Budget{template}); !errors.Is(err, ErrQuotaTemplatesUnavailable) {
-		t.Fatalf("ReplaceConfigBudgets() error = %v, want ErrQuotaTemplatesUnavailable", err)
-	}
-	if store.replaceCalls != 0 {
-		t.Fatalf("replace calls = %d, want 0", store.replaceCalls)
-	}
+	require.NoError(t, err)
+	err = service.UpsertBudgets(context.Background(), []Budget{template})
+	require.ErrorIs(t, err, ErrQuotaTemplatesUnavailable)
+	err = service.ReplaceConfigBudgets(context.Background(), []Budget{template})
+	require.ErrorIs(t, err, ErrQuotaTemplatesUnavailable)
+	require.Equal(t, 0, store.replaceCalls)
 }
 
 func TestServiceSaveSettingsReturnsSavedSnapshotWhenRefreshFails(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	store.listErr = errors.New("refresh failed")
 
 	want := DefaultSettings()
 	want.DailyResetHour = 7
 	saved, err := service.SaveSettings(ctx, want)
 
-	if err == nil {
-		t.Fatal("SaveSettings() error = nil, want refresh error")
-	}
-	if !strings.Contains(err.Error(), "refresh budget service after saving settings") {
-		t.Fatalf("SaveSettings() error = %v, want refresh wrapper", err)
-	}
-	if saved.DailyResetHour != want.DailyResetHour {
-		t.Fatalf("saved settings = %+v, want persisted snapshot %+v", saved, want)
-	}
+	require.ErrorContains(t, err, "refresh budget service after saving settings")
+	require.Equal(t, want.DailyResetHour, saved.DailyResetHour, "saved settings = %+v, want persisted snapshot %+v", saved, want)
 }
 
 func TestServiceRefreshSortsBudgetsByScopeSubjectThenLongestPeriod(t *testing.T) {
@@ -205,9 +188,7 @@ func TestServiceRefreshSortsBudgetsByScopeSubjectThenLongestPeriod(t *testing.T)
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	got := service.Budgets()
 	want := []Budget{
@@ -217,15 +198,12 @@ func TestServiceRefreshSortsBudgetsByScopeSubjectThenLongestPeriod(t *testing.T)
 		{Scope: ScopeUserPath, Subject: "/team/alpha", PeriodSeconds: PeriodDailySeconds},
 		{Scope: ScopeUserPath, Subject: "/team/beta", PeriodSeconds: PeriodDailySeconds},
 	}
-	if len(got) != len(want) {
-		t.Fatalf("got %d budgets, want %d: %+v", len(got), len(want), got)
-	}
+	require.Len(t, got, len(want))
+
 	for i := range want {
-		if got[i].Scope != want[i].Scope || got[i].Subject != want[i].Subject || got[i].PeriodSeconds != want[i].PeriodSeconds {
-			t.Fatalf("budget[%d] = %s %s/%d, want %s %s/%d",
-				i, got[i].Scope, got[i].Subject, got[i].PeriodSeconds,
-				want[i].Scope, want[i].Subject, want[i].PeriodSeconds)
-		}
+		require.Equal(t, want[i].Scope, got[i].Scope, "budget[%d]", i)
+		require.Equal(t, want[i].Subject, got[i].Subject, "budget[%d]", i)
+		require.Equal(t, want[i].PeriodSeconds, got[i].PeriodSeconds, "budget[%d]", i)
 	}
 }
 
@@ -233,29 +211,20 @@ func TestSeedConfiguredBudgetsReplacesEmptyConfigSet(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
-	store.replaceCalls = 0
+	require.NoError(t, err)
 
-	if err := seedConfiguredBudgets(ctx, service, config.BudgetsConfig{}); err != nil {
-		t.Fatalf("seedConfiguredBudgets() failed: %v", err)
-	}
-	if store.replaceCalls != 1 {
-		t.Fatalf("ReplaceConfigBudgets calls = %d, want 1", store.replaceCalls)
-	}
-	if len(store.replacedBudgets) != 0 {
-		t.Fatalf("replaced budgets = %+v, want empty", store.replacedBudgets)
-	}
+	store.replaceCalls = 0
+	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{})
+	require.NoError(t, err)
+	require.Equal(t, 1, store.replaceCalls)
+	require.Empty(t, store.replacedBudgets)
 }
 
 func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 	ctx := context.Background()
 	store := &fakeStore{}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
 		UserPaths: []config.BudgetUserPathConfig{
@@ -265,23 +234,22 @@ func TestSeedConfiguredBudgetsSeedsBothScopes(t *testing.T) {
 			{Label: "Mobile-App-iOS", Limits: []config.BudgetLimitConfig{{Period: "monthly", Amount: 500}}},
 		},
 	})
-	if err != nil {
-		t.Fatalf("seedConfiguredBudgets() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	want := []Budget{
 		{Scope: ScopeUserPath, Subject: "/team", PerChild: true, PeriodSeconds: PeriodDailySeconds, Amount: 10, Source: SourceConfig},
 		{Scope: ScopeLabel, Subject: "Mobile-App-iOS", PeriodSeconds: PeriodMonthlySeconds, Amount: 500, Source: SourceConfig},
 	}
-	if len(store.replacedBudgets) != len(want) {
-		t.Fatalf("replaced budgets = %+v, want %d entries", store.replacedBudgets, len(want))
-	}
+	require.Len(t, store.replacedBudgets, len(want))
+
 	for i, budget := range want {
 		got := store.replacedBudgets[i]
-		if got.Scope != budget.Scope || got.Subject != budget.Subject ||
-			got.PerChild != budget.PerChild || got.PeriodSeconds != budget.PeriodSeconds || got.Amount != budget.Amount || got.Source != budget.Source {
-			t.Fatalf("replaced budget[%d] = %+v, want %+v", i, got, budget)
-		}
+		require.Equal(t, budget.Scope, got.Scope, "replaced budget[%d]", i)
+		require.Equal(t, budget.Subject, got.Subject, "replaced budget[%d]", i)
+		require.Equal(t, budget.PerChild, got.PerChild, "replaced budget[%d]", i)
+		require.Equal(t, budget.PeriodSeconds, got.PeriodSeconds, "replaced budget[%d]", i)
+		require.Equal(t, budget.Amount, got.Amount, "replaced budget[%d]", i)
+		require.Equal(t, budget.Source, got.Source, "replaced budget[%d]", i)
 	}
 }
 
@@ -289,9 +257,8 @@ func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) 
 	ctx := context.Background()
 	store := &fakeStore{}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	store.replaceCalls = 0
 
 	err = seedConfiguredBudgets(ctx, service, config.BudgetsConfig{
@@ -305,15 +272,8 @@ func TestSeedConfiguredBudgetsRejectsInvalidPeriodBeforeReplacing(t *testing.T) 
 		},
 	})
 
-	if err == nil {
-		t.Fatal("seedConfiguredBudgets() error = nil, want invalid period error")
-	}
-	if !strings.Contains(err.Error(), `invalid budget period for user_path "/team" limit 0: "fortnightly"`) {
-		t.Fatalf("seedConfiguredBudgets() error = %v, want contextual invalid period error", err)
-	}
-	if store.replaceCalls != 0 {
-		t.Fatalf("ReplaceConfigBudgets calls = %d, want 0", store.replaceCalls)
-	}
+	require.ErrorContains(t, err, `invalid budget period for user_path "/team" limit 0: "fortnightly"`)
+	require.Equal(t, 0, store.replaceCalls)
 }
 
 func TestServiceCheckRejectsExceededBudgetForMatchingUserPath(t *testing.T) {
@@ -323,25 +283,19 @@ func TestServiceCheckRejectsExceededBudgetForMatchingUserPath(t *testing.T) {
 			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
 		},
 		sum: func(window SpendWindow) (float64, bool, error) {
-			if window.Subject != "/team" {
-				t.Fatalf("sum subject = %q, want /team", window.Subject)
-			}
+			require.Equal(t, "/team", window.Subject)
+
 			return 10, true, nil
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	err = service.Check(ctx, path("/team/app"), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
 	var exceeded *ExceededError
-	if !errors.As(err, &exceeded) {
-		t.Fatalf("Check() error = %v, want ExceededError", err)
-	}
-	if got := exceeded.Result.Budget.Subject; got != "/team" {
-		t.Fatalf("exceeded budget subject = %q, want /team", got)
-	}
+	require.ErrorAs(t, err, &exceeded)
+	got := exceeded.Result.Budget.Subject
+	require.Equal(t, "/team", got)
 }
 
 func TestServicePerChildBudgetUsesDirectChildSpendPartition(t *testing.T) {
@@ -364,28 +318,21 @@ func TestServicePerChildBudgetUsesDirectChildSpendPartition(t *testing.T) {
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 
 	var exceeded *ExceededError
-	if err := service.Check(ctx, path("/users/alice/app"), now); !errors.As(err, &exceeded) {
-		t.Fatalf("alice Check() error = %v, want ExceededError", err)
-	}
-	if exceeded.Result.Budget.Subject != "/users" || exceeded.Result.Budget.EffectiveSubject != "/users/alice" {
-		t.Fatalf("resolved alice budget = %+v", exceeded.Result.Budget)
-	}
-	if err := service.Check(ctx, path("/users/bob/app"), now); err != nil {
-		t.Fatalf("bob Check() error = %v, want independent available budget", err)
-	}
+	err = service.Check(ctx, path("/users/alice/app"), now)
+	require.ErrorAs(t, err, &exceeded)
+	require.Equal(t, "/users", exceeded.Result.Budget.Subject)
+	require.Equal(t, "/users/alice", exceeded.Result.Budget.EffectiveSubject, "resolved alice budget = %+v", exceeded.Result.Budget)
+	err = service.Check(ctx, path("/users/bob/app"), now)
+	require.NoError(t, err)
+
 	results, err := service.StatusesFor(ctx, path("/users"), now)
-	if err != nil {
-		t.Fatalf("base StatusesFor() error = %v", err)
-	}
-	if len(results) != 0 {
-		t.Fatalf("base StatusesFor() = %+v, want no child template match", results)
-	}
+	require.NoError(t, err)
+	require.Empty(t, results)
 }
 
 func TestServiceGlobalPerChildBudgetStatusDoesNotInventAggregate(t *testing.T) {
@@ -394,19 +341,14 @@ func TestServiceGlobalPerChildBudgetStatusDoesNotInventAggregate(t *testing.T) {
 		PeriodSeconds: PeriodDailySeconds, Amount: 10,
 	}}}
 	service, err := NewService(context.Background(), store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	results, err := service.Statuses(context.Background(), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("Statuses() failed: %v", err)
-	}
-	if len(results) != 1 || results[0].HasUsage || results[0].Remaining != 10 {
-		t.Fatalf("Statuses() = %+v, want unresolved template with full nominal remaining", results)
-	}
-	if store.sumCalls != 0 {
-		t.Fatalf("SumSpend calls = %d, want 0 for unresolved template", store.sumCalls)
-	}
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.False(t, results[0].HasUsage)
+	require.Equal(t, float64(10), results[0].Remaining)
+	require.Equal(t, 0, store.sumCalls)
 }
 
 func TestServiceCheckRejectsExceededLabelBudget(t *testing.T) {
@@ -416,31 +358,26 @@ func TestServiceCheckRejectsExceededLabelBudget(t *testing.T) {
 			{Scope: ScopeLabel, Subject: "iOS", PeriodSeconds: PeriodMonthlySeconds, Amount: 100},
 		},
 		sum: func(window SpendWindow) (float64, bool, error) {
-			if window.Scope != ScopeLabel || window.Subject != "iOS" {
-				t.Fatalf("sum window = %s %q, want label iOS", window.Scope, window.Subject)
-			}
+			require.Equal(t, ScopeLabel, window.Scope)
+			require.Equal(t, "iOS", window.Subject)
+
 			return 120, true, nil
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	now := time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC)
 
 	subjects := Subjects{UserPath: "/team", Labels: []string{"android", "iOS"}}
 	var exceeded *ExceededError
-	if err := service.Check(ctx, subjects, now); !errors.As(err, &exceeded) {
-		t.Fatalf("Check() error = %v, want ExceededError", err)
-	}
-	if got := exceeded.Error(); !strings.Contains(got, "label iOS") {
-		t.Fatalf("ExceededError = %q, want it to name the label subject", got)
-	}
-
+	err = service.Check(ctx, subjects, now)
+	require.ErrorAs(t, err, &exceeded)
+	got := exceeded.Error()
+	require.Contains(t, got, "label iOS")
 	// The label is matched verbatim, so a different casing is a different budget.
-	if err := service.Check(ctx, Subjects{UserPath: "/team", Labels: []string{"ios"}}, now); err != nil {
-		t.Fatalf("Check() with unmatched label casing error = %v, want nil", err)
-	}
+	err = service.Check(ctx, Subjects{UserPath: "/team", Labels: []string{"ios"}}, now)
+	require.NoError(t, err)
 }
 
 func TestServiceCheckEvaluatesEveryMatchingBudgetInOneStoreCall(t *testing.T) {
@@ -456,24 +393,14 @@ func TestServiceCheckEvaluatesEveryMatchingBudgetInOneStoreCall(t *testing.T) {
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	subjects := Subjects{UserPath: "/team/app", Labels: []string{"prod", "iOS"}}
 	results, err := service.CheckWithResults(ctx, subjects, time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("CheckWithResults() error = %v", err)
-	}
-	if len(results) != 4 {
-		t.Fatalf("CheckWithResults() returned %d results, want 4 (/, /team, label prod, label iOS)", len(results))
-	}
-	if store.sumCalls != 1 {
-		t.Fatalf("store spend lookups = %d, want 1 batched call for all matching budgets", store.sumCalls)
-	}
-	if len(store.lastWindows) != 4 {
-		t.Fatalf("batched windows = %d, want 4", len(store.lastWindows))
-	}
+	require.NoError(t, err)
+	require.Len(t, results, 4)
+	require.Equal(t, 1, store.sumCalls)
+	require.Len(t, store.lastWindows, 4)
 }
 
 func TestServiceStatusesForReportsAllMatchingBudgetsWithoutEnforcing(t *testing.T) {
@@ -493,30 +420,22 @@ func TestServiceStatusesForReportsAllMatchingBudgetsWithoutEnforcing(t *testing.
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	results, err := service.StatusesFor(ctx, path("/team/app"), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("StatusesFor() error = %v, want nil", err)
-	}
-	if len(results) != 2 {
-		t.Fatalf("StatusesFor() returned %d results, want 2 (exceeded budgets must not stop evaluation)", len(results))
-	}
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
 	byPeriod := map[int64]CheckResult{}
 	for _, result := range results {
-		if result.Budget.Subject != "/team" {
-			t.Fatalf("result budget subject = %q, want /team", result.Budget.Subject)
-		}
+		require.Equal(t, "/team", result.Budget.Subject)
+
 		byPeriod[result.Budget.PeriodSeconds] = result
 	}
-	if got := byPeriod[PeriodDailySeconds].Spent; got != 12 {
-		t.Fatalf("daily spent = %v, want 12", got)
-	}
-	if got := byPeriod[PeriodMonthlySeconds].Remaining; got != 58 {
-		t.Fatalf("monthly remaining = %v, want 58", got)
-	}
+	got := byPeriod[PeriodDailySeconds].Spent
+	require.Equal(t, float64(12), got)
+	got = byPeriod[PeriodMonthlySeconds].Remaining
+	require.Equal(t, float64(58), got)
 }
 
 func TestServiceStatusesForErrorPaths(t *testing.T) {
@@ -529,20 +448,13 @@ func TestServiceStatusesForErrorPaths(t *testing.T) {
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+	_, err = service.StatusesFor(ctx, path("/te:am"), now)
+	require.Error(t, err)
 
-	if _, err := service.StatusesFor(ctx, path("/te:am"), now); err == nil {
-		t.Fatal("StatusesFor() with invalid path: error = nil, want normalization error")
-	}
 	results, err := service.StatusesFor(ctx, path("/team"), now)
-	if err == nil || !strings.Contains(err.Error(), "store down") {
-		t.Fatalf("StatusesFor() error = %v, want store failure", err)
-	}
-	if len(results) != 0 {
-		t.Fatalf("StatusesFor() partial results = %d, want 0 when the batch fails", len(results))
-	}
+	require.ErrorContains(t, err, "store down")
+	require.Empty(t, results)
 }
 
 func TestServiceCheckBudgetAmountBoundary(t *testing.T) {
@@ -570,24 +482,16 @@ func TestServiceCheckBudgetAmountBoundary(t *testing.T) {
 				},
 			}
 			service, err := NewService(ctx, store)
-			if err != nil {
-				t.Fatalf("NewService() failed: %v", err)
-			}
+			require.NoError(t, err)
 
 			err = service.Check(ctx, path("/team/app"), now)
 			var exceeded *ExceededError
 			if tt.wantError {
-				if !errors.As(err, &exceeded) {
-					t.Fatalf("Check() error = %v, want ExceededError", err)
-				}
-				if exceeded.Result.Spent != tt.spent {
-					t.Fatalf("exceeded spent = %v, want %v", exceeded.Result.Spent, tt.spent)
-				}
+				require.ErrorAs(t, err, &exceeded)
+				require.Equal(t, tt.spent, exceeded.Result.Spent)
 				return
 			}
-			if err != nil {
-				t.Fatalf("Check() error = %v, want nil", err)
-			}
+			require.NoError(t, err)
 		})
 	}
 }
@@ -600,30 +504,20 @@ func TestServiceCheckDoesNotEnforceBudgetWithoutUsage(t *testing.T) {
 			{Scope: ScopeUserPath, Subject: "/team", PeriodSeconds: PeriodDailySeconds, Amount: 10},
 		},
 		sum: func(window SpendWindow) (float64, bool, error) {
-			if window.Subject != "/team" {
-				t.Fatalf("sum subject = %q, want /team", window.Subject)
-			}
+			require.Equal(t, "/team", window.Subject)
+
 			return 100, false, nil
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Check(ctx, path("/team"), now)
+	require.NoError(t, err)
 
-	if err := service.Check(ctx, path("/team"), now); err != nil {
-		t.Fatalf("Check() error = %v, want nil when the store reports no usage", err)
-	}
 	results, err := service.CheckWithResults(ctx, path("/team"), now)
-	if err != nil {
-		t.Fatalf("CheckWithResults() error = %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("CheckWithResults() returned %d results, want 1", len(results))
-	}
-	if results[0].HasUsage {
-		t.Fatal("CheckWithResults().HasUsage = true, want false")
-	}
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.False(t, results[0].HasUsage)
 }
 
 func TestServiceCheckIgnoresNonMatchingSubjects(t *testing.T) {
@@ -636,21 +530,13 @@ func TestServiceCheckIgnoresNonMatchingSubjects(t *testing.T) {
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// A sibling path, and a request whose labels do not include "prod".
 	results, err := service.CheckWithResults(ctx, Subjects{UserPath: "/team-alpha", Labels: []string{"staging"}}, now)
-	if err != nil {
-		t.Fatalf("CheckWithResults() error = %v", err)
-	}
-	if len(results) != 0 {
-		t.Fatalf("expected no matching budgets, got %d", len(results))
-	}
-	if store.sumCalls != 0 {
-		t.Fatal("the store should not be queried when nothing matches")
-	}
+	require.NoError(t, err)
+	require.Empty(t, results)
+	require.Equal(t, 0, store.sumCalls)
 }
 
 func TestServiceCheckStartsAtManualResetWhenNewerThanPeriodStart(t *testing.T) {
@@ -662,17 +548,11 @@ func TestServiceCheckStartsAtManualResetWhenNewerThanPeriodStart(t *testing.T) {
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = service.CheckWithResults(ctx, path("/team"), time.Date(2026, time.April, 25, 12, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("CheckWithResults() error = %v", err)
-	}
-	if !store.lastWindows[0].Start.Equal(resetAt) {
-		t.Fatalf("sum start = %s, want reset time %s", store.lastWindows[0].Start, resetAt)
-	}
+	require.NoError(t, err)
+	require.True(t, store.lastWindows[0].Start.Equal(resetAt), "sum start = %s, want reset time %s", store.lastWindows[0].Start, resetAt)
 }
 
 func TestServiceCheckIgnoresManualResetOlderThanPeriodStart(t *testing.T) {
@@ -685,16 +565,11 @@ func TestServiceCheckIgnoresManualResetOlderThanPeriodStart(t *testing.T) {
 		},
 	}
 	service, err := NewService(ctx, store)
-	if err != nil {
-		t.Fatalf("NewService() failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = service.CheckWithResults(ctx, path("/team"), now)
-	if err != nil {
-		t.Fatalf("CheckWithResults() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	want := time.Date(2026, time.April, 25, 0, 0, 0, 0, time.UTC)
-	if !store.lastWindows[0].Start.Equal(want) {
-		t.Fatalf("sum start = %s, want period start %s", store.lastWindows[0].Start, want)
-	}
+	require.True(t, store.lastWindows[0].Start.Equal(want), "sum start = %s, want period start %s", store.lastWindows[0].Start, want)
 }

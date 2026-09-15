@@ -145,7 +145,8 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 	// the upload the gateway already holds — so the same call costs the same
 	// whether the transcript comes back as json, text, srt or vtt.
 	var seconds float64
-	if !parsed.Usage.tokenBilled() {
+	tokenBilled := parsed.Usage.tokenBilled()
+	if !tokenBilled {
 		if parsed.Usage != nil && parsed.Usage.Seconds > 0 {
 			seconds = parsed.Usage.Seconds
 		} else if duration, ok := numericFloat(parsed.Duration); ok && duration > 0 {
@@ -160,8 +161,10 @@ func extractFromAudioTextResponse(body, audio []byte, requestID, model, provider
 
 	applyUsageCosts(entry, provider, endpoint, pricing...)
 	// Nothing billable was reported or measurable: a duration-priced model then
-	// costs $0, which reads as a free call rather than an unrecorded one.
-	if entry.CostsCalculationCaveat == "" && seconds <= 0 && entry.TotalTokens == 0 &&
+	// costs $0, which reads as a free call rather than an unrecorded one. A
+	// provider that named tokens as the billable unit did report its usage, so a
+	// zero-token response of that shape is an authoritative $0 — not a gap.
+	if entry.CostsCalculationCaveat == "" && seconds <= 0 && entry.TotalTokens == 0 && !tokenBilled &&
 		audioDurationAffectsCost(effectiveEndpointPricing(endpoint, entry.Timestamp, pricing...)) {
 		entry.CostsCalculationCaveat = caveatAudioMissingUsage
 	}

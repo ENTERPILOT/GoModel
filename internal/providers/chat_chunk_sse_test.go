@@ -5,18 +5,19 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 )
 
 func decodeChunkSSE(t *testing.T, line string) map[string]any {
 	t.Helper()
 	payload, ok := strings.CutPrefix(line, "data: ")
-	if !ok || !strings.HasSuffix(payload, "\n\n") {
-		t.Fatalf("chunk = %q, want data: <json>\\n\\n framing", line)
-	}
+	require.True(t, ok)
+	require.True(t, strings.HasSuffix(payload, "\n\n"), "chunk = %q, want data: <json>\\n\\n framing", line)
+
 	var chunk map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSuffix(payload, "\n\n")), &chunk); err != nil {
-		t.Fatalf("unmarshal chunk payload: %v", err)
-	}
+	err := json.Unmarshal([]byte(strings.TrimSuffix(payload, "\n\n")), &chunk)
+	require.NoError(t, err)
+
 	return chunk
 }
 
@@ -25,41 +26,31 @@ func TestFormatChatChunkSSE(t *testing.T) {
 		"chunk-1", 1700000000, "claude-3", "anthropic",
 		map[string]any{"content": "hi"}, nil, nil,
 	))
-
-	if got := chunk["id"]; got != "chunk-1" {
-		t.Fatalf("id = %v, want chunk-1", got)
-	}
-	if got := chunk["object"]; got != "chat.completion.chunk" {
-		t.Fatalf("object = %v, want chat.completion.chunk", got)
-	}
-	if got := chunk["created"]; got != float64(1700000000) {
-		t.Fatalf("created = %v, want 1700000000", got)
-	}
-	if got := chunk["model"]; got != "claude-3" {
-		t.Fatalf("model = %v, want claude-3", got)
-	}
-	if got := chunk["provider"]; got != "anthropic" {
-		t.Fatalf("provider = %v, want anthropic", got)
-	}
-	if _, present := chunk["usage"]; present {
-		t.Fatal("usage present, want omitted when nil")
-	}
+	got := chunk["id"]
+	require.Equal(t, "chunk-1", got)
+	got = chunk["object"]
+	require.Equal(t, "chat.completion.chunk", got)
+	got = chunk["created"]
+	require.Equal(t, float64(1700000000), got)
+	got = chunk["model"]
+	require.Equal(t, "claude-3", got)
+	got = chunk["provider"]
+	require.Equal(t, "anthropic", got)
+	_, present := chunk["usage"]
+	require.False(t, present)
 
 	choices, ok := chunk["choices"].([]any)
-	if !ok || len(choices) != 1 {
-		t.Fatalf("choices = %#v, want exactly one choice", chunk["choices"])
-	}
+	require.True(t, ok)
+	require.Len(t, choices, 1)
+
 	choice := choices[0].(map[string]any)
-	if got := choice["index"]; got != float64(0) {
-		t.Fatalf("choice index = %v, want 0", got)
-	}
-	if choice["finish_reason"] != nil {
-		t.Fatalf("finish_reason = %v, want explicit null", choice["finish_reason"])
-	}
+	got = choice["index"]
+	require.Equal(t, float64(0), got)
+	require.Nil(t, choice["finish_reason"])
+
 	delta, _ := choice["delta"].(map[string]any)
-	if got := delta["content"]; got != "hi" {
-		t.Fatalf("delta content = %v, want hi", got)
-	}
+	got = delta["content"]
+	require.Equal(t, "hi", got)
 }
 
 func TestFormatChatChunkSSEWithFinishReasonAndUsage(t *testing.T) {
@@ -70,14 +61,11 @@ func TestFormatChatChunkSSEWithFinishReasonAndUsage(t *testing.T) {
 	))
 
 	choice := chunk["choices"].([]any)[0].(map[string]any)
-	if got := choice["finish_reason"]; got != "stop" {
-		t.Fatalf("finish_reason = %v, want stop", got)
-	}
+	got := choice["finish_reason"]
+	require.Equal(t, "stop", got)
+
 	usage, ok := chunk["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("usage = %#v, want object", chunk["usage"])
-	}
-	if got := usage["total_tokens"]; got != float64(7) {
-		t.Fatalf("usage total_tokens = %v, want 7", got)
-	}
+	require.True(t, ok, "usage = %#v, want object", chunk["usage"])
+	got = usage["total_tokens"]
+	require.Equal(t, float64(7), got)
 }

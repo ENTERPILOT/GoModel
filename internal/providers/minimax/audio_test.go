@@ -1,50 +1,22 @@
 package minimax
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
 )
 
-func TestProvider_ImplementsAudioProvider(t *testing.T) {
-	provider := NewWithHTTPClient("key", "", nil, llmclient.Hooks{})
-	if _, ok := any(provider).(core.AudioProvider); !ok {
-		t.Fatal("minimax provider should implement core.AudioProvider")
-	}
-}
-
 func TestCreateSpeech_UsesNativeEndpointAndDecodesHex(t *testing.T) {
-	var gotPath string
-	var gotAuth string
-	var gotRequest speechRequest
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "read error", http.StatusInternalServerError)
-			return
-		}
-		if err := json.Unmarshal(body, &gotRequest); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"audio":"000102ff","status":2},"base_resp":{"status_code":0,"status_msg":"success"}}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"audio":"000102ff","status":2},"base_resp":{"status_code":0,"status_msg":"success"}}`)
 
 	provider := NewWithHTTPClient("minimax-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
@@ -54,48 +26,27 @@ func TestCreateSpeech_UsesNativeEndpointAndDecodesHex(t *testing.T) {
 		ResponseFormat: "wav",
 		Speed:          1.5,
 	})
-	if err != nil {
-		t.Fatalf("CreateSpeech() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	if gotPath != "/v1/t2a_v2" {
-		t.Fatalf("path = %q, want /v1/t2a_v2", gotPath)
-	}
-	if gotAuth != "Bearer minimax-key" {
-		t.Fatalf("authorization = %q, want Bearer minimax-key", gotAuth)
-	}
-	if gotRequest.Model != "speech-2.8-hd" || gotRequest.Text != "hello" {
-		t.Fatalf("request model/text = %q/%q", gotRequest.Model, gotRequest.Text)
-	}
-	if gotRequest.Stream {
-		t.Fatal("stream = true, want false")
-	}
-	if gotRequest.OutputFormat != "hex" {
-		t.Fatalf("output_format = %q, want hex", gotRequest.OutputFormat)
-	}
-	if gotRequest.VoiceSetting.VoiceID != "English_expressive_narrator" || gotRequest.VoiceSetting.Speed != 1.5 {
-		t.Fatalf("voice_setting = %+v", gotRequest.VoiceSetting)
-	}
-	if gotRequest.AudioSetting.Format != "wav" {
-		t.Fatalf("audio_setting.format = %q, want wav", gotRequest.AudioSetting.Format)
-	}
-	if resp.ContentType != "audio/wav" {
-		t.Fatalf("content type = %q, want audio/wav", resp.ContentType)
-	}
-	if !bytes.Equal(resp.Data, []byte{0x00, 0x01, 0x02, 0xff}) {
-		t.Fatalf("audio data = %v", resp.Data)
-	}
+	req := capture.Last(t)
+	assert.Equal(t, "/v1/t2a_v2", req.Path)
+	assert.Equal(t, "Bearer minimax-key", req.Header.Get("Authorization"))
+
+	var gotRequest speechRequest
+	require.NoError(t, json.Unmarshal(req.Body, &gotRequest))
+	assert.Equal(t, "speech-2.8-hd", gotRequest.Model)
+	assert.Equal(t, "hello", gotRequest.Text)
+	assert.False(t, gotRequest.Stream)
+	assert.Equal(t, "hex", gotRequest.OutputFormat)
+	assert.Equal(t, "English_expressive_narrator", gotRequest.VoiceSetting.VoiceID)
+	assert.Equal(t, 1.5, gotRequest.VoiceSetting.Speed)
+	assert.Equal(t, "wav", gotRequest.AudioSetting.Format)
+	assert.Equal(t, "audio/wav", resp.ContentType)
+	assert.Equal(t, []byte{0x00, 0x01, 0x02, 0xff}, resp.Data)
 }
 
 func TestCreateSpeech_DefaultsToMP3AndNormalSpeed(t *testing.T) {
-	var gotRequest speechRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &gotRequest)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"audio":"ff","status":2},"base_resp":{"status_code":0}}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"data":{"audio":"ff","status":2},"base_resp":{"status_code":0}}`)
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
@@ -103,15 +54,13 @@ func TestCreateSpeech_DefaultsToMP3AndNormalSpeed(t *testing.T) {
 		Input: "hello",
 		Voice: "voice-id",
 	})
-	if err != nil {
-		t.Fatalf("CreateSpeech() error = %v", err)
-	}
-	if gotRequest.AudioSetting.Format != "mp3" || gotRequest.VoiceSetting.Speed != 1 {
-		t.Fatalf("defaults = format %q, speed %v", gotRequest.AudioSetting.Format, gotRequest.VoiceSetting.Speed)
-	}
-	if resp.ContentType != "audio/mpeg" {
-		t.Fatalf("content type = %q, want audio/mpeg", resp.ContentType)
-	}
+	require.NoError(t, err)
+
+	var gotRequest speechRequest
+	require.NoError(t, json.Unmarshal(capture.Last(t).Body, &gotRequest))
+	assert.Equal(t, "mp3", gotRequest.AudioSetting.Format)
+	assert.Equal(t, float64(1), gotRequest.VoiceSetting.Speed)
+	assert.Equal(t, "audio/mpeg", resp.ContentType)
 }
 
 func TestCreateSpeech_ValidatesNativeConstraints(t *testing.T) {
@@ -133,9 +82,8 @@ func TestCreateSpeech_ValidatesNativeConstraints(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := provider.CreateSpeech(context.Background(), tt.req)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("CreateSpeech() error = %v, want substring %q", err, tt.want)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
 }
@@ -164,51 +112,32 @@ func TestCreateSpeech_MapsNativeStatusCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				body, _ := json.Marshal(map[string]any{
-					"data":      nil,
-					"base_resp": map[string]any{"status_code": tt.nativeStatus, "status_msg": tt.statusMsg},
-				})
-				_, _ = w.Write(body)
-			}))
-			defer server.Close()
+			body, err := json.Marshal(map[string]any{
+				"data":      nil,
+				"base_resp": map[string]any{"status_code": tt.nativeStatus, "status_msg": tt.statusMsg},
+			})
+			require.NoError(t, err)
+			server, _ := providertest.JSONServer(t, http.StatusOK, string(body))
 
 			provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
-			_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+			_, err = provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 				Model: "speech-2.8-hd",
 				Input: "hello",
 				Voice: "voice-id",
 			})
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) {
-				t.Fatalf("CreateSpeech() error = %v, want *core.GatewayError", err)
-			}
-			if gatewayErr.StatusCode != tt.wantHTTPStatus {
-				t.Fatalf("status = %d, want %d", gatewayErr.StatusCode, tt.wantHTTPStatus)
-			}
-			if gatewayErr.Type != tt.wantType {
-				t.Fatalf("type = %q, want %q", gatewayErr.Type, tt.wantType)
-			}
-			if !strings.Contains(gatewayErr.Message, tt.statusMsg) {
-				t.Fatalf("message = %q, want substring %q", gatewayErr.Message, tt.statusMsg)
-			}
-			if !strings.Contains(gatewayErr.Message, strconv.Itoa(tt.nativeStatus)) {
-				t.Fatalf("message = %q, want native status %d", gatewayErr.Message, tt.nativeStatus)
-			}
-			if gatewayErr.Provider != "minimax" {
-				t.Fatalf("provider = %q, want minimax", gatewayErr.Provider)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			assert.Equal(t, tt.wantHTTPStatus, gatewayErr.StatusCode)
+			assert.Equal(t, tt.wantType, gatewayErr.Type)
+			assert.Contains(t, gatewayErr.Message, tt.statusMsg)
+			assert.Contains(t, gatewayErr.Message, strconv.Itoa(tt.nativeStatus))
+			assert.Equal(t, "minimax", gatewayErr.Provider)
 		})
 	}
 }
 
 func TestCreateSpeech_RejectsMalformedAudio(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"audio":"not-hex","status":2},"base_resp":{"status_code":0}}`))
-	}))
-	defer server.Close()
+	server, _ := providertest.JSONServer(t, http.StatusOK, `{"data":{"audio":"not-hex","status":2},"base_resp":{"status_code":0}}`)
 
 	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
@@ -216,15 +145,13 @@ func TestCreateSpeech_RejectsMalformedAudio(t *testing.T) {
 		Input: "hello",
 		Voice: "voice-id",
 	})
-	if err == nil || !strings.Contains(err.Error(), "not valid hexadecimal") {
-		t.Fatalf("CreateSpeech() error = %v, want malformed audio error", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not valid hexadecimal")
 }
 
 func TestCreateTranscription_IsUnsupported(t *testing.T) {
 	provider := NewWithHTTPClient("key", "", nil, llmclient.Hooks{})
 	_, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{})
-	if err == nil || !strings.Contains(err.Error(), "does not support speech-to-text") {
-		t.Fatalf("CreateTranscription() error = %v", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not support speech-to-text")
 }

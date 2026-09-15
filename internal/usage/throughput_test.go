@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseThroughputGranularity(t *testing.T) {
@@ -24,19 +27,14 @@ func TestParseThroughputGranularity(t *testing.T) {
 	for name, tc := range cases {
 		gran, err := ParseThroughputGranularity(name)
 		if tc.wantErr {
-			if err == nil {
-				t.Errorf("ParseThroughputGranularity(%q) expected error, got none", name)
-			}
+			assert.Error(t, err, "granularity %q", name)
 			continue
 		}
-		if err != nil {
-			t.Errorf("ParseThroughputGranularity(%q) unexpected error: %v", name, err)
+		if !assert.NoError(t, err, "granularity %q", name) {
 			continue
 		}
-		if gran.WindowCount != tc.wantWindow || gran.BucketSize != tc.wantBucket {
-			t.Errorf("ParseThroughputGranularity(%q) = {window:%d bucket:%v}, want {window:%d bucket:%v}",
-				name, gran.WindowCount, gran.BucketSize, tc.wantWindow, tc.wantBucket)
-		}
+		assert.Equal(t, tc.wantWindow, gran.WindowCount, "granularity %q", name)
+		assert.Equal(t, tc.wantBucket, gran.BucketSize, "granularity %q", name)
 	}
 }
 
@@ -45,38 +43,31 @@ func TestEmptyTokenThroughputIsZeroFilledAndAligned(t *testing.T) {
 	end := time.Date(2026, 1, 15, 12, 0, 30, 0, time.UTC)
 	tp := EmptyTokenThroughput(gran, end, 0)
 
-	if tp.BucketSeconds != 60 || tp.Granularity != "minute" {
-		t.Fatalf("got granularity=%q bucketSeconds=%d", tp.Granularity, tp.BucketSeconds)
-	}
-	if len(tp.Buckets) != 60 {
-		t.Fatalf("got %d buckets, want 60", len(tp.Buckets))
-	}
+	require.Equal(t, 60, tp.BucketSeconds)
+	require.Equal(t, "minute", tp.Granularity)
+	require.Len(t, tp.Buckets, 60)
+
 	// Last bucket starts at the current minute; first is 59 minutes earlier.
 	wantLast := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
-	if !tp.Buckets[59].Start.Equal(wantLast) {
-		t.Errorf("last bucket start = %v, want %v", tp.Buckets[59].Start, wantLast)
-	}
-	if !tp.Buckets[0].Start.Equal(wantLast.Add(-59 * time.Minute)) {
-		t.Errorf("first bucket start = %v, want %v", tp.Buckets[0].Start, wantLast.Add(-59*time.Minute))
-	}
+	assert.True(t, tp.Buckets[59].Start.Equal(wantLast), "last bucket start = %v, want %v", tp.Buckets[59].Start, wantLast)
+	assert.True(t, tp.Buckets[0].Start.Equal(wantLast.Add(-59*time.Minute)), "first bucket start = %v, want %v", tp.Buckets[0].Start, wantLast.Add(-59*time.Minute))
+
 	for i, b := range tp.Buckets {
-		if b.InputTokens != 0 || b.OutputTokens != 0 || b.PromptCachedTokens != 0 || b.LocallyCachedTokens != 0 {
-			t.Errorf("bucket %d not zero-filled: %+v", i, b)
-		}
+		assert.Equal(t, int64(0), b.InputTokens)
+		assert.Equal(t, int64(0), b.OutputTokens)
+		assert.Equal(t, int64(0), b.PromptCachedTokens)
+		assert.Equal(t, int64(0), b.LocallyCachedTokens, "bucket %d not zero-filled: %+v", i, b)
 	}
 }
 
 func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	end := time.Date(2026, 1, 15, 12, 0, 30, 0, time.UTC)
@@ -101,44 +92,26 @@ func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 			InputTokens: 999, OutputTokens: 999, TotalTokens: 1998,
 		},
 	})
-	if err != nil {
-		t.Fatalf("failed to seed usage entries: %v", err)
-	}
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
 
 	gran, _ := ParseThroughputGranularity("minute")
 	tp, err := reader.GetTokenThroughput(ctx, gran, end, 0)
-	if err != nil {
-		t.Fatalf("GetTokenThroughput returned error: %v", err)
-	}
-	if len(tp.Buckets) != 60 {
-		t.Fatalf("got %d buckets, want 60", len(tp.Buckets))
-	}
+	require.NoError(t, err)
+	require.Len(t, tp.Buckets, 60)
 
 	last := tp.Buckets[59]
-	if last.InputTokens != 70 {
-		t.Errorf("InputTokens = %d, want 70 (uncached portion of provider input)", last.InputTokens)
-	}
-	if last.PromptCachedTokens != 30 {
-		t.Errorf("PromptCachedTokens = %d, want 30", last.PromptCachedTokens)
-	}
-	if last.OutputTokens != 40 {
-		t.Errorf("OutputTokens = %d, want 40", last.OutputTokens)
-	}
-	if last.LocallyCachedTokens != 20 {
-		t.Errorf("LocallyCachedTokens = %d, want 20 (total tokens of the exact-cache hit)", last.LocallyCachedTokens)
-	}
+	assert.Equal(t, int64(70), last.InputTokens)
+	assert.Equal(t, int64(30), last.PromptCachedTokens)
+	assert.Equal(t, int64(40), last.OutputTokens)
+	assert.Equal(t, int64(20), last.LocallyCachedTokens)
 
 	// Every earlier bucket must be empty — the out-of-window row is excluded.
 	for i := range 59 {
 		b := tp.Buckets[i]
-		if b.InputTokens+b.OutputTokens+b.PromptCachedTokens+b.LocallyCachedTokens != 0 {
-			t.Errorf("bucket %d should be empty, got %+v", i, b)
-		}
+		assert.Equal(t, int64(0), b.InputTokens+b.OutputTokens+b.PromptCachedTokens+b.LocallyCachedTokens, "bucket %d should be empty, got %+v", i, b)
 	}
 }
 
@@ -147,54 +120,39 @@ func TestSQLiteReaderGetTokenThroughput_SplitsAndBuckets(t *testing.T) {
 // UTC day — matching the Daily Token Usage chart.
 func TestSQLiteReaderGetTokenThroughput_DayBucketsUseTimezoneOffset(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatalf("failed to open sqlite database: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer db.Close()
 
 	store, err := NewSQLiteStore(db, 0)
-	if err != nil {
-		t.Fatalf("failed to create sqlite store: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	offset := int64(2 * 3600)                            // UTC+2
 	end := time.Date(2026, 1, 15, 0, 30, 0, 0, time.UTC) // 02:30 local on Jan 15
 	// 23:00 UTC Jan 14 == 01:00 local Jan 15, i.e. local "today".
 	rowTime := time.Date(2026, 1, 14, 23, 0, 0, 0, time.UTC)
-
-	if err := store.WriteBatch(ctx, []*UsageEntry{{
+	err = store.WriteBatch(ctx, []*UsageEntry{{
 		ID: "tz1", RequestID: "r1", Timestamp: rowTime, Model: "gpt-5", Provider: "openai",
 		Endpoint: "/v1/chat/completions", InputTokens: 10, OutputTokens: 5, TotalTokens: 15,
-	}}); err != nil {
-		t.Fatalf("failed to seed usage entry: %v", err)
-	}
+	}})
+	require.NoError(t, err)
 
 	reader, err := NewSQLiteReader(db)
-	if err != nil {
-		t.Fatalf("failed to create sqlite reader: %v", err)
-	}
+	require.NoError(t, err)
+
 	gran, _ := ParseThroughputGranularity("day")
 
 	tp, err := reader.GetTokenThroughput(ctx, gran, end, offset)
-	if err != nil {
-		t.Fatalf("GetTokenThroughput returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	today := tp.Buckets[len(tp.Buckets)-1]
 	wantStart := time.Date(2026, 1, 14, 22, 0, 0, 0, time.UTC) // local midnight Jan 15
-	if !today.Start.Equal(wantStart) {
-		t.Errorf("today bucket start = %v, want local midnight %v", today.Start, wantStart)
-	}
-	if today.InputTokens != 10 {
-		t.Errorf("today (local) bucket input = %d, want 10", today.InputTokens)
-	}
+	assert.True(t, today.Start.Equal(wantStart), "today bucket start = %v, want local midnight %v", today.Start, wantStart)
+	assert.Equal(t, int64(10), today.InputTokens)
 
 	// With UTC alignment (offset 0) the same row falls in *yesterday*, so today is empty.
 	utc, err := reader.GetTokenThroughput(ctx, gran, end, 0)
-	if err != nil {
-		t.Fatalf("GetTokenThroughput (UTC) returned error: %v", err)
-	}
-	if utc.Buckets[len(utc.Buckets)-1].InputTokens != 0 {
-		t.Errorf("UTC-aligned today bucket should be empty (row is yesterday in UTC)")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), utc.Buckets[len(utc.Buckets)-1].InputTokens)
 }

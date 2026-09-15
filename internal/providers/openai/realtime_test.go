@@ -7,29 +7,27 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func realtimeProvider(t *testing.T, apiKey string) *Provider {
+	t.Helper()
+	p, ok := New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{}).(*Provider)
+	require.True(t, ok, "New() should return *Provider")
+	return p
+}
 
 func TestRealtimeTarget(t *testing.T) {
 	const apiKey = "sk-secret-key"
-	p, ok := New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{}).(*Provider)
-	if !ok {
-		t.Fatal("New did not return *Provider")
-	}
+	p := realtimeProvider(t, apiKey)
 
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasPrefix(target.URL, "wss://api.openai.com/v1/realtime?") {
-		t.Errorf("url = %q, want wss realtime endpoint", target.URL)
-	}
-	if got := target.Headers.Get("Authorization"); got != "Bearer "+apiKey {
-		t.Errorf("Authorization = %q, want bearer with key", got)
-	}
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(target.URL, "wss://api.openai.com/v1/realtime?"), "url = %q, want wss realtime endpoint", target.URL)
+	assert.Equal(t, "Bearer "+apiKey, target.Headers.Get("Authorization"))
 	// The legacy beta header must NOT be sent: the GA realtime endpoint rejects it.
-	if got := target.Headers.Get("OpenAI-Beta"); got != "" {
-		t.Errorf("OpenAI-Beta = %q, want unset (GA endpoint rejects the beta header)", got)
-	}
+	assert.Empty(t, target.Headers.Get("OpenAI-Beta"))
 }
 
 func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
@@ -37,99 +35,67 @@ func TestRealtimeTargetFollowsSetBaseURL(t *testing.T) {
 	// (inherited from CompatibleProvider) updates the client, and RealtimeTarget
 	// reads the live base URL, so a custom OpenAI-compatible host is honored and
 	// the injected key never goes to the wrong host.
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 	p.SetBaseURL("https://custom.example.com/v1")
 
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasPrefix(target.URL, "wss://custom.example.com/v1/realtime") {
-		t.Errorf("url = %q, want the SetBaseURL host", target.URL)
-	}
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(target.URL, "wss://custom.example.com/v1/realtime"), "url = %q, want the SetBaseURL host", target.URL)
 }
 
 func TestRealtimeTargetMissingModel(t *testing.T) {
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
-	if _, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "  "}); err == nil {
-		t.Fatal("expected error for missing model")
-	}
+	p := realtimeProvider(t, "k")
+	_, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "  "})
+	require.Error(t, err)
 }
 
 func TestRealtimeTargetOmitsAuthWhenNoKey(t *testing.T) {
-	p := New(providers.ProviderConfig{APIKey: ""}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "")
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if _, present := target.Headers["Authorization"]; present {
-		t.Error("Authorization header should be absent when no API key is configured")
-	}
+	require.NoError(t, err)
+	assert.NotContains(t, target.Headers, "Authorization")
 }
 
 func TestRealtimeTargetAttachesByCallID(t *testing.T) {
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", CallID: "rtc_42"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(target.URL, "call_id=rtc_42") {
-		t.Errorf("url = %q, want call_id attach query", target.URL)
-	}
-	if strings.Contains(target.URL, "model=") {
-		t.Errorf("url = %q, want no model query on sideband attach", target.URL)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, target.URL, "call_id=rtc_42")
+	assert.NotContains(t, target.URL, "model=", "sideband attach must not carry a model query")
 }
 
 func TestRealtimeCallTarget(t *testing.T) {
 	const apiKey = "sk-secret-key"
-	p := New(providers.ProviderConfig{APIKey: apiKey}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, apiKey)
 
 	target, err := p.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if target.URL != "https://api.openai.com/v1/realtime/calls" {
-		t.Errorf("url = %q, want the realtime calls endpoint", target.URL)
-	}
-	if got := target.Headers.Get("Authorization"); got != "Bearer "+apiKey {
-		t.Errorf("Authorization = %q, want bearer with key", got)
-	}
-	if got := target.Headers.Get("OpenAI-Beta"); got != "" {
-		t.Errorf("OpenAI-Beta = %q, want unset (GA endpoint rejects the beta header)", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.openai.com/v1/realtime/calls", target.URL)
+	assert.Equal(t, "Bearer "+apiKey, target.Headers.Get("Authorization"))
+	assert.Empty(t, target.Headers.Get("OpenAI-Beta"))
 }
 
 func TestRealtimeClientSecretTarget(t *testing.T) {
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 
 	target, err := p.RealtimeClientSecretTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if target.URL != "https://api.openai.com/v1/realtime/client_secrets" {
-		t.Errorf("url = %q, want the client secrets endpoint", target.URL)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.openai.com/v1/realtime/client_secrets", target.URL)
 }
 
 func TestRealtimeCallTargetMissingModel(t *testing.T) {
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
-	if _, err := p.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: " "}); err == nil {
-		t.Fatal("expected error for missing model")
-	}
+	p := realtimeProvider(t, "k")
+	_, err := p.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: " "})
+	require.Error(t, err)
 }
 
 func TestRealtimeCallTargetFollowsSetBaseURL(t *testing.T) {
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 	p.SetBaseURL("https://custom.example.com/v1")
 
 	target, err := p.RealtimeCallTarget(context.Background(), &core.RealtimeRequest{Model: "m"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if target.URL != "https://custom.example.com/v1/realtime/calls" {
-		t.Errorf("url = %q, want the SetBaseURL host", target.URL)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "https://custom.example.com/v1/realtime/calls", target.URL)
 }
 
 func TestRealtimeTargetTranslationIntent(t *testing.T) {
@@ -137,64 +103,42 @@ func TestRealtimeTargetTranslationIntent(t *testing.T) {
 	// a transcription session, keeps the model in the URL. It reports no usage
 	// events of its own, so the provider asks the gateway to meter the audio it
 	// relays.
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 
 	for _, intent := range []string{"translation", " Translation "} {
 		target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: intent})
-		if err != nil {
-			t.Fatalf("intent %q: unexpected error: %v", intent, err)
-		}
-		if target.URL != "wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate" {
-			t.Errorf("intent %q: url = %q, want the translations endpoint with the model", intent, target.URL)
-		}
-		if !target.MeterInputAudio {
-			t.Errorf("intent %q: MeterInputAudio = false, want the session metered", intent)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate", target.URL, "intent %q", intent)
+		assert.True(t, target.MeterInputAudio, "intent %q: the session must be metered", intent)
 		// The model is in the URL, so nothing has to be pinned in-session.
-		if target.PinSessionModel != "" {
-			t.Errorf("intent %q: PinSessionModel = %q, want empty", intent, target.PinSessionModel)
-		}
-		if got := target.Headers.Get("Authorization"); got != "Bearer k" {
-			t.Errorf("intent %q: Authorization = %q, want bearer with key", intent, got)
-		}
+		assert.Empty(t, target.PinSessionModel, "intent %q", intent)
+		assert.Equal(t, "Bearer k", target.Headers.Get("Authorization"), "intent %q", intent)
 	}
 }
 
 func TestRealtimeTargetConversationIsNotMetered(t *testing.T) {
 	// Conversation sessions report usage in response.done events, so the gateway
 	// must not meter (and double-count) their audio.
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if target.MeterInputAudio {
-		t.Error("MeterInputAudio = true, want false for a session that reports its own usage")
-	}
+	require.NoError(t, err)
+	assert.False(t, target.MeterInputAudio)
 }
 
 func TestRealtimeHTTPTargetsTranslationIntent(t *testing.T) {
 	// Translation sessions sign WebRTC calls and mint client secrets on the same
 	// dedicated surface as their websocket.
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 	req := &core.RealtimeRequest{Model: "gpt-realtime-translate", Intent: core.RealtimeIntentTranslation}
 
 	call, err := p.RealtimeCallTarget(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if call.URL != "https://api.openai.com/v1/realtime/translations/calls" {
-		t.Errorf("calls url = %q, want the translations calls endpoint", call.URL)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.openai.com/v1/realtime/translations/calls", call.URL)
 
 	secret, err := p.RealtimeClientSecretTarget(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if secret.URL != "https://api.openai.com/v1/realtime/translations/client_secrets" {
-		t.Errorf("client secrets url = %q, want the translations client secrets endpoint", secret.URL)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.openai.com/v1/realtime/translations/client_secrets", secret.URL)
 }
 
 func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
@@ -202,51 +146,38 @@ func TestRealtimeTargetTranscriptionIntent(t *testing.T) {
 	// parameter: OpenAI rejects transcription models as the session model, and
 	// picks the actual model later via session.update. The requested model only
 	// routes the request inside the gateway.
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 
 	for _, intent := range []string{"transcription", " Transcription "} {
 		target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-4o-transcribe", Intent: intent})
-		if err != nil {
-			t.Fatalf("intent %q: unexpected error: %v", intent, err)
-		}
-		if target.URL != "wss://api.openai.com/v1/realtime?intent=transcription" {
-			t.Errorf("intent %q: url = %q, want intent-only realtime URL", intent, target.URL)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "wss://api.openai.com/v1/realtime?intent=transcription", target.URL, "intent %q", intent)
+
 		// The URL carries no model, so the provider must ask the gateway to pin
 		// the session.update model selection to the routed model.
-		if target.PinSessionModel != "gpt-4o-transcribe" {
-			t.Errorf("intent %q: PinSessionModel = %q, want the routed model", intent, target.PinSessionModel)
-		}
+		assert.Equal(t, "gpt-4o-transcribe", target.PinSessionModel, "intent %q", intent)
+
 		// Transcription models usually report usage in their completed event,
 		// but a model that omits it would otherwise leave the session free, so
 		// the relayed audio has to back it. The gateway meters it only when the
 		// session reports nothing, so this never double-bills the common case.
-		if !target.MeterInputAudio {
-			t.Errorf("intent %q: MeterInputAudio = false, want the session metered as a fallback", intent)
-		}
+		assert.True(t, target.MeterInputAudio, "intent %q: the session must be metered as a fallback", intent)
 	}
 
 	// The model still gates the request: without one there is nothing to route
 	// or attribute usage to, transcription intent or not.
-	if _, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Intent: "transcription"}); err == nil {
-		t.Error("expected error for transcription intent without model")
-	}
+	_, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Intent: "transcription"})
+	assert.Error(t, err)
 
 	// Unknown intents keep today's conversation-session behavior.
 	target, err := p.RealtimeTarget(context.Background(), &core.RealtimeRequest{Model: "gpt-realtime", Intent: "conversation"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(target.URL, "model=gpt-realtime") {
-		t.Errorf("url = %q, want model parameter for non-transcription intent", target.URL)
-	}
-	if target.PinSessionModel != "" {
-		t.Errorf("PinSessionModel = %q, want empty: the URL already fixes the model", target.PinSessionModel)
-	}
+	require.NoError(t, err)
+	assert.Contains(t, target.URL, "model=gpt-realtime")
+	assert.Empty(t, target.PinSessionModel)
 }
 
 func TestSupportsRealtimeIntent(t *testing.T) {
-	p := New(providers.ProviderConfig{APIKey: "k"}, providers.ProviderOptions{}).(*Provider)
+	p := realtimeProvider(t, "k")
 	cases := map[string]bool{
 		core.RealtimeIntentTranscription: true,
 		core.RealtimeIntentTranslation:   true,
@@ -256,8 +187,6 @@ func TestSupportsRealtimeIntent(t *testing.T) {
 		"":                               false,
 	}
 	for intent, want := range cases {
-		if got := p.SupportsRealtimeIntent(intent); got != want {
-			t.Errorf("SupportsRealtimeIntent(%q) = %v, want %v", intent, got, want)
-		}
+		assert.Equal(t, want, p.SupportsRealtimeIntent(intent), "intent %q", intent)
 	}
 }

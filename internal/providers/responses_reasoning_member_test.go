@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -21,6 +23,9 @@ func TestResponsesReasoningFromVendorReasoningMember(t *testing.T) {
 	}{
 		{name: "reasoning alone", delta: `{"reasoning":"Think."}`, want: "Think."},
 		{name: "reasoning_content wins", delta: `{"reasoning_content":"Canonical.","reasoning":"Vendor."}`, want: "Canonical."},
+		// A provider that sends a non-string reasoning_content (an effort echo,
+		// say) must not suppress the vendor member that carries the text.
+		{name: "a non-string reasoning_content falls back", delta: `{"reasoning_content":{"effort":"high"},"reasoning":"Vendor."}`, want: "Vendor."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -32,9 +37,8 @@ data: [DONE]
 `
 			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "qwen/qwen3.6-27b", "groq")
 			raw, err := io.ReadAll(converter)
-			if err != nil {
-				t.Fatalf("read converter: %v", err)
-			}
+			require.NoError(t, err)
+
 			var got strings.Builder
 			for _, event := range parseTestSSEEvents(t, string(raw)) {
 				if event.Done || !strings.HasSuffix(event.Name, "reasoning_text.delta") {
@@ -43,9 +47,7 @@ data: [DONE]
 				delta, _ := event.Payload["delta"].(string)
 				got.WriteString(delta)
 			}
-			if got.String() != tt.want {
-				t.Errorf("reasoning_text deltas = %q, want %q", got.String(), tt.want)
-			}
+			assert.Equal(t, tt.want, got.String())
 		})
 	}
 }
@@ -66,6 +68,14 @@ func TestConvertChatResponseToResponsesReadsVendorReasoningMember(t *testing.T) 
 			want: "Canonical.",
 		},
 		{name: "a non-string member is ignored", fields: map[string]json.RawMessage{"reasoning": json.RawMessage(`{"effort":"high"}`)}},
+		{
+			name: "a non-string reasoning_content falls back",
+			fields: map[string]json.RawMessage{
+				"reasoning_content": json.RawMessage(`{"effort":"high"}`),
+				"reasoning":         json.RawMessage(`"Vendor."`),
+			},
+			want: "Vendor.",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,9 +96,7 @@ func TestConvertChatResponseToResponsesReadsVendorReasoningMember(t *testing.T) 
 					got += part.Text
 				}
 			}
-			if got != tt.want {
-				t.Errorf("reasoning text = %q, want %q", got, tt.want)
-			}
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

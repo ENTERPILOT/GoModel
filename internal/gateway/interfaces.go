@@ -53,6 +53,15 @@ type TranslatedRequestPatcher interface {
 	PatchResponsesRequest(ctx context.Context, req *core.ResponsesRequest) (*core.ResponsesRequest, error)
 }
 
+// PromptContentEditor is an optional TranslatedRequestPatcher capability: it
+// reports whether the prompt phase may rewrite the content of this request.
+// Only a rewriting prompt phase (anonymization, redaction) needs the replayed
+// history of a chained request in its input; a patcher that does not implement
+// this interface is assumed to rewrite.
+type PromptContentEditor interface {
+	EditsPromptContent(ctx context.Context) bool
+}
+
 // ResponsesAttemptPatcher adapts a Responses request to the provider one
 // attempt is about to reach, after failover has chosen the target. It runs
 // for the primary attempt and for every failover attempt with that target's

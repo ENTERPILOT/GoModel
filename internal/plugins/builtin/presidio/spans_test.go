@@ -2,8 +2,10 @@ package presidio
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestByteSpans(t *testing.T) {
@@ -23,58 +25,56 @@ func TestByteSpans(t *testing.T) {
 		{entity: "DATE_TIME", start: 0, end: 2, score: 0.9},
 		{entity: "PERSON", start: 10, end: 13, score: 0.85},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("spans = %+v, want %+v", got, want)
-	}
-	if out := rewrite(text, got, func(s span, v string) string { return "<" + s.entity + ">" }); out != "<DATE_TIME>ë 😀 <PERSON>" {
-		t.Errorf("rewrite = %q", out)
-	}
+	assert.Equal(t, want, got)
+	out := rewrite(text, got, func(s span, v string) string { return "<" + s.entity + ">" })
+	assert.Equal(t, "<DATE_TIME>ë 😀 <PERSON>", out)
 	// One offset per code point, allocated for the 9 runes, not the 13 bytes.
-	if o := runeOffsets(text); len(o) != 9 || cap(o) != 9 || o[4] != 5 || o[8] != 12 {
-		t.Errorf("runeOffsets = %v (cap %d)", o, cap(o))
-	}
-	if runeBytes(text, 5) != 9 || runeBytes(text, 100) != len(text) || runeBytes(text, 0) != 0 {
-		t.Error("runeBytes")
-	}
+	o := runeOffsets(text)
+	require.Len(t, o, 9)
+	assert.Equal(t, 9, cap(o))
+	assert.Equal(t, 5, o[4])
+	assert.Equal(t, 12, o[8])
+	assert.Equal(t, 9, runeBytes(text, 5))
+	assert.Equal(t, len(text), runeBytes(text, 100))
+	assert.Equal(t, 0, runeBytes(text, 0))
 }
 
 func TestMapping(t *testing.T) {
 	m := newMapping()
-	if m.placeholder("PERSON", "Ann", true) != "<PERSON_1>" || m.placeholder("PERSON", "Bob", true) != "<PERSON_2>" || m.placeholder("PERSON", "Ann", false) != "<PERSON_1>" || m.placeholder("EMAIL_ADDRESS", "a@b", false) != "<EMAIL_ADDRESS_1>" {
-		t.Errorf("placeholders = %v", m.byPlaceholder)
-	}
+	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", true))
+	assert.Equal(t, "<PERSON_2>", m.placeholder("PERSON", "Bob", true))
+	assert.Equal(t, "<PERSON_1>", m.placeholder("PERSON", "Ann", false))
+	assert.Equal(t, "<EMAIL_ADDRESS_1>", m.placeholder("EMAIL_ADDRESS", "a@b", false), "placeholders = %v", m.byPlaceholder)
+
 	for i := 3; i <= 12; i++ {
 		m.placeholder("PERSON", "P"+string(rune('0'+i%10))+string(rune('a'+i)), true)
 	}
 	text := "<PERSON_12> and <PERSON_1> and <EMAIL_ADDRESS_1> and <PERSON_99>"
 	got, n := m.restore(text)
-	if got != "P2m and Ann and <EMAIL_ADDRESS_1> and <PERSON_99>" || n != 2 {
-		t.Errorf("restore = %q, %d", got, n)
-	}
-	if got, n := m.restore("nothing here"); got != "nothing here" || n != 0 {
-		t.Errorf("restore = %q, %d", got, n)
-	}
-	if !m.hasRestorable() || newMapping().hasRestorable() {
-		t.Error("hasRestorable")
-	}
+	assert.Equal(t, "P2m and Ann and <EMAIL_ADDRESS_1> and <PERSON_99>", got)
+	assert.Equal(t, 2, n)
+	got, n = m.restore("nothing here")
+	assert.Equal(t, "nothing here", got)
+	assert.Equal(t, 0, n)
+	assert.True(t, m.hasRestorable())
+	assert.False(t, newMapping().hasRestorable())
+
 	var nilMap *mapping
-	if got, _ := nilMap.restore("<PERSON_1>"); got != "<PERSON_1>" {
-		t.Error("nil mapping")
-	}
+	got, _ = nilMap.restore("<PERSON_1>")
+	assert.Equal(t, "<PERSON_1>", got)
 }
 
 func TestArgStrings(t *testing.T) {
 	tree, strs, ok := argStrings(json.RawMessage(`{"b": ["x", 1, {"c": "y"}], "a": "z", "d": null}`))
-	if !ok || !reflect.DeepEqual(strs, []string{"z", "x", "y"}) {
-		t.Fatalf("strings = %v, ok %v", strs, ok)
-	}
+	require.True(t, ok)
+	require.Equal(t, []string{"z", "x", "y"}, strs)
+
 	out, err := withArgStrings(tree, []string{"Z", "X", "<a&b>"})
-	if err != nil || string(out) != `{"a":"Z","b":["X",1,{"c":"<a&b>"}],"d":null}` {
-		t.Errorf("out = %s, %v", out, err)
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, `{"a":"Z","b":["X",1,{"c":"<a&b>"}],"d":null}`, string(out), "out = %s, %v", out, err)
+
 	for _, raw := range []string{`"text"`, `5`, `not json`, ``} {
-		if _, _, ok := argStrings(json.RawMessage(raw)); ok {
-			t.Errorf("%q accepted", raw)
-		}
+		_, _, ok := argStrings(json.RawMessage(raw))
+		assert.False(t, ok, "%q accepted", raw)
 	}
 }

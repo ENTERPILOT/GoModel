@@ -134,6 +134,15 @@ the same precedence every other GoModel provider applies.
 Models routed to `/messages` use the Anthropic thinking dialect instead and are
 not affected by this mapping.
 
+## DeepSeek models
+
+Model IDs starting with `deepseek` get the same request handling as the native
+DeepSeek provider, including when a virtual model routes to them:
+`reasoning_content` is filled in on earlier assistant turns when tools are
+present, and `json_schema` structured output follows
+`DEEPSEEK_JSON_SCHEMA_MODE`. See
+[DeepSeek](/providers/deepseek#structured-outputs) for details.
+
 ## Not supported
 
 - Embeddings (returns `invalid_request_error`).

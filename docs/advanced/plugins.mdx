@@ -588,6 +588,13 @@ Notes for authors:
   as the reason, and is logged once per transition; the error text must not
   contain secrets and is truncated to 256 characters. Health is informational:
   traffic still runs through the instance under its `fail_mode`.
+- Implement `pluginapi.ContentEditor` (`EditsContent() bool`) when a plugin
+  that declares `Mutates` can be configured not to edit, such as a detector
+  set to flag instead of rewrite. GoModel asks a configured instance before
+  work it does only for editing plugins — replaying the stored history of a
+  chained Responses request rather than letting the provider resolve
+  `previous_response_id` itself. It never changes how a hook runs, and a
+  mutating plugin without it is taken to edit.
 - Field inputs `secret` and `model` exist for API keys of external classifiers
   and for model pickers; a `secret` value is masked in every admin response.
   Use `bool` for a switch and `list` for an open-ended list of strings

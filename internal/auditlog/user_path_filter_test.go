@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAuditUserPathSubtreeBounds(t *testing.T) {
@@ -20,9 +21,8 @@ func TestAuditUserPathSubtreeBounds(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lower, upper := auditUserPathSubtreeBounds(tt.userPath)
-			if lower != tt.wantLower || upper != tt.wantUpper {
-				t.Fatalf("auditUserPathSubtreeBounds(%q) = (%q, %q), want (%q, %q)", tt.userPath, lower, upper, tt.wantLower, tt.wantUpper)
-			}
+			require.Equal(t, tt.wantLower, lower)
+			require.Equal(t, tt.wantUpper, upper, "auditUserPathSubtreeBounds(%q) = (%q, %q), want (%q, %q)", tt.userPath, lower, upper, tt.wantLower, tt.wantUpper)
 		})
 	}
 }
@@ -47,17 +47,14 @@ func TestAuditUserPathSubtreeRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := auditUserPathSubtreeRegex(tt.userPath); got != tt.want {
-				t.Fatalf("auditUserPathSubtreeRegex(%q) = %q, want %q", tt.userPath, got, tt.want)
-			}
+			got := auditUserPathSubtreeRegex(tt.userPath)
+			require.Equal(t, tt.want, got, "auditUserPathSubtreeRegex(%q)", tt.userPath)
 		})
 	}
 }
 
 func TestEscapeLikeWildcards(t *testing.T) {
-	if got := sqlutil.EscapeLikeWildcards("/team%_a"); got != "/team\\%\\_a" {
-		t.Fatalf("sqlutil.EscapeLikeWildcards(%q) = %q, want %q", "/team%_a", got, "/team\\%\\_a")
-	}
+	require.Equal(t, "/team\\%\\_a", sqlutil.EscapeLikeWildcards("/team%_a"))
 }
 
 func TestAuditUserPathSQLPredicate(t *testing.T) {
@@ -89,18 +86,13 @@ func TestAuditUserPathSQLPredicate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := auditUserPathSQLPredicate(tt.userPath, tt.column); got != tt.want {
-				t.Fatalf("auditUserPathSQLPredicate(%q) = %q, want %q", tt.userPath, got, tt.want)
-			}
+			got := auditUserPathSQLPredicate(tt.userPath, tt.column)
+			require.Equal(t, tt.want, got, "auditUserPathSQLPredicate(%q)", tt.userPath)
 		})
 	}
 }
 
 func TestAuditExactUserPathSQLPredicate(t *testing.T) {
-	if got := auditExactUserPathSQLPredicate("/", "user_path"); got != "(user_path = ? OR user_path = '' OR user_path IS NULL)" {
-		t.Fatalf("root exact predicate = %q", got)
-	}
-	if got := auditExactUserPathSQLPredicate("/team", "user_path"); got != "user_path = ?" {
-		t.Fatalf("nested exact predicate = %q", got)
-	}
+	require.Equal(t, "(user_path = ? OR user_path = '' OR user_path IS NULL)", auditExactUserPathSQLPredicate("/", "user_path"))
+	require.Equal(t, "user_path = ?", auditExactUserPathSQLPredicate("/team", "user_path"))
 }

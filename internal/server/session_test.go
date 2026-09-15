@@ -10,9 +10,11 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/session"
 )
 
@@ -71,13 +73,12 @@ func (r *partialErrorReadCloser) Close() error {
 
 func sessionTestContext(t *testing.T, path string, headers map[string]string) *echo.Context {
 	t.Helper()
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, path, nil)
+	opts := make([]echotest.Option, 0, len(headers))
 	for name, value := range headers {
-		req.Header.Set(name, value)
+		opts = append(opts, echotest.WithHeader(name, value))
 	}
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c, _ := echotest.Post(t, path, nil, opts...)
+	req := c.Request()
 	snapshot := core.NewRequestSnapshot(
 		http.MethodPost, path, nil, nil, req.Header, "application/json", nil, false, "req-1", nil,
 	)
@@ -93,13 +94,9 @@ func sessionBodyTestContext(
 	bodyNotCaptured bool,
 ) (*echo.Context, *httptest.ResponseRecorder) {
 	t.Helper()
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, path, nil)
-	req.Body = body
+	c, rec := echotest.Post(t, path, body)
+	req := c.Request()
 	req.ContentLength = contentLength
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
 	snapshot := core.NewRequestSnapshot(
 		http.MethodPost, path, nil, nil, req.Header,
 		"application/json", nil, bodyNotCaptured, "req-1", nil,
@@ -119,12 +116,9 @@ func TestSessionCaptureStampsContext(t *testing.T) {
 		got = core.SessionIDFromContext(c.Request().Context())
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if got != "11111111-2222-3333-4444-555555555555" {
-		t.Fatalf("session id = %q, want header value", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, "11111111-2222-3333-4444-555555555555", got)
 }
 
 func TestSessionCapturePublishesSessionBeforeDownstreamHandler(t *testing.T) {
@@ -138,20 +132,16 @@ func TestSessionCapturePublishesSessionBeforeDownstreamHandler(t *testing.T) {
 	c.Set(string(auditlog.LogEntryLivePublisherKey), publisher)
 
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
-		if len(publisher.events) != 1 {
-			t.Fatalf("live events before handler = %d, want 1", len(publisher.events))
-		}
-		if got := publisher.events[0]; got.eventType != auditlog.LiveEventAuditUpdated || got.sessionID != "session-live" {
-			t.Fatalf("live event = %#v, want audit.updated with detected session", got)
-		}
-		if entry.SessionID != "session-live" {
-			t.Fatalf("entry session = %q, want detected session", entry.SessionID)
-		}
+		require.Len(t, publisher.events, 1)
+		got := publisher.events[0]
+		require.Equal(t, auditlog.LiveEventAuditUpdated, got.eventType)
+		require.Equal(t, "session-live", got.sessionID, "live event = %#v, want audit.updated with detected session", got)
+		require.Equal(t, "session-live", entry.SessionID)
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
+	err := handler(c)
+	require.NoError(t, err)
 }
 
 func TestSessionCaptureInheritsTrustedInteractionParent(t *testing.T) {
@@ -166,17 +156,14 @@ func TestSessionCaptureInheritsTrustedInteractionParent(t *testing.T) {
 	}}
 
 	handler := sessionCapture(detector, lookup, false)(func(c *echo.Context) error {
-		if got := core.SessionIDFromContext(c.Request().Context()); got != "auto-resolved-session" {
-			t.Fatalf("session id = %q, want inherited parent session", got)
-		}
+		got := core.SessionIDFromContext(c.Request().Context())
+		require.Equal(t, "auto-resolved-session", got)
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if lookup.calls != 1 {
-		t.Fatalf("parent lookups = %d, want 1", lookup.calls)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, 1, lookup.calls)
 }
 
 func TestSessionCaptureAllowsParentWhenAuthenticationIsDisabled(t *testing.T) {
@@ -189,14 +176,13 @@ func TestSessionCaptureAllowsParentWhenAuthenticationIsDisabled(t *testing.T) {
 	}}
 
 	handler := sessionCapture(detector, lookup, true)(func(c *echo.Context) error {
-		if got := core.SessionIDFromContext(c.Request().Context()); got != "parent-session" {
-			t.Fatalf("session id = %q, want inherited parent session", got)
-		}
+		got := core.SessionIDFromContext(c.Request().Context())
+		require.Equal(t, "parent-session", got)
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
+	err := handler(c)
+	require.NoError(t, err)
 }
 
 func TestSessionCaptureUsesLiveAuthenticationDecision(t *testing.T) {
@@ -231,21 +217,15 @@ func TestSessionCaptureUsesLiveAuthenticationDecision(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-		}
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	}
 
 	send("")
-	if lookup.calls != 1 {
-		t.Fatalf("no-auth parent lookups = %d, want 1", lookup.calls)
-	}
+	require.Equal(t, 1, lookup.calls)
 
 	authenticator.enabled = true
 	send("managed")
-	if lookup.calls != 1 {
-		t.Fatalf("non-dashboard managed key performed a parent lookup; calls = %d", lookup.calls)
-	}
+	require.Equal(t, 1, lookup.calls)
 }
 
 func TestSessionCaptureRejectsUntrustedOrCrossPathParent(t *testing.T) {
@@ -282,20 +262,17 @@ func TestSessionCaptureRejectsUntrustedOrCrossPathParent(t *testing.T) {
 
 			handler := sessionCapture(detector, lookup, false)(func(c *echo.Context) error {
 				got := core.SessionIDFromContext(c.Request().Context())
-				if tc.requestUserPath != "" && (got == "" || got == "parent-session") {
-					t.Fatalf("session id = %q, want scoped detector fallback", got)
-				}
-				if tc.requestUserPath == "" && got != "detected-session" {
-					t.Fatalf("session id = %q, want detector fallback", got)
+				if tc.requestUserPath != "" {
+					require.NotEmpty(t, got, "want scoped detector fallback")
+					require.NotEqual(t, "parent-session", got, "want scoped detector fallback")
+				} else {
+					require.Equal(t, "detected-session", got, "want detector fallback")
 				}
 				return nil
 			})
-			if err := handler(c); err != nil {
-				t.Fatalf("handler error = %v", err)
-			}
-			if lookup.calls != tc.wantCalls {
-				t.Fatalf("parent lookups = %d, want %d", lookup.calls, tc.wantCalls)
-			}
+			err := handler(c)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantCalls, lookup.calls)
 		})
 	}
 }
@@ -307,14 +284,13 @@ func TestSessionCaptureSkipsNonModelPaths(t *testing.T) {
 	})
 
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
-		if id := core.SessionIDFromContext(c.Request().Context()); id != "" {
-			t.Fatalf("session id = %q, want empty on non-model path", id)
-		}
+		id := core.SessionIDFromContext(c.Request().Context())
+		require.Empty(t, id)
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
+	err := handler(c)
+	require.NoError(t, err)
 }
 
 func TestSessionCaptureNilDetectorIsNoOp(t *testing.T) {
@@ -325,17 +301,14 @@ func TestSessionCaptureNilDetectorIsNoOp(t *testing.T) {
 	called := false
 	handler := sessionCapture(nil, nil, false)(func(c *echo.Context) error {
 		called = true
-		if id := core.SessionIDFromContext(c.Request().Context()); id != "" {
-			t.Fatalf("session id = %q, want empty with nil detector", id)
-		}
+		id := core.SessionIDFromContext(c.Request().Context())
+		require.Empty(t, id)
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if !called {
-		t.Fatal("next handler not called")
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.True(t, called)
 }
 
 // Bodies over the 64 KiB ingress capture limit (or chunked requests) are not
@@ -361,20 +334,14 @@ func TestSessionCaptureMaterializesLargeBodies(t *testing.T) {
 		got = core.SessionIDFromContext(c.Request().Context())
 		// The handler must still be able to read the full body afterwards.
 		remaining, err := io.ReadAll(c.Request().Body)
-		if err != nil {
-			t.Fatalf("body read after capture: %v", err)
-		}
-		if len(remaining) != len(body) {
-			t.Fatalf("body truncated after capture: %d != %d", len(remaining), len(body))
-		}
+		require.NoError(t, err)
+		require.Len(t, remaining, len(body))
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if got != "big-body-session" {
-		t.Fatalf("session id = %q, want body signal from a large body", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, "big-body-session", got)
 }
 
 func TestSessionCaptureMaterializesChunkedBody(t *testing.T) {
@@ -393,20 +360,14 @@ func TestSessionCaptureMaterializesChunkedBody(t *testing.T) {
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
 		got = core.SessionIDFromContext(c.Request().Context())
 		remaining, err := io.ReadAll(c.Request().Body)
-		if err != nil {
-			t.Fatalf("body read after capture: %v", err)
-		}
-		if string(remaining) != body {
-			t.Fatalf("replayed body = %q, want original", remaining)
-		}
+		require.NoError(t, err)
+		require.Equal(t, body, string(remaining))
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if got != "chunked-session" {
-		t.Fatalf("session id = %q, want chunked body signal", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, "chunked-session", got)
 }
 
 // JSON bodies past the audit capture limit still carry session signals: the
@@ -429,40 +390,27 @@ func TestSessionCaptureDetectsBodySignalPastAuditCaptureLimit(t *testing.T) {
 	var got string
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
 		got = core.SessionIDFromContext(c.Request().Context())
-		if body.read != int64(len(bodyText)) {
-			t.Fatalf("session detection read = %d, want the complete body %d", body.read, len(bodyText))
-		}
+		require.Equal(t, int64(len(bodyText)), body.read, "session detection read = %d, want the complete body %d", body.read, len(bodyText))
 
 		snapshot := core.GetRequestSnapshot(c.Request().Context())
-		if snapshot == nil || !snapshot.BodyNotCaptured || snapshot.CapturedBodyView() != nil {
-			t.Fatal("audit capture must stay bounded for an oversized body")
-		}
+		require.NotNil(t, snapshot)
+		require.True(t, snapshot.BodyNotCaptured)
+		require.Nil(t, snapshot.CapturedBodyView())
 
 		first, err := requestBodyBytes(c)
-		if err != nil {
-			t.Fatalf("handler body read: %v", err)
-		}
-		if string(first) != bodyText {
-			t.Fatal("handler did not receive the complete body")
-		}
+		require.NoError(t, err)
+		require.Equal(t, bodyText, string(first))
+
 		second, err := requestBodyBytes(c)
-		if err != nil {
-			t.Fatalf("second handler body read: %v", err)
-		}
-		if &first[0] != &second[0] {
-			t.Fatal("handler copied the materialized body instead of reusing it")
-		}
-		if body.read != int64(len(bodyText)) {
-			t.Fatalf("source read again by handler: %d bytes", body.read)
-		}
+		require.NoError(t, err)
+		require.Same(t, &second[0], &first[0])
+		require.Equal(t, int64(len(bodyText)), body.read)
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if got != "huge-body-session" {
-		t.Fatalf("session id = %q, want body signal from an oversized body", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.Equal(t, "huge-body-session", got)
 }
 
 func TestSessionCaptureAutoDetectsChunkedBodyPastAuditCaptureLimit(t *testing.T) {
@@ -477,20 +425,14 @@ func TestSessionCaptureAutoDetectsChunkedBodyPastAuditCaptureLimit(t *testing.T)
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
 		got = core.SessionIDFromContext(c.Request().Context())
 		remaining, err := io.ReadAll(c.Request().Body)
-		if err != nil {
-			t.Fatalf("handler body read: %v", err)
-		}
-		if string(remaining) != bodyText {
-			t.Fatal("materialized body was not replayed intact")
-		}
+		require.NoError(t, err)
+		require.Equal(t, bodyText, string(remaining))
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if !strings.HasPrefix(got, "auto-") {
-		t.Fatalf("session id = %q, want content-derived id from an oversized chunked body", got)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(got, "auto-"), "session id = %q, want content-derived id from an oversized chunked body", got)
 }
 
 // Opaque bodies are streamed upstream, so detection only peeks them: a
@@ -510,21 +452,16 @@ func TestSessionCaptureDoesNotPreReadKnownOversizedOpaqueBody(t *testing.T) {
 	)
 
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
-		if body.read != 0 {
-			t.Fatalf("oversized body read before handler: %d bytes", body.read)
-		}
+		require.Equal(t, int64(0), body.read)
+
 		remaining, err := io.ReadAll(c.Request().Body)
-		if err != nil {
-			t.Fatalf("handler body read: %v", err)
-		}
-		if len(remaining) != len(bodyText) {
-			t.Fatalf("handler body length = %d, want %d", len(remaining), len(bodyText))
-		}
+		require.NoError(t, err)
+		require.Len(t, remaining, len(bodyText))
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
+	err := handler(c)
+	require.NoError(t, err)
 }
 
 func TestSessionCaptureBoundsUnknownOversizedOpaqueBodyAndReplaysIt(t *testing.T) {
@@ -541,21 +478,16 @@ func TestSessionCaptureBoundsUnknownOversizedOpaqueBodyAndReplaysIt(t *testing.T
 	)
 
 	handler := sessionCapture(detector, nil, false)(func(c *echo.Context) error {
-		if body.read != auditlog.MaxBodyCapture+1 {
-			t.Fatalf("session detection read = %d, want bounded %d", body.read, auditlog.MaxBodyCapture+1)
-		}
+		require.Equal(t, int64(auditlog.MaxBodyCapture+1), body.read)
+
 		remaining, err := io.ReadAll(c.Request().Body)
-		if err != nil {
-			t.Fatalf("handler body read: %v", err)
-		}
-		if string(remaining) != bodyText {
-			t.Fatal("bounded session peek did not replay the complete body")
-		}
+		require.NoError(t, err)
+		require.Equal(t, bodyText, string(remaining))
+
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
+	err := handler(c)
+	require.NoError(t, err)
 }
 
 // The body size limit trips while detection materializes a chunked JSON body;
@@ -571,15 +503,10 @@ func TestSessionCaptureKeepsBodyLimitStatus(t *testing.T) {
 		called = true
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if called {
-		t.Fatal("downstream handler called after the body limit tripped")
-	}
-	if rec.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.False(t, called)
+	require.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
 }
 
 func TestSessionCaptureRejectsBodyReadFailure(t *testing.T) {
@@ -593,16 +520,9 @@ func TestSessionCaptureRejectsBodyReadFailure(t *testing.T) {
 		called = true
 		return nil
 	})
-	if err := handler(c); err != nil {
-		t.Fatalf("handler error = %v", err)
-	}
-	if called {
-		t.Fatal("downstream handler called after request body read failure")
-	}
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
-	}
-	if !strings.Contains(rec.Body.String(), "failed to read request body") {
-		t.Fatalf("response = %q, want body read failure", rec.Body.String())
-	}
+	err := handler(c)
+	require.NoError(t, err)
+	require.False(t, called)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "failed to read request body")
 }

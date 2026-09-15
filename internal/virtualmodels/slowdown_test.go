@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolveSlowdown(t *testing.T) {
@@ -84,9 +85,8 @@ func TestResolveSlowdown(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := newSlowdownService(t, tt.rows...)
-			if got := service.ResolveSlowdown(tt.ctx, tt.requested, tt.resolved); got != tt.want {
-				t.Fatalf("ResolveSlowdown() = %v, want %v", got, tt.want)
-			}
+			got := service.ResolveSlowdown(tt.ctx, tt.requested, tt.resolved)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -96,9 +96,7 @@ func TestVirtualModelCloneDoesNotShareSlowdown(t *testing.T) {
 	cloned := original.clone()
 
 	*cloned.Slowdown = 1
-	if *original.Slowdown != 0.5 {
-		t.Fatalf("mutating clone changed original slowdown to %v", *original.Slowdown)
-	}
+	require.Equal(t, 0.5, *original.Slowdown)
 }
 
 func TestUpsertValidatesSlowdown(t *testing.T) {
@@ -129,14 +127,11 @@ func TestUpsertValidatesSlowdown(t *testing.T) {
 				Enabled:  true,
 			})
 			if tt.wantInvalid {
-				if err == nil || !IsValidationError(err) {
-					t.Fatalf("Upsert() error = %v, want validation error", err)
-				}
+				require.Error(t, err)
+				require.True(t, IsValidationError(err))
 				return
 			}
-			if err != nil {
-				t.Fatalf("Upsert() error = %v, want nil", err)
-			}
+			require.NoError(t, err)
 		})
 	}
 }
@@ -146,16 +141,13 @@ func newSlowdownService(t *testing.T, rows ...VirtualModel) *Service {
 	store := newSQLVMStore(t)
 	ctx := context.Background()
 	for _, row := range rows {
-		if err := store.Upsert(ctx, row); err != nil {
-			t.Fatalf("store.Upsert(%q): %v", row.Source, err)
-		}
+		err := store.Upsert(ctx, row)
+		require.NoError(t, err, "store.Upsert(%q)", row.Source)
 	}
 	service, err := NewService(store, testCatalog(), true)
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	if err := service.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(ctx)
+	require.NoError(t, err)
+
 	return service
 }

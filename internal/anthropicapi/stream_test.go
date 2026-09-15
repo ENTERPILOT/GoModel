@@ -5,6 +5,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // drainConverter runs the SSE converter over chatStream and returns the parsed
@@ -15,9 +18,7 @@ func drainConverter(t *testing.T, chatStream string) []map[string]any {
 	defer conv.Close() //nolint:errcheck
 
 	out, err := io.ReadAll(conv)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
+	require.NoError(t, err)
 
 	var events []map[string]any
 	for block := range strings.SplitSeq(string(out), "\n\n") {
@@ -27,9 +28,9 @@ func drainConverter(t *testing.T, chatStream string) []map[string]any {
 				continue
 			}
 			var payload map[string]any
-			if err := json.Unmarshal([]byte(data), &payload); err != nil {
-				t.Fatalf("unmarshal event %q: %v", data, err)
-			}
+			err := json.Unmarshal([]byte(data), &payload)
+			require.NoError(t, err, "unmarshal event %q: %v", data, err)
+
 			events = append(events, payload)
 		}
 	}
@@ -62,30 +63,25 @@ func TestStreamConverterText(t *testing.T) {
 		"content_block_stop", "message_delta", "message_stop",
 	}
 	got := eventTypes(events)
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("event sequence = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got)
 
 	start := events[0]["message"].(map[string]any)
-	if start["id"] != "msg_chatcmpl-1" || start["model"] != "gpt" {
-		t.Errorf("message_start = %+v", start)
-	}
+	assert.Equal(t, "msg_chatcmpl-1", start["id"])
+	assert.Equal(t, "gpt", start["model"], "message_start = %+v", start)
 
 	// content_block_delta payloads carry the text deltas.
 	d0 := events[2]["delta"].(map[string]any)
 	d1 := events[3]["delta"].(map[string]any)
-	if d0["type"] != "text_delta" || d0["text"] != "Hel" || d1["text"] != "lo" {
-		t.Errorf("text deltas = %v / %v", d0, d1)
-	}
+	assert.Equal(t, "text_delta", d0["type"])
+	assert.Equal(t, "Hel", d0["text"])
+	assert.Equal(t, "lo", d1["text"], "text deltas = %v / %v", d0, d1)
 
 	delta := events[5]
-	if delta["delta"].(map[string]any)["stop_reason"] != "end_turn" {
-		t.Errorf("message_delta stop_reason = %+v", delta["delta"])
-	}
+	assert.Equal(t, "end_turn", delta["delta"].(map[string]any)["stop_reason"], "message_delta stop_reason = %+v", delta["delta"])
+
 	usage := delta["usage"].(map[string]any)
-	if usage["input_tokens"] != float64(5) || usage["output_tokens"] != float64(2) {
-		t.Errorf("message_delta usage = %+v", usage)
-	}
+	assert.Equal(t, float64(5), usage["input_tokens"])
+	assert.Equal(t, float64(2), usage["output_tokens"], "message_delta usage = %+v", usage)
 }
 
 func TestStreamConverterToolCall(t *testing.T) {
@@ -106,27 +102,20 @@ func TestStreamConverterToolCall(t *testing.T) {
 		"content_block_stop", "message_delta", "message_stop",
 	}
 	got := eventTypes(events)
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("event sequence = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got)
 
 	block := events[1]["content_block"].(map[string]any)
-	if block["type"] != "tool_use" || block["id"] != "call_1" || block["name"] != "get_weather" {
-		t.Errorf("tool_use content_block = %+v", block)
-	}
+	assert.Equal(t, "tool_use", block["type"])
+	assert.Equal(t, "call_1", block["id"])
+	assert.Equal(t, "get_weather", block["name"], "tool_use content_block = %+v", block)
+
 	extra, _ := json.Marshal(block["extra_content"])
-	if string(extra) != `{"google":{"thought_signature":"sig"}}` {
-		t.Errorf("tool_use extra_content = %s", extra)
-	}
+	assert.Equal(t, `{"google":{"thought_signature":"sig"}}`, string(extra), "tool_use extra_content = %s", extra)
 
 	args := events[2]["delta"].(map[string]any)
-	if args["type"] != "input_json_delta" || args["partial_json"] != `{"city":` {
-		t.Errorf("input_json_delta = %+v", args)
-	}
-
-	if events[5]["delta"].(map[string]any)["stop_reason"] != "tool_use" {
-		t.Errorf("message_delta = %+v", events[5]["delta"])
-	}
+	assert.Equal(t, "input_json_delta", args["type"])
+	assert.Equal(t, `{"city":`, args["partial_json"], "input_json_delta = %+v", args)
+	assert.Equal(t, "tool_use", events[5]["delta"].(map[string]any)["stop_reason"], "message_delta = %+v", events[5]["delta"])
 }
 
 // closeTracker records whether Close was called on the underlying stream.
@@ -147,16 +136,11 @@ func (c *closeTracker) Close() error {
 func TestStreamConverterCloseClosesUnderlying(t *testing.T) {
 	body := &closeTracker{Reader: strings.NewReader("data: [DONE]\n\n")}
 	conv := NewStreamConverter(body, "m", 0)
-
-	if _, err := io.ReadAll(conv); err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-	if err := conv.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	if !body.closed {
-		t.Fatal("Close did not propagate to the underlying stream")
-	}
+	_, err := io.ReadAll(conv)
+	require.NoError(t, err)
+	err = conv.Close()
+	require.NoError(t, err)
+	require.True(t, body.closed)
 }
 
 func TestStreamConverterEmptyStream(t *testing.T) {
@@ -164,9 +148,7 @@ func TestStreamConverterEmptyStream(t *testing.T) {
 	events := drainConverter(t, "data: [DONE]\n\n")
 	got := eventTypes(events)
 	want := []string{"message_start", "message_delta", "message_stop"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("event sequence = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got)
 }
 
 func TestStreamConverterStopSequence(t *testing.T) {
@@ -182,13 +164,11 @@ func TestStreamConverterStopSequence(t *testing.T) {
 
 	events := drainConverter(t, chatStream)
 	final := events[len(events)-2]
-	if final["type"] != "message_delta" {
-		t.Fatalf("expected message_delta before message_stop, got %v", final["type"])
-	}
+	require.Equal(t, "message_delta", final["type"])
+
 	delta := final["delta"].(map[string]any)
-	if delta["stop_reason"] != "stop_sequence" || delta["stop_sequence"] != "7" {
-		t.Errorf("message_delta delta = %+v, want stop_reason=stop_sequence stop_sequence=7", delta)
-	}
+	assert.Equal(t, "stop_sequence", delta["stop_reason"])
+	assert.Equal(t, "7", delta["stop_sequence"], "message_delta delta = %+v, want stop_reason=stop_sequence stop_sequence=7", delta)
 }
 
 func TestStreamConverterMessageStartInputEstimate(t *testing.T) {
@@ -204,9 +184,7 @@ func TestStreamConverterMessageStartInputEstimate(t *testing.T) {
 	conv := NewStreamConverter(io.NopCloser(strings.NewReader(chatStream)), "m", 42)
 	defer conv.Close() //nolint:errcheck
 	out, err := io.ReadAll(conv)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
+	require.NoError(t, err)
 
 	var start, delta map[string]any
 	for block := range strings.SplitSeq(string(out), "\n\n") {
@@ -216,9 +194,9 @@ func TestStreamConverterMessageStartInputEstimate(t *testing.T) {
 				continue
 			}
 			var payload map[string]any
-			if err := json.Unmarshal([]byte(data), &payload); err != nil {
-				t.Fatalf("unmarshal %q: %v", data, err)
-			}
+			err := json.Unmarshal([]byte(data), &payload)
+			require.NoError(t, err, "unmarshal %q: %v", data, err)
+
 			switch payload["type"] {
 			case "message_start":
 				start = payload
@@ -229,13 +207,11 @@ func TestStreamConverterMessageStartInputEstimate(t *testing.T) {
 	}
 
 	usage := start["message"].(map[string]any)["usage"].(map[string]any)
-	if usage["input_tokens"] != float64(42) {
-		t.Errorf("message_start usage = %+v, want input_tokens=42", usage)
-	}
+	assert.Equal(t, float64(42), usage["input_tokens"], "message_start usage = %+v, want input_tokens=42", usage)
+
 	finalUsage := delta["usage"].(map[string]any)
-	if finalUsage["input_tokens"] != float64(11) || finalUsage["output_tokens"] != float64(1) {
-		t.Errorf("message_delta usage = %+v, want real 11/1", finalUsage)
-	}
+	assert.Equal(t, float64(11), finalUsage["input_tokens"])
+	assert.Equal(t, float64(1), finalUsage["output_tokens"], "message_delta usage = %+v, want real 11/1", finalUsage)
 }
 
 // TestStreamConverterThinkingSignature pins the streaming half of the thinking
@@ -262,21 +238,17 @@ func TestStreamConverterThinkingSignature(t *testing.T) {
 		"content_block_start", "content_block_delta", "content_block_stop",
 		"message_delta", "message_stop",
 	}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("event types = %v, want %v", got, want)
-	}
+	require.Equal(t, want, got)
 
 	signature := events[4]["delta"].(map[string]any)
-	if signature["type"] != "signature_delta" || signature["signature"] != "sig-1" {
-		t.Fatalf("event 4 delta = %v, want a signature_delta carrying sig-1", signature)
-	}
-	if idx, _ := events[4]["index"].(float64); int(idx) != 0 {
-		t.Errorf("signature_delta index = %v, want the open thinking block (0)", events[4]["index"])
-	}
+	require.Equal(t, "signature_delta", signature["type"])
+	require.Equal(t, "sig-1", signature["signature"], "event 4 delta = %v, want a signature_delta carrying sig-1", signature)
+	idx, _ := events[4]["index"].(float64)
+	assert.Equal(t, 0, int(idx), "signature_delta index = %v, want the open thinking block (0)", events[4]["index"])
+
 	for _, event := range events {
-		if _, ok := event["extra_content"]; ok {
-			t.Errorf("event %v leaks the gateway's extra_content member", event["type"])
-		}
+		_, ok := event["extra_content"]
+		assert.False(t, ok, "event %v leaks the gateway's extra_content member", event["type"])
 	}
 }
 
@@ -297,16 +269,16 @@ func TestStreamConverterUnsignedThinkingCarriesEmptySignature(t *testing.T) {
 
 	events := drainConverter(t, chatStream)
 	block := events[1]["content_block"].(map[string]any)
-	if events[1]["type"] != "content_block_start" || block["type"] != "thinking" {
-		t.Fatalf("event 1 = %v, want a thinking content_block_start", events[1])
-	}
+	require.Equal(t, "content_block_start", events[1]["type"])
+	require.Equal(t, "thinking", block["type"], "event 1 = %v, want a thinking content_block_start", events[1])
+
 	signature, ok := block["signature"]
-	if !ok || signature != "" {
-		t.Fatalf("content_block = %v, want an empty signature member", block)
-	}
+	require.True(t, ok)
+	require.Empty(t, signature)
+
 	for _, event := range events {
-		if delta, ok := event["delta"].(map[string]any); ok && delta["type"] == "signature_delta" {
-			t.Fatalf("unsigned reasoning emitted %v, want no signature_delta", delta)
+		if delta, ok := event["delta"].(map[string]any); ok {
+			require.NotEqual(t, "signature_delta", delta["type"], "unsigned reasoning emitted %v", delta)
 		}
 	}
 }
@@ -326,12 +298,10 @@ func TestStreamConverterRedactedThinking(t *testing.T) {
 
 	events := drainConverter(t, chatStream)
 	block := events[1]["content_block"].(map[string]any)
-	if events[1]["type"] != "content_block_start" || block["type"] != "redacted_thinking" || block["data"] != "opaque" {
-		t.Fatalf("event 1 = %v, want a redacted_thinking block carrying the opaque data", events[1])
-	}
-	if events[2]["type"] != "content_block_stop" {
-		t.Fatalf("event 2 = %v, want the redacted block closed immediately", events[2]["type"])
-	}
+	require.Equal(t, "content_block_start", events[1]["type"])
+	require.Equal(t, "redacted_thinking", block["type"])
+	require.Equal(t, "opaque", block["data"], "event 1 = %v, want a redacted_thinking block carrying the opaque data", events[1])
+	require.Equal(t, "content_block_stop", events[2]["type"])
 }
 
 // The cumulative extra_content a chunk carries must not re-emit signatures the
@@ -358,9 +328,7 @@ func TestStreamConverterThinkingSignatureNotRepeated(t *testing.T) {
 		}
 		signatures = append(signatures, delta["signature"].(string))
 	}
-	if strings.Join(signatures, ",") != "sig-a,sig-b" {
-		t.Fatalf("signature deltas = %v, want each block signed exactly once", signatures)
-	}
+	require.Equal(t, "sig-a,sig-b", strings.Join(signatures, ","), "signature deltas = %v, want each block signed exactly once", signatures)
 }
 
 // Interleaved thinking puts text between two thinking blocks. The second
@@ -402,9 +370,7 @@ func TestStreamConverterThinkingBlocksAroundText(t *testing.T) {
 		"start:text", "delta:text_delta", "stop",
 		"start:thinking", "delta:thinking_delta", "delta:signature_delta:sig-b", "stop",
 	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("content events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
+	require.Equal(t, strings.Join(want, "\n"), strings.Join(got, "\n"))
 }
 
 // Providers that name the member "reasoning" instead of "reasoning_content"
@@ -438,9 +404,7 @@ func TestStreamConverterVendorReasoningMember(t *testing.T) {
 				}
 				thinking = append(thinking, delta["thinking"].(string))
 			}
-			if strings.Join(thinking, "") != tt.want {
-				t.Errorf("thinking = %q, want %q", strings.Join(thinking, ""), tt.want)
-			}
+			assert.Equal(t, tt.want, strings.Join(thinking, ""))
 		})
 	}
 }

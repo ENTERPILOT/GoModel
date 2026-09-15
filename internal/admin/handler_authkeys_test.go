@@ -1,18 +1,17 @@
 package admin
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/authkeys"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type authKeyTestStore struct {
@@ -93,276 +92,120 @@ func (s *authKeyTestStore) Close() error { return nil }
 func newAuthKeyHandler(t *testing.T, store authkeys.Store) *Handler {
 	t.Helper()
 	service, err := authkeys.NewService(store)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return NewHandler(nil, nil, WithAuthKeys(service))
 }
 
 func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
-	e := echo.New()
 
-	listCtx, listRec := newHandlerContext("/admin/auth-keys")
-	if err := h.ListAuthKeys(listCtx); err != nil {
-		t.Fatalf("ListAuthKeys() error = %v", err)
-	}
-	if listRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("ListAuthKeys() status = %d, want 503", listRec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
-	if err := h.CreateAuthKey(createCtx); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	if createRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("CreateAuthKey() status = %d, want 503", createRec.Code)
-	}
+	c, rec = echotest.Post(t, "/admin/auth-keys", `{"name":"primary"}`)
+	require.NoError(t, h.CreateAuthKey(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys/test-key/deactivate", nil)
-	deactivateRec := httptest.NewRecorder()
-	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
-	deactivateCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-key"}})
-	if err := h.DeactivateAuthKey(deactivateCtx); err != nil {
-		t.Fatalf("DeactivateAuthKey() error = %v", err)
-	}
-	if deactivateRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("DeactivateAuthKey() status = %d, want 503", deactivateRec.Code)
-	}
+	c, rec = echotest.Post(t, "/admin/auth-keys/test-key/deactivate", nil, echotest.WithPathValue("id", "test-key"))
+	require.NoError(t, h.DeactivateAuthKey(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 
-	labelsReq := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/test-key/labels", bytes.NewBufferString(`{"labels":["a"]}`))
-	labelsReq.Header.Set("Content-Type", "application/json")
-	labelsRec := httptest.NewRecorder()
-	labelsCtx := e.NewContext(labelsReq, labelsRec)
-	labelsCtx.SetPathValues(echo.PathValues{{Name: "id", Value: "test-key"}})
-	if err := h.UpdateAuthKeyLabels(labelsCtx); err != nil {
-		t.Fatalf("UpdateAuthKeyLabels() error = %v", err)
-	}
-	if labelsRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("UpdateAuthKeyLabels() status = %d, want 503", labelsRec.Code)
-	}
+	c, rec = echotest.Request(t, http.MethodPut, "/admin/auth-keys/test-key/labels", `{"labels":["a"]}`, echotest.WithPathValue("id", "test-key"))
+	require.NoError(t, h.UpdateAuthKeyLabels(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+}
+
+func createAuthKey(t *testing.T, h *Handler, body string) authkeys.IssuedKey {
+	t.Helper()
+	c, rec := echotest.Post(t, "/admin/auth-keys", body)
+	require.NoError(t, h.CreateAuthKey(c))
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	return echotest.Decode[authkeys.IssuedKey](t, rec)
 }
 
 func TestCreateListAndDeactivateAuthKey(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","description":"prod key","user_path":" team//alpha/service/ ","labels":[" team-a ","batch","team-a"]}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
+	issued := createAuthKey(t, h, `{"name":"primary","description":"prod key","user_path":" team//alpha/service/ ","labels":[" team-a ","batch","team-a"]}`)
+	require.NotEmpty(t, issued.Value)
+	require.NotEmpty(t, issued.ID)
+	assert.Equal(t, "/team/alpha/service", issued.UserPath)
+	assert.Equal(t, []string{"team-a", "batch"}, issued.Labels)
 
-	if err := h.CreateAuthKey(createCtx); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("CreateAuthKey() status = %d, want 201", createRec.Code)
-	}
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	views := echotest.Decode[[]authkeys.View](t, rec)
+	require.Len(t, views, 1)
+	assert.True(t, views[0].Active)
+	assert.Equal(t, "/team/alpha/service", views[0].UserPath)
+	assert.Equal(t, []string{"team-a", "batch"}, views[0].Labels)
 
-	var issued authkeys.IssuedKey
-	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
-		t.Fatalf("unmarshal create response: %v", err)
-	}
-	if issued.Value == "" || issued.ID == "" {
-		t.Fatalf("issued response = %#v, want id and value", issued)
-	}
-	if issued.UserPath != "/team/alpha/service" {
-		t.Fatalf("issued.UserPath = %q, want /team/alpha/service", issued.UserPath)
-	}
-	if !reflect.DeepEqual(issued.Labels, []string{"team-a", "batch"}) {
-		t.Fatalf("issued.Labels = %v, want [team-a batch]", issued.Labels)
-	}
+	c, rec = echotest.Post(t, "/admin/auth-keys/"+issued.ID+"/deactivate", nil, echotest.WithPathValue("id", issued.ID))
+	require.NoError(t, h.DeactivateAuthKey(c))
+	require.Equal(t, http.StatusNoContent, rec.Code)
 
-	listCtx, listRec := newHandlerContext("/admin/auth-keys")
-	if err := h.ListAuthKeys(listCtx); err != nil {
-		t.Fatalf("ListAuthKeys() error = %v", err)
-	}
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("ListAuthKeys() status = %d, want 200", listRec.Code)
-	}
-
-	var views []authkeys.View
-	if err := json.Unmarshal(listRec.Body.Bytes(), &views); err != nil {
-		t.Fatalf("unmarshal list response: %v", err)
-	}
-	if len(views) != 1 || !views[0].Active {
-		t.Fatalf("list response = %#v, want one active key", views)
-	}
-	if views[0].UserPath != "/team/alpha/service" {
-		t.Fatalf("views[0].UserPath = %q, want /team/alpha/service", views[0].UserPath)
-	}
-	if !reflect.DeepEqual(views[0].Labels, []string{"team-a", "batch"}) {
-		t.Fatalf("views[0].Labels = %v, want [team-a batch]", views[0].Labels)
-	}
-
-	deactivateReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys/"+issued.ID+"/deactivate", nil)
-	deactivateRec := httptest.NewRecorder()
-	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
-	deactivateCtx.SetPathValues(echo.PathValues{{Name: "id", Value: issued.ID}})
-
-	if err := h.DeactivateAuthKey(deactivateCtx); err != nil {
-		t.Fatalf("DeactivateAuthKey() error = %v", err)
-	}
-	if deactivateRec.Code != http.StatusNoContent {
-		t.Fatalf("DeactivateAuthKey() status = %d, want 204", deactivateRec.Code)
-	}
-
-	listCtx, listRec = newHandlerContext("/admin/auth-keys")
-	if err := h.ListAuthKeys(listCtx); err != nil {
-		t.Fatalf("ListAuthKeys() error after deactivate = %v", err)
-	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &views); err != nil {
-		t.Fatalf("unmarshal list response after deactivate: %v", err)
-	}
-	if len(views) != 1 || views[0].Active {
-		t.Fatalf("list response after deactivate = %#v, want one inactive key", views)
-	}
+	c, rec = echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	views = echotest.Decode[[]authkeys.View](t, rec)
+	require.Len(t, views, 1)
+	assert.False(t, views[0].Active)
 }
 
 func TestUpdateAuthKeyDashboardAccess(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
+	issued := createAuthKey(t, h, `{"name":"ops","dashboard_access":true}`)
+	require.True(t, issued.DashboardAccess)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"ops","dashboard_access":true}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	if err := h.CreateAuthKey(e.NewContext(createReq, createRec)); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	var issued authkeys.IssuedKey
-	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
-		t.Fatalf("unmarshal create response: %v", err)
-	}
-	if !issued.DashboardAccess {
-		t.Fatal("issued.DashboardAccess = false, want true")
+	updateAccess := func(id, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/dashboard-access", body, echotest.WithPathValue("id", id))
+		require.NoError(t, h.UpdateAuthKeyDashboardAccess(c))
+		return rec
 	}
 
-	updateAccess := func(id, body string) (*httptest.ResponseRecorder, error) {
-		req := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/"+id+"/dashboard-access", bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		ctx := e.NewContext(req, rec)
-		ctx.SetPathValues(echo.PathValues{{Name: "id", Value: id}})
-		return rec, h.UpdateAuthKeyDashboardAccess(ctx)
-	}
+	rec := updateAccess(issued.ID, `{"dashboard_access":false}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, echotest.Decode[authkeys.View](t, rec).DashboardAccess)
 
-	rec, err := updateAccess(issued.ID, `{"dashboard_access":false}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyDashboardAccess() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("UpdateAuthKeyDashboardAccess() status = %d, want 200", rec.Code)
-	}
-	var view authkeys.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("unmarshal update response: %v", err)
-	}
-	if view.DashboardAccess {
-		t.Fatal("view.DashboardAccess = true, want false after revoke")
-	}
-
-	rec, err = updateAccess("missing", `{"dashboard_access":true}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyDashboardAccess(missing) error = %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("UpdateAuthKeyDashboardAccess(missing) status = %d, want 404", rec.Code)
-	}
+	rec = updateAccess("missing", `{"dashboard_access":true}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 
 	// Omitted or null values must be rejected, not treated as a revoke.
 	for _, body := range []string{`{}`, `{"dashboard_access":null}`} {
-		rec, err = updateAccess(issued.ID, body)
-		if err != nil {
-			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) error = %v", body, err)
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("UpdateAuthKeyDashboardAccess(%s) status = %d, want 400", body, rec.Code)
-		}
+		rec = updateAccess(issued.ID, body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
 	}
 }
 
 func TestUpdateAuthKeyLabels(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
+	issued := createAuthKey(t, h, `{"name":"primary","labels":["old"]}`)
 
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","labels":["old"]}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	if err := h.CreateAuthKey(e.NewContext(createReq, createRec)); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	var issued authkeys.IssuedKey
-	if err := json.Unmarshal(createRec.Body.Bytes(), &issued); err != nil {
-		t.Fatalf("unmarshal create response: %v", err)
+	updateLabels := func(id, body string) *httptest.ResponseRecorder {
+		c, rec := echotest.Request(t, http.MethodPut, "/admin/auth-keys/"+id+"/labels", body, echotest.WithPathValue("id", id))
+		require.NoError(t, h.UpdateAuthKeyLabels(c))
+		return rec
 	}
 
-	updateLabels := func(id, body string) (*httptest.ResponseRecorder, error) {
-		req := httptest.NewRequest(http.MethodPut, "/admin/auth-keys/"+id+"/labels", bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		ctx := e.NewContext(req, rec)
-		ctx.SetPathValues(echo.PathValues{{Name: "id", Value: id}})
-		return rec, h.UpdateAuthKeyLabels(ctx)
-	}
+	rec := updateLabels(issued.ID, `{"labels":[" prod ","batch","prod"]}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"prod", "batch"}, echotest.Decode[authkeys.View](t, rec).Labels)
 
-	rec, err := updateLabels(issued.ID, `{"labels":[" prod ","batch","prod"]}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyLabels() error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("UpdateAuthKeyLabels() status = %d, want 200", rec.Code)
-	}
-	var view authkeys.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
-		t.Fatalf("unmarshal update response: %v", err)
-	}
-	if !reflect.DeepEqual(view.Labels, []string{"prod", "batch"}) {
-		t.Fatalf("view.Labels = %v, want [prod batch]", view.Labels)
-	}
+	rec = updateLabels(issued.ID, `{"labels":[]}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Nil(t, echotest.Decode[authkeys.View](t, rec).Labels)
 
-	rec, err = updateLabels(issued.ID, `{"labels":[]}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyLabels(clear) error = %v", err)
-	}
-	if rec.Code != http.StatusOK {
-		t.Fatalf("UpdateAuthKeyLabels(clear) status = %d, want 200", rec.Code)
-	}
-	var clearedView authkeys.View
-	if err := json.Unmarshal(rec.Body.Bytes(), &clearedView); err != nil {
-		t.Fatalf("unmarshal clear response: %v", err)
-	}
-	if clearedView.Labels != nil {
-		t.Fatalf("view.Labels after clear = %v, want nil", clearedView.Labels)
-	}
-
-	rec, err = updateLabels("missing-id", `{"labels":["x"]}`)
-	if err != nil {
-		t.Fatalf("UpdateAuthKeyLabels(missing) error = %v", err)
-	}
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("UpdateAuthKeyLabels(missing) status = %d, want 404", rec.Code)
-	}
+	rec = updateLabels("missing-id", `{"labels":["x"]}`)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
-	e := echo.New()
-
-	createReq := httptest.NewRequest(http.MethodPost, "/admin/auth-keys", bytes.NewBufferString(`{"name":"primary","user_path":"/team/../alpha"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	createCtx := e.NewContext(createReq, createRec)
-
-	if err := h.CreateAuthKey(createCtx); err != nil {
-		t.Fatalf("CreateAuthKey() error = %v", err)
-	}
-	if createRec.Code != http.StatusBadRequest {
-		t.Fatalf("CreateAuthKey() status = %d, want 400", createRec.Code)
-	}
+	c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"primary","user_path":"/team/../alpha"}`)
+	require.NoError(t, h.CreateAuthKey(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }

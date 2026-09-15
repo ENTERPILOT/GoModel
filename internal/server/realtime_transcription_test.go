@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPinTranscriptionModel(t *testing.T) {
@@ -60,9 +62,7 @@ func TestPinTranscriptionModel(t *testing.T) {
 			if want == "" {
 				want = tt.frame
 			}
-			if !jsonOrRawEqual(got, want) {
-				t.Errorf("mapped frame = %s, want %s", got, want)
-			}
+			assert.True(t, jsonOrRawEqual(got, want), "mapped frame = %s, want %s", got, want)
 		})
 	}
 }

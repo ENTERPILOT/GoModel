@@ -1,8 +1,9 @@
 package config
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplySessionEnv_ParsesAndMerges(t *testing.T) {
@@ -17,23 +18,19 @@ func TestApplySessionEnv_ParsesAndMerges(t *testing.T) {
 	t.Setenv("SESSION_HEADER_1", "X-My-Session")
 	t.Setenv("SESSION_HEADER_1_TRANSFORM", "session-uuid")
 	t.Setenv("SESSION_HEADER_2", "X-New-Session")
-
-	if err := applySessionEnv(cfg); err != nil {
-		t.Fatalf("applySessionEnv() error = %v", err)
-	}
+	err := applySessionEnv(cfg)
+	require.NoError(t, err)
 
 	headers := cfg.Session.Headers
-	if len(headers) != 3 {
-		t.Fatalf("headers = %#v, want 3 entries", headers)
-	}
+	require.Len(t, headers, 3)
+
 	// Env replaces the whole YAML entry with the same name...
-	if headers[0].Header != "X-My-Session" || headers[0].Transform != "session-uuid" {
-		t.Fatalf("merged entry = %#v, want env override", headers[0])
-	}
+	require.Equal(t, "X-My-Session", headers[0].Header)
+	require.Equal(t, "session-uuid", headers[0].Transform, "merged entry = %#v, want env override", headers[0])
+
 	// ...keeps unrelated YAML entries, and appends new env entries.
-	if headers[1].Header != "X-Other" || headers[2].Header != "X-New-Session" {
-		t.Fatalf("headers = %#v", headers)
-	}
+	require.Equal(t, "X-Other", headers[1].Header)
+	require.Equal(t, "X-New-Session", headers[2].Header, "headers = %#v", headers)
 }
 
 func TestNormalizeSessionConfig(t *testing.T) {
@@ -75,27 +72,22 @@ func TestNormalizeSessionConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := normalizeSessionConfig(&tt.cfg)
 			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("normalizeSessionConfig() error = %v", err)
-				}
-				if got := tt.cfg.Headers[0].Header; got != "X-My-Session" {
-					t.Fatalf("canonical header = %q", got)
-				}
-				if got := tt.cfg.Headers[0].Transform; got != "session-uuid" {
-					t.Fatalf("canonical transform = %q", got)
-				}
+				require.NoError(t, err)
+				got := tt.cfg.Headers[0].Header
+				require.Equal(t, "X-My-Session", got)
+				got = tt.cfg.Headers[0].Transform
+				require.Equal(t, "session-uuid", got)
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
 
 func TestSessionDefaults(t *testing.T) {
 	cfg := buildDefaultConfig()
-	if !cfg.Session.Enabled || !cfg.Session.AutoDetect || !cfg.Session.BuiltinRules {
-		t.Fatalf("session defaults = %+v, want all enabled", cfg.Session)
-	}
+	require.True(t, cfg.Session.Enabled)
+	require.True(t, cfg.Session.AutoDetect)
+	require.True(t, cfg.Session.BuiltinRules, "session defaults = %+v, want all enabled", cfg.Session)
 }

@@ -1,6 +1,10 @@
 package responsecache
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestExtractEmbedText_ResponsesInputArray(t *testing.T) {
 	body := []byte(`{
@@ -11,39 +15,29 @@ func TestExtractEmbedText_ResponsesInputArray(t *testing.T) {
   ]
 }`)
 	text, n := extractEmbedText(body, false)
-	if text != "what is the capital of Germany" {
-		t.Fatalf("embed text = %q, want Germany question", text)
-	}
-	if n != 1 {
-		t.Fatalf("nonSystemCount = %d, want 1", n)
-	}
+	require.Equal(t, "what is the capital of Germany", text)
+	require.Equal(t, 1, n)
 }
 
 func TestExtractEmbedText_InputString(t *testing.T) {
 	body := []byte(`{"model":"x","input":"hello"}`)
 	text, n := extractEmbedText(body, false)
-	if text != "hello" || n != 1 {
-		t.Fatalf("got %q, n=%d", text, n)
-	}
+	require.Equal(t, "hello", text)
+	require.Equal(t, 1, n)
 }
 
 func TestConversationInvariantFingerprint_ResponsesInputArray(t *testing.T) {
 	body := []byte(`{"input":[{"role":"user","content":"same"}]}`)
 	fp, ok := conversationInvariantFingerprint(body, false)
-	if !ok {
-		t.Fatal("expected ok")
-	}
-	if fp == "" {
-		t.Fatal("expected non-empty fingerprint for structured input array")
-	}
+	require.True(t, ok)
+	require.NotEmpty(t, fp)
 }
 
 func TestConversationInvariantFingerprint_InputString(t *testing.T) {
 	body := []byte(`{"input":"hi"}`)
 	fp, ok := conversationInvariantFingerprint(body, false)
-	if !ok || fp != "" {
-		t.Fatalf("fp=%q ok=%v", fp, ok)
-	}
+	require.True(t, ok)
+	require.Empty(t, fp)
 }
 
 func TestComputeParamsHash_IncludesReasoning(t *testing.T) {
@@ -51,7 +45,5 @@ func TestComputeParamsHash_IncludesReasoning(t *testing.T) {
 	high := []byte(`{"model":"m","reasoning":{"effort":"high"}}`)
 	h1 := computeParamsHash(low, "/v1/responses", nil, "", "embed")
 	h2 := computeParamsHash(high, "/v1/responses", nil, "", "embed")
-	if h1 == h2 {
-		t.Fatal("expected different params hashes when reasoning differs")
-	}
+	require.NotEqual(t, h2, h1)
 }
