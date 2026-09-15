@@ -705,6 +705,7 @@ func (s *translatedInferenceService) handleStreamingReadCloser(
 			providerName: providerName,
 		})
 	}
+	stream = guardStreamCompletion(endpoint, stream)
 	wrappedStream := streaming.NewObservedSSEStream(stream, observers...)
 	if outerWrap != nil {
 		wrappedStream = outerWrap(wrappedStream)

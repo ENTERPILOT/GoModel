@@ -77,6 +77,17 @@ exactly like a genuine error status, and the response is never cached as a
 success. Passthrough endpoints are exempt: they forward the provider's
 response byte-for-byte.
 
+**Streams that stop early** end with an explicit error instead of a silent
+EOF. When a provider stream closes or fails before its terminal event
+(`data: [DONE]` or a `finish_reason` for chat completions, a terminal
+`response.*` event for `/v1/responses`, `message_stop` for `/v1/messages`),
+GoModel relays everything received so far and then sends one error event in
+the endpoint's format with the code `stream_incomplete` (for example
+`data: {"error":{"code":"stream_incomplete",...}}` on chat completions). This
+covers malformed chunks, a connection dropped in the middle of a tool call,
+and similar truncations, so a client never mistakes a partial answer for a
+complete one. The request log records the stream as a `stream_error`.
+
 **The circuit breaker** counts transport errors and, by default, `429` and
 all `5xx` responses as failures. One exhausted retry sequence counts as one
 failure; individual HTTP retries do not increment the breaker. A successful

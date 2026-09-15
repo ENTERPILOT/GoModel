@@ -151,6 +151,54 @@ func TestStreamConverterEmptyStream(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+// failingReader serves body, then fails with err instead of io.EOF.
+type failingReader struct {
+	body *strings.Reader
+	err  error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.body.Len() > 0 {
+		return r.body.Read(p)
+	}
+	return 0, r.err
+}
+
+func TestStreamConverterStoppedEarlyEndsWithErrorEvent(t *testing.T) {
+	partial := strings.Join([]string{
+		`data: {"id":"chatcmpl-9","model":"gpt","choices":[{"delta":{"content":"one"},"finish_reason":null}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"f","arguments":"{\"ci"}}]}}]}`,
+		"",
+	}, "\n\n")
+	tests := []struct {
+		name    string
+		readErr error
+		wantErr error
+	}{
+		{name: "EOF before finish", readErr: io.EOF, wantErr: io.ErrUnexpectedEOF},
+		{name: "connection reset", readErr: io.ErrClosedPipe, wantErr: io.ErrClosedPipe},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &failingReader{body: strings.NewReader(partial), err: tt.readErr}
+			conv := NewStreamConverter(io.NopCloser(body), "m", 0)
+			out, err := io.ReadAll(conv)
+			require.ErrorIs(t, err, tt.wantErr)
+
+			stream := string(out)
+			assert.NotContains(t, stream, "message_stop")
+			require.True(t, strings.HasSuffix(stream, "event: error\ndata: {\"error\":{\"message\":\"provider stream ended before completion\",\"type\":\"api_error\"},\"type\":\"error\"}\n\n"), "stream = %q", stream)
+		})
+	}
+}
+
+func TestStreamConverterFinishWithoutDoneEndsCleanly(t *testing.T) {
+	chatStream := `data: {"id":"chatcmpl-2","choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}` + "\n\n"
+	got := eventTypes(drainConverter(t, chatStream))
+	assert.Equal(t, "message_stop", got[len(got)-1])
+}
+
 func TestStreamConverterStopSequence(t *testing.T) {
 	// The anthropic provider carries a natively-reported stop sequence as a
 	// delta extension field; the converter must surface it per the Anthropic
