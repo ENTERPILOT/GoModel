@@ -2,8 +2,10 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -113,6 +115,74 @@ func TestHandleError_EnrichesAuditEntryWithGatewayErrorCode(t *testing.T) {
 	require.Equal(t, string(core.ErrorTypeRateLimit), entry.ErrorType)
 	require.Equal(t, "budget exceeded", entry.Data.ErrorMessage)
 	require.Equal(t, "budget_exceeded", entry.Data.ErrorCode)
+}
+
+func TestHandleError_ClassifiesClientCancellation(t *testing.T) {
+	tests := []struct {
+		name          string
+		path          string
+		cancelRequest bool
+		err           error
+		wantStatus    int
+		wantErrorType string
+	}{
+		{
+			name:          "raw cancellation after client disconnect",
+			path:          "/v1/chat/completions",
+			cancelRequest: true,
+			err:           fmt.Errorf("send request: %w", context.Canceled),
+			wantStatus:    statusClientClosedRequest,
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "gateway error wrapping cancellation after client disconnect",
+			path:          "/v1/chat/completions",
+			cancelRequest: true,
+			err:           core.NewProviderError("openai", http.StatusBadGateway, "upstream failed", context.Canceled),
+			wantStatus:    statusClientClosedRequest,
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "anthropic dialect after client disconnect",
+			path:          "/v1/messages",
+			cancelRequest: true,
+			err:           context.Canceled,
+			wantStatus:    statusClientClosedRequest,
+			wantErrorType: "client_disconnected",
+		},
+		{
+			name:          "cancellation while the client is still connected",
+			path:          "/v1/chat/completions",
+			err:           context.Canceled,
+			wantStatus:    http.StatusInternalServerError,
+			wantErrorType: string(core.ErrorTypeProvider),
+		},
+		{
+			name:          "provider failure racing a client disconnect",
+			path:          "/v1/chat/completions",
+			cancelRequest: true,
+			err:           core.NewProviderError("openai", http.StatusBadGateway, "upstream failed", errors.New("bad gateway")),
+			wantStatus:    http.StatusBadGateway,
+			wantErrorType: string(core.ErrorTypeProvider),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c, rec := echotest.Post(t, tc.path, nil)
+			entry := &auditlog.LogEntry{Data: &auditlog.LogData{}}
+			c.Set(string(auditlog.LogEntryKey), entry)
+			if tc.cancelRequest {
+				ctx, cancel := context.WithCancel(c.Request().Context())
+				cancel()
+				c.SetRequest(c.Request().WithContext(ctx))
+			}
+
+			require.NoError(t, handleError(c, tc.err))
+
+			assert.Equal(t, tc.wantStatus, rec.Code)
+			assert.Equal(t, tc.wantErrorType, entry.ErrorType)
+		})
+	}
 }
 
 func TestHandleRouteNotFound_AnthropicDialect(t *testing.T) {

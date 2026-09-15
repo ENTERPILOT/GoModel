@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -29,9 +30,16 @@ func handleErrorAsAnthropic(c *echo.Context, err error) error {
 	return c.JSON(status, body)
 }
 
+// statusClientClosedRequest is the de facto status proxies use for requests the
+// client aborted before the response was ready.
+const statusClientClosedRequest = 499
+
 // recordHandledError normalizes err to a gateway error, logs it and enriches
 // the audit entry and response headers, returning the error left to render.
 func recordHandledError(c *echo.Context, err error) *core.GatewayError {
+	if isClientClosedRequest(c, err) {
+		return recordClientClosedRequest(c, err)
+	}
 	gatewayErr, ok := errors.AsType[*core.GatewayError](err)
 	if !ok {
 		gatewayErr = core.NewProviderError("", http.StatusInternalServerError, "an unexpected error occurred", err)
@@ -40,6 +48,34 @@ func recordHandledError(c *echo.Context, err error) *core.GatewayError {
 	enrichAuditEntryWithProviderAttempts(c)
 	auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
 	applyErrorResponseHeaders(c, err)
+	return gatewayErr
+}
+
+// isClientClosedRequest reports whether err is the caller's own cancellation:
+// the request context is canceled and err carries that cancellation. Both are
+// required, so a provider failure racing a disconnect still counts as one.
+func isClientClosedRequest(c *echo.Context, err error) bool {
+	if c == nil || c.Request() == nil || !errors.Is(err, context.Canceled) {
+		return false
+	}
+	return errors.Is(c.Request().Context().Err(), context.Canceled)
+}
+
+// recordClientClosedRequest records a request the client abandoned before the
+// response was ready as client_disconnected with status 499, the way the
+// streaming path does, so the audit log and error metrics do not count it as
+// a provider failure. The rendered body only reaches a client that is gone.
+func recordClientClosedRequest(c *echo.Context, err error) *core.GatewayError {
+	gatewayErr := core.NewInvalidRequestErrorWithStatus(statusClientClosedRequest, "request canceled", err).
+		WithCode("request_canceled")
+	slog.Debug("request canceled by client",
+		"error", err,
+		"method", c.Request().Method,
+		"path", c.Request().URL.Path,
+		"request_id", requestIDFromContextOrHeader(c.Request()),
+	)
+	enrichAuditEntryWithProviderAttempts(c)
+	auditlog.EnrichEntryWithError(c, "client_disconnected", err.Error(), "")
 	return gatewayErr
 }
 
