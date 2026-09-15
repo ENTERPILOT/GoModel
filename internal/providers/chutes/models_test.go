@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func TestListModels_PreservesChutesMetadata(t *testing.T) {
 		}]
 	}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
 
@@ -69,7 +70,7 @@ func TestListModels_FiltersBlankIDsAndKeepsMinimalModels(t *testing.T) {
 		]
 	}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
 	require.Len(t, resp.Data, 1)
@@ -87,7 +88,7 @@ func TestListModels_FiltersBlankIDsAndKeepsMinimalModels(t *testing.T) {
 func TestListModels_ReturnsUpstreamError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusServiceUnavailable, `{"error":{"message":"catalog unavailable"}}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	_, err := provider.ListModels(context.Background())
 	require.Error(t, err)
 

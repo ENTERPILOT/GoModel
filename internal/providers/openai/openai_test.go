@@ -299,8 +299,7 @@ func TestChatCompletion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
-			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:    "gpt-4o",
@@ -497,8 +496,7 @@ data: [DONE]
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.responseBody))
 			})
-			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			body, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
 				Model:    "gpt-4o",
@@ -562,8 +560,7 @@ func TestListModels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
-			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			resp, err := provider.ListModels(context.Background())
 
@@ -587,8 +584,7 @@ func TestCancelledContextReturnsError(t *testing.T) {
 		<-r.Context().Done()
 		w.WriteHeader(http.StatusRequestTimeout)
 	})
-	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -709,8 +705,7 @@ func TestResponses(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
-			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{Model: "gpt-4o", Input: "Hello"})
 
@@ -815,8 +810,7 @@ func TestResponsesUtilitiesForwardResponseContext(t *testing.T) {
 
 func TestResponsesWithArrayInput(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, responsesReplyJSON)
-	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
 		Model: "gpt-4o",
@@ -916,8 +910,7 @@ data: {"type":"response.completed","response":{"id":"resp_123","object":"respons
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.responseBody))
 			})
-			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{Model: "gpt-4o", Input: "Hello"})
 
@@ -1080,8 +1073,7 @@ func TestChatCompletion_PreservesToolConfiguration(t *testing.T) {
 				"choices": [{"index": 0, "message": {"role": "assistant", "content": "", "tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "lookup_weather", "arguments": "{\"city\":\"Warsaw\"}"}}]}, "finish_reason": "tool_calls"}],
 				"usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15}
 			}`)
-			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			maxTokens := 256
 			parallelToolCalls := false
@@ -1184,8 +1176,7 @@ func TestChatCompletion_MapsReasoningToReasoningEffort(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
-			provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 				Model:     tt.model,

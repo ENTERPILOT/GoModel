@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,7 +52,7 @@ func TestSetBaseURL_ChangesRequestTarget(t *testing.T) {
 func TestChatCompletion_ReturnsUpstreamError(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusTooManyRequests, `{"error":{"message":"rate limited","type":"rate_limit_error"}}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "Qwen/Qwen3-32B-TEE",
 		Messages: []core.Message{{Role: "user", Content: "hi"}},
@@ -67,7 +68,7 @@ func TestChatCompletion_ReturnsUpstreamError(t *testing.T) {
 func TestPassthrough_ForwardsOpaqueRequest(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusAccepted, `{"accepted":true}`)
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodPost,
 		Endpoint: "chat/completions?trace=true",
@@ -96,7 +97,7 @@ func TestPassthrough_ForwardsOpaqueRequest(t *testing.T) {
 func TestStreamResponses_TranslatesToChatCompletions(t *testing.T) {
 	server, capture := providertest.SSEServer(t, "data: {\"id\":\"chatcmpl-chutes\",\"object\":\"chat.completion.chunk\",\"created\":1677652288,\"model\":\"Qwen/Qwen3-32B-TEE\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n")
 
-	provider := NewWithHTTPClient("cpk_test", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "cpk_test", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	stream, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
 		Model: "Qwen/Qwen3-32B-TEE",
 		Input: "hi",

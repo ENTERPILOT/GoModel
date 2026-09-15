@@ -417,6 +417,8 @@ func TestSemanticCacheMiddleware_HeaderThresholdOverride(t *testing.T) {
 
 func TestSemanticCacheMiddleware_TTLExpiry(t *testing.T) {
 	store := NewMapVecStore()
+	current := time.Now()
+	store.now = func() time.Time { return current }
 	emb := &mockEmbedder{vector: []float32{1, 0, 0}}
 
 	m := newSemanticCacheMiddleware(emb, store, config.SemanticCacheConfig{
@@ -431,7 +433,7 @@ func TestSemanticCacheMiddleware_TTLExpiry(t *testing.T) {
 
 	require.Equal(t, 1, store.Len())
 
-	time.Sleep(2 * time.Second)
+	current = current.Add(2 * time.Second)
 	err := store.DeleteExpired(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 0, store.Len())

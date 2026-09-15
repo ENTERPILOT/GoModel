@@ -9,6 +9,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,9 +19,7 @@ const testAPIKey = "test-api-key"
 
 // newTestProvider builds a provider pointed at baseURL with the default client.
 func newTestProvider(baseURL string) *Provider {
-	provider := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-	provider.SetBaseURL(baseURL)
-	return provider
+	return New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: baseURL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 }
 
 // statusServer answers every request with status and body, so a table can

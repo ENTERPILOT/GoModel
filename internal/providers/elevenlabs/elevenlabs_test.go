@@ -7,6 +7,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/providers/providertest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,7 +33,7 @@ func TestListModels_FiltersToTextToSpeechAndAddsScribe(t *testing.T) {
 		{"model_id":"eleven_english_sts_v2","name":"Eleven English STS v2","can_do_text_to_speech":false}
 	]`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
 
@@ -58,7 +59,7 @@ func TestListModels_FiltersToTextToSpeechAndAddsScribe(t *testing.T) {
 func TestListModels_FallsBackToStaticModelsOnFirstFetchFailure(t *testing.T) {
 	server, _ := providertest.JSONServer(t, http.StatusServiceUnavailable, `unavailable`)
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	resp, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
 	require.Len(t, resp.Data, len(staticTranscriptionModels), "want only the static transcription models")
@@ -81,7 +82,7 @@ func TestListModels_PropagatesErrorOnceCatalogHasSucceededOnce(t *testing.T) {
 		_, _ = w.Write([]byte(`[{"model_id":"eleven_multilingual_v2","name":"Eleven Multilingual v2","can_do_text_to_speech":true}]`))
 	})
 
-	provider := NewWithHTTPClient("key", server.URL, server.Client(), llmclient.Hooks{})
+	provider := New(providers.ProviderConfig{APIKey: "key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 	_, err := provider.ListModels(context.Background())
 	require.NoError(t, err)
 

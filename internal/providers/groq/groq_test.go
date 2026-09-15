@@ -20,9 +20,7 @@ const testAPIKey = "test-api-key"
 
 // newTestProvider points a provider at the given upstream URL.
 func newTestProvider(baseURL string) *Provider {
-	p := NewWithHTTPClient(testAPIKey, nil, llmclient.Hooks{})
-	p.SetBaseURL(baseURL)
-	return p
+	return New(providers.ProviderConfig{APIKey: testAPIKey, BaseURL: baseURL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 }
 
 func TestChatCompatibleContract(t *testing.T) {

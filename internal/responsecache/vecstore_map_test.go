@@ -12,6 +12,14 @@ import (
 type MapVecStore struct {
 	mu      sync.Mutex
 	entries []mapVecEntry
+	now     func() time.Time // nil means time.Now; tests advance it instead of sleeping
+}
+
+func (s *MapVecStore) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 type mapVecEntry struct {
@@ -30,7 +38,7 @@ func NewMapVecStore() *MapVecStore {
 func (s *MapVecStore) Search(_ context.Context, vec []float32, paramsHash string, limit int) ([]VecResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now().Unix()
+	now := s.clock().Unix()
 	var results []VecResult
 	var toDelete []int
 	for i, e := range s.entries {
@@ -69,7 +77,7 @@ func (s *MapVecStore) Insert(_ context.Context, key string, vec []float32, respo
 	defer s.mu.Unlock()
 	var expiresAt int64
 	if ttl != 0 {
-		expiresAt = time.Now().Add(ttl).Unix()
+		expiresAt = s.clock().Add(ttl).Unix()
 	}
 	s.entries = append(s.entries, mapVecEntry{
 		key:        key,
@@ -84,7 +92,7 @@ func (s *MapVecStore) Insert(_ context.Context, key string, vec []float32, respo
 func (s *MapVecStore) DeleteExpired(_ context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now().Unix()
+	now := s.clock().Unix()
 	filtered := make([]mapVecEntry, 0, len(s.entries))
 	for _, e := range s.entries {
 		if e.expiresAt <= 0 || e.expiresAt >= now {

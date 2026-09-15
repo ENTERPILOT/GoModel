@@ -624,7 +624,7 @@ func TestPatchResponsesAttempt_PendingSnapshotWaitFollowsAccessScope(t *testing.
 			case <-finished:
 				require.False(t, tt.wantWait)
 
-			case <-time.After(time.Second):
+			case <-time.After(200 * time.Millisecond):
 				require.True(t, tt.wantWait)
 			}
 			s.finishPendingSnapshot("resp_t", done)

@@ -860,8 +860,7 @@ func TestChatCompletion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, capture := providertest.JSONServer(t, tt.statusCode, tt.responseBody)
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ChatRequest{
 				Model: "gemini-2.0-flash",
@@ -1193,8 +1192,7 @@ data: [DONE]
 				_, _ = io.WriteString(w, tt.responseBody)
 			})
 
-			provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
+			provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 			req := &core.ChatRequest{
 				Model: "gemini-2.0-flash",
@@ -1484,8 +1482,7 @@ func TestChatCompletionWithContext(t *testing.T) {
 		w.WriteHeader(http.StatusRequestTimeout)
 	})
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1524,8 +1521,7 @@ func TestResponses(t *testing.T) {
 		}
 	}`)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	req := &core.ResponsesRequest{
 		Model: "gemini-2.0-flash",
@@ -1625,8 +1621,7 @@ func TestStreamResponses(t *testing.T) {
 data: [DONE]
 `)
 
-	provider := NewWithHTTPClient("test-api-key", nil, llmclient.Hooks{})
-	provider.SetBaseURL(server.URL)
+	provider := New(providers.ProviderConfig{APIKey: "test-api-key", BaseURL: server.URL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 
 	req := &core.ResponsesRequest{
 		Model: "gemini-2.0-flash",

@@ -1480,7 +1480,13 @@ func TestCircuitBreaker_ClientCancellationDoesNotTrip(t *testing.T) {
 
 func TestClient_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(1 * time.Second)
+		// Outlive the client deadline, but stop once the client has gone so
+		// server.Close does not wait out the full second.
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(time.Second):
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
 	}))

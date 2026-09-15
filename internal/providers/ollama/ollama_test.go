@@ -45,9 +45,7 @@ data: [DONE]
 
 // newTestProvider builds a keyless provider pointed at baseURL.
 func newTestProvider(baseURL string) *Provider {
-	provider := NewWithHTTPClient("", nil, llmclient.Hooks{})
-	provider.SetBaseURL(baseURL)
-	return provider
+	return New(providers.ProviderConfig{BaseURL: baseURL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 }
 
 func TestNew(t *testing.T) {

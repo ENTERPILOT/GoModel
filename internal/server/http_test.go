@@ -20,8 +20,6 @@ import (
 	"github.com/enterpilot/gomodel/internal/providers"
 	"github.com/enterpilot/gomodel/internal/usage"
 
-	_ "github.com/enterpilot/gomodel/cmd/gomodel/docs"
-
 	"github.com/labstack/echo/v5"
 )
 
