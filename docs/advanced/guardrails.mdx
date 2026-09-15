@@ -398,6 +398,17 @@ Values that come from the caller, such as `user_path` and `session_id`, are
 inserted as sent. A request whose prompt had a tag expanded is not stored in the
 response cache, because the reply may repeat request-specific values.
 
+<Warning>
+Time-based tags can break provider prompt caching and raise costs. Providers
+cache the start of a prompt, usually the system message, and reuse it only
+when it is identical. `{{gomodel.time}}` and `{{gomodel.datetime}}` change
+every second, and `{{gomodel.request_id}}` changes on every request, so every
+call pays the full input price and waits longer. `{{gomodel.date}}` and
+`{{gomodel.weekday}}` change once a day and cost one cache miss per day. Prefer
+`date` over `time` or `datetime`, and place volatile tags at the end of the
+prompt rather than the start of a long system message.
+</Warning>
+
 #### Settings
 
 | Key | Required | Default | Description |
