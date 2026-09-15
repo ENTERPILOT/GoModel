@@ -82,9 +82,12 @@ func TestFindCredentialsAndHTTPClientAuthSelection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var gotForm url.Values
 			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				err := r.ParseForm()
-				assert.NoError(t, err)
-
+				// require cannot stop the test from the server goroutine, so a
+				// bad form ends the request here instead.
+				if !assert.NoError(t, r.ParseForm()) {
+					http.Error(w, "invalid form", http.StatusBadRequest)
+					return
+				}
 				gotForm = r.PostForm
 				token := tt.wantToken
 				if gotForm.Get("grant_type") == "urn:ietf:params:oauth:grant-type:jwt-bearer" {
