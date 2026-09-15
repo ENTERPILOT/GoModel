@@ -22,9 +22,10 @@ func toolPrompt() *Prompt {
 
 func TestPromptViews(t *testing.T) {
 	p := toolPrompt()
-	got := p.LastUser().ID
-	assert.Equal(t, "m4", got)
-	got = p.Text()
+	last := p.LastUser()
+	require.NotNil(t, last)
+	assert.Equal(t, "m4", last.ID)
+	got := p.Text()
 	assert.Equal(t, "be brief\nweather?\nthanks", got)
 	got = p.Text(RoleUser)
 	assert.Equal(t, "weather?\nthanks", got)

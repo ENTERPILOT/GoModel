@@ -103,18 +103,18 @@ func TestRunStreamCoalescesAndTerminates(t *testing.T) {
 func TestRunStreamObserveAndBuffer(t *testing.T) {
 	r := &redactor{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamObserve}}
 	res, err := RunStream(context.Background(), r, nil, []*pluginapi.StreamEvent{TextDelta("a secret")})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "a secret", res.Text[0], "observe: %+v, %v", res, err)
 
 	r = &redactor{policy: pluginapi.StreamPolicy{Mode: pluginapi.StreamBuffer}}
 	res, err = RunStream(context.Background(), r, nil, []*pluginapi.StreamEvent{TextDelta("a se"), TextDelta("cret")})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "a [x]", res.Text[0])
 	assert.Empty(t, r.windows)
 	assert.NotNil(t, res.Response, "buffer: %+v, %v", res, err)
 
 	res, err = RunStream(context.Background(), r, nil, []*pluginapi.StreamEvent{TextDelta("stop")})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, pluginapi.ActionBlock, res.End.Action)
 	assert.Empty(t, res.Text, "buffer block: %+v, %v", res, err)
 }
@@ -123,7 +123,7 @@ func TestHostAndFixtures(t *testing.T) {
 	h := NewHost("yes")
 	h.Finish = "length"
 	c, err := h.Complete(context.Background(), pluginapi.InferenceRequest{Model: "m"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "yes", c.Text(0))
 	assert.Equal(t, "length", c.Choices[0].FinishReason, "reply = %+v, %v", c, err)
 	c, _ = h.Complete(context.Background(), pluginapi.InferenceRequest{})
@@ -218,14 +218,14 @@ func TestRunStreamBufferedRespondAndPresetResponse(t *testing.T) {
 	preset.Choices[0].FinishReason = "length"
 	x = Exchange(nil, preset)
 	res, err = RunStream(context.Background(), r, x, []*pluginapi.StreamEvent{TextDelta("ignored")})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "keep", res.Text[0])
 	assert.Equal(t, "length", res.Response.Choices[0].FinishReason, "preset = %+v, %v", res, err)
 
 	// A respond decision is what the client receives.
 	answer := &responder{}
 	res, err = RunStream(context.Background(), answer, Exchange(nil, nil), []*pluginapi.StreamEvent{TextDelta("anything")})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "no", res.Text[0])
 	assert.Equal(t, pluginapi.ActionRespond, res.End.Action, "respond = %+v, %v", res, err)
 }
@@ -246,7 +246,7 @@ func TestHostReplyMayInspectHost(t *testing.T) {
 		return &pluginapi.Completion{Choices: []pluginapi.Choice{{Message: pluginapi.TextMessage(pluginapi.RoleAssistant, "n="+string(rune('0'+len(h.Requests()))))}}}, nil
 	}
 	c, err := h.Complete(context.Background(), pluginapi.InferenceRequest{})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "n=1", c.Text(0))
 	assert.Equal(t, 1, h.Recorded().Counts["seen"], "reply = %+v, %v", c, err)
 }

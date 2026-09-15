@@ -29,12 +29,12 @@ func TestParseConfigRejectsUnknownAndInvalid(t *testing.T) {
 		`[1]`:          "demo: invalid config:",
 	} {
 		_, err := ParseConfig("demo", testSchema, json.RawMessage(raw))
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), want)
 	}
 	for _, raw := range []string{``, `  `, `null`, `{}`} {
 		c, err := ParseConfig("demo", testSchema, json.RawMessage(raw))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "d", c.String("name", "d"), "%q: %v", raw, err)
 	}
 }
@@ -117,7 +117,7 @@ func TestConfigErrors(t *testing.T) {
 		c := parse(t, tt.raw)
 		tt.read(c)
 		err := c.Err()
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), tt.want)
 	}
 	// The first problem wins and later reads keep their defaults.
@@ -125,7 +125,7 @@ func TestConfigErrors(t *testing.T) {
 	assert.Equal(t, "d", c.String("name", "d"))
 	assert.Equal(t, 3, c.Int("n", 3, 0, 9))
 	err := c.Err()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "name must be a string")
 }
 
