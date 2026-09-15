@@ -141,3 +141,31 @@ func TestApplyPluginsLoadEnvEmpty(t *testing.T) {
 	require.NoError(t, applyEnvOverrides(cfg))
 	require.Equal(t, []PluginFileConfig{{File: "a.so"}}, cfg.Plugins.Load, "whitespace-only env must leave the config list untouched")
 }
+
+func TestLoad_PluginsLoadEnv(t *testing.T) {
+	sha := strings.Repeat("ab", 32) // 64 hex chars
+
+	t.Run("env list lands in Plugins.Load", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		t.Setenv("PLUGINS_LOAD", "optical_compression.so,keyword_block.so="+sha)
+		withTempDir(t, func(string) {
+			result, err := Load()
+			require.NoError(t, err)
+			require.Equal(t, []PluginFileConfig{
+				{File: "optical_compression.so"},
+				{File: "keyword_block.so", SHA256: sha},
+			}, result.Config.Plugins.Load)
+		})
+	})
+
+	t.Run("env replaces config.yaml list", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		t.Setenv("PLUGINS_LOAD", "b.so")
+		withTempDir(t, func(dir string) {
+			writeConfigYAML(t, dir, "plugins:\n  load:\n    - file: a.so\n")
+			result, err := Load()
+			require.NoError(t, err)
+			require.Equal(t, []PluginFileConfig{{File: "b.so"}}, result.Config.Plugins.Load)
+		})
+	})
+}
