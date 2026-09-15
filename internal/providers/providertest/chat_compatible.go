@@ -3,6 +3,7 @@ package providertest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -32,7 +33,7 @@ const ChatChunkSSE = "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completi
 // ResponsesJSON is a minimal Responses API reply whose single message says
 // Reply.
 const ResponsesJSON = `{
-	"id":"resp-test",
+	"id":"` + ResponsesID + `",
 	"object":"response",
 	"model":"` + Model + `",
 	"status":"completed",
@@ -40,8 +41,13 @@ const ResponsesJSON = `{
 	"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}
 }`
 
-// ResponsesSSE is a one-delta Responses API stream ending in [DONE].
-const ResponsesSSE = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"" + Reply + "\"}\n\ndata: [DONE]\n\n"
+// ResponsesID is the response ID the native Responses fixtures carry.
+const ResponsesID = "resp-test"
+
+// ResponsesSSE is a Responses API stream that opens with response.created,
+// carries one text delta, and ends in [DONE].
+const ResponsesSSE = "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"" + ResponsesID + "\",\"object\":\"response\",\"model\":\"" + Model + "\",\"status\":\"in_progress\"}}\n\n" +
+	"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"" + Reply + "\"}\n\ndata: [DONE]\n\n"
 
 // ModelsJSON lists Model as the only available model.
 const ModelsJSON = `{"object":"list","data":[{"id":"` + Model + `","object":"model","owned_by":"test"}]}`
@@ -135,7 +141,8 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 	if p.Registration.Discovery.AllowAPIKeyless {
 		t.Run("keyless requests carry no credentials", func(t *testing.T) {
 			server, capture := JSONServer(t, http.StatusOK, ChatCompletionJSON)
-			provider := p.New("", server.URL, server.Client(), llmclient.Hooks{})
+			provider := p.Registration.New(providers.ProviderConfig{BaseURL: server.URL}, providers.ProviderOptions{})
+			require.NotNil(t, provider)
 			_, err := provider.ChatCompletion(context.Background(), chatRequest())
 			require.NoError(t, err)
 			assert.Empty(t, capture.Last(t).Header.Get(p.AuthHeader), "upstream %s header", p.AuthHeader)
@@ -171,13 +178,23 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 	// Responses reach the upstream either translated to chat completions or
 	// forwarded to its own /responses endpoint; only the path, fixtures, and
 	// request shape differ.
+	// Translation keeps the chat completion ID on the reply but mints a resp_
+	// ID for the stream; native forwarding keeps the upstream ID for both.
 	responsesMode, responsesPath := "translate to chat completions", "/chat/completions"
 	responsesReply, responsesStream := ChatCompletionJSON, ChatChunkSSE
 	checkResponsesRequest := assertChatRequest
+	wantResponseID := "chatcmpl-test"
+	checkStreamID := func(t testing.TB, id string) {
+		assert.True(t, strings.HasPrefix(id, "resp_"), "response.created id = %q, want a generated resp_ ID", id)
+	}
 	if p.NativeResponses {
 		responsesMode, responsesPath = "forward to the upstream responses endpoint", "/responses"
 		responsesReply, responsesStream = ResponsesJSON, ResponsesSSE
 		checkResponsesRequest = assertResponsesRequest
+		wantResponseID = ResponsesID
+		checkStreamID = func(t testing.TB, id string) {
+			assert.Equal(t, ResponsesID, id, "response.created id")
+		}
 	}
 
 	t.Run("responses "+responsesMode, func(t *testing.T) {
@@ -189,6 +206,7 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		assertUpstream(t, req, http.MethodPost, responsesPath, p.AuthHeader, wantAuth)
 		checkResponsesRequest(t, req.JSON(t), false)
 		assertResponse(t, resp)
+		assert.Equal(t, wantResponseID, resp.ID, "response id")
 	})
 
 	t.Run("stream responses "+responsesMode, func(t *testing.T) {
@@ -201,6 +219,9 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		assertUpstream(t, req, http.MethodPost, responsesPath, p.AuthHeader, wantAuth)
 		checkResponsesRequest(t, req.JSON(t), true)
 		assertStreamBody(t, body, "response.output_text.delta", Reply, "data: [DONE]")
+		created := responseCreated(t, body)
+		checkStreamID(t, fmt.Sprint(created["id"]))
+		assert.Equal(t, Model, created["model"], "response.created model")
 	})
 
 	if p.SkipEmbeddings {
@@ -314,6 +335,27 @@ func assertResponse(t testing.TB, resp *core.ResponsesResponse) {
 	assert.Equal(t, 5, resp.Usage.InputTokens, "usage input tokens")
 	assert.Equal(t, 1, resp.Usage.OutputTokens, "usage output tokens")
 	assert.Equal(t, 6, resp.Usage.TotalTokens, "usage total tokens")
+}
+
+// responseCreated returns the response object of the stream's
+// response.created event.
+func responseCreated(t testing.TB, body []byte) map[string]any {
+	t.Helper()
+	for line := range strings.SplitSeq(string(body), "\n") {
+		data, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var event map[string]any
+		if json.Unmarshal([]byte(data), &event) != nil || event["type"] != "response.created" {
+			continue
+		}
+		response, ok := event["response"].(map[string]any)
+		require.True(t, ok, "response.created event = %s, want a response object", data)
+		return response
+	}
+	require.FailNow(t, "stream has no response.created event", "stream body = %q", body)
+	return nil
 }
 
 // assertStreamBody checks that each expected fragment appears in the stream.
