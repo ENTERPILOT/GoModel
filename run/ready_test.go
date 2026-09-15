@@ -38,7 +38,6 @@ func TestReadyProbeURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := probeURL(tt.server, "/health/ready")
 			require.Equal(t, tt.expected, got)
-
 		})
 	}
 }
@@ -96,7 +95,6 @@ func TestCheckReadyEndpoint(t *testing.T) {
 			}
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.wantErr)
-
 		})
 	}
 }

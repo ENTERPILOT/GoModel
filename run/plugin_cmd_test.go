@@ -111,7 +111,6 @@ func TestParsePluginBuildArgs(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.wantDir, opts.Dir)
 			require.Equal(t, tt.wantOut, opts.Out, "opts = %+v, want dir %q out %q", opts, tt.wantDir, tt.wantOut)
-
 		})
 	}
 }
@@ -165,7 +164,6 @@ func TestDeclaresBuildInfo(t *testing.T) {
 			got, err := declaresBuildInfo(dir)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got)
-
 		})
 	}
 	dir := t.TempDir()

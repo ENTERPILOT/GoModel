@@ -40,7 +40,6 @@ func TestHealthProbeURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := healthProbeURL(tt.server)
 			require.Equal(t, tt.expected, got)
-
 		})
 	}
 }
@@ -93,7 +92,6 @@ func TestCheckHealthEndpoint(t *testing.T) {
 			}
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.wantErr)
-
 		})
 	}
 }

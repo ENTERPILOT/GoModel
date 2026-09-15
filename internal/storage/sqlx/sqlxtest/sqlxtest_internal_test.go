@@ -26,7 +26,6 @@ func TestIsTransientCatalogRace(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := isTransientCatalogRace(tt.err)
 			require.Equal(t, tt.want, got, "isTransientCatalogRace(%v) = %v, want %v", tt.err, got, tt.want)
-
 		})
 	}
 }

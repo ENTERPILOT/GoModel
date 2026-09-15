@@ -51,7 +51,6 @@ func TestDemoModeFromEnv(t *testing.T) {
 			got, err := demoModeFromEnv()
 			require.Equal(t, tt.wantErr, err != nil)
 			require.Equal(t, tt.want, got)
-
 		})
 	}
 }

@@ -22,8 +22,7 @@ func TestNullableJSONStrings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := NullableJSONStrings(tt.values, "row-1")
-			require.Equal(t, tt.want, got, "NullableJSONStrings(%v) = %v, want %v", tt.values, got, tt.want)
-
+			require.Equal(t, tt.want, got, "NullableJSONStrings(%v)", tt.values)
 		})
 	}
 }
@@ -44,7 +43,6 @@ func TestStringsFromJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := StringsFromJSON(tt.raw, "row-1")
 			require.Equal(t, tt.want, got, "StringsFromJSON(%q) = %v, want %v", tt.raw, got, tt.want)
-
 		})
 	}
 }
@@ -73,7 +71,6 @@ func TestTimeFromUnix(t *testing.T) {
 				// one bad row takes down every listing that includes it.
 				json.Marshal(got)
 			require.NoError(t, err, "TimeFromUnix(%d) is not JSON-encodable: %v", tt.value, err)
-
 		})
 	}
 }

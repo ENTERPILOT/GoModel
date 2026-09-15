@@ -33,7 +33,6 @@ func TestDecodeMedia(t *testing.T) {
 			require.Equal(t, tt.wantOK, ok)
 			require.Equal(t, string(tt.want), string(data))
 			require.Equal(t, tt.wantType, mediaType, "DecodeMedia() = %q, %q, %v; want %q, %q, %v", data, mediaType, ok, tt.want, tt.wantType, tt.wantOK)
-
 		})
 	}
 }
@@ -97,7 +96,6 @@ func TestPromptSetMediaErrors(t *testing.T) {
 			require.Contains(t, err.Error(), tt.want)
 			assert.False(t, p.Changes().Dirty)
 			assert.Equal(t, "https://x/y.png", p.Messages[1].Parts[1].URL)
-
 		})
 	}
 }

@@ -80,7 +80,6 @@ func TestScalarRoundTrip(t *testing.T) {
 		assert.NotEmpty(t, payload)
 		assert.Equal(t, 1.5, amount)
 		assert.Equal(t, int64(1700000000), updatedAt)
-
 	})
 }
 
@@ -104,7 +103,6 @@ func TestFalseBoolRoundTrip(t *testing.T) {
 		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM conformance WHERE flag = ?`, false).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 1, count)
-
 	})
 }
 
@@ -116,7 +114,6 @@ func TestQueryRowNoRows(t *testing.T) {
 		var id string
 		err := db.QueryRow(ctx, `SELECT id FROM conformance WHERE id = ?`, "missing").Scan(&id)
 		require.ErrorIs(t, err, sqlx.ErrNoRows)
-
 	})
 }
 
@@ -141,7 +138,6 @@ func TestExecReportsRowsAffected(t *testing.T) {
 		affected, err = db.Exec(ctx, `DELETE FROM conformance WHERE id = ?`, "missing")
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), affected)
-
 	})
 }
 
@@ -176,7 +172,6 @@ func TestUpsertOnConflict(t *testing.T) {
 		assert.False(t, flag)
 		assert.Equal(t, `["two"]`, string(doc), "doc = %s, want [\"two\"]", doc)
 		assert.Equal(t, int64(2), updatedAt)
-
 	})
 }
 
@@ -210,7 +205,6 @@ func TestQueryIteratesRows(t *testing.T) {
 		require.Len(t, got, 3)
 		assert.Equal(t, "a", got[0])
 		assert.Equal(t, "c", got[2])
-
 	})
 }
 
@@ -227,7 +221,6 @@ func TestQueryOnEmptyTable(t *testing.T) {
 		assert.False(t, rows.Next())
 		err = rows.Err()
 		require.NoError(t, err)
-
 	})
 }
 
@@ -252,7 +245,6 @@ func TestInTxCommits(t *testing.T) {
 		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM conformance`).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 2, count)
-
 	})
 }
 
@@ -278,7 +270,6 @@ func TestInTxRollsBackOnError(t *testing.T) {
 		err = db.QueryRow(ctx, `SELECT COUNT(*) FROM conformance`).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, 0, count)
-
 	})
 }
 
@@ -302,7 +293,6 @@ func TestInTxSeesItsOwnWrites(t *testing.T) {
 			return nil
 		})
 		require.NoError(t, err)
-
 	})
 }
 
@@ -329,7 +319,6 @@ func TestRepeatedPlaceholderBindsPositionally(t *testing.T) {
 		err = db.QueryRow(ctx, `SELECT updated_at FROM conformance WHERE id = ?`, "a").Scan(&updatedAt)
 		require.NoError(t, err)
 		assert.Equal(t, int64(5), updatedAt)
-
 	})
 }
 
@@ -376,7 +365,6 @@ func TestInTxIsAtomicUnderConcurrency(t *testing.T) {
 		err := db.QueryRow(ctx, `SELECT COUNT(*) FROM conformance`).Scan(&count)
 		require.NoError(t, err)
 		assert.Equal(t, workers*3, count)
-
 	})
 }
 

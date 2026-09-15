@@ -357,7 +357,6 @@ func TestSendReloadSignal(t *testing.T) {
 				t.Fatal("the reload signal was never delivered")
 			}
 			assert.Contains(t, out.String(), "reload requested")
-
 		})
 	}
 }

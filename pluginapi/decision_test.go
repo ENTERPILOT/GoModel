@@ -24,7 +24,6 @@ func TestDecisions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.action, tt.d.Action)
 			assert.Equal(t, tt.blocks, tt.d.Blocks())
-
 		})
 	}
 

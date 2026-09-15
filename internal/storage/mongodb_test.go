@@ -68,7 +68,6 @@ func TestResolveMongoDatabase(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := resolveMongoDatabase(tt.cfg)
 			assert.Equal(t, tt.want, got, "resolveMongoDatabase(%+v) = %q, want %q", tt.cfg, got, tt.want)
-
 		})
 	}
 }

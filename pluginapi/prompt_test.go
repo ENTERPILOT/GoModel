@@ -79,7 +79,6 @@ func TestPromptSetText(t *testing.T) {
 			ch := p.Changes()
 			assert.True(t, ch.Dirty)
 			assert.Equal(t, ChangeEdited, ch.Messages[tt.msgID], "changes = %+v", ch)
-
 		})
 	}
 }
@@ -173,7 +172,6 @@ func TestPromptRemoveToolPairs(t *testing.T) {
 			assert.Equal(t, ChangeRemoved, ch.Messages["m2"])
 			assert.Equal(t, ChangeRemoved, ch.Messages["m3"], "changes = %+v", ch.Messages)
 			assert.Empty(t, p.ToolCalls())
-
 		})
 	}
 }
@@ -219,7 +217,6 @@ func TestPromptChangesEdits(t *testing.T) {
 			got := p.Changes()
 			assert.Equal(t, 0, got.Edits)
 			assert.False(t, got.Dirty, "Changes() after Reset = %+v", got)
-
 		})
 	}
 }

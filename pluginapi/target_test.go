@@ -89,7 +89,6 @@ func TestPromptSetTargetTextErrors(t *testing.T) {
 			err := p.SetTargetText(tt.target, "x")
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.want)
-
 		})
 	}
 	require.False(t, p.Changes().Dirty)

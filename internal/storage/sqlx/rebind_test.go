@@ -95,7 +95,6 @@ func TestRebind(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := rebind(tt.query)
 			assert.Equal(t, tt.want, got)
-
 		})
 	}
 }
@@ -127,7 +126,6 @@ func TestExpandTypes(t *testing.T) {
 			}
 			// An unexpanded token would reach the database as invalid SQL.
 			assert.NotContains(t, got, "{", "expansion left a token behind:\n%s", got)
-
 		})
 	}
 }
@@ -162,7 +160,6 @@ func TestIsDuplicateColumnError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := IsDuplicateColumnError(tt.err)
 			assert.Equal(t, tt.want, got, "IsDuplicateColumnError(%v) = %v, want %v", tt.err, got, tt.want)
-
 		})
 	}
 }

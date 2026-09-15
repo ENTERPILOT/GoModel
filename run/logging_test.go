@@ -38,7 +38,6 @@ func TestParseLogLevel(t *testing.T) {
 			got, err := parseLogLevel(tt.input)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, got, "parseLogLevel(%q) = %v, want %v", tt.input, got, tt.want)
-
 		})
 	}
 }
@@ -67,7 +66,6 @@ func TestNewLogHandlerFormatSelection(t *testing.T) {
 			handler := newLogHandler(io.Discard, tt.isTTY, tt.format, slog.LevelInfo)
 			_, gotJSON := handler.(*slog.JSONHandler)
 			require.Equal(t, tt.wantJSON, gotJSON, "newLogHandler(isTTY=%v, format=%q) json = %v, want %v", tt.isTTY, tt.format, gotJSON, tt.wantJSON)
-
 		})
 	}
 }
@@ -99,7 +97,6 @@ func TestNewLogHandlerUsesConfiguredLevel(t *testing.T) {
 			require.False(t, handler.Enabled(ctx, slog.LevelInfo))
 			require.True(t, handler.Enabled(ctx, slog.LevelWarn))
 			require.True(t, handler.Enabled(ctx, slog.LevelError))
-
 		})
 	}
 }
@@ -123,7 +120,6 @@ func TestNewLogHandlerEscapesAttrValues(t *testing.T) {
 			out := buf.String()
 			require.Equal(t, 1, strings.Count(out, "\n"))
 			require.NotContains(t, out, "\x1b", "%s handler leaked control characters: %q", format, out)
-
 		})
 	}
 }

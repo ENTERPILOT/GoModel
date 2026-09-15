@@ -37,7 +37,6 @@ func TestDatabaseName(t *testing.T) {
 			// The pid keeps parallel package processes apart; the counter keeps
 			// subtests within one process apart.
 			assert.True(t, strings.HasSuffix(got, "_"+pid+"_"+strconv.FormatUint(tc.counter, 10)), "name %q does not end in the pid and counter", got)
-
 		})
 	}
 }

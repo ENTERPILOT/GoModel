@@ -53,7 +53,6 @@ func TestDefaultSQLitePath(t *testing.T) {
 			t.Chdir(dir)
 			got := DefaultSQLitePath()
 			assert.Equal(t, tt.want, got)
-
 		})
 	}
 }
