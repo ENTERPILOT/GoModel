@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type testStore struct {
@@ -98,26 +99,17 @@ func TestServiceResolvePricingAppliesMostSpecificOverride(t *testing.T) {
 			OutputPerMtok: &baseOutput,
 		}},
 	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	pricing := service.ResolvePricing("gpt-4o", "openai")
-	if pricing == nil {
-		t.Fatal("ResolvePricing() = nil")
-	}
-	if pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
-		t.Fatalf("InputPerMtok = %#v, want 40", pricing.InputPerMtok)
-	}
-	if pricing.OutputPerMtok == nil || *pricing.OutputPerMtok != baseOutput {
-		t.Fatalf("OutputPerMtok = %#v, want base %v", pricing.OutputPerMtok, baseOutput)
-	}
-	if pricing.Currency != CurrencyUSD {
-		t.Fatalf("Currency = %q, want %q", pricing.Currency, CurrencyUSD)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, float64(40), *pricing.InputPerMtok)
+	require.NotNil(t, pricing.OutputPerMtok)
+	require.Equal(t, baseOutput, *pricing.OutputPerMtok)
+	require.Equal(t, CurrencyUSD, pricing.Currency)
 }
 
 func TestServiceResolvePricingModelWideBeatsProviderWide(t *testing.T) {
@@ -129,17 +121,14 @@ func TestServiceResolvePricingModelWideBeatsProviderWide(t *testing.T) {
 		testCatalog{providerNames: []string{"openai"}},
 		nil,
 	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	pricing := service.ResolvePricing("gpt-4o", "openai")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 30 {
-		t.Fatalf("ResolvePricing() = %+v, want model-wide input rate 30", pricing)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, float64(30), *pricing.InputPerMtok)
 }
 
 func TestServiceResolvePricingPreservesSlashShapedModelIDs(t *testing.T) {
@@ -152,22 +141,19 @@ func TestServiceResolvePricingPreservesSlashShapedModelIDs(t *testing.T) {
 		testCatalog{providerNames: []string{"openrouter"}},
 		nil,
 	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	pricing := service.ResolvePricing("anthropic/claude-sonnet", "openrouter")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
-		t.Fatalf("ResolvePricing(slash-shaped exact) = %+v, want exact input rate 40", pricing)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, float64(40), *pricing.InputPerMtok)
 
 	pricing = service.ResolvePricing("openrouter/anthropic/claude-sonnet", "openrouter")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 40 {
-		t.Fatalf("ResolvePricing(redundant provider prefix) = %+v, want exact input rate 40", pricing)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, float64(40), *pricing.InputPerMtok)
 }
 
 func TestServiceResolvePricingFallsBackToRawProviderOwnedModelForBasePricing(t *testing.T) {
@@ -179,17 +165,14 @@ func TestServiceResolvePricingFallsBackToRawProviderOwnedModelForBasePricing(t *
 			"openrouter/openrouter/free": {InputPerMtok: &baseInput},
 		},
 	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	pricing := service.ResolvePricing("openrouter/free", "openrouter")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != baseInput {
-		t.Fatalf("ResolvePricing(raw provider-owned base) = %+v, want base input rate %v", pricing, baseInput)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, baseInput, *pricing.InputPerMtok)
 }
 
 func TestServiceResolvePricingSlashShapedModelWideBeatsProviderWide(t *testing.T) {
@@ -201,41 +184,31 @@ func TestServiceResolvePricingSlashShapedModelWideBeatsProviderWide(t *testing.T
 		testCatalog{providerNames: []string{"openrouter"}},
 		nil,
 	)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	pricing := service.ResolvePricing("anthropic/claude-sonnet", "openrouter")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 30 {
-		t.Fatalf("ResolvePricing(slash-shaped model-wide) = %+v, want model-wide input rate 30", pricing)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, float64(30), *pricing.InputPerMtok)
 }
 
 func TestServiceRejectsEmptyAndNegativePricing(t *testing.T) {
 	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-
-	if err := service.Upsert(context.Background(), Override{Selector: "openai/gpt-4o"}); !IsValidationError(err) {
-		t.Fatalf("Upsert(empty) error = %v, want validation", err)
-	}
-	if err := service.Upsert(context.Background(), Override{
+	require.NoError(t, err)
+	err = service.Upsert(context.Background(), Override{Selector: "openai/gpt-4o"})
+	require.True(t, IsValidationError(err))
+	err = service.Upsert(context.Background(), Override{
 		Selector: "openai/gpt-4o",
 		Pricing:  Pricing{InputPerMtok: new(float64(-1))},
-	}); !IsValidationError(err) {
-		t.Fatalf("Upsert(negative) error = %v, want validation", err)
-	}
+	})
+	require.True(t, IsValidationError(err))
 }
 
 func TestServiceRejectsInvalidTieredPricing(t *testing.T) {
 	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	cases := []struct {
 		name    string
@@ -285,18 +258,14 @@ func TestServiceRejectsInvalidTieredPricing(t *testing.T) {
 				Selector: "openai/gpt-4o",
 				Pricing:  tc.pricing,
 			})
-			if !IsValidationError(err) {
-				t.Fatalf("Upsert(%s) error = %v, want validation", tc.name, err)
-			}
+			require.True(t, IsValidationError(err), "Upsert(%s) error = %v, want validation", tc.name, err)
 		})
 	}
 }
 
 func TestServiceAcceptsIncreasingTieredPricing(t *testing.T) {
 	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	err = service.Upsert(context.Background(), Override{
 		Selector: "openai/gpt-4o",
@@ -305,17 +274,13 @@ func TestServiceAcceptsIncreasingTieredPricing(t *testing.T) {
 			{UpToMtok: new(float64(1)), InputPerMtok: new(0.5)},
 		}},
 	})
-	if err != nil {
-		t.Fatalf("Upsert(valid tiers) error = %v", err)
-	}
+	require.NoError(t, err)
 }
 
 func TestServiceReconcilesSnapshotWhenUpsertRollbackFails(t *testing.T) {
 	store := newTestStore()
 	service, err := NewService(store, testCatalog{providerNames: []string{"openai"}}, nil)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	store.listErrs = []error{errors.New("list failed"), nil}
 	store.deleteErr = errors.New("rollback delete failed")
@@ -323,14 +288,12 @@ func TestServiceReconcilesSnapshotWhenUpsertRollbackFails(t *testing.T) {
 		Selector: "openai/gpt-4o",
 		Pricing:  Pricing{InputPerMtok: new(float64(9))},
 	})
-	if err == nil {
-		t.Fatal("Upsert() error = nil, want refresh/rollback error")
-	}
+	require.Error(t, err)
 
 	pricing := service.ResolvePricing("gpt-4o", "openai")
-	if pricing == nil || pricing.InputPerMtok == nil || *pricing.InputPerMtok != 9 {
-		t.Fatalf("ResolvePricing() = %+v, want reconciled persisted override", pricing)
-	}
+	require.NotNil(t, pricing)
+	require.NotNil(t, pricing.InputPerMtok)
+	require.Equal(t, float64(9), *pricing.InputPerMtok)
 }
 
 func TestServiceReconcilesSnapshotWhenDeleteRollbackFails(t *testing.T) {
@@ -341,47 +304,33 @@ func TestServiceReconcilesSnapshotWhenDeleteRollbackFails(t *testing.T) {
 		Pricing:      Pricing{InputPerMtok: new(float64(9))},
 	})
 	service, err := NewService(store, testCatalog{providerNames: []string{"openai"}}, nil)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	store.listErrs = []error{errors.New("list failed"), nil}
 	store.upsertErr = errors.New("rollback upsert failed")
 	err = service.Delete(context.Background(), "openai/gpt-4o")
-	if err == nil {
-		t.Fatal("Delete() error = nil, want refresh/rollback error")
-	}
-
-	if _, ok := service.Get("openai/gpt-4o"); ok {
-		t.Fatal("Get() found deleted override after rollback failure, want reconciled persisted state")
-	}
+	require.Error(t, err)
+	_, ok := service.Get("openai/gpt-4o")
+	require.False(t, ok)
 }
 
 func TestServiceBuildSnapshotRejectsDuplicateNormalizedSelectors(t *testing.T) {
 	service, err := NewService(newTestStore(), testCatalog{providerNames: []string{"openai"}}, nil)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = service.buildSnapshot([]Override{
 		{Selector: "openai/gpt-4o", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: new(float64(1))}},
 		{Selector: " openai/gpt-4o ", ProviderName: "openai", Model: "gpt-4o", Pricing: Pricing{InputPerMtok: new(float64(2))}},
 	})
-	if err == nil {
-		t.Fatal("buildSnapshot() error = nil, want duplicate selector error")
-	}
+	require.Error(t, err)
+
 	var duplicateErr *DuplicateSelectorError
-	if !errors.As(err, &duplicateErr) {
-		t.Fatalf("buildSnapshot() error = %T %v, want *DuplicateSelectorError", err, err)
-	}
-	if duplicateErr.Normalized != "openai/gpt-4o" ||
-		duplicateErr.Original != " openai/gpt-4o " ||
-		duplicateErr.Existing != "openai/gpt-4o" {
-		t.Fatalf("DuplicateSelectorError = %+v, want normalized/original/existing selector details", duplicateErr)
-	}
+	require.ErrorAs(t, err, &duplicateErr)
+	require.Equal(t, "openai/gpt-4o", duplicateErr.Normalized)
+	require.Equal(t, " openai/gpt-4o ", duplicateErr.Original)
+	require.Equal(t, "openai/gpt-4o", duplicateErr.Existing)
 }
 
 func TestNormalizedRefreshIntervalClampsBelowRefreshTimeout(t *testing.T) {
@@ -399,9 +348,8 @@ func TestNormalizedRefreshIntervalClampsBelowRefreshTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizedRefreshInterval(tt.interval); got != tt.want {
-				t.Fatalf("normalizedRefreshInterval(%s) = %s, want %s", tt.interval, got, tt.want)
-			}
+			got := normalizedRefreshInterval(tt.interval)
+			require.Equal(t, tt.want, got, "normalizedRefreshInterval(%s) = %s, want %s", tt.interval, got, tt.want)
 		})
 	}
 }

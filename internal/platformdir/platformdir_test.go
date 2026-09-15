@@ -4,19 +4,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDataDir(t *testing.T) {
 	dir, err := DataDir()
-	if err != nil {
-		t.Fatalf("DataDir() error: %v", err)
-	}
-	if !filepath.IsAbs(dir) {
-		t.Errorf("DataDir() = %q, want an absolute path", dir)
-	}
-	if filepath.Base(dir) != app {
-		t.Errorf("DataDir() = %q, want a %q leaf directory", dir, app)
-	}
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(dir), "DataDir() = %q, want an absolute path", dir)
+	assert.Equal(t, app, filepath.Base(dir), "DataDir() = %q, want a %q leaf directory", dir, app)
 }
 
 func TestDataDirHonorsXDGDataHome(t *testing.T) {
@@ -26,41 +23,28 @@ func TestDataDirHonorsXDGDataHome(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "/custom/data")
 
 	dir, err := DataDir()
-	if err != nil {
-		t.Fatalf("DataDir() error: %v", err)
-	}
-	if want := filepath.Join("/custom/data", app); dir != want {
-		t.Errorf("DataDir() = %q, want %q", dir, want)
-	}
+	require.NoError(t, err)
+	want := filepath.Join("/custom/data", app)
+	assert.Equal(t, want, dir)
 }
 
 func TestCacheDir(t *testing.T) {
 	dir, err := CacheDir()
-	if err != nil {
-		t.Fatalf("CacheDir() error: %v", err)
-	}
-	if !filepath.IsAbs(dir) {
-		t.Errorf("CacheDir() = %q, want an absolute path", dir)
-	}
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(dir), "CacheDir() = %q, want an absolute path", dir)
+
 	want := app
 	if runtime.GOOS == "windows" {
 		want = "cache"
 	}
-	if filepath.Base(dir) != want {
-		t.Errorf("CacheDir() = %q, want a %q leaf directory", dir, want)
-	}
+	assert.Equal(t, want, filepath.Base(dir))
 }
 
 func TestDataAndCacheDirsDiffer(t *testing.T) {
 	dataDir, err := DataDir()
-	if err != nil {
-		t.Fatalf("DataDir() error: %v", err)
-	}
+	require.NoError(t, err)
+
 	cacheDir, err := CacheDir()
-	if err != nil {
-		t.Fatalf("CacheDir() error: %v", err)
-	}
-	if dataDir == cacheDir {
-		t.Errorf("DataDir() and CacheDir() are both %q; they must differ", dataDir)
-	}
+	require.NoError(t, err)
+	assert.NotEqual(t, cacheDir, dataDir)
 }

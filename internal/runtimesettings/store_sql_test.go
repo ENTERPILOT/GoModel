@@ -7,6 +7,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newSQLiteStore(t *testing.T) *SQLStore {
@@ -16,28 +18,25 @@ func newSQLiteStore(t *testing.T) *SQLStore {
 		func(db sqlx.DB) (*SQLStore, error) { return NewSQLStore(context.Background(), db) },
 		nil,
 	)
-	if err != nil {
-		t.Fatalf("create SQL store: %v", err)
-	}
+	require.NoError(t, err)
+
 	return store
 }
 
 func TestSQLStoreSetDefaultKeepsFirstValue(t *testing.T) {
 	ctx := context.Background()
 	store := newSQLiteStore(t)
-
-	if stored, err := store.SetDefault(ctx, "install_id", "first"); err != nil || stored != "first" {
-		t.Fatalf("SetDefault on a new key = %q, %v; want the given value", stored, err)
-	}
-	if stored, err := store.SetDefault(ctx, "install_id", "second"); err != nil || stored != "first" {
-		t.Fatalf("SetDefault on an existing key = %q, %v; want the first value", stored, err)
-	}
-	if err := store.Set(ctx, "install_id", "third"); err != nil {
-		t.Fatal(err)
-	}
-	if stored, err := store.SetDefault(ctx, "install_id", "fourth"); err != nil || stored != "third" {
-		t.Fatalf("SetDefault after Set = %q, %v; want the set value", stored, err)
-	}
+	stored, err := store.SetDefault(ctx, "install_id", "first")
+	require.NoError(t, err)
+	require.Equal(t, "first", stored)
+	stored, err = store.SetDefault(ctx, "install_id", "second")
+	require.NoError(t, err)
+	require.Equal(t, "first", stored)
+	err = store.Set(ctx, "install_id", "third")
+	require.NoError(t, err)
+	stored, err = store.SetDefault(ctx, "install_id", "fourth")
+	require.NoError(t, err)
+	require.Equal(t, "third", stored)
 }
 
 func TestSQLStoreSetDefaultConvergesConcurrentWriters(t *testing.T) {
@@ -50,21 +49,18 @@ func TestSQLStoreSetDefaultConvergesConcurrentWriters(t *testing.T) {
 	for w := range writers {
 		wg.Go(func() {
 			stored, err := store.SetDefault(ctx, "install_id", string(rune('a'+w)))
-			if err != nil {
-				t.Errorf("writer %d: %v", w, err)
-			}
+			assert.NoError(t, err, "writer %d: %v", w, err)
+
 			results[w] = stored
 		})
 	}
 	wg.Wait()
 
 	winner, found, err := store.Get(ctx, "install_id")
-	if err != nil || !found {
-		t.Fatalf("Get after concurrent SetDefault: found=%v err=%v", found, err)
-	}
+	require.NoError(t, err)
+	require.True(t, found)
+
 	for w, got := range results {
-		if got != winner {
-			t.Errorf("writer %d got %q, database holds %q", w, got, winner)
-		}
+		assert.Equal(t, winner, got, "worker %d", w)
 	}
 }

@@ -5,35 +5,33 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func TestMongoDBStoreRoundTrip(t *testing.T) {
-	if _, err := NewMongoDBStore(context.Background(), nil); err == nil {
-		t.Fatal("expected error for nil database")
-	}
+	_, err := NewMongoDBStore(context.Background(), nil)
+	require.Error(t, err)
 
 	mongotest.Run(t, func(t *testing.T, database *mongo.Database) {
 		ctx := context.Background()
 		store, err := NewMongoDBStore(ctx, database)
-		if err != nil {
-			t.Fatalf("create MongoDB store: %v", err)
-		}
-		if _, found, err := store.Get(ctx, "pro.compression.level"); err != nil || found {
-			t.Fatalf("missing Get found=%v err=%v", found, err)
-		}
-		if err := store.Set(ctx, "pro.compression.level", "high"); err != nil {
-			t.Fatalf("Set: %v", err)
-		}
+		require.NoError(t, err)
+		_, found, err := store.Get(ctx, "pro.compression.level")
+		require.NoError(t, err)
+		require.False(t, found)
+		err = store.Set(ctx, "pro.compression.level", "high")
+		require.NoError(t, err)
+
 		value, found, err := store.Get(ctx, "pro.compression.level")
-		if err != nil || !found || value != "high" {
-			t.Fatalf("Get value=%q found=%v err=%v", value, found, err)
-		}
-		if stored, err := store.SetDefault(ctx, "pro.compression.level", "low"); err != nil || stored != "high" {
-			t.Fatalf("SetDefault on an existing key = %q, %v; want the existing value", stored, err)
-		}
-		if stored, err := store.SetDefault(ctx, "install_id", "first"); err != nil || stored != "first" {
-			t.Fatalf("SetDefault on a new key = %q, %v; want the given value", stored, err)
-		}
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, "high", value)
+		stored, err := store.SetDefault(ctx, "pro.compression.level", "low")
+		require.NoError(t, err)
+		require.Equal(t, "high", stored)
+		stored, err = store.SetDefault(ctx, "install_id", "first")
+		require.NoError(t, err)
+		require.Equal(t, "first", stored)
 	})
 }

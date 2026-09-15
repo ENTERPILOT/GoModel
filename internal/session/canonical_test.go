@@ -5,6 +5,7 @@ import (
 	encjson "encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
 )
 
@@ -37,9 +38,7 @@ func TestCanonicalSegmentMatchesStdlib(t *testing.T) {
 		parsed := gjson.Parse(segment)
 		got := canonicalSegment(parsed)
 		want := stdlibCanonical(t, parsed.Raw)
-		if !bytes.Equal(got, want) {
-			t.Errorf("canonicalSegment(%s) = %s, stdlib canonical = %s", segment, got, want)
-		}
+		assert.Equal(t, want, []byte(got), "canonicalSegment(%s) = %s, stdlib canonical = %s", segment, got, want)
 	}
 }
 

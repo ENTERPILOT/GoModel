@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 // runawayPlugin is a mutating prompt plugin that ignores its context and
@@ -38,20 +39,17 @@ func TestPromptRunDoesNotReadAbandonedExchange(t *testing.T) {
 	entry := plugins.Entry{Name: "runaway", Manifest: plugin.Manifest(), Kinds: plugins.ImplementedKinds(plugin), Source: plugins.SourceBuiltin, Factory: func() pluginapi.Plugin { return plugin }}
 	host := plugins.NewHost(plugins.HostDeps{}, plugins.HostInfo{PluginName: "runaway", InstanceName: "runaway"})
 	inst, err := plugins.NewInstance(context.Background(), entry, plugins.InstanceSpec{Name: "runaway", Timeout: 20 * time.Millisecond}, host)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	chain, err := plugins.BuildChain(pluginapi.KindPrompt, []plugins.Ref{{Instance: inst, Step: 1}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	msg := pluginapi.TextMessage(pluginapi.RoleUser, "hello")
 	msg.ID = "m0"
 	prompt := &pluginapi.Prompt{Messages: []pluginapi.Message{msg}}
 	prompt.Reset()
 
 	edited, err := newPromptRun(context.Background(), chain).run(context.Background(), prompt, nil)
-	if err == nil || edited {
-		t.Fatalf("run = edited %v, err %v; want a failure and no edit", edited, err)
-	}
+	require.Error(t, err)
+	require.False(t, edited)
 }

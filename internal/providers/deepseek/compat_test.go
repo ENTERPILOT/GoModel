@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
@@ -16,7 +18,7 @@ import (
 
 func TestAdaptCompatibility_PadsEveryAssistantTurnWhenToolsPresent(t *testing.T) {
 	var req core.ChatRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"deepseek-v4-flash",
 		"messages":[
 			{"role":"user","content":"hi"},
@@ -27,24 +29,18 @@ func TestAdaptCompatibility_PadsEveryAssistantTurnWhenToolsPresent(t *testing.T)
 			{"role":"assistant","content":"done","reasoning_content":"client reasoning"}
 		],
 		"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	adapted, err := AdaptCompatibility(&req, "deepseek", JSONSchemaDowngrade)
-	if err != nil {
-		t.Fatalf("AdaptCompatibility() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	want := map[int]string{1: `" "`, 3: `" "`, 5: `"client reasoning"`}
 	for i, message := range adapted.Messages {
-		if got := string(message.ExtraFields.Lookup("reasoning_content")); got != want[i] {
-			t.Errorf("messages[%d] (%s) reasoning_content = %q, want %q", i, message.Role, got, want[i])
-		}
+		got := string(message.ExtraFields.Lookup("reasoning_content"))
+		assert.Equal(t, want[i], got, "messages[%d] (%s) reasoning_content = %q, want %q", i, message.Role, got, want[i])
 	}
-	if req.Messages[1].ExtraFields.Lookup("reasoning_content") != nil {
-		t.Fatal("AdaptCompatibility() mutated the caller's request")
-	}
+	require.Nil(t, req.Messages[1].ExtraFields.Lookup("reasoning_content"))
 }
 
 func TestAdaptCompatibility_JSONSchemaResponseFormat(t *testing.T) {
@@ -105,21 +101,18 @@ func TestAdaptCompatibility_JSONSchemaResponseFormat(t *testing.T) {
 
 			adapted, err := AdaptCompatibility(req, "opencode_go", tt.mode)
 			if tt.wantErr {
-				if err == nil || !strings.Contains(err.Error(), `opencode_go model "deepseek-v4-flash"`) {
-					t.Fatalf("AdaptCompatibility() error = %v, want error naming provider and model", err)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), `opencode_go model "deepseek-v4-flash"`)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("AdaptCompatibility() error = %v", err)
-			}
-			if got := string(adapted.ExtraFields.Lookup("response_format")); got != tt.wantFormat {
-				t.Fatalf("response_format = %s, want %s", got, tt.wantFormat)
-			}
+			require.NoError(t, err)
+			got := string(adapted.ExtraFields.Lookup("response_format"))
+			require.Equal(t, tt.wantFormat, got)
+
 			if tt.wantInstruction == nil {
-				if adapted != req {
-					t.Fatal("AdaptCompatibility() copied an unchanged request")
-				}
+				require.Same(t, req, adapted)
+
 				return
 			}
 
@@ -127,18 +120,14 @@ func TestAdaptCompatibility_JSONSchemaResponseFormat(t *testing.T) {
 			for _, message := range adapted.Messages {
 				roles = append(roles, message.Role)
 			}
-			if strings.Join(roles, ",") != "system,system,user" {
-				t.Fatalf("roles = %v, want instruction after the leading system message", roles)
-			}
+			require.Equal(t, "system,system,user", strings.Join(roles, ","), "roles = %v, want instruction after the leading system message", roles)
+
 			instruction := core.ExtractTextContent(adapted.Messages[1].Content)
 			for _, want := range tt.wantInstruction {
-				if !strings.Contains(instruction, want) {
-					t.Errorf("instruction = %q, want it to contain %q", instruction, want)
-				}
+				assert.Contains(t, instruction, want)
 			}
-			if len(req.Messages) != 2 || string(req.ExtraFields.Lookup("response_format")) != tt.responseFormat {
-				t.Fatal("AdaptCompatibility() mutated the caller's request")
-			}
+			require.Len(t, req.Messages, 2)
+			require.Equal(t, tt.responseFormat, string(req.ExtraFields.Lookup("response_format")))
 		})
 	}
 }
@@ -162,28 +151,26 @@ func TestResponses_DowngradesJSONSchemaTextFormat(t *testing.T) {
 	defer server.Close()
 
 	var req core.ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"deepseek-v4-flash",
 		"input":"weather?",
 		"text":{"format":{"type":"json_schema","name":"weather","schema":{"type":"object"}}}
-	}`), &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	provider := NewWithHTTPClient("deepseek-key", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.Responses(context.Background(), &req); err != nil {
-		t.Fatalf("Responses() error = %v", err)
-	}
+	_, err = provider.Responses(context.Background(), &req)
+	require.NoError(t, err)
 
 	format, _ := gotBody["response_format"].(map[string]any)
-	if format["type"] != "json_object" {
-		t.Fatalf("response_format = %#v, want json_object", gotBody["response_format"])
-	}
+	require.Equal(t, "json_object", format["type"], "response_format = %#v, want json_object", gotBody["response_format"])
+
 	messages, _ := gotBody["messages"].([]any)
 	first, _ := messages[0].(map[string]any)
-	if first["role"] != "system" || !strings.Contains(first["content"].(string), `{"type":"object"}`) {
-		t.Fatalf("messages[0] = %#v, want schema instruction", first)
-	}
+	require.Equal(t, "system", first["role"])
+	content, ok := first["content"].(string)
+	require.True(t, ok, "messages[0] = %#v, want string content", first)
+	require.Contains(t, content, `{"type":"object"}`, "messages[0] = %#v, want schema instruction", first)
 }
 
 func TestIsModel(t *testing.T) {
@@ -200,9 +187,8 @@ func TestIsModel(t *testing.T) {
 		{model: "", want: false},
 	}
 	for _, tt := range tests {
-		if got := IsModel(tt.model); got != tt.want {
-			t.Errorf("IsModel(%q) = %v, want %v", tt.model, got, tt.want)
-		}
+		got := IsModel(tt.model)
+		assert.Equal(t, tt.want, got, "IsModel(%q) = %v, want %v", tt.model, got, tt.want)
 	}
 }
 
@@ -218,8 +204,7 @@ func TestLoadJSONSchemaMode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Setenv(jsonSchemaModeEnvVar, tt.value)
-		if got := LoadJSONSchemaMode(); got != tt.want {
-			t.Errorf("LoadJSONSchemaMode() with %q = %q, want %q", tt.value, got, tt.want)
-		}
+		got := LoadJSONSchemaMode()
+		assert.Equal(t, tt.want, got, "LoadJSONSchemaMode() with %q = %q, want %q", tt.value, got, tt.want)
 	}
 }

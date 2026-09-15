@@ -11,16 +11,16 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	err := os.MkdirAll(filepath.Dir(path), 0o755)
+	require.NoError(t, err)
+	err = os.WriteFile(path, []byte(content), 0o644)
+	require.NoError(t, err)
 }
 
 func TestResolve(t *testing.T) {
@@ -58,14 +58,13 @@ func TestResolve(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := Resolve(tt.file, tt.searchPaths)
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("Resolve() error = %v, want containing %q", err, tt.wantErr)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.wantErr)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("Resolve() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			// Relative files are returned with symlinks resolved; absolute
 			// files as given.
 			real, _ := filepath.EvalSymlinks(tt.want)
@@ -98,20 +97,16 @@ func TestVerifySHA256(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := VerifySHA256(path, tt.digest)
 			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("VerifySHA256() error = %v", err)
-				}
+				require.NoError(t, err)
+
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("VerifySHA256() error = %v, want containing %q", err, tt.wantErr)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
-
-	if _, err := FileSHA256(filepath.Join(t.TempDir(), "missing")); err == nil {
-		t.Fatal("FileSHA256(missing) error = nil")
-	}
+	_, err := FileSHA256(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
 }
 
 func TestLoad_NothingConfigured(t *testing.T) {
@@ -120,9 +115,8 @@ func TestLoad_NothingConfigured(t *testing.T) {
 		{SearchPaths: []string{"/nonexistent/dir"}},
 	} {
 		got, err := Load(cfg)
-		if err != nil || got != nil {
-			t.Fatalf("Load(%+v) = %v, %v; want nil, nil", cfg, got, err)
-		}
+		require.NoError(t, err)
+		require.Nil(t, got, "Load(%+v) = %v, %v; want nil, nil", cfg, got, err)
 	}
 }
 
@@ -159,9 +153,8 @@ func TestLoad_FailsBeforeOpening(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Load(tt.cfg)
-			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("Load() error = %v, want containing %q", err, tt.wantErr)
-			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
@@ -176,29 +169,25 @@ func TestBuildFlags(t *testing.T) {
 	}
 	f := flagsFromSettings(settings)
 	want := []string{"-trimpath", "-race", "-tags=swagger,e2e", "-gcflags=all=-N -l"}
-	if got := f.Args(); strings.Join(got, " ") != strings.Join(want, " ") {
-		t.Fatalf("Args() = %v, want %v", got, want)
-	}
-	if s := (BuildFlags{}).String(); s != "(none)" {
-		t.Fatalf("empty String() = %q", s)
-	}
+	got := f.Args()
+	require.Equal(t, strings.Join(want, " "), strings.Join(got, " "), "Args() = %v, want %v", got, want)
+	s := (BuildFlags{}).String()
+	require.Equal(t, "(none)", s)
 }
 
 func TestModuleVersion(t *testing.T) {
 	main := &debug.BuildInfo{Main: debug.Module{Path: hostModule, Version: "v1.2.3"}}
-	if got := moduleVersion(main); got != "v1.2.3" {
-		t.Fatalf("main module version = %q", got)
-	}
+	got := moduleVersion(main)
+	require.Equal(t, "v1.2.3", got)
+
 	dep := &debug.BuildInfo{
 		Main: debug.Module{Path: "example.com/custom"},
 		Deps: []*debug.Module{{Path: hostModule, Version: "v1.0.0", Replace: &debug.Module{Path: "../gomodel", Version: "v1.0.1"}}},
 	}
-	if got := moduleVersion(dep); got != "v1.0.1" {
-		t.Fatalf("replaced dep version = %q", got)
-	}
-	if got := moduleVersion(&debug.BuildInfo{}); got != "" {
-		t.Fatalf("absent module version = %q", got)
-	}
+	got = moduleVersion(dep)
+	require.Equal(t, "v1.0.1", got)
+	got = moduleVersion(&debug.BuildInfo{})
+	require.Empty(t, got)
 }
 
 func TestDescribeOpenError(t *testing.T) {
@@ -229,23 +218,19 @@ func TestDescribeOpenError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := describeOpenError(path, tt.err)
-			if !errors.Is(got, tt.err) {
-				t.Fatalf("describeOpenError() does not wrap the cause: %v", got)
-			}
+			require.ErrorIs(t, got, tt.err)
+
 			for _, w := range tt.want {
-				if !strings.Contains(got.Error(), w) {
-					t.Errorf("describeOpenError() = %q, want containing %q", got, w)
-				}
+				assert.Contains(t, got.Error(), w)
 			}
 		})
 	}
 }
 
 func TestFactoryFromSymbol(t *testing.T) {
-	if _, _, err := factoryFromSymbol(new(int)); err == nil || !strings.Contains(err.Error(), "*int") {
-		t.Fatalf("factoryFromSymbol(*int) error = %v", err)
-	}
-	if _, err := buildInfoFromSymbol("x"); err == nil {
-		t.Fatal("buildInfoFromSymbol(string) error = nil")
-	}
+	_, _, err := factoryFromSymbol(new(int))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "*int")
+	_, err = buildInfoFromSymbol("x")
+	require.Error(t, err)
 }

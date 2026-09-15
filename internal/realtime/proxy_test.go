@@ -3,7 +3,6 @@ package realtime_test
 import (
 	"bytes"
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +11,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/realtime"
 )
@@ -90,28 +91,22 @@ func TestProxyRelaysBidirectionally(t *testing.T) {
 
 	client, ctx, cancel := dialClient(t, proxy.URL)
 	defer cancel()
+	err := client.Write(ctx, websocket.MessageText, []byte("ping"))
+	require.NoError(t, err)
 
-	if err := client.Write(ctx, websocket.MessageText, []byte("ping")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
 	typ, data, err := client.Read(ctx)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if typ != websocket.MessageText || string(data) != "ping" {
-		t.Errorf("got (%v,%q), want (text,ping)", typ, data)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, websocket.MessageText, typ)
+	assert.Equal(t, "ping", string(data), "got (%v,%q), want (text,ping)", typ, data)
 
 	client.Close(websocket.StatusNormalClosure, "")
-	if got := waitProxy(t, retc); got != nil {
-		t.Errorf("Proxy returned %v, want nil on normal close", got)
-	}
+	got := waitProxy(t, retc)
+	assert.NoError(t, got)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(serverFrames) != 1 || string(serverFrames[0]) != "ping" {
-		t.Errorf("server tap = %v, want one echoed ping frame", serverFrames)
-	}
+	require.Len(t, serverFrames, 1)
+	assert.Equal(t, "ping", string(serverFrames[0]))
 }
 
 func TestProxyRelaysLargeFrame(t *testing.T) {
@@ -130,20 +125,16 @@ func TestProxyRelaysLargeFrame(t *testing.T) {
 	// 512 KiB — well beyond coder/websocket's 32 KiB default read limit, which the
 	// proxy raises so base64 audio frames survive.
 	big := strings.Repeat("a", 512*1024)
-	if err := client.Write(ctx, websocket.MessageText, []byte(big)); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	err := client.Write(ctx, websocket.MessageText, []byte(big))
+	require.NoError(t, err)
+
 	_, data, err := client.Read(ctx)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if len(data) != len(big) {
-		t.Errorf("echoed length = %d, want %d", len(data), len(big))
-	}
+	require.NoError(t, err)
+	assert.Equal(t, len(big), len(data))
+
 	client.Close(websocket.StatusNormalClosure, "")
-	if got := waitProxy(t, retc); got != nil {
-		t.Errorf("Proxy returned %v, want nil on normal close", got)
-	}
+	got := waitProxy(t, retc)
+	assert.NoError(t, got)
 }
 
 func TestProxyDialErrorBeforeUpgrade(t *testing.T) {
@@ -162,16 +153,14 @@ func TestProxyDialErrorBeforeUpgrade(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, resp, err := websocket.Dial(ctx, wsURL(srv.URL), nil)
-	if err == nil {
-		t.Fatal("expected client dial to fail against a non-upgraded response")
-	}
+	require.Error(t, err)
+
 	if resp != nil && resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
 	var de *realtime.DialError
-	if got := waitProxy(t, retc); !errors.As(got, &de) {
-		t.Fatalf("Proxy error = %v, want *DialError", got)
-	}
+	got := waitProxy(t, retc)
+	require.ErrorAs(t, got, &de)
 }
 
 func waitProxy(t *testing.T, retc chan error) error {
@@ -205,9 +194,9 @@ func TestProxyHeartbeatTearsDownUnresponsivePeer(t *testing.T) {
 
 	select {
 	case err := <-retc:
-		if err == nil || !strings.Contains(err.Error(), "heartbeat") {
-			t.Fatalf("Proxy returned %v, want heartbeat failure", err)
-		}
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "heartbeat")
+
 	case <-time.After(5 * time.Second):
 		t.Fatal("session with unresponsive peer was not torn down")
 	}
@@ -234,12 +223,10 @@ func TestProxyHeartbeatLeavesResponsiveSessionAlive(t *testing.T) {
 	// (reads in flight on both sides answer the pings) must not be killed.
 	deadline := time.Now().Add(400 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		if err := client.Write(ctx, websocket.MessageText, []byte(`{"ping":"pong"}`)); err != nil {
-			t.Fatalf("client write failed: %v", err)
-		}
-		if _, _, err := client.Read(ctx); err != nil {
-			t.Fatalf("client read failed: %v", err)
-		}
+		err := client.Write(ctx, websocket.MessageText, []byte(`{"ping":"pong"}`))
+		require.NoError(t, err)
+		_, _, err = client.Read(ctx)
+		require.NoError(t, err)
 	}
 
 	select {
@@ -247,14 +234,13 @@ func TestProxyHeartbeatLeavesResponsiveSessionAlive(t *testing.T) {
 		t.Fatalf("session ended early: %v", err)
 	default:
 	}
-	if err := client.Close(websocket.StatusNormalClosure, ""); err != nil {
-		t.Fatalf("client close failed: %v", err)
-	}
+	err := client.Close(websocket.StatusNormalClosure, "")
+	require.NoError(t, err)
+
 	select {
 	case err := <-retc:
-		if err != nil {
-			t.Fatalf("Proxy returned %v after normal close, want nil", err)
-		}
+		require.NoError(t, err)
+
 	case <-time.After(5 * time.Second):
 		t.Fatal("proxy did not finish after client close")
 	}
@@ -276,17 +262,13 @@ func TestProxyMapsClientFrames(t *testing.T) {
 	c, ctx, cancel := dialClient(t, proxy.URL)
 	defer cancel()
 	defer c.Close(websocket.StatusNormalClosure, "done")
+	err := c.Write(ctx, websocket.MessageText, []byte(`{"from":"client"}`))
+	require.NoError(t, err)
 
-	if err := c.Write(ctx, websocket.MessageText, []byte(`{"from":"client"}`)); err != nil {
-		t.Fatalf("client write failed: %v", err)
-	}
 	_, echoed, err := c.Read(ctx)
-	if err != nil {
-		t.Fatalf("client read failed: %v", err)
-	}
-	if got := string(echoed); got != `{"from":"mapped"}` {
-		t.Errorf("upstream saw %q, want the mapped frame", got)
-	}
+	require.NoError(t, err)
+	got := string(echoed)
+	assert.Equal(t, `{"from":"mapped"}`, got)
 }
 
 func TestProxyObservesClientFrames(t *testing.T) {
@@ -306,19 +288,17 @@ func TestProxyObservesClientFrames(t *testing.T) {
 	c, ctx, cancel := dialClient(t, proxy.URL)
 	defer cancel()
 	defer c.Close(websocket.StatusNormalClosure, "done")
+	err := c.Write(ctx, websocket.MessageText, []byte(`{"from":"client"}`))
+	require.NoError(t, err)
 
-	if err := c.Write(ctx, websocket.MessageText, []byte(`{"from":"client"}`)); err != nil {
-		t.Fatalf("client write failed: %v", err)
-	}
 	select {
 	case frame := <-observed:
-		if got := string(frame); got != `{"from":"client"}` {
-			t.Errorf("observer saw %q, want the unmapped client frame", got)
-		}
+		got := string(frame)
+		assert.Equal(t, `{"from":"client"}`, got)
+
 	case <-time.After(5 * time.Second):
 		t.Fatal("client frame was never observed")
 	}
-	if _, _, err := c.Read(ctx); err != nil {
-		t.Fatalf("client read failed: %v", err)
-	}
+	_, _, err = c.Read(ctx)
+	require.NoError(t, err)
 }

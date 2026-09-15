@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -84,9 +86,7 @@ func TestDetectPrecedence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := detector.Detect(chatSnapshot(tt.headers, tt.body), "")
-			if got != tt.want {
-				t.Fatalf("Detect() = %q, want %q", got, tt.want)
-			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -132,9 +132,7 @@ func TestDetectBodySignals(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := detector.Detect(chatSnapshot(nil, tt.body), "")
-			if got != tt.want {
-				t.Fatalf("Detect() = %q, want %q", got, tt.want)
-			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -143,9 +141,8 @@ func TestDetectMetadataWithoutSessionFallsThrough(t *testing.T) {
 	// A metadata.user_id with no embedded session uuid must not become a
 	// session id itself (it is a per-install value).
 	body := `{"model":"claude-sonnet-5","messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"user_deadbeef"}}`
-	if got := newBuiltinDetector(false).Detect(chatSnapshot(nil, body), ""); got != "" {
-		t.Fatalf("Detect() = %q, want empty", got)
-	}
+	got := newBuiltinDetector(false).Detect(chatSnapshot(nil, body), "")
+	require.Empty(t, got)
 }
 
 func TestDetectUserPathScoping(t *testing.T) {
@@ -153,33 +150,24 @@ func TestDetectUserPathScoping(t *testing.T) {
 
 	uuidHeaders := map[string][]string{"X-Session-Id": {"11111111-2222-3333-4444-555555555555"}}
 	scopedUUID := detector.Detect(chatSnapshot(uuidHeaders, `{}`), "team/app")
-	if !strings.HasPrefix(scopedUUID, "scoped-") {
-		t.Fatalf("uuid-shaped client id must be user-path scoped, got %q", scopedUUID)
-	}
-	if other := detector.Detect(chatSnapshot(uuidHeaders, `{}`), "team/other"); other == scopedUUID {
-		t.Fatal("same UUID-shaped id under different user paths must not collide")
-	}
+	require.True(t, strings.HasPrefix(scopedUUID, "scoped-"), "uuid-shaped client id must be user-path scoped, got %q", scopedUUID)
+	other := detector.Detect(chatSnapshot(uuidHeaders, `{}`), "team/other")
+	require.NotEqual(t, scopedUUID, other)
 
 	weakHeaders := map[string][]string{"Agent-Session-Id": {"20260727_3"}}
 	scoped := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/app")
-	if !strings.HasPrefix(scoped, "scoped-") {
-		t.Fatalf("weak id must be user-path scoped, got %q", scoped)
-	}
-	if again := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/app"); again != scoped {
-		t.Fatalf("scoping must be deterministic: %q vs %q", scoped, again)
-	}
-	// Hash scoping (with the \x00 separator plus cleanSessionID's control-char
-	// rejection) is unambiguous: no path/id split can forge another tenant's
-	// id the way plain "path|id" concatenation could.
-	if other := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/other"); other == scoped {
-		t.Fatal("same weak id under different user paths must not collide")
-	}
-	if got := detector.Detect(chatSnapshot(weakHeaders, `{}`), ""); got != "20260727_3" {
-		t.Fatalf("weak id without user path stays raw, got %q", got)
-	}
-	if got := detector.Detect(chatSnapshot(uuidHeaders, `{}`), ""); got != "11111111-2222-3333-4444-555555555555" {
-		t.Fatalf("UUID-shaped id without user path stays raw, got %q", got)
-	}
+	require.True(t, strings.HasPrefix(scoped, "scoped-"), "weak id must be user-path scoped, got %q", scoped)
+	again := detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/app")
+	require.Equal(t, scoped, again)
+	other = // Hash scoping (with the \x00 separator plus cleanSessionID's control-char
+		// rejection) is unambiguous: no path/id split can forge another tenant's
+		// id the way plain "path|id" concatenation could.
+		detector.Detect(chatSnapshot(weakHeaders, `{}`), "team/other")
+	require.NotEqual(t, scoped, other)
+	got := detector.Detect(chatSnapshot(weakHeaders, `{}`), "")
+	require.Equal(t, "20260727_3", got)
+	got = detector.Detect(chatSnapshot(uuidHeaders, `{}`), "")
+	require.Equal(t, "11111111-2222-3333-4444-555555555555", got)
 }
 
 func TestDetectAutoStability(t *testing.T) {
@@ -192,18 +180,12 @@ func TestDetectAutoStability(t *testing.T) {
 	idSecond := detector.Detect(chatSnapshot(nil, second), "")
 	idOther := detector.Detect(chatSnapshot(nil, other), "")
 
-	if idFirst == "" || !strings.HasPrefix(idFirst, "auto-") {
-		t.Fatalf("auto id = %q, want auto- prefix", idFirst)
-	}
-	if idFirst != idSecond {
-		t.Fatalf("appending a turn changed the id: %q vs %q", idFirst, idSecond)
-	}
-	if idFirst == idOther {
-		t.Fatal("different conversations must get different auto ids")
-	}
-	if scoped := detector.Detect(chatSnapshot(nil, first), "team"); scoped == idFirst {
-		t.Fatal("auto id must fold in the user path")
-	}
+	require.NotEmpty(t, idFirst)
+	require.True(t, strings.HasPrefix(idFirst, "auto-"))
+	require.Equal(t, idSecond, idFirst)
+	require.NotEqual(t, idOther, idFirst)
+	scoped := detector.Detect(chatSnapshot(nil, first), "team")
+	require.NotEqual(t, idFirst, scoped)
 }
 
 func TestDetectAutoCanonicalizesStablePrefixJSON(t *testing.T) {
@@ -217,9 +199,8 @@ func TestDetectAutoCanonicalizesStablePrefixJSON(t *testing.T) {
 
 	idFirst := detector.Detect(chatSnapshot(nil, first), "team")
 	idReordered := detector.Detect(chatSnapshot(nil, reordered), "team")
-	if idFirst == "" || idFirst != idReordered {
-		t.Fatalf("semantic JSON changes split auto session: %q vs %q", idFirst, idReordered)
-	}
+	require.NotEmpty(t, idFirst)
+	require.Equal(t, idReordered, idFirst)
 }
 
 func TestCanonicalSegmentFallsBackToExactRawJSON(t *testing.T) {
@@ -232,9 +213,8 @@ func TestCanonicalSegmentFallsBackToExactRawJSON(t *testing.T) {
 		`1}`,
 	} {
 		result := gjson.Result{Type: gjson.JSON, Raw: raw}
-		if got := string(canonicalSegment(result)); got != raw {
-			t.Errorf("canonicalSegment(%q) = %q, want exact raw fallback", raw, got)
-		}
+		got := string(canonicalSegment(result))
+		assert.Equal(t, raw, got)
 	}
 }
 
@@ -245,12 +225,8 @@ func TestDetectAutoPreservesArrayOrderAndValues(t *testing.T) {
 	changedValue := `{"model":"gpt-4o","tools":[{"type":"function","function":{"name":"first"}},{"type":"function","function":{"name":"second"}}],"messages":[{"role":"user","content":"hello!"}]}`
 
 	id := detector.Detect(chatSnapshot(nil, base), "")
-	if id == detector.Detect(chatSnapshot(nil, reorderedTools), "") {
-		t.Fatal("tool array order must remain part of the session anchor")
-	}
-	if id == detector.Detect(chatSnapshot(nil, changedValue), "") {
-		t.Fatal("changed message value must change the session anchor")
-	}
+	require.NotEqual(t, detector.Detect(chatSnapshot(nil, reorderedTools), ""), id)
+	require.NotEqual(t, detector.Detect(chatSnapshot(nil, changedValue), ""), id)
 }
 
 func TestDetectAutoSystemPromptShape(t *testing.T) {
@@ -260,12 +236,8 @@ func TestDetectAutoSystemPromptShape(t *testing.T) {
 	sibling := `{"model":"gpt-4o","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"opener B"}]}`
 
 	idFirst := detector.Detect(chatSnapshot(nil, first), "")
-	if idFirst != detector.Detect(chatSnapshot(nil, followUp), "") {
-		t.Fatal("follow-up with appended turns must keep the id")
-	}
-	if idFirst == detector.Detect(chatSnapshot(nil, sibling), "") {
-		t.Fatal("same system prompt with a different first user message must get a new id")
-	}
+	require.Equal(t, detector.Detect(chatSnapshot(nil, followUp), ""), idFirst)
+	require.NotEqual(t, detector.Detect(chatSnapshot(nil, sibling), ""), idFirst)
 }
 
 func TestDetectAutoResponsesStringInput(t *testing.T) {
@@ -273,9 +245,8 @@ func TestDetectAutoResponsesStringInput(t *testing.T) {
 		"POST", "/v1/responses", nil, nil, nil,
 		"application/json", []byte(`{"model":"gpt-4o","input":"hello"}`), false, "req-1", nil,
 	)
-	if got := newBuiltinDetector(true).Detect(snapshot, ""); !strings.HasPrefix(got, "auto-") {
-		t.Fatalf("Detect() = %q, want auto- prefix", got)
-	}
+	got := newBuiltinDetector(true).Detect(snapshot, "")
+	require.True(t, strings.HasPrefix(got, "auto-"), "Detect() = %q, want auto- prefix", got)
 }
 
 func TestDetectAutoSkipsNonConversationEndpoints(t *testing.T) {
@@ -283,9 +254,8 @@ func TestDetectAutoSkipsNonConversationEndpoints(t *testing.T) {
 		"POST", "/v1/embeddings", nil, nil, nil,
 		"application/json", []byte(`{"model":"text-embedding-3-small","input":"hi"}`), false, "req-1", nil,
 	)
-	if got := newBuiltinDetector(true).Detect(snapshot, ""); got != "" {
-		t.Fatalf("Detect() = %q, want empty", got)
-	}
+	got := newBuiltinDetector(true).Detect(snapshot, "")
+	require.Empty(t, got)
 }
 
 func TestDetectBodyNotCaptured(t *testing.T) {
@@ -295,31 +265,27 @@ func TestDetectBodyNotCaptured(t *testing.T) {
 		"application/json", nil, true, "req-1", nil,
 	)
 	detector := newBuiltinDetector(true)
-	if got := detector.Detect(snapshot, ""); got != "header-wins" {
-		t.Fatalf("header detection must survive uncaptured bodies, got %q", got)
-	}
+	got := detector.Detect(snapshot, "")
+	require.Equal(t, "header-wins", got)
+
 	snapshot = core.NewRequestSnapshot(
 		"POST", "/v1/chat/completions", nil, nil, nil,
 		"application/json", nil, true, "req-1", nil,
 	)
-	if got := detector.Detect(snapshot, ""); got != "" {
-		t.Fatalf("Detect() = %q, want empty for uncaptured body", got)
-	}
+	got = detector.Detect(snapshot, "")
+	require.Empty(t, got)
 }
 
 func TestDetectAutoDisabled(t *testing.T) {
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`
-	if got := newBuiltinDetector(false).Detect(chatSnapshot(nil, body), ""); got != "" {
-		t.Fatalf("Detect() = %q, want empty with auto detection off", got)
-	}
+	got := newBuiltinDetector(false).Detect(chatSnapshot(nil, body), "")
+	require.Empty(t, got)
 }
 
 func TestDetectNilReceiverAndSnapshot(t *testing.T) {
 	var detector *Detector
-	if got := detector.Detect(chatSnapshot(nil, `{}`), ""); got != "" {
-		t.Fatalf("nil detector Detect() = %q, want empty", got)
-	}
-	if got := newBuiltinDetector(true).Detect(nil, ""); got != "" {
-		t.Fatalf("nil snapshot Detect() = %q, want empty", got)
-	}
+	got := detector.Detect(chatSnapshot(nil, `{}`), "")
+	require.Empty(t, got)
+	got = newBuiltinDetector(true).Detect(nil, "")
+	require.Empty(t, got)
 }

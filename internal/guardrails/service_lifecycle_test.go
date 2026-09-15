@@ -10,6 +10,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 // lifecyclePlugin counts how many instances were built and closed.
@@ -65,19 +66,18 @@ func lifecycleService(t *testing.T, store *testStore) (*Service, *lifecycleTrack
 	t.Helper()
 	tracker := &lifecycleTracker{}
 	catalog := plugins.NewCatalog()
-	if err := catalog.Register(func() pluginapi.Plugin { return &lifecyclePlugin{tracker: tracker} }, plugins.SourceRegistered); err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
+	err := catalog.Register(func() pluginapi.Plugin { return &lifecyclePlugin{tracker: tracker} }, plugins.SourceRegistered)
+	require.NoError(t, err)
+
 	service, err := NewService(store, catalog, plugins.HostDeps{})
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	clock := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	service.now = func() time.Time { return clock }
 	service.retireAfter = time.Minute
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return service, tracker, &clock
 }
 
@@ -91,58 +91,45 @@ func TestServiceRefreshKeepsUnchangedInstances(t *testing.T) {
 	before := service.snapshot.instances["a"]
 
 	store.definitions["a"] = lifecycleDefinition("a", "one", "described differently")
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if service.snapshot.instances["a"] != before {
-		t.Fatal("unchanged definition rebuilt its instance")
-	}
-	if built, closed := tracker.counts(); built != 2 || closed != 0 {
-		t.Fatalf("built = %d, closed = %d, want 2 built and none closed", built, closed)
-	}
+	err := service.Refresh(context.Background())
+	require.NoError(t, err)
+	require.Same(t, before, service.snapshot.instances["a"])
+	built, closed := tracker.counts()
+	require.Equal(t, 2, built)
+	require.Equal(t, 0, closed)
 }
 
 func TestServiceRetiresReplacedInstancesAfterGrace(t *testing.T) {
 	store := newTestStore(lifecycleDefinition("a", "one", ""))
 	service, tracker, clock := lifecycleService(t, store)
 	before := service.snapshot.instances["a"]
-
-	if err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", "")); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
-	if service.snapshot.instances["a"] == before {
-		t.Fatal("changed config kept the old instance")
-	}
-	if built, closed := tracker.counts(); built != 2 || closed != 0 {
-		t.Fatalf("after replace: built = %d, closed = %d, want the old instance still open", built, closed)
-	}
+	err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", ""))
+	require.NoError(t, err)
+	require.NotSame(t, before, service.snapshot.instances["a"])
+	built, closed := tracker.counts()
+	require.Equal(t, 2, built)
+	require.Equal(t, 0, closed)
 
 	*clock = clock.Add(30 * time.Second)
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if _, closed := tracker.counts(); closed != 0 {
-		t.Fatal("retired instance closed before its grace period")
-	}
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	_, closed = tracker.counts()
+	require.Equal(t, 0, closed)
 
 	*clock = clock.Add(31 * time.Second)
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if built, closed := tracker.counts(); built != 2 || closed != 1 {
-		t.Fatalf("after grace: built = %d, closed = %d, want the replaced instance closed", built, closed)
-	}
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	built, closed = tracker.counts()
+	require.Equal(t, 2, built)
+	require.Equal(t, 1, closed)
+	err = service.Delete(context.Background(), "a")
+	require.NoError(t, err)
 
-	if err := service.Delete(context.Background(), "a"); err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
 	*clock = clock.Add(2 * time.Minute)
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if _, closed := tracker.counts(); closed != 2 {
-		t.Fatalf("closed = %d, want the deleted instance closed too", closed)
-	}
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	_, closed = tracker.counts()
+	require.Equal(t, 2, closed)
 }
 
 func TestServiceClosesFreshInstancesWhenPersistFails(t *testing.T) {
@@ -151,32 +138,24 @@ func TestServiceClosesFreshInstancesWhenPersistFails(t *testing.T) {
 	before := service.snapshot.instances["a"]
 
 	store.upsertErr = errors.New("db down")
-	if err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", "")); err == nil {
-		t.Fatal("Upsert() error = nil, want persistence failure")
-	}
-	if service.snapshot.instances["a"] != before {
-		t.Fatal("failed upsert swapped the snapshot")
-	}
-	if built, closed := tracker.counts(); built != 2 || closed != 1 {
-		t.Fatalf("built = %d, closed = %d, want the never-served instance closed", built, closed)
-	}
+	require.Error(t, service.Upsert(context.Background(), lifecycleDefinition("a", "changed", "")))
+	require.Same(t, before, service.snapshot.instances["a"])
+	built, closed := tracker.counts()
+	require.Equal(t, 2, built)
+	require.Equal(t, 1, closed)
 }
 
 func TestServiceCloseClosesActiveAndRetiredInstances(t *testing.T) {
 	store := newTestStore(lifecycleDefinition("a", "one", ""), lifecycleDefinition("b", "two", ""))
 	service, tracker, _ := lifecycleService(t, store)
-	if err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", "")); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
-	if err := service.Close(context.Background()); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-	if built, closed := tracker.counts(); built != 3 || closed != 3 {
-		t.Fatalf("built = %d, closed = %d, want everything closed once", built, closed)
-	}
-	if service.Len() != 0 {
-		t.Fatal("snapshot not emptied by Close")
-	}
+	err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", ""))
+	require.NoError(t, err)
+	err = service.Close(context.Background())
+	require.NoError(t, err)
+	built, closed := tracker.counts()
+	require.Equal(t, 3, built)
+	require.Equal(t, 3, closed)
+	require.Equal(t, 0, service.Len())
 }
 
 func TestServiceKeepsHeldRetiredInstanceOpen(t *testing.T) {
@@ -185,39 +164,31 @@ func TestServiceKeepsHeldRetiredInstanceOpen(t *testing.T) {
 	old := service.snapshot.instances["a"]
 	// A compiled workflow or a long-running stream still holds the instance.
 	old.Acquire()
+	err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", ""))
+	require.NoError(t, err)
 
-	if err := service.Upsert(context.Background(), lifecycleDefinition("a", "changed", "")); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
 	*clock = clock.Add(5 * time.Minute)
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if _, closed := tracker.counts(); closed != 0 {
-		t.Fatal("held instance closed after the grace period")
-	}
-	if old.Closed() {
-		t.Fatal("held instance marked closed")
-	}
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	_, closed := tracker.counts()
+	require.Equal(t, 0, closed)
+	require.False(t, old.Closed())
 
 	old.Release()
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if _, closed := tracker.counts(); closed != 1 {
-		t.Fatalf("closed = %d, want the released instance closed", closed)
-	}
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+	_, closed = tracker.counts()
+	require.Equal(t, 1, closed)
 }
 
 func TestServiceViewsCarryTheGuardrailFlag(t *testing.T) {
 	store := newTestStore(lifecycleDefinition("a", "one", ""))
 	service, _, _ := lifecycleService(t, store)
 	views := service.ListViews()
-	if len(views) != 1 || !views[0].Guardrail {
-		t.Fatalf("views = %+v, want one view flagged as a guardrail from its plugin manifest", views)
-	}
+	require.Len(t, views, 1)
+	require.True(t, views[0].Guardrail)
+
 	types := service.TypeDefinitions()
-	if len(types) != 1 || !types[0].Guardrail {
-		t.Fatalf("types = %+v, want the lifecycle type flagged as a guardrail", types)
-	}
+	require.Len(t, types, 1)
+	require.True(t, types[0].Guardrail)
 }

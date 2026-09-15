@@ -11,6 +11,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/plugins"
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 type staticChains struct{ chains *plugins.Chains }
@@ -32,18 +33,16 @@ func (p *decisionPlugin) OnPrompt(context.Context, *pluginapi.Exchange) (plugina
 func chainsFor(t *testing.T, service *Service, steps ...StepReference) *plugins.Chains {
 	t.Helper()
 	chains, err := service.BuildChains(steps)
-	if err != nil {
-		t.Fatalf("BuildChains() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return chains
 }
 
 func decodeChatRequest(t *testing.T, body string) *core.ChatRequest {
 	t.Helper()
 	req, err := core.DecodeChatRequest([]byte(body), nil)
-	if err != nil {
-		t.Fatalf("DecodeChatRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return req
 }
 
@@ -76,38 +75,30 @@ func TestWorkflowRequestPatcherRewritesChatPreservingStructure(t *testing.T) {
 	}`)
 	ctx, state := plugins.WithRequestState(context.Background())
 	got, err := patcher.PatchChatRequest(ctx, req)
-	if err != nil {
-		t.Fatalf("PatchChatRequest() error = %v", err)
-	}
-	if len(got.Messages) != 4 {
-		t.Fatalf("messages = %d, want 4 (system injected)", len(got.Messages))
-	}
-	if got.Messages[0].Role != "system" || core.ExtractTextContent(got.Messages[0].Content) != "be safe" {
-		t.Fatalf("first message = %+v", got.Messages[0])
-	}
+	require.NoError(t, err)
+	require.Len(t, got.Messages, 4)
+	require.Equal(t, "system", got.Messages[0].Role)
+	require.Equal(t, "be safe", core.ExtractTextContent(got.Messages[0].Content), "first message = %+v", got.Messages[0])
+
 	body, err := json.Marshal(got.Messages[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(body), `"cache_control":{"type":"ephemeral"}`) || !strings.Contains(string(body), `[|---|](PERSON_1)`) || !strings.Contains(string(body), `image_url`) || !strings.Contains(string(body), `"name":"alice"`) {
-		t.Fatalf("user message lost structure: %s", body)
-	}
-	if core.ExtractTextContent(got.Messages[3].Content) != "John was here" {
-		t.Fatalf("tool message rewritten though tool role not selected: %+v", got.Messages[3])
-	}
-	if got.Messages[2].Content != nil || len(got.Messages[2].ToolCalls) != 1 {
-		t.Fatalf("assistant tool call message changed: %+v", got.Messages[2])
-	}
-	if got.Temperature == nil || *got.Temperature != 0.2 || got.Model != "gpt-4o" {
-		t.Fatalf("envelope changed: %+v", got)
-	}
-	if core.ExtractTextContent(req.Messages[0].Content) != "Hi, I am John" {
-		t.Fatal("original request mutated")
-	}
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"cache_control":{"type":"ephemeral"}`)
+	require.Contains(t, string(body), `[|---|](PERSON_1)`)
+	require.Contains(t, string(body), `image_url`)
+	require.Contains(t, string(body), `"name":"alice"`, "user message lost structure: %s", body)
+	require.Equal(t, "John was here", core.ExtractTextContent(got.Messages[3].Content), "tool message rewritten though tool role not selected: %+v", got.Messages[3])
+	require.Nil(t, got.Messages[2].Content)
+	require.Len(t, got.Messages[2].ToolCalls, 1, "assistant tool call message changed: %+v", got.Messages[2])
+	require.NotNil(t, got.Temperature)
+	require.Equal(t, 0.2, *got.Temperature)
+	require.Equal(t, "gpt-4o", got.Model, "envelope changed: %+v", got)
+	require.Equal(t, "Hi, I am John", core.ExtractTextContent(req.Messages[0].Content))
+
 	records := state.Snapshot()
-	if len(records) != 2 || !records[0].Edited || records[0].Instance != "privacy" || !records[1].Edited {
-		t.Fatalf("records = %+v", records)
-	}
+	require.Len(t, records, 2)
+	require.True(t, records[0].Edited)
+	require.Equal(t, "privacy", records[0].Instance)
+	require.True(t, records[1].Edited)
 }
 
 func TestWorkflowRequestPatcherLeavesRequestUntouchedWithoutEdits(t *testing.T) {
@@ -115,38 +106,29 @@ func TestWorkflowRequestPatcherLeavesRequestUntouchedWithoutEdits(t *testing.T) 
 	patcher := NewWorkflowRequestPatcher(staticChains{chainsFor(t, service, StepReference{Ref: "safety", Step: 1})})
 	req := decodeChatRequest(t, `{"model":"m","messages":[{"role":"system","content":"already"},{"role":"user","content":"hi"}]}`)
 	got, err := patcher.PatchChatRequest(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != req {
-		t.Fatal("request copied although nothing changed")
-	}
-	if got, err := NewWorkflowRequestPatcher(nil).PatchChatRequest(context.Background(), req); err != nil || got != req {
-		t.Fatalf("nil resolver = %v, %v", got, err)
-	}
-	if got, err := NewWorkflowRequestPatcher(staticChains{}).PatchChatRequest(context.Background(), req); err != nil || got != req {
-		t.Fatalf("nil chains = %v, %v", got, err)
-	}
+	require.NoError(t, err)
+	require.Same(t, req, got)
+	got, err = NewWorkflowRequestPatcher(nil).PatchChatRequest(context.Background(), req)
+	require.NoError(t, err)
+	require.Same(t, req, got)
+	got, err = NewWorkflowRequestPatcher(staticChains{}).PatchChatRequest(context.Background(), req)
+	require.NoError(t, err)
+	require.Same(t, req, got)
 }
 
 func TestWorkflowRequestPatcherResponses(t *testing.T) {
 	service := newService(t, newTestStore(Definition{Name: "override", Type: "system_prompt", Config: json.RawMessage(`{"mode":"override","content":"new rules"}`)}), nil)
 	patcher := NewWorkflowRequestPatcher(staticChains{chainsFor(t, service, StepReference{Ref: "override", Step: 1})})
 	req, err := core.DecodeResponsesRequest([]byte(`{"model":"m","instructions":"old","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got, err := patcher.PatchResponsesRequest(context.Background(), req)
-	if err != nil {
-		t.Fatalf("PatchResponsesRequest() error = %v", err)
-	}
-	if got.Instructions != "new rules" {
-		t.Fatalf("instructions = %q", got.Instructions)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "new rules", got.Instructions)
+
 	body, _ := json.Marshal(got.Input)
-	if !strings.Contains(string(body), `"input_text"`) || strings.Contains(string(body), "new rules") {
-		t.Fatalf("input = %s", body)
-	}
+	require.Contains(t, string(body), `"input_text"`)
+	require.NotContains(t, string(body), "new rules", "input = %s", body)
 }
 
 func TestWorkflowRequestPatcherDecisions(t *testing.T) {
@@ -168,41 +150,41 @@ func TestWorkflowRequestPatcherDecisions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			catalog := plugins.NewCatalog()
 			decision := tt.decision
-			if err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{decision: decision} }, plugins.SourceBuiltin); err != nil {
-				t.Fatal(err)
-			}
+			err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{decision: decision} }, plugins.SourceBuiltin)
+			require.NoError(t, err)
+
 			service, err := NewService(newTestStore(Definition{Name: "d", Type: "decide", FailMode: tt.failMode}), catalog, plugins.HostDeps{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := service.Refresh(context.Background()); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+			err = service.Refresh(context.Background())
+			require.NoError(t, err)
+
 			patcher := NewWorkflowRequestPatcher(staticChains{chainsFor(t, service, StepReference{Ref: "d", Step: 1})})
 			ctx, state := plugins.WithRequestState(context.Background())
 			got, err := patcher.PatchChatRequest(ctx, decodeChatRequest(t, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 			switch {
 			case tt.wantShort:
 				var short *plugins.ShortCircuit
-				if !errors.As(err, &short) || short.Completion == nil || short.Completion.Text(0) != "I cannot help" || short.Instance != "d" {
-					t.Fatalf("error = %v, want short circuit", err)
-				}
+				require.ErrorAs(t, err, &short)
+				require.NotNil(t, short.Completion)
+				require.Equal(t, "I cannot help", short.Completion.Text(0))
+				require.Equal(t, "d", short.Instance)
+
 			case tt.wantStatus != 0:
 				var gatewayErr *core.GatewayError
-				if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != tt.wantStatus || gatewayErr.Code == nil || *gatewayErr.Code != tt.wantCode || gatewayErr.Message != "nope" {
-					t.Fatalf("error = %v, want %d/%s", err, tt.wantStatus, tt.wantCode)
-				}
+				require.ErrorAs(t, err, &gatewayErr)
+				require.Equal(t, tt.wantStatus, gatewayErr.HTTPStatusCode())
+				require.NotNil(t, gatewayErr.Code)
+				require.Equal(t, tt.wantCode, *gatewayErr.Code)
+				require.Equal(t, "nope", gatewayErr.Message)
+
 			default:
-				if err != nil || got == nil {
-					t.Fatalf("unexpected error %v", err)
-				}
-				if state.ResponseHeaders.Get(plugins.GuardrailHeader) != tt.wantHeader {
-					t.Fatalf("header = %q, want %q", state.ResponseHeaders.Get(plugins.GuardrailHeader), tt.wantHeader)
-				}
+				require.NoError(t, err)
+				require.NotNil(t, got)
+				require.Equal(t, tt.wantHeader, state.ResponseHeaders.Get(plugins.GuardrailHeader))
 			}
-			if records := state.Snapshot(); len(records) != 1 || records[0].Decision.Action != plugins.NormalizeDecision(tt.decision).Action {
-				t.Fatalf("records = %+v", records)
-			}
+			records := state.Snapshot()
+			require.Len(t, records, 1)
+			require.Equal(t, plugins.NormalizeDecision(tt.decision).Action, records[0].Decision.Action)
 		})
 	}
 }
@@ -223,9 +205,9 @@ func (failingPlugin) OnPrompt(context.Context, *pluginapi.Exchange) (pluginapi.D
 // passthrough (and the provider's own history) alone.
 func TestWorkflowRequestPatcherEditsPromptContent(t *testing.T) {
 	catalog := testCatalog(t)
-	if err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{} }, plugins.SourceRegistered); err != nil {
-		t.Fatal(err)
-	}
+	err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{} }, plugins.SourceRegistered)
+	require.NoError(t, err)
+
 	store := newTestStore(
 		Definition{Name: "classify", Type: "decide"},
 		systemPromptDefinition("inject", "be safe"),
@@ -233,12 +215,9 @@ func TestWorkflowRequestPatcherEditsPromptContent(t *testing.T) {
 		Definition{Name: "flag", Type: "string_replace", Config: json.RawMessage(`{"rules":"secret => [redacted]","on_match":"warn"}`)},
 	)
 	service, err := NewService(store, catalog, plugins.HostDeps{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	tests := []struct {
 		name  string
@@ -259,9 +238,8 @@ func TestWorkflowRequestPatcherEditsPromptContent(t *testing.T) {
 				chains = chainsFor(t, service, tt.steps...)
 			}
 			patcher := NewWorkflowRequestPatcher(staticChains{chains})
-			if got := patcher.EditsPromptContent(context.Background()); got != tt.want {
-				t.Fatalf("EditsPromptContent() = %v, want %v", got, tt.want)
-			}
+			got := patcher.EditsPromptContent(context.Background())
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -273,28 +251,27 @@ func TestWorkflowRequestPatcherFailModes(t *testing.T) {
 	}{{"", true}, {"closed", true}, {"open", false}} {
 		t.Run("fail_mode="+tt.failMode, func(t *testing.T) {
 			catalog := plugins.NewCatalog()
-			if err := catalog.Register(func() pluginapi.Plugin { return failingPlugin{} }, plugins.SourceBuiltin); err != nil {
-				t.Fatal(err)
-			}
+			err := catalog.Register(func() pluginapi.Plugin { return failingPlugin{} }, plugins.SourceBuiltin)
+			require.NoError(t, err)
+
 			service, err := NewService(newTestStore(Definition{Name: "f", Type: "fail", FailMode: tt.failMode}), catalog, plugins.HostDeps{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := service.Refresh(context.Background()); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+			err = service.Refresh(context.Background())
+			require.NoError(t, err)
+
 			patcher := NewWorkflowRequestPatcher(staticChains{chainsFor(t, service, StepReference{Ref: "f", Step: 1})})
 			_, err = patcher.PatchChatRequest(context.Background(), decodeChatRequest(t, `{"model":"m","messages":[{"role":"user","content":"hi"}]}`))
 			if !tt.wantErr {
-				if err != nil {
-					t.Fatalf("error = %v, want nil (fail open)", err)
-				}
+				require.NoError(t, err)
+
 				return
 			}
 			var gatewayErr *core.GatewayError
-			if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusInternalServerError || *gatewayErr.Code != plugins.CodePluginFailure {
-				t.Fatalf("error = %v, want 500 plugin_failure", err)
-			}
+			require.ErrorAs(t, err, &gatewayErr)
+			require.Equal(t, http.StatusInternalServerError, gatewayErr.HTTPStatusCode())
+			require.NotNil(t, gatewayErr.Code)
+			require.Equal(t, plugins.CodePluginFailure, *gatewayErr.Code)
+
 			if strings.Contains(gatewayErr.Message, "f") && strings.Contains(gatewayErr.Message, "classifier") {
 				t.Fatalf("client message leaks plugin details: %q", gatewayErr.Message)
 			}
@@ -314,49 +291,42 @@ func TestWorkflowBatchPreparerRewritesInlineItems(t *testing.T) {
 		},
 	}
 	result, err := preparer.PrepareBatchRequest(context.Background(), "openai", req)
-	if err != nil {
-		t.Fatalf("PrepareBatchRequest() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	chat := string(result.Request.Requests[0].Body)
-	if !strings.Contains(chat, `"guardrail system"`) || !strings.Contains(chat, `"extra":1`) || !strings.Contains(chat, `"seed":7`) {
-		t.Fatalf("chat item = %s", chat)
-	}
+	require.Contains(t, chat, `"guardrail system"`)
+	require.Contains(t, chat, `"extra":1`)
+	require.Contains(t, chat, `"seed":7`)
+
 	var chatReq core.ChatRequest
-	if err := json.Unmarshal(result.Request.Requests[0].Body, &chatReq); err != nil || len(chatReq.Messages) != 2 || chatReq.Messages[0].Role != "system" {
-		t.Fatalf("chat item decode = %+v, %v", chatReq, err)
-	}
-	if resp := string(result.Request.Requests[1].Body); !strings.Contains(resp, `"instructions":"guardrail system"`) {
-		t.Fatalf("responses item = %s", resp)
-	}
-	if string(result.Request.Requests[2].Body) != `{"model":"m","input":"Hi"}` {
-		t.Fatalf("embeddings item changed: %s", result.Request.Requests[2].Body)
-	}
-	if string(req.Requests[0].Body) != `{"model":"m","messages":[{"role":"user","content":"Hi","extra":1}],"seed":7}` {
-		t.Fatal("original batch mutated")
-	}
-	if result, err := NewWorkflowBatchPreparer(nil, staticChains{}).PrepareBatchRequest(context.Background(), "openai", req); err != nil || result.Request != req {
-		t.Fatalf("empty chain result = %+v, %v", result, err)
-	}
+	err = json.Unmarshal(result.Request.Requests[0].Body, &chatReq)
+	require.NoError(t, err)
+	require.Len(t, chatReq.Messages, 2)
+	require.Equal(t, "system", chatReq.Messages[0].Role, "chat item decode = %+v, %v", chatReq, err)
+	resp := string(result.Request.Requests[1].Body)
+	require.Contains(t, resp, `"instructions":"guardrail system"`)
+	require.Equal(t, `{"model":"m","input":"Hi"}`, string(result.Request.Requests[2].Body), "embeddings item changed: %s", result.Request.Requests[2].Body)
+	require.Equal(t, `{"model":"m","messages":[{"role":"user","content":"Hi","extra":1}],"seed":7}`, string(req.Requests[0].Body))
+	result, err = NewWorkflowBatchPreparer(nil, staticChains{}).PrepareBatchRequest(context.Background(), "openai", req)
+	require.NoError(t, err)
+	require.Same(t, req, result.Request, "empty chain result = %+v, %v", result, err)
 }
 
 func TestWorkflowBatchPreparerRejectsRespondDecisions(t *testing.T) {
 	catalog := plugins.NewCatalog()
-	if err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{decision: pluginapi.Respond("no")} }, plugins.SourceBuiltin); err != nil {
-		t.Fatal(err)
-	}
+	err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{decision: pluginapi.Respond("no")} }, plugins.SourceBuiltin)
+	require.NoError(t, err)
+
 	service, err := NewService(newTestStore(Definition{Name: "d", Type: "decide"}), catalog, plugins.HostDeps{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
 	preparer := NewWorkflowBatchPreparer(nil, staticChains{chainsFor(t, service, StepReference{Ref: "d", Step: 1})})
 	_, err = preparer.PrepareBatchRequest(context.Background(), "openai", &core.BatchRequest{Requests: []core.BatchRequestItem{
 		{CustomID: "chat-1", Method: "POST", URL: "/v1/chat/completions", Body: json.RawMessage(`{"model":"m","messages":[{"role":"user","content":"Hi"}]}`)},
 	}})
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusBadRequest {
-		t.Fatalf("error = %v, want 400", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusBadRequest, gatewayErr.HTTPStatusCode())
 }

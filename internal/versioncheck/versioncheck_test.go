@@ -9,6 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newTestChecker wires a Checker to a manifest server and a fixed clock.
@@ -48,9 +51,8 @@ func TestManifestURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := manifestURL(tt.base, tt.app); got != tt.want {
-				t.Fatalf("manifestURL(%q, %q) = %q, want %q", tt.base, tt.app, got, tt.want)
-			}
+			got := manifestURL(tt.base, tt.app)
+			require.Equal(t, tt.want, got, "manifestURL(%q, %q) = %q, want %q", tt.base, tt.app, got, tt.want)
 		})
 	}
 }
@@ -72,13 +74,10 @@ func TestSafeURLKeepsOnlySchemeAndHost(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.want+" "+tt.raw, func(t *testing.T) {
 			got := SafeURL(tt.raw)
-			if got != tt.want {
-				t.Fatalf("SafeURL(%q) = %q, want %q", tt.raw, got, tt.want)
-			}
+			require.Equal(t, tt.want, got, "SafeURL(%q) = %q, want %q", tt.raw, got, tt.want)
+
 			for _, secret := range []string{"hunter2", "token=abc", "s3cr3t"} {
-				if strings.Contains(got, secret) {
-					t.Fatalf("SafeURL(%q) leaked %q", tt.raw, secret)
-				}
+				require.NotContains(t, got, secret, "SafeURL(%q) leaked %q", tt.raw, secret)
 			}
 		})
 	}
@@ -90,15 +89,10 @@ func TestRefreshReportsUpdate(t *testing.T) {
 	})
 
 	status, err := checker.Refresh(context.Background(), Beacon{})
-	if err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
-	if status.Latest != "0.1.82" || !status.UpdateAvailable {
-		t.Fatalf("got %+v, want latest 0.1.82 with an update", status)
-	}
-	if status.CheckedAt == "" {
-		t.Fatal("expected CheckedAt to be stamped")
-	}
+	require.NoError(t, err)
+	require.Equal(t, "0.1.82", status.Latest)
+	require.True(t, status.UpdateAvailable, "got %+v, want latest 0.1.82 with an update", status)
+	require.NotEmpty(t, status.CheckedAt)
 }
 
 func TestRefreshSendsIdentityHeaders(t *testing.T) {
@@ -111,19 +105,16 @@ func TestRefreshSendsIdentityHeaders(t *testing.T) {
 		got = r.Header.Clone()
 		_, _ = w.Write([]byte("1.0.0-pro"))
 	})
+	_, err := checker.Refresh(context.Background(), Beacon{})
+	require.NoError(t, err)
 
-	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
 	for header, want := range map[string]string{
 		"X-Gomodel-Version": "1.0.0-pro",
 		"X-Gomodel-App":     "GoModel Pro",
 		"X-Gomodel-Install": "install-123",
 		"X-Gomodel-Source":  "scheduled",
 	} {
-		if got.Get(header) != want {
-			t.Errorf("%s = %q, want %q", header, got.Get(header), want)
-		}
+		assert.Equal(t, want, got.Get(header))
 	}
 }
 
@@ -139,21 +130,17 @@ func TestRefreshAsksInstallIDFuncPerRequest(t *testing.T) {
 		sent = append(sent, r.Header.Get("X-GoModel-Install"))
 		_, _ = w.Write([]byte("0.1.82"))
 	})
+	_, err := // The database answered between the two checks and the id it holds
+		// differs from the provisional one: the second request must carry it.
+		checker.Refresh(context.Background(), Beacon{})
+	require.NoError(t, err)
 
-	// The database answered between the two checks and the id it holds
-	// differs from the provisional one: the second request must carry it.
-	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
 	current = "database-id"
 	now = now.Add(2 * minRefreshInterval)
-	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
-
-	if want := []string{"provisional-id", "database-id"}; !slices.Equal(sent, want) {
-		t.Fatalf("X-GoModel-Install per request = %q, want %q (InstallID must not override the func)", sent, want)
-	}
+	_, err = checker.Refresh(context.Background(), Beacon{})
+	require.NoError(t, err)
+	want := []string{"provisional-id", "database-id"}
+	require.True(t, slices.Equal(sent, want), "X-GoModel-Install per request = %q, want %q (InstallID must not override the func)", sent, want)
 }
 
 func TestRefreshForwardsOnlyAllowlistedBrowserHeaders(t *testing.T) {
@@ -174,38 +161,24 @@ func TestRefreshForwardsOnlyAllowlistedBrowserHeaders(t *testing.T) {
 	inbound.Header.Set("Referer", "https://gateway.example.com/admin/dashboard?key=leak")
 
 	beacon := BeaconFromRequest(inbound, "2026-08-26-abc")
-	if _, err := checker.Refresh(context.Background(), beacon); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
+	_, err := checker.Refresh(context.Background(), beacon)
+	require.NoError(t, err)
+	assert.Equal(t, "Mozilla/5.0 (Macintosh)", got.Get("User-Agent"))
+	assert.Equal(t, "en-GB,en;q=0.9", got.Get("Accept-Language"))
+	assert.Equal(t, `"macOS"`, got.Get("Sec-CH-UA-Platform"))
+	value := // The dashboard's hostname identifies the operator's organization, so it
+		// is never forwarded.
+		got.Get("X-GoModel-Host")
+	assert.Empty(t, value)
+	assert.Equal(t, "2026-08-26-abc", got.Get("X-GoModel-Date"))
+	value = // Client addresses are personal data and are never forwarded.
+		got.Get("X-Forwarded-For")
+	assert.Empty(t, value)
+	assert.Equal(t, "dashboard", got.Get("X-GoModel-Source"))
 
-	if got.Get("User-Agent") != "Mozilla/5.0 (Macintosh)" {
-		t.Errorf("User-Agent = %q, want the browser's", got.Get("User-Agent"))
-	}
-	if got.Get("Accept-Language") != "en-GB,en;q=0.9" {
-		t.Errorf("Accept-Language = %q", got.Get("Accept-Language"))
-	}
-	if got.Get("Sec-CH-UA-Platform") != `"macOS"` {
-		t.Errorf("Sec-CH-UA-Platform = %q", got.Get("Sec-CH-UA-Platform"))
-	}
-	// The dashboard's hostname identifies the operator's organization, so it
-	// is never forwarded.
-	if value := got.Get("X-GoModel-Host"); value != "" {
-		t.Errorf("X-GoModel-Host = %q, want the hostname kept local", value)
-	}
-	if got.Get("X-GoModel-Date") != "2026-08-26-abc" {
-		t.Errorf("X-GoModel-Date = %q", got.Get("X-GoModel-Date"))
-	}
-	// Client addresses are personal data and are never forwarded.
-	if value := got.Get("X-Forwarded-For"); value != "" {
-		t.Errorf("X-Forwarded-For = %q, want the address kept local", value)
-	}
-	if got.Get("X-GoModel-Source") != "dashboard" {
-		t.Errorf("X-GoModel-Source = %q, want dashboard", got.Get("X-GoModel-Source"))
-	}
 	for _, forbidden := range []string{"Cookie", "Authorization", "X-API-Key", "Referer"} {
-		if value := got.Get(forbidden); value != "" {
-			t.Errorf("%s leaked upstream as %q", forbidden, value)
-		}
+		value := got.Get(forbidden)
+		assert.Empty(t, value, "%s leaked upstream as %q", forbidden, value)
 	}
 }
 
@@ -219,13 +192,10 @@ func TestRefreshThrottlesRepeatedCalls(t *testing.T) {
 
 	// Scheduled checks only; a burst of them must collapse to one.
 	for range 5 {
-		if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-			t.Fatalf("Refresh: %v", err)
-		}
+		_, err := checker.Refresh(context.Background(), Beacon{})
+		require.NoError(t, err)
 	}
-	if calls.Load() != 1 {
-		t.Fatalf("made %d manifest requests, want 1 within the throttle window", calls.Load())
-	}
+	require.Equal(t, int64(1), calls.Load())
 }
 
 func TestRefreshRespectsDailyBudget(t *testing.T) {
@@ -242,14 +212,12 @@ func TestRefreshRespectsDailyBudget(t *testing.T) {
 	// Step past the per-request throttle between attempts so only the daily
 	// budget can stop them.
 	for range 4 {
-		if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-			t.Fatalf("Refresh: %v", err)
-		}
+		_, err := checker.Refresh(context.Background(), Beacon{})
+		require.NoError(t, err)
+
 		now = now.Add(2 * minRefreshInterval)
 	}
-	if calls.Load() != 2 {
-		t.Fatalf("made %d manifest requests, want the 2 the budget allows", calls.Load())
-	}
+	require.Equal(t, int64(2), calls.Load())
 }
 
 func TestRefreshKeepsCachedStatusOnFailure(t *testing.T) {
@@ -262,20 +230,16 @@ func TestRefreshKeepsCachedStatusOnFailure(t *testing.T) {
 		}
 		_, _ = w.Write([]byte("0.1.82"))
 	})
+	_, err := checker.Refresh(context.Background(), Beacon{})
+	require.NoError(t, err)
 
-	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-		t.Fatalf("first Refresh: %v", err)
-	}
 	fail = true
 	now = now.Add(2 * minRefreshInterval)
 
 	status, err := checker.Refresh(context.Background(), Beacon{})
-	if err == nil {
-		t.Fatal("expected the failed manifest fetch to report an error")
-	}
-	if status.Latest != "0.1.82" || !status.UpdateAvailable {
-		t.Fatalf("got %+v, want the previously cached result", status)
-	}
+	require.Error(t, err)
+	require.Equal(t, "0.1.82", status.Latest)
+	require.True(t, status.UpdateAvailable, "got %+v, want the previously cached result", status)
 }
 
 func TestRefreshRejectsNonVersionBody(t *testing.T) {
@@ -284,12 +248,8 @@ func TestRefreshRejectsNonVersionBody(t *testing.T) {
 	})
 
 	status, err := checker.Refresh(context.Background(), Beacon{})
-	if err == nil {
-		t.Fatal("expected an error for an HTML body")
-	}
-	if status.Latest != "" {
-		t.Fatalf("latest = %q, want it left unset", status.Latest)
-	}
+	require.Error(t, err)
+	require.Empty(t, status.Latest)
 }
 
 func TestRefreshRejectsOversizedManifest(t *testing.T) {
@@ -300,12 +260,8 @@ func TestRefreshRejectsOversizedManifest(t *testing.T) {
 	// Truncating would leave a plausible-looking but wrong version in the
 	// cache, so an oversized body must be refused outright.
 	status, err := checker.Refresh(context.Background(), Beacon{})
-	if err == nil {
-		t.Fatal("expected an error for an oversized manifest")
-	}
-	if status.Latest != "" {
-		t.Fatalf("latest = %q, want the cache left untouched", status.Latest)
-	}
+	require.Error(t, err)
+	require.Empty(t, status.Latest)
 }
 
 func TestDisabledCheckerNeverCallsOut(t *testing.T) {
@@ -317,18 +273,16 @@ func TestDisabledCheckerNeverCallsOut(t *testing.T) {
 	defer srv.Close()
 
 	checker := New(Config{Enabled: false, URL: srv.URL, App: "GoModel", Version: "0.1.81", Client: srv.Client()})
-	if _, err := checker.Refresh(context.Background(), Beacon{}); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
+	_, err := checker.Refresh(context.Background(), Beacon{})
+	require.NoError(t, err)
+
 	checker.Run(context.Background())
 
-	if calls.Load() != 0 {
-		t.Fatalf("a disabled checker made %d requests", calls.Load())
-	}
+	require.Equal(t, int64(0), calls.Load())
+
 	status := checker.Status()
-	if status.Enabled || status.Version != "0.1.81" {
-		t.Fatalf("got %+v, want the local version with Enabled false", status)
-	}
+	require.False(t, status.Enabled)
+	require.Equal(t, "0.1.81", status.Version, "got %+v, want the local version with Enabled false", status)
 }
 
 func TestLeaksQueryInCleartext(t *testing.T) {
@@ -346,9 +300,8 @@ func TestLeaksQueryInCleartext(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := LeaksQueryInCleartext(tt.raw); got != tt.want {
-				t.Fatalf("LeaksQueryInCleartext(%q) = %v, want %v", tt.raw, got, tt.want)
-			}
+			got := LeaksQueryInCleartext(tt.raw)
+			require.Equal(t, tt.want, got, "LeaksQueryInCleartext(%q) = %v, want %v", tt.raw, got, tt.want)
 		})
 	}
 }
