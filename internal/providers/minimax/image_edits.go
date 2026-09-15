@@ -105,15 +105,18 @@ func (p *Provider) CreateImageEdit(ctx context.Context, req *core.ImageEditReque
 			Base64 []string `json:"image_base64"`
 		} `json:"data"`
 		BaseResponse struct {
-			Code int `json:"status_code"`
+			Code *int `json:"status_code"`
 		} `json:"base_resp"`
 	}
 	if err := json.Unmarshal(responseBody, &response); err != nil {
 		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "failed to parse image response", err)
 	}
-	if response.BaseResponse.Code != 0 {
-		message := fmt.Sprintf("minimax image request failed (status %d)", response.BaseResponse.Code)
-		switch response.BaseResponse.Code {
+	if response.BaseResponse.Code == nil {
+		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "image response is missing status_code", nil)
+	}
+	if *response.BaseResponse.Code != 0 {
+		message := fmt.Sprintf("minimax image request failed (status %d)", *response.BaseResponse.Code)
+		switch *response.BaseResponse.Code {
 		case 1002:
 			return nil, core.NewRateLimitError("minimax", message)
 		case 1004, 2049:

@@ -47,7 +47,7 @@ func TestCreateImageEdit(t *testing.T) {
 }
 
 func TestCreateImageEditErrors(t *testing.T) {
-	for _, body := range []string{`{"base_resp":{"status_code":1004}}`, `{"data":{},"base_resp":{"status_code":0}}`, `invalid`} {
+	for _, body := range []string{`{"base_resp":{"status_code":1004}}`, `{"data":{},"base_resp":{"status_code":0}}`, `invalid`, `{"data":{"image_urls":["https://example.com/image.png"]}}`, `{"data":{"image_urls":["https://example.com/image.png"]},"base_resp":{}}`} {
 		t.Run(body, func(t *testing.T) {
 			server, _ := providertest.JSONServer(t, http.StatusOK, body)
 			provider := NewWithHTTPClient("minimax-key", server.URL, server.Client(), llmclient.Hooks{})
