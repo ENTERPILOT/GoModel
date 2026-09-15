@@ -100,8 +100,14 @@ func TestResponsesWithPreviousResponseID_ChainCarriesFullHistory(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	waitForStoredResponse(t, store, "resp_conv_2")
+
+	// Turn three needs its own ID: snapshots are written in the background,
+	// keyed by response ID, so reusing resp_conv_2 would let this write race
+	// the turn-two assertions below and overwrite that snapshot.
+	provider.responsesResponse.ID = "resp_conv_3"
 	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"turn three","previous_response_id":"resp_conv_2"}`)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	waitForStoredResponse(t, store, "resp_conv_3")
 
 	items := forwardedInputItems(t, provider.capturingProvider)
 	require.Len(t, items, 5)
