@@ -98,15 +98,31 @@ jobs:
 
   # The unit suite runs as four shards so the long-pole packages
   # (internal/server, internal/providers) do not serialise behind the rest.
-  # Shards that open PostgreSQL start it with `docker run` in the background
-  # right after checkout, so the image pull overlaps the Go setup and compile
-  # instead of gating the job the way a service container does. Without a
-  # reachable database GOMODEL_TEST_POSTGRES_URL is unset, every PostgreSQL
-  # subtest skips, and CI stays green while covering only SQLite — hence the
-  # explicit readiness wait before the tests.
+  # Shards that open PostgreSQL get a service container; without one
+  # GOMODEL_TEST_POSTGRES_URL is unset, every PostgreSQL subtest skips, and CI
+  # stays green while covering only SQLite. Pull requests skip -race (see
+  # unit-tests-race) and upload one coverage profile per shard.
   unit-tests:
     name: Unit (${{ matrix.name }})
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Mirrors Docker Hub's official image. Anonymous pulls of
+        # registry-1.docker.io intermittently time out on GitHub runners.
+        # An empty image string means "no service", which is how shards
+        # that never open a database skip the container.
+        image: ${{ matrix.postgres && 'public.ecr.aws/docker/library/postgres:18-alpine' || '' }}
+        env:
+          POSTGRES_USER: gomodel
+          POSTGRES_PASSWORD: gomodel
+          POSTGRES_DB: gomodel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gomodel -d gomodel"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     strategy:
       fail-fast: false
       matrix:
@@ -138,16 +154,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Start PostgreSQL
-        if: matrix.postgres
-        # Mirrors Docker Hub's official image. Anonymous pulls of
-        # registry-1.docker.io intermittently time out on GitHub runners.
-        run: |
-          nohup docker run -d --rm --name gomodel-postgres \
-            -e POSTGRES_USER=gomodel -e POSTGRES_PASSWORD=gomodel -e POSTGRES_DB=gomodel \
-            -p 5432:5432 public.ecr.aws/docker/library/postgres:18-alpine \
-            > postgres-start.log 2>&1 &
-
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
         with:
@@ -176,25 +182,20 @@ jobs:
             echo "tags=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Wait for PostgreSQL
-        if: matrix.postgres
-        run: |
-          for i in $(seq 1 60); do
-            if docker exec gomodel-postgres pg_isready -U gomodel -d gomodel >/dev/null 2>&1; then
-              echo "PostgreSQL ready after ${i}s"; exit 0
-            fi
-            sleep 1
-          done
-          echo "PostgreSQL did not become ready" >&2
-          cat postgres-start.log; docker logs gomodel-postgres || true
-          exit 1
-
       - name: Run tests
-        run: go test ${{ env.GO_TEST_SHORT }} ${{ steps.shard.outputs.tags }} -timeout=10m ${{ steps.shard.outputs.packages }}
+        run: go test ${{ env.GO_TEST_SHORT }} ${{ steps.shard.outputs.tags }} -coverprofile=coverage-${{ matrix.name }}.out -timeout=10m ${{ steps.shard.outputs.packages }}
         env:
           # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
           # so pointing it at a configured application database is opt-in.
           GOMODEL_TEST_POSTGRES_URL: ${{ matrix.postgres && 'postgres://gomodel:gomodel@localhost:5432/gomodel' || '' }}
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          files: ./coverage-${{ matrix.name }}.out
+          flags: ${{ matrix.name }}
+          fail_ci_if_error: false
+        continue-on-error: true
 
   # The race detector doubles the compile and run time, so pull requests skip
   # it and pushes to main run the whole suite under -race once, unsharded.
@@ -203,17 +204,26 @@ jobs:
     name: Unit (race)
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Mirrors Docker Hub's official image. Anonymous pulls of
+        # registry-1.docker.io intermittently time out on GitHub runners.
+        image: public.ecr.aws/docker/library/postgres:18-alpine
+        env:
+          POSTGRES_USER: gomodel
+          POSTGRES_PASSWORD: gomodel
+          POSTGRES_DB: gomodel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gomodel -d gomodel"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-
-      - name: Start PostgreSQL
-        run: |
-          nohup docker run -d --rm --name gomodel-postgres \
-            -e POSTGRES_USER=gomodel -e POSTGRES_PASSWORD=gomodel -e POSTGRES_DB=gomodel \
-            -p 5432:5432 public.ecr.aws/docker/library/postgres:18-alpine \
-            > postgres-start.log 2>&1 &
 
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
@@ -229,22 +239,18 @@ jobs:
       - name: Stub the dashboard bundle
         run: make frontend-stub
 
-      - name: Wait for PostgreSQL
-        run: |
-          for i in $(seq 1 60); do
-            if docker exec gomodel-postgres pg_isready -U gomodel -d gomodel >/dev/null 2>&1; then
-              echo "PostgreSQL ready after ${i}s"; exit 0
-            fi
-            sleep 1
-          done
-          echo "PostgreSQL did not become ready" >&2
-          cat postgres-start.log; docker logs gomodel-postgres || true
-          exit 1
-
       - name: Run tests
-        run: go test -race -timeout=15m ./cmd/... ./config/... ./ext/... ./internal/... ./run/...
+        run: go test -race -coverprofile=coverage.out -timeout=15m ./cmd/... ./config/... ./ext/... ./internal/... ./run/...
         env:
           GOMODEL_TEST_POSTGRES_URL: postgres://gomodel:gomodel@localhost:5432/gomodel
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          files: ./coverage.out
+          flags: race
+          fail_ci_if_error: false
+        continue-on-error: true
 
   e2e-tests:
     name: E2E Tests
@@ -271,25 +277,35 @@ jobs:
       - name: Run tests
         run: go test ${{ env.GO_TEST_SHORT }} -tags=e2e -timeout=5m ./tests/e2e/...
 
-  # The suite brings up its own MongoDB replica set in TestMain (a service
-  # container cannot pass --replSet). PostgreSQL is started here in the
-  # background instead, and both images are pulled while Go sets up and
-  # compiles so neither pull sits on the critical path.
+  # PostgreSQL is a service container (the harness connects to it through
+  # GOMODEL_INTEGRATION_POSTGRES_URL). The suite brings up its own MongoDB
+  # replica set in TestMain because a service container cannot pass
+  # --replSet; its image is pre-pulled in the background while Go sets up and
+  # compiles, and the harness pulls it itself if that did not finish.
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: gomodel_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d gomodel_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - name: Start PostgreSQL and pull MongoDB
-        run: |
-          nohup sh -c 'docker run -d --rm --name gomodel-postgres \
-            -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=gomodel_test \
-            -p 5432:5432 public.ecr.aws/docker/library/postgres:16-alpine \
-            && docker pull public.ecr.aws/docker/library/mongo:7' \
-            > containers-start.log 2>&1 &
+      - name: Pre-pull MongoDB
+        run: setsid nohup docker pull public.ecr.aws/docker/library/mongo:7 > /dev/null 2>&1 &
 
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
@@ -304,18 +320,6 @@ jobs:
 
       - name: Stub the dashboard bundle
         run: make frontend-stub
-
-      - name: Wait for PostgreSQL
-        run: |
-          for i in $(seq 1 90); do
-            if docker exec gomodel-postgres pg_isready -U test -d gomodel_test >/dev/null 2>&1; then
-              echo "PostgreSQL ready after ${i}s"; exit 0
-            fi
-            sleep 1
-          done
-          echo "PostgreSQL did not become ready" >&2
-          cat containers-start.log; docker logs gomodel-postgres || true
-          exit 1
 
       - name: Run tests
         run: go test -tags=integration -timeout=10m ./tests/integration/...
