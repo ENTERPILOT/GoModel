@@ -4,23 +4,14 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
 
-	"github.com/labstack/echo/v5"
+	"github.com/enterpilot/gomodel/internal/echotest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestNew(t *testing.T) {
-	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
-	if h == nil {
-		t.Fatalf("NewWithBasePath() returned nil handler")
-	}
-}
 
 // A clean checkout compiles (static/ holds a committed placeholder) but has
 // no built dashboard. The constructor must say so rather than serve a broken
@@ -36,12 +27,8 @@ func TestBuildIndexHTML_MissingBuild(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := buildIndexHTML(tt.assets, "/", false)
-			if err == nil {
-				t.Fatalf("expected error for missing dashboard build")
-			}
-			if !strings.Contains(err.Error(), "make frontend") {
-				t.Errorf("error should tell the user how to build the dashboard, got %q", err)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "make frontend")
 		})
 	}
 }
@@ -51,192 +38,118 @@ func TestBuildIndexHTML_InjectsGlobalsAndBasePath(t *testing.T) {
 		"static/dist/index.html": {Data: []byte(`<html><head><script src="/admin/static/assets/index-abc.js"></script></head><body></body></html>`)},
 	}
 	got, err := buildIndexHTML(assets, "/gateway", true)
-	if err != nil {
-		t.Fatalf("buildIndexHTML() returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	html := string(got)
 	for _, want := range []string{
 		`src="/gateway/admin/static/assets/index-abc.js"`,
 		`window.GOMODEL_BASE_PATH="/gateway"`,
 		`window.GOMODEL_DEMO_MODE=true`,
 	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("expected %q in rendered index.html:\n%s", want, html)
-		}
+		assert.Contains(t, html, want)
 	}
 }
 
 func serveIndex(t *testing.T, h *Handler, target string) *httptest.ResponseRecorder {
 	t.Helper()
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, target, nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	if err := h.Index(c); err != nil {
-		t.Fatalf("Index() returned error: %v", err)
-	}
+	c, rec := echotest.Get(t, target)
+	require.NoError(t, h.Index(c))
 	return rec
 }
 
 func serveStatic(t *testing.T, h *Handler, target string) *httptest.ResponseRecorder {
 	t.Helper()
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, target, nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	if err := h.Static(c); err != nil {
-		t.Fatalf("Static() returned error: %v", err)
-	}
+	c, rec := echotest.Get(t, target)
+	require.NoError(t, h.Static(c))
 	return rec
 }
 
 func TestIndex_ReturnsHTML(t *testing.T) {
 	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
+	require.NoError(t, err)
 
 	rec := serveIndex(t, h, "/admin/dashboard")
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
-	}
-	contentType := rec.Header().Get("Content-Type")
-	if contentType != "text/html; charset=utf-8" {
-		t.Errorf("expected Content-Type text/html; charset=utf-8, got %s", contentType)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "text/html; charset=utf-8", rec.Header().Get("Content-Type"))
 
 	body := rec.Body.String()
 	lower := strings.ToLower(body)
-	if !strings.Contains(lower, "<!doctype html") && !strings.Contains(lower, "<html") {
-		t.Errorf("expected HTML content, got: %.200s", body)
-	}
-	if !strings.Contains(body, `window.GOMODEL_BASE_PATH="/"`) {
-		t.Errorf("expected injected base path global in page HTML")
-	}
-	if !regexp.MustCompile(`window\.GOMODEL_VERSION="[^"]+"`).MatchString(body) {
-		t.Errorf("expected injected version global in page HTML")
-	}
-	if !strings.Contains(body, "window.GOMODEL_DEMO_MODE=false") {
-		t.Errorf("expected demo mode global false in page HTML")
-	}
-	if !regexp.MustCompile(`/admin/static/assets/index-[^"]+\.js`).MatchString(body) {
-		t.Errorf("expected hashed SPA script tag in page HTML")
-	}
-	if !regexp.MustCompile(`/admin/static/assets/index-[^"]+\.css`).MatchString(body) {
-		t.Errorf("expected hashed SPA stylesheet link in page HTML")
-	}
+	assert.True(t, strings.Contains(lower, "<!doctype html") || strings.Contains(lower, "<html"), "expected HTML content, got: %.200s", body)
+	assert.Contains(t, body, `window.GOMODEL_BASE_PATH="/"`)
+	assert.Regexp(t, `window\.GOMODEL_VERSION="[^"]+"`, body)
+	assert.Contains(t, body, "window.GOMODEL_DEMO_MODE=false")
+	assert.Regexp(t, `/admin/static/assets/index-[^"]+\.js`, body)
+	assert.Regexp(t, `/admin/static/assets/index-[^"]+\.css`, body)
 }
 
 func TestIndex_DemoModeInjectsFlag(t *testing.T) {
 	h, err := NewWithDemoMode("/", true)
-	if err != nil {
-		t.Fatalf("NewWithDemoMode() returned error: %v", err)
-	}
-	body := serveIndex(t, h, "/admin/dashboard").Body.String()
-	if !strings.Contains(body, "window.GOMODEL_DEMO_MODE=true") {
-		t.Error("expected demo mode global true in page HTML")
-	}
-}
+	require.NoError(t, err)
 
-func TestIndex_StandardModeHidesDemoFlag(t *testing.T) {
-	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
 	body := serveIndex(t, h, "/admin/dashboard").Body.String()
-	if !strings.Contains(body, "window.GOMODEL_DEMO_MODE=false") {
-		t.Error("expected demo mode global false in page HTML")
-	}
+	assert.Contains(t, body, "window.GOMODEL_DEMO_MODE=true")
 }
 
 func TestIndex_UsesBasePathForGeneratedURLs(t *testing.T) {
 	h, err := NewWithBasePath("/gw")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	body := serveIndex(t, h, "/gw/admin/dashboard").Body.String()
 
-	if !strings.Contains(body, `window.GOMODEL_BASE_PATH="/gw"`) {
-		t.Errorf("expected injected base path /gw in page HTML")
-	}
-	if !regexp.MustCompile(`"/gw/admin/static/assets/index-[^"]+\.js`).MatchString(body) {
-		t.Errorf("expected base-path-prefixed script URL in page HTML")
-	}
-	if strings.Contains(body, `"/admin/static/`) {
-		t.Errorf("expected no unprefixed asset URLs in page HTML")
-	}
+	assert.Contains(t, body, `window.GOMODEL_BASE_PATH="/gw"`)
+	assert.Regexp(t, `"/gw/admin/static/assets/index-[^"]+\.js`, body)
+	assert.NotContains(t, body, `"/admin/static/`)
 }
 
 func TestStatic_ServesSPAAssets(t *testing.T) {
 	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
+	require.NoError(t, err)
 
 	sub, err := fs.Sub(content, "static/dist")
-	if err != nil {
-		t.Fatalf("fs.Sub returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	entries, err := fs.ReadDir(sub, "assets")
-	if err != nil {
-		t.Fatalf("expected built assets directory in embed: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Fatalf("expected built assets in embed, got none")
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, entries)
 
 	for _, entry := range entries {
 		rec := serveStatic(t, h, "/admin/static/assets/"+entry.Name())
-		if rec.Code != http.StatusOK {
-			t.Errorf("asset %s: expected 200, got %d", entry.Name(), rec.Code)
-		}
-		if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
-			t.Errorf("asset %s: expected immutable cache header, got %q", entry.Name(), cc)
-		}
+		assert.Equal(t, http.StatusOK, rec.Code, entry.Name())
+		assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable", entry.Name())
 	}
 }
 
 func TestStatic_ServesFavicon(t *testing.T) {
 	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	rec := serveStatic(t, h, "/admin/static/favicon.svg")
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for favicon, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestStatic_ServesFonts(t *testing.T) {
 	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	rec := serveStatic(t, h, "/admin/static/fonts/inter.css")
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200 for fonts/inter.css, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestStatic_NotFound(t *testing.T) {
 	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	rec := serveStatic(t, h, "/admin/static/nope.js")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", rec.Code)
-	}
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 // TestIndex_HasNoExternalResources keeps the dashboard self-contained: no
 // CDN scripts, styles, or fonts.
 func TestIndex_HasNoExternalResources(t *testing.T) {
 	h, err := NewWithBasePath("/")
-	if err != nil {
-		t.Fatalf("NewWithBasePath() returned error: %v", err)
-	}
+	require.NoError(t, err)
+
 	body := serveIndex(t, h, "/admin/dashboard").Body.String()
 	for _, marker := range []string{
 		"https://cdn.",
@@ -245,8 +158,6 @@ func TestIndex_HasNoExternalResources(t *testing.T) {
 		"jsdelivr.net",
 		"googleapis.com",
 	} {
-		if strings.Contains(body, marker) {
-			t.Errorf("expected no external resource %q in page HTML", marker)
-		}
+		assert.NotContains(t, body, marker)
 	}
 }
