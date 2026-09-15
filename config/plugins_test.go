@@ -87,3 +87,34 @@ func TestLoad_PluginsEnabledFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyPluginsLoadEnv(t *testing.T) {
+	t.Setenv("PLUGINS_LOAD", "a.so, b.so=deadbeef, a.so, , c.so")
+
+	cfg := &Config{}
+	require.NoError(t, applyEnvOverrides(cfg))
+	require.Equal(t, []PluginFileConfig{
+		{File: "a.so"},
+		{File: "b.so", SHA256: "deadbeef"},
+		{File: "c.so"},
+	}, cfg.Plugins.Load)
+}
+
+func TestApplyPluginsLoadEnvMergesWithConfigFile(t *testing.T) {
+	t.Setenv("PLUGINS_LOAD", "b.so, c.so")
+
+	cfg := &Config{Plugins: PluginsConfig{Load: []PluginFileConfig{{File: "a.so"}}}}
+	require.NoError(t, applyEnvOverrides(cfg))
+	require.Equal(t, []PluginFileConfig{
+		{File: "a.so"},
+		{File: "b.so"},
+		{File: "c.so"},
+	}, cfg.Plugins.Load)
+}
+
+func TestApplyPluginsLoadEnvEmpty(t *testing.T) {
+	t.Setenv("PLUGINS_LOAD", "  ")
+	cfg := &Config{}
+	require.NoError(t, applyEnvOverrides(cfg))
+	require.Empty(t, cfg.Plugins.Load)
+}
