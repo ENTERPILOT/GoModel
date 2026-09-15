@@ -2,39 +2,41 @@ package kilo
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestChatCompletion_UsesBearerAuthAndPreservesModelAndTools(t *testing.T) {
-	var gotPath string
-	var gotAuth string
-	var gotBody map[string]any
+// Kilo is a thin wrapper over the shared chat-centric adapter, so the shared
+// contract covers its surface. Kilo exposes no embeddings endpoint, so
+// Embeddings must fail fast without an upstream call, and the provider must
+// not advertise native batch, file, or audio support.
+func TestChatCompatibleContract(t *testing.T) {
+	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
+		Registration:   Registration,
+		Type:           "kilo",
+		DefaultBaseURL: "https://api.kilo.ai/api/gateway",
+		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
+			return NewWithHTTPClient(apiKey, baseURL, client, hooks)
+		},
+	})
+	providertest.AssertNoNativeSurfaces(t, NewWithHTTPClient("kilo-key", "", nil, llmclient.Hooks{}))
+}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-kilo",
-			"created":1677652288,
-			"model":"anthropic/claude-sonnet-4.5",
-			"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":"tool_calls"}],
-			"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}
-		}`))
-	}))
-	defer server.Close()
+func TestChatCompletion_PreservesToolsAndToolChoice(t *testing.T) {
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{
+		"id":"chatcmpl-kilo",
+		"created":1677652288,
+		"model":"anthropic/claude-sonnet-4.5",
+		"choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":"tool_calls"}],
+		"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}
+	}`)
 
 	provider := NewWithHTTPClient("kilo-key", server.URL, server.Client(), llmclient.Hooks{})
 	resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
@@ -49,46 +51,18 @@ func TestChatCompletion_UsesBearerAuthAndPreservesModelAndTools(t *testing.T) {
 		}},
 		ToolChoice: "auto",
 	})
-	if err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
-	if gotPath != "/chat/completions" {
-		t.Fatalf("path = %q, want /chat/completions", gotPath)
-	}
-	if gotAuth != "Bearer kilo-key" {
-		t.Fatalf("authorization = %q, want Bearer kilo-key", gotAuth)
-	}
-	if gotBody["model"] != "anthropic/claude-sonnet-4.5" {
-		t.Fatalf("request model = %#v, want slash-delimited model unchanged", gotBody["model"])
-	}
-	if gotBody["tool_choice"] != "auto" {
-		t.Fatalf("tool_choice = %#v, want auto", gotBody["tool_choice"])
-	}
-	tools, ok := gotBody["tools"].([]any)
-	if !ok || len(tools) != 1 {
-		t.Fatalf("tools = %#v, want one tool", gotBody["tools"])
-	}
-	if resp.Model != "anthropic/claude-sonnet-4.5" || len(resp.Choices) != 1 || len(resp.Choices[0].Message.ToolCalls) != 1 {
-		t.Fatalf("unexpected response: %+v", resp)
-	}
+	require.NoError(t, err)
+
+	sent := capture.Last(t).JSON(t)
+	assert.Equal(t, "anthropic/claude-sonnet-4.5", sent["model"])
+	assert.Equal(t, "auto", sent["tool_choice"])
+	assert.Len(t, sent["tools"], 1)
+	require.Len(t, resp.Choices, 1)
+	assert.Len(t, resp.Choices[0].Message.ToolCalls, 1)
 }
 
-func TestStreamChatCompletion_UsesSSEAndPreservesStreamOptions(t *testing.T) {
-	var gotPath string
-	var gotAuth string
-	var gotBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			http.Error(w, "decode error", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl-kilo\",\"object\":\"chat.completion.chunk\",\"choices\":[]}\n\ndata: [DONE]\n\n")
-	}))
-	defer server.Close()
+func TestStreamChatCompletion_PreservesStreamOptions(t *testing.T) {
+	server, capture := providertest.SSEServer(t, "data: {\"id\":\"chatcmpl-kilo\",\"object\":\"chat.completion.chunk\",\"choices\":[]}\n\ndata: [DONE]\n\n")
 
 	provider := NewWithHTTPClient("kilo-key", server.URL, server.Client(), llmclient.Hooks{})
 	stream, err := provider.StreamChatCompletion(context.Background(), &core.ChatRequest{
@@ -96,69 +70,14 @@ func TestStreamChatCompletion_UsesSSEAndPreservesStreamOptions(t *testing.T) {
 		Messages:      []core.Message{{Role: "user", Content: "hi"}},
 		StreamOptions: &core.StreamOptions{IncludeUsage: true},
 	})
-	if err != nil {
-		t.Fatalf("StreamChatCompletion() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer stream.Close()
+
 	body, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
-	if gotPath != "/chat/completions" || gotAuth != "Bearer kilo-key" {
-		t.Fatalf("request path/auth = %q/%q", gotPath, gotAuth)
-	}
-	if gotBody["model"] != "openai/gpt-5.5" || gotBody["stream"] != true {
-		t.Fatalf("stream request body = %#v", gotBody)
-	}
-	streamOptions, ok := gotBody["stream_options"].(map[string]any)
-	if !ok || streamOptions["include_usage"] != true {
-		t.Fatalf("stream_options = %#v, want include_usage=true", gotBody["stream_options"])
-	}
-	if !strings.Contains(string(body), "data: [DONE]") {
-		t.Fatalf("stream body = %q, want SSE terminator", body)
-	}
-}
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "data: [DONE]")
 
-func TestListModels_PreservesProviderQualifiedIDs(t *testing.T) {
-	var gotPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"google/gemini-3.1-pro","object":"model","owned_by":"google"}]}`))
-	}))
-	defer server.Close()
-
-	provider := NewWithHTTPClient("kilo-key", server.URL, server.Client(), llmclient.Hooks{})
-	resp, err := provider.ListModels(context.Background())
-	if err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
-	if gotPath != "/models" {
-		t.Fatalf("path = %q, want /models", gotPath)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].ID != "google/gemini-3.1-pro" {
-		t.Fatalf("models = %+v, want provider-qualified Kilo model", resp.Data)
-	}
-}
-
-func TestEmbeddings_ReturnsUnsupportedError(t *testing.T) {
-	provider := NewWithHTTPClient("kilo-key", "", nil, llmclient.Hooks{})
-	_, err := provider.Embeddings(context.Background(), &core.EmbeddingRequest{Model: "any"})
-	if err == nil || !strings.Contains(err.Error(), "kilo does not support embeddings") {
-		t.Fatalf("Embeddings() error = %v, want unsupported error", err)
-	}
-}
-
-func TestProvider_DoesNotExposeOptionalOpenAICompatibleInterfaces(t *testing.T) {
-	provider := NewWithHTTPClient("kilo-key", "", nil, llmclient.Hooks{})
-
-	if _, ok := any(provider).(core.NativeBatchProvider); ok {
-		t.Fatal("kilo provider should not implement native batch provider")
-	}
-	if _, ok := any(provider).(core.NativeFileProvider); ok {
-		t.Fatal("kilo provider should not implement native file provider")
-	}
-	if _, ok := any(provider).(core.AudioProvider); ok {
-		t.Fatal("kilo provider should not implement audio provider")
-	}
+	sent := capture.Last(t).JSON(t)
+	assert.Equal(t, true, sent["stream"])
+	assert.Equal(t, map[string]any{"include_usage": true}, sent["stream_options"])
 }

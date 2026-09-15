@@ -8,6 +8,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newSQLStoreForTest(t *testing.T, db sqlx.DB, retentionDays int) (*SQLStore, error) {
@@ -17,11 +19,9 @@ func newSQLStoreForTest(t *testing.T, db sqlx.DB, retentionDays int) (*SQLStore,
 
 func TestSQLStore_WriteBatch_NullDataPreservation(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
@@ -45,17 +45,14 @@ func TestSQLStore_WriteBatch_NullDataPreservation(t *testing.T) {
 				},
 			},
 		}
-
 		// Write entries
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
 
 		// Query to check NULL vs non-NULL
 		rows, err := db.Query(ctx, "SELECT id, data, data IS NULL as is_null FROM audit_logs ORDER BY id")
-		if err != nil {
-			t.Fatalf("query failed: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer rows.Close()
 
 		results := make(map[string]bool) // id -> isNull
@@ -63,112 +60,42 @@ func TestSQLStore_WriteBatch_NullDataPreservation(t *testing.T) {
 			var id string
 			var data *string
 			var isNull bool
-			if err := rows.Scan(&id, &data, &isNull); err != nil {
-				t.Fatalf("scan failed: %v", err)
-			}
+			err := rows.Scan(&id, &data, &isNull)
+			require.NoError(t, err)
+
 			results[id] = isNull
 		}
 
-		// Verify entry with nil Data has NULL in database
-		if !results["entry-nil-data"] {
-			t.Error("entry with nil Data should have NULL in database, got non-NULL")
-		}
-
-		// Verify entry with Data has non-NULL in database
-		if results["entry-with-data"] {
-			t.Error("entry with Data should have non-NULL in database, got NULL")
-		}
-	})
-}
-
-func TestSQLStore_WriteBatch_Chunking(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
-		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
-		defer store.Close()
-
-		ctx := context.Background()
-
-		// Create more entries than can fit in a single batch (>62 entries)
-		// Using 150 entries to ensure we need at least 3 batches
-		numEntries := 150
-		entries := make([]*LogEntry, numEntries)
-		for i := range numEntries {
-			entries[i] = &LogEntry{
-				ID:             fmt.Sprintf("entry-%03d", i),
-				Timestamp:      time.Now(),
-				RequestedModel: "gpt-4",
-				Provider:       "openai",
-				StatusCode:     200,
-			}
-		}
-
-		// Write all entries - this should internally chunk into multiple batches
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
-
-		// Verify all entries were persisted
-		var count int
-		if err := db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count); err != nil {
-			t.Fatalf("count query failed: %v", err)
-		}
-
-		if count != numEntries {
-			t.Errorf("expected %d entries, got %d", numEntries, count)
-		}
-
-		// Verify entries are actually in the database by sampling a few
-		for _, id := range []string{"entry-000", "entry-062", "entry-124", "entry-149"} {
-			var found int
-			err := db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs WHERE id = ?", id).Scan(&found)
-			if err != nil {
-				t.Fatalf("query for %s failed: %v", id, err)
-			}
-			if found != 1 {
-				t.Errorf("entry %s not found in database", id)
-			}
-		}
+		assert.True(t, results["entry-nil-data"], "nil Data must be stored as SQL NULL")
+		assert.False(t, results["entry-with-data"], "non-nil Data must not be stored as SQL NULL")
 	})
 }
 
 func TestSQLStore_WriteBatch_EmptyEntries(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
-
 		// Empty slice should not error
-		if err := store.WriteBatch(ctx, []*LogEntry{}); err != nil {
-			t.Fatalf("WriteBatch with empty entries failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, []*LogEntry{})
+		require.NoError(t, err)
 
 		// Verify no entries in database
 		var count int
-		if err := db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count); err != nil {
-			t.Fatalf("count query failed: %v", err)
-		}
-		if count != 0 {
-			t.Errorf("expected 0 entries, got %d", count)
-		}
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, 0, count)
 	})
 }
 
 func TestSQLStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
@@ -183,18 +110,13 @@ func TestSQLStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 				RequestedModel: "gpt-4",
 			}
 		}
-
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
 
 		var count int
-		if err := db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count); err != nil {
-			t.Fatalf("count query failed: %v", err)
-		}
-		if count != numEntries {
-			t.Errorf("expected %d entries, got %d", numEntries, count)
-		}
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
+		require.NoError(t, err)
+		assert.Equal(t, numEntries, count)
 
 		// Test with maxEntriesPerBatch + 1 entries - should require 2 batches
 		entries = make([]*LogEntry, maxEntriesPerBatch+1)
@@ -205,28 +127,21 @@ func TestSQLStore_WriteBatch_ExactBatchBoundary(t *testing.T) {
 				RequestedModel: "gpt-4",
 			}
 		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count)
+		require.NoError(t, err)
 
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch failed at boundary: %v", err)
-		}
-
-		if err := db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_logs").Scan(&count); err != nil {
-			t.Fatalf("count query failed: %v", err)
-		}
 		expectedTotal := numEntries + maxEntriesPerBatch + 1
-		if count != expectedTotal {
-			t.Errorf("expected %d entries, got %d", expectedTotal, count)
-		}
+		assert.Equal(t, expectedTotal, count)
 	})
 }
 
 func TestSQLStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
@@ -239,49 +154,29 @@ func TestSQLStore_WriteBatch_PersistsAliasFields(t *testing.T) {
 			AliasUsed:      true,
 			StatusCode:     200,
 		}
-
-		if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, []*LogEntry{entry})
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		logEntry, err := reader.GetLogByID(ctx, entry.ID)
-		if err != nil {
-			t.Fatalf("GetLogByID failed: %v", err)
-		}
-		if logEntry == nil {
-			t.Fatal("expected log entry, got nil")
-			return
-		}
-		if logEntry.RequestedModel != entry.RequestedModel {
-			t.Fatalf("RequestedModel = %q, want %q", logEntry.RequestedModel, entry.RequestedModel)
-		}
-		if logEntry.ResolvedModel != entry.ResolvedModel {
-			t.Fatalf("ResolvedModel = %q, want %q", logEntry.ResolvedModel, entry.ResolvedModel)
-		}
-		if logEntry.Provider != entry.Provider {
-			t.Fatalf("Provider = %q, want %q", logEntry.Provider, entry.Provider)
-		}
-		if !logEntry.AliasUsed {
-			t.Fatal("AliasUsed = false, want true")
-		}
-		if logEntry.UserPath != "/" {
-			t.Fatalf("UserPath = %q, want /", logEntry.UserPath)
-		}
+		require.NoError(t, err)
+
+		require.NotNil(t, logEntry)
+		require.Equal(t, entry.RequestedModel, logEntry.RequestedModel)
+		require.Equal(t, entry.ResolvedModel, logEntry.ResolvedModel)
+		require.Equal(t, entry.Provider, logEntry.Provider)
+		require.True(t, logEntry.AliasUsed)
+		require.Equal(t, "/", logEntry.UserPath)
 	})
 }
 
 func TestSQLStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
@@ -320,74 +215,50 @@ func TestSQLStore_WriteBatch_PersistsProviderAttempts(t *testing.T) {
 				},
 			},
 		}
-
-		if err := store.WriteBatch(ctx, []*LogEntry{entry}); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		err = store.WriteBatch(ctx, []*LogEntry{entry})
+		require.NoError(t, err)
 
 		var attemptRows int
-		if err := db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_log_attempts WHERE audit_log_id = ?", entry.ID).Scan(&attemptRows); err != nil {
-			t.Fatalf("count audit_log_attempts failed: %v", err)
-		}
-		if attemptRows != 2 {
-			t.Fatalf("attempt rows = %d, want 2", attemptRows)
-		}
+		err = db.QueryRow(ctx, "SELECT COUNT(*) FROM audit_log_attempts WHERE audit_log_id = ?", entry.ID).Scan(&attemptRows)
+		require.NoError(t, err)
+		require.Equal(t, 2, attemptRows)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
+
 		got, err := reader.GetLogByID(ctx, entry.ID)
-		if err != nil {
-			t.Fatalf("GetLogByID failed: %v", err)
-		}
-		if got == nil || got.Data == nil {
-			t.Fatalf("entry data = %#v, want populated", got)
-		}
-		if len(got.Data.Attempts) != 2 {
-			t.Fatalf("hydrated attempts = %#v, want 2", got.Data.Attempts)
-		}
-		if got.Data.Attempts[0].Kind != AttemptKindPrimary || got.Data.Attempts[0].StatusCode != 404 {
-			t.Fatalf("primary attempt = %#v, want failed 404 primary", got.Data.Attempts[0])
-		}
-		if got.Data.Attempts[1].Kind != AttemptKindFailover || !got.Data.Attempts[1].Success {
-			t.Fatalf("failover attempt = %#v, want successful failover", got.Data.Attempts[1])
-		}
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.NotNil(t, got.Data)
+		require.Len(t, got.Data.Attempts, 2)
+		require.Equal(t, AttemptKindPrimary, got.Data.Attempts[0].Kind)
+		require.Equal(t, 404, got.Data.Attempts[0].StatusCode)
+		require.Equal(t, AttemptKindFailover, got.Data.Attempts[1].Kind)
+		require.True(t, got.Data.Attempts[1].Success)
 
 		primary := got.Data.Attempts[0]
 		body, ok := primary.ResponseBody.(map[string]any)
-		if !ok {
-			t.Fatalf("primary response body type = %T, want map", primary.ResponseBody)
-		}
+		require.True(t, ok, "primary response body type = %T, want map", primary.ResponseBody)
+
 		errObj, ok := body["error"].(map[string]any)
-		if !ok || errObj["code"] != "model_not_found" {
-			t.Fatalf("primary response body = %#v, want nested provider error", primary.ResponseBody)
-		}
-		if primary.ResponseHeaders["X-Request-Id"] != "req-123" || primary.ResponseHeaders["Retry-After"] != "30" {
-			t.Fatalf("primary response headers = %#v, want captured upstream headers", primary.ResponseHeaders)
-		}
-		if got.Data.Attempts[1].ResponseBody != nil || got.Data.Attempts[1].ResponseHeaders != nil {
-			t.Fatalf("successful attempt should not carry a captured error body/headers: %#v", got.Data.Attempts[1])
-		}
+		require.True(t, ok)
+		require.Equal(t, "model_not_found", errObj["code"])
+		require.Equal(t, "req-123", primary.ResponseHeaders["X-Request-Id"])
+		require.Equal(t, "30", primary.ResponseHeaders["Retry-After"])
+		require.Nil(t, got.Data.Attempts[1].ResponseBody)
+		require.Nil(t, got.Data.Attempts[1].ResponseHeaders, "successful attempt must not carry a captured error body/headers")
 
 		conversation, err := reader.GetConversation(ctx, entry.ID, 40)
-		if err != nil {
-			t.Fatalf("GetConversation failed: %v", err)
-		}
-		if len(conversation.Entries) != 1 || conversation.Entries[0].Data == nil {
-			t.Fatalf("conversation = %#v, want one populated entry", conversation)
-		}
-		if len(conversation.Entries[0].Data.Attempts) != 0 {
-			t.Fatalf("conversation hydrated provider attempts: %#v", conversation.Entries[0].Data.Attempts)
-		}
+		require.NoError(t, err)
+		require.Len(t, conversation.Entries, 1)
+		require.NotNil(t, conversation.Entries[0].Data)
+		require.Empty(t, conversation.Entries[0].Data.Attempts)
 
 		parent, err := reader.GetInteractionParent(ctx, entry.ID)
-		if err != nil {
-			t.Fatalf("GetInteractionParent failed: %v", err)
-		}
-		if parent == nil || parent.UserPath != "/" || parent.SessionID != "" {
-			t.Fatalf("interaction parent = %#v, want root path with empty session", parent)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+		require.Equal(t, "/", parent.UserPath)
+		require.Empty(t, parent.SessionID)
 	})
 }
 
@@ -396,13 +267,12 @@ func TestSQLReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 		ctx := context.Background()
 
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		now := db.Dialect().TimestampArg(time.Now())
-		if _, err := db.Exec(ctx, `
+		_, err = db.Exec(ctx, `
 			INSERT INTO audit_logs (
 				id, timestamp, duration_ns, requested_model, resolved_model, provider, alias_used, workflow_version_id,
 				status_code, request_id, client_ip, method, path, stream, error_type, data
@@ -424,43 +294,24 @@ func TestSQLReader_AllowsNullWorkflowVersionIDAndErrorType(t *testing.T) {
 			false,
 			nil,
 			nil,
-		); err != nil {
-			t.Fatalf("failed to insert audit log row: %v", err)
-		}
+		)
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		entry, err := reader.GetLogByID(context.Background(), "null-workflow-version")
-		if err != nil {
-			t.Fatalf("GetLogByID failed: %v", err)
-		}
-		if entry == nil {
-			t.Fatal("expected log entry, got nil")
-			return
-		}
-		if entry.WorkflowVersionID != "" {
-			t.Fatalf("WorkflowVersionID = %q, want empty", entry.WorkflowVersionID)
-		}
-		if entry.ErrorType != "" {
-			t.Fatalf("ErrorType = %q, want empty", entry.ErrorType)
-		}
+		require.NoError(t, err)
+
+		require.NotNil(t, entry)
+		require.Empty(t, entry.WorkflowVersionID)
+		require.Empty(t, entry.ErrorType)
 
 		logs, err := reader.GetLogs(context.Background(), LogQueryParams{Limit: 10})
-		if err != nil {
-			t.Fatalf("GetLogs failed: %v", err)
-		}
-		if len(logs.Entries) != 1 {
-			t.Fatalf("len(entries) = %d, want 1", len(logs.Entries))
-		}
-		if logs.Entries[0].WorkflowVersionID != "" {
-			t.Fatalf("list WorkflowVersionID = %q, want empty", logs.Entries[0].WorkflowVersionID)
-		}
-		if logs.Entries[0].ErrorType != "" {
-			t.Fatalf("list ErrorType = %q, want empty", logs.Entries[0].ErrorType)
-		}
+		require.NoError(t, err)
+		require.Len(t, logs.Entries, 1)
+		require.Empty(t, logs.Entries[0].WorkflowVersionID)
+		require.Empty(t, logs.Entries[0].ErrorType)
 	})
 }
 
@@ -469,9 +320,8 @@ func TestSQLReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 		ctx := context.Background()
 
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		now := db.Dialect().TimestampArg(time.Now())
@@ -518,28 +368,16 @@ func TestSQLReader_GetLogsFiltersByUserPathSubtree(t *testing.T) {
 			"",
 			nil,
 		)
-		if err != nil {
-			t.Fatalf("failed to insert audit log rows: %v", err)
-		}
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		logs, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/team", Limit: 10})
-		if err != nil {
-			t.Fatalf("GetLogs failed: %v", err)
-		}
-		if len(logs.Entries) != 1 {
-			t.Fatalf("len(entries) = %d, want 1", len(logs.Entries))
-		}
-		if logs.Entries[0].ID != "match-team" {
-			t.Fatalf("entry id = %q, want match-team", logs.Entries[0].ID)
-		}
-		if logs.Entries[0].UserPath != "/team/a" {
-			t.Fatalf("entry user_path = %q, want /team/a", logs.Entries[0].UserPath)
-		}
+		require.NoError(t, err)
+		require.Len(t, logs.Entries, 1)
+		require.Equal(t, "match-team", logs.Entries[0].ID)
+		require.Equal(t, "/team/a", logs.Entries[0].UserPath)
 	})
 }
 
@@ -548,9 +386,8 @@ func TestSQLReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
 		ctx := context.Background()
 
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		now := db.Dialect().TimestampArg(time.Now())
@@ -597,37 +434,27 @@ func TestSQLReader_GetLogsRootUserPathIncludesLegacyNullRows(t *testing.T) {
 			"",
 			nil,
 		)
-		if err != nil {
-			t.Fatalf("failed to insert audit log rows: %v", err)
-		}
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		logs, err := reader.GetLogs(context.Background(), LogQueryParams{UserPath: "/", Limit: 10})
-		if err != nil {
-			t.Fatalf("GetLogs failed: %v", err)
-		}
-		if len(logs.Entries) != 2 {
-			t.Fatalf("len(entries) = %d, want 2", len(logs.Entries))
-		}
+		require.NoError(t, err)
+		require.Len(t, logs.Entries, 2)
 	})
 }
 
 func TestSQLStoreAndReader_PreserveCacheType(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		ctx := context.Background()
 		now := time.Now()
-		if err := store.WriteBatch(ctx, []*LogEntry{
+		err = store.WriteBatch(ctx, []*LogEntry{
 			{
 				ID:             "cache-exact",
 				Timestamp:      now,
@@ -641,46 +468,32 @@ func TestSQLStoreAndReader_PreserveCacheType(t *testing.T) {
 				RequestedModel: "gpt-4",
 				Provider:       "openai",
 			},
-		}); err != nil {
-			t.Fatalf("WriteBatch failed: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		var exactCacheType *string
-		if err := db.QueryRow(ctx, "SELECT cache_type FROM audit_logs WHERE id = ?", "cache-exact").Scan(&exactCacheType); err != nil {
-			t.Fatalf("query exact cache_type failed: %v", err)
-		}
-		if exactCacheType == nil || *exactCacheType != CacheTypeExact {
-			t.Fatalf("exact cache_type = %v, want %q", exactCacheType, CacheTypeExact)
-		}
+		err = db.QueryRow(ctx, "SELECT cache_type FROM audit_logs WHERE id = ?", "cache-exact").Scan(&exactCacheType)
+		require.NoError(t, err)
+		require.NotNil(t, exactCacheType)
+		require.Equal(t, CacheTypeExact, *exactCacheType)
 
 		var noneCacheType *string
-		if err := db.QueryRow(ctx, "SELECT cache_type FROM audit_logs WHERE id = ?", "cache-none").Scan(&noneCacheType); err != nil {
-			t.Fatalf("query nil cache_type failed: %v", err)
-		}
-		if noneCacheType != nil {
-			t.Fatalf("nil cache_type = %q, want SQL NULL", *noneCacheType)
-		}
+		err = db.QueryRow(ctx, "SELECT cache_type FROM audit_logs WHERE id = ?", "cache-none").Scan(&noneCacheType)
+		require.NoError(t, err)
+		require.Nil(t, noneCacheType)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		exactEntry, err := reader.GetLogByID(ctx, "cache-exact")
-		if err != nil {
-			t.Fatalf("GetLogByID(exact) failed: %v", err)
-		}
-		if exactEntry == nil || exactEntry.CacheType != CacheTypeExact {
-			t.Fatalf("exact entry cache_type = %#v, want %q", exactEntry, CacheTypeExact)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, exactEntry)
+		require.Equal(t, CacheTypeExact, exactEntry.CacheType)
 
 		noneEntry, err := reader.GetLogByID(ctx, "cache-none")
-		if err != nil {
-			t.Fatalf("GetLogByID(none) failed: %v", err)
-		}
-		if noneEntry == nil || noneEntry.CacheType != "" {
-			t.Fatalf("none entry cache_type = %#v, want empty", noneEntry)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, noneEntry)
+		require.Empty(t, noneEntry.CacheType)
 	})
 }
 
@@ -688,9 +501,8 @@ func TestSQLReader_GetLogsUserPathSubtreeIsSegmentExact(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
+
 		defer store.Close()
 
 		now := time.Now()
@@ -705,37 +517,34 @@ func TestSQLReader_GetLogsUserPathSubtreeIsSegmentExact(t *testing.T) {
 			// User paths are case-preserving, and the filter compares bytes.
 			{ID: "other-case", Timestamp: now, UserPath: "/Team/a"},
 		}
-		if err := store.WriteBatch(ctx, entries); err != nil {
-			t.Fatalf("WriteBatch: %v", err)
-		}
+		err = store.WriteBatch(ctx, entries)
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
+
 		ids := func(params LogQueryParams) map[string]bool {
 			t.Helper()
 			logs, err := reader.GetLogs(ctx, params)
-			if err != nil {
-				t.Fatalf("GetLogs(%+v): %v", params, err)
-			}
+			require.NoError(t, err, "GetLogs(%+v)", params)
+
 			got := make(map[string]bool, len(logs.Entries))
 			for _, entry := range logs.Entries {
 				got[entry.ID] = true
 			}
-			if logs.Total != len(got) {
-				t.Fatalf("Total = %d, want %d", logs.Total, len(got))
-			}
+			require.Equal(t, len(got), logs.Total)
+
 			return got
 		}
 
 		subtree := ids(LogQueryParams{UserPath: "/team", Limit: 10})
-		if len(subtree) != 3 || !subtree["self"] || !subtree["child"] || !subtree["grandchild"] {
-			t.Fatalf("subtree ids = %v, want self, child, grandchild", subtree)
-		}
+		require.Len(t, subtree, 3)
+		require.True(t, subtree["self"])
+		require.True(t, subtree["child"])
+		require.True(t, subtree["grandchild"])
+
 		exact := ids(LogQueryParams{UserPath: "/team", ExactUserPath: true, Limit: 10})
-		if len(exact) != 1 || !exact["self"] {
-			t.Fatalf("exact ids = %v, want self", exact)
-		}
+		require.Len(t, exact, 1)
+		require.True(t, exact["self"])
 	})
 }

@@ -8,15 +8,13 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSQLReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractionalEndBoundary(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
 
 		ctx := context.Background()
 		err = store.WriteBatch(ctx, []*LogEntry{
@@ -39,19 +37,13 @@ func TestSQLReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractionalEn
 				Provider:       "openai",
 			},
 		})
-		if err != nil {
-			t.Fatalf("failed to seed audit logs: %v", err)
-		}
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		location, err := time.LoadLocation("Europe/Warsaw")
-		if err != nil {
-			t.Fatalf("failed to load location: %v", err)
-		}
+		require.NoError(t, err)
 
 		result, err := reader.GetLogs(ctx, LogQueryParams{
 			StartDate: time.Date(2026, 1, 16, 0, 0, 0, 0, location),
@@ -59,35 +51,21 @@ func TestSQLReaderGetLogs_IncludesFractionalStartBoundaryAndExcludesFractionalEn
 			Limit:     10,
 			Offset:    0,
 		})
-		if err != nil {
-			t.Fatalf("GetLogs returned error: %v", err)
-		}
-
-		if result.Total != 2 {
-			t.Fatalf("expected 2 logs in range, got %d", result.Total)
-		}
-		if len(result.Entries) != 2 {
-			t.Fatalf("expected 2 returned entries, got %d", len(result.Entries))
-		}
-		if result.Entries[0].ID != "inside-range" {
-			t.Fatalf("expected latest in-range entry %q, got %q", "inside-range", result.Entries[0].ID)
-		}
-		if result.Entries[1].ID != "start-boundary" {
-			t.Fatalf("expected boundary entry %q, got %q", "start-boundary", result.Entries[1].ID)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 2, result.Total)
+		require.Len(t, result.Entries, 2)
+		require.Equal(t, "inside-range", result.Entries[0].ID)
+		require.Equal(t, "start-boundary", result.Entries[1].ID)
 	})
 }
 
 func TestSQLReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
 
 		ctx := context.Background()
-		if err := store.WriteBatch(ctx, []*LogEntry{
+		err = store.WriteBatch(ctx, []*LogEntry{
 			{
 				ID:             "team-match",
 				Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -102,32 +80,20 @@ func TestSQLReaderGetLogs_SearchMatchesUserPath(t *testing.T) {
 				Provider:       "openai",
 				UserPath:       "/org/beta",
 			},
-		}); err != nil {
-			t.Fatalf("failed to seed audit logs: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		result, err := reader.GetLogs(ctx, LogQueryParams{
 			Search: "team/alpha",
 			Limit:  10,
 		})
-		if err != nil {
-			t.Fatalf("GetLogs returned error: %v", err)
-		}
-
-		if result.Total != 1 {
-			t.Fatalf("expected 1 log in search result, got %d", result.Total)
-		}
-		if len(result.Entries) != 1 {
-			t.Fatalf("expected 1 returned entry, got %d", len(result.Entries))
-		}
-		if result.Entries[0].ID != "team-match" {
-			t.Fatalf("expected matching entry %q, got %q", "team-match", result.Entries[0].ID)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 1, result.Total)
+		require.Len(t, result.Entries, 1)
+		require.Equal(t, "team-match", result.Entries[0].ID)
 	})
 }
 
@@ -139,12 +105,10 @@ func TestSQLReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
 		const searchUUID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
 
 		ctx := context.Background()
-		if err := store.WriteBatch(ctx, []*LogEntry{
+		err = store.WriteBatch(ctx, []*LogEntry{
 			{
 				ID:             "request-id-match",
 				Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -169,47 +133,32 @@ func TestSQLReaderGetLogs_SearchUUIDMatchesIdentifierColumns(t *testing.T) {
 				ErrorType:      "provider_error",
 				Data:           &LogData{ErrorMessage: "upstream rejected request " + searchUUID},
 			},
-		}); err != nil {
-			t.Fatalf("failed to seed audit logs: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		// Uppercase paste must still find the lowercase stored identifiers.
 		result, err := reader.GetLogs(ctx, LogQueryParams{
 			Search: strings.ToUpper(searchUUID),
 			Limit:  10,
 		})
-		if err != nil {
-			t.Fatalf("GetLogs returned error: %v", err)
-		}
-
-		if result.Total != 2 {
-			t.Fatalf("expected 2 logs in search result, got %d", result.Total)
-		}
-		if len(result.Entries) != 2 {
-			t.Fatalf("expected 2 returned entries, got %d", len(result.Entries))
-		}
-		if result.Entries[0].ID != "request-id-match" || result.Entries[1].ID != "session-id-match" {
-			t.Fatalf("expected identifier matches, got %q and %q",
-				result.Entries[0].ID, result.Entries[1].ID)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 2, result.Total)
+		require.Len(t, result.Entries, 2)
+		require.Equal(t, "request-id-match", result.Entries[0].ID)
+		require.Equal(t, "session-id-match", result.Entries[1].ID)
 	})
 }
 
 func TestSQLReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-
 		store, err := newSQLStoreForTest(t, db, 0)
-		if err != nil {
-			t.Fatalf("failed to create store: %v", err)
-		}
+		require.NoError(t, err)
 
 		ctx := context.Background()
-		if err := store.WriteBatch(ctx, []*LogEntry{
+		err = store.WriteBatch(ctx, []*LogEntry{
 			{
 				ID:             "timeout-match",
 				Timestamp:      time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC),
@@ -230,31 +179,19 @@ func TestSQLReaderGetLogs_SearchMatchesErrorMessage(t *testing.T) {
 					ErrorMessage: "upstream refused connection",
 				},
 			},
-		}); err != nil {
-			t.Fatalf("failed to seed audit logs: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		reader, err := NewSQLReader(db)
-		if err != nil {
-			t.Fatalf("failed to create sqlite reader: %v", err)
-		}
+		require.NoError(t, err)
 
 		result, err := reader.GetLogs(ctx, LogQueryParams{
 			Search: "timeout awaiting response headers",
 			Limit:  10,
 		})
-		if err != nil {
-			t.Fatalf("GetLogs returned error: %v", err)
-		}
-
-		if result.Total != 1 {
-			t.Fatalf("expected 1 log in search result, got %d", result.Total)
-		}
-		if len(result.Entries) != 1 {
-			t.Fatalf("expected 1 returned entry, got %d", len(result.Entries))
-		}
-		if result.Entries[0].ID != "timeout-match" {
-			t.Fatalf("expected matching entry %q, got %q", "timeout-match", result.Entries[0].ID)
-		}
+		require.NoError(t, err)
+		require.Equal(t, 1, result.Total)
+		require.Len(t, result.Entries, 1)
+		require.Equal(t, "timeout-match", result.Entries[0].ID)
 	})
 }

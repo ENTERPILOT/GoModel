@@ -2,18 +2,16 @@ package telemetry
 
 import (
 	"net/http"
-	"net/http/httptest"
-	"slices"
-	"strings"
 	"testing"
 
-	"github.com/labstack/echo-opentelemetry"
-	"github.com/labstack/echo/v5"
+	echootel "github.com/labstack/echo-opentelemetry"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.39.0"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 func TestNewBuildsMiddlewareAndHooksWithoutExporters(t *testing.T) {
@@ -21,23 +19,18 @@ func TestNewBuildsMiddlewareAndHooksWithoutExporters(t *testing.T) {
 	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
 	service, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if service.Middleware() == nil || service.Hooks().OnRequestStart == nil {
-		t.Fatal("service must expose HTTP middleware and provider hooks")
-	}
-	if err := service.Close(); err != nil {
-		t.Fatalf("Close() = %v", err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, service.Middleware())
+	require.NotNil(t, service.Hooks().OnRequestStart)
+	err = service.Close()
+	require.NoError(t, err)
 }
 
 func TestNewRejectsUnknownExporter(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "zipkin")
 	_, err := New(t.Context(), config.OpenTelemetryConfig{}, "/metrics", "")
-	if err == nil || !strings.Contains(err.Error(), "otlp or none") {
-		t.Fatalf("error = %v, want supported-exporter error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "otlp or none")
 }
 
 func TestOperationalEndpointSkipperUsesConfiguredMetricsPath(t *testing.T) {
@@ -53,11 +46,8 @@ func TestOperationalEndpointSkipperUsesConfiguredMetricsPath(t *testing.T) {
 	}
 	for requestPath, want := range tests {
 		t.Run(requestPath, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, requestPath, nil)
-			ctx := echo.New().NewContext(req, httptest.NewRecorder())
-			if got := skip(ctx); got != want {
-				t.Fatalf("skip(%q) = %v, want %v", requestPath, got, want)
-			}
+			ctx, _ := echotest.Get(t, requestPath)
+			require.Equal(t, want, skip(ctx))
 		})
 	}
 }
@@ -89,9 +79,7 @@ func TestBoundedMetricAttributesRemovesHostDimensions(t *testing.T) {
 
 func TestExporterNameDefaultsToOTLP(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "")
-	if got := exporterName("OTEL_TRACES_EXPORTER"); got != "otlp" {
-		t.Fatalf("exporterName() = %q, want otlp", got)
-	}
+	require.Equal(t, "otlp", exporterName("OTEL_TRACES_EXPORTER"))
 }
 
 func TestSignalProtocol(t *testing.T) {
@@ -109,9 +97,7 @@ func TestSignalProtocol(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", tt.generic)
 			t.Setenv("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", tt.specific)
-			if got := signalProtocol("TRACES"); got != tt.want {
-				t.Fatalf("signalProtocol() = %q, want %q", got, tt.want)
-			}
+			require.Equal(t, tt.want, signalProtocol("TRACES"))
 		})
 	}
 }
@@ -120,9 +106,8 @@ func TestTracerProviderRejectsUnknownProtocol(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "thrift")
 	_, err := newTracerProvider(t.Context(), resource.Empty())
-	if err == nil || !strings.Contains(err.Error(), "grpc or http/protobuf") {
-		t.Fatalf("error = %v, want unsupported-protocol error", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "grpc or http/protobuf")
 }
 
 func TestPropagatorsFromEnv(t *testing.T) {
@@ -142,11 +127,7 @@ func TestPropagatorsFromEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(propagatorsEnvVar, tt.configured)
-			got := propagatorsFromEnv().Fields()
-			slices.Sort(got)
-			if !slices.Equal(got, tt.wantFields) {
-				t.Fatalf("Fields() = %q, want %q", got, tt.wantFields)
-			}
+			require.ElementsMatch(t, tt.wantFields, propagatorsFromEnv().Fields())
 		})
 	}
 }
@@ -157,11 +138,7 @@ func assertAttributeKeys(t *testing.T, attrs []attribute.KeyValue, want []attrib
 	for _, attr := range attrs {
 		got = append(got, attr.Key)
 	}
-	slices.Sort(got)
-	slices.Sort(want)
-	if !slices.Equal(got, want) {
-		t.Fatalf("attribute keys = %v, want %v", got, want)
-	}
+	require.ElementsMatch(t, want, got)
 }
 
 func TestPlaintextCredentialSignals(t *testing.T) {
@@ -192,9 +169,7 @@ func TestPlaintextCredentialSignals(t *testing.T) {
 			for _, key := range otlpVars {
 				t.Setenv(key, tt.env[key])
 			}
-			if got := plaintextCredentialSignals(); !slices.Equal(got, tt.want) {
-				t.Fatalf("plaintextCredentialSignals() = %v, want %v", got, tt.want)
-			}
+			require.ElementsMatch(t, tt.want, plaintextCredentialSignals())
 		})
 	}
 }
@@ -214,27 +189,15 @@ func TestNewResourceServiceName(t *testing.T) {
 	}
 
 	res, err := newResource(t.Context(), "gomodel-pro")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := serviceName(t, res); got != "gomodel-pro" {
-		t.Fatalf("service.name = %q, want the product name", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "gomodel-pro", serviceName(t, res))
 
 	res, err = newResource(t.Context(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := serviceName(t, res); got != "gomodel" {
-		t.Fatalf("service.name = %q, want the gomodel default", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "gomodel", serviceName(t, res))
 
 	t.Setenv("OTEL_SERVICE_NAME", "from-env")
 	res, err = newResource(t.Context(), "gomodel-pro")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := serviceName(t, res); got != "from-env" {
-		t.Fatalf("service.name = %q, want OTEL_SERVICE_NAME to override the product name", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "from-env", serviceName(t, res))
 }

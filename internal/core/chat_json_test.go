@@ -1,9 +1,10 @@
 package core
 
 import (
-	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestChatRequestJSON_CanonicalizesToolObjectKeyOrder(t *testing.T) {
@@ -15,26 +16,19 @@ func TestChatRequestJSON_CanonicalizesToolObjectKeyOrder(t *testing.T) {
 	encoded := make([][]byte, len(bodies))
 	for i, body := range bodies {
 		var req ChatRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			t.Fatalf("json.Unmarshal(body %d) error = %v", i, err)
-		}
-		var err error
+		err := json.Unmarshal(body, &req)
+		require.NoError(t, err)
+
 		encoded[i], err = json.Marshal(req)
-		if err != nil {
-			t.Fatalf("json.Marshal(body %d) error = %v", i, err)
-		}
+		require.NoError(t, err)
 	}
-	if !bytes.Equal(encoded[0], encoded[1]) {
-		t.Fatalf("equivalent tool maps produced different provider shapes:\nfirst:  %s\nsecond: %s", encoded[0], encoded[1])
-	}
+	require.Equal(t, encoded[1], encoded[0])
 }
 
 func lookupUnknownField(t *testing.T, fields UnknownJSONFields, key string) json.RawMessage {
 	t.Helper()
 	raw := fields.Lookup(key)
-	if raw == nil {
-		t.Fatalf("unknown field %q missing", key)
-	}
+	require.NotNil(t, raw, "unknown field %q missing", key)
 	return raw
 }
 
@@ -84,102 +78,66 @@ func TestChatRequestJSON_RoundTripPreservesUnknownFields(t *testing.T) {
 		"stream_options",
 		"reasoning",
 	)
-	if err != nil {
-		t.Fatalf("extractUnknownJSONFields() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var req ChatRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
+	err = json.Unmarshal(body, &req)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-4o-mini", req.Model)
 
-	if req.Model != "gpt-4o-mini" {
-		t.Fatalf("Model = %q, want gpt-4o-mini", req.Model)
-	}
 	traceField := lookupUnknownField(t, req.ExtraFields, "x_trace")
-	if string(traceField) != string(wantExtra.Lookup("x_trace")) {
-		t.Fatalf("ExtraFields[x_trace] = %s, want %s", traceField, wantExtra.Lookup("x_trace"))
-	}
+	require.Equal(t, string(wantExtra.Lookup("x_trace")), string(traceField))
+
 	var topTrace map[string]any
-	if err := json.Unmarshal(traceField, &topTrace); err != nil {
-		t.Fatalf("failed to unmarshal x_trace: %v", err)
-	}
-	if topTrace["id"] != "trace-1" {
-		t.Fatalf("x_trace.id = %#v, want trace-1", topTrace["id"])
-	}
-	if len(req.Messages) != 1 {
-		t.Fatalf("len(Messages) = %d, want 1", len(req.Messages))
-	}
+	err = json.Unmarshal(traceField, &topTrace)
+	require.NoError(t, err)
+	require.Equal(t, "trace-1", topTrace["id"])
+	require.Len(t, req.Messages, 1)
+
 	var messageMeta map[string]any
-	if err := json.Unmarshal(lookupUnknownField(t, req.Messages[0].ExtraFields, "x_message_meta"), &messageMeta); err != nil {
-		t.Fatalf("failed to unmarshal x_message_meta: %v", err)
-	}
-	if messageMeta["id"] != "msg-1" {
-		t.Fatalf("x_message_meta.id = %#v, want msg-1", messageMeta["id"])
-	}
-	if len(req.Messages[0].ToolCalls) != 1 {
-		t.Fatalf("len(ToolCalls) = %d, want 1", len(req.Messages[0].ToolCalls))
-	}
-	if got := lookupUnknownField(t, req.Messages[0].ToolCalls[0].ExtraFields, "x_tool_call"); string(got) != "true" {
-		t.Fatalf("x_tool_call = %s, want true", got)
-	}
+	err = json.Unmarshal(lookupUnknownField(t, req.Messages[0].ExtraFields, "x_message_meta"), &messageMeta)
+	require.NoError(t, err)
+	require.Equal(t, "msg-1", messageMeta["id"])
+	require.Len(t, req.Messages[0].ToolCalls, 1)
+	got := lookupUnknownField(t, req.Messages[0].ToolCalls[0].ExtraFields, "x_tool_call")
+	require.Equal(t, "true", string(got))
+
 	var functionMeta map[string]any
-	if err := json.Unmarshal(lookupUnknownField(t, req.Messages[0].ToolCalls[0].Function.ExtraFields, "x_function_meta"), &functionMeta); err != nil {
-		t.Fatalf("failed to unmarshal x_function_meta: %v", err)
-	}
-	if functionMeta["strict"] != true {
-		t.Fatalf("x_function_meta.strict = %#v, want true", functionMeta["strict"])
-	}
-	if got := req.Tools[0]["x_tool_meta"]; got != "keep-me" {
-		t.Fatalf("tools[0][x_tool_meta] = %#v, want keep-me", got)
-	}
+	err = json.Unmarshal(lookupUnknownField(t, req.Messages[0].ToolCalls[0].Function.ExtraFields, "x_function_meta"), &functionMeta)
+	require.NoError(t, err)
+	require.Equal(t, true, functionMeta["strict"])
+	require.Equal(t, "keep-me", req.Tools[0]["x_tool_meta"])
 
 	roundTrip, err := json.Marshal(req)
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var decoded map[string]any
-	if err := json.Unmarshal(roundTrip, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal(roundTrip) error = %v", err)
-	}
+	err = json.Unmarshal(roundTrip, &decoded)
+	require.NoError(t, err)
+
 	traceMap, ok := decoded["x_trace"].(map[string]any)
-	if !ok {
-		t.Fatalf("x_trace = %#v, want object", decoded["x_trace"])
-	}
-	if traceMap["id"] != "trace-1" {
-		t.Fatalf("x_trace.id = %#v, want trace-1", traceMap["id"])
-	}
+	require.True(t, ok, "x_trace = %#v, want object", decoded["x_trace"])
+	require.Equal(t, "trace-1", traceMap["id"])
 
 	messages, ok := decoded["messages"].([]any)
-	if !ok || len(messages) != 1 {
-		t.Fatalf("messages = %#v, want len=1", decoded["messages"])
-	}
+	require.True(t, ok)
+	require.Len(t, messages, 1)
+
 	message := messages[0].(map[string]any)
 	messageMetaMap, ok := message["x_message_meta"].(map[string]any)
-	if !ok {
-		t.Fatalf("x_message_meta = %#v, want object", message["x_message_meta"])
-	}
-	if messageMetaMap["id"] != "msg-1" {
-		t.Fatalf("x_message_meta.id = %#v, want msg-1", messageMetaMap["id"])
-	}
+	require.True(t, ok, "x_message_meta = %#v, want object", message["x_message_meta"])
+	require.Equal(t, "msg-1", messageMetaMap["id"])
+
 	toolCalls := message["tool_calls"].([]any)
 	toolCall := toolCalls[0].(map[string]any)
-	if toolCall["x_tool_call"] != true {
-		t.Fatalf("x_tool_call = %#v, want true", toolCall["x_tool_call"])
-	}
+	require.Equal(t, true, toolCall["x_tool_call"])
+
 	function := toolCall["function"].(map[string]any)
 	functionMetaMap, ok := function["x_function_meta"].(map[string]any)
-	if !ok {
-		t.Fatalf("x_function_meta = %#v, want object", function["x_function_meta"])
-	}
-	if functionMetaMap["strict"] != true {
-		t.Fatalf("x_function_meta.strict = %#v, want true", functionMetaMap["strict"])
-	}
+	require.True(t, ok, "x_function_meta = %#v, want object", function["x_function_meta"])
+	require.Equal(t, true, functionMetaMap["strict"])
 
 	tools := decoded["tools"].([]any)
 	tool := tools[0].(map[string]any)
-	if tool["x_tool_meta"] != "keep-me" {
-		t.Fatalf("x_tool_meta = %#v, want keep-me", tool["x_tool_meta"])
-	}
+	require.Equal(t, "keep-me", tool["x_tool_meta"])
 }

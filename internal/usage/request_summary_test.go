@@ -1,6 +1,10 @@
 package usage
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestSummarizeRequestUsage_OpenAICompatibleCachedTokens(t *testing.T) {
 	summary := SummarizeRequestUsage([]UsageLogEntry{
@@ -13,24 +17,12 @@ func TestSummarizeRequestUsage_OpenAICompatibleCachedTokens(t *testing.T) {
 			},
 		},
 	})
-	if summary == nil {
-		t.Fatal("expected non-nil summary")
-	}
-	if summary.InputTokens != 120 {
-		t.Fatalf("InputTokens = %d, want 120", summary.InputTokens)
-	}
-	if summary.UncachedInputTokens != 40 {
-		t.Fatalf("UncachedInputTokens = %d, want 40", summary.UncachedInputTokens)
-	}
-	if summary.CachedInputTokens != 80 {
-		t.Fatalf("CachedInputTokens = %d, want 80", summary.CachedInputTokens)
-	}
-	if summary.TotalTokens != 150 {
-		t.Fatalf("TotalTokens = %d, want 150", summary.TotalTokens)
-	}
-	if summary.EstimatedCachedCharacters != 320 {
-		t.Fatalf("EstimatedCachedCharacters = %d, want 320", summary.EstimatedCachedCharacters)
-	}
+	require.NotNil(t, summary)
+	require.Equal(t, int64(120), summary.InputTokens)
+	require.Equal(t, int64(40), summary.UncachedInputTokens)
+	require.Equal(t, int64(80), summary.CachedInputTokens)
+	require.Equal(t, int64(150), summary.TotalTokens)
+	require.Equal(t, int64(320), summary.EstimatedCachedCharacters)
 }
 
 func TestSummarizeRequestUsage_RewriteSavings(t *testing.T) {
@@ -71,21 +63,14 @@ func TestSummarizeRequestUsage_RewriteSavings(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			summary := SummarizeRequestUsage(tc.entries)
-			if summary == nil {
-				t.Fatal("expected non-nil summary")
-			}
-			if summary.RewriteTokensSaved != tc.wantTokens {
-				t.Fatalf("RewriteTokensSaved = %d, want %d", summary.RewriteTokensSaved, tc.wantTokens)
-			}
-			switch {
-			case tc.wantCost == nil:
-				if summary.RewriteCostSaved != nil {
-					t.Fatalf("RewriteCostSaved = %v, want nil", *summary.RewriteCostSaved)
-				}
-			case summary.RewriteCostSaved == nil:
-				t.Fatalf("RewriteCostSaved = nil, want %v", *tc.wantCost)
-			case *summary.RewriteCostSaved != *tc.wantCost:
-				t.Fatalf("RewriteCostSaved = %v, want %v", *summary.RewriteCostSaved, *tc.wantCost)
+			require.NotNil(t, summary)
+			require.Equal(t, tc.wantTokens, summary.RewriteTokensSaved)
+
+			if tc.wantCost == nil {
+				require.Nil(t, summary.RewriteCostSaved)
+			} else {
+				require.NotNil(t, summary.RewriteCostSaved)
+				require.Equal(t, *tc.wantCost, *summary.RewriteCostSaved)
 			}
 		})
 	}
@@ -103,24 +88,12 @@ func TestSummarizeRequestUsage_AnthropicSplitCacheAccounting(t *testing.T) {
 			},
 		},
 	})
-	if summary == nil {
-		t.Fatal("expected non-nil summary")
-	}
-	if summary.InputTokens != 170 {
-		t.Fatalf("InputTokens = %d, want 170", summary.InputTokens)
-	}
-	if summary.UncachedInputTokens != 50 {
-		t.Fatalf("UncachedInputTokens = %d, want 50", summary.UncachedInputTokens)
-	}
-	if summary.CachedInputTokens != 90 {
-		t.Fatalf("CachedInputTokens = %d, want 90", summary.CachedInputTokens)
-	}
-	if summary.CacheWriteInputTokens != 30 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 30", summary.CacheWriteInputTokens)
-	}
-	if summary.TotalTokens != 190 {
-		t.Fatalf("TotalTokens = %d, want 190", summary.TotalTokens)
-	}
+	require.NotNil(t, summary)
+	require.Equal(t, int64(170), summary.InputTokens)
+	require.Equal(t, int64(50), summary.UncachedInputTokens)
+	require.Equal(t, int64(90), summary.CachedInputTokens)
+	require.Equal(t, int64(30), summary.CacheWriteInputTokens)
+	require.Equal(t, int64(190), summary.TotalTokens)
 }
 
 func TestSummarizeRequestUsage_AnthropicSplitCacheAccountingWithoutCacheFields(t *testing.T) {
@@ -131,24 +104,12 @@ func TestSummarizeRequestUsage_AnthropicSplitCacheAccountingWithoutCacheFields(t
 			OutputTokens: 20,
 		},
 	})
-	if summary == nil {
-		t.Fatal("expected non-nil summary")
-	}
-	if summary.InputTokens != 50 {
-		t.Fatalf("InputTokens = %d, want 50", summary.InputTokens)
-	}
-	if summary.UncachedInputTokens != 50 {
-		t.Fatalf("UncachedInputTokens = %d, want 50", summary.UncachedInputTokens)
-	}
-	if summary.CachedInputTokens != 0 {
-		t.Fatalf("CachedInputTokens = %d, want 0", summary.CachedInputTokens)
-	}
-	if summary.CacheWriteInputTokens != 0 {
-		t.Fatalf("CacheWriteInputTokens = %d, want 0", summary.CacheWriteInputTokens)
-	}
-	if summary.TotalTokens != 70 {
-		t.Fatalf("TotalTokens = %d, want 70", summary.TotalTokens)
-	}
+	require.NotNil(t, summary)
+	require.Equal(t, int64(50), summary.InputTokens)
+	require.Equal(t, int64(50), summary.UncachedInputTokens)
+	require.Equal(t, int64(0), summary.CachedInputTokens)
+	require.Equal(t, int64(0), summary.CacheWriteInputTokens)
+	require.Equal(t, int64(70), summary.TotalTokens)
 }
 
 func TestSummarizeUsageByRequestID(t *testing.T) {
@@ -160,13 +121,7 @@ func TestSummarizeUsageByRequestID(t *testing.T) {
 			{Provider: "openai", InputTokens: 20, OutputTokens: 10},
 		},
 	})
-	if len(summaries) != 2 {
-		t.Fatalf("len(summaries) = %d, want 2", len(summaries))
-	}
-	if summaries["req-1"].TotalTokens != 15 {
-		t.Fatalf("summaries[req-1].TotalTokens = %d, want 15", summaries["req-1"].TotalTokens)
-	}
-	if summaries["req-2"].TotalTokens != 30 {
-		t.Fatalf("summaries[req-2].TotalTokens = %d, want 30", summaries["req-2"].TotalTokens)
-	}
+	require.Len(t, summaries, 2)
+	require.Equal(t, int64(15), summaries["req-1"].TotalTokens)
+	require.Equal(t, int64(30), summaries["req-2"].TotalTokens)
 }

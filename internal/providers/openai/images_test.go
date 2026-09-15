@@ -2,78 +2,56 @@ package openai
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateImage_ForwardsRequestAndDecodesResponse(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]any
-	provider := newSpeechTestProvider(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		raw, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(raw, &gotBody)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"created":1713833628,"data":[{"b64_json":"aGk=","revised_prompt":"a fluffy cat"}],"output_format":"png","quality":"high","size":"1024x1024","usage":{"input_tokens":10,"output_tokens":1000,"total_tokens":1010,"input_tokens_details":{"text_tokens":10,"image_tokens":0}}}`))
-	})
+	provider, capture := newTestProvider(t, jsonHandler(
+		`{"created":1713833628,"data":[{"b64_json":"aGk=","revised_prompt":"a fluffy cat"}],"output_format":"png","quality":"high","size":"1024x1024","usage":{"input_tokens":10,"output_tokens":1000,"total_tokens":1010,"input_tokens_details":{"text_tokens":10,"image_tokens":0}}}`))
 
 	req, err := core.DecodeImageGenerationRequest([]byte(`{"model":"gpt-image-1","prompt":"a cat","n":1,"quality":"high","background":"opaque"}`), nil)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	require.NoError(t, err)
+
 	resp, err := provider.CreateImage(context.Background(), req)
-	if err != nil {
-		t.Fatalf("CreateImage() error = %v", err)
-	}
+	require.NoError(t, err)
 
-	if gotPath != "/images/generations" {
-		t.Errorf("path = %q, want /images/generations", gotPath)
-	}
-	if gotBody["model"] != "gpt-image-1" || gotBody["prompt"] != "a cat" || gotBody["background"] != "opaque" {
-		t.Errorf("forwarded body = %v", gotBody)
-	}
-	if _, present := gotBody["provider"]; present {
-		t.Errorf("forwarded body carries provider hint: %v", gotBody)
-	}
+	sent := capture.Last(t)
+	assert.Equal(t, "/images/generations", sent.Path)
+	body := sent.JSON(t)
+	assert.Equal(t, "gpt-image-1", body["model"])
+	assert.Equal(t, "a cat", body["prompt"])
+	assert.Equal(t, "opaque", body["background"], "unknown fields must be forwarded")
+	assert.NotContains(t, body, "provider", "forwarded body carries provider hint")
 
-	if resp.Created != 1713833628 || len(resp.Data) != 1 || resp.Data[0].B64JSON != "aGk=" || resp.Data[0].RevisedPrompt != "a fluffy cat" {
-		t.Errorf("response = %+v", resp)
-	}
-	if resp.Quality != "high" || resp.Size != "1024x1024" || resp.OutputFormat != "png" {
-		t.Errorf("echoed output parameters = %+v", resp)
-	}
-	if resp.Usage == nil || resp.Usage.TotalTokens != 1010 || resp.Usage.InputTokensDetails == nil || resp.Usage.InputTokensDetails.TextTokens != 10 {
-		t.Errorf("usage = %+v", resp.Usage)
-	}
+	assert.Equal(t, int64(1713833628), resp.Created)
+	require.Len(t, resp.Data, 1)
+	assert.Equal(t, "aGk=", resp.Data[0].B64JSON)
+	assert.Equal(t, "a fluffy cat", resp.Data[0].RevisedPrompt)
+	assert.Equal(t, "high", resp.Quality)
+	assert.Equal(t, "1024x1024", resp.Size)
+	assert.Equal(t, "png", resp.OutputFormat)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 1010, resp.Usage.TotalTokens)
+	require.NotNil(t, resp.Usage.InputTokensDetails)
+	assert.Equal(t, 10, resp.Usage.InputTokensDetails.TextTokens)
 }
 
 func TestCreateImage_FillsMissingCreatedAndData(t *testing.T) {
-	provider := newSpeechTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	})
+	provider, _ := newTestProvider(t, jsonHandler(`{}`))
 
 	resp, err := provider.CreateImage(context.Background(), &core.ImageGenerationRequest{Model: "dall-e-3", Prompt: "a cat"})
-	if err != nil {
-		t.Fatalf("CreateImage() error = %v", err)
-	}
-	if resp.Created == 0 {
-		t.Error("Created should default to now when upstream omits it")
-	}
-	if resp.Data == nil {
-		t.Error("Data should be an empty array, not null")
-	}
+	require.NoError(t, err)
+	assert.NotZero(t, resp.Created)
+	assert.NotNil(t, resp.Data)
 }
 
 func TestCreateImage_RejectsInvalidRequests(t *testing.T) {
-	provider := newSpeechTestProvider(t, func(_ http.ResponseWriter, _ *http.Request) {
-		t.Fatal("upstream must not be called for invalid requests")
-	})
+	provider, capture := newTestProvider(t, nil)
 
 	tests := []struct {
 		name    string
@@ -86,25 +64,21 @@ func TestCreateImage_RejectsInvalidRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := provider.CreateImage(context.Background(), tt.req)
-			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {
-				t.Fatalf("error = %v, want %q", err, tt.wantMsg)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantMsg)
 		})
 	}
+	assert.Zero(t, capture.Count(), "upstream must not be called for invalid requests")
 }
 
 func TestCreateImage_PropagatesUpstreamError(t *testing.T) {
-	provider := newSpeechTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
+	provider, _ := newTestProvider(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"Your request was rejected as a result of our safety system.","type":"invalid_request_error"}}`))
 	})
 
 	_, err := provider.CreateImage(context.Background(), &core.ImageGenerationRequest{Model: "dall-e-3", Prompt: "a cat"})
-	if err == nil {
-		t.Fatal("expected upstream error")
-	}
-	if !strings.Contains(err.Error(), "safety system") {
-		t.Errorf("error = %v, want upstream message preserved", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "safety system")
 }

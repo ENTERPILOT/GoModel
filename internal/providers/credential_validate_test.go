@@ -1,11 +1,12 @@
 package providers
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // assertCredentialField requires err to be a field-scoped rejection naming
@@ -14,12 +15,8 @@ import (
 func assertCredentialField(t *testing.T, err error, field string) {
 	t.Helper()
 	var fieldErr *CredentialFieldError
-	if !errors.As(err, &fieldErr) {
-		t.Fatalf("error = %v (%T), want a *CredentialFieldError naming %q", err, err, field)
-	}
-	if fieldErr.Field != field {
-		t.Fatalf("error field = %q, want %q (message: %s)", fieldErr.Field, field, fieldErr.Message)
-	}
+	require.ErrorAs(t, err, &fieldErr)
+	require.Equal(t, field, fieldErr.Field)
 }
 
 func TestValidateCredential_RequiredFields(t *testing.T) {
@@ -67,9 +64,8 @@ func TestValidateCredential_RequiredFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateCredential(tt.cred, tt.schema)
 			if tt.field == "" {
-				if err != nil {
-					t.Fatalf("validateCredential() error = %v, want nil", err)
-				}
+				require.NoError(t, err)
+
 				return
 			}
 			assertCredentialField(t, err, tt.field)
@@ -90,9 +86,8 @@ func TestValidateCredential_AcceptsSpellingsOutsideAFieldsOptions(t *testing.T) 
 	})
 
 	for _, mode := range []string{"", "native", "openai_compatible", "compat", "GENERATE_CONTENT"} {
-		if err := validateCredential(ManagedProviderCredential{Name: "p", Type: "modal", APIMode: mode}, schema); err != nil {
-			t.Errorf("validateCredential(api_mode=%q) error = %v, want nil", mode, err)
-		}
+		err := validateCredential(ManagedProviderCredential{Name: "p", Type: "modal", APIMode: mode}, schema)
+		assert.NoError(t, err)
 	}
 }
 
@@ -149,9 +144,8 @@ func TestValidateCredential_GoogleAuth(t *testing.T) {
 		{Name: "v", Type: "vertex", VertexProject: "p", VertexLocation: "us-central1", AuthType: "gcp_service_account", ServiceAccountFile: "/etc/sa.json"},
 	}
 	for _, cred := range valid {
-		if err := validateCredential(cred, schema); err != nil {
-			t.Errorf("validateCredential(%+v) error = %v, want nil", cred, err)
-		}
+		err := validateCredential(cred, schema)
+		assert.NoError(t, err)
 	}
 }
 
@@ -175,25 +169,22 @@ func TestValidateCredential_VertexFieldsNeedAnExplicitBackend(t *testing.T) {
 	// Saying "vertex" hands the row to Google's own rules, which it satisfies.
 	explicit := ambiguous
 	explicit.Backend = "vertex"
-	if err := validateCredential(explicit, schema); err != nil {
-		t.Errorf("validateCredential(backend=vertex) error = %v, want nil", err)
-	}
+	err := validateCredential(explicit, schema)
+	assert.NoError(t, err)
 
 	// With a key the row resolves and runs, so the adapter's own inference
 	// takes it from there.
 	keyed := ambiguous
 	keyed.APIKeys = []string{"AIza-real"}
-	if err := validateCredential(keyed, schema); err != nil {
-		t.Errorf("validateCredential(with an API key) error = %v, want nil", err)
-	}
+	err = validateCredential(keyed, schema)
+	assert.NoError(t, err)
 
 	// A type with no backend field to set is never asked to set one.
 	vertexOnly := credentialSchema("vertex", DiscoveryConfig{
 		CredentialFields: []CredentialField{{Name: CredentialFieldVertexProject}, {Name: CredentialFieldVertexLocation}},
 	})
-	if err := validateCredential(ManagedProviderCredential{Name: "v", Type: "vertex", VertexProject: "p", VertexLocation: "us-central1"}, vertexOnly); err != nil {
-		t.Errorf("validateCredential(vertex type) error = %v, want nil", err)
-	}
+	err = validateCredential(ManagedProviderCredential{Name: "v", Type: "vertex", VertexProject: "p", VertexLocation: "us-central1"}, vertexOnly)
+	assert.NoError(t, err)
 }
 
 // A Gemini row only has to satisfy Google's rules once it points at Vertex;
@@ -208,9 +199,8 @@ func TestValidateCredential_GeminiOnlyNeedsGoogleAuthOnVertex(t *testing.T) {
 	})
 
 	aiStudio := ManagedProviderCredential{Name: "g", Type: "gemini", APIKeys: []string{"AIza-real"}}
-	if err := validateCredential(aiStudio, schema); err != nil {
-		t.Fatalf("validateCredential(AI Studio) error = %v, want nil", err)
-	}
+	err := validateCredential(aiStudio, schema)
+	require.NoError(t, err)
 
 	onVertex := aiStudio
 	onVertex.Backend = "vertex"
@@ -237,15 +227,12 @@ func TestCredentialsService_UpsertReportsAnUnresolvableRowAgainstAField(t *testi
 	store := newFakeCredentialStore()
 
 	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), store, nil, config.ResilienceConfig{})
-	if err != nil {
-		t.Fatalf("NewCredentialsService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "half-configured", Type: "conditional", Enabled: true})
 	assertCredentialField(t, err, CredentialFieldAPIKeys)
-	if _, getErr := store.Get(ctx, "half-configured"); !errors.Is(getErr, ErrCredentialNotFound) {
-		t.Errorf("store.Get() error = %v, want ErrCredentialNotFound (an unappliable credential must not be persisted)", getErr)
-	}
+	_, getErr := store.Get(ctx, "half-configured")
+	assert.ErrorIs(t, getErr, ErrCredentialNotFound)
 }
 
 func TestCredentialsService_UpsertRejectsAnIncompleteRowWithoutStoringIt(t *testing.T) {
@@ -255,28 +242,20 @@ func TestCredentialsService_UpsertRejectsAnIncompleteRowWithoutStoringIt(t *test
 	store := newFakeCredentialStore()
 
 	svc, err := NewCredentialsService(ctx, factory, registry, store, nil, config.ResilienceConfig{})
-	if err != nil {
-		t.Fatalf("NewCredentialsService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	err = svc.Upsert(ctx, ManagedProviderCredential{Name: "no-key", Type: "test", Enabled: true})
 	assertCredentialField(t, err, CredentialFieldAPIKeys)
-
-	if _, err := store.Get(ctx, "no-key"); !errors.Is(err, ErrCredentialNotFound) {
-		t.Errorf("store.Get(no-key) error = %v, want ErrCredentialNotFound (a rejected credential must not be persisted)", err)
-	}
-	if registry.ProviderCount() != 0 {
-		t.Errorf("ProviderCount() = %d, want 0", registry.ProviderCount())
-	}
+	_, err = store.Get(ctx, "no-key")
+	assert.ErrorIs(t, err, ErrCredentialNotFound)
+	assert.Equal(t, 0, registry.ProviderCount())
 }
 
 func TestCredentialsService_UpsertRejectsNameAndTypeByField(t *testing.T) {
 	ctx := t.Context()
 	factory := newCredentialsTestFactory(t)
 	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
-	if err != nil {
-		t.Fatalf("NewCredentialsService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	assertCredentialField(t, svc.Upsert(ctx, ManagedProviderCredential{Type: "test"}), "name")
 	assertCredentialField(t, svc.Upsert(ctx, ManagedProviderCredential{Name: "a/b", Type: "test"}), "name")
@@ -290,9 +269,7 @@ func TestCredentialsService_UpsertValidatesDisabledRows(t *testing.T) {
 	ctx := t.Context()
 	factory := newCredentialsTestFactory(t)
 	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
-	if err != nil {
-		t.Fatalf("NewCredentialsService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	assertCredentialField(t,
 		svc.Upsert(ctx, ManagedProviderCredential{Name: "off", Type: "test", Enabled: false}),
@@ -308,18 +285,10 @@ func TestCredentialsService_CredentialSchemasCoverEveryRegisteredType(t *testing
 	factory.Add(Registration{Type: "b", New: func(ProviderConfig, ProviderOptions) core.Provider { return &registryMockProvider{} }})
 
 	svc, err := NewCredentialsService(ctx, factory, NewModelRegistry(), newFakeCredentialStore(), nil, config.ResilienceConfig{})
-	if err != nil {
-		t.Fatalf("NewCredentialsService() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	schemas := svc.CredentialSchemas()
-	if len(schemas) != len(factory.RegisteredTypes()) {
-		t.Fatalf("CredentialSchemas() = %d schemas, want one per registered type (%d)", len(schemas), len(factory.RegisteredTypes()))
-	}
-	if !svc.CredentialSchema("a").Accepts(CredentialFieldAPIKeys) {
-		t.Error("CredentialSchema(a) does not accept api_keys, want the derived key form")
-	}
-	if !svc.CredentialSchema("unknown").Accepts(CredentialFieldModels) {
-		t.Error("CredentialSchema(unknown) should still fall back to the derived form")
-	}
+	require.Equal(t, len(factory.RegisteredTypes()), len(schemas))
+	assert.True(t, svc.CredentialSchema("a").Accepts(CredentialFieldAPIKeys))
+	assert.True(t, svc.CredentialSchema("unknown").Accepts(CredentialFieldModels))
 }

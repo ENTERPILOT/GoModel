@@ -2,11 +2,15 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type fakeProbe struct {
@@ -68,25 +72,16 @@ func TestReadyEndpoint(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantStatusCode {
-				t.Fatalf("status code = %d, want %d (body: %s)", rec.Code, tt.wantStatusCode, rec.Body.String())
-			}
+			require.Equal(t, tt.wantStatusCode, rec.Code, rec.Body.String())
 
-			var body readinessResponse
-			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-				t.Fatalf("decode body: %v", err)
-			}
-			if body.Status != tt.wantStatus {
-				t.Errorf("status = %q, want %q", body.Status, tt.wantStatus)
-			}
+			body := echotest.Decode[readinessResponse](t, rec)
+			assert.Equal(t, tt.wantStatus, body.Status)
+
 			for comp, want := range tt.wantComponents {
-				if got := body.Components[comp]; got != want {
-					t.Errorf("component %q = %q, want %q", comp, got, want)
-				}
+				got := body.Components[comp]
+				assert.Equal(t, want, got)
 			}
-			if len(body.Components) != len(tt.wantComponents) {
-				t.Errorf("components = %v, want %v", body.Components, tt.wantComponents)
-			}
+			assert.Len(t, body.Components, len(tt.wantComponents))
 		})
 	}
 }
@@ -98,7 +93,5 @@ func TestReadyEndpointSkipsAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("readiness without auth = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }

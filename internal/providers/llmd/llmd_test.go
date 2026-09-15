@@ -2,7 +2,6 @@ package llmd
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,18 +11,15 @@ import (
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRegistrationRequiresEndpointAndAllowsKeyless(t *testing.T) {
-	if Registration.Type != "llmd" {
-		t.Fatalf("Registration.Type = %q, want llmd", Registration.Type)
-	}
-	if !Registration.Discovery.RequireBaseURL {
-		t.Fatal("llmd base URL must be required")
-	}
-	if !Registration.Discovery.AllowAPIKeyless {
-		t.Fatal("llmd must allow a keyless Gateway")
-	}
+	require.Equal(t, "llmd", Registration.Type)
+	require.True(t, Registration.Discovery.RequireBaseURL)
+	require.True(t, Registration.Discovery.AllowAPIKeyless)
 }
 
 func TestChatCompletionInjectsTrustedLLMDHeaders(t *testing.T) {
@@ -69,48 +65,35 @@ func TestChatCompletionInjectsTrustedLLMDHeaders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var got http.Header
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				got = r.Header.Clone()
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{
-					"id":"chatcmpl-llmd",
-					"created":1677652288,
-					"model":"Qwen/Qwen2.5-0.5B-Instruct",
-					"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
-				}`))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{
+				"id":"chatcmpl-llmd",
+				"created":1677652288,
+				"model":"Qwen/Qwen2.5-0.5B-Instruct",
+				"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+			}`)
 
 			provider := NewWithHTTPClient(tt.apiKey, server.URL, tt.controls, server.Client(), llmclient.Hooks{})
 			resp, err := provider.ChatCompletion(tt.ctx, &core.ChatRequest{
 				Model:    "Qwen/Qwen2.5-0.5B-Instruct",
 				Messages: []core.Message{{Role: "user", Content: "hello"}},
 			})
-			if err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
-			if resp.ID != "chatcmpl-llmd" || resp.Model != "Qwen/Qwen2.5-0.5B-Instruct" {
-				t.Errorf("response identity = (%q, %q), want normalized ID and model", resp.ID, resp.Model)
-			}
-			if len(resp.Choices) != 1 || resp.Choices[0].Message.Role != "assistant" || resp.Choices[0].Message.Content != "ok" {
-				t.Errorf("response choices = %#v, want one assistant choice containing ok", resp.Choices)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, "chatcmpl-llmd", resp.ID)
+			assert.Equal(t, "Qwen/Qwen2.5-0.5B-Instruct", resp.Model)
+			require.Len(t, resp.Choices, 1)
+			assert.Equal(t, "assistant", resp.Choices[0].Message.Role)
+			assert.Equal(t, "ok", resp.Choices[0].Message.Content)
+
+			got := capture.Last(t).Header
 			for key, want := range tt.wantHeaders {
-				assertHeader(t, got, key, want)
+				assert.Equal(t, want, got.Get(key), "header %s", key)
 			}
 		})
 	}
 }
 
 func TestPassthroughReplacesClientSuppliedControlHeaders(t *testing.T) {
-	var got []http.Header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = append(got, r.Header.Clone())
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"tokens":[1,2,3]}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"tokens":[1,2,3]}`)
 
 	provider := NewWithHTTPClient("router-token", server.URL+"/v1", ControlConfig{
 		InferenceObjective:   "trusted-objective",
@@ -136,21 +119,21 @@ func TestPassthroughReplacesClientSuppliedControlHeaders(t *testing.T) {
 				"X-Gateway-Destination-Endpoint-Served": {"10.0.0.1:8000"},
 			},
 		})
-		if err != nil {
-			t.Fatalf("Passthrough(%q) error = %v", endpoint, err)
-		}
+		require.NoError(t, err)
+
 		_ = resp.Body.Close()
 	}
 
-	if len(got) != 2 {
-		t.Fatalf("upstream requests = %d, want root and /v1 requests", len(got))
-	}
-	for i, headers := range got {
-		assertHeader(t, headers, "Authorization", "Bearer router-token")
-		assertHeader(t, headers, canonicalObjectiveHeader, "trusted-objective")
-		assertHeader(t, headers, legacyObjectiveHeader, "trusted-objective")
-		assertHeader(t, headers, canonicalFairnessHeader, "/trusted/tenant")
-		assertHeader(t, headers, legacyFairnessHeader, "/trusted/tenant")
+	got := capture.All()
+	require.Len(t, got, 2)
+
+	for i, req := range got {
+		headers := req.Header
+		assert.Equal(t, "Bearer router-token", headers.Get("Authorization"), "request %d", i)
+		assert.Equal(t, "trusted-objective", headers.Get(canonicalObjectiveHeader), "request %d", i)
+		assert.Equal(t, "trusted-objective", headers.Get(legacyObjectiveHeader), "request %d", i)
+		assert.Equal(t, "/trusted/tenant", headers.Get(canonicalFairnessHeader), "request %d", i)
+		assert.Equal(t, "/trusted/tenant", headers.Get(legacyFairnessHeader), "request %d", i)
 		for _, key := range []string{
 			"X-Api-Key",
 			"Api-Key",
@@ -159,21 +142,18 @@ func TestPassthroughReplacesClientSuppliedControlHeaders(t *testing.T) {
 			"X-Gateway-Model-Name-Rewrite",
 			"X-Gateway-Destination-Endpoint-Served",
 		} {
-			if value := headers.Get(key); value != "" {
-				t.Errorf("request %d: %s = %q, want stripped", i, key, value)
-			}
+			assert.Empty(t, headers.Get(key), "request %d: %s should be stripped", i, key)
 		}
 	}
 }
 
 func TestPassthroughPreservesDroppedReasonOnRawErrorResponses(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server, _ := providertest.Server(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set(droppedReasonHeader, "rejected-saturated")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"error":{"message":"request dropped"}}`))
-	}))
-	defer server.Close()
+	})
 
 	provider := NewWithHTTPClient("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
 	for _, endpoint := range []string{"tokenize", "chat/completions"} {
@@ -182,25 +162,16 @@ func TestPassthroughPreservesDroppedReasonOnRawErrorResponses(t *testing.T) {
 			Endpoint: endpoint,
 			Body:     io.NopCloser(strings.NewReader(`{}`)),
 		})
-		if err != nil {
-			t.Fatalf("Passthrough(%q) error = %v", endpoint, err)
-		}
+		require.NoError(t, err)
+
 		_ = resp.Body.Close()
-		if resp.StatusCode != http.StatusTooManyRequests {
-			t.Errorf("Passthrough(%q) status = %d, want %d", endpoint, resp.StatusCode, http.StatusTooManyRequests)
-		}
-		assertHeader(t, http.Header(resp.Headers), droppedReasonHeader, "rejected-saturated")
+		assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode, "Passthrough(%q)", endpoint)
+		assert.Equal(t, "rejected-saturated", http.Header(resp.Headers).Get(droppedReasonHeader), "Passthrough(%q)", endpoint)
 	}
 }
 
 func TestPassthroughSelectsV1AndRouterRootPaths(t *testing.T) {
-	var gotPaths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPaths = append(gotPaths, r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
 	provider := NewWithHTTPClient("", server.URL+"/v1", ControlConfig{}, server.Client(), llmclient.Hooks{})
 	for _, endpoint := range []string{"completions", "messages", "inference/v1/generate", "tokenize"} {
@@ -209,35 +180,27 @@ func TestPassthroughSelectsV1AndRouterRootPaths(t *testing.T) {
 			Endpoint: endpoint,
 			Body:     io.NopCloser(strings.NewReader(`{}`)),
 		})
-		if err != nil {
-			t.Fatalf("Passthrough(%q) error = %v", endpoint, err)
-		}
+		require.NoError(t, err)
+
 		_ = resp.Body.Close()
 	}
 
-	want := []string{"/v1/completions", "/v1/messages", "/inference/v1/generate", "/tokenize"}
-	if len(gotPaths) != len(want) {
-		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	var gotPaths []string
+	for _, req := range capture.All() {
+		gotPaths = append(gotPaths, req.Path)
 	}
-	for i := range want {
-		if gotPaths[i] != want[i] {
-			t.Errorf("path[%d] = %q, want %q", i, gotPaths[i], want[i])
-		}
-	}
+	assert.Equal(t, []string{"/v1/completions", "/v1/messages", "/inference/v1/generate", "/tokenize"}, gotPaths)
 }
 
 func TestCompatibleAndRootClientsShareKeyRotation(t *testing.T) {
-	var gotAuth []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
+	server, capture := providertest.Server(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path == "/v1/chat/completions" {
 			_, _ = w.Write([]byte(`{"id":"chatcmpl-1","model":"test","choices":[]}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
+	})
 
 	provider := newProvider("", server.URL+"/v1", ControlConfig{}, providers.ProviderOptions{
 		Keys: providers.NewKeyring("router-a", "router-b"),
@@ -247,26 +210,20 @@ func TestCompatibleAndRootClientsShareKeyRotation(t *testing.T) {
 		Endpoint: "tokenize",
 		Body:     io.NopCloser(strings.NewReader(`{}`)),
 	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	_ = passthrough.Body.Close()
-	if _, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
+	_, err = provider.ChatCompletion(context.Background(), &core.ChatRequest{
 		Model:    "test",
 		Messages: []core.Message{{Role: "user", Content: "hello"}},
-	}); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 
-	want := []string{"Bearer router-a", "Bearer router-b"}
-	if len(gotAuth) != len(want) {
-		t.Fatalf("Authorization headers = %v, want %v", gotAuth, want)
+	var gotAuth []string
+	for _, req := range capture.All() {
+		gotAuth = append(gotAuth, req.Header.Get("Authorization"))
 	}
-	for i := range want {
-		if gotAuth[i] != want[i] {
-			t.Errorf("Authorization[%d] = %q, want %q", i, gotAuth[i], want[i])
-		}
-	}
+	assert.Equal(t, []string{"Bearer router-a", "Bearer router-b"}, gotAuth)
 }
 
 func TestFairnessHeaderCanBeDisabled(t *testing.T) {
@@ -275,13 +232,8 @@ func TestFairnessHeaderCanBeDisabled(t *testing.T) {
 	provider := &Provider{controls: ControlConfig{FairnessFromUserPath: false}}
 
 	provider.setHeaders(request, "")
-
-	if value := request.Header.Get(canonicalFairnessHeader); value != "" {
-		t.Fatalf("canonical fairness header = %q, want empty", value)
-	}
-	if value := request.Header.Get(legacyFairnessHeader); value != "" {
-		t.Fatalf("legacy fairness header = %q, want empty", value)
-	}
+	assert.Empty(t, request.Header.Get(canonicalFairnessHeader))
+	assert.Empty(t, request.Header.Get(legacyFairnessHeader))
 }
 
 func TestFairnessHeaderIgnoresClientAssertedSnapshotPath(t *testing.T) {
@@ -294,13 +246,8 @@ func TestFairnessHeaderIgnoresClientAssertedSnapshotPath(t *testing.T) {
 	provider := &Provider{controls: ControlConfig{FairnessFromUserPath: true}}
 
 	provider.setHeaders(request, "")
-
-	if value := request.Header.Get(canonicalFairnessHeader); value != "" {
-		t.Fatalf("canonical fairness header = %q, want empty", value)
-	}
-	if value := request.Header.Get(legacyFairnessHeader); value != "" {
-		t.Fatalf("legacy fairness header = %q, want empty", value)
-	}
+	assert.Empty(t, request.Header.Get(canonicalFairnessHeader))
+	assert.Empty(t, request.Header.Get(legacyFairnessHeader))
 }
 
 func TestExposeDroppedReasonReturnsOnlySafeLLMDHeader(t *testing.T) {
@@ -311,36 +258,19 @@ func TestExposeDroppedReasonReturnsOnlySafeLLMDHeader(t *testing.T) {
 	}
 
 	wrapped := exposeDroppedReason(upstream)
-	if !errors.Is(wrapped, upstream) {
-		t.Fatal("wrapped error must preserve the upstream error chain")
-	}
+	require.ErrorIs(t, wrapped, upstream)
+
 	headerErr, ok := wrapped.(interface{ ResponseHeaders() http.Header })
-	if !ok {
-		t.Fatalf("wrapped error type %T does not expose response headers", wrapped)
-	}
+	require.True(t, ok, "wrapped error type %T does not expose response headers", wrapped)
+
 	headers := headerErr.ResponseHeaders()
-	assertHeader(t, headers, droppedReasonHeader, "rejected-saturated")
-	if value := headers.Get("Set-Cookie"); value != "" {
-		t.Fatalf("Set-Cookie = %q, want filtered", value)
-	}
+	assert.Equal(t, "rejected-saturated", headers.Get(droppedReasonHeader))
+	assert.Empty(t, headers.Get("Set-Cookie"))
 }
 
 func TestProviderDoesNotAdvertiseUnsupportedNativeSurfaces(t *testing.T) {
 	provider := NewWithHTTPClient("", "http://llmd.invalid/v1", ControlConfig{}, nil, llmclient.Hooks{})
-	if _, ok := any(provider).(core.NativeBatchProvider); ok {
-		t.Fatal("llmd provider must not advertise the separate llm-d Batch Gateway")
-	}
-	if _, ok := any(provider).(core.NativeFileProvider); ok {
-		t.Fatal("llmd provider must not advertise native files")
-	}
-	if _, ok := any(provider).(core.NativeResponseLifecycleProvider); ok {
-		t.Fatal("llmd provider must not advertise Responses lifecycle operations")
-	}
-}
-
-func assertHeader(t *testing.T, headers http.Header, key, want string) {
-	t.Helper()
-	if got := headers.Get(key); got != want {
-		t.Errorf("%s = %q, want %q", key, got, want)
-	}
+	providertest.AssertNoNativeSurfaces(t, provider)
+	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
+	require.False(t, ok)
 }

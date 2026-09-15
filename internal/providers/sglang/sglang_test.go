@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestChatCompletionUsesOptionalBearerAuthAndV1Endpoint(t *testing.T) {
@@ -24,74 +26,42 @@ func TestChatCompletionUsesOptionalBearerAuthAndV1Endpoint(t *testing.T) {
 		{name: "without API key"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotPath, gotAuth string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotPath = r.URL.Path
-				gotAuth = r.Header.Get("Authorization")
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{
-					"id":"chatcmpl-sglang",
-					"created":1677652288,
-					"model":"HuggingFaceTB/SmolLM2-135M-Instruct",
-					"choices":[{"index":0,"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}]
-				}`))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, http.StatusOK, providertest.ChatCompletionJSON)
 
 			provider := NewWithHTTPClient(tt.apiKey, server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			resp, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-				Model:    "HuggingFaceTB/SmolLM2-135M-Instruct",
+				Model:    providertest.Model,
 				Messages: []core.Message{{Role: "user", Content: "hi"}},
 			})
-			if err != nil {
-				t.Fatalf("ChatCompletion() error = %v", err)
-			}
-			if resp.Model != "HuggingFaceTB/SmolLM2-135M-Instruct" {
-				t.Fatalf("resp.Model = %q", resp.Model)
-			}
-			if gotPath != "/v1/chat/completions" {
-				t.Fatalf("path = %q, want /v1/chat/completions", gotPath)
-			}
-			if gotAuth != tt.wantAuth {
-				t.Fatalf("authorization = %q, want %q", gotAuth, tt.wantAuth)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, providertest.Model, resp.Model)
+
+			req := capture.Last(t)
+			assert.Equal(t, "/v1/chat/completions", req.Path)
+			assert.Equal(t, tt.wantAuth, req.Header.Get("Authorization"))
 		})
 	}
 }
 
 func TestChatCompletionPreservesSGLangExtensionFields(t *testing.T) {
-	var gotBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"chatcmpl-sglang","model":"test","choices":[]}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"id":"chatcmpl-sglang","model":"test","choices":[]}`)
 
 	var req core.ChatRequest
-	if err := json.Unmarshal([]byte(`{
+	err := json.Unmarshal([]byte(`{
 		"model":"test",
 		"messages":[{"role":"user","content":"hi"}],
 		"chat_template_kwargs":{"enable_thinking":false},
 		"separate_reasoning":true
-	}`), &req); err != nil {
-		t.Fatalf("decode ChatRequest: %v", err)
-	}
+	}`), &req)
+	require.NoError(t, err)
 
 	provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
-	if _, err := provider.ChatCompletion(context.Background(), &req); err != nil {
-		t.Fatalf("ChatCompletion() error = %v", err)
-	}
+	_, err = provider.ChatCompletion(context.Background(), &req)
+	require.NoError(t, err)
 
-	kwargs, ok := gotBody["chat_template_kwargs"].(map[string]any)
-	if !ok || kwargs["enable_thinking"] != false {
-		t.Fatalf("chat_template_kwargs = %#v", gotBody["chat_template_kwargs"])
-	}
-	if gotBody["separate_reasoning"] != true {
-		t.Fatalf("separate_reasoning = %#v", gotBody["separate_reasoning"])
-	}
+	sent := capture.Last(t).JSON(t)
+	assert.Equal(t, map[string]any{"enable_thinking": false}, sent["chat_template_kwargs"])
+	assert.Equal(t, true, sent["separate_reasoning"])
 }
 
 func TestOpenAICompatibleEndpoints(t *testing.T) {
@@ -132,21 +102,11 @@ func TestOpenAICompatibleEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotPath string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotPath = r.URL.Path
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(tt.response))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, http.StatusOK, tt.response)
 
 			provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
-			if err := tt.call(provider); err != nil {
-				t.Fatalf("call error = %v", err)
-			}
-			if gotPath != tt.wantPath {
-				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
-			}
+			require.NoError(t, tt.call(provider))
+			assert.Equal(t, tt.wantPath, capture.Last(t).Path)
 		})
 	}
 }
@@ -175,42 +135,24 @@ func TestOpenAICompatibleStreamingEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotPath string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotPath = r.URL.Path
-				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
-			}))
-			defer server.Close()
+			server, capture := providertest.SSEServer(t, "data: [DONE]\n\n")
 
 			provider := NewWithHTTPClient("", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			body, err := tt.call(provider)
-			if err != nil {
-				t.Fatalf("streaming call error = %v", err)
-			}
+			require.NoError(t, err)
 			defer body.Close()
-			if gotPath != tt.wantPath {
-				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
-			}
+			assert.Equal(t, tt.wantPath, capture.Last(t).Path)
 		})
 	}
 }
 
+// SGLang serves passthrough and the OpenAI-compatible surface, but nothing
+// that would need native batch, file, audio, or response-lifecycle support.
 func TestProviderExposesOnlyVerifiedOptionalInterfaces(t *testing.T) {
 	provider := NewWithHTTPClient("", "", nil, llmclient.Hooks{})
-
-	if _, ok := any(provider).(core.PassthroughProvider); !ok {
-		t.Fatal("sglang provider should implement passthrough provider")
-	}
-	if _, ok := any(provider).(core.NativeBatchProvider); ok {
-		t.Fatal("sglang provider should not implement native batch provider")
-	}
-	if _, ok := any(provider).(core.NativeFileProvider); ok {
-		t.Fatal("sglang provider should not implement native file provider")
-	}
-	if _, ok := any(provider).(core.NativeResponseLifecycleProvider); ok {
-		t.Fatal("sglang provider should not implement native response lifecycle provider")
-	}
+	providertest.AssertNoNativeSurfaces(t, provider)
+	_, ok := any(provider).(core.NativeResponseLifecycleProvider)
+	assert.False(t, ok, "provider should not implement core.NativeResponseLifecycleProvider")
 }
 
 func TestPassthroughRoutesNativeAndOpenAIEndpoints(t *testing.T) {
@@ -231,14 +173,7 @@ func TestPassthroughRoutesNativeAndOpenAIEndpoints(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotPath, gotAuth string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotPath = r.URL.Path
-				gotAuth = r.Header.Get("Authorization")
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{}`))
-			}))
-			defer server.Close()
+			server, capture := providertest.JSONServer(t, http.StatusOK, `{}`)
 
 			provider := NewWithHTTPClient("sglang-key", server.URL+"/v1", server.Client(), llmclient.Hooks{})
 			resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
@@ -247,29 +182,18 @@ func TestPassthroughRoutesNativeAndOpenAIEndpoints(t *testing.T) {
 				Body:     io.NopCloser(strings.NewReader("{}")),
 				Headers:  http.Header{"Content-Type": []string{"application/json"}},
 			})
-			if err != nil {
-				t.Fatalf("Passthrough() error = %v", err)
-			}
+			require.NoError(t, err)
 			defer resp.Body.Close()
 
-			if gotPath != tt.wantPath {
-				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
-			}
-			if gotAuth != "Bearer sglang-key" {
-				t.Fatalf("authorization = %q, want Bearer sglang-key", gotAuth)
-			}
+			req := capture.Last(t)
+			assert.Equal(t, tt.wantPath, req.Path)
+			assert.Equal(t, "Bearer sglang-key", req.Header.Get("Authorization"))
 		})
 	}
 }
 
 func TestNewSharesKeyRotationWithNativePassthrough(t *testing.T) {
-	var gotAuth []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = append(gotAuth, r.Header.Get("Authorization"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"list","data":[]}`)
 
 	keys := providers.NewKeyring("key-one", "key-two")
 	provider := New(providers.ProviderConfig{
@@ -277,48 +201,39 @@ func TestNewSharesKeyRotationWithNativePassthrough(t *testing.T) {
 		APIKey:  "key-one",
 		BaseURL: server.URL + "/v1",
 	}, providers.ProviderOptions{Keys: keys}).(*Provider)
+	_, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
 
-	if _, err := provider.ListModels(context.Background()); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodGet,
 		Endpoint: "health",
 	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	if len(gotAuth) != 2 || gotAuth[0] != "Bearer key-one" || gotAuth[1] != "Bearer key-two" {
-		t.Fatalf("authorization headers = %v", gotAuth)
-	}
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	assert.Equal(t, "Bearer key-one", requests[0].Header.Get("Authorization"))
+	assert.Equal(t, "Bearer key-two", requests[1].Header.Get("Authorization"))
 }
 
 func TestSetBaseURLUpdatesOpenAIAndNativeClients(t *testing.T) {
-	var gotPaths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPaths = append(gotPaths, r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
-	}))
-	defer server.Close()
+	server, capture := providertest.JSONServer(t, http.StatusOK, `{"object":"list","data":[]}`)
 
 	provider := NewWithHTTPClient("", "http://127.0.0.1:1/v1", server.Client(), llmclient.Hooks{})
 	provider.SetBaseURL(server.URL + "/v1")
-	if _, err := provider.ListModels(context.Background()); err != nil {
-		t.Fatalf("ListModels() error = %v", err)
-	}
+	_, err := provider.ListModels(context.Background())
+	require.NoError(t, err)
+
 	resp, err := provider.Passthrough(context.Background(), &core.PassthroughRequest{
 		Method:   http.MethodGet,
 		Endpoint: "health",
 	})
-	if err != nil {
-		t.Fatalf("Passthrough() error = %v", err)
-	}
+	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	if len(gotPaths) != 2 || gotPaths[0] != "/v1/models" || gotPaths[1] != "/health" {
-		t.Fatalf("paths = %v, want [/v1/models /health]", gotPaths)
-	}
+	requests := capture.All()
+	require.Len(t, requests, 2)
+	assert.Equal(t, "/v1/models", requests[0].Path)
+	assert.Equal(t, "/health", requests[1].Path)
 }

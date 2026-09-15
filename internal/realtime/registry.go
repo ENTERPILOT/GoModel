@@ -32,18 +32,20 @@ type callEntry struct {
 // counters, it is per-instance state: after a restart (or on another replica)
 // clients fall back to passing model and provider explicitly.
 type CallRegistry struct {
-	mu      sync.Mutex
-	entries map[string]callEntry
-	ttl     time.Duration
-	now     func() time.Time
+	mu       sync.Mutex
+	entries  map[string]callEntry
+	ttl      time.Duration
+	capacity int
+	now      func() time.Time
 }
 
 // NewCallRegistry returns an empty registry with production defaults.
 func NewCallRegistry() *CallRegistry {
 	return &CallRegistry{
-		entries: make(map[string]callEntry),
-		ttl:     DefaultCallTTL,
-		now:     time.Now,
+		entries:  make(map[string]callEntry),
+		ttl:      DefaultCallTTL,
+		capacity: maxCalls,
+		now:      time.Now,
 	}
 }
 
@@ -59,7 +61,7 @@ func (r *CallRegistry) Register(callID string, route CallRoute) {
 	r.pruneLocked(now)
 	// Re-registering an existing id overwrites in place; only a genuinely new
 	// entry at capacity needs to make room.
-	if _, exists := r.entries[callID]; !exists && len(r.entries) >= maxCalls {
+	if _, exists := r.entries[callID]; !exists && len(r.entries) >= r.capacity {
 		r.evictSoonestLocked()
 	}
 	r.entries[callID] = callEntry{route: route, expires: now.Add(r.ttl)}

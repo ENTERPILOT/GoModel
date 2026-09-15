@@ -2,27 +2,22 @@ package auditlog
 
 import (
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"net/http"
 	"testing"
 )
 
 func TestCaptureAttemptResponseBody(t *testing.T) {
-	if got := CaptureAttemptResponseBody(nil); got != nil {
-		t.Fatalf("empty body = %#v, want nil", got)
-	}
+	got := CaptureAttemptResponseBody(nil)
+	require.Nil(t, got)
 
 	captured := CaptureAttemptResponseBody([]byte(`{"error":{"code":"model_not_found"}}`))
-	if _, ok := captured.(json.RawMessage); !ok {
-		t.Fatalf("json body = %T, want json.RawMessage", captured)
-	}
-	if _, ok := BodyDocument(captured).(map[string]any); !ok {
-		t.Fatalf("json body did not decode to a map: %#v", BodyDocument(captured))
-	}
-
-	if got := CaptureAttemptResponseBody([]byte("upstream is down")); got != "upstream is down" {
-		t.Fatalf("non-json body = %#v, want raw string", got)
-	}
+	_, ok := captured.(json.RawMessage)
+	require.True(t, ok, "json body = %T, want json.RawMessage", captured)
+	_, ok = BodyDocument(captured).(map[string]any)
+	require.True(t, ok, "json body did not decode to a map: %#v", BodyDocument(captured))
+	require.Equal(t, "upstream is down", CaptureAttemptResponseBody([]byte("upstream is down")))
 }
 
 func TestRedactAttemptResponseHeaders(t *testing.T) {
@@ -33,16 +28,10 @@ func TestRedactAttemptResponseHeaders(t *testing.T) {
 	}
 
 	got := RedactAttemptResponseHeaders(headers)
-	if got["Authorization"] != "[REDACTED]" {
-		t.Fatalf("Authorization = %q, want redacted", got["Authorization"])
-	}
-	if got["Retry-After"] != "30" || got["X-Request-Id"] != "req-123" {
-		t.Fatalf("diagnostic headers were not preserved: %#v", got)
-	}
-
-	if RedactAttemptResponseHeaders(nil) != nil {
-		t.Fatalf("nil headers should map to nil")
-	}
+	require.Equal(t, "[REDACTED]", got["Authorization"])
+	require.Equal(t, "30", got["Retry-After"])
+	require.Equal(t, "req-123", got["X-Request-Id"], "diagnostic headers were not preserved: %#v", got)
+	require.Nil(t, RedactAttemptResponseHeaders(nil))
 }
 
 func TestGateAttemptCapture(t *testing.T) {
@@ -57,20 +46,15 @@ func TestGateAttemptCapture(t *testing.T) {
 	}
 
 	both := GateAttemptCapture(base(), Config{LogBodies: true, LogHeaders: true})
-	if both[0].ResponseBody == nil || both[0].ResponseHeaders == nil {
-		t.Fatalf("with bodies+headers enabled both captures should survive: %#v", both[0])
-	}
+	require.NotNil(t, both[0].ResponseBody)
+	require.NotNil(t, both[0].ResponseHeaders, "with bodies+headers enabled both captures should survive: %#v", both[0])
 
 	neither := GateAttemptCapture(base(), Config{})
-	if neither[0].ResponseBody != nil || neither[0].ResponseHeaders != nil {
-		t.Fatalf("with logging disabled captures should be stripped: %#v", neither[0])
-	}
-	if neither[0].ErrorMessage != "model is not available" {
-		t.Fatalf("structured error fields must be preserved when gating: %#v", neither[0])
-	}
+	require.Nil(t, neither[0].ResponseBody)
+	require.Nil(t, neither[0].ResponseHeaders, "with logging disabled captures should be stripped: %#v", neither[0])
+	require.Equal(t, "model is not available", neither[0].ErrorMessage, "structured error fields must be preserved when gating: %#v", neither[0])
 
 	bodyOnly := GateAttemptCapture(base(), Config{LogBodies: true})
-	if bodyOnly[0].ResponseBody == nil || bodyOnly[0].ResponseHeaders != nil {
-		t.Fatalf("LogBodies-only should keep body and drop headers: %#v", bodyOnly[0])
-	}
+	require.NotNil(t, bodyOnly[0].ResponseBody)
+	require.Nil(t, bodyOnly[0].ResponseHeaders, "LogBodies-only should keep body and drop headers: %#v", bodyOnly[0])
 }

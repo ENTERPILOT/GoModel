@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/require"
 )
 
 // requireTrigramIndex opens a store and reader on a PostgreSQL database that
@@ -19,20 +20,16 @@ func requireTrigramIndex(t *testing.T, db sqlx.DB) (*SQLStore, *SQLReader) {
 	}
 	ctx := context.Background()
 	store, err := newSQLStoreForTest(t, db, 0)
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	require.NoError(t, err)
+
 	store.indexBuild.Wait()
 	if !hasTrigramSearchIndex(ctx, db) {
 		t.Skip("pg_trgm could not be installed on the test server")
 	}
 	reader, err := NewSQLReader(db)
-	if err != nil {
-		t.Fatalf("failed to create reader: %v", err)
-	}
-	if !reader.searchIsIndexed(ctx) {
-		t.Fatal("reader did not detect the trigram search index")
-	}
+	require.NoError(t, err)
+	require.True(t, reader.searchIsIndexed(ctx))
+
 	return store, reader
 }
 
@@ -66,12 +63,9 @@ func TestSQLReader_SearchUsesTrigramIndex(t *testing.T) {
 			}
 			return rows.Err()
 		})
-		if err != nil {
-			t.Fatalf("EXPLAIN: %v", err)
-		}
-		if joined := strings.Join(plan, "\n"); !strings.Contains(joined, trigramSearchIndex) {
-			t.Fatalf("plan does not use %s:\n%s", trigramSearchIndex, joined)
-		}
+		require.NoError(t, err)
+		joined := strings.Join(plan, "\n")
+		require.Contains(t, joined, trigramSearchIndex)
 	})
 }
 
@@ -82,7 +76,7 @@ func TestSQLReader_SearchViaTrigramIndexKeepsSemantics(t *testing.T) {
 		ctx := context.Background()
 
 		at := time.Date(2026, 1, 16, 12, 0, 0, 0, time.UTC)
-		if err := store.WriteBatch(ctx, []*LogEntry{
+		err := store.WriteBatch(ctx, []*LogEntry{
 			{ID: "path-hit", Timestamp: at, RequestedModel: "gpt-5", UserPath: "/team/alpha"},
 			{ID: "error-hit", Timestamp: at, RequestedModel: "gpt-5", ErrorType: "provider_error",
 				Data: &LogData{ErrorMessage: "http2: timeout awaiting response headers"}},
@@ -91,23 +85,20 @@ func TestSQLReader_SearchViaTrigramIndexKeepsSemantics(t *testing.T) {
 			{ID: "ungated", Timestamp: at, RequestedModel: "gpt-5",
 				Data: &LogData{ErrorMessage: "timeout awaiting nothing"}},
 			{ID: "wild", Timestamp: at, RequestedModel: "gpt-5", Path: "/v1/100%_done"},
-		}); err != nil {
-			t.Fatalf("WriteBatch: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		expect := func(search string, want ...string) {
 			t.Helper()
 			result, err := reader.GetLogs(ctx, LogQueryParams{Search: search, Limit: 10})
-			if err != nil {
-				t.Fatalf("GetLogs(%q): %v", search, err)
-			}
+			require.NoError(t, err, "GetLogs(%q): %v", search, err)
+
 			got := make([]string, 0, len(result.Entries))
 			for _, entry := range result.Entries {
 				got = append(got, entry.ID)
 			}
-			if strings.Join(got, ",") != strings.Join(want, ",") || result.Total != len(want) {
-				t.Fatalf("search %q = %v (total %d), want %v", search, got, result.Total, want)
-			}
+			require.Equal(t, strings.Join(want, ","), strings.Join(got, ","))
+			require.Equal(t, len(want), result.Total, "search %q = %v (total %d), want %v", search, got, result.Total, want)
 		}
 		expect("team/alpha", "path-hit")
 		expect("TEAM/ALPHA", "path-hit")
@@ -119,21 +110,16 @@ func TestSQLReader_SearchViaTrigramIndexKeepsSemantics(t *testing.T) {
 
 func TestSQLReader_ShortSearchKeepsColumnSweep(t *testing.T) {
 	reader := &SQLReader{dialect: readerDialectFor(sqlx.PostgreSQL)}
-	if condition, _ := reader.searchFilter("ab", true); !strings.Contains(condition, "request_id ILIKE") {
-		t.Fatalf("two-character search should sweep columns, got %s", condition)
-	}
-	if condition, _ := reader.searchFilter("abc", true); strings.Contains(condition, "request_id ILIKE") {
-		t.Fatalf("three-character search should use the indexed expression, got %s", condition)
-	}
+	condition, _ := reader.searchFilter("ab", true)
+	require.Contains(t, condition, "request_id ILIKE")
+	condition, _ = reader.searchFilter("abc", true)
+	require.NotContains(t, condition, "request_id ILIKE", "three-character search should use the indexed expression")
 	// Characters, not bytes: one CJK character is three bytes but yields no
 	// trigram, while three of them do.
-	if condition, _ := reader.searchFilter("中", true); !strings.Contains(condition, "request_id ILIKE") {
-		t.Fatalf("single multibyte character should sweep columns, got %s", condition)
-	}
-	if condition, _ := reader.searchFilter("中文字", true); strings.Contains(condition, "request_id ILIKE") {
-		t.Fatalf("three multibyte characters should use the indexed expression, got %s", condition)
-	}
-	if condition, _ := reader.searchFilter("abc", false); !strings.Contains(condition, "request_id ILIKE") {
-		t.Fatalf("without the index the search should sweep columns, got %s", condition)
-	}
+	condition, _ = reader.searchFilter("中", true)
+	require.Contains(t, condition, "request_id ILIKE")
+	condition, _ = reader.searchFilter("中文字", true)
+	require.NotContains(t, condition, "request_id ILIKE", "three multibyte characters should use the indexed expression")
+	condition, _ = reader.searchFilter("abc", false)
+	require.Contains(t, condition, "request_id ILIKE")
 }

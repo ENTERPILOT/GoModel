@@ -2,10 +2,9 @@ package config
 
 import (
 	"fmt"
-	"reflect"
-	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,30 +17,25 @@ func TestApplyVirtualModelsEnv_ParsesAndMerges(t *testing.T) {
 		{"source":"smart","strategy":"cost","targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama"}]},
 		{"source":"new","target":"anthropic/claude"}
 	]`)
+	err := applyVirtualModelsEnv(cfg, true)
+	require.NoError(t, err)
+	require.Len(t, cfg.VirtualModels, 3)
 
-	if err := applyVirtualModelsEnv(cfg, true); err != nil {
-		t.Fatalf("applyVirtualModelsEnv() error = %v", err)
-	}
-	if len(cfg.VirtualModels) != 3 {
-		t.Fatalf("merged len = %d, want 3", len(cfg.VirtualModels))
-	}
 	// "smart" is overridden in place (env wins) and keeps its position.
 	smart := cfg.VirtualModels[0]
-	if smart.Source != "smart" || smart.Strategy != "cost" || len(smart.Targets) != 2 {
-		t.Fatalf("env did not override smart: %#v", smart)
-	}
+	require.Equal(t, "smart", smart.Source)
+	require.Equal(t, "cost", smart.Strategy)
+	require.Len(t, smart.Targets, 2, "env did not override smart: %#v", smart)
+
 	// "keep" is untouched; "new" is appended.
-	if cfg.VirtualModels[1].Source != "keep" || cfg.VirtualModels[2].Source != "new" {
-		t.Fatalf("merge order wrong: %#v", cfg.VirtualModels)
-	}
+	require.Equal(t, "keep", cfg.VirtualModels[1].Source)
+	require.Equal(t, "new", cfg.VirtualModels[2].Source, "merge order wrong: %#v", cfg.VirtualModels)
 }
 
 func TestApplyVirtualModelsEnv_Invalid(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv(envVirtualModels, `{not valid json`)
-	if err := applyVirtualModelsEnv(cfg, true); err == nil {
-		t.Fatalf("applyVirtualModelsEnv() error = nil, want parse error")
-	}
+	require.Error(t, applyVirtualModelsEnv(cfg, true))
 }
 
 // The env layer overrides YAML entry by entry, so a typo must fail loudly rather
@@ -51,12 +45,8 @@ func TestApplyVirtualModelsEnv_RejectsUnknownField(t *testing.T) {
 	t.Setenv(envVirtualModels, `[{"source":"smart","targts":[{"model":"openai/gpt-4o"}]}]`)
 
 	err := applyVirtualModelsEnv(cfg, true)
-	if err == nil {
-		t.Fatal("applyVirtualModelsEnv() error = nil, want unknown-field error")
-	}
-	if !strings.Contains(err.Error(), "targts") {
-		t.Fatalf("applyVirtualModelsEnv() error = %q, want it to name the unknown field", err)
-	}
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "targts")
 }
 
 // json.Decoder stops after the first value and leaves the rest unread, so trailing
@@ -75,12 +65,8 @@ func TestApplyVirtualModelsEnv_RejectsTrailingData(t *testing.T) {
 				t.Setenv(envVirtualModels, raw)
 
 				err := applyVirtualModelsEnv(cfg, strict)
-				if err == nil {
-					t.Fatal("applyVirtualModelsEnv() error = nil, want trailing-data error")
-				}
-				if !strings.Contains(err.Error(), "unexpected data after the JSON value") {
-					t.Fatalf("applyVirtualModelsEnv() error = %q, want a trailing-data error", err)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "unexpected data after the JSON value")
 			})
 		}
 	}
@@ -91,13 +77,10 @@ func TestApplyVirtualModelsEnv_RejectsTrailingData(t *testing.T) {
 func TestApplyVirtualModelsEnv_LaxIgnoresUnknownField(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv(envVirtualModels, `[{"source":"smart","targts":[],"target":"openai/gpt-4o"}]`)
-
-	if err := applyVirtualModelsEnv(cfg, false); err != nil {
-		t.Fatalf("applyVirtualModelsEnv() error = %v, want the unknown key ignored", err)
-	}
-	if len(cfg.VirtualModels) != 1 || cfg.VirtualModels[0].Target != "openai/gpt-4o" {
-		t.Fatalf("lax decode dropped the known fields: %#v", cfg.VirtualModels)
-	}
+	err := applyVirtualModelsEnv(cfg, false)
+	require.NoError(t, err)
+	require.Len(t, cfg.VirtualModels, 1)
+	require.Equal(t, "openai/gpt-4o", cfg.VirtualModels[0].Target)
 }
 
 // Even lax, a value of the wrong type is fatal.
@@ -105,25 +88,20 @@ func TestApplyVirtualModelsEnv_LaxStillRejectsMalformedValues(t *testing.T) {
 	cfg := &Config{}
 	t.Setenv(envVirtualModels, `[{"source":123}]`)
 
-	if err := applyVirtualModelsEnv(cfg, false); err == nil {
-		t.Fatal("applyVirtualModelsEnv() error = nil, want a type error")
-	}
+	require.Error(t, applyVirtualModelsEnv(cfg, false))
 }
 
 func TestApplyVirtualModelsEnv_Unset(t *testing.T) {
 	cfg := &Config{VirtualModels: []VirtualModelConfig{{Source: "smart", Target: "openai/gpt-4o"}}}
 	t.Setenv(envVirtualModels, "")
-	if err := applyVirtualModelsEnv(cfg, true); err != nil {
-		t.Fatalf("applyVirtualModelsEnv() error = %v", err)
-	}
-	if len(cfg.VirtualModels) != 1 {
-		t.Fatalf("unset env mutated config: %#v", cfg.VirtualModels)
-	}
+	err := applyVirtualModelsEnv(cfg, true)
+	require.NoError(t, err)
+	require.Len(t, cfg.VirtualModels, 1)
 }
 
 func TestVirtualModelConfig_PluginStrategyFromYAMLAndEnv(t *testing.T) {
 	var cfg Config
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 virtual_models:
   - source: smart-router
     strategy: plugin
@@ -134,26 +112,21 @@ virtual_models:
     targets:
       - { model: openai/gpt-4o }
       - { model: groq/llama }
-`), &cfg); err != nil {
-		t.Fatalf("yaml.Unmarshal() error = %v", err)
-	}
-	if len(cfg.VirtualModels) != 1 {
-		t.Fatalf("len(VirtualModels) = %d, want 1", len(cfg.VirtualModels))
-	}
+`), &cfg)
+	require.NoError(t, err)
+	require.Len(t, cfg.VirtualModels, 1)
+
 	vm := cfg.VirtualModels[0]
-	if vm.Strategy != "plugin" || vm.StrategyPlugin != "cheapest_healthy" {
-		t.Fatalf("yaml entry = %+v, want plugin strategy fields", vm)
-	}
-	if want := map[string]any{"prefer": "fastest", "max_error_rate": 0.1}; !reflect.DeepEqual(vm.StrategyConfig, want) {
-		t.Fatalf("yaml strategy_config = %#v, want %#v", vm.StrategyConfig, want)
-	}
+	require.Equal(t, "plugin", vm.Strategy)
+	require.Equal(t, "cheapest_healthy", vm.StrategyPlugin, "yaml entry = %+v, want plugin strategy fields", vm)
+	want := map[string]any{"prefer": "fastest", "max_error_rate": 0.1}
+	require.Equal(t, want, vm.StrategyConfig)
 
 	t.Setenv(envVirtualModels, `[{"source":"smart-router","strategy":"plugin","strategy_plugin":"latency_aware","strategy_config":{"p95_window":"5m"},"targets":[{"model":"openai/gpt-4o"},{"model":"groq/llama"}]}]`)
-	if err := applyVirtualModelsEnv(&cfg, true); err != nil {
-		t.Fatalf("applyVirtualModelsEnv() error = %v", err)
-	}
+	err = applyVirtualModelsEnv(&cfg, true)
+	require.NoError(t, err)
+
 	vm = cfg.VirtualModels[0]
-	if vm.StrategyPlugin != "latency_aware" || !reflect.DeepEqual(vm.StrategyConfig, map[string]any{"p95_window": "5m"}) {
-		t.Fatalf("env entry = %+v, want env to override plugin fields", vm)
-	}
+	require.Equal(t, "latency_aware", vm.StrategyPlugin)
+	require.Equal(t, map[string]any{"p95_window": "5m"}, vm.StrategyConfig, "env entry = %+v, want env to override plugin fields", vm)
 }

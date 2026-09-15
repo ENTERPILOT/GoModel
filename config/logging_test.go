@@ -1,8 +1,9 @@
 package config
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestImageBodyScope(t *testing.T) {
@@ -21,18 +22,14 @@ func TestImageBodyScope(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.raw), func(t *testing.T) {
 			got := ResolveImageBodyScope(tt.raw)
-			if got != tt.want {
-				t.Fatalf("ResolveImageBodyScope(%q) = %q, want %q", tt.raw, got, tt.want)
-			}
-			if got.Valid() != tt.valid {
-				t.Fatalf("Valid() = %v, want %v", got.Valid(), tt.valid)
-			}
+			require.Equal(t, tt.want, got, "ResolveImageBodyScope(%q)", tt.raw)
+			require.Equal(t, tt.valid, got.Valid())
+
 			if !tt.valid {
 				return
 			}
-			if got.Inputs() != tt.inputs || got.Outputs() != tt.outs {
-				t.Fatalf("Inputs/Outputs = %v/%v, want %v/%v", got.Inputs(), got.Outputs(), tt.inputs, tt.outs)
-			}
+			require.Equal(t, tt.inputs, got.Inputs())
+			require.Equal(t, tt.outs, got.Outputs())
 		})
 	}
 }
@@ -42,29 +39,21 @@ func TestLoadImageBodyLoggingEnv(t *testing.T) {
 
 	withTempDir(t, func(string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if result.Config.Logging.LogImageBodies {
-			t.Fatal("log_image_bodies should default to false")
-		}
-		if got := result.Config.Logging.LogImageBodiesScope; got != ImageBodyScopeAll {
-			t.Fatalf("log_image_bodies_scope default = %q, want all", got)
-		}
+		require.NoError(t, err)
+		require.False(t, result.Config.Logging.LogImageBodies)
+		got := result.Config.Logging.LogImageBodiesScope
+		require.Equal(t, ImageBodyScopeAll, got)
 
 		t.Setenv("LOGGING_LOG_IMAGE_BODIES", "true")
 		t.Setenv("LOGGING_LOG_IMAGE_BODIES_SCOPE", "Output")
 		result, err = Load()
-		if err != nil {
-			t.Fatalf("Load() failed: %v", err)
-		}
-		if !result.Config.Logging.LogImageBodies || result.Config.Logging.LogImageBodiesScope != ImageBodyScopeOutput {
-			t.Fatalf("logging = %+v, want image bodies on with output scope", result.Config.Logging)
-		}
+		require.NoError(t, err)
+		require.True(t, result.Config.Logging.LogImageBodies)
+		require.Equal(t, ImageBodyScopeOutput, result.Config.Logging.LogImageBodiesScope, "logging = %+v, want image bodies on with output scope", result.Config.Logging)
 
 		t.Setenv("LOGGING_LOG_IMAGE_BODIES_SCOPE", "pixels")
-		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "log_image_bodies_scope") {
-			t.Fatalf("Load() error = %v, want invalid scope error", err)
-		}
+		_, err = Load()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "log_image_bodies_scope")
 	})
 }

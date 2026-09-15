@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractFromImageResponse_NilResponse(t *testing.T) {
-	if entry := ExtractFromImageResponse(nil, "req", "dall-e-3", "openai"); entry != nil {
-		t.Fatalf("expected nil entry, got %+v", entry)
-	}
+	entry := ExtractFromImageResponse(nil, "req", "dall-e-3", "openai")
+	require.Nil(t, entry)
 }
 
 func TestExtractFromImageResponse_PerImagePricing(t *testing.T) {
@@ -18,27 +19,17 @@ func TestExtractFromImageResponse_PerImagePricing(t *testing.T) {
 
 	entry := ExtractFromImageResponse(resp, "req-1", "dall-e-3", "openai", pricing)
 
-	if entry.Endpoint != endpointImageGenerations {
-		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointImageGenerations)
-	}
-	if entry.Model != "dall-e-3" || entry.Provider != "openai" || entry.RequestID != "req-1" {
-		t.Errorf("identity = %q/%q/%q", entry.Provider, entry.Model, entry.RequestID)
-	}
-	if entry.TotalTokens != 0 {
-		t.Errorf("tokens = %d, want 0 for a per-image model", entry.TotalTokens)
-	}
-	if got := entry.RawData[rawKeyImages]; got != 2 {
-		t.Errorf("images = %v, want 2", got)
-	}
-	if entry.OutputCost == nil || !costsNearlyEqual(*entry.OutputCost, 0.08) {
-		t.Errorf("output cost = %v, want 0.08", entry.OutputCost)
-	}
-	if entry.TotalCost == nil || !costsNearlyEqual(*entry.TotalCost, 0.08) {
-		t.Errorf("total cost = %v, want 0.08", entry.TotalCost)
-	}
-	if entry.CostsCalculationCaveat != "" {
-		t.Errorf("caveat = %q, want none", entry.CostsCalculationCaveat)
-	}
+	assert.Equal(t, endpointImageGenerations, entry.Endpoint)
+	assert.Equal(t, "dall-e-3", entry.Model)
+	assert.Equal(t, "openai", entry.Provider)
+	assert.Equal(t, "req-1", entry.RequestID)
+	assert.Equal(t, 0, entry.TotalTokens)
+	assert.Equal(t, 2, entry.RawData[rawKeyImages])
+	require.NotNil(t, entry.OutputCost)
+	assert.True(t, costsNearlyEqual(*entry.OutputCost, 0.08))
+	require.NotNil(t, entry.TotalCost)
+	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.08))
+	assert.Empty(t, entry.CostsCalculationCaveat)
 }
 
 func TestExtractFromImageResponse_TokenPricing(t *testing.T) {
@@ -54,38 +45,27 @@ func TestExtractFromImageResponse_TokenPricing(t *testing.T) {
 
 	entry := ExtractFromImageResponse(resp, "req-2", "gpt-image-1", "openai", pricing)
 
-	if entry.InputTokens != 100 || entry.OutputTokens != 1000 || entry.TotalTokens != 1100 {
-		t.Errorf("tokens = %d/%d/%d, want 100/1000/1100 (total derived)", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
-	}
-	if got := entry.RawData["prompt_text_tokens"]; got != 100 {
-		t.Errorf("prompt_text_tokens = %v, want 100", got)
-	}
-	if got := entry.RawData[rawKeyImages]; got != 1 {
-		t.Errorf("images = %v, want 1", got)
-	}
+	assert.Equal(t, 100, entry.InputTokens)
+	assert.Equal(t, 1000, entry.OutputTokens)
+	assert.Equal(t, 1100, entry.TotalTokens)
+	assert.Equal(t, 100, entry.RawData["prompt_text_tokens"])
+	assert.Equal(t, 1, entry.RawData[rawKeyImages])
+
 	// 100 * 5 / 1e6 + 1000 * 40 / 1e6 = 0.0005 + 0.04
-	if entry.TotalCost == nil || !costsNearlyEqual(*entry.TotalCost, 0.0405) {
-		t.Errorf("total cost = %v, want 0.0405", entry.TotalCost)
-	}
-	if entry.CostsCalculationCaveat != "" {
-		t.Errorf("caveat = %q, want none (token details are informational)", entry.CostsCalculationCaveat)
-	}
+	require.NotNil(t, entry.TotalCost)
+	assert.True(t, costsNearlyEqual(*entry.TotalCost, 0.0405))
+	assert.Empty(t, entry.CostsCalculationCaveat)
 }
 
 func TestExtractFromImageResponse_NoPricing(t *testing.T) {
 	entry := ExtractFromImageResponse(&core.ImageGenerationResponse{Data: []core.ImageData{{URL: "https://a"}}}, "req", "dall-e-3", "openai")
-	if entry.TotalCost != nil {
-		t.Errorf("total cost = %v, want nil without pricing", entry.TotalCost)
-	}
-	if got := entry.RawData[rawKeyImages]; got != 1 {
-		t.Errorf("images = %v, want 1", got)
-	}
+	assert.Nil(t, entry.TotalCost)
+	assert.Equal(t, 1, entry.RawData[rawKeyImages])
 }
 
 func TestExtractFromImageEditResponse(t *testing.T) {
-	if entry := ExtractFromImageEditResponse(nil, "req", "gpt-image-1", "openai"); entry != nil {
-		t.Fatalf("expected nil entry for nil response, got %+v", entry)
-	}
+	entry := ExtractFromImageEditResponse(nil, "req", "gpt-image-1", "openai")
+	require.Nil(t, entry)
 
 	resp := &core.ImageGenerationResponse{
 		Data: []core.ImageData{{B64JSON: "aGk="}},
@@ -99,23 +79,20 @@ func TestExtractFromImageEditResponse(t *testing.T) {
 	// tokens decide, so the edit costs 1000 * 40 / 1e6.
 	pricing := &core.ModelPricing{OutputImagePerMtok: new(40.0), PerImage: new(0.167)}
 
-	entry := ExtractFromImageEditResponse(resp, "req-2", "gpt-image-1", "openai", pricing)
+	entry = ExtractFromImageEditResponse(resp, "req-2", "gpt-image-1", "openai", pricing)
 
-	if entry.Endpoint != endpointImageEdits {
-		t.Errorf("endpoint = %q, want %q", entry.Endpoint, endpointImageEdits)
-	}
-	if entry.Model != "gpt-image-1" || entry.Provider != "openai" || entry.RequestID != "req-2" {
-		t.Errorf("identity = %q/%q/%q", entry.Provider, entry.Model, entry.RequestID)
-	}
-	if entry.InputTokens != 50 || entry.OutputTokens != 1000 || entry.TotalTokens != 1050 {
-		t.Errorf("tokens = %d/%d/%d", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
-	}
-	if entry.RawData[rawKeyImages] != 1 || entry.RawData["prompt_image_tokens"] != 40 || entry.RawData["prompt_text_tokens"] != 10 {
-		t.Errorf("raw data = %v", entry.RawData)
-	}
-	if entry.OutputCost == nil || !costsNearlyEqual(*entry.OutputCost, 0.04) {
-		t.Errorf("output cost = %v, want 0.04 from image output tokens", entry.OutputCost)
-	}
+	assert.Equal(t, endpointImageEdits, entry.Endpoint)
+	assert.Equal(t, "gpt-image-1", entry.Model)
+	assert.Equal(t, "openai", entry.Provider)
+	assert.Equal(t, "req-2", entry.RequestID)
+	assert.Equal(t, 50, entry.InputTokens)
+	assert.Equal(t, 1000, entry.OutputTokens)
+	assert.Equal(t, 1050, entry.TotalTokens)
+	assert.Equal(t, 1, entry.RawData[rawKeyImages])
+	assert.Equal(t, 40, entry.RawData["prompt_image_tokens"])
+	assert.Equal(t, 10, entry.RawData["prompt_text_tokens"], "raw data = %v", entry.RawData)
+	require.NotNil(t, entry.OutputCost)
+	assert.True(t, costsNearlyEqual(*entry.OutputCost, 0.04))
 }
 
 // TestImageBillingUnit pins the rule that decides how an image call is priced:
@@ -206,17 +183,13 @@ func TestImageBillingUnit(t *testing.T) {
 
 			entry := ExtractFromImageResponse(resp, "req", "m", "openai", tt.pricing)
 
-			switch {
-			case tt.wantCost == nil && entry.TotalCost != nil:
-				t.Errorf("total cost = %v, want nil", *entry.TotalCost)
-			case tt.wantCost != nil && entry.TotalCost == nil:
-				t.Errorf("total cost = nil, want %v", *tt.wantCost)
-			case tt.wantCost != nil && !costsNearlyEqual(*entry.TotalCost, *tt.wantCost):
-				t.Errorf("total cost = %v, want %v", *entry.TotalCost, *tt.wantCost)
+			if tt.wantCost == nil {
+				assert.Nil(t, entry.TotalCost)
+			} else {
+				require.NotNil(t, entry.TotalCost)
+				assert.True(t, costsNearlyEqual(*entry.TotalCost, *tt.wantCost), "total cost = %v, want %v", *entry.TotalCost, *tt.wantCost)
 			}
-			if entry.CostsCalculationCaveat != tt.wantCaveat {
-				t.Errorf("caveat = %q, want %q", entry.CostsCalculationCaveat, tt.wantCaveat)
-			}
+			assert.Equal(t, tt.wantCaveat, entry.CostsCalculationCaveat)
 		})
 	}
 }
@@ -240,12 +213,9 @@ func TestImageCostCaveat_TimeWindowRate(t *testing.T) {
 
 	entry := ExtractFromImageResponse(resp, "req", "m", "openai", pricing)
 
-	if entry.TotalCost == nil || !costsNearlyEqual(*entry.TotalCost, 9*5/1e6+272*40/1e6) {
-		t.Errorf("total cost = %v, want the time-window rate applied", entry.TotalCost)
-	}
-	if entry.CostsCalculationCaveat != "" {
-		t.Errorf("caveat = %q, want none when the window priced the row", entry.CostsCalculationCaveat)
-	}
+	require.NotNil(t, entry.TotalCost)
+	assert.True(t, costsNearlyEqual(*entry.TotalCost, 9*5/1e6+272*40/1e6))
+	assert.Empty(t, entry.CostsCalculationCaveat)
 }
 
 func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
@@ -256,43 +226,33 @@ func TestExtractFromImageResponse_NoUsageCaveat(t *testing.T) {
 	pricing := &core.ModelPricing{InputPerMtok: new(0.3), OutputPerMtok: new(30.0)}
 
 	entry := ExtractFromImageResponse(resp, "req", "gemini-2.5-flash-image", "gemini", pricing)
-	if entry.CostsCalculationCaveat == "" {
-		t.Fatal("expected a caveat for a usage-less response without per-image pricing")
-	}
+	require.NotEmpty(t, entry.CostsCalculationCaveat)
 
 	// With a per_image price the cost is real, so no caveat.
 	priced := ExtractFromImageResponse(resp, "req", "dall-e-3", "openai", &core.ModelPricing{PerImage: new(0.04)})
-	if priced.CostsCalculationCaveat != "" {
-		t.Fatalf("caveat = %q, want none when per-image cost was calculated", priced.CostsCalculationCaveat)
-	}
+	require.Empty(t, priced.CostsCalculationCaveat)
 
 	// An explicit zero per_image price means a deliberately free model — its
 	// known $0 cost must not read as unavailable.
 	free := ExtractFromImageResponse(resp, "req", "free-image-model", "openai", &core.ModelPricing{PerImage: new(0.0)})
-	if free.CostsCalculationCaveat != "" {
-		t.Fatalf("caveat = %q, want none for an explicitly free per-image model", free.CostsCalculationCaveat)
-	}
+	require.Empty(t, free.CostsCalculationCaveat)
 
 	// A per_image price with nothing to count is no basis: an empty response
 	// without usage stays flagged.
 	empty := ExtractFromImageResponse(&core.ImageGenerationResponse{}, "req", "dall-e-3", "openai", &core.ModelPricing{PerImage: new(0.04)})
-	if empty.CostsCalculationCaveat == "" {
-		t.Fatal("expected a caveat when there are no images and no usage to price")
-	}
+	require.NotEmpty(t, empty.CostsCalculationCaveat)
 
 	// A per-request price does not depend on usage at all, so it costs the
 	// row on its own and needs no caveat.
 	perRequest := ExtractFromImageResponse(resp, "req", "flat-rate-model", "openai", &core.ModelPricing{PerRequest: new(0.02)})
-	if perRequest.CostsCalculationCaveat != "" || perRequest.TotalCost == nil {
-		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", perRequest.CostsCalculationCaveat, perRequest.TotalCost)
-	}
+	require.Empty(t, perRequest.CostsCalculationCaveat)
+	require.NotNil(t, perRequest.TotalCost)
 
 	// A usage-carrying response keeps its token costs and stays caveat-free.
 	withUsage := ExtractFromImageResponse(&core.ImageGenerationResponse{
 		Data:  []core.ImageData{{B64JSON: "aGk="}},
 		Usage: &core.ImageUsage{InputTokens: 10, OutputTokens: 1000, TotalTokens: 1010},
 	}, "req", "gemini-2.5-flash-image", "gemini", pricing)
-	if withUsage.CostsCalculationCaveat != "" || withUsage.TotalCost == nil {
-		t.Fatalf("entry = caveat %q cost %v, want costed and caveat-free", withUsage.CostsCalculationCaveat, withUsage.TotalCost)
-	}
+	require.Empty(t, withUsage.CostsCalculationCaveat)
+	require.NotNil(t, withUsage.TotalCost)
 }

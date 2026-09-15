@@ -10,7 +10,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 func createConversation(t *testing.T, srv *Server, body string) core.Conversation {
@@ -19,13 +22,10 @@ func createConversation(t *testing.T, srv *Server, body string) core.Conversatio
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var conversation core.Conversation
-	if err := json.Unmarshal(rec.Body.Bytes(), &conversation); err != nil {
-		t.Fatalf("decode conversation: %v", err)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	conversation := echotest.Decode[core.Conversation](t, rec)
+
 	return conversation
 }
 
@@ -34,18 +34,10 @@ func TestConversationCreateReturnsOpenAICompatibleObject(t *testing.T) {
 
 	conversation := createConversation(t, srv, `{"metadata":{"topic":"demo"}}`)
 
-	if !strings.HasPrefix(conversation.ID, "conv_") {
-		t.Fatalf("id = %q, want conv_ prefix", conversation.ID)
-	}
-	if conversation.Object != "conversation" {
-		t.Fatalf("object = %q, want conversation", conversation.Object)
-	}
-	if conversation.CreatedAt <= 0 {
-		t.Fatalf("created_at = %d, want positive", conversation.CreatedAt)
-	}
-	if conversation.Metadata["topic"] != "demo" {
-		t.Fatalf("metadata[topic] = %q, want demo", conversation.Metadata["topic"])
-	}
+	require.True(t, strings.HasPrefix(conversation.ID, "conv_"), "id = %q, want conv_ prefix", conversation.ID)
+	require.Equal(t, "conversation", conversation.Object)
+	require.Greater(t, conversation.CreatedAt, int64(0))
+	require.Equal(t, "demo", conversation.Metadata["topic"])
 }
 
 func TestConversationCreateEmptyBodyYieldsEmptyMetadataObject(t *testing.T) {
@@ -54,17 +46,13 @@ func TestConversationCreateEmptyBodyYieldsEmptyMetadataObject(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/conversations", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var conversation core.Conversation
-	if err := json.Unmarshal(rec.Body.Bytes(), &conversation); err != nil {
-		t.Fatalf("decode conversation: %v", err)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	conversation := echotest.Decode[core.Conversation](t, rec)
+
 	// metadata must be an empty object rather than null, matching OpenAI.
-	if conversation.Metadata == nil || len(conversation.Metadata) != 0 {
-		t.Fatalf("metadata = %#v, want empty object", conversation.Metadata)
-	}
+	require.NotNil(t, conversation.Metadata)
+	require.Empty(t, conversation.Metadata)
 }
 
 func TestConversationCreateAcceptsItems(t *testing.T) {
@@ -72,9 +60,7 @@ func TestConversationCreateAcceptsItems(t *testing.T) {
 
 	conversation := createConversation(t, srv,
 		`{"items":[{"type":"message","role":"user","content":"hello"}]}`)
-	if conversation.ID == "" {
-		t.Fatal("conversation id is empty")
-	}
+	require.NotEmpty(t, conversation.ID)
 }
 
 func TestConversationGetRoundTrip(t *testing.T) {
@@ -84,16 +70,11 @@ func TestConversationGetRoundTrip(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID, nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("get status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var got core.Conversation
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode conversation: %v", err)
-	}
-	if got.ID != created.ID || got.Metadata["k"] != "v" {
-		t.Fatalf("get conversation = %+v, want id %s metadata k=v", got, created.ID)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	got := echotest.Decode[core.Conversation](t, rec)
+	require.Equal(t, created.ID, got.ID)
+	require.Equal(t, "v", got.Metadata["k"], "get conversation = %+v, want id %s metadata k=v", got, created.ID)
 }
 
 func TestConversationUpdateMergesMetadata(t *testing.T) {
@@ -105,19 +86,12 @@ func TestConversationUpdateMergesMetadata(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("update status = %d, want 200 (%s)", rec.Code, rec.Body.String())
-	}
-	var updated core.Conversation
-	if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("decode conversation: %v", err)
-	}
-	if updated.Metadata["new"] != "value" {
-		t.Fatalf("metadata[new] = %q, want value", updated.Metadata["new"])
-	}
-	if updated.Metadata["old"] != "value" || updated.Metadata["keep"] != "gone" {
-		t.Fatalf("metadata = %v, want existing keys preserved", updated.Metadata)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	updated := echotest.Decode[core.Conversation](t, rec)
+	require.Equal(t, "value", updated.Metadata["new"])
+	require.Equal(t, "value", updated.Metadata["old"])
+	require.Equal(t, "gone", updated.Metadata["keep"], "metadata = %v, want existing keys preserved", updated.Metadata)
 }
 
 func TestConversationUpdateRejectsOversizedMergedMetadata(t *testing.T) {
@@ -133,16 +107,13 @@ func TestConversationUpdateRejectsOversizedMergedMetadata(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("update status = %d (%s), want 400", rec.Code, rec.Body.String())
-	}
-	var envelope core.OpenAIErrorEnvelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if envelope.Error.Param == nil || *envelope.Error.Param != "metadata" || envelope.Error.Code == nil || *envelope.Error.Code != "metadata_max_properties_exceeded" {
-		t.Fatalf("error = %+v, want metadata_max_properties_exceeded", envelope.Error)
-	}
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+
+	envelope := echotest.Decode[core.OpenAIErrorEnvelope](t, rec)
+	require.NotNil(t, envelope.Error.Param)
+	require.Equal(t, "metadata", *envelope.Error.Param)
+	require.NotNil(t, envelope.Error.Code)
+	require.Equal(t, "metadata_max_properties_exceeded", *envelope.Error.Code, "error = %+v, want metadata_max_properties_exceeded", envelope.Error)
 }
 
 func TestConversationItemsLifecycleAndPagination(t *testing.T) {
@@ -156,72 +127,56 @@ func TestConversationItemsLifecycleAndPagination(t *testing.T) {
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID+"/items?order=asc&limit=2", nil)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list status = %d (%s), want 200", listRec.Code, listRec.Body.String())
-	}
-	var firstPage core.ConversationItemListResponse
-	if err := json.Unmarshal(listRec.Body.Bytes(), &firstPage); err != nil {
-		t.Fatalf("decode first page: %v", err)
-	}
-	if firstPage.Object != "list" || len(firstPage.Data) != 2 || !firstPage.HasMore {
-		t.Fatalf("first page = %+v, want two items and has_more", firstPage)
-	}
-	if firstPage.FirstID == nil || firstPage.LastID == nil {
-		t.Fatalf("first/last id = %v/%v, want stable ids", firstPage.FirstID, firstPage.LastID)
-	}
+	require.Equal(t, http.StatusOK, listRec.Code, listRec.Body.String())
+
+	firstPage := echotest.Decode[core.ConversationItemListResponse](t, listRec)
+	require.Equal(t, "list", firstPage.Object)
+	require.Len(t, firstPage.Data, 2)
+	require.True(t, firstPage.HasMore, "first page = %+v, want two items and has_more", firstPage)
+	require.NotNil(t, firstPage.FirstID)
+	require.NotNil(t, firstPage.LastID)
+
 	var firstItem map[string]any
-	if err := json.Unmarshal(firstPage.Data[0], &firstItem); err != nil {
-		t.Fatalf("decode first item: %v", err)
-	}
-	if firstItem["role"] != "developer" || firstItem["status"] != "completed" {
-		t.Fatalf("first item = %#v, want normalized developer message", firstItem)
-	}
+	err := json.Unmarshal(firstPage.Data[0], &firstItem)
+	require.NoError(t, err)
+	require.Equal(t, "developer", firstItem["role"])
+	require.Equal(t, "completed", firstItem["status"], "first item = %#v, want normalized developer message", firstItem)
 
 	secondReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID+"/items?order=asc&limit=2&after="+*firstPage.LastID, nil)
 	secondRec := httptest.NewRecorder()
 	srv.ServeHTTP(secondRec, secondReq)
-	var secondPage core.ConversationItemListResponse
-	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondPage); err != nil {
-		t.Fatalf("decode second page: %v", err)
-	}
-	if secondRec.Code != http.StatusOK || len(secondPage.Data) != 1 || secondPage.HasMore {
-		t.Fatalf("second page status/data = %d/%+v, want final item", secondRec.Code, secondPage)
-	}
+	secondPage := echotest.Decode[core.ConversationItemListResponse](t, secondRec)
+	require.Equal(t, http.StatusOK, secondRec.Code)
+	require.Len(t, secondPage.Data, 1)
+	require.False(t, secondPage.HasMore, "second page status/data = %d/%+v, want final item", secondRec.Code, secondPage)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/conversations/"+created.ID+"/items",
 		strings.NewReader(`{"items":[{"role":"user","content":"fourth"},{"type":"reasoning","summary":[]}]}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create items status = %d (%s), want 200", createRec.Code, createRec.Body.String())
-	}
-	var added core.ConversationItemListResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &added); err != nil {
-		t.Fatalf("decode created items: %v", err)
-	}
-	if len(added.Data) != 2 || added.HasMore || added.FirstID == nil || added.LastID == nil {
-		t.Fatalf("created items = %+v, want two-item list", added)
-	}
+	require.Equal(t, http.StatusOK, createRec.Code, createRec.Body.String())
+
+	added := echotest.Decode[core.ConversationItemListResponse](t, createRec)
+	require.Len(t, added.Data, 2)
+	require.False(t, added.HasMore)
+	require.NotNil(t, added.FirstID)
+	require.NotNil(t, added.LastID, "created items = %+v, want two-item list", added)
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID+"/items/"+*added.LastID, nil)
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusOK || !strings.Contains(getRec.Body.String(), `"type":"reasoning"`) {
-		t.Fatalf("get item status/body = %d/%s", getRec.Code, getRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, getRec.Code)
+	require.Contains(t, getRec.Body.String(), `"type":"reasoning"`)
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/conversations/"+created.ID+"/items/"+*added.LastID, nil)
 	deleteRec := httptest.NewRecorder()
 	srv.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("delete item status = %d (%s), want 200", deleteRec.Code, deleteRec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, deleteRec.Code, deleteRec.Body.String())
+
 	getAfterDelete := httptest.NewRecorder()
 	srv.ServeHTTP(getAfterDelete, getReq)
-	if getAfterDelete.Code != http.StatusNotFound {
-		t.Fatalf("get deleted item status = %d, want 404", getAfterDelete.Code)
-	}
+	require.Equal(t, http.StatusNotFound, getAfterDelete.Code)
 }
 
 func TestConversationItemsConcurrentDuplicateIDHasSingleWinner(t *testing.T) {
@@ -251,9 +206,8 @@ func TestConversationItemsConcurrentDuplicateIDHasSingleWinner(t *testing.T) {
 	for status := range statuses {
 		counts[status]++
 	}
-	if counts[http.StatusOK] != 1 || counts[http.StatusBadRequest] != writers-1 {
-		t.Fatalf("statuses = %v, want one 200 and %d 400s", counts, writers-1)
-	}
+	require.Equal(t, 1, counts[http.StatusOK])
+	require.Equal(t, writers-1, counts[http.StatusBadRequest], "statuses = %v, want one 200 and %d 400s", counts, writers-1)
 }
 
 func TestConversationCreateRejectsNonObjectItems(t *testing.T) {
@@ -263,16 +217,11 @@ func TestConversationCreateRejectsNonObjectItems(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("body %s status = %d (%s), want 400", body, rec.Code, rec.Body.String())
-		}
-		var envelope core.OpenAIErrorEnvelope
-		if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-			t.Fatalf("decode error: %v", err)
-		}
-		if envelope.Error.Param == nil || *envelope.Error.Param != "items[0]" {
-			t.Fatalf("body %s param = %v, want items[0]", body, envelope.Error.Param)
-		}
+		require.Equal(t, http.StatusBadRequest, rec.Code, "body %s status = %d (%s), want 400", body, rec.Code, rec.Body.String())
+
+		envelope := echotest.Decode[core.OpenAIErrorEnvelope](t, rec)
+		require.NotNil(t, envelope.Error.Param)
+		require.Equal(t, "items[0]", *envelope.Error.Param, "body %s param = %v, want items[0]", body, envelope.Error.Param)
 	}
 }
 
@@ -299,16 +248,11 @@ func TestConversationCreateRejectsNullRequiredFunctionFields(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d (%s), want 400", rec.Code, rec.Body.String())
-			}
-			var envelope core.OpenAIErrorEnvelope
-			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-				t.Fatalf("decode error: %v", err)
-			}
-			if envelope.Error.Param == nil || *envelope.Error.Param != "items[0]" {
-				t.Fatalf("param = %v, want items[0]", envelope.Error.Param)
-			}
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+
+			envelope := echotest.Decode[core.OpenAIErrorEnvelope](t, rec)
+			require.NotNil(t, envelope.Error.Param)
+			require.Equal(t, "items[0]", *envelope.Error.Param)
 		})
 	}
 }
@@ -326,12 +270,9 @@ func TestPaginateConversationItemsCapsDirectLimit(t *testing.T) {
 		Limit: maxCursorListLimit + 1,
 		Order: "asc",
 	})
-	if err != nil {
-		t.Fatalf("paginate: %v", err)
-	}
-	if len(page.Data) != maxCursorListLimit || !page.HasMore {
-		t.Fatalf("page has %d items and has_more=%v, want %d and true", len(page.Data), page.HasMore, maxCursorListLimit)
-	}
+	require.Nil(t, err)
+	require.Len(t, page.Data, maxCursorListLimit)
+	require.True(t, page.HasMore)
 }
 
 func TestConversationItemListEmptyUsesNullCursors(t *testing.T) {
@@ -341,19 +282,15 @@ func TestConversationItemListEmptyUsesNullCursors(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID+"/items", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list status = %d (%s), want 200", rec.Code, rec.Body.String())
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if first, exists := body["first_id"]; !exists || first != nil {
-		t.Fatalf("first_id = %#v (exists %v), want null", first, exists)
-	}
-	if last, exists := body["last_id"]; !exists || last != nil {
-		t.Fatalf("last_id = %#v (exists %v), want null", last, exists)
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	body := echotest.Decode[map[string]any](t, rec)
+	first, exists := body["first_id"]
+	require.True(t, exists)
+	require.Nil(t, first)
+	last, exists := body["last_id"]
+	require.True(t, exists)
+	require.Nil(t, last)
 }
 
 func TestConversationItemListUnknownCursorReturnsOpenAICompatible404(t *testing.T) {
@@ -363,16 +300,12 @@ func TestConversationItemListUnknownCursorReturnsOpenAICompatible404(t *testing.
 	req := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID+"/items?after=msg_missing", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("list status = %d (%s), want 404", rec.Code, rec.Body.String())
-	}
-	var envelope core.OpenAIErrorEnvelope
-	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if envelope.Error.Type != core.ErrorTypeInvalidRequest || envelope.Error.Param == nil || *envelope.Error.Param != "after" {
-		t.Fatalf("error = %+v, want invalid_request_error for after", envelope.Error)
-	}
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+
+	envelope := echotest.Decode[core.OpenAIErrorEnvelope](t, rec)
+	require.Equal(t, core.ErrorTypeInvalidRequest, envelope.Error.Type)
+	require.NotNil(t, envelope.Error.Param)
+	require.Equal(t, "after", *envelope.Error.Param, "error = %+v, want invalid_request_error for after", envelope.Error)
 }
 
 func TestConversationItemIncludeControlsOptionalFields(t *testing.T) {
@@ -394,13 +327,10 @@ func TestConversationItemIncludeControlsOptionalFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			without := string(conversationItemForInclude(json.RawMessage(tt.item), nil))
-			if strings.Contains(without, `"`+tt.field+`"`) {
-				t.Fatalf("without include = %s, want %s omitted", without, tt.field)
-			}
+			require.NotContains(t, without, `"`+tt.field+`"`, "without include = %s, want %s omitted", without, tt.field)
+
 			with := string(conversationItemForInclude(json.RawMessage(tt.item), []string{tt.include}))
-			if !strings.Contains(with, `"`+tt.field+`"`) {
-				t.Fatalf("with include = %s, want %s retained", with, tt.field)
-			}
+			require.Contains(t, with, `"`+tt.field+`"`)
 		})
 	}
 }
@@ -412,23 +342,15 @@ func TestConversationItemsPreserveLargeUnknownIntegers(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID+"/items?order=asc", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list status = %d (%s), want 200", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"opaque_integer":9007199254740993`) {
-		t.Fatalf("list body = %s, want exact large integer", rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"opaque_integer":9007199254740993`)
 }
 
 func TestConversationItemProjectionPreservesUnknownNumericFields(t *testing.T) {
 	raw := json.RawMessage(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"ok","logprobs":[],"opaque_integer":9007199254740993}]}`)
 	projected := conversationItemForInclude(raw, nil)
-	if !strings.Contains(string(projected), `"opaque_integer":9007199254740993`) {
-		t.Fatalf("projected item = %s, want exact large integer", projected)
-	}
-	if strings.Contains(string(projected), `"logprobs"`) {
-		t.Fatalf("projected item = %s, want logprobs omitted", projected)
-	}
+	require.Contains(t, string(projected), `"opaque_integer":9007199254740993`, "projected item = %s, want exact large integer", projected)
+	require.NotContains(t, string(projected), `"logprobs"`, "projected item = %s, want logprobs omitted", projected)
 }
 
 func TestConversationDeleteRemovesConversation(t *testing.T) {
@@ -438,23 +360,17 @@ func TestConversationDeleteRemovesConversation(t *testing.T) {
 	delReq := httptest.NewRequest(http.MethodDelete, "/v1/conversations/"+created.ID, nil)
 	delRec := httptest.NewRecorder()
 	srv.ServeHTTP(delRec, delReq)
-	if delRec.Code != http.StatusOK {
-		t.Fatalf("delete status = %d, want 200 (%s)", delRec.Code, delRec.Body.String())
-	}
-	var deleted core.ConversationDeleteResponse
-	if err := json.Unmarshal(delRec.Body.Bytes(), &deleted); err != nil {
-		t.Fatalf("decode delete response: %v", err)
-	}
-	if deleted.ID != created.ID || deleted.Object != "conversation.deleted" || !deleted.Deleted {
-		t.Fatalf("delete response = %+v, want deleted %s", deleted, created.ID)
-	}
+	require.Equal(t, http.StatusOK, delRec.Code, delRec.Body.String())
+
+	deleted := echotest.Decode[core.ConversationDeleteResponse](t, delRec)
+	require.Equal(t, created.ID, deleted.ID)
+	require.Equal(t, "conversation.deleted", deleted.Object)
+	require.True(t, deleted.Deleted, "delete response = %+v, want deleted %s", deleted, created.ID)
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.ID, nil)
 	getRec := httptest.NewRecorder()
 	srv.ServeHTTP(getRec, getReq)
-	if getRec.Code != http.StatusNotFound {
-		t.Fatalf("get after delete status = %d, want 404 (%s)", getRec.Code, getRec.Body.String())
-	}
+	require.Equal(t, http.StatusNotFound, getRec.Code, getRec.Body.String())
 }
 
 // TestConversationEndpointErrors covers the validation and not-found error
@@ -553,21 +469,16 @@ func TestConversationEndpointErrors(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d (%s)", rec.Code, tt.wantStatus, rec.Body.String())
-			}
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
 
-			var envelope core.OpenAIErrorEnvelope
-			if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
-				t.Fatalf("decode error envelope: %v", err)
-			}
-			if tt.wantErrorType != "" && envelope.Error.Type != tt.wantErrorType {
-				t.Fatalf("error type = %q, want %q", envelope.Error.Type, tt.wantErrorType)
+			envelope := echotest.Decode[core.OpenAIErrorEnvelope](t, rec)
+
+			if tt.wantErrorType != "" {
+				require.Equal(t, tt.wantErrorType, envelope.Error.Type)
 			}
 			if tt.wantErrorParam != "" {
-				if envelope.Error.Param == nil || *envelope.Error.Param != tt.wantErrorParam {
-					t.Fatalf("error param = %v, want %q", envelope.Error.Param, tt.wantErrorParam)
-				}
+				require.NotNil(t, envelope.Error.Param)
+				require.Equal(t, tt.wantErrorParam, *envelope.Error.Param)
 			}
 		})
 	}

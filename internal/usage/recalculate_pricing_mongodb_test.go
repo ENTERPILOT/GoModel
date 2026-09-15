@@ -5,12 +5,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"testing"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type mongoPricingTestContextKey struct{}
@@ -50,12 +50,9 @@ func TestMongoDBStoreRecalculatePricingTransactionFlow(t *testing.T) {
 		},
 		recalculatePricingDocuments: func(ctx context.Context, filter bson.D, _ PricingResolver) (RecalculatePricingResult, error) {
 			recalculateCalls++
-			if got := ctx.Value(mongoPricingTestContextKey{}); got != "transaction" {
-				t.Fatalf("transaction context marker = %v, want transaction", got)
-			}
-			if !mongoFilterHasProviderSelector(filter, "primary-openai") {
-				t.Fatalf("filter = %#v, want provider/provider_name selector", filter)
-			}
+			require.Equal(t, "transaction", ctx.Value(mongoPricingTestContextKey{}))
+			require.True(t, mongoFilterHasProviderSelector(filter, "primary-openai"), "filter = %#v, want provider/provider_name selector", filter)
+
 			return RecalculatePricingResult{Matched: 1, Recalculated: 1, WithPricing: 1}, nil
 		},
 	}
@@ -63,18 +60,14 @@ func TestMongoDBStoreRecalculatePricingTransactionFlow(t *testing.T) {
 	result, err := store.RecalculatePricing(context.Background(), RecalculatePricingParams{
 		Model: " gpt-4o ", Provider: " primary-openai ",
 	}, staticTestPricingResolver{})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.Status != "ok" || result.Matched != 1 || result.Recalculated != 1 || result.WithPricing != 1 {
-		t.Fatalf("result = %+v, want finalized successful result", result)
-	}
-	if session.withTransactionCalls != 1 || session.endSessionCalls != 1 {
-		t.Fatalf("session calls = transaction %d end %d, want 1/1", session.withTransactionCalls, session.endSessionCalls)
-	}
-	if recalculateCalls != 1 {
-		t.Fatalf("recalculate calls = %d, want 1", recalculateCalls)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.Status)
+	require.Equal(t, int64(1), result.Matched)
+	require.Equal(t, int64(1), result.Recalculated)
+	require.Equal(t, int64(1), result.WithPricing, "result = %+v, want finalized successful result", result)
+	require.Equal(t, 1, session.withTransactionCalls)
+	require.Equal(t, 1, session.endSessionCalls)
+	require.Equal(t, 1, recalculateCalls)
 }
 
 func TestMongoDBStoreRecalculatePricingFallsBackWhenTransactionsUnavailable(t *testing.T) {
@@ -93,29 +86,23 @@ func TestMongoDBStoreRecalculatePricingFallsBackWhenTransactionsUnavailable(t *t
 		},
 		recalculatePricingDocuments: func(ctx context.Context, _ bson.D, _ PricingResolver) (RecalculatePricingResult, error) {
 			recalculateCalls++
-			if got := ctx.Value(mongoPricingTestContextKey{}); got != nil {
-				t.Fatalf("fallback context marker = %v, want nil", got)
-			}
+			got := ctx.Value(mongoPricingTestContextKey{})
+			require.Nil(t, got)
+
 			return RecalculatePricingResult{Matched: 2, Recalculated: 2, WithPricing: 2}, nil
 		},
 	}
 
 	result, err := store.RecalculatePricing(context.Background(), RecalculatePricingParams{}, staticTestPricingResolver{})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.Status != "ok" || result.Matched != 2 || result.Recalculated != 2 || result.WithPricing != 2 {
-		t.Fatalf("result = %+v, want finalized fallback result", result)
-	}
-	if session.withTransactionCalls != 1 || session.endSessionCalls != 1 {
-		t.Fatalf("session calls = transaction %d end %d, want 1/1", session.withTransactionCalls, session.endSessionCalls)
-	}
-	if recalculateCalls != 1 {
-		t.Fatalf("recalculate calls = %d, want 1", recalculateCalls)
-	}
-	if !strings.Contains(logs.String(), "falling back to non-transactional update") {
-		t.Fatalf("logs = %q, want fallback warning", logs.String())
-	}
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.Status)
+	require.Equal(t, int64(2), result.Matched)
+	require.Equal(t, int64(2), result.Recalculated)
+	require.Equal(t, int64(2), result.WithPricing, "result = %+v, want finalized fallback result", result)
+	require.Equal(t, 1, session.withTransactionCalls)
+	require.Equal(t, 1, session.endSessionCalls)
+	require.Equal(t, 1, recalculateCalls)
+	require.Contains(t, logs.String(), "falling back to non-transactional update")
 }
 
 func TestMongoDBStoreRecalculatePricingFallsBackWhenTransactionBodyReportsCapabilityError(t *testing.T) {
@@ -129,14 +116,14 @@ func TestMongoDBStoreRecalculatePricingFallsBackWhenTransactionBodyReportsCapabi
 			recalculateCalls++
 			switch recalculateCalls {
 			case 1:
-				if got := ctx.Value(mongoPricingTestContextKey{}); got != "transaction" {
-					t.Fatalf("transaction context marker = %v, want transaction", got)
-				}
+				got := ctx.Value(mongoPricingTestContextKey{})
+				require.Equal(t, "transaction", got)
+
 				return RecalculatePricingResult{}, errors.New("transaction numbers are only allowed on a replica set member or mongos")
 			case 2:
-				if got := ctx.Value(mongoPricingTestContextKey{}); got != nil {
-					t.Fatalf("fallback context marker = %v, want nil", got)
-				}
+				got := ctx.Value(mongoPricingTestContextKey{})
+				require.Nil(t, got)
+
 				return RecalculatePricingResult{Matched: 1, Recalculated: 1, WithPricing: 1}, nil
 			default:
 				t.Fatalf("unexpected recalculate call %d", recalculateCalls)
@@ -146,15 +133,12 @@ func TestMongoDBStoreRecalculatePricingFallsBackWhenTransactionBodyReportsCapabi
 	}
 
 	result, err := store.RecalculatePricing(context.Background(), RecalculatePricingParams{}, staticTestPricingResolver{})
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.Status != "ok" || result.Matched != 1 || result.Recalculated != 1 || result.WithPricing != 1 {
-		t.Fatalf("result = %+v, want finalized fallback result", result)
-	}
-	if recalculateCalls != 2 {
-		t.Fatalf("recalculate calls = %d, want 2", recalculateCalls)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "ok", result.Status)
+	require.Equal(t, int64(1), result.Matched)
+	require.Equal(t, int64(1), result.Recalculated)
+	require.Equal(t, int64(1), result.WithPricing, "result = %+v, want finalized fallback result", result)
+	require.Equal(t, 2, recalculateCalls)
 }
 
 func TestMongoDBStoreRecalculatePricingUsesProviderNameForPricing(t *testing.T) {
@@ -186,18 +170,10 @@ func TestMongoDBStoreRecalculatePricingUsesProviderNameForPricing(t *testing.T) 
 	result, err := store.RecalculatePricing(context.Background(), RecalculatePricingParams{
 		Model: "gpt-4o", Provider: " primary-openai ",
 	}, resolver)
-	if err != nil {
-		t.Fatalf("RecalculatePricing() error = %v", err)
-	}
-	if result.WithPricing != 1 {
-		t.Fatalf("result = %+v, want pricing match", result)
-	}
-	if resolver.provider != "primary-openai" {
-		t.Fatalf("ResolvePricing provider = %q, want primary-openai", resolver.provider)
-	}
-	if !mongoFilterHasProviderSelector(capturedFilter, "primary-openai") {
-		t.Fatalf("filter = %#v, want provider/provider_name selector", capturedFilter)
-	}
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.WithPricing, "result = %+v, want pricing match", result)
+	require.Equal(t, "primary-openai", resolver.provider)
+	require.True(t, mongoFilterHasProviderSelector(capturedFilter, "primary-openai"), "filter = %#v, want provider/provider_name selector", capturedFilter)
 }
 
 func mongoFilterHasProviderSelector(filter bson.D, selector string) bool {
