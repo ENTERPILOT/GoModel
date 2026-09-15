@@ -100,7 +100,7 @@ func TestOpenAIReplayListModels(t *testing.T) {
 }
 
 func TestOpenAIReplayResponses(t *testing.T) {
-	require.True(t, goldenFileExists(t, "openai/responses.json"))
+	require.True(t, goldenFileExists(t, "openai/responses.json"), "missing golden file openai/responses.json; run `make record-api` to create/update contract fixtures")
 
 	provider := newOpenAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): jsonFixtureRoute(t, "openai/responses.json"),
@@ -117,7 +117,7 @@ func TestOpenAIReplayResponses(t *testing.T) {
 }
 
 func TestOpenAIReplayStreamResponses(t *testing.T) {
-	require.True(t, goldenFileExists(t, "openai/responses_stream.txt"))
+	require.True(t, goldenFileExists(t, "openai/responses_stream.txt"), "missing golden file openai/responses_stream.txt; run `make record-api` to create/update contract fixtures")
 
 	provider := newOpenAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): sseFixtureRoute(t, "openai/responses_stream.txt"),

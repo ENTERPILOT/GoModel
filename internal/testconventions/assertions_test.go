@@ -3,12 +3,13 @@
 package testconventions
 
 import (
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -58,30 +59,107 @@ func TestNoHandRolledAssertions(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			stmt, ok := n.(*ast.IfStmt)
-			if ok && stmt.Else == nil && onlyFailsTest(stmt.Body) {
-				pos := fset.Position(stmt.Pos())
-				rel, relErr := filepath.Rel(root, pos.Filename)
-				if relErr != nil {
-					rel = pos.Filename
-				}
-				offenders = append(offenders, fmt.Sprintf("%s:%d", filepath.ToSlash(rel), pos.Line))
+		for _, pos := range handRolledAssertions(fset, file) {
+			rel, relErr := filepath.Rel(root, pos.Filename)
+			if relErr != nil {
+				rel = pos.Filename
 			}
-			return true
-		})
+			offenders = append(offenders, filepath.ToSlash(rel)+":"+strconv.Itoa(pos.Line))
+		}
 		return nil
 	})
 	require.NoError(t, err)
 	assert.Empty(t, offenders, "replace these hand-rolled assertions with testify require/assert:\n%s", strings.Join(offenders, "\n"))
 }
 
+func TestHandRolledAssertionsDetection(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{name: "test failing in an if", src: `func TestX(t *testing.T) { if a != b { t.Fatalf("x") } }`, want: 1},
+		{name: "any receiver name", src: `func TestX(x *testing.T) { if a != b { x.Errorf("x") } }`, want: 1},
+		{name: "helper taking testing.TB", src: `func check(tb testing.TB) { if a != b { tb.Fatal("x") } }`, want: 1},
+		{name: "closure inherits the test", src: `func TestX(t *testing.T) { t.Run("s", func(t *testing.T) { if a { t.Error("x"); return } }) }`, want: 1},
+		{name: "benchmark named t", src: `func BenchmarkX(t *testing.B) { if a != b { t.Fatal("x") } }`, want: 0},
+		{name: "benchmark", src: `func BenchmarkX(b *testing.B) { if err != nil { b.Fatal(err) } }`, want: 0},
+		{name: "return with a value", src: `func TestX(t *testing.T) { f := func() error { if a { t.Error("x"); return err }; return nil }; _ = f }`, want: 0},
+		{name: "other work in the body", src: `func TestX(t *testing.T) { if a { cleanup(); t.Fatal("x") } }`, want: 0},
+		{name: "unconditional failure", src: `func TestX(t *testing.T) { select { case <-done: default: t.Fatal("x") } }`, want: 0},
+		{name: "if with else", src: `func TestX(t *testing.T) { if a { t.Fatal("x") } else { ok() } }`, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "x_test.go", "package x\nimport \"testing\"\n"+tt.src, parser.SkipObjectResolution)
+			require.NoError(t, err)
+			assert.Len(t, handRolledAssertions(fset, file), tt.want)
+		})
+	}
+}
+
+// handRolledAssertions returns the position of every if statement in file
+// that only fails a test or test helper.
+func handRolledAssertions(fset *token.FileSet, file *ast.File) []token.Position {
+	var found []token.Position
+	ast.Walk(finder{fset: fset, found: &found}, file)
+	return found
+}
+
+// finder walks a file while tracking which identifiers in scope are
+// *testing.T or testing.TB parameters, so exemptions follow the declared
+// type rather than the variable name.
+type finder struct {
+	fset   *token.FileSet
+	params map[string]string
+	found  *[]token.Position
+}
+
+func (f finder) Visit(n ast.Node) ast.Visitor {
+	switch n := n.(type) {
+	case *ast.FuncDecl:
+		return f.withParams(n.Type)
+	case *ast.FuncLit:
+		return f.withParams(n.Type)
+	case *ast.IfStmt:
+		if n.Else == nil && f.onlyFailsTest(n.Body) {
+			*f.found = append(*f.found, f.fset.Position(n.Pos()))
+		}
+	}
+	return f
+}
+
+// withParams returns a finder that also knows fn's testing parameters. A
+// parameter of any other type shadows an outer testing parameter of the same
+// name.
+func (f finder) withParams(fn *ast.FuncType) finder {
+	params := maps.Clone(f.params)
+	if params == nil {
+		params = map[string]string{}
+	}
+	for _, field := range fn.Params.List {
+		kind := testingType(field.Type)
+		for _, name := range field.Names {
+			if kind == "" {
+				delete(params, name.Name)
+			} else {
+				params[name.Name] = kind
+			}
+		}
+	}
+	f.params = params
+	return f
+}
+
 // onlyFailsTest reports whether body is just a Fatal, Fatalf, Error, or
-// Errorf call on a test (t or tb), optionally followed by a bare return.
-func onlyFailsTest(body *ast.BlockStmt) bool {
+// Errorf call on a *testing.T or testing.TB, optionally followed by a bare
+// return.
+func (f finder) onlyFailsTest(body *ast.BlockStmt) bool {
 	stmts := body.List
 	if len(stmts) == 2 {
-		if _, ok := stmts[1].(*ast.ReturnStmt); !ok {
+		ret, ok := stmts[1].(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 0 {
 			return false
 		}
 		stmts = stmts[:1]
@@ -105,7 +183,7 @@ func onlyFailsTest(body *ast.BlockStmt) bool {
 	if !ok {
 		return false
 	}
-	if recv.Name != "t" && recv.Name != "tb" {
+	if kind := f.params[recv.Name]; kind != "T" && kind != "TB" {
 		return false
 	}
 	switch sel.Sel.Name {
@@ -113,4 +191,20 @@ func onlyFailsTest(body *ast.BlockStmt) bool {
 		return true
 	}
 	return false
+}
+
+// testingType returns T, B, TB, or F for a testing parameter type, or "".
+func testingType(expr ast.Expr) string {
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || pkg.Name != "testing" {
+		return ""
+	}
+	return sel.Sel.Name
 }

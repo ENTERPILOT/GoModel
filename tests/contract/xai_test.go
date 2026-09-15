@@ -91,7 +91,7 @@ func TestXAIReplayListModels(t *testing.T) {
 }
 
 func TestXAIReplayResponses(t *testing.T) {
-	require.True(t, goldenFileExists(t, "xai/responses.json"))
+	require.True(t, goldenFileExists(t, "xai/responses.json"), "missing golden file xai/responses.json; run `make record-api` to create/update contract fixtures")
 
 	provider := newXAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): jsonFixtureRoute(t, "xai/responses.json"),
@@ -108,7 +108,7 @@ func TestXAIReplayResponses(t *testing.T) {
 }
 
 func TestXAIReplayStreamResponses(t *testing.T) {
-	require.True(t, goldenFileExists(t, "xai/responses_stream.txt"))
+	require.True(t, goldenFileExists(t, "xai/responses_stream.txt"), "missing golden file xai/responses_stream.txt; run `make record-api` to create/update contract fixtures")
 
 	provider := newXAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): sseFixtureRoute(t, "xai/responses_stream.txt"),
