@@ -54,7 +54,7 @@ func (s *imageService) CreateImage(c *echo.Context) error {
 	}
 	req, err := core.DecodeImageGenerationRequest(body, env)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if err := core.ValidateImageGenerationRequest(req); err != nil {
 		return handleError(c, err)

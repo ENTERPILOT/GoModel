@@ -22,7 +22,7 @@ func (s *nativeBatchService) CreateMessageBatch(c *echo.Context) error {
 	}
 	createReq, err := anthropicapi.DecodeBatchCreateRequest(body)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	req, err := anthropicapi.ToBatchRequest(createReq)
 	if err != nil {

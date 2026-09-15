@@ -26,7 +26,7 @@ func (s *conversationService) CreateConversationItems(c *echo.Context) error {
 	}
 	req, err := core.DecodeConversationItemCreateRequest(body)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 	if len(req.Items) == 0 {
 		return handleError(c, core.NewInvalidRequestError("items is required", nil).WithParam("items"))
