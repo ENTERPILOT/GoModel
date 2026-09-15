@@ -17,6 +17,30 @@ A 3-layer testing strategy with **DB state verification** as the highest priorit
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Store suites on every backend
+
+Every persistence domain (usage, audit log, budgets, rate limits, auth keys,
+workflows, ...) ships a SQL store and a MongoDB store. Their unit suites are
+written once against the domain's `Store` interface and run on each backend
+that is reachable:
+
+| Backend | Helper | How it is enabled |
+|---|---|---|
+| SQLite | `sqlxtest.Run` | always, in-memory |
+| PostgreSQL | `sqlxtest.Run` | `GOMODEL_TEST_POSTGRES_URL` set (CI: service container) |
+| MongoDB | `mongotest.Run` | `MONGO_TEST_DSN` set (CI: `tools/ci/mongo-replset.sh`) |
+
+Without the variable the backend's subtest skips, so a green run without
+PostgreSQL or MongoDB covers SQLite only. CI sets both on the shards that own
+stores. Locally:
+
+```bash
+# single-node replica set (the guardrails and workflows stores use transactions)
+MONGO_PORT=27217 sh tools/ci/mongo-replset.sh start && MONGO_PORT=27217 sh tools/ci/mongo-replset.sh wait
+MONGO_TEST_DSN='mongodb://localhost:27217/?replicaSet=rs&directConnection=true' go test ./internal/...
+docker rm -f gomodel-mongo
+```
+
 ## Test Architecture Overview
 
 ```

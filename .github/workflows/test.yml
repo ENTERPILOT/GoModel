@@ -97,10 +97,12 @@ jobs:
           retention-days: 1
 
   # One job for the whole unit suite plus the contract replay suite (an
-  # in-memory suite behind a build tag). PostgreSQL is a service container;
-  # without it GOMODEL_TEST_POSTGRES_URL is unset, every PostgreSQL subtest
-  # skips, and CI stays green while covering only SQLite. Pull requests run
-  # without the race detector; pushes to main run under -race.
+  # in-memory suite behind a build tag). PostgreSQL is a service container and
+  # MongoDB a replica set from tools/ci/mongo-replset.sh; without them
+  # GOMODEL_TEST_POSTGRES_URL and MONGO_TEST_DSN are unset, every PostgreSQL
+  # and MongoDB subtest skips, and CI stays green while covering only SQLite.
+  # Pull requests run without the race detector; pushes to main run under
+  # -race.
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -125,6 +127,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Start MongoDB
+        run: sh tools/ci/mongo-replset.sh start
+
       - name: Restore Go caches
         uses: ./.github/actions/go-cache
         with:
@@ -139,15 +144,20 @@ jobs:
       - name: Stub the dashboard bundle
         run: make frontend-stub
 
+      - name: Wait for MongoDB
+        run: sh tools/ci/mongo-replset.sh wait
+
       - name: Run tests
         run: >-
           go test ${{ env.GO_TEST_SHORT }} ${{ github.event_name == 'push' && '-race' || '' }}
           -tags=contract -coverprofile=coverage.out -timeout=15m
           ./cmd/... ./config/... ./ext/... ./internal/... ./run/... ./tests/contract/...
         env:
-          # Deliberately not POSTGRES_URL: the suite creates and drops schemas,
-          # so pointing it at a configured application database is opt-in.
+          # Deliberately not POSTGRES_URL / MONGODB_URL: the suites create and
+          # drop schemas and databases, so pointing them at a configured
+          # application database is opt-in.
           GOMODEL_TEST_POSTGRES_URL: postgres://gomodel:gomodel@localhost:5432/gomodel
+          MONGO_TEST_DSN: mongodb://localhost:27017/?replicaSet=rs&directConnection=true
 
       - name: Upload coverage
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
