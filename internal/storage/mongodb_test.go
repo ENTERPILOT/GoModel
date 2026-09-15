@@ -1,6 +1,10 @@
 package storage
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestResolveMongoDatabase(t *testing.T) {
 	tests := []struct {
@@ -62,9 +66,9 @@ func TestResolveMongoDatabase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveMongoDatabase(tt.cfg); got != tt.want {
-				t.Errorf("resolveMongoDatabase(%+v) = %q, want %q", tt.cfg, got, tt.want)
-			}
+			got := resolveMongoDatabase(tt.cfg)
+			assert.Equal(t, tt.want, got, "resolveMongoDatabase(%+v) = %q, want %q", tt.cfg, got, tt.want)
+
 		})
 	}
 }

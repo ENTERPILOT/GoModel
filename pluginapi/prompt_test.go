@@ -2,9 +2,10 @@ package pluginapi
 
 import (
 	"encoding/json"
-	"errors"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func toolPrompt() *Prompt {
@@ -21,34 +22,30 @@ func toolPrompt() *Prompt {
 
 func TestPromptViews(t *testing.T) {
 	p := toolPrompt()
-	if got := p.LastUser().ID; got != "m4" {
-		t.Errorf("LastUser = %q, want m4", got)
-	}
-	if got := p.Text(); got != "be brief\nweather?\nthanks" {
-		t.Errorf("Text() = %q", got)
-	}
-	if got := p.Text(RoleUser); got != "weather?\nthanks" {
-		t.Errorf("Text(user) = %q", got)
-	}
-	if got := p.SystemText(); got != "be brief" {
-		t.Errorf("SystemText = %q", got)
-	}
+	got := p.LastUser().ID
+	assert.Equal(t, "m4", got)
+	got = p.Text()
+	assert.Equal(t, "be brief\nweather?\nthanks", got)
+	got = p.Text(RoleUser)
+	assert.Equal(t, "weather?\nthanks", got)
+	got = p.SystemText()
+	assert.Equal(t, "be brief", got)
+
 	calls := p.ToolCalls()
-	if len(calls) != 1 || calls[0].MessageID != "m2" || !calls[0].HasResult || calls[0].Call.Name != "weather" {
-		t.Errorf("ToolCalls = %+v", calls)
-	}
+	require.Len(t, calls, 1)
+	assert.Equal(t, "m2", calls[0].MessageID)
+	assert.True(t, calls[0].HasResult)
+	assert.Equal(t, "weather", calls[0].Call.Name)
+
 	if got := len(p.NewSince(3)); got != 2 {
 		t.Errorf("NewSince(3) len = %d, want 2", got)
 	}
 	if got := p.NewSince(99); got != nil {
 		t.Errorf("NewSince(99) = %v, want nil", got)
 	}
-	if p.Message("nope") != nil || p.Message("m3").Role != RoleTool {
-		t.Error("Message lookup wrong")
-	}
-	if p.Changes().Dirty {
-		t.Error("fresh prompt must not be dirty")
-	}
+	assert.Nil(t, p.Message("nope"))
+	assert.Equal(t, RoleTool, p.Message("m3").Role)
+	assert.False(t, p.Changes().Dirty)
 }
 
 func TestPromptSetText(t *testing.T) {
@@ -69,55 +66,40 @@ func TestPromptSetText(t *testing.T) {
 			p := toolPrompt()
 			err := p.SetText(tt.msgID, tt.partIdx, "new")
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("err = %v, want containing %q", err, tt.wantErr)
-				}
-				if p.Changes().Dirty {
-					t.Error("failed edit must not dirty the prompt")
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tt.wantErr)
+				assert.False(t, p.Changes().Dirty)
+
 				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if p.Message(tt.msgID).Parts[tt.partIdx].Text != "new" {
-				t.Error("text not applied")
-			}
+			require.NoError(t, err)
+			assert.Equal(t, "new", p.Message(tt.msgID).Parts[tt.partIdx].Text)
+
 			ch := p.Changes()
-			if !ch.Dirty || ch.Messages[tt.msgID] != ChangeEdited {
-				t.Errorf("changes = %+v", ch)
-			}
+			assert.True(t, ch.Dirty)
+			assert.Equal(t, ChangeEdited, ch.Messages[tt.msgID], "changes = %+v", ch)
+
 		})
 	}
 }
 
 func TestPromptToolEdits(t *testing.T) {
 	p := toolPrompt()
-	if err := p.SetToolArguments("m2", "call_1", json.RawMessage(`{"city":"Bergen"}`)); err != nil {
-		t.Fatal(err)
-	}
-	if got := string(p.Message("m2").Parts[0].ToolCall.Arguments); got != `{"city":"Bergen"}` {
-		t.Errorf("arguments = %s", got)
-	}
-	if err := p.SetToolArguments("m2", "call_1", json.RawMessage(`{bad`)); err == nil {
-		t.Error("invalid JSON must be rejected")
-	}
-	if err := p.SetToolArguments("m2", "call_9", json.RawMessage(`{}`)); err == nil {
-		t.Error("unknown call must be rejected")
-	}
-	if err := p.SetToolResult("m3", "call_1", []Part{{Kind: PartText, Text: "[redacted]"}}); err != nil {
-		t.Fatal(err)
-	}
-	if got := p.Message("m3").Text(); got != "[redacted]" {
-		t.Errorf("tool result text = %q", got)
-	}
-	if err := p.SetToolResult("m3", "call_9", nil); err == nil {
-		t.Error("unknown result must be rejected")
-	}
+	err := p.SetToolArguments("m2", "call_1", json.RawMessage(`{"city":"Bergen"}`))
+	require.NoError(t, err)
+	got := string(p.Message("m2").Parts[0].ToolCall.Arguments)
+	assert.Equal(t, `{"city":"Bergen"}`, got)
+	assert.Error(t, p.SetToolArguments("m2", "call_1", json.RawMessage(`{bad`)))
+	assert.Error(t, p.SetToolArguments("m2", "call_9", json.RawMessage(`{}`)))
+	err = p.SetToolResult("m3", "call_1", []Part{{Kind: PartText, Text: "[redacted]"}})
+	require.NoError(t, err)
+	got = p.Message("m3").Text()
+	assert.Equal(t, "[redacted]", got)
+	assert.Error(t, p.SetToolResult("m3", "call_9", nil))
+
 	ch := p.Changes()
-	if ch.Messages["m2"] != ChangeEdited || ch.Messages["m3"] != ChangeEdited {
-		t.Errorf("changes = %+v", ch.Messages)
-	}
+	assert.Equal(t, ChangeEdited, ch.Messages["m2"])
+	assert.Equal(t, ChangeEdited, ch.Messages["m3"], "changes = %+v", ch.Messages)
 }
 
 func TestPromptInsertAppendRemove(t *testing.T) {
@@ -125,59 +107,41 @@ func TestPromptInsertAppendRemove(t *testing.T) {
 	first := p.Insert(0, TextMessage(RoleSystem, "prefix"))
 	last := p.Append(TextMessage(RoleUser, "suffix"))
 	far := p.Insert(99, TextMessage(RoleUser, "clamped"))
-	if first != "new-1" || last != "new-2" || far != "new-3" {
-		t.Errorf("ids = %q %q %q", first, last, far)
-	}
-	if p.Messages[0].ID != first || p.Messages[len(p.Messages)-1].ID != far || p.Messages[len(p.Messages)-2].ID != last {
-		t.Error("insert positions wrong")
-	}
+	assert.Equal(t, "new-1", first)
+	assert.Equal(t, "new-2", last)
+	assert.Equal(t, "new-3", far)
+	assert.Equal(t, first, p.Messages[0].ID)
+	assert.Equal(t, far, p.Messages[len(p.Messages)-1].ID)
+	assert.Equal(t, last, p.Messages[len(p.Messages)-2].ID)
+
 	ch := p.Changes()
-	if ch.Messages[first] != ChangeInserted || ch.Messages[last] != ChangeInserted {
-		t.Errorf("changes = %+v", ch.Messages)
-	}
-
-	// Editing an inserted message keeps it inserted.
-	if err := p.SetText(first, 0, "prefix2"); err != nil {
-		t.Fatal(err)
-	}
-	if p.Changes().Messages[first] != ChangeInserted {
-		t.Error("edited inserted message must stay inserted")
-	}
-
-	// Removing an inserted message forgets it entirely.
-	if err := p.Remove(first); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := p.Changes().Messages[first]; ok {
-		t.Error("removed inserted message must not be in changes")
-	}
-	if p.Message(first) != nil {
-		t.Error("removed message still present")
-	}
-
-	// Removing an original records it.
-	if err := p.Remove("m0"); err != nil {
-		t.Fatal(err)
-	}
-	if p.Changes().Messages["m0"] != ChangeRemoved || p.Message("m0") != nil {
-		t.Error("removed original not recorded")
-	}
-	if err := p.Remove("m0"); err == nil {
-		t.Error("second removal must fail")
-	}
-	if err := p.Remove("zz"); err == nil {
-		t.Error("unknown id must fail")
-	}
-	if err := p.Validate(); err != nil {
-		t.Errorf("Validate = %v", err)
-	}
+	assert.Equal(t, ChangeInserted, ch.Messages[first])
+	assert.Equal(t, ChangeInserted, ch.Messages[last], "changes = %+v", ch.Messages)
+	err := // Editing an inserted message keeps it inserted.
+		p.SetText(first, 0, "prefix2")
+	require.NoError(t, err)
+	assert.Equal(t, ChangeInserted, p.Changes().Messages[first])
+	err = // Removing an inserted message forgets it entirely.
+		p.Remove(first)
+	require.NoError(t, err)
+	_, ok := p.Changes().Messages[first]
+	assert.False(t, ok)
+	assert.Nil(t, p.Message(first))
+	err = // Removing an original records it.
+		p.Remove("m0")
+	require.NoError(t, err)
+	assert.Equal(t, ChangeRemoved, p.Changes().Messages["m0"])
+	assert.Nil(t, p.Message("m0"))
+	assert.Error(t, p.Remove("m0"))
+	assert.Error(t, p.Remove("zz"))
+	err = p.Validate()
+	assert.NoError(t, err)
 
 	// IDs never collide with ones the host handed out.
 	q := &Prompt{Messages: []Message{{ID: "new-1", Role: RoleUser}}}
 	q.Reset()
-	if id := q.Append(TextMessage(RoleUser, "x")); id != "new-2" {
-		t.Errorf("colliding id reuse: %q", id)
-	}
+	id := q.Append(TextMessage(RoleUser, "x"))
+	assert.Equal(t, "new-2", id)
 }
 
 func TestPromptRemoveToolPairs(t *testing.T) {
@@ -193,31 +157,22 @@ func TestPromptRemoveToolPairs(t *testing.T) {
 			p := toolPrompt()
 			err := p.Remove(tt.order[0])
 			var dangling *DanglingToolError
-			if !errors.As(err, &dangling) {
-				t.Fatalf("first removal err = %v, want DanglingToolError", err)
-			}
-			if dangling.PartnerID != tt.order[1] || dangling.CallID != "call_1" {
-				t.Errorf("dangling = %+v", dangling)
-			}
-			if p.Message(tt.order[0]) != nil {
-				t.Error("first message must be removed despite the error")
-			}
-			if verr := p.Validate(); !errors.As(verr, &dangling) {
-				t.Errorf("Validate = %v, want dangling", verr)
-			}
-			if err := p.Remove(dangling.PartnerID); err != nil {
-				t.Fatalf("second removal err = %v", err)
-			}
-			if err := p.Validate(); err != nil {
-				t.Errorf("Validate after both removed = %v", err)
-			}
+			require.ErrorAs(t, err, &dangling)
+			assert.Equal(t, tt.order[1], dangling.PartnerID)
+			assert.Equal(t, "call_1", dangling.CallID, "dangling = %+v", dangling)
+			assert.Nil(t, p.Message(tt.order[0]))
+			verr := p.Validate()
+			assert.ErrorAs(t, verr, &dangling)
+			err = p.Remove(dangling.PartnerID)
+			require.NoError(t, err)
+			err = p.Validate()
+			assert.NoError(t, err)
+
 			ch := p.Changes()
-			if ch.Messages["m2"] != ChangeRemoved || ch.Messages["m3"] != ChangeRemoved {
-				t.Errorf("changes = %+v", ch.Messages)
-			}
-			if len(p.ToolCalls()) != 0 {
-				t.Error("tool calls must be gone")
-			}
+			assert.Equal(t, ChangeRemoved, ch.Messages["m2"])
+			assert.Equal(t, ChangeRemoved, ch.Messages["m3"], "changes = %+v", ch.Messages)
+			assert.Empty(t, p.ToolCalls())
+
 		})
 	}
 }
@@ -251,18 +206,19 @@ func TestPromptChangesEdits(t *testing.T) {
 			p := toolPrompt()
 			tt.edit(p)
 			ch := p.Changes()
-			if ch.Edits != tt.want || ch.Dirty != (tt.want > 0) {
-				t.Fatalf("Changes() = {Edits: %d, Dirty: %v}, want %d edits", ch.Edits, ch.Dirty, tt.want)
-			}
+			require.Equal(t, tt.want, ch.Edits)
+			require.Equal(t, tt.want > 0, ch.Dirty)
+
 			// Changes() is a copy: later edits do not move it, Reset clears it.
 			_ = p.SetText("m0", 0, "later")
-			if ch.Edits != tt.want || p.Changes().Edits != tt.want+1 {
-				t.Errorf("edits after a later edit: copy %d, live %d", ch.Edits, p.Changes().Edits)
-			}
+			assert.Equal(t, tt.want, ch.Edits)
+			assert.Equal(t, tt.want+1, p.Changes().Edits)
+
 			p.Reset()
-			if got := p.Changes(); got.Edits != 0 || got.Dirty {
-				t.Errorf("Changes() after Reset = %+v", got)
-			}
+			got := p.Changes()
+			assert.Equal(t, 0, got.Edits)
+			assert.False(t, got.Dirty, "Changes() after Reset = %+v", got)
+
 		})
 	}
 }
@@ -274,39 +230,34 @@ func TestPromptClone(t *testing.T) {
 	p := toolPrompt()
 	_ = p.SetText("m1", 0, "first")
 	c := p.Clone()
-	if c.Text() != p.Text() || c.Changes().Edits != 1 || c.Changes().Messages["m1"] != ChangeEdited {
-		t.Fatalf("clone differs from the original: %q, %+v", c.Text(), c.Changes())
-	}
+	require.Equal(t, p.Text(), c.Text())
+	require.Equal(t, 1, c.Changes().Edits)
+	require.Equal(t, ChangeEdited, c.Changes().Messages["m1"], "clone differs from the original: %q, %+v", c.Text(), c.Changes())
 
 	_ = p.SetText("m1", 0, "second")
 	_ = p.SetToolArguments("m2", "call_1", json.RawMessage(`{"city":"Rome"}`))
 	_ = p.Remove("m4")
-	if c.Messages[1].Text() != "first" || len(c.Messages) != 5 || c.Changes().Edits != 1 {
-		t.Errorf("original edits reached the clone: %q, %d messages, %+v", c.Messages[1].Text(), len(c.Messages), c.Changes())
-	}
-	if got := string(c.Messages[2].Parts[0].ToolCall.Arguments); got != `{"city":"Oslo"}` {
-		t.Errorf("clone tool call arguments = %s", got)
-	}
+	assert.Equal(t, "first", c.Messages[1].Text())
+	require.Len(t, c.Messages, 5)
+	assert.Equal(t, 1, c.Changes().Edits)
+	got := string(c.Messages[2].Parts[0].ToolCall.Arguments)
+	assert.Equal(t, `{"city":"Oslo"}`, got)
+	id := c.Insert(0, TextMessage(RoleSystem, "x"))
+	assert.Equal(t, "new-1", id)
+	assert.Len(t, p.Messages, 4)
+	assert.Nil(t, p.Message(id))
+	assert.Equal(t, "new-1", p.Clone().Insert(0, TextMessage(RoleSystem, "y")))
 
-	if id := c.Insert(0, TextMessage(RoleSystem, "x")); id != "new-1" || len(p.Messages) != 4 || p.Message(id) != nil {
-		t.Errorf("clone insert %q leaked into the original (%d messages)", id, len(p.Messages))
-	}
-	if p.Clone().Insert(0, TextMessage(RoleSystem, "y")) != "new-1" {
-		t.Error("a fresh clone must continue the original's ID sequence")
-	}
 	if got := c.Changes(); got.Messages["m4"] != "" || len(c.removed) != 0 {
 		t.Errorf("removal on the original reached the clone: %+v", got)
 	}
-	if (*Prompt)(nil).Clone() != nil {
-		t.Error("Clone of nil must be nil")
-	}
+	assert.Nil(t, (*Prompt)(nil).Clone())
 
 	// Tool-call arguments are their own bytes on each side.
 	c = p.Clone()
 	c.Messages[2].Parts[0].ToolCall.Arguments[2] = 'X'
-	if got := string(p.Messages[2].Parts[0].ToolCall.Arguments); got != `{"city":"Rome"}` {
-		t.Errorf("clone shares tool call argument bytes with the original: %s", got)
-	}
+	got = string(p.Messages[2].Parts[0].ToolCall.Arguments)
+	assert.Equal(t, `{"city":"Rome"}`, got)
 
 	// The extra parameters are copied, nested values included.
 	p.Params.Extra = map[string]any{"metadata": map[string]any{"team": "a"}}
@@ -332,40 +283,37 @@ func TestPromptSetParam(t *testing.T) {
 	p.SetParam("temperature", 0.5)
 	p.SetParam("top_p", json.Number("0.9"))
 	p.SetParam("user", "alice")
-	if p.Params.MaxTokens == nil || *p.Params.MaxTokens != 42 {
-		t.Error("max_tokens not applied to Params")
-	}
-	if p.Params.Temperature == nil || *p.Params.Temperature != 0.5 {
-		t.Error("temperature not applied to Params")
-	}
-	if p.Params.TopP == nil || *p.Params.TopP != 0.9 {
-		t.Error("top_p not applied to Params")
-	}
+	require.NotNil(t, p.Params.MaxTokens)
+	assert.Equal(t, 42, *p.Params.MaxTokens)
+	require.NotNil(t, p.Params.Temperature)
+	assert.Equal(t, 0.5, *p.Params.Temperature)
+	require.NotNil(t, p.Params.TopP)
+	assert.Equal(t, 0.9, *p.Params.TopP)
+
 	ch := p.Changes()
-	if !ch.Dirty || len(ch.Params) != 4 || ch.Params["user"] != "alice" {
-		t.Errorf("changes = %+v", ch)
-	}
+	assert.True(t, ch.Dirty)
+	require.Len(t, ch.Params, 4)
+	assert.Equal(t, "alice", ch.Params["user"], "changes = %+v", ch)
+
 	p.Reset()
-	if p.Changes().Dirty {
-		t.Error("Reset must clear tracking")
-	}
+	assert.False(t, p.Changes().Dirty)
+
 	// Changes() returns a copy.
 	p.SetParam("x", 1)
 	ch = p.Changes()
 	ch.Params["y"] = 2
-	if _, ok := p.Changes().Params["y"]; ok {
-		t.Error("Changes must return a copy")
-	}
+	_, ok := p.Changes().Params["y"]
+	assert.False(t, ok)
 }
 
 func TestValuesNilSafe(t *testing.T) {
 	var v Values
-	if _, ok := v.Get("k"); ok {
-		t.Error("nil Values.Get must report absent")
-	}
+	_, ok := v.Get("k")
+	assert.False(t, ok)
+
 	v = Values{}
 	v.Set("k", 1)
-	if got, ok := v.Get("k"); !ok || got != 1 {
-		t.Error("Set/Get round trip failed")
-	}
+	got, ok := v.Get("k")
+	assert.True(t, ok)
+	assert.Equal(t, 1, got)
 }

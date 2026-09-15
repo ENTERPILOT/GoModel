@@ -15,6 +15,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/server"
 	"github.com/enterpilot/gomodel/internal/session"
 	"github.com/enterpilot/gomodel/internal/usage"
+	"github.com/stretchr/testify/require"
 )
 
 // benchRateLimitStore is a minimal in-memory ratelimit.Store carrying one
@@ -62,9 +63,8 @@ func newBenchRateLimiter(tb testing.TB) *ratelimit.Service {
 		MaxRequests:   &maxRequests,
 	}}}
 	service, err := ratelimit.NewService(context.Background(), store)
-	if err != nil {
-		tb.Fatalf("new rate limit service: %v", err)
-	}
+	require.NoError(tb, err)
+
 	tb.Cleanup(service.Close)
 	return service
 }
@@ -113,14 +113,12 @@ func newBenchRouter(tb testing.TB, modelCount int) *providers.Router {
 
 	registry := providers.NewModelRegistry()
 	registry.RegisterProviderWithNameAndType(&benchProvider{models: models}, "mock", "mock")
-	if err := registry.Initialize(context.Background()); err != nil {
-		tb.Fatalf("registry initialize: %v", err)
-	}
+	err := registry.Initialize(context.Background())
+	require.NoError(tb, err)
 
 	router, err := providers.NewRouter(registry)
-	if err != nil {
-		tb.Fatalf("new router: %v", err)
-	}
+	require.NoError(tb, err)
+
 	return router
 }
 

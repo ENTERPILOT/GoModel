@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRepeatDemoModeWarnings(t *testing.T) {
@@ -47,12 +49,9 @@ func TestDemoModeFromEnv(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(envDemoMode, tt.value)
 			got, err := demoModeFromEnv()
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("demoModeFromEnv() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if got != tt.want {
-				t.Fatalf("demoModeFromEnv() = %v, want %v", got, tt.want)
-			}
+			require.Equal(t, tt.wantErr, err != nil)
+			require.Equal(t, tt.want, got)
+
 		})
 	}
 }

@@ -12,6 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // A .env value applies only where the real environment has nothing to say,
@@ -23,13 +26,10 @@ func TestDotenvLeavesExportedVariablesAlone(t *testing.T) {
 	t.Cleanup(func() { os.Unsetenv("GOMODEL_TEST_FILE_ONLY") })
 
 	newDotenv().apply()
-
-	if got := os.Getenv("GOMODEL_TEST_EXPORTED"); got != "from-environment" {
-		t.Errorf("exported variable = %q, want it untouched by the env file", got)
-	}
-	if got := os.Getenv("GOMODEL_TEST_FILE_ONLY"); got != "from-file" {
-		t.Errorf("file-only variable = %q, want %q", got, "from-file")
-	}
+	got := os.Getenv("GOMODEL_TEST_EXPORTED")
+	assert.Equal(t, "from-environment", got)
+	got = os.Getenv("GOMODEL_TEST_FILE_ONLY")
+	assert.Equal(t, "from-file", got)
 }
 
 // Reloading is worth little if it cannot see edited credentials and endpoints,
@@ -48,16 +48,12 @@ func TestDotenvReappliesEditedFile(t *testing.T) {
 	env.apply()
 	writeEnvFile(t, "GOMODEL_TEST_EXPORTED=from-file\nGOMODEL_TEST_EDITED=after\n")
 	env.apply()
-
-	if got := os.Getenv("GOMODEL_TEST_EDITED"); got != "after" {
-		t.Errorf("edited variable = %q, want %q", got, "after")
-	}
-	if _, present := os.LookupEnv("GOMODEL_TEST_REMOVED"); present {
-		t.Error("variable dropped from the env file is still set")
-	}
-	if got := os.Getenv("GOMODEL_TEST_EXPORTED"); got != "from-environment" {
-		t.Errorf("exported variable = %q, want it untouched by the env file", got)
-	}
+	got := os.Getenv("GOMODEL_TEST_EDITED")
+	assert.Equal(t, "after", got)
+	_, present := os.LookupEnv("GOMODEL_TEST_REMOVED")
+	assert.False(t, present)
+	got = os.Getenv("GOMODEL_TEST_EXPORTED")
+	assert.Equal(t, "from-environment", got)
 }
 
 // A missing .env file is the normal case for container deployments: it means
@@ -70,53 +66,42 @@ func TestDotenvClearsWhenTheFileDisappears(t *testing.T) {
 
 	env := newDotenv()
 	env.apply()
-	if err := os.Remove(filepath.Join(dir, envFile)); err != nil {
-		t.Fatal(err)
-	}
-	env.apply()
+	err := os.Remove(filepath.Join(dir, envFile))
+	require.NoError(t, err)
 
-	if _, present := os.LookupEnv("GOMODEL_TEST_VANISHING"); present {
-		t.Error("variable survived the removal of the env file")
-	}
+	env.apply()
+	_, present := os.LookupEnv("GOMODEL_TEST_VANISHING")
+	assert.False(t, present)
 }
 
 func TestPIDFileRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "gomodel.pid")
 
 	remove, err := writePIDFile(path)
-	if err != nil {
-		t.Fatalf("writePIDFile() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	pid, err := readPIDFile(path)
-	if err != nil {
-		t.Fatalf("readPIDFile() error = %v", err)
-	}
-	if pid != os.Getpid() {
-		t.Errorf("pid = %d, want %d", pid, os.Getpid())
-	}
+	require.NoError(t, err)
+	assert.Equal(t, os.Getpid(), pid)
 
 	remove()
-	if _, err := readPIDFile(path); err == nil {
-		t.Error("readPIDFile() after removal = nil error, want an error")
-	}
+	_, err = readPIDFile(path)
+	assert.Error(t, err)
 }
 
 func TestPIDFileEmptyPathIsANoop(t *testing.T) {
 	remove, err := writePIDFile("  ")
-	if err != nil {
-		t.Fatalf("writePIDFile(\"\") error = %v", err)
-	}
+	require.NoError(t, err)
+
 	remove()
 }
 
 func TestReadPIDFileRejectsGarbage(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gomodel.pid")
-	if err := os.WriteFile(path, []byte("not-a-pid"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readPIDFile(path); err == nil {
-		t.Error("readPIDFile() on a garbage file = nil error, want an error")
-	}
+	err := os.WriteFile(path, []byte("not-a-pid"), 0o644)
+	require.NoError(t, err)
+	_, err = readPIDFile(path)
+	assert.Error(t, err)
 }
 
 // The whole point of building the replacement before stopping what is running:
@@ -145,29 +130,24 @@ func TestServeUntilShutdownKeepsServingWhenReloadFails(t *testing.T) {
 	<-first.started
 	reload <- reloadSignal
 	<-attempts
-	if first.shutdowns.Load() != 0 {
-		t.Fatal("a failed reload stopped the running generation")
-	}
+	require.Equal(t, int32(0), first.shutdowns.Load())
 
 	reload <- reloadSignal
 	<-attempts
 	<-second.started
-	if got := first.shutdowns.Load(); got != 1 {
-		t.Fatalf("first generation shutdowns = %d, want 1", got)
-	}
+	got := first.shutdowns.Load()
+	require.Equal(t, int32(1), got)
 
 	cancel()
 	select {
 	case err := <-served:
-		if err != nil {
-			t.Fatalf("serveUntilShutdown() error = %v, want nil", err)
-		}
+		require.NoError(t, err)
+
 	case <-time.After(5 * time.Second):
 		t.Fatal("serveUntilShutdown did not return after cancellation")
 	}
-	if got := second.shutdowns.Load(); got != 1 {
-		t.Fatalf("second generation shutdowns = %d, want 1", got)
-	}
+	got = second.shutdowns.Load()
+	require.Equal(t, int32(1), got)
 }
 
 // Reloading must not cost the port. This walks the window a reload opens: the
@@ -181,57 +161,49 @@ func TestBoundSocketSurvivesGenerations(t *testing.T) {
 	}
 
 	first, err := socket.next()
-	if err != nil {
-		t.Fatalf("socket.next() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	address := first.Addr().String()
-	if err := first.Close(); err != nil {
-		t.Fatalf("close first listener: %v", err)
-	}
+	err = first.Close()
+	require.NoError(t, err)
 
 	// Nothing is accepting at this point.
 	conn, err := net.DialTimeout("tcp", address, 5*time.Second)
-	if err != nil {
-		t.Fatalf("connect while no generation is accepting: %v", err)
-	}
+	require.NoError(t, err)
+
 	defer conn.Close()
 
 	second, err := socket.next()
-	if err != nil {
-		t.Fatalf("socket.next() after a generation ended = %v", err)
-	}
+	require.NoError(t, err)
+
 	defer second.Close()
-	if got := second.Addr().String(); got != address {
-		t.Fatalf("second generation address = %q, want %q", got, address)
-	}
+	got := second.Addr().String()
+	require.Equal(t, address, got)
+
 	if deadliner, ok := second.(interface{ SetDeadline(time.Time) error }); ok {
-		if err := deadliner.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			t.Fatalf("set accept deadline: %v", err)
-		}
+		err := deadliner.SetDeadline(time.Now().Add(5 * time.Second))
+		require.NoError(t, err)
 	}
 
 	waiting, err := second.Accept()
-	if err != nil {
-		t.Fatalf("accept the connection that waited through the swap: %v", err)
-	}
+	require.NoError(t, err)
+
 	_ = waiting.Close()
 }
 
 func testSocket(t *testing.T) *boundSocket {
 	t.Helper()
 	socket, err := listenOn("127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listenOn() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = socket.Close() })
 	return socket
 }
 
 func writeEnvFile(t *testing.T, contents string) {
 	t.Helper()
-	if err := os.WriteFile(envFile, []byte(contents), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	err := os.WriteFile(envFile, []byte(contents), 0o600)
+	require.NoError(t, err)
 }
 
 // fakeGeneration stands in for one built application: it serves until it is
@@ -267,22 +239,15 @@ func (g *fakeGeneration) Shutdown(context.Context) error {
 func TestPIDFileRemovalLeavesAnotherInstanceAlone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gomodel.pid")
 	remove, err := writePIDFile(path)
-	if err != nil {
-		t.Fatalf("writePIDFile() error = %v", err)
-	}
-	if err := os.WriteFile(path, []byte("424242\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	err = os.WriteFile(path, []byte("424242\n"), 0o644)
+	require.NoError(t, err)
 
 	remove()
 
 	pid, err := readPIDFile(path)
-	if err != nil {
-		t.Fatalf("readPIDFile() error = %v, want the other instance's pid file intact", err)
-	}
-	if pid != 424242 {
-		t.Errorf("pid = %d, want 424242", pid)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 424242, pid)
 }
 
 // A reload reads the environment file before it can know whether the
@@ -305,35 +270,27 @@ func TestDotenvApplyUndoRestoresTheEnvironment(t *testing.T) {
 	// The edit a failed reload would have read.
 	writeEnvFile(t, "GOMODEL_TEST_KEPT=after\nGOMODEL_TEST_ADDED=new\nGOMODEL_TEST_EXPORTED=from-file\n")
 	undo := env.apply()
-	if got := os.Getenv("GOMODEL_TEST_KEPT"); got != "after" {
-		t.Fatalf("edited variable before undo = %q, want %q", got, "after")
-	}
+	got := os.Getenv("GOMODEL_TEST_KEPT")
+	require.Equal(t, "after", got)
 
 	undo()
-
-	if got := os.Getenv("GOMODEL_TEST_KEPT"); got != "before" {
-		t.Errorf("edited variable after undo = %q, want %q", got, "before")
-	}
-	if got := os.Getenv("GOMODEL_TEST_DROPPED"); got != "present" {
-		t.Errorf("removed variable after undo = %q, want %q", got, "present")
-	}
-	if _, present := os.LookupEnv("GOMODEL_TEST_ADDED"); present {
-		t.Error("variable added by the rejected file is still set")
-	}
-	if got := os.Getenv("GOMODEL_TEST_EXPORTED"); got != "from-environment" {
-		t.Errorf("exported variable = %q, want it untouched throughout", got)
-	}
+	got = os.Getenv("GOMODEL_TEST_KEPT")
+	assert.Equal(t, "before", got)
+	got = os.Getenv("GOMODEL_TEST_DROPPED")
+	assert.Equal(t, "present", got)
+	_, present := os.LookupEnv("GOMODEL_TEST_ADDED")
+	assert.False(t, present)
+	got = os.Getenv("GOMODEL_TEST_EXPORTED")
+	assert.Equal(t, "from-environment", got)
 
 	// The bookkeeping has to be restored too, or the next reload treats the
 	// rolled-back variables as none of its business.
 	writeEnvFile(t, "GOMODEL_TEST_KEPT=third\n")
 	env.apply()
-	if got := os.Getenv("GOMODEL_TEST_KEPT"); got != "third" {
-		t.Errorf("variable after a later reload = %q, want %q", got, "third")
-	}
-	if _, present := os.LookupEnv("GOMODEL_TEST_DROPPED"); present {
-		t.Error("variable dropped from the env file survived the later reload")
-	}
+	got = os.Getenv("GOMODEL_TEST_KEPT")
+	assert.Equal(t, "third", got)
+	_, present = os.LookupEnv("GOMODEL_TEST_DROPPED")
+	assert.False(t, present)
 }
 
 func TestSendReloadSignal(t *testing.T) {
@@ -347,9 +304,8 @@ func TestSendReloadSignal(t *testing.T) {
 			pidFile: func(t *testing.T, dir string) string {
 				path := filepath.Join(dir, "gomodel.pid")
 				remove, err := writePIDFile(path)
-				if err != nil {
-					t.Fatalf("writePIDFile() error = %v", err)
-				}
+				require.NoError(t, err)
+
 				t.Cleanup(remove)
 				return path
 			},
@@ -365,9 +321,9 @@ func TestSendReloadSignal(t *testing.T) {
 			name: "reports a pid file that names no process",
 			pidFile: func(t *testing.T, dir string) string {
 				path := filepath.Join(dir, "garbage.pid")
-				if err := os.WriteFile(path, []byte("not-a-pid"), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				err := os.WriteFile(path, []byte("not-a-pid"), 0o644)
+				require.NoError(t, err)
+
 				return path
 			},
 			wantError: true,
@@ -389,23 +345,19 @@ func TestSendReloadSignal(t *testing.T) {
 			var out strings.Builder
 			err := sendReloadSignal(&out)
 			if tt.wantError {
-				if err == nil {
-					t.Fatal("sendReloadSignal() error = nil, want an error")
-				}
+				require.Error(t, err)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("sendReloadSignal() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			select {
 			case <-delivered:
 			case <-time.After(5 * time.Second):
 				t.Fatal("the reload signal was never delivered")
 			}
-			if !strings.Contains(out.String(), "reload requested") {
-				t.Errorf("output = %q, want it to confirm the reload", out.String())
-			}
+			assert.Contains(t, out.String(), "reload requested")
+
 		})
 	}
 }

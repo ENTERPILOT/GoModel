@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/platformdir"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultSQLitePath(t *testing.T) {
 	platformDataDir, err := platformdir.DataDir()
-	if err != nil {
-		t.Fatalf("platformdir.DataDir() error: %v", err)
-	}
+	require.NoError(t, err)
+
 	platformPath := filepath.Join(platformDataDir, "gomodel.db")
 
 	tests := []struct {
@@ -23,18 +24,18 @@ func TestDefaultSQLitePath(t *testing.T) {
 		{
 			name: "data directory exists keeps legacy path",
 			setup: func(t *testing.T, dir string) {
-				if err := os.Mkdir(filepath.Join(dir, "data"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				err := os.Mkdir(filepath.Join(dir, "data"), 0o755)
+				require.NoError(t, err)
+
 			},
 			want: LegacySQLitePath,
 		},
 		{
 			name: "regular file named data falls through to platform path",
 			setup: func(t *testing.T, dir string) {
-				if err := os.WriteFile(filepath.Join(dir, "data"), []byte("not a directory"), 0o644); err != nil {
-					t.Fatal(err)
-				}
+				err := os.WriteFile(filepath.Join(dir, "data"), []byte("not a directory"), 0o644)
+				require.NoError(t, err)
+
 			},
 			want: platformPath,
 		},
@@ -50,10 +51,9 @@ func TestDefaultSQLitePath(t *testing.T) {
 			dir := t.TempDir()
 			tt.setup(t, dir)
 			t.Chdir(dir)
+			got := DefaultSQLitePath()
+			assert.Equal(t, tt.want, got)
 
-			if got := DefaultSQLitePath(); got != tt.want {
-				t.Errorf("DefaultSQLitePath() = %q, want %q", got, tt.want)
-			}
 		})
 	}
 }

@@ -5,6 +5,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDatabaseName(t *testing.T) {
@@ -26,18 +29,15 @@ func TestDatabaseName(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := DatabaseName(tc.testName, tc.counter)
 
-			if len(got) >= 64 {
-				t.Errorf("len(%q) = %d, want < 64", got, len(got))
-			}
+			assert.Less(t, len(got), 64, "len(%q) = %d, want < 64", got, len(got))
+
 			// MongoDB rejects these outright.
-			if strings.ContainsAny(got, `/\. "$`+"\x00") {
-				t.Errorf("name %q holds a character MongoDB rejects", got)
-			}
+			assert.False(t, strings.ContainsAny(got, `/\. "$`+"\x00"), "name %q holds a character MongoDB rejects", got)
+
 			// The pid keeps parallel package processes apart; the counter keeps
 			// subtests within one process apart.
-			if !strings.HasSuffix(got, "_"+pid+"_"+strconv.FormatUint(tc.counter, 10)) {
-				t.Errorf("name %q does not end in the pid and counter", got)
-			}
+			assert.True(t, strings.HasSuffix(got, "_"+pid+"_"+strconv.FormatUint(tc.counter, 10)), "name %q does not end in the pid and counter", got)
+
 		})
 	}
 }
@@ -48,10 +48,6 @@ func TestDatabaseName(t *testing.T) {
 func TestDatabaseNameSeparatesProcessesAndSubtests(t *testing.T) {
 	first := DatabaseName("TestStoreDelete/mongodb", 1)
 	second := DatabaseName("TestStoreDelete/mongodb", 2)
-	if first == second {
-		t.Fatalf("counter did not separate subtests: both %q", first)
-	}
-	if !strings.Contains(first, strconv.Itoa(os.Getpid())) {
-		t.Fatalf("name %q carries no pid, so another test process could collide", first)
-	}
+	require.NotEqual(t, second, first)
+	require.Contains(t, first, strconv.Itoa(os.Getpid()))
 }

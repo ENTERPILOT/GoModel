@@ -2,8 +2,9 @@ package sqlx
 
 import (
 	"errors"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // A miscounted placeholder silently shifts every argument after it, which no
@@ -92,9 +93,9 @@ func TestRebind(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := rebind(tt.query); got != tt.want {
-				t.Errorf("rebind()\n got: %s\nwant: %s", got, tt.want)
-			}
+			got := rebind(tt.query)
+			assert.Equal(t, tt.want, got)
+
 		})
 	}
 }
@@ -122,14 +123,11 @@ func TestExpandTypes(t *testing.T) {
 		t.Run(string(tt.dialect), func(t *testing.T) {
 			got := tt.dialect.ExpandTypes(ddl)
 			for _, want := range tt.want {
-				if !strings.Contains(got, want) {
-					t.Errorf("expansion missing %q:\n%s", want, got)
-				}
+				assert.Contains(t, got, want)
 			}
 			// An unexpanded token would reach the database as invalid SQL.
-			if strings.Contains(got, "{") {
-				t.Errorf("expansion left a token behind:\n%s", got)
-			}
+			assert.NotContains(t, got, "{", "expansion left a token behind:\n%s", got)
+
 		})
 	}
 }
@@ -140,9 +138,7 @@ func TestExpandTypesLeavesUnrelatedBracesAlone(t *testing.T) {
 	const ddl = `headers ` + TypeJSONText + ` NOT NULL DEFAULT '{}'`
 	for _, dialect := range []Dialect{SQLite, PostgreSQL} {
 		got := dialect.ExpandTypes(ddl)
-		if !strings.Contains(got, `DEFAULT '{}'`) {
-			t.Errorf("%s: default was rewritten: %s", dialect, got)
-		}
+		assert.Contains(t, got, `DEFAULT '{}'`, "%s: default was rewritten: %s", dialect, got)
 	}
 }
 
@@ -164,9 +160,9 @@ func TestIsDuplicateColumnError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := IsDuplicateColumnError(tt.err); got != tt.want {
-				t.Errorf("IsDuplicateColumnError(%v) = %v, want %v", tt.err, got, tt.want)
-			}
+			got := IsDuplicateColumnError(tt.err)
+			assert.Equal(t, tt.want, got, "IsDuplicateColumnError(%v) = %v, want %v", tt.err, got, tt.want)
+
 		})
 	}
 }

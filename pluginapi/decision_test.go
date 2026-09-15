@@ -1,6 +1,11 @@
 package pluginapi
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
 func TestDecisions(t *testing.T) {
 	tests := []struct {
@@ -17,29 +22,29 @@ func TestDecisions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.d.Action != tt.action {
-				t.Errorf("action = %q, want %q", tt.d.Action, tt.action)
-			}
-			if tt.d.Blocks() != tt.blocks {
-				t.Errorf("Blocks() = %v, want %v", tt.d.Blocks(), tt.blocks)
-			}
+			assert.Equal(t, tt.action, tt.d.Action)
+			assert.Equal(t, tt.blocks, tt.d.Blocks())
+
 		})
 	}
 
 	b := Block(446, "policy", "no")
-	if b.Status != 446 || b.Code != "policy" || b.Message != "no" {
-		t.Errorf("Block fields = %+v", b)
-	}
+	assert.Equal(t, 446, b.Status)
+	assert.Equal(t, "policy", b.Code)
+	assert.Equal(t, "no", b.Message, "Block fields = %+v", b)
+
 	r := Respond("nope")
-	if r.Response == nil || len(r.Response.Choices) != 1 {
-		t.Fatal("Respond must build a one-choice completion")
-	}
+	require.NotNil(t, r.Response)
+	require.Len(t, r.Response.Choices, 1)
+
 	ch := r.Response.Choices[0]
-	if ch.Index != 0 || ch.FinishReason != "stop" || ch.Message.Role != RoleAssistant || ch.Message.Text() != "nope" {
-		t.Errorf("Respond choice = %+v", ch)
-	}
+	assert.Equal(t, 0, ch.Index)
+	assert.Equal(t, "stop", ch.FinishReason)
+	assert.Equal(t, RoleAssistant, ch.Message.Role)
+	assert.Equal(t, "nope", ch.Message.Text(), "Respond choice = %+v", ch)
+
 	w := Warn("pii", "found", 3)
-	if w.Code != "pii" || w.Message != "found" || w.Detail != 3 {
-		t.Errorf("Warn fields = %+v", w)
-	}
+	assert.Equal(t, "pii", w.Code)
+	assert.Equal(t, "found", w.Message)
+	assert.Equal(t, 3, w.Detail, "Warn fields = %+v", w)
 }
