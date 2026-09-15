@@ -23,6 +23,7 @@
 #   MONGO_PULL_ATTEMPTS         pull attempts [6]
 #   MONGO_PULL_BACKOFF_SECONDS  backoff step, attempt n waits n*step [5]
 #   MONGO_IMAGE                 image [public.ecr.aws/docker/library/mongo:7]
+#   MONGO_STATE_DIR             where the start log and state file go [/tmp]
 #
 # The suites read MONGO_TEST_DSN; the workflow sets it to
 # mongodb://localhost:27017/?replicaSet=rs&directConnection=true.
@@ -30,8 +31,9 @@ set -eu
 
 name=gomodel-mongo
 image=${MONGO_IMAGE:-public.ecr.aws/docker/library/mongo:7}
-log=/tmp/gomodel-mongo-start.log
-state=/tmp/gomodel-mongo-start.state
+state_dir=${MONGO_STATE_DIR:-/tmp}
+log=$state_dir/gomodel-mongo-start.log
+state=$state_dir/gomodel-mongo-start.state
 deadline_seconds=${MONGO_WAIT_SECONDS:-180}
 port=${MONGO_PORT:-27017}
 attempts=${MONGO_PULL_ATTEMPTS:-6}
