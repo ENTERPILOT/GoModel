@@ -185,7 +185,6 @@ func TestWorkflowRequestPatcherDecisions(t *testing.T) {
 			records := state.Snapshot()
 			require.Len(t, records, 1)
 			require.Equal(t, plugins.NormalizeDecision(tt.decision).Action, records[0].Decision.Action)
-
 		})
 	}
 }
@@ -241,7 +240,6 @@ func TestWorkflowRequestPatcherEditsPromptContent(t *testing.T) {
 			patcher := NewWorkflowRequestPatcher(staticChains{chains})
 			got := patcher.EditsPromptContent(context.Background())
 			require.Equal(t, tt.want, got)
-
 		})
 	}
 }

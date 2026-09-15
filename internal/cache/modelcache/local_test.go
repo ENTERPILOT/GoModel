@@ -51,7 +51,6 @@ func TestLocalCache(t *testing.T) {
 		require.True(t, ok)
 		require.Len(t, p.Models, 1, "expected 1 model in openai provider, got %v", result.Providers)
 		assert.Equal(t, "test-model", p.Models[0].ID)
-
 	})
 
 	t.Run("CreateDirectoryIfNeeded", func(t *testing.T) {
@@ -69,7 +68,6 @@ func TestLocalCache(t *testing.T) {
 		require.NoError(t, err)
 		_, err = os.Stat(cacheFile)
 		require.False(t, os.IsNotExist(err))
-
 	})
 
 	t.Run("EmptyFilePath", func(t *testing.T) {
@@ -83,14 +81,12 @@ func TestLocalCache(t *testing.T) {
 		data := &ModelCache{}
 		err = cache.Set(ctx, data)
 		require.NoError(t, err)
-
 	})
 
 	t.Run("CloseIsNoOp", func(t *testing.T) {
 		cache := NewLocalCache("/tmp/test.json")
 		err := cache.Close()
 		require.NoError(t, err)
-
 	})
 
 	t.Run("InvalidJSON", func(t *testing.T) {
@@ -104,7 +100,6 @@ func TestLocalCache(t *testing.T) {
 
 		_, err = cache.Get(ctx)
 		require.Error(t, err)
-
 	})
 }
 
@@ -146,6 +141,5 @@ func TestModelCacheSerialization(t *testing.T) {
 
 		anthropic := restored.Providers["anthropic-main"]
 		assert.Equal(t, "anthropic", anthropic.ProviderType)
-
 	})
 }

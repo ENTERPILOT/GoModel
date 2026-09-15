@@ -383,7 +383,6 @@ func TestFetchIfChanged_LocalFile(t *testing.T) {
 			err = // Restore for the next location.
 				os.WriteFile(path, content, 0o600)
 			require.NoError(t, err)
-
 		})
 	}
 }

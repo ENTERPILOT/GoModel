@@ -113,7 +113,6 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 		assert.Equal(t, int64(111), stored.CreatedAt)
 		assert.Equal(t, "anthropic", stored.ProviderType)
 		assert.Equal(t, "updated.jsonl", stored.Filename)
-
 	})
 }
 
@@ -121,7 +120,6 @@ func TestStoreGetMissingReturnsNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		_, err := store.Get(context.Background(), "absent")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -129,7 +127,6 @@ func TestStoreDeleteMissingReturnsNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		err := store.Delete(context.Background(), "absent")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -142,7 +139,6 @@ func TestStoreDeleteRemovesMapping(t *testing.T) {
 		require.NoError(t, err)
 		_, err = store.Get(ctx, "file-1")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -151,7 +147,6 @@ func TestStoreRejectsIncompleteMapping(t *testing.T) {
 		ctx := context.Background()
 		assert.Error(t, store.Upsert(ctx, &StoredFile{ProviderType: "openai"}))
 		assert.Error(t, store.Upsert(ctx, &StoredFile{ID: "file-1"}))
-
 	})
 }
 
@@ -209,7 +204,6 @@ func TestStoreListFiltersByUserPathSubtree(t *testing.T) {
 				require.NoError(t, err)
 				ids := fileIDs(got)
 				require.True(t, slices.Equal(ids, tt.want), "ids = %v, want %v", ids, tt.want)
-
 			})
 		}
 
@@ -217,6 +211,5 @@ func TestStoreListFiltersByUserPathSubtree(t *testing.T) {
 		require.NoError(t, err)
 		ids := fileIDs(page)
 		require.True(t, slices.Equal(ids, []string{"file-alpha-new", "file-alpha-anthropic"}), "page ids = %v", ids)
-
 	})
 }

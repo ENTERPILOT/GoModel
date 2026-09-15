@@ -74,6 +74,5 @@ func TestStore_RoundTrip(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, rows, 1)
 		require.Equal(t, "/acme/eng", rows[0].UserPath)
-
 	})
 }

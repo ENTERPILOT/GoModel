@@ -128,7 +128,6 @@ func TestAdaptCompatibility_JSONSchemaResponseFormat(t *testing.T) {
 			}
 			require.Len(t, req.Messages, 2)
 			require.Equal(t, tt.responseFormat, string(req.ExtraFields.Lookup("response_format")))
-
 		})
 	}
 }

@@ -82,7 +82,6 @@ func TestSQLStoreCreateGetRoundtrip(t *testing.T) {
 		require.False(t, got.StoredAt.IsZero())
 		require.False(t, got.ExpiresAt.IsZero())
 		require.True(t, got.ExpiresAt.After(got.StoredAt), "ExpiresAt = %v, want after StoredAt %v", got.ExpiresAt, got.StoredAt)
-
 	})
 }
 
@@ -95,7 +94,6 @@ func TestSQLStoreCreateRejectsDuplicates(t *testing.T) {
 		err = store.Create(ctx, testStoredResponse("resp-1"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "already exists")
-
 	})
 }
 
@@ -121,7 +119,6 @@ func TestSQLStoreCreateReplacesExpired(t *testing.T) {
 		got, err := store.Get(ctx, "resp-1")
 		require.NoError(t, err)
 		require.Equal(t, "gpt-replacement", got.Response.Model)
-
 	})
 }
 
@@ -144,7 +141,6 @@ func TestSQLStoreUpdatePreservesRetentionColumns(t *testing.T) {
 		require.Equal(t, "gpt-updated", got.Response.Model)
 		require.True(t, got.StoredAt.Equal(created.StoredAt))
 		require.True(t, got.ExpiresAt.Equal(created.ExpiresAt), "retention changed: stored %v→%v expires %v→%v", created.StoredAt, got.StoredAt, created.ExpiresAt, got.ExpiresAt)
-
 	})
 }
 
@@ -152,7 +148,6 @@ func TestSQLStoreUpdateMissingReturnsNotFound(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		err := store.Update(context.Background(), testStoredResponse("missing"))
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -167,7 +162,6 @@ func TestStoreDelete(t *testing.T) {
 		require.ErrorIs(t, err, ErrNotFound)
 		err = store.Delete(ctx, "resp-1")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -194,6 +188,5 @@ func TestSQLStoreExpiryAndSweep(t *testing.T) {
 		err = store.db.QueryRow(ctx, "SELECT COUNT(*) FROM response_snapshots").Scan(&count)
 		require.NoError(t, err)
 		require.Equal(t, 0, count)
-
 	})
 }

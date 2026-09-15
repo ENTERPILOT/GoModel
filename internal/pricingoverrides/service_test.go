@@ -259,7 +259,6 @@ func TestServiceRejectsInvalidTieredPricing(t *testing.T) {
 				Pricing:  tc.pricing,
 			})
 			require.True(t, IsValidationError(err), "Upsert(%s) error = %v, want validation", tc.name, err)
-
 		})
 	}
 }
@@ -351,7 +350,6 @@ func TestNormalizedRefreshIntervalClampsBelowRefreshTimeout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := normalizedRefreshInterval(tt.interval)
 			require.Equal(t, tt.want, got, "normalizedRefreshInterval(%s) = %s, want %s", tt.interval, got, tt.want)
-
 		})
 	}
 }

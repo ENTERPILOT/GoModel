@@ -51,7 +51,6 @@ func TestNewSQLStoreAddsMissingUserPathColumn(t *testing.T) {
 		got, err := store.Get(ctx, "after-migration")
 		require.NoError(t, err)
 		assert.Equal(t, "/team/alpha", got.UserPath)
-
 	})
 }
 
@@ -87,7 +86,6 @@ func TestSQLStoreUpsertAndListRoundTripsUserPath(t *testing.T) {
 		require.Equal(t, "scoped", definitions[1].Name)
 		assert.Empty(t, definitions[0].UserPath)
 		assert.Equal(t, "/team/alpha", definitions[1].UserPath)
-
 	})
 }
 
@@ -108,7 +106,6 @@ func TestSQLStoreUpsertPreservesCreatedAt(t *testing.T) {
 
 		// created_at is excluded from the ON CONFLICT update list.
 		assert.True(t, updated.CreatedAt.Equal(created.CreatedAt), "CreatedAt = %v, want %v preserved", updated.CreatedAt, created.CreatedAt)
-
 	})
 }
 
@@ -127,7 +124,6 @@ func TestSQLStoreUpsertManyIsAtomic(t *testing.T) {
 		definitions, err := store.List(ctx)
 		require.NoError(t, err)
 		assert.Empty(t, definitions)
-
 	})
 }
 
@@ -143,7 +139,6 @@ func TestSQLStoreUpsertManyCommits(t *testing.T) {
 		definitions, err := store.List(ctx)
 		require.NoError(t, err)
 		assert.Len(t, definitions, 2)
-
 	})
 }
 
@@ -154,7 +149,6 @@ func TestSQLStoreGetAndDeleteMissingReturnNotFound(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNotFound)
 		err = store.Delete(ctx, "absent")
 		assert.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -168,7 +162,6 @@ func TestSQLStoreDeleteRemovesDefinition(t *testing.T) {
 		require.NoError(t, err)
 		_, err = store.Get(ctx, "g")
 		assert.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -209,6 +202,5 @@ func TestSQLStoreRoundTripsFailModeAndTimeout(t *testing.T) {
 		got, _ = store.Get(ctx, "timed")
 		require.Empty(t, got.FailMode)
 		require.Equal(t, 0, got.TimeoutMS)
-
 	})
 }

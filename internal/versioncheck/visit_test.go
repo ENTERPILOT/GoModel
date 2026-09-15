@@ -35,7 +35,6 @@ func TestSplitVisit(t *testing.T) {
 			date, id := SplitVisit(tt.value)
 			require.Equal(t, tt.wantDate, date)
 			require.Equal(t, tt.wantID, id, "SplitVisit(%q) = (%q, %q), want (%q, %q)", tt.value, date, id, tt.wantDate, tt.wantID)
-
 		})
 	}
 }
@@ -58,7 +57,6 @@ func TestDueToday(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := DueToday(tt.value, now)
 			require.Equal(t, tt.want, got, "DueToday(%q) = %v, want %v", tt.value, got, tt.want)
-
 		})
 	}
 }

@@ -119,7 +119,6 @@ func TestNewHTTPClient(t *testing.T) {
 
 			// Verify Proxy is set
 			assert.NotNil(t, transport.Proxy)
-
 		})
 	}
 }

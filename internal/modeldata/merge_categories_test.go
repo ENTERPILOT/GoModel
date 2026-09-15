@@ -15,7 +15,6 @@ func TestMergeMetadata_DerivesCategoriesFromOverrideModes(t *testing.T) {
 		merged := MergeMetadata(nil, &core.ModelMetadata{Modes: []string{"embedding"}})
 		require.Len(t, merged.Categories, 1)
 		assert.Equal(t, core.CategoryEmbedding, merged.Categories[0])
-
 	})
 
 	t.Run("replaces stale base categories", func(t *testing.T) {
@@ -28,7 +27,6 @@ func TestMergeMetadata_DerivesCategoriesFromOverrideModes(t *testing.T) {
 		assert.Equal(t, "embedding", merged.Modes[0])
 		require.Len(t, merged.Categories, 1)
 		assert.Equal(t, core.CategoryEmbedding, merged.Categories[0])
-
 	})
 
 	t.Run("explicit override categories win", func(t *testing.T) {
@@ -38,7 +36,6 @@ func TestMergeMetadata_DerivesCategoriesFromOverrideModes(t *testing.T) {
 		})
 		require.Len(t, merged.Categories, 1)
 		assert.Equal(t, core.CategoryUtility, merged.Categories[0])
-
 	})
 
 	t.Run("no modes leaves base categories alone", func(t *testing.T) {
@@ -46,6 +43,5 @@ func TestMergeMetadata_DerivesCategoriesFromOverrideModes(t *testing.T) {
 		merged := MergeMetadata(base, &core.ModelMetadata{DisplayName: "X"})
 		require.Len(t, merged.Categories, 1)
 		assert.Equal(t, core.CategoryTextGeneration, merged.Categories[0])
-
 	})
 }

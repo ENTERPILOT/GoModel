@@ -537,7 +537,6 @@ func TestDashboardRuntimeConfig_VirtualModelStrategies(t *testing.T) {
 			values := dashboardRuntimeConfig(&config.Config{}, false, false, tt.adaptiveRouting)
 			got := values.VirtualModelStrategies
 			require.Equal(t, tt.want, got, "dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigVMStrategies, got, tt.want)
-
 		})
 	}
 }
@@ -561,7 +560,6 @@ func TestDashboardRuntimeConfig_ExposesUserPathHeader(t *testing.T) {
 			values := dashboardRuntimeConfig(tt.cfg, false, false, false)
 			got := values.UserPathHeader
 			require.Equal(t, tt.want, got, "dashboardRuntimeConfig()[%q] = %q, want %q", admin.DashboardConfigUserPathHeader, got, tt.want)
-
 		})
 	}
 }
@@ -635,7 +633,6 @@ func TestUsagePricingRecalculationConfigured(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got := usagePricingRecalculationConfigured(test.cfg)
 			require.Equal(t, test.want, got)
-
 		})
 	}
 }

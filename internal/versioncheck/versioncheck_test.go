@@ -53,7 +53,6 @@ func TestManifestURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := manifestURL(tt.base, tt.app)
 			require.Equal(t, tt.want, got, "manifestURL(%q, %q) = %q, want %q", tt.base, tt.app, got, tt.want)
-
 		})
 	}
 }
@@ -303,7 +302,6 @@ func TestLeaksQueryInCleartext(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := LeaksQueryInCleartext(tt.raw)
 			require.Equal(t, tt.want, got, "LeaksQueryInCleartext(%q) = %v, want %v", tt.raw, got, tt.want)
-
 		})
 	}
 }

@@ -78,7 +78,6 @@ func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
 			publish(tc.publishAfter)
 
 			require.Equal(t, tc.want, sub.Latest)
-
 		})
 	}
 }

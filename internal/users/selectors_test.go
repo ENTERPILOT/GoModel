@@ -43,7 +43,6 @@ func TestNormalizeAllowedModels(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got, "NormalizeAllowedModels(%v) = %v, want %v", tc.raw, got, tc.want)
-
 		})
 	}
 }
@@ -76,7 +75,6 @@ func TestMatches(t *testing.T) {
 			t.Parallel()
 			got := Matches(tc.allowed, tc.selector)
 			require.Equal(t, tc.want, got, "Matches(%v, %s) = %v, want %v", tc.allowed, tc.selector.QualifiedModel(), got, tc.want)
-
 		})
 	}
 }

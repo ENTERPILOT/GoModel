@@ -91,7 +91,6 @@ func TestRewriteGuardedChatBatchBody(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Contains(t, string(body), tt.wantBodyHas, "expected body to contain %q, got %s", tt.wantBodyHas, body)
-
 		})
 	}
 }

@@ -22,7 +22,6 @@ func TestChannelFor(t *testing.T) {
 		t.Run(tt.app, func(t *testing.T) {
 			got := ChannelFor(tt.app)
 			require.Equal(t, tt.want, got, "ChannelFor(%q) = %q, want %q", tt.app, got, tt.want)
-
 		})
 	}
 }

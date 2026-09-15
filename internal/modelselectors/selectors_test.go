@@ -195,7 +195,6 @@ func TestParseStoredParts(t *testing.T) {
 			providerName, model := ParseStoredParts(tt.selector)
 			require.Equal(t, tt.wantProvider, providerName)
 			require.Equal(t, tt.wantModel, model)
-
 		})
 	}
 }
@@ -212,7 +211,6 @@ func TestSelectorHelpers(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				got := String(tt.providerName, tt.model)
 				require.Equal(t, tt.want, got)
-
 			})
 		}
 	})
@@ -245,7 +243,6 @@ func TestSelectorHelpers(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				got := ScopeKindFor(tt.selector, tt.providerName, tt.model)
 				require.Equal(t, tt.want, got)
-
 			})
 		}
 	})
@@ -261,7 +258,6 @@ func TestSelectorHelpers(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				got := ExactMatchKey(tt.providerName, tt.model)
 				require.Equal(t, tt.want, got)
-
 			})
 		}
 	})
@@ -285,7 +281,6 @@ func TestSelectorHelpers(t *testing.T) {
 				require.Equal(t, tt.wantPrefix, prefix)
 				require.Equal(t, tt.wantRest, rest)
 				require.Equal(t, tt.wantOK, ok)
-
 			})
 		}
 	})

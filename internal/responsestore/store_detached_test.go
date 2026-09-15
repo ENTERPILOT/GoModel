@@ -74,7 +74,6 @@ func TestDetachedPersistSuite(t *testing.T) {
 		got, err = store.Get(ctx, "resp-persist")
 		require.NoError(t, err)
 		require.Equal(t, "gpt-updated", got.Response.Model)
-
 	})
 }
 
@@ -184,7 +183,6 @@ func TestSQLStorePersistPreservesExplicitRetention(t *testing.T) {
 		require.NoError(t, err)
 		_, err = store.Get(ctx, "resp-expired")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -215,6 +213,5 @@ func TestSQLStorePersistStampsRetentionColumns(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, got.StoredAt.Equal(storedAt))
 		require.True(t, got.ExpiresAt.Equal(expiresAt), "retention = (%v, %v), want preserved (%v, %v)", got.StoredAt, got.ExpiresAt, storedAt, expiresAt)
-
 	})
 }

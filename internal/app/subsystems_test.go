@@ -61,7 +61,6 @@ func newFullyWiredApp(t *testing.T) *App {
 	t.Cleanup(func() {
 		err := application.Shutdown(context.Background())
 		assert.NoError(t, err)
-
 	})
 	return application
 }
@@ -86,7 +85,6 @@ func TestShutdownOrderCoversEveryRegisteredSubsystem(t *testing.T) {
 		}
 		assert.True(t, slices.Contains(ordered, registered.name), "subsystem %q is registered as ownedByShutdown but missing from shutdownOrder: "+
 			"it would be released on startup failure and leaked on shutdown", registered.name)
-
 	}
 }
 

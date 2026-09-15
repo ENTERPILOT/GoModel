@@ -27,7 +27,6 @@ func TestDashboardVirtualModelStrategies_IncludesRoutePlugins(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := dashboardVirtualModelStrategies(tc.adaptiveRouting, tc.plugins)
 			require.Equal(t, tc.want, got)
-
 		})
 	}
 }
@@ -62,7 +61,6 @@ func TestRouteOutcome_MapsClientResults(t *testing.T) {
 			require.Equal(t, tc.wantTimeout, got.Timeout, "outcome = %+v, want success=%v timeout=%v", got, tc.wantSuccess, tc.wantTimeout)
 			require.Equal(t, tc.info.StatusCode, got.StatusCode)
 			require.Equal(t, tc.info.Duration, got.Latency, "outcome = %+v, want status and latency copied", got)
-
 		})
 	}
 }

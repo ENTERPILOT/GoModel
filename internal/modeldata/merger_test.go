@@ -422,7 +422,6 @@ func TestResolve_ReleaseDateSuffixFallback(t *testing.T) {
 			require.NotNil(t, meta.Pricing.CachedInputPerMtok)
 			assert.Equal(t, 1.05, *meta.Pricing.InputPerMtok)
 			assert.Equal(t, 0.525, *meta.Pricing.CachedInputPerMtok)
-
 		})
 	}
 }
@@ -607,7 +606,6 @@ func TestResolve_RoutingSuffixFallback(t *testing.T) {
 			assert.Equal(t, "GPT-5.6 Luna Pro", meta.DisplayName)
 			require.NotNil(t, meta.ContextWindow)
 			assert.Equal(t, 1050000, *meta.ContextWindow)
-
 		})
 	}
 }
@@ -695,7 +693,6 @@ func TestStripRoutingSuffix(t *testing.T) {
 			base, ok := stripRoutingSuffix(tc.modelID)
 			assert.Equal(t, tc.ok, ok)
 			assert.Equal(t, tc.base, base)
-
 		})
 	}
 }

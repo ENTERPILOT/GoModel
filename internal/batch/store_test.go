@@ -15,14 +15,12 @@ func TestSerializeBatchValidatesID(t *testing.T) {
 	t.Run("nil batch", func(t *testing.T) {
 		_, err := serializeBatch(nil)
 		require.Error(t, err)
-
 	})
 
 	t.Run("empty batch id", func(t *testing.T) {
 		_, err := serializeBatch(&StoredBatch{Batch: &core.BatchResponse{}})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "batch ID is empty")
-
 	})
 }
 

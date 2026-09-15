@@ -67,7 +67,6 @@ func TestSQLStoreStoresPricingWithoutCurrency(t *testing.T) {
 		require.Len(t, overrides, 1)
 		assert.Equal(t, "openai", overrides[0].ProviderName)
 		assert.Equal(t, "gpt-4o", overrides[0].Model)
-
 	})
 }
 
@@ -90,7 +89,6 @@ func TestStoreUpsertReplacesPricing(t *testing.T) {
 		require.Len(t, overrides, 1)
 		require.NotNil(t, overrides[0].Pricing.InputPerMtok)
 		assert.Equal(t, 2.0, *overrides[0].Pricing.InputPerMtok)
-
 	})
 }
 
@@ -124,7 +122,6 @@ func TestStoreDeleteMissingReturnsNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		err := store.Delete(context.Background(), "absent/model")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -144,6 +141,5 @@ func TestStoreDeleteRemovesOverride(t *testing.T) {
 		overrides, err := store.List(ctx)
 		require.NoError(t, err)
 		assert.Empty(t, overrides)
-
 	})
 }

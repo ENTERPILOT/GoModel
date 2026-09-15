@@ -205,7 +205,6 @@ func TestServiceBuildChainsErrors(t *testing.T) {
 			_, err := service.BuildChains(tt.steps)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.want)
-
 		})
 	}
 }
@@ -275,7 +274,6 @@ func TestServiceUpsertValidation(t *testing.T) {
 			require.Contains(t, err.Error(), tt.want)
 			require.True(t, IsValidationError(err))
 			require.Equal(t, 0, service.Len())
-
 		})
 	}
 }

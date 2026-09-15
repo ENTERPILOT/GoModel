@@ -75,7 +75,6 @@ func TestExtractLabels(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ExtractLabels(tt.rules, tt.headers)
 			require.Equal(t, tt.want, got)
-
 		})
 	}
 }

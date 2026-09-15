@@ -103,7 +103,6 @@ func TestVerifySHA256(t *testing.T) {
 			}
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.wantErr)
-
 		})
 	}
 	_, err := FileSHA256(filepath.Join(t.TempDir(), "missing"))
@@ -156,7 +155,6 @@ func TestLoad_FailsBeforeOpening(t *testing.T) {
 			_, err := Load(tt.cfg)
 			require.Error(t, err)
 			require.Contains(t, err.Error(), tt.wantErr)
-
 		})
 	}
 }

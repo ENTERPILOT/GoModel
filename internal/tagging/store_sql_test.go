@@ -49,7 +49,6 @@ func TestSQLStoreGetRulesEmptyWhenUnset(t *testing.T) {
 		got, err := store.GetRules(context.Background())
 		require.NoError(t, err)
 		assert.Empty(t, got)
-
 	})
 }
 
@@ -68,7 +67,6 @@ func TestSQLStoreSaveReplacesPreviousRules(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		assert.Equal(t, "X-Three", got[0].Header)
-
 	})
 }
 
@@ -84,7 +82,6 @@ func TestSQLStoreSaveEmptyClearsRules(t *testing.T) {
 		got, err := store.GetRules(ctx)
 		require.NoError(t, err)
 		assert.Empty(t, got)
-
 	})
 }
 
@@ -102,7 +99,6 @@ func TestNewSQLStoreIsIdempotent(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		assert.Equal(t, "X-Keep", got[0].Header)
-
 	})
 }
 

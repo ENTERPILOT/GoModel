@@ -59,7 +59,6 @@ func TestSQLConversationCreateGetRoundtrip(t *testing.T) {
 		require.Equal(t, "req-1", got.RequestID, "metadata = %+v, want user path and request id preserved", got)
 		require.False(t, got.StoredAt.IsZero())
 		require.False(t, got.ExpiresAt.IsZero(), "retention not stamped: stored %v expires %v", got.StoredAt, got.ExpiresAt)
-
 	})
 }
 
@@ -93,7 +92,6 @@ func TestSQLConversationAppendItemsPreservesOrder(t *testing.T) {
 		err = json.Unmarshal(got.Items[2], &nested)
 		require.NoError(t, err)
 		require.Equal(t, 1, nested.Nested["n"])
-
 	})
 }
 
@@ -103,7 +101,6 @@ func TestSQLConversationAppendItemsMissingReturnsNotFound(t *testing.T) {
 			json.RawMessage(`{"type":"message"}`),
 		})
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -123,7 +120,6 @@ func TestSQLConversationAppendItemsRejectsDuplicateID(t *testing.T) {
 		got, err := store.Get(ctx, conv.Conversation.ID)
 		require.NoError(t, err)
 		require.Len(t, got.Items, 1)
-
 	})
 }
 
@@ -151,7 +147,6 @@ func TestSQLConversationMergeMetadataAndDeleteItem(t *testing.T) {
 		require.Equal(t, "msg_2", itemID(updated.Items[0]))
 		_, err = store.DeleteItem(ctx, "conv-items", "missing")
 		require.ErrorIs(t, err, ErrItemNotFound)
-
 	})
 }
 
@@ -170,7 +165,6 @@ func TestSQLConversationMergeMetadataRejectsOversizedResult(t *testing.T) {
 		got, err := store.Get(context.Background(), conv.Conversation.ID)
 		require.NoError(t, err)
 		require.Equal(t, core.MaxConversationMetadataPairs, len(got.Conversation.Metadata))
-
 	})
 }
 
@@ -183,7 +177,6 @@ func TestSQLConversationCreateRejectsDuplicates(t *testing.T) {
 		err = store.Create(ctx, testStoredConversation("conv-1"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "already exists")
-
 	})
 }
 
@@ -214,6 +207,5 @@ func TestSQLConversationDeleteAndExpiry(t *testing.T) {
 		err = store.db.QueryRow(ctx, "SELECT COUNT(*) FROM conversation_snapshots").Scan(&count)
 		require.NoError(t, err)
 		require.Equal(t, 0, count)
-
 	})
 }

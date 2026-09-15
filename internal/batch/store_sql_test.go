@@ -81,7 +81,6 @@ func TestSQLStoreLifecycle(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, got2.Batch)
 		assert.Equal(t, "cancelled", got2.Batch.Status)
-
 	})
 }
 
@@ -98,7 +97,6 @@ func TestStoreDelete(t *testing.T) {
 		require.NoError(t, err)
 		_, err = store.Get(ctx, "batch-sql-del")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -107,7 +105,6 @@ func TestSQLStoreUpdateMissingReturnsNotFound(t *testing.T) {
 		b := &StoredBatch{Batch: &core.BatchResponse{ID: "absent", Object: "batch", Status: "completed"}}
 		err := store.Update(context.Background(), b)
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -133,7 +130,6 @@ func TestSQLStoreListPaginatesNewestFirst(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, next, 1)
 		require.Equal(t, "batch-a", next[0].Batch.ID)
-
 	})
 }
 
@@ -141,7 +137,6 @@ func TestSQLStoreListAfterUnknownCursorReturnsNotFound(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		_, err := store.List(context.Background(), 10, "absent", "")
 		require.ErrorIs(t, err, ErrNotFound)
-
 	})
 }
 
@@ -229,6 +224,5 @@ func TestSQLStoreBackfillsUserPathColumn(t *testing.T) {
 		require.NoError(t, err)
 		got := batchIDs(scoped)
 		require.True(t, slices.Equal(got, []string{"batch-old"}), "scoped list after backfill = %v, want [batch-old]", got)
-
 	})
 }

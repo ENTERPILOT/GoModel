@@ -87,7 +87,6 @@ func TestDetectPrecedence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := detector.Detect(chatSnapshot(tt.headers, tt.body), "")
 			require.Equal(t, tt.want, got)
-
 		})
 	}
 }
@@ -134,7 +133,6 @@ func TestDetectBodySignals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := detector.Detect(chatSnapshot(nil, tt.body), "")
 			require.Equal(t, tt.want, got)
-
 		})
 	}
 }

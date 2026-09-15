@@ -85,7 +85,6 @@ func TestService_PathAllowlistsIntersectDownTheChain(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := svc.AllowsModel(tc.ctx, tc.selector)
 			require.Equal(t, tc.want, got, "AllowsModel(%s) = %v, want %v", tc.selector.QualifiedModel(), got, tc.want)
-
 		})
 	}
 

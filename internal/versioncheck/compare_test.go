@@ -60,7 +60,6 @@ func TestIsNewer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := IsNewer(tt.current, tt.latest)
 			require.Equal(t, tt.want, got, "IsNewer(%q, %q) = %v, want %v", tt.current, tt.latest, got, tt.want)
-
 		})
 	}
 }
