@@ -114,7 +114,7 @@ func TestProviderFactory_Create_Success(t *testing.T) {
 	}
 
 	provider, err := factory.Create(cfg)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, provider)
 }
 

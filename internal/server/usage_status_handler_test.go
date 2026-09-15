@@ -262,7 +262,7 @@ func TestUsageStatusDerivedFields(t *testing.T) {
 	require.Equal(t, 1.2, *windowed.TokensUsageRatio)
 	require.True(t, windowed.Exhausted)
 	require.NotNil(t, windowed.ResetsInSeconds)
-	require.Greater(t, *windowed.ResetsInSeconds, int64(0))
+	require.Positive(t, *windowed.ResetsInSeconds)
 	require.LessOrEqual(t, *windowed.ResetsInSeconds, int64(45))
 	require.NotNil(t, concurrent.RequestsUsageRatio)
 	require.Equal(t, 1.0, *concurrent.RequestsUsageRatio)

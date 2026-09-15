@@ -39,9 +39,7 @@ func TestBrokerPublishesAndReplaysBySequence(t *testing.T) {
 	got := sub.Replay[0].Type
 	require.Equal(t, EventUsageCompleted, got)
 
-	if got := sub.Replay[0].Seq; got != 2 {
-		t.Fatalf("replay seq = %d, want 2", got)
-	}
+	require.EqualValues(t, 2, sub.Replay[0].Seq, "replay seq")
 }
 
 func TestSubscriptionLatestSnapshotsSequenceAtSubscribe(t *testing.T) {
@@ -149,12 +147,8 @@ func TestBrokerReplaysActiveSnapshotsForFreshSubscribers(t *testing.T) {
 	require.Equal(t, EventAuditUpdated, got)
 
 	payload := eventPayload(t, sub.Replay[0])
-	if got := payload["method"]; got != "POST" {
-		t.Fatalf("snapshot method = %v, want POST", got)
-	}
-	if got := payload["provider"]; got != "openai" {
-		t.Fatalf("snapshot provider = %v, want openai", got)
-	}
+	require.Equal(t, "POST", payload["method"], "snapshot method")
+	require.Equal(t, "openai", payload["provider"], "snapshot provider")
 	got = sub.Replay[1].Type
 	require.Equal(t, EventUsageCompleted, got)
 }
@@ -406,9 +400,7 @@ func TestBrokerCloseStopsSubscribersAndRejectsNewSubscriptions(t *testing.T) {
 		RequestID: "req-closed",
 		Timestamp: time.Now(),
 	})
-	if got := b.LatestSeq(); got != 0 {
-		t.Fatalf("LatestSeq() = %d after close publish, want 0", got)
-	}
+	require.Zero(t, b.LatestSeq(), "LatestSeq() after close publish")
 
 	sub.Close()
 	b.Close()

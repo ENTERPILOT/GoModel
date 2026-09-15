@@ -478,7 +478,7 @@ func TestEstimateInputTokens(t *testing.T) {
 		"messages":[{"role":"user","content":"count these characters please"}]
 	}`)
 	got := EstimateInputTokens(req)
-	require.Greater(t, got, 0)
+	require.Positive(t, got)
 	assert.Equal(t, 0, EstimateInputTokens(nil))
 }
 

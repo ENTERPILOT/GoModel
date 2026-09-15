@@ -96,10 +96,10 @@ func TestFetch_OversizedBody(t *testing.T) {
 	defer server.Close()
 
 	_, _, err := Fetch(context.Background(), server.URL)
-	assert.Error(t, err)
+	require.Error(t, err)
 
-	if err != nil && !strings.Contains(err.Error(), "too large") {
-		t.Errorf("expected 'too large' error, got: %v", err)
+	if err != nil {
+		assert.Contains(t, err.Error(), "too large")
 	}
 }
 
@@ -334,13 +334,15 @@ func TestParse_PricingTimeWindows(t *testing.T) {
 
 	// Saturday 08:00 UTC would be a peak hour on a weekday.
 	saturday := time.Date(2026, 8, 29, 8, 0, 0, 0, time.UTC)
-	if got := pricing.AtTime(saturday); *got.InputPerMtok != 0.22 || *got.OutputPerMtok != 0.66 {
-		t.Fatalf("AtTime(saturday) = %v / %v, want off-peak 0.22 / 0.66", *got.InputPerMtok, *got.OutputPerMtok)
-	}
+	offPeak := pricing.AtTime(saturday)
+	require.NotNil(t, offPeak.InputPerMtok)
+	require.NotNil(t, offPeak.OutputPerMtok)
+	require.Equal(t, 0.22, *offPeak.InputPerMtok, "AtTime(saturday) input")
+	require.Equal(t, 0.66, *offPeak.OutputPerMtok, "AtTime(saturday) output")
 	monday := time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC)
-	if got := pricing.AtTime(monday); *got.InputPerMtok != 0.44 {
-		t.Fatalf("AtTime(monday peak) = %v, want base 0.44", *got.InputPerMtok)
-	}
+	peak := pricing.AtTime(monday)
+	require.NotNil(t, peak.InputPerMtok)
+	require.Equal(t, 0.44, *peak.InputPerMtok, "AtTime(monday peak) input")
 }
 
 func TestFetchIfChanged_LocalFile(t *testing.T) {
@@ -381,7 +383,7 @@ func TestFetchIfChanged_LocalFile(t *testing.T) {
 func TestFetchIfChanged_LocalFileErrors(t *testing.T) {
 	dir := t.TempDir()
 	_, err := FetchIfChanged(context.Background(), filepath.Join(dir, "missing.json"), "")
-	assert.Error(t, err)
+	require.Error(t, err)
 
 	bad := filepath.Join(dir, "bad.json")
 	err = os.WriteFile(bad, []byte("not json"), 0o600)

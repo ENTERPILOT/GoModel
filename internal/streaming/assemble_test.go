@@ -228,7 +228,7 @@ func TestAppendOutputText_BoundsContentIndex(t *testing.T) {
 	require.Equal(t, "neg", item.Content[0].Text)
 
 	appendOutputText(item, 1<<30, "far")
-	require.Equal(t, maxAssembledContentParts, len(item.Content))
+	require.Len(t, item.Content, maxAssembledContentParts)
 	require.Equal(t, "far", item.Content[len(item.Content)-1].Text)
 
 	appendOutputText(item, 1, "one")
@@ -276,8 +276,8 @@ func TestSynthesizeChatStream_CarriesReplayState(t *testing.T) {
 
 	// The Anthropic Messages converter closes the thinking block when the
 	// first text arrives, so a signature that came after it would be dropped.
-	if textAt >= 0 && extraAt > textAt {
-		t.Errorf("extra_content at chunk %d, first content at %d; want the replay state first", extraAt, textAt)
+	if textAt >= 0 {
+		assert.LessOrEqual(t, extraAt, textAt, "extra_content at chunk %d, first content at %d; want the replay state first", extraAt, textAt)
 	}
 	var want, have any
 	err := json.Unmarshal([]byte(replay), &want)

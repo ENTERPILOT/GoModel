@@ -171,7 +171,7 @@ func TestVersionEndpointNeverForwardsCredentials(t *testing.T) {
 		assert.Empty(t, value, "%s leaked to the release host as %q", forbidden, value)
 	}
 	for _, value := range headers() {
-		assert.False(t, strings.Contains(strings.Join(value, " "), "sk-"), "a credential-shaped value reached the release host: %v", value)
+		assert.NotContains(t, strings.Join(value, " "), "sk-", "a credential-shaped value reached the release host: %v", value)
 	}
 }
 
@@ -289,11 +289,11 @@ func TestVersionEndpointRejectsAForgedVisitID(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	awaitChecks(t, calls, 1)
 	sent := headers().Get("X-GoModel-Date")
-	assert.False(t, strings.Contains(sent, "injected"))
+	assert.NotContains(t, sent, "injected")
 	assert.NotContains(t, sent, "AAAA", "X-GoModel-Date should discard the forged id")
 
 	issued := visitCookie(t, rec)
-	assert.False(t, strings.Contains(issued, "injected"))
+	assert.NotContains(t, issued, "injected")
 	assert.NotContains(t, issued, "AAAA", "Set-Cookie should discard the forged id")
 
 	date, id := versioncheck.SplitVisit(issued)

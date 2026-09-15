@@ -117,7 +117,7 @@ func TestSQLStoreDeactivate(t *testing.T) {
 		require.NoError(t, err)
 		// Deactivating twice reports not-found rather than silently succeeding.
 		err = store.Deactivate(ctx, created.ID)
-		assert.ErrorIs(t, err, ErrNotFound)
+		require.ErrorIs(t, err, ErrNotFound)
 
 		active, err := store.ListActive(ctx)
 		require.NoError(t, err)

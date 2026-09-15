@@ -70,7 +70,7 @@ func TestArgStrings(t *testing.T) {
 	require.Equal(t, []string{"z", "x", "y"}, strs)
 
 	out, err := withArgStrings(tree, []string{"Z", "X", "<a&b>"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, `{"a":"Z","b":["X",1,{"c":"<a&b>"}],"d":null}`, string(out), "out = %s, %v", out, err)
 
 	for _, raw := range []string{`"text"`, `5`, `not json`, ``} {

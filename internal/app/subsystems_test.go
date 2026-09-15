@@ -119,9 +119,7 @@ func TestShutdownOrderHasNoUnregisteredEntries(t *testing.T) {
 
 	seen := make(map[string]bool, len(application.shutdownOrder()))
 	for _, subsystem := range application.shutdownOrder() {
-		if seen[subsystem.name] {
-			t.Errorf("subsystem %q appears twice in shutdownOrder", subsystem.name)
-		}
+		assert.False(t, seen[subsystem.name], "subsystem %q appears twice in shutdownOrder", subsystem.name)
 		seen[subsystem.name] = true
 
 		owner, ok := registered[subsystem.name]
@@ -209,6 +207,6 @@ func TestUnwindClosesEveryEntryAndJoinsErrors(t *testing.T) {
 
 	err := application.unwind()
 	assert.Equal(t, 3, closed)
-	assert.ErrorIs(t, err, firstErr)
+	require.ErrorIs(t, err, firstErr)
 	assert.ErrorIs(t, err, secondErr)
 }

@@ -48,6 +48,23 @@ func newTestProvider(baseURL string) *Provider {
 	return New(providers.ProviderConfig{BaseURL: baseURL}, providertest.Options(llmclient.Hooks{})).(*Provider)
 }
 
+// Ollama's OpenAI-compatible surface translates Responses to chat completions
+// and may run without an API key. Its embeddings use the native /api/embed
+// endpoint, which the tests below cover.
+func TestChatCompatibleContract(t *testing.T) {
+	providertest.AssertChatCompatible(t, providertest.ChatCompatible{
+		Registration:   Registration,
+		Type:           "ollama",
+		DefaultBaseURL: "http://localhost:11434/v1",
+		SkipEmbeddings: true,
+		New: func(apiKey, baseURL string, client *http.Client, hooks llmclient.Hooks) core.Provider {
+			provider := NewWithHTTPClient(apiKey, client, hooks)
+			provider.SetBaseURL(baseURL)
+			return provider
+		},
+	})
+}
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -117,31 +134,6 @@ func TestChatCompletion(t *testing.T) {
 			}
 			require.NoError(t, err)
 			tt.checkResponse(t, resp)
-		})
-	}
-}
-
-func TestChatCompletion_AuthorizationHeader(t *testing.T) {
-	tests := []struct {
-		name     string
-		apiKey   string
-		wantAuth string
-	}{
-		{name: "with api key", apiKey: "test-api-key", wantAuth: "Bearer test-api-key"},
-		{name: "without api key"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
-			provider := NewWithHTTPClient(tt.apiKey, nil, llmclient.Hooks{})
-			provider.SetBaseURL(server.URL)
-
-			_, err := provider.ChatCompletion(context.Background(), &core.ChatRequest{
-				Model:    "llama3.2",
-				Messages: []core.Message{{Role: "user", Content: "Hello"}},
-			})
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantAuth, capture.Last(t).Header.Get("Authorization"))
 		})
 	}
 }
@@ -350,29 +342,6 @@ func TestChatCompletionWithContext(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestResponses(t *testing.T) {
-	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
-	provider := newTestProvider(server.URL)
-
-	resp, err := provider.Responses(context.Background(), &core.ResponsesRequest{
-		Model: "llama3.2",
-		Input: "Hello",
-	})
-	require.NoError(t, err)
-	// Ollama converts Responses to chat completions.
-	assert.Equal(t, "/chat/completions", capture.Last(t).Path)
-	assert.Equal(t, "chatcmpl-123", resp.ID)
-	assert.Equal(t, "response", resp.Object)
-	assert.Equal(t, "llama3.2", resp.Model)
-	assert.Equal(t, "completed", resp.Status)
-	require.Len(t, resp.Output, 1)
-	require.Len(t, resp.Output[0].Content, 1)
-	assert.Equal(t, "Hello! How can I help you today?", resp.Output[0].Content[0].Text)
-	require.NotNil(t, resp.Usage)
-	assert.Equal(t, 10, resp.Usage.InputTokens)
-	assert.Equal(t, 20, resp.Usage.OutputTokens)
-}
-
 func TestResponsesWithArrayInput(t *testing.T) {
 	server, capture := providertest.JSONServer(t, http.StatusOK, chatCompletionJSON)
 	provider := newTestProvider(server.URL)
@@ -392,28 +361,6 @@ func TestResponsesWithArrayInput(t *testing.T) {
 	messages, ok := capture.Last(t).JSON(t)["messages"].([]any)
 	require.True(t, ok)
 	assert.Len(t, messages, 3)
-}
-
-func TestStreamResponses(t *testing.T) {
-	server, capture := providertest.SSEServer(t, chatChunkSSE)
-	provider := newTestProvider(server.URL)
-
-	body, err := provider.StreamResponses(context.Background(), &core.ResponsesRequest{
-		Model: "llama3.2",
-		Input: "Hello",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, body)
-	defer func() { _ = body.Close() }()
-
-	respBody, err := io.ReadAll(body)
-	require.NoError(t, err)
-	assert.Equal(t, true, capture.Last(t).JSON(t)["stream"])
-
-	responseStr := string(respBody)
-	assert.Contains(t, responseStr, "response.created")
-	assert.Contains(t, responseStr, "response.output_text.delta")
-	assert.Contains(t, responseStr, "[DONE]")
 }
 
 func TestResponsesWithContext(t *testing.T) {

@@ -83,7 +83,7 @@ func TestFindCredentialsAndHTTPClientAuthSelection(t *testing.T) {
 			var gotForm url.Values
 			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				err := r.ParseForm()
-				require.NoError(t, err)
+				assert.NoError(t, err)
 
 				gotForm = r.PostForm
 				token := tt.wantToken
