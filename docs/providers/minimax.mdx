@@ -29,6 +29,21 @@ providers:
 `https://api.minimax.io/v1`); accounts on the China platform should set it to
 `https://api.minimaxi.com/v1`.
 
+## Video input
+
+Use `video_url` message content parts with `MiniMax-M3` for video input
+on `/v1/chat/completions`, including streaming requests:
+
+```json
+{"type":"video_url","video_url":{"url":"mm_file://your-file-id","detail":"high","fps":2}}
+```
+
+The gateway preserves video URLs and processing settings. A URL, base64 data
+URL, or an existing MiniMax file reference can be supplied. Upload large videos
+through MiniMax's Files API first; the gateway does not upload videos for you.
+See the [MiniMax video input reference](https://platform.minimax.io/docs/api-reference/text-openai-api#multimodal-input)
+for supported formats and size limits.
+
 ## Temperature
 
 MiniMax requires `temperature` in `(0.0, 1.0]` and rejects zero. GoModel clamps

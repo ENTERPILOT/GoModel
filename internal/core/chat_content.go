@@ -12,6 +12,7 @@ import (
 type ContentPart struct {
 	Type        string             `json:"type"`
 	Text        string             `json:"text,omitempty"`
+	VideoURL    *VideoURLContent   `json:"video_url,omitempty"`
 	ImageURL    *ImageURLContent   `json:"image_url,omitempty"`
 	InputAudio  *InputAudioContent `json:"input_audio,omitempty"`
 	File        *FileContent       `json:"file,omitempty"`
@@ -125,6 +126,14 @@ func (p ContentPart) MarshalJSON() ([]byte, error) {
 			Type:     "image_url",
 			ImageURL: p.ImageURL,
 		}, p.ExtraFields)
+	case "video_url":
+		if p.VideoURL == nil || strings.TrimSpace(p.VideoURL.URL) == "" {
+			return nil, fmt.Errorf("video_url part is missing video_url.url")
+		}
+		return marshalWithUnknownJSONFields(struct {
+			Type     string           `json:"type"`
+			VideoURL *VideoURLContent `json:"video_url"`
+		}{Type: "video_url", VideoURL: p.VideoURL}, p.ExtraFields)
 	case "input_audio":
 		if p.InputAudio == nil {
 			return nil, fmt.Errorf("input_audio part is missing data or format")
@@ -440,11 +449,12 @@ func interfacePartsText(parts []any) []string {
 
 func unmarshalContentPart(data []byte) (ContentPart, error) {
 	var raw struct {
-		Type       string          `json:"type"`
-		Text       *string         `json:"text,omitempty"`
-		ImageURL   json.RawMessage `json:"image_url,omitempty"`
-		InputAudio json.RawMessage `json:"input_audio,omitempty"`
-		File       *FileContent    `json:"file,omitempty"`
+		Type       string           `json:"type"`
+		Text       *string          `json:"text,omitempty"`
+		VideoURL   *VideoURLContent `json:"video_url,omitempty"`
+		ImageURL   json.RawMessage  `json:"image_url,omitempty"`
+		InputAudio json.RawMessage  `json:"input_audio,omitempty"`
+		File       *FileContent     `json:"file,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return ContentPart{}, err
@@ -453,6 +463,7 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 		"type",
 		"text",
 		"image_url",
+		"video_url",
 		"input_audio",
 		"file",
 	)
@@ -480,6 +491,11 @@ func unmarshalContentPart(data []byte) (ContentPart, error) {
 			ImageURL:    imageURL,
 			ExtraFields: extraFields,
 		}, nil
+	case "video_url":
+		if raw.VideoURL == nil || strings.TrimSpace(raw.VideoURL.URL) == "" {
+			return ContentPart{}, fmt.Errorf("video_url part is missing video_url.url")
+		}
+		return ContentPart{Type: "video_url", VideoURL: raw.VideoURL, ExtraFields: extraFields}, nil
 	case "input_audio":
 		audio, err := unmarshalInputAudioContent(raw.InputAudio)
 		if err != nil {
@@ -529,6 +545,13 @@ func normalizeTypedContentPart(part ContentPart) (ContentPart, error) {
 			},
 			ExtraFields: CloneUnknownJSONFields(part.ExtraFields),
 		}, nil
+	case "video_url":
+		if part.VideoURL == nil || strings.TrimSpace(part.VideoURL.URL) == "" {
+			return ContentPart{}, fmt.Errorf("video_url part is missing video_url.url")
+		}
+		video := *part.VideoURL
+		video.ExtraFields = CloneUnknownJSONFields(part.VideoURL.ExtraFields)
+		return ContentPart{Type: "video_url", VideoURL: &video, ExtraFields: CloneUnknownJSONFields(part.ExtraFields)}, nil
 	case "input_audio":
 		if part.InputAudio == nil {
 			return ContentPart{}, fmt.Errorf("input_audio part is missing data or format")
