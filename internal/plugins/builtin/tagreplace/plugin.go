@@ -41,7 +41,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 		ConfigSchema: []pluginapi.Field{
 			{
 				Key: "roles", Label: "Prompt roles", Input: pluginapi.InputCheckboxes, Default: []string{"system"},
-				Help:    "Which prompt messages tags are expanded in. Adding user lets callers read request values such as labels.",
+				Help:    "Which prompt messages tags are expanded in. Adding user lets callers read request values such as the user path.",
 				Options: pluginapi.RoleOptions(),
 			},
 			{
@@ -128,5 +128,7 @@ func (p *Plugin) OnPrompt(_ context.Context, x *pluginapi.Exchange) (pluginapi.D
 	if total == 0 {
 		return pluginapi.Allow(), nil
 	}
-	return pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: map[string]any{"replacements": total}}, nil
+	// The expanded prompt carries request-specific values, so its reply must
+	// not be replayed to another request from the response cache.
+	return pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: map[string]any{"replacements": total}, NoStore: true}, nil
 }

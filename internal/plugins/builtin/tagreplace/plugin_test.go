@@ -25,7 +25,6 @@ func testMeta() pluginapi.Meta {
 		RequestID:          "req-1",
 		UserPath:           "/team/a",
 		SessionID:          "sess-1",
-		Labels:             map[string]string{"team": "search"},
 		RequestedModel:     "smart",
 		Provider:           "openai",
 		ProviderName:       "openai-eu",
@@ -60,8 +59,7 @@ func TestExpandTags(t *testing.T) {
 		{"time", "{{gomodel.time}}", "22:30:05"},
 		{"datetime", "{{gomodel.datetime}}", "2026-09-15T22:30:05Z"},
 		{"weekday", "{{gomodel.weekday}}", "Tuesday"},
-		{"label", "{{gomodel.label.team}}", "search"},
-		{"missing label is empty", "[{{gomodel.label.nope}}]", "[]"},
+		{"labels are not tags", "{{gomodel.label.team}}", "{{gomodel.label.team}}"},
 		{"spaces inside braces", "{{ gomodel.resolved_model }}", "gpt-4o"},
 		{"unknown tag kept", "{{gomodel.secret}} {{other.date}}", "{{gomodel.secret}} {{other.date}}"},
 		{"no tags", "plain text", "plain text"},
@@ -86,6 +84,7 @@ func TestOnPromptRolesAndDetail(t *testing.T) {
 	assert.Equal(t, "which model? smart", x.Prompt.Messages[1].Text())
 	assert.Equal(t, "{{gomodel.resolved_model}}", x.Prompt.Messages[2].Text(), "assistant is not a configured role")
 	assert.Equal(t, map[string]any{"replacements": 3}, d.Detail)
+	assert.True(t, d.NoStore, "expanded prompts must not be cached")
 	assert.True(t, x.Prompt.Changes().Dirty)
 }
 
@@ -93,10 +92,10 @@ func TestDefaultRolesSkipUserMessages(t *testing.T) {
 	p := newPlugin(t, "")
 	x, d := runPrompt(t, p,
 		plugintest.Text(pluginapi.RoleDeveloper, "d", "{{gomodel.resolved_model}}"),
-		plugintest.Text(pluginapi.RoleUser, "u", "{{gomodel.label.team}}"),
+		plugintest.Text(pluginapi.RoleUser, "u", "{{gomodel.user_path}}"),
 	)
 	assert.Equal(t, "gpt-4o", x.Prompt.Messages[0].Text())
-	assert.Equal(t, "{{gomodel.label.team}}", x.Prompt.Messages[1].Text())
+	assert.Equal(t, "{{gomodel.user_path}}", x.Prompt.Messages[1].Text())
 	assert.Equal(t, map[string]any{"replacements": 1}, d.Detail)
 }
 
@@ -108,6 +107,7 @@ func TestOnPromptWithoutTagsLeavesPromptClean(t *testing.T) {
 	)
 	assert.Equal(t, "{{gomodel.date}}", x.Prompt.Messages[0].Text())
 	assert.Nil(t, d.Detail)
+	assert.False(t, d.NoStore, "a prompt without tags stays cacheable")
 	assert.False(t, x.Prompt.Changes().Dirty)
 }
 
