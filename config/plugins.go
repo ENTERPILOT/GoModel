@@ -29,9 +29,9 @@ type PluginsConfig struct {
 	// GoModelPlugin symbol (see the pluginapi package). A file that cannot be
 	// resolved, verified, or opened is a startup error.
 	// Env: PLUGINS_LOAD is a comma-separated list of file names, each
-	// optionally "file=sha256hex" to pin the digest, appended to this list
-	// (duplicates by file name are skipped). It exists so an install can
-	// load plugins without a config.yaml.
+	// optionally "file=sha256hex" to pin the digest, and REPLACES this list
+	// when set (env > config), like every other env-configurable value. It
+	// exists so an install can load plugins without a config.yaml.
 	Load []PluginFileConfig `yaml:"load"`
 }
 
