@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,10 @@ const (
 	postgresURLEnv = "GOMODEL_INTEGRATION_POSTGRES_URL"
 	mongoURLEnv    = "GOMODEL_INTEGRATION_MONGO_URL"
 )
+
+// mongoDatabaseName is the database the suite resets and points the gateway
+// at: the harness default, or the one an external URL names.
+var mongoDatabaseName = "gomodel_test"
 
 // TestMain sets up and tears down the Docker-backed test databases.
 func TestMain(m *testing.M) {
@@ -112,7 +117,11 @@ func TestMain(m *testing.M) {
 func setupPostgreSQL(ctx context.Context) error {
 	var err error
 
-	if pgURL = os.Getenv(postgresURLEnv); pgURL == "" {
+	if pgURL = os.Getenv(postgresURLEnv); pgURL != "" {
+		if _, err := disposableDatabaseName(postgresURLEnv, pgURL, ""); err != nil {
+			return err
+		}
+	} else {
 		log.Println("Starting PostgreSQL container...")
 		pgContainer, err = dockerRunDetached(
 			ctx,
@@ -161,6 +170,11 @@ func setupMongoDB(ctx context.Context) error {
 	var err error
 
 	if external := os.Getenv(mongoURLEnv); external != "" {
+		name, err := disposableDatabaseName(mongoURLEnv, external, mongoDatabaseName)
+		if err != nil {
+			return err
+		}
+		mongoDatabaseName = name
 		// The external URL carries its own topology (replica set, SRV,
 		// several seeds); forcing direct mode would break it.
 		return connectMongoDB(ctx, external, false)
@@ -268,10 +282,29 @@ func connectMongoDB(ctx context.Context, rawURL string, direct bool) error {
 	}
 
 	// Get database reference
-	mongoDatabase = mongoClient.Database("gomodel_test")
+	mongoDatabase = mongoClient.Database(mongoDatabaseName)
 
 	log.Println("MongoDB ready")
 	return nil
+}
+
+// disposableDatabaseName returns the database rawURL names, or fallback when
+// the URL names none. The suite drops tables and collections in that
+// database, so an external one must be disposable by construction: its name
+// has to end in _test. envName only labels the error.
+func disposableDatabaseName(envName, rawURL, fallback string) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", envName, err)
+	}
+	name := strings.TrimPrefix(parsed.Path, "/")
+	if name == "" {
+		name = fallback
+	}
+	if !strings.HasSuffix(name, "_test") {
+		return "", fmt.Errorf("%s names database %q; the suite drops its tables, so the name must end in _test", envName, name)
+	}
+	return name, nil
 }
 
 // redactedURL hides any password in a connection string before it is logged.
