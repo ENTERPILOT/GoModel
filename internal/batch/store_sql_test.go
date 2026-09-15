@@ -45,8 +45,8 @@ func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
 	})
 }
 
-func TestSQLStoreLifecycle(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestStoreLifecycle(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 		b := &StoredBatch{
 			Batch: &core.BatchResponse{
@@ -100,8 +100,8 @@ func TestStoreDelete(t *testing.T) {
 	})
 }
 
-func TestSQLStoreUpdateMissingReturnsNotFound(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestStoreUpdateMissingReturnsNotFound(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		b := &StoredBatch{Batch: &core.BatchResponse{ID: "absent", Object: "batch", Status: "completed"}}
 		err := store.Update(context.Background(), b)
 		require.ErrorIs(t, err, ErrNotFound)

@@ -4,11 +4,41 @@ import (
 	"context"
 	"testing"
 
-	"github.com/enterpilot/gomodel/internal/storage/sqlx"
-	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 )
+
+// runStoreSuite exercises behaviour every Store implementation owes its
+// callers, against each backend available in this environment.
+func runStoreSuite(t *testing.T, body func(t *testing.T, store Store)) {
+	t.Helper()
+	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
+		store, err := NewSQLStore(context.Background(), db)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = store.Close() })
+		body(t, store)
+	})
+	mongotest.Run(t, func(t *testing.T, db *mongo.Database) {
+		store, err := NewMongoDBStore(db)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = store.Close() })
+		body(t, store)
+	})
+}
+
+// testWorkflowPayload is a minimal valid payload for store-level tests, which
+// care about versioning and activation rather than workflow semantics.
+func testWorkflowPayload() Payload {
+	return Payload{
+		SchemaVersion: 1,
+		Features:      FeatureFlags{Cache: true, Audit: true, Usage: true},
+	}
+}
 
 // The two migration cases below start from table shapes long-lived
 // deployments still have on disk: one that already gained scope_user_path and
@@ -74,122 +104,6 @@ func TestNewSQLStore_AddsMissingScopeUserPathColumn(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "/team/alpha", got.Scope.UserPath)
 	})
-}
-
-func TestSQLStoreCreateAllocatesVersionsAndDeactivatesPrevious(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		ctx := context.Background()
-		store, err := NewSQLStore(ctx, db)
-		require.NoError(t, err)
-
-		first, err := store.Create(ctx, CreateInput{
-			Name: "first", Payload: testWorkflowPayload(), Activate: true,
-		})
-		require.NoError(t, err)
-
-		second, err := store.Create(ctx, CreateInput{
-			Name: "second", Payload: testWorkflowPayload(), Activate: true,
-		})
-		require.NoError(t, err)
-		assert.Equal(t, 1, first.Version)
-		assert.Equal(t, 2, second.Version)
-
-		// Activating a new version must retire the previous one: the unique
-		// partial index allows only one active row per scope.
-		active, err := store.ListActive(ctx)
-		require.NoError(t, err)
-		require.Len(t, active, 1)
-		require.Equal(t, second.ID, active[0].ID)
-	})
-}
-
-func TestSQLStoreDeactivate(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		ctx := context.Background()
-		store, err := NewSQLStore(ctx, db)
-		require.NoError(t, err)
-
-		created, err := store.Create(ctx, CreateInput{
-			Name: "only", Payload: testWorkflowPayload(), Activate: true,
-		})
-		require.NoError(t, err)
-		err = store.Deactivate(ctx, created.ID)
-		require.NoError(t, err)
-		// Deactivating twice reports not-found rather than silently succeeding.
-		err = store.Deactivate(ctx, created.ID)
-		require.ErrorIs(t, err, ErrNotFound)
-
-		active, err := store.ListActive(ctx)
-		require.NoError(t, err)
-		assert.Empty(t, active)
-	})
-}
-
-func TestSQLStoreEnsureManagedDefaultGlobalIsIdempotent(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		ctx := context.Background()
-		store, err := NewSQLStore(ctx, db)
-		require.NoError(t, err)
-
-		input := CreateInput{
-			Name:        ManagedDefaultGlobalName,
-			Description: ManagedDefaultGlobalDescription,
-			Payload:     testWorkflowPayload(),
-			Managed:     true,
-			Activate:    true,
-		}
-		created, err := store.EnsureManagedDefaultGlobal(ctx, input, "hash-1")
-		require.NoError(t, err)
-		require.NotNil(t, created)
-
-		// Same hash: nothing new is published on the next start.
-		again, err := store.EnsureManagedDefaultGlobal(ctx, input, "hash-1")
-		require.NoError(t, err)
-		assert.Nil(t, again)
-
-		// A changed hash publishes a new version and retires the old one.
-		updated, err := store.EnsureManagedDefaultGlobal(ctx, input, "hash-2")
-		require.NoError(t, err)
-		require.NotNil(t, updated)
-		require.Equal(t, 2, updated.Version)
-	})
-}
-
-func TestSQLStoreEnsureManagedDefaultGlobalLeavesOperatorVersionAlone(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		ctx := context.Background()
-		store, err := NewSQLStore(ctx, db)
-		require.NoError(t, err)
-
-		operator, err := store.Create(ctx, CreateInput{
-			Name: "operator authored", Payload: testWorkflowPayload(), Activate: true,
-		})
-		require.NoError(t, err)
-
-		published, err := store.EnsureManagedDefaultGlobal(ctx, CreateInput{
-			Name:        ManagedDefaultGlobalName,
-			Description: ManagedDefaultGlobalDescription,
-			Payload:     testWorkflowPayload(),
-			Managed:     true,
-			Activate:    true,
-		}, "hash-1")
-		require.NoError(t, err)
-		assert.Nil(t, published)
-
-		active, err := store.ListActive(ctx)
-		require.NoError(t, err)
-		require.Len(t, active, 1)
-		assert.Equal(t, operator.ID, active[0].ID)
-	})
-}
-
-// testWorkflowPayload is a minimal valid payload for store-level tests, which
-// care about versioning and activation rather than workflow semantics.
-func testWorkflowPayload() Payload {
-	return Payload{
-		SchemaVersion: 1,
-		Features:      FeatureFlags{Cache: true, Audit: true, Usage: true},
-	}
 }
 
 // TestNewSQLStoreConvertsTimestamptzCreatedAt covers the one column where the

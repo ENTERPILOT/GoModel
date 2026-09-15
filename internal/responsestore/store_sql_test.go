@@ -104,17 +104,17 @@ func TestSQLStoreCreateReplacesExpired(t *testing.T) {
 		expired := testStoredResponse("resp-1")
 		expired.StoredAt = time.Now().UTC().Add(-2 * time.Hour)
 		expired.ExpiresAt = time.Now().UTC().Add(-time.Hour)
-		_, err := // Expired-at-write snapshots are silently skipped, so seed the row directly.
-			store.db.Exec(ctx,
-				"INSERT INTO response_snapshots (id, data, stored_at, expires_at) VALUES (?, ?, ?, ?)",
-				"resp-1", `{"response":{"id":"resp-1"}}`, expired.StoredAt.Unix(), expired.ExpiresAt.Unix(),
-			)
-		require.NoError(t, err)
+		// Expired-at-write snapshots are silently skipped, so seed the row directly.
+		_, err := store.db.Exec(ctx,
+			"INSERT INTO response_snapshots (id, data, stored_at, expires_at) VALUES (?, ?, ?, ?)",
+			"resp-1", `{"response":{"id":"resp-1"}}`, expired.StoredAt.Unix(), expired.ExpiresAt.Unix(),
+		)
+		require.NoError(t, err, "seed expired row")
 
 		replacement := testStoredResponse("resp-1")
 		replacement.Response.Model = "gpt-replacement"
 		err = store.Create(ctx, replacement)
-		require.NoError(t, err)
+		require.NoError(t, err, "create over expired")
 
 		got, err := store.Get(ctx, "resp-1")
 		require.NoError(t, err)
@@ -122,8 +122,8 @@ func TestSQLStoreCreateReplacesExpired(t *testing.T) {
 	})
 }
 
-func TestSQLStoreUpdatePreservesRetentionColumns(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestStoreUpdatePreservesRetentionColumns(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
 		err := store.Create(ctx, testStoredResponse("resp-1"))
 		require.NoError(t, err)
@@ -139,13 +139,13 @@ func TestSQLStoreUpdatePreservesRetentionColumns(t *testing.T) {
 		got, err := store.Get(ctx, "resp-1")
 		require.NoError(t, err)
 		require.Equal(t, "gpt-updated", got.Response.Model)
-		require.True(t, got.StoredAt.Equal(created.StoredAt))
-		require.True(t, got.ExpiresAt.Equal(created.ExpiresAt), "retention changed: stored %v→%v expires %v→%v", created.StoredAt, got.StoredAt, created.ExpiresAt, got.ExpiresAt)
+		require.True(t, got.StoredAt.Equal(created.StoredAt), "StoredAt changed: %v→%v", created.StoredAt, got.StoredAt)
+		require.True(t, got.ExpiresAt.Equal(created.ExpiresAt), "ExpiresAt changed: %v→%v", created.ExpiresAt, got.ExpiresAt)
 	})
 }
 
-func TestSQLStoreUpdateMissingReturnsNotFound(t *testing.T) {
-	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
+func TestStoreUpdateMissingReturnsNotFound(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T, store Store) {
 		err := store.Update(context.Background(), testStoredResponse("missing"))
 		require.ErrorIs(t, err, ErrNotFound)
 	})
@@ -173,12 +173,13 @@ func TestSQLStoreExpiryAndSweep(t *testing.T) {
 		entry.ExpiresAt = time.Now().UTC().Add(time.Second)
 		err := store.Create(ctx, entry)
 		require.NoError(t, err)
-		_, err = // Simulate expiry passing by rewriting the retention column.
-			store.db.Exec(ctx,
-				"UPDATE response_snapshots SET expires_at = ? WHERE id = ?",
-				time.Now().Add(-time.Minute).Unix(), "resp-1",
-			)
-		require.NoError(t, err)
+
+		// Simulate expiry passing by rewriting the retention column.
+		_, err = store.db.Exec(ctx,
+			"UPDATE response_snapshots SET expires_at = ? WHERE id = ?",
+			time.Now().Add(-time.Minute).Unix(), "resp-1",
+		)
+		require.NoError(t, err, "expire row")
 		_, err = store.Get(ctx, "resp-1")
 		require.ErrorIs(t, err, ErrNotFound)
 		err = store.DeleteExpired(ctx)
