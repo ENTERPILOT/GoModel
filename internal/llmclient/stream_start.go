@@ -12,9 +12,9 @@ import (
 )
 
 // maxStreamStartBytes bounds how much of an SSE stream is held back while
-// looking for its first data event. Keep-alive comments and event lines
-// before the first payload are small; a stream that sends more than this
-// without a data line streams through unchanged.
+// looking for its first data event. Comments and blank lines beyond it carry
+// no data and are dropped instead of held; a single line longer than it
+// streams through unchanged.
 const maxStreamStartBytes = 64 * 1024
 
 // errEmptyStream marks a 200 stream that ended before delivering any event.
@@ -25,9 +25,9 @@ var errEmptyStream = errors.New("provider returned an empty stream")
 // before the gateway commits response headers and can still fail over. An
 // empty body fails for any content type. For SSE, the first data event is
 // read: an {"error": ...} payload (see core.ParseEmbeddedProviderError) fails
-// with the status it carries. Everything held back replays ahead of the live
-// stream otherwise. Returns the error with resp.Body closed, or nil with
-// resp.Body ready.
+// with the status it carries, and a stream that ends with no data event
+// fails as empty. Held-back bytes replay ahead of the live stream otherwise.
+// Returns the error with resp.Body closed, or nil with resp.Body ready.
 func interceptStreamStart(provider string, resp *http.Response) *core.GatewayError {
 	reader := bufio.NewReaderSize(resp.Body, streamPeekBytes)
 	if _, err := reader.Peek(1); err != nil {
@@ -43,14 +43,14 @@ func interceptStreamStart(provider string, resp *http.Response) *core.GatewayErr
 		return nil
 	}
 
-	head, payload, readErr := readFirstSSEData(reader, maxStreamStartBytes)
+	head, payload, ended, readErr := readFirstSSEData(reader, maxStreamStartBytes)
 	switch {
 	case payload != nil:
 		if embedded := core.ParseEmbeddedProviderError(provider, payload); embedded != nil {
 			_ = resp.Body.Close()
 			return embedded
 		}
-	case readErr == nil && len(head) < maxStreamStartBytes:
+	case ended:
 		// The stream ended after only comments or blank lines.
 		_ = resp.Body.Close()
 		return core.NewProviderError(provider, http.StatusBadGateway, errEmptyStream.Error(), errEmptyStream)
@@ -68,12 +68,14 @@ func interceptStreamStart(provider string, resp *http.Response) *core.GatewayErr
 }
 
 // readFirstSSEData consumes whole lines from r until the first event that
-// carries data is complete, limit bytes are read, or r ends. It returns every
-// consumed byte and, when found, that event's joined data payload. A clean
-// EOF is not an error.
-func readFirstSSEData(r *bufio.Reader, limit int) (head, payload []byte, err error) {
+// carries data is complete, and returns the bytes to replay with that event's
+// joined data payload. ended reports a stream that closed cleanly before any
+// data. While no data is pending, comment and blank lines beyond limit are
+// dropped, so a long run of keep-alives is still checked in bounded memory.
+// A single line longer than limit stops the inspection with nothing decided.
+func readFirstSSEData(r *bufio.Reader, limit int) (head, payload []byte, ended bool, err error) {
 	var data [][]byte
-	for len(head) < limit {
+	for {
 		lineStart := len(head)
 		line, readErr := r.ReadSlice('\n')
 		for errors.Is(readErr, bufio.ErrBufferFull) && len(head)+len(line) < limit {
@@ -81,24 +83,33 @@ func readFirstSSEData(r *bufio.Reader, limit int) (head, payload []byte, err err
 			line, readErr = r.ReadSlice('\n')
 		}
 		head = append(head, line...)
+		if errors.Is(readErr, bufio.ErrBufferFull) {
+			return head, nil, false, nil
+		}
+
 		trimmed := bytes.TrimRight(head[lineStart:], "\r\n")
 		if value, ok := bytes.CutPrefix(trimmed, []byte("data:")); ok {
 			data = append(data, bytes.TrimPrefix(value, []byte(" ")))
 		}
 
-		if readErr != nil && !errors.Is(readErr, bufio.ErrBufferFull) {
+		if readErr != nil {
 			if readErr != io.EOF {
-				return head, nil, readErr
+				return head, nil, false, readErr
 			}
 			// A final event may end at EOF without its blank line.
 			if len(data) > 0 {
-				return head, bytes.Join(data, []byte("\n")), nil
+				return head, bytes.Join(data, []byte("\n")), false, nil
 			}
-			return head, nil, nil
+			return head, nil, true, nil
 		}
-		if len(trimmed) == 0 && len(data) > 0 {
-			return head, bytes.Join(data, []byte("\n")), nil
+		if len(data) > 0 {
+			if len(trimmed) == 0 {
+				return head, bytes.Join(data, []byte("\n")), false, nil
+			}
+			continue
+		}
+		if len(head) > limit && (len(trimmed) == 0 || trimmed[0] == ':') {
+			head = head[:0]
 		}
 	}
-	return head, nil, nil
 }

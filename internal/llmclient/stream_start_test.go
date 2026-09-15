@@ -53,6 +53,20 @@ func TestClient_DoStream_StreamStartFailures(t *testing.T) {
 			wantMessage: "empty stream",
 		},
 		{
+			name:        "keep-alive events beyond the hold-back limit",
+			contentType: "text/event-stream",
+			body:        strings.Repeat(": keep-alive\n\n", maxStreamStartBytes/14+10),
+			wantStatus:  http.StatusBadGateway,
+			wantMessage: "empty stream",
+		},
+		{
+			name:        "comment lines beyond the hold-back limit without blank lines",
+			contentType: "text/event-stream",
+			body:        strings.Repeat(": pad\n", maxStreamStartBytes/6+10),
+			wantStatus:  http.StatusBadGateway,
+			wantMessage: "empty stream",
+		},
+		{
 			name:        "in-band 429 as first event",
 			contentType: "text/event-stream",
 			body:        "data: {\"error\":{\"message\":\"Rate limit exceeded\",\"type\":\"rate_limit_error\",\"code\":429}}\n\n",
@@ -72,6 +86,13 @@ func TestClient_DoStream_StreamStartFailures(t *testing.T) {
 			body:        "data: {\"error\":{\"message\":\"upstream down\",\"code\":503}}",
 			wantStatus:  http.StatusServiceUnavailable,
 			wantMessage: "upstream down",
+		},
+		{
+			name:        "in-band error after keep-alives beyond the hold-back limit",
+			contentType: "text/event-stream",
+			body:        strings.Repeat(": keep-alive\n\n", maxStreamStartBytes/14+10) + "data: {\"error\":{\"message\":\"slow down\",\"code\":429}}\n\n",
+			wantStatus:  http.StatusTooManyRequests,
+			wantMessage: "slow down",
 		},
 	}
 
@@ -122,9 +143,9 @@ func TestClient_DoStream_StreamStartReplaysHealthyStreams(t *testing.T) {
 			body:        "data: {\"choices\":[{\"delta\":{\"content\":\"" + strings.Repeat("a", 4*streamPeekBytes) + "\"}}]}\n\n",
 		},
 		{
-			name:        "comments beyond the hold-back limit",
+			name:        "first line longer than the hold-back limit",
 			contentType: "text/event-stream",
-			body:        strings.Repeat(": pad\n", maxStreamStartBytes/6+10) + "data: {\"choices\":[]}\n\n",
+			body:        "data: {\"choices\":[{\"delta\":{\"content\":\"" + strings.Repeat("a", maxStreamStartBytes+1024) + "\"}}]}\n\n",
 		},
 		{
 			name:        "non-SSE stream",
@@ -147,6 +168,24 @@ func TestClient_DoStream_StreamStartReplaysHealthyStreams(t *testing.T) {
 			assert.Equal(t, tt.body, string(got))
 		})
 	}
+}
+
+func TestClient_DoStream_StreamStartDropsOversizedKeepAlives(t *testing.T) {
+	// Keep-alives beyond the hold-back limit carry no data, so they are
+	// dropped rather than buffered; everything from the first event on is kept.
+	events := "event: message_start\ndata: {\"type\":\"message_start\"}\n\ndata: [DONE]\n\n"
+	body := strings.Repeat(": keep-alive\n\n", maxStreamStartBytes/14+10) + events
+	server := streamServer(t, "text/event-stream", body)
+	client := New(DefaultConfig("test", server.URL), nil)
+
+	stream, err := client.DoStream(context.Background(), Request{Method: http.MethodPost, Endpoint: "/stream"})
+	require.NoError(t, err)
+	defer stream.Close()
+
+	got, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(string(got), events), "the first event must replay intact")
+	assert.Less(t, len(got), len(body))
 }
 
 func TestClient_DoStream_EmptyStreamRecordsFailure(t *testing.T) {
