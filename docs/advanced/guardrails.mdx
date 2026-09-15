@@ -362,6 +362,59 @@ until the response is complete.
       ACME Corp => [company]
 ```
 
+### `tag_replace`
+
+Replaces `{{gomodel.<tag>}}` placeholders in prompt text with values of the
+current request, just before the provider call. Use it to tell the model which
+model it runs as, or today's date, without the client sending them. It pairs
+well with `system_prompt`: put the tags in the system prompt and run
+`tag_replace` at a later `order`.
+
+**Phases:** prompt. **Edits content:** yes.
+
+#### Tags
+
+| Tag | Value |
+| --- | ----- |
+| `{{gomodel.requested_model}}` | Model the client asked for. |
+| `{{gomodel.resolved_model}}` | Provider model the request is sent to. |
+| `{{gomodel.virtual_model}}` | Virtual model that produced the resolution, empty otherwise. |
+| `{{gomodel.provider_type}}` | Provider type, for example `openai`. |
+| `{{gomodel.provider_name}}` | Provider instance name. |
+| `{{gomodel.user_path}}` | Effective user path. |
+| `{{gomodel.label.<key>}}` | Request label `<key>`, empty when not set. |
+| `{{gomodel.request_id}}` | Gateway request ID. |
+| `{{gomodel.session_id}}` | Detected session ID, empty when none. |
+| `{{gomodel.date}}` | Current date, `2026-09-15`. |
+| `{{gomodel.time}}` | Current time, `14:05:00`. |
+| `{{gomodel.datetime}}` | Current date and time in RFC 3339, `2026-09-15T14:05:00Z`. |
+| `{{gomodel.weekday}}` | Current day of the week, `Tuesday`. |
+
+Spaces inside the braces are allowed. Unknown tags are left as written.
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `roles` | No | `["system", "user"]` | Prompt messages tags are expanded in: `system` (includes developer), `user`, `assistant`, `tool`. |
+| `timezone` | No | `UTC` | IANA timezone for the date and time tags, for example `Europe/Warsaw`. |
+
+#### Example
+
+```yaml
+- name: "model-facts"
+  type: "system_prompt"
+  order: 0
+  system_prompt:
+    mode: "decorator"
+    content: "You are {{gomodel.resolved_model}}. Today is {{gomodel.weekday}}, {{gomodel.date}}."
+- name: "expand-tags"
+  type: "tag_replace"
+  order: 1
+  config:
+    timezone: "Europe/Warsaw"
+```
+
 ### `header_edit`
 
 Sets, adds, and removes HTTP headers on the request, the client response, and
