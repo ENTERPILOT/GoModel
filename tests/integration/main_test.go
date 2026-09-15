@@ -135,7 +135,7 @@ func setupPostgreSQL(ctx context.Context) error {
 		pgURL = fmt.Sprintf("postgres://test:test@%s:%s/gomodel_test?sslmode=disable", dockerPublishedHost(), port)
 	}
 
-	log.Printf("PostgreSQL URL: %s", pgURL)
+	log.Printf("PostgreSQL URL: %s", redactedURL(pgURL))
 
 	// Create connection pool
 	pgPool, err = pgxpool.New(ctx, pgURL)
@@ -161,7 +161,9 @@ func setupMongoDB(ctx context.Context) error {
 	var err error
 
 	if external := os.Getenv(mongoURLEnv); external != "" {
-		return connectMongoDB(ctx, external)
+		// The external URL carries its own topology (replica set, SRV,
+		// several seeds); forcing direct mode would break it.
+		return connectMongoDB(ctx, external, false)
 	}
 
 	log.Println("Starting MongoDB container...")
@@ -226,25 +228,35 @@ func setupMongoDB(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get MongoDB port: %w", err)
 	}
-	return connectMongoDB(ctx, fmt.Sprintf("mongodb://%s:%s/?replicaSet=%s", dockerPublishedHost(), port, mongoReplicaSetName))
+	// The single-member replica set advertises the container's internal IP,
+	// which the host cannot reach, so the client must connect directly.
+	return connectMongoDB(ctx, fmt.Sprintf("mongodb://%s:%s/?replicaSet=%s", dockerPublishedHost(), port, mongoReplicaSetName), true)
 }
 
-// connectMongoDB opens the shared client against url and waits for it to
-// answer. The container path and the external path meet here.
-func connectMongoDB(ctx context.Context, url string) error {
+// connectMongoDB opens the shared client against rawURL and waits for it to
+// answer. The container path and the external path meet here; only the
+// container path asks for direct mode.
+func connectMongoDB(ctx context.Context, rawURL string, direct bool) error {
 	var err error
-	mongoURL, err = withDirectMongoConnection(url)
-	if err != nil {
-		return fmt.Errorf("failed to normalize MongoDB connection string: %w", err)
+	mongoURL = rawURL
+	if direct {
+		mongoURL, err = withDirectMongoConnection(rawURL)
+		if err != nil {
+			return fmt.Errorf("failed to normalize MongoDB connection string: %w", err)
+		}
 	}
 
-	log.Printf("MongoDB URL: %s", mongoURL)
+	log.Printf("MongoDB URL: %s", redactedURL(mongoURL))
 
 	readyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	// Create client
-	mongoClient, err = mongo.Connect(options.Client().ApplyURI(mongoURL).SetDirect(true))
+	clientOpts := options.Client().ApplyURI(mongoURL)
+	if direct {
+		clientOpts.SetDirect(true)
+	}
+	mongoClient, err = mongo.Connect(clientOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create MongoDB client: %w", err)
 	}
@@ -258,8 +270,17 @@ func connectMongoDB(ctx context.Context, url string) error {
 	// Get database reference
 	mongoDatabase = mongoClient.Database("gomodel_test")
 
-	log.Println("MongoDB container ready")
+	log.Println("MongoDB ready")
 	return nil
+}
+
+// redactedURL hides any password in a connection string before it is logged.
+func redactedURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable url>"
+	}
+	return parsed.Redacted()
 }
 
 // cleanup terminates all containers and connections.
