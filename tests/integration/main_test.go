@@ -46,6 +46,13 @@ const mongoReplicaSetName = "rs"
 const (
 	postgresImage = "public.ecr.aws/docker/library/postgres:16-alpine"
 	mongoImage    = "public.ecr.aws/docker/library/mongo:7"
+
+	// postgresURLEnv and mongoURLEnv name already-running databases. When set,
+	// the harness connects to them instead of starting a container, which lets
+	// CI provide PostgreSQL as a service container that is pulled while the
+	// suite compiles. The MongoDB one must already be a replica set.
+	postgresURLEnv = "GOMODEL_INTEGRATION_POSTGRES_URL"
+	mongoURLEnv    = "GOMODEL_INTEGRATION_MONGO_URL"
 )
 
 // TestMain sets up and tears down the Docker-backed test databases.
@@ -54,7 +61,16 @@ func TestMain(m *testing.M) {
 
 	// Pull before starting anything: the containers come up concurrently below,
 	// and two simultaneous anonymous pulls trip the registry's rate limit.
-	if err := dockerPullImages(testCtx, postgresImage, mongoImage); err != nil {
+	// Databases supplied through the environment (CI service containers)
+	// need no image at all.
+	var images []string
+	if os.Getenv(postgresURLEnv) == "" {
+		images = append(images, postgresImage)
+	}
+	if os.Getenv(mongoURLEnv) == "" {
+		images = append(images, mongoImage)
+	}
+	if err := dockerPullImages(testCtx, images...); err != nil {
 		log.Printf("Image pull failed: %v", err)
 		cancelFunc()
 		os.Exit(1)
@@ -96,26 +112,28 @@ func TestMain(m *testing.M) {
 func setupPostgreSQL(ctx context.Context) error {
 	var err error
 
-	log.Println("Starting PostgreSQL container...")
-	pgContainer, err = dockerRunDetached(
-		ctx,
-		[]string{
-			"-P",
-			"-e", "POSTGRES_DB=gomodel_test",
-			"-e", "POSTGRES_USER=test",
-			"-e", "POSTGRES_PASSWORD=test",
-		},
-		postgresImage,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to start PostgreSQL container: %w", err)
-	}
+	if pgURL = os.Getenv(postgresURLEnv); pgURL == "" {
+		log.Println("Starting PostgreSQL container...")
+		pgContainer, err = dockerRunDetached(
+			ctx,
+			[]string{
+				"-P",
+				"-e", "POSTGRES_DB=gomodel_test",
+				"-e", "POSTGRES_USER=test",
+				"-e", "POSTGRES_PASSWORD=test",
+			},
+			postgresImage,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to start PostgreSQL container: %w", err)
+		}
 
-	port, err := pgContainer.hostPort(ctx, "5432/tcp")
-	if err != nil {
-		return fmt.Errorf("failed to get PostgreSQL port: %w", err)
+		port, err := pgContainer.hostPort(ctx, "5432/tcp")
+		if err != nil {
+			return fmt.Errorf("failed to get PostgreSQL port: %w", err)
+		}
+		pgURL = fmt.Sprintf("postgres://test:test@%s:%s/gomodel_test?sslmode=disable", dockerPublishedHost(), port)
 	}
-	pgURL = fmt.Sprintf("postgres://test:test@%s:%s/gomodel_test?sslmode=disable", dockerPublishedHost(), port)
 
 	log.Printf("PostgreSQL URL: %s", pgURL)
 
@@ -141,6 +159,10 @@ func setupPostgreSQL(ctx context.Context) error {
 // setupMongoDB starts a MongoDB container and creates the client.
 func setupMongoDB(ctx context.Context) error {
 	var err error
+
+	if external := os.Getenv(mongoURLEnv); external != "" {
+		return connectMongoDB(ctx, external)
+	}
 
 	log.Println("Starting MongoDB container...")
 	mongoContainer, err = dockerRunDetached(
@@ -204,13 +226,22 @@ func setupMongoDB(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get MongoDB port: %w", err)
 	}
-	mongoURL = fmt.Sprintf("mongodb://%s:%s/?replicaSet=%s", dockerPublishedHost(), port, mongoReplicaSetName)
-	mongoURL, err = withDirectMongoConnection(mongoURL)
+	return connectMongoDB(ctx, fmt.Sprintf("mongodb://%s:%s/?replicaSet=%s", dockerPublishedHost(), port, mongoReplicaSetName))
+}
+
+// connectMongoDB opens the shared client against url and waits for it to
+// answer. The container path and the external path meet here.
+func connectMongoDB(ctx context.Context, url string) error {
+	var err error
+	mongoURL, err = withDirectMongoConnection(url)
 	if err != nil {
 		return fmt.Errorf("failed to normalize MongoDB connection string: %w", err)
 	}
 
 	log.Printf("MongoDB URL: %s", mongoURL)
+
+	readyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 
 	// Create client
 	mongoClient, err = mongo.Connect(options.Client().ApplyURI(mongoURL).SetDirect(true))

@@ -10,10 +10,12 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // API endpoints
@@ -245,4 +247,27 @@ func newStreamingResponsesRequest(model, content string) core.ResponsesRequest {
 		Stream: true,
 		Input:  content,
 	}
+}
+
+// usageRequestCount reads the request total the admin usage summary reports.
+func usageRequestCount(t *testing.T, serverURL string) int {
+	t.Helper()
+	resp, err := http.Get(serverURL + "/admin/usage/summary?days=30")
+	require.NoError(t, err)
+	defer closeBody(resp)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var summary usage.UsageSummary
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&summary))
+	return summary.TotalRequests
+}
+
+// waitForUsageFlush polls until the usage summary reports at least want
+// requests. The usage logger flushes on a 1s interval in these fixtures;
+// polling returns as soon as the rows land instead of sleeping out a fixed
+// multiple of that interval.
+func waitForUsageFlush(t *testing.T, serverURL string, want int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return usageRequestCount(t, serverURL) >= want
+	}, 10*time.Second, 50*time.Millisecond, "usage rows did not flush: fewer than %d requests recorded", want)
 }
