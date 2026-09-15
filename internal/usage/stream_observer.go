@@ -84,18 +84,40 @@ func (o *StreamUsageObserver) SetRewriteTokensSaved(tokensSaved int) {
 	o.rewriteSaved = tokensSaved
 }
 
-// usageKeyLiteral gates WantsJSONEvent: extractUsageFromEvent can only produce
-// an entry from payloads carrying a "usage" member (top-level or nested under
-// "response"), so events without the literal never matter.
 var usageKeyLiteral = []byte(`"usage"`)
 
-// WantsJSONEvent reports whether the raw SSE payload can carry usage data.
-// This lets the observed stream skip JSON decoding for the vast majority of
-// content-delta chunks. Known trade-off: a provider that JSON-escapes key
-// characters (e.g. "usage") would slip past this byte scan; no known
+// HasUsageObject reports whether a raw SSE JSON payload contains a "usage"
+// member whose value is a JSON object, at any depth. Usage can only be
+// extracted from such a member (top-level, or nested under "response" or
+// "message"), so stream observers use this to skip decoding every other event.
+//
+// Matching the key alone is not enough: OpenAI streams sent with
+// stream_options.include_usage, which the gateway forces on by default, carry
+// "usage":null in every content chunk. Known trade-off: a provider that
+// JSON-escapes key characters would slip past this byte scan; no known
 // provider does, and covering it would mean decoding every chunk again.
+func HasUsageObject(raw []byte) bool {
+	rest := raw
+	for {
+		i := bytes.Index(rest, usageKeyLiteral)
+		if i < 0 {
+			return false
+		}
+		rest = rest[i+len(usageKeyLiteral):]
+		j := skipJSONSpace(rest, 0)
+		if j < len(rest) && rest[j] == ':' {
+			j = skipJSONSpace(rest, j+1)
+			if j < len(rest) && rest[j] == '{' {
+				return true
+			}
+		}
+	}
+}
+
+// WantsJSONEvent reports whether the raw SSE payload can carry usage data.
+// This lets the observed stream skip JSON decoding for content-delta chunks.
 func (o *StreamUsageObserver) WantsJSONEvent(raw []byte) bool {
-	return bytes.Contains(raw, usageKeyLiteral)
+	return HasUsageObject(raw)
 }
 
 func (o *StreamUsageObserver) OnJSONEvent(chunk map[string]any) {

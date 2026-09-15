@@ -517,6 +517,15 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxAllocs: 62,   // baseline 60 (incl. request labels on both observers)
 			maxBytes:  3712, // baseline ~3.5 KB (audit entry carries the guardrail outcome trail)
 		},
+		{
+			// include_usage stream shape: every content chunk carries
+			// "usage":null. Before the usage filter required an object value,
+			// every one of those chunks was decoded (196 allocs, ~9.2 KB).
+			name:      "streaming_observers_include_usage",
+			bench:     BenchmarkSharedStreamingObserversIncludeUsage,
+			maxAllocs: 50,   // baseline 48
+			maxBytes:  3136, // baseline ~2.9 KB
+		},
 	}
 
 	for _, tc := range cases {
