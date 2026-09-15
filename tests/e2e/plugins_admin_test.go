@@ -30,11 +30,12 @@ func TestPlugins_AdminSurface_E2E(t *testing.T) {
 			assert.Equal(t, "ok", p.Health, p.Name)
 			assert.NotEmpty(t, p.Kinds, "%s should list its hook kinds", p.Name)
 		}
-		for _, name := range []string{"system_prompt", "llm_based_altering", "string_replace", "header_edit", "llm_judge"} {
+		for _, name := range []string{"system_prompt", "llm_based_altering", "string_replace", "tag_replace", "header_edit", "llm_judge"} {
 			assert.Contains(t, byName, name)
 		}
 		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, byName["string_replace"])
 		assert.ElementsMatch(t, []string{"prompt", "response"}, byName["header_edit"])
+		assert.ElementsMatch(t, []string{"prompt"}, byName["tag_replace"])
 		assert.ElementsMatch(t, []string{"prompt", "response", "stream"}, byName["llm_judge"])
 	})
 

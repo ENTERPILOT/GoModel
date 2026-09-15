@@ -362,6 +362,76 @@ until the response is complete.
       ACME Corp => [company]
 ```
 
+### `tag_replace`
+
+Replaces `{{gomodel.<tag>}}` placeholders in prompt text with values of the
+current request, just before the provider call. Use it to tell the model which
+model it runs as, or today's date, without the client sending them. It pairs
+well with `system_prompt`: put the tags in the system prompt and run
+`tag_replace` at a later `order`.
+
+**Phases:** prompt. **Edits content:** yes.
+
+#### Tags
+
+| Tag | Value |
+| --- | ----- |
+| `{{gomodel.requested_model}}` | Model the client asked for. |
+| `{{gomodel.resolved_model}}` | Provider model the request is sent to. |
+| `{{gomodel.virtual_model}}` | Virtual model that produced the resolution, empty otherwise. |
+| `{{gomodel.provider_type}}` | Provider type, for example `openai`. |
+| `{{gomodel.provider_name}}` | Provider instance name. |
+| `{{gomodel.user_path}}` | Effective user path. |
+| `{{gomodel.request_id}}` | Gateway request ID. |
+| `{{gomodel.session_id}}` | Detected session ID, empty when none. |
+| `{{gomodel.date}}` | Current date, `2026-09-15`. |
+| `{{gomodel.time}}` | Current time, `14:05:00`. |
+| `{{gomodel.datetime}}` | Current date and time in RFC 3339, `2026-09-15T14:05:00Z`. |
+| `{{gomodel.weekday}}` | Current day of the week, `Tuesday`. |
+
+Spaces inside the braces are allowed. Unknown tags are left as written.
+
+A tag with no value for the request, such as `session_id` without a session,
+becomes empty. The model and provider tags name the first selected provider:
+the prompt phase runs once, so a failover attempt receives the same text.
+Values that come from the caller, such as `user_path` and `session_id`, are
+inserted as sent. A request whose prompt had a tag expanded is not stored in the
+response cache, because the reply may repeat request-specific values.
+
+<Warning>
+Time-based tags can break provider prompt caching and raise costs. Providers
+cache the start of a prompt, usually the system message, and reuse it only
+when it is identical. `{{gomodel.time}}` and `{{gomodel.datetime}}` change
+every second, and `{{gomodel.request_id}}` changes on every request, so every
+call pays the full input price and waits longer. `{{gomodel.date}}` and
+`{{gomodel.weekday}}` change once a day and cost one cache miss per day. Prefer
+`date` over `time` or `datetime`, and place volatile tags at the end of the
+prompt rather than the start of a long system message.
+</Warning>
+
+#### Settings
+
+| Key | Required | Default | Description |
+| --- | -------- | ------- | ----------- |
+| `roles` | No | `["system"]` | Prompt messages tags are expanded in: `system` (includes developer), `user`, `assistant`, `tool`. Adding `user` lets callers read request values such as the user path and rewrites template text in their prompts. |
+| `timezone` | No | `UTC` | IANA timezone for the date and time tags, for example `Europe/Warsaw`. The host zone `Local` is rejected. |
+
+#### Example
+
+```yaml
+- name: "model-facts"
+  type: "system_prompt"
+  order: 0
+  system_prompt:
+    mode: "decorator"
+    content: "You are {{gomodel.resolved_model}}. Today is {{gomodel.weekday}}, {{gomodel.date}}."
+- name: "expand-tags"
+  type: "tag_replace"
+  order: 1
+  config:
+    timezone: "Europe/Warsaw"
+```
+
 ### `header_edit`
 
 Sets, adds, and removes HTTP headers on the request, the client response, and
