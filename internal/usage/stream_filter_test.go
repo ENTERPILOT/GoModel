@@ -17,6 +17,9 @@ func TestHasUsageObject(t *testing.T) {
 		{name: "include_usage null chunk", raw: `{"choices":[{"delta":{"content":"Hi"}}],"usage":null}`, want: false},
 		{name: "null with spaces", raw: `{"usage" : null}`, want: false},
 		{name: "usage word as a string value", raw: `{"delta":{"content":"usage"},"x":"usage"}`, want: false},
+		// Inside a JSON string every quote is escaped, so the bytes hold
+		// \"usage\" and never the unescaped "usage" the scan looks for.
+		{name: "usage object text inside a string", raw: `{"choices":[{"delta":{"content":"text: \"usage\": {}"}}]}`, want: false},
 		{name: "truncated after key", raw: `{"usage":`, want: false},
 		{name: "final openai chunk", raw: `{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":3}}`, want: true},
 		{name: "object with spaces", raw: "{\"usage\" :\n\t{\"input_tokens\":1}}", want: true},

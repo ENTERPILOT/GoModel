@@ -961,7 +961,10 @@ func TestBrokerReplayAfterBufferWrap(t *testing.T) {
 // audit.completed and audit.flushed. It is the per-request broker cost on
 // every request, whether or not a dashboard is connected.
 func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
-	broker := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 1000})
+	// The subscriber buffer is far larger than the default so a drain
+	// goroutine that falls behind cannot get the subscriber dropped, which
+	// would silently turn the subscribed case into the idle one.
+	broker := NewBroker(Config{Enabled: true, BufferSize: 10000, ReplayLimit: 1000, SubscriberBuffer: 1 << 16})
 	if subscribe {
 		sub := broker.Subscribe(0)
 		require.NotNil(b, sub)
@@ -1013,6 +1016,10 @@ func benchAuditRequestLifecycle(b *testing.B, subscribe bool) {
 		entry.Data.ResponseBody = responseBody
 		broker.PublishAuditEvent(EventAuditCompleted, entry)
 		broker.PublishAuditEvent(EventAuditFlushed, entry)
+	}
+	b.StopTimer()
+	if subscribe && !broker.HasLiveSubscribers() {
+		b.Fatal("the subscriber was dropped during the run, so the idle path was measured")
 	}
 }
 
