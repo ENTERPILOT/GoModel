@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,7 +47,18 @@ const mongoReplicaSetName = "rs"
 const (
 	postgresImage = "public.ecr.aws/docker/library/postgres:16-alpine"
 	mongoImage    = "public.ecr.aws/docker/library/mongo:7"
+
+	// postgresURLEnv and mongoURLEnv name already-running databases. When set,
+	// the harness connects to them instead of starting a container, which lets
+	// CI provide PostgreSQL as a service container that is pulled while the
+	// suite compiles. The MongoDB one must already be a replica set.
+	postgresURLEnv = "GOMODEL_INTEGRATION_POSTGRES_URL"
+	mongoURLEnv    = "GOMODEL_INTEGRATION_MONGO_URL"
 )
+
+// mongoDatabaseName is the database the suite resets and points the gateway
+// at: the harness default, or the one an external URL names.
+var mongoDatabaseName = "gomodel_test"
 
 // TestMain sets up and tears down the Docker-backed test databases.
 func TestMain(m *testing.M) {
@@ -54,7 +66,16 @@ func TestMain(m *testing.M) {
 
 	// Pull before starting anything: the containers come up concurrently below,
 	// and two simultaneous anonymous pulls trip the registry's rate limit.
-	if err := dockerPullImages(testCtx, postgresImage, mongoImage); err != nil {
+	// Databases supplied through the environment (CI service containers)
+	// need no image at all.
+	var images []string
+	if os.Getenv(postgresURLEnv) == "" {
+		images = append(images, postgresImage)
+	}
+	if os.Getenv(mongoURLEnv) == "" {
+		images = append(images, mongoImage)
+	}
+	if err := dockerPullImages(testCtx, images...); err != nil {
 		log.Printf("Image pull failed: %v", err)
 		cancelFunc()
 		os.Exit(1)
@@ -96,28 +117,34 @@ func TestMain(m *testing.M) {
 func setupPostgreSQL(ctx context.Context) error {
 	var err error
 
-	log.Println("Starting PostgreSQL container...")
-	pgContainer, err = dockerRunDetached(
-		ctx,
-		[]string{
-			"-P",
-			"-e", "POSTGRES_DB=gomodel_test",
-			"-e", "POSTGRES_USER=test",
-			"-e", "POSTGRES_PASSWORD=test",
-		},
-		postgresImage,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to start PostgreSQL container: %w", err)
+	if pgURL = os.Getenv(postgresURLEnv); pgURL != "" {
+		if _, err := disposableDatabaseName(postgresURLEnv, pgURL, ""); err != nil {
+			return err
+		}
+	} else {
+		log.Println("Starting PostgreSQL container...")
+		pgContainer, err = dockerRunDetached(
+			ctx,
+			[]string{
+				"-P",
+				"-e", "POSTGRES_DB=gomodel_test",
+				"-e", "POSTGRES_USER=test",
+				"-e", "POSTGRES_PASSWORD=test",
+			},
+			postgresImage,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to start PostgreSQL container: %w", err)
+		}
+
+		port, err := pgContainer.hostPort(ctx, "5432/tcp")
+		if err != nil {
+			return fmt.Errorf("failed to get PostgreSQL port: %w", err)
+		}
+		pgURL = fmt.Sprintf("postgres://test:test@%s:%s/gomodel_test?sslmode=disable", dockerPublishedHost(), port)
 	}
 
-	port, err := pgContainer.hostPort(ctx, "5432/tcp")
-	if err != nil {
-		return fmt.Errorf("failed to get PostgreSQL port: %w", err)
-	}
-	pgURL = fmt.Sprintf("postgres://test:test@%s:%s/gomodel_test?sslmode=disable", dockerPublishedHost(), port)
-
-	log.Printf("PostgreSQL URL: %s", pgURL)
+	log.Printf("PostgreSQL URL: %s", redactedURL(pgURL))
 
 	// Create connection pool
 	pgPool, err = pgxpool.New(ctx, pgURL)
@@ -141,6 +168,17 @@ func setupPostgreSQL(ctx context.Context) error {
 // setupMongoDB starts a MongoDB container and creates the client.
 func setupMongoDB(ctx context.Context) error {
 	var err error
+
+	if external := os.Getenv(mongoURLEnv); external != "" {
+		name, err := disposableDatabaseName(mongoURLEnv, external, mongoDatabaseName)
+		if err != nil {
+			return err
+		}
+		mongoDatabaseName = name
+		// The external URL carries its own topology (replica set, SRV,
+		// several seeds); forcing direct mode would break it.
+		return connectMongoDB(ctx, external, false)
+	}
 
 	log.Println("Starting MongoDB container...")
 	mongoContainer, err = dockerRunDetached(
@@ -204,16 +242,35 @@ func setupMongoDB(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get MongoDB port: %w", err)
 	}
-	mongoURL = fmt.Sprintf("mongodb://%s:%s/?replicaSet=%s", dockerPublishedHost(), port, mongoReplicaSetName)
-	mongoURL, err = withDirectMongoConnection(mongoURL)
-	if err != nil {
-		return fmt.Errorf("failed to normalize MongoDB connection string: %w", err)
+	// The single-member replica set advertises the container's internal IP,
+	// which the host cannot reach, so the client must connect directly.
+	return connectMongoDB(ctx, fmt.Sprintf("mongodb://%s:%s/?replicaSet=%s", dockerPublishedHost(), port, mongoReplicaSetName), true)
+}
+
+// connectMongoDB opens the shared client against rawURL and waits for it to
+// answer. The container path and the external path meet here; only the
+// container path asks for direct mode.
+func connectMongoDB(ctx context.Context, rawURL string, direct bool) error {
+	var err error
+	mongoURL = rawURL
+	if direct {
+		mongoURL, err = withDirectMongoConnection(rawURL)
+		if err != nil {
+			return fmt.Errorf("failed to normalize MongoDB connection string: %w", err)
+		}
 	}
 
-	log.Printf("MongoDB URL: %s", mongoURL)
+	log.Printf("MongoDB URL: %s", redactedURL(mongoURL))
+
+	readyCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 
 	// Create client
-	mongoClient, err = mongo.Connect(options.Client().ApplyURI(mongoURL).SetDirect(true))
+	clientOpts := options.Client().ApplyURI(mongoURL)
+	if direct {
+		clientOpts.SetDirect(true)
+	}
+	mongoClient, err = mongo.Connect(clientOpts)
 	if err != nil {
 		return fmt.Errorf("failed to create MongoDB client: %w", err)
 	}
@@ -225,10 +282,38 @@ func setupMongoDB(ctx context.Context) error {
 	}
 
 	// Get database reference
-	mongoDatabase = mongoClient.Database("gomodel_test")
+	mongoDatabase = mongoClient.Database(mongoDatabaseName)
 
-	log.Println("MongoDB container ready")
+	log.Println("MongoDB ready")
 	return nil
+}
+
+// disposableDatabaseName returns the database rawURL names, or fallback when
+// the URL names none. The suite drops tables and collections in that
+// database, so an external one must be disposable by construction: its name
+// has to end in _test. envName only labels the error.
+func disposableDatabaseName(envName, rawURL, fallback string) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", envName, err)
+	}
+	name := strings.TrimPrefix(parsed.Path, "/")
+	if name == "" {
+		name = fallback
+	}
+	if !strings.HasSuffix(name, "_test") {
+		return "", fmt.Errorf("%s names database %q; the suite drops its tables, so the name must end in _test", envName, name)
+	}
+	return name, nil
+}
+
+// redactedURL hides any password in a connection string before it is logged.
+func redactedURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "<unparseable url>"
+	}
+	return parsed.Redacted()
 }
 
 // cleanup terminates all containers and connections.

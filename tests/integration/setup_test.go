@@ -336,7 +336,7 @@ func buildAppConfig(t *testing.T, cfg TestServerConfig, mockLLMURL string, port 
 			Type: "mongodb",
 			MongoDB: config.MongoDBStorageConfig{
 				URL:      GetMongoURL(),
-				Database: "gomodel_test",
+				Database: mongoDatabaseName,
 			},
 		}
 	default:

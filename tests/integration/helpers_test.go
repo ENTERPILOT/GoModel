@@ -10,10 +10,12 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/usage"
 )
 
 // API endpoints
@@ -245,4 +247,49 @@ func newStreamingResponsesRequest(model, content string) core.ResponsesRequest {
 		Stream: true,
 		Input:  content,
 	}
+}
+
+// usageSummaryClient bounds each admin usage request so a stalled endpoint
+// cannot leave a request goroutine behind after a wait gives up.
+var usageSummaryClient = &http.Client{Timeout: 5 * time.Second}
+
+// readUsageRequestCount reads the request total the admin usage summary
+// reports. It returns an error rather than failing the test so it can run
+// inside a polling callback.
+func readUsageRequestCount(serverURL string) (int, error) {
+	resp, err := usageSummaryClient.Get(serverURL + "/admin/usage/summary?days=30")
+	if err != nil {
+		return 0, err
+	}
+	defer closeBody(resp)
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("usage summary: status %d", resp.StatusCode)
+	}
+	var summary usage.UsageSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		return 0, fmt.Errorf("usage summary: decode: %w", err)
+	}
+	return summary.TotalRequests, nil
+}
+
+// usageRequestCount is readUsageRequestCount for test bodies: a failed read
+// fails the test.
+func usageRequestCount(t *testing.T, serverURL string) int {
+	t.Helper()
+	count, err := readUsageRequestCount(serverURL)
+	require.NoError(t, err)
+	return count
+}
+
+// waitForUsageFlush polls until the usage summary reports at least want
+// requests. The usage logger flushes on a 1s interval in these fixtures;
+// polling returns as soon as the rows land instead of sleeping out a fixed
+// multiple of that interval. The callback runs on Eventually's own goroutine,
+// so it reports rather than fails: a transient read error is just "not yet".
+func waitForUsageFlush(t *testing.T, serverURL string, want int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		count, err := readUsageRequestCount(serverURL)
+		return err == nil && count >= want
+	}, 10*time.Second, 50*time.Millisecond, "usage rows did not flush: fewer than %d requests recorded", want)
 }
