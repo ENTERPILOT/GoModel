@@ -88,6 +88,9 @@ func TestHandRolledAssertionsDetection(t *testing.T) {
 		{name: "other work in the body", src: `func TestX(t *testing.T) { if a { cleanup(); t.Fatal("x") } }`, want: 0},
 		{name: "unconditional failure", src: `func TestX(t *testing.T) { select { case <-done: default: t.Fatal("x") } }`, want: 0},
 		{name: "if with else", src: `func TestX(t *testing.T) { if a { t.Fatal("x") } else { ok() } }`, want: 0},
+		{name: "local shadows the test in an if initializer", src: `func TestX(t *testing.T) { if t := other(); t.Bad() { t.Error("x") } }`, want: 0},
+		{name: "local shadows the test in a nested block", src: `func TestX(t *testing.T) { { t := fake{}; if a { t.Fatal("x") } } }`, want: 0},
+		{name: "closure shadowing leaves the outer test checked", src: `func TestX(t *testing.T) { f := func() { t := fake{}; if a { t.Fatal("x") } }; _ = f; if b { t.Fatal("y") } }`, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -119,9 +122,9 @@ type finder struct {
 func (f finder) Visit(n ast.Node) ast.Visitor {
 	switch n := n.(type) {
 	case *ast.FuncDecl:
-		return f.withParams(n.Type)
+		return f.withParams(n.Type, n.Body)
 	case *ast.FuncLit:
-		return f.withParams(n.Type)
+		return f.withParams(n.Type, n.Body)
 	case *ast.IfStmt:
 		if n.Else == nil && f.onlyFailsTest(n.Body) {
 			*f.found = append(*f.found, f.fset.Position(n.Pos()))
@@ -131,9 +134,10 @@ func (f finder) Visit(n ast.Node) ast.Visitor {
 }
 
 // withParams returns a finder that also knows fn's testing parameters. A
-// parameter of any other type shadows an outer testing parameter of the same
-// name.
-func (f finder) withParams(fn *ast.FuncType) finder {
+// parameter of any other type, or a local variable declared in body, shadows
+// a testing parameter of the same name; the check then skips that name in
+// this function rather than guess which declaration a call refers to.
+func (f finder) withParams(fn *ast.FuncType, body *ast.BlockStmt) finder {
 	params := maps.Clone(f.params)
 	if params == nil {
 		params = map[string]string{}
@@ -148,8 +152,49 @@ func (f finder) withParams(fn *ast.FuncType) finder {
 			}
 		}
 	}
+	for name := range localNames(body) {
+		delete(params, name)
+	}
 	f.params = params
 	return f
+}
+
+// localNames returns the variables body declares with :=, var, or range.
+// Nested function literals are skipped; they get their own scope when the
+// walk reaches them.
+func localNames(body *ast.BlockStmt) map[string]bool {
+	names := map[string]bool{}
+	if body == nil {
+		return names
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.AssignStmt:
+			if n.Tok == token.DEFINE {
+				for _, lhs := range n.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						names[id.Name] = true
+					}
+				}
+			}
+		case *ast.ValueSpec:
+			for _, id := range n.Names {
+				names[id.Name] = true
+			}
+		case *ast.RangeStmt:
+			if n.Tok == token.DEFINE {
+				for _, expr := range []ast.Expr{n.Key, n.Value} {
+					if id, ok := expr.(*ast.Ident); ok {
+						names[id.Name] = true
+					}
+				}
+			}
+		}
+		return true
+	})
+	return names
 }
 
 // onlyFailsTest reports whether body is just a Fatal, Fatalf, Error, or
