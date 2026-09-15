@@ -34,6 +34,16 @@ const (
 		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}]}\n\n" +
 		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n" +
 		"data: [DONE]\n\n"
+	// sampleChatStreamIncludeUsage is the shape OpenAI sends when the gateway
+	// forces stream_options.include_usage (the default): every chunk carries
+	// "usage":null and only the last one has token counts.
+	sampleChatStreamIncludeUsage = "" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world\"},\"finish_reason\":null}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":null}\n\n" +
+		"data: {\"id\":\"chatcmpl-bench\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"gpt-4o-mini\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8}}\n\n" +
+		"data: [DONE]\n\n"
 )
 
 // benchProvider is a mock provider. When models is empty it advertises a single
@@ -322,17 +332,25 @@ func BenchmarkOpenAIResponsesStreamConverter(b *testing.B) {
 }
 
 func BenchmarkSharedStreamingAuditAndUsageObservers(b *testing.B) {
-	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true, LogBodies: true})
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true, LogBodies: true}, sampleChatStream)
 }
 
 // BenchmarkSharedStreamingObserversDefaultConfig runs the same pipeline with
-// audit body capture disabled — the default configuration, where the stream
-// can skip decoding content-delta chunks.
+// audit body capture disabled, where the stream can skip decoding
+// content-delta chunks. Body capture is on by default (config.LogConfig), so
+// this measures deployments that turned it off.
 func BenchmarkSharedStreamingObserversDefaultConfig(b *testing.B) {
-	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true})
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true}, sampleChatStream)
 }
 
-func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config) {
+// BenchmarkSharedStreamingObserversIncludeUsage is the body-capture-off
+// pipeline over the stream shape OpenAI sends with include_usage forced on,
+// where every content chunk carries "usage":null.
+func BenchmarkSharedStreamingObserversIncludeUsage(b *testing.B) {
+	benchmarkSharedStreamingObservers(b, auditlog.Config{Enabled: true}, sampleChatStreamIncludeUsage)
+}
+
+func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config, sse string) {
 	auditLogger := benchAuditLogger{cfg: auditCfg}
 	usageLogger := benchUsageLogger{cfg: usage.Config{Enabled: true}}
 	// Labels mirror a tagged request so the guard exercises the labelled path.
@@ -362,7 +380,7 @@ func benchmarkSharedStreamingObservers(b *testing.B, auditCfg auditlog.Config) {
 		usageObserver.SetLabels(labels)
 
 		stream := streaming.NewObservedSSEStream(
-			io.NopCloser(strings.NewReader(sampleChatStream)),
+			io.NopCloser(strings.NewReader(sse)),
 			auditlog.NewStreamLogObserver(auditLogger, entry, "/v1/chat/completions"),
 			usageObserver,
 		)
