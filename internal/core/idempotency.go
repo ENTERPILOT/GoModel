@@ -36,8 +36,9 @@ func IdempotencyKey(ctx context.Context) string {
 	}
 	// Snapshot headers are cloned from the inbound http.Header, whose keys
 	// net/http has already canonicalized.
+	// A repeated header is ambiguous, so it forwards nothing.
 	values := GetRequestSnapshot(ctx).HeadersView()[IdempotencyKeyHeader]
-	if len(values) == 0 {
+	if len(values) != 1 {
 		return ""
 	}
 	return validIdempotencyKey(values[0])

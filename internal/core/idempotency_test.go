@@ -38,6 +38,14 @@ func TestIdempotencyKey_FromRequestSnapshot(t *testing.T) {
 	}
 }
 
+func TestIdempotencyKey_RepeatedHeaderForwardsNothing(t *testing.T) {
+	for _, values := range [][]string{{"req-1", "req-2"}, {"", "req-2"}} {
+		header := http.Header{"Idempotency-Key": values}
+		snapshot := NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, header, "", nil, false, "req-id", nil)
+		assert.Empty(t, IdempotencyKey(WithRequestSnapshot(context.Background(), snapshot)), "values %q", values)
+	}
+}
+
 func TestIdempotencyKey_Overrides(t *testing.T) {
 	assert.Empty(t, IdempotencyKey(context.Background()))
 	assert.Empty(t, IdempotencyKey(WithRequestSnapshot(context.Background(), NewRequestSnapshot(http.MethodPost, "/v1/chat/completions", nil, nil, nil, "", nil, false, "req-id", nil))))
