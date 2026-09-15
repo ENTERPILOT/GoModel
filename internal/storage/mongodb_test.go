@@ -1,10 +1,50 @@
 package storage
 
 import (
+	"context"
+	"os"
+	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 )
+
+// TestNewMongoDBConnectsAndPings runs only when MONGO_TEST_DSN names a
+// reachable server; it never writes, so a throwaway database name suffices.
+func TestNewMongoDBConnectsAndPings(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv(mongotest.DSNEnv))
+	if dsn == "" {
+		t.Skipf("%s not set", mongotest.DSNEnv)
+	}
+	ctx := context.Background()
+
+	store, err := NewMongoDB(ctx, MongoDBConfig{URL: dsn, Database: "gomodel_test_storage_ping"})
+	if err != nil {
+		t.Fatalf("NewMongoDB: %v", err)
+	}
+	checker, ok := store.(HealthChecker)
+	if !ok {
+		t.Fatalf("%T does not implement HealthChecker", store)
+	}
+	if err := checker.Ping(ctx); err != nil {
+		t.Errorf("Ping: %v", err)
+	}
+	if got := store.Database().Name(); got != "gomodel_test_storage_ping" {
+		t.Errorf("Database().Name() = %q, want gomodel_test_storage_ping", got)
+	}
+	if err := store.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+	if err := checker.Ping(ctx); err == nil {
+		t.Error("Ping after Close = nil, want error")
+	}
+}
+
+func TestNewMongoDBRequiresURL(t *testing.T) {
+	if _, err := NewMongoDB(context.Background(), MongoDBConfig{}); err == nil {
+		t.Fatal("NewMongoDB with empty URL = nil error, want error")
+	}
+}
 
 func TestResolveMongoDatabase(t *testing.T) {
 	tests := []struct {
@@ -66,8 +106,9 @@ func TestResolveMongoDatabase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveMongoDatabase(tt.cfg)
-			assert.Equal(t, tt.want, got, "resolveMongoDatabase(%+v) = %q, want %q", tt.cfg, got, tt.want)
+			if got := resolveMongoDatabase(tt.cfg); got != tt.want {
+				t.Errorf("resolveMongoDatabase(%+v) = %q, want %q", tt.cfg, got, tt.want)
+			}
 		})
 	}
 }

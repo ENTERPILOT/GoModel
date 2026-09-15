@@ -175,7 +175,8 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) erro
 	_, err := s.collection.InsertMany(ctx, docs, opts)
 	if err != nil {
 		// Check if it's a bulk write error with some successes
-		if bulkErr, ok := errors.AsType[*mongo.BulkWriteException](err); ok {
+		// The driver returns the exception by value, so match the value type.
+		if bulkErr, ok := errors.AsType[mongo.BulkWriteException](err); ok {
 			failedCount := len(bulkErr.WriteErrors)
 			// Log for visibility
 			slog.Warn("partial audit log insert failure",
@@ -189,7 +190,7 @@ func (s *MongoDBStore) WriteBatch(ctx context.Context, entries []*LogEntry) erro
 			return &PartialWriteError{
 				TotalEntries: len(entries),
 				FailedCount:  failedCount,
-				Cause:        *bulkErr,
+				Cause:        bulkErr,
 			}
 		}
 		return fmt.Errorf("failed to insert audit logs: %w", err)

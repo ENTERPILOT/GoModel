@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/enterpilot/gomodel/internal/storage/sqlx"
-	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -146,11 +144,8 @@ func TestFoldRequestStats_ZeroFillStopsAtNow(t *testing.T) {
 	require.Empty(t, stats.ProviderLatency)
 }
 
-func TestSQLReaderGetRequestStats(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-
+func TestReaderGetRequestStats(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		day := time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC)
 		entries := []*LogEntry{
 			{ID: "ok-1", Timestamp: day.Add(10*time.Hour + 15*time.Minute), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 100e6},
@@ -164,10 +159,7 @@ func TestSQLReaderGetRequestStats(t *testing.T) {
 			// Outside the queried range.
 			{ID: "next-day", Timestamp: day.Add(30 * time.Hour), Provider: "openai", ProviderName: "openai-prod", StatusCode: 200, DurationNs: 100e6},
 		}
-		err = store.WriteBatch(context.Background(), entries)
-		require.NoError(t, err)
-
-		reader, err := NewSQLReader(db)
+		err := store.WriteBatch(context.Background(), entries)
 		require.NoError(t, err)
 
 		stats, err := reader.GetRequestStats(context.Background(), RequestStatsParams{
@@ -212,11 +204,8 @@ func TestSQLReaderGetRequestStats(t *testing.T) {
 	})
 }
 
-func TestSQLReaderGetRequestStats_FiltersByUserPathSubtree(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-
+func TestReaderGetRequestStats_FiltersByUserPathSubtree(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		day := time.Date(2026, 1, 16, 0, 0, 0, 0, time.UTC)
 		entries := []*LogEntry{
 			{ID: "alpha", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6, UserPath: "/team/alpha"},
@@ -225,10 +214,7 @@ func TestSQLReaderGetRequestStats_FiltersByUserPathSubtree(t *testing.T) {
 			{ID: "beta", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6, UserPath: "/team/beta"},
 			{ID: "no-path", Timestamp: day.Add(10 * time.Hour), Provider: "openai", StatusCode: 200, DurationNs: 100e6},
 		}
-		err = store.WriteBatch(context.Background(), entries)
-		require.NoError(t, err)
-
-		reader, err := NewSQLReader(db)
+		err := store.WriteBatch(context.Background(), entries)
 		require.NoError(t, err)
 
 		tests := []struct {

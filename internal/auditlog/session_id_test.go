@@ -62,17 +62,9 @@ func TestSQLStore_SessionIDRoundtripAndFilter(t *testing.T) {
 	})
 }
 
-func TestSQLReader_GetConversationUsesKeysetPagination(t *testing.T) {
-	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
-		store, err := newSQLStoreForTest(t, db, 0)
-		require.NoError(t, err)
-
-		defer store.Close()
-
+func TestReader_GetConversationUsesKeysetPagination(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
 		ctx := context.Background()
-		reader, err := NewSQLReader(db)
-		require.NoError(t, err)
-
 		base := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
 		cases := []struct {
 			name      string
