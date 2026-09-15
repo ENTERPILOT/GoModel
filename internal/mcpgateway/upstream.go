@@ -10,9 +10,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -135,7 +137,7 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 	dialCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 	defer cancel()
 
-	transport, err := u.transport()
+	transport, probe, err := u.transport()
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +148,7 @@ func (u *upstream) ensureSessionLocked(ctx context.Context) (*mcp.ClientSession,
 	}, u.clientOptions())
 	session, err = client.Connect(dialCtx, transport, nil)
 	if err != nil {
-		return nil, fmt.Errorf("connect to mcp server %q: %w", u.spec.Name, err)
+		return nil, u.connectError(err, probe)
 	}
 
 	u.stateMu.Lock()
@@ -183,19 +185,22 @@ func (u *upstream) clientOptions() *mcp.ClientOptions {
 	}
 }
 
-// transport builds a fresh transport for one dial attempt.
-func (u *upstream) transport() (mcp.Transport, error) {
+// transport builds a fresh transport for one dial attempt. HTTP transports
+// also return the probe watching that dial (nil for stdio); see connectError.
+func (u *upstream) transport() (mcp.Transport, *connectProbe, error) {
 	switch u.spec.Transport {
 	case "http", "":
+		probe := &connectProbe{method: http.MethodPost}
 		return &mcp.StreamableClientTransport{
 			Endpoint:   u.spec.URL,
-			HTTPClient: u.httpClientWithHeaders(),
-		}, nil
+			HTTPClient: u.dialClient(probe),
+		}, probe, nil
 	case "sse":
+		probe := &connectProbe{method: http.MethodGet}
 		return &mcp.SSEClientTransport{
 			Endpoint:   u.spec.URL,
-			HTTPClient: u.httpClientWithHeaders(),
-		}, nil
+			HTTPClient: u.dialClient(probe),
+		}, probe, nil
 	case "stdio":
 		cmd := exec.Command(u.spec.Command, u.spec.Args...)
 		// Start from a minimal environment, not os.Environ(): the gateway
@@ -215,35 +220,109 @@ func (u *upstream) transport() (mcp.Transport, error) {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 		cmd.Stderr = os.Stderr
-		return &mcp.CommandTransport{Command: cmd}, nil
+		return &mcp.CommandTransport{Command: cmd}, nil, nil
 	default:
-		return nil, fmt.Errorf("mcp server %q: unsupported transport %q", u.spec.Name, u.spec.Transport)
+		return nil, nil, fmt.Errorf("mcp server %q: unsupported transport %q", u.spec.Name, u.spec.Transport)
 	}
 }
 
-// httpClientWithHeaders overlays the configured static headers on the shared
-// HTTP client. The headers carry the upstream credential; the client's own
-// bearer token was terminated at the gateway and is never forwarded.
-func (u *upstream) httpClientWithHeaders() *http.Client {
+// dialClient overlays the connect probe and the configured static headers on
+// the shared HTTP client. The headers carry the upstream credential; the
+// client's own bearer token was terminated at the gateway and is never
+// forwarded.
+func (u *upstream) dialClient(probe *connectProbe) *http.Client {
 	base := u.httpClient
 	if base == nil {
 		base = http.DefaultClient
 	}
-	if len(u.spec.Headers) == 0 {
-		return base
-	}
-	clone := *base
 	transport := base.Transport
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	clone.Transport = &headerRoundTripper{
-		base:    transport,
-		headers: u.spec.Headers,
-		origin:  requestOrigin(u.spec.URL),
+	if len(u.spec.Headers) > 0 {
+		transport = &headerRoundTripper{
+			base:    transport,
+			headers: u.spec.Headers,
+			origin:  requestOrigin(u.spec.URL),
+		}
 	}
+	probe.base = transport
+	clone := *base
+	clone.Transport = probe
 	return &clone
 }
+
+// connectProbe watches one dial and remembers how the URL answered the first
+// request of its handshake: the POST of a streamable transport, the GET of an
+// SSE one. A 404 or 405 there means something listens at the URL but no MCP
+// endpoint does — almost always a wrong path, since servers mount their
+// endpoint under different paths. The SDK reports that as a bare "Not Found",
+// which reads like a session problem; connectError turns it into a hint about
+// the URL. Only that first request counts: a later 404 on a request carrying
+// a session ID is the server dropping that session, not a missing endpoint,
+// and stateless servers legitimately answer the standalone SSE GET with 405.
+type connectProbe struct {
+	base    http.RoundTripper
+	method  string
+	decided atomic.Bool
+	status  atomic.Int32
+}
+
+func (p *connectProbe) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := p.base.RoundTrip(req)
+	if err != nil || req.Method != p.method || !p.decided.CompareAndSwap(false, true) {
+		return resp, err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		p.status.Store(int32(resp.StatusCode))
+	}
+	return resp, err
+}
+
+// missingEndpoint returns the status of the dial's first handshake request
+// when it showed no MCP endpoint at the URL, and 0 otherwise.
+func (p *connectProbe) missingEndpoint() int {
+	if p == nil {
+		return 0
+	}
+	return int(p.status.Load())
+}
+
+// connectError wraps a failed dial, pointing at the URL path when the probe
+// saw that nothing MCP is served there. Only the origin is ever named: the
+// path and query stay out of errors and logs because some servers carry
+// credentials in them.
+func (u *upstream) connectError(err error, probe *connectProbe) error {
+	err = redactDialError(err)
+	if status := probe.missingEndpoint(); status != 0 {
+		return fmt.Errorf("connect to mcp server %q: %s answered HTTP %d %s; no MCP endpoint at that path, check the url: %w",
+			u.spec.Name, requestOrigin(u.spec.URL), status, http.StatusText(status), err)
+	}
+	return fmt.Errorf("connect to mcp server %q: %w", u.spec.Name, err)
+}
+
+// redactDialError trims every URL quoted in a transport failure to its
+// origin. The HTTP client's *url.Error carries the request URL, and Go masks
+// only its password, leaving userinfo, path, and query — all places a
+// credential can sit. The SDK formats that error into a string several
+// layers up, so the text is rewritten rather than the chain unwrapped; dial
+// errors are only ever logged and displayed.
+func redactDialError(err error) error {
+	text := err.Error()
+	redacted := quotedURL.ReplaceAllStringFunc(text, func(match string) string {
+		if origin := requestOrigin(match[1 : len(match)-1]); origin != "" {
+			return `"` + origin + `"`
+		}
+		return `"redacted"`
+	})
+	if redacted == text {
+		return err
+	}
+	return errors.New(redacted)
+}
+
+// quotedURL matches the %q-formatted URL inside a *url.Error message.
+var quotedURL = regexp.MustCompile(`"https?://[^"\s]+"`)
 
 type headerRoundTripper struct {
 	base    http.RoundTripper
