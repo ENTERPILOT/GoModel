@@ -46,27 +46,58 @@ func TestUpstreamConnectsToStatelessServer(t *testing.T) {
 
 // TestUpstreamConnectNamesMissingEndpoint covers a URL whose path serves no
 // MCP endpoint (the usual misconfiguration): the error must point at the
-// path instead of surfacing the SDK's bare "Not Found", and must not leak
-// credentials carried in the URL.
+// path instead of surfacing the SDK's bare "Not Found", naming only the
+// origin so credentials in the path or query never reach logs.
 func TestUpstreamConnectNamesMissingEndpoint(t *testing.T) {
 	ts := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(ts.Close)
 
-	u := newUpstream(testSpec("alpha", ts.URL+"/wrong?token=secret", nil), ts.Client())
+	u := newUpstream(testSpec("alpha", ts.URL+"/path-secret?token=query-secret", nil), ts.Client())
 	err := u.refresh(context.Background())
 	if err == nil {
 		t.Fatalf("refresh() against a non-MCP path should error")
 	}
-	for _, want := range []string{`connect to mcp server "alpha"`, "HTTP 404 Not Found", ts.URL + "/wrong", "check the url"} {
+	for _, want := range []string{`connect to mcp server "alpha"`, ts.URL + " answered HTTP 404 Not Found", "check the url"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error = %q, want it to contain %q", err, want)
 		}
 	}
-	if strings.Contains(err.Error(), "secret") {
-		t.Fatalf("error = %q leaks the URL query", err)
+	for _, leak := range []string{"path-secret", "query-secret"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("error = %q leaks %q from the URL", err, leak)
+		}
 	}
 	view := u.view()
 	if view.Status != StatusDegraded || view.LastError != err.Error() {
 		t.Fatalf("view = %+v, want degraded with the connect error", view)
+	}
+}
+
+// TestUpstreamConnectKeepsSessionLossDiagnosis covers a stateful server that
+// accepts initialize and then drops the session: the 404 arrives on a later
+// request, so the error must stay the SDK's session failure rather than
+// blame a URL that did serve the handshake.
+func TestUpstreamConnectKeepsSessionLossDiagnosis(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	inner := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Mcp-Session-Id") != "" {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+
+	u := newUpstream(testSpec("alpha", ts.URL, nil), ts.Client())
+	err := u.refresh(context.Background())
+	if err == nil {
+		t.Fatalf("refresh() against a server dropping its session should error")
+	}
+	if strings.Contains(err.Error(), "no MCP endpoint") {
+		t.Fatalf("error = %q misreports a lost session as a missing endpoint", err)
+	}
+	if !strings.Contains(err.Error(), `connect to mcp server "alpha"`) {
+		t.Fatalf("error = %q, want the connect wrapper", err)
 	}
 }

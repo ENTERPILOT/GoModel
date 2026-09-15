@@ -251,28 +251,34 @@ func (u *upstream) dialClient(probe *connectProbe) *http.Client {
 	return &clone
 }
 
-// connectProbe watches the HTTP responses of one dial. A 404 or 405 to a POST
-// means something answers at the URL but no MCP endpoint does — almost always
-// a wrong path, since servers mount their endpoint under different paths. The
-// SDK reports that as a bare "Not Found", which reads like a session problem;
-// connectError turns it into a hint about the URL. GETs are ignored because
-// stateless servers legitimately answer the standalone SSE GET with 405.
+// connectProbe watches one dial and remembers how the URL answered its first
+// POST. A 404 or 405 there means something listens at the URL but no MCP
+// endpoint does — almost always a wrong path, since servers mount their
+// endpoint under different paths. The SDK reports that as a bare "Not Found",
+// which reads like a session problem; connectError turns it into a hint about
+// the URL. Only the first POST counts: a later 404 on a request carrying a
+// session ID is the server dropping that session, not a missing endpoint.
+// GETs are ignored because stateless servers legitimately answer the
+// standalone SSE GET with 405.
 type connectProbe struct {
-	base   http.RoundTripper
-	status atomic.Int32
+	base    http.RoundTripper
+	decided atomic.Bool
+	status  atomic.Int32
 }
 
 func (p *connectProbe) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := p.base.RoundTrip(req)
-	if err == nil && req.Method != http.MethodGet &&
-		(resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+	if err != nil || req.Method == http.MethodGet || !p.decided.CompareAndSwap(false, true) {
+		return resp, err
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
 		p.status.Store(int32(resp.StatusCode))
 	}
 	return resp, err
 }
 
-// missingEndpoint returns the recorded status, or 0 when every POST of the
-// dial reached an MCP endpoint.
+// missingEndpoint returns the status of the dial's first POST when it showed
+// no MCP endpoint at the URL, and 0 otherwise.
 func (p *connectProbe) missingEndpoint() int {
 	if p == nil {
 		return 0
@@ -280,27 +286,16 @@ func (p *connectProbe) missingEndpoint() int {
 	return int(p.status.Load())
 }
 
-// connectError wraps a failed dial, naming the URL path when the probe saw
-// that nothing MCP is served there.
+// connectError wraps a failed dial, pointing at the URL path when the probe
+// saw that nothing MCP is served there. Only the origin is named: the path
+// and query stay out of errors and logs because some servers carry
+// credentials in them.
 func (u *upstream) connectError(err error, probe *connectProbe) error {
 	if status := probe.missingEndpoint(); status != 0 {
 		return fmt.Errorf("connect to mcp server %q: %s answered HTTP %d %s; no MCP endpoint at that path, check the url: %w",
-			u.spec.Name, endpointForLog(u.spec.URL), status, http.StatusText(status), err)
+			u.spec.Name, requestOrigin(u.spec.URL), status, http.StatusText(status), err)
 	}
 	return fmt.Errorf("connect to mcp server %q: %w", u.spec.Name, err)
-}
-
-// endpointForLog renders the configured URL without userinfo or query, which
-// may carry credentials.
-func endpointForLog(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "the configured url"
-	}
-	parsed.User = nil
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return parsed.String()
 }
 
 type headerRoundTripper struct {
