@@ -74,6 +74,31 @@ func TestUpstreamConnectNamesMissingEndpoint(t *testing.T) {
 	}
 }
 
+// TestUpstreamConnectNamesTransportMismatch covers a 405 on the handshake:
+// a streamable HTTP endpoint configured as sse (or the reverse) exists at the
+// path, so the hint must point at the transport rather than only the url.
+func TestUpstreamConnectNamesTransportMismatch(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "alpha", Version: "test"}, nil)
+	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
+		&mcp.StreamableHTTPOptions{Stateless: true})
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+
+	u := newUpstream(testSpec("alpha", ts.URL, func(spec *ServerSpec) { spec.Transport = "sse" }), ts.Client())
+	err := u.refresh(context.Background())
+	if err == nil {
+		t.Fatalf("refresh() with the wrong transport should error")
+	}
+	for _, want := range []string{ts.URL + " answered HTTP 405 Method Not Allowed to the sse handshake", "check the transport and the url"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to contain %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "no MCP endpoint at that path") {
+		t.Fatalf("error = %q blames the path for a transport mismatch", err)
+	}
+}
+
 // TestUpstreamConnectKeepsSessionLossDiagnosis covers a stateful server that
 // accepts initialize and then drops the session: the 404 arrives on a later
 // request, so the error must stay the SDK's session failure rather than

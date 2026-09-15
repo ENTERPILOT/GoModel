@@ -159,6 +159,7 @@ filters.
 | Connected with no tools | The key's `user_path`, the server's visibility settings, and allowed/disallowed tool filters |
 | Server is degraded | Open its catalog in the dashboard, inspect the last error, then use **Reconnect** |
 | Last error says `no MCP endpoint at that path` (older releases: `session not found` during the initial connection) | The server's `url` includes its MCP endpoint path, for example `/http` for mcp-devtools or `/v2/mcp` for Firecrawl |
+| Last error mentions `HTTP 405 Method Not Allowed` | The server's `transport` matches the endpoint: `http` for streamable HTTP, `sse` only for legacy SSE servers |
 | Works locally but not remotely | The public URL, TLS certificate, firewall, and reverse-proxy forwarding for `/mcp` |
 
 GoModel uses bearer authentication rather than an interactive OAuth flow for

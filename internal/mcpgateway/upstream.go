@@ -288,17 +288,33 @@ func (p *connectProbe) missingEndpoint() int {
 	return int(p.status.Load())
 }
 
-// connectError wraps a failed dial, pointing at the URL path when the probe
-// saw that nothing MCP is served there. Only the origin is ever named: the
+// connectError wraps a failed dial, pointing at the URL path or transport
+// when the probe saw that the handshake never reached an MCP endpoint. A 404
+// means nothing is mounted at the path. A 405 means the path exists but
+// rejects the handshake method, which is what a streamable HTTP endpoint
+// answers to the SSE transport's GET (and an SSE endpoint to a POST), so the
+// transport is the first thing to check. Only the origin is ever named: the
 // path and query stay out of errors and logs because some servers carry
 // credentials in them.
 func (u *upstream) connectError(err error, probe *connectProbe) error {
 	err = redactDialError(err)
-	if status := probe.missingEndpoint(); status != 0 {
-		return fmt.Errorf("connect to mcp server %q: %s answered HTTP %d %s; no MCP endpoint at that path, check the url: %w",
-			u.spec.Name, requestOrigin(u.spec.URL), status, http.StatusText(status), err)
+	switch status := probe.missingEndpoint(); status {
+	case http.StatusNotFound:
+		return fmt.Errorf("connect to mcp server %q: %s answered HTTP 404 Not Found; no MCP endpoint at that path, check the url: %w",
+			u.spec.Name, requestOrigin(u.spec.URL), err)
+	case http.StatusMethodNotAllowed:
+		return fmt.Errorf("connect to mcp server %q: %s answered HTTP 405 Method Not Allowed to the %s handshake; the endpoint likely speaks the other transport, check the transport and the url: %w",
+			u.spec.Name, requestOrigin(u.spec.URL), u.transportName(), err)
 	}
 	return fmt.Errorf("connect to mcp server %q: %w", u.spec.Name, err)
+}
+
+// transportName is the configured transport with the default made explicit.
+func (u *upstream) transportName() string {
+	if u.spec.Transport == "" {
+		return "http"
+	}
+	return u.spec.Transport
 }
 
 // redactDialError trims every URL quoted in a transport failure to its
