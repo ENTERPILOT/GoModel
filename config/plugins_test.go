@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -86,4 +87,85 @@ func TestLoad_PluginsEnabledFlag(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestApplyPluginsLoadEnv(t *testing.T) {
+	sha := strings.Repeat("ab", 32) // 64 hex chars
+	t.Setenv("PLUGINS_LOAD", "a.so, b.so="+sha+", , c.so")
+
+	cfg := &Config{}
+	require.NoError(t, applyEnvOverrides(cfg))
+	require.Equal(t, []PluginFileConfig{
+		{File: "a.so"},
+		{File: "b.so", SHA256: sha},
+		{File: "c.so"},
+	}, cfg.Plugins.Load)
+}
+
+func TestApplyPluginsLoadEnvDelimiterBearingFilenames(t *testing.T) {
+	sha := strings.Repeat("ab", 32) // 64 hex chars
+	tests := []struct {
+		name string
+		env  string
+		want []PluginFileConfig
+	}{
+		{"equals in filename", "equals=name.so", []PluginFileConfig{{File: "equals=name.so"}}},
+		{"digest on last equals", "f=oo.so=" + sha, []PluginFileConfig{{File: "f=oo.so", SHA256: sha}}},
+		{"short digest is filename", "file=deadbeef", []PluginFileConfig{{File: "file=deadbeef"}}},
+		{"non-hex 64-char suffix is filename", "file.so=" + strings.Repeat("a", 63) + "Z", []PluginFileConfig{{File: "file.so=" + strings.Repeat("a", 63) + "Z"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PLUGINS_LOAD", tt.env)
+			cfg := &Config{}
+			require.NoError(t, applyEnvOverrides(cfg))
+			require.Equal(t, tt.want, cfg.Plugins.Load)
+		})
+	}
+}
+
+func TestApplyPluginsLoadEnvReplacesConfigFileList(t *testing.T) {
+	t.Setenv("PLUGINS_LOAD", "b.so, c.so")
+
+	cfg := &Config{Plugins: PluginsConfig{Load: []PluginFileConfig{{File: "a.so"}}}}
+	require.NoError(t, applyEnvOverrides(cfg))
+	require.Equal(t, []PluginFileConfig{
+		{File: "b.so"},
+		{File: "c.so"},
+	}, cfg.Plugins.Load)
+}
+
+func TestApplyPluginsLoadEnvEmpty(t *testing.T) {
+	t.Setenv("PLUGINS_LOAD", "  ")
+	cfg := &Config{Plugins: PluginsConfig{Load: []PluginFileConfig{{File: "a.so"}}}}
+	require.NoError(t, applyEnvOverrides(cfg))
+	require.Equal(t, []PluginFileConfig{{File: "a.so"}}, cfg.Plugins.Load, "whitespace-only env must leave the config list untouched")
+}
+
+func TestLoad_PluginsLoadEnv(t *testing.T) {
+	sha := strings.Repeat("ab", 32) // 64 hex chars
+
+	t.Run("env list lands in Plugins.Load", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		t.Setenv("PLUGINS_LOAD", "optical_compression.so,keyword_block.so="+sha)
+		withTempDir(t, func(string) {
+			result, err := Load()
+			require.NoError(t, err)
+			require.Equal(t, []PluginFileConfig{
+				{File: "optical_compression.so"},
+				{File: "keyword_block.so", SHA256: sha},
+			}, result.Config.Plugins.Load)
+		})
+	})
+
+	t.Run("env replaces config.yaml list", func(t *testing.T) {
+		clearAllConfigEnvVars(t)
+		t.Setenv("PLUGINS_LOAD", "b.so")
+		withTempDir(t, func(dir string) {
+			writeConfigYAML(t, dir, "plugins:\n  load:\n    - file: a.so\n")
+			result, err := Load()
+			require.NoError(t, err)
+			require.Equal(t, []PluginFileConfig{{File: "b.so"}}, result.Config.Plugins.Load)
+		})
+	})
 }
