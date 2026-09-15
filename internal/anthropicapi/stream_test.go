@@ -199,6 +199,17 @@ func TestStreamConverterFinishWithoutDoneEndsCleanly(t *testing.T) {
 	assert.Equal(t, "message_stop", got[len(got)-1])
 }
 
+func TestStreamConverterFinishedTurnSurvivesTrailingReadError(t *testing.T) {
+	finished := `data: {"id":"chatcmpl-3","choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}` + "\n\n"
+	body := &failingReader{body: strings.NewReader(finished), err: io.ErrClosedPipe}
+	conv := NewStreamConverter(io.NopCloser(body), "m", 0)
+
+	out, err := io.ReadAll(conv)
+	require.NoError(t, err)
+	assert.Contains(t, string(out), "event: message_stop")
+	assert.NotContains(t, string(out), "event: error")
+}
+
 func TestStreamConverterStopSequence(t *testing.T) {
 	// The anthropic provider carries a natively-reported stop sequence as a
 	// delta extension field; the converter must surface it per the Anthropic

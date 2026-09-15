@@ -2,23 +2,34 @@ package server
 
 import (
 	"bytes"
-	"errors"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/goccy/go-json"
 	"github.com/tidwall/gjson"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
-// ErrStreamIncomplete reports a provider stream that ended before its
-// terminal event.
-var ErrStreamIncomplete = errors.New("provider stream ended before completion")
+const (
+	// maxGuardLineBytes caps how much of one SSE line the completion guard
+	// parses as JSON.
+	maxGuardLineBytes = 64 * 1024
+	// guardEdgeBytes is how much of each end of a longer line is kept to
+	// classify it: a large final chat chunk or a response.completed event
+	// that carries the whole response.
+	guardEdgeBytes = 4 * 1024
+)
 
-// maxGuardLineBytes caps how much of one SSE line the completion guard keeps
-// to classify it. Terminal events are small; a longer line is content.
-const maxGuardLineBytes = 64 * 1024
+// Terminal markers of a payload too long to parse. Quotes escaped inside
+// string content never match them.
+var (
+	longInBandError       = regexp.MustCompile(`^\{\s*"error"\s*:\s*\{`)
+	longChatTerminal      = regexp.MustCompile(`"finish_reason"\s*:\s*"`)
+	longResponsesTerminal = regexp.MustCompile(`"type"\s*:\s*"(?:response\.(?:completed|incomplete|failed|done)|error)"`)
+)
 
 type streamKind int
 
@@ -43,9 +54,9 @@ func streamKindForPath(path string) streamKind {
 // guardStreamCompletion makes a stream that stops before its terminal event
 // end with an explicit error event in the route's dialect, instead of a
 // silent EOF the client cannot tell from a complete answer. The upstream
-// bytes pass through unchanged. After the error event, Read returns the
-// read failure, or ErrStreamIncomplete for a clean EOF, so the truncation is
-// recorded as a stream error.
+// bytes pass through unchanged. After the error event, Read returns the read
+// failure wrapped in streaming.ErrStreamIncomplete, so the truncation is
+// recorded as a provider stream error.
 func guardStreamCompletion(path string, stream io.ReadCloser) io.ReadCloser {
 	kind := streamKindForPath(path)
 	if kind == 0 || stream == nil {
@@ -56,19 +67,22 @@ func guardStreamCompletion(path string, stream io.ReadCloser) io.ReadCloser {
 
 type completionGuard struct {
 	io.ReadCloser
-	kind      streamKind
+	kind streamKind
+	// line holds the current line, or only its first guardEdgeBytes once
+	// longLine is set; tail then holds its last guardEdgeBytes.
 	line      []byte
+	tail      []byte
 	longLine  bool
 	completed bool
-	tail      []byte
+	errEvent  []byte
 	endErr    error
 }
 
 func (g *completionGuard) Read(p []byte) (int, error) {
 	if g.endErr != nil {
-		if len(g.tail) > 0 {
-			n := copy(p, g.tail)
-			g.tail = g.tail[n:]
+		if len(g.errEvent) > 0 {
+			n := copy(p, g.errEvent)
+			g.errEvent = g.errEvent[n:]
 			return n, nil
 		}
 		return 0, g.endErr
@@ -86,11 +100,8 @@ func (g *completionGuard) Read(p []byte) (int, error) {
 	if g.completed {
 		return n, err
 	}
-	g.endErr = err
-	if err == io.EOF {
-		g.endErr = ErrStreamIncomplete
-	}
-	g.tail = streamErrorEvent(g.kind)
+	g.endErr = streaming.IncompleteStreamError(err)
+	g.errEvent = streamErrorEvent(g.kind)
 	return n, nil
 }
 
@@ -109,29 +120,43 @@ func (g *completionGuard) observe(chunk []byte) {
 
 func (g *completionGuard) appendLine(part []byte) {
 	if g.longLine {
+		g.keepTail(part)
 		return
 	}
-	if len(g.line)+len(part) > maxGuardLineBytes {
-		g.longLine = true
-		g.line = g.line[:0]
+	if len(g.line)+len(part) <= maxGuardLineBytes {
+		g.line = append(g.line, part...)
 		return
 	}
-	g.line = append(g.line, part...)
+	// Too long to parse: keep only its first and last guardEdgeBytes.
+	g.longLine = true
+	g.tail = append(g.tail[:0], g.line...)
+	g.keepTail(part)
+	if len(g.line) < guardEdgeBytes {
+		g.line = append(g.line, part[:min(len(part), guardEdgeBytes-len(g.line))]...)
+	}
+	g.line = g.line[:min(len(g.line), guardEdgeBytes)]
+}
+
+func (g *completionGuard) keepTail(part []byte) {
+	g.tail = append(g.tail, part...)
+	if extra := len(g.tail) - guardEdgeBytes; extra > 0 {
+		g.tail = append(g.tail[:0], g.tail[extra:]...)
+	}
 }
 
 func (g *completionGuard) classifyLine() {
-	line := bytes.TrimSpace(g.line)
-	long := g.longLine
-	g.line = g.line[:0]
-	g.longLine = false
-	if long {
-		return
-	}
-	payload, ok := bytes.CutPrefix(line, []byte("data:"))
+	head, tail, long := g.line, g.tail, g.longLine
+	g.line, g.tail, g.longLine = g.line[:0], g.tail[:0], false
+	payload, ok := bytes.CutPrefix(bytes.TrimSpace(head), []byte("data:"))
 	if !ok {
 		return
 	}
-	g.completed = isTerminalPayload(g.kind, bytes.TrimSpace(payload))
+	payload = bytes.TrimSpace(payload)
+	if long {
+		g.completed = isTerminalLongPayload(g.kind, payload, tail)
+		return
+	}
+	g.completed = isTerminalPayload(g.kind, payload)
 }
 
 // isTerminalPayload reports whether one SSE data payload ends the stream: the
@@ -163,10 +188,27 @@ func isTerminalPayload(kind streamKind, payload []byte) bool {
 	return false
 }
 
+// isTerminalLongPayload classifies a payload too long to parse from its
+// first bytes (head) and last bytes (tail): an in-band error opens with its
+// error member, a Responses event names its type before the response it
+// carries, and a chat chunk's finish_reason follows its long delta.
+func isTerminalLongPayload(kind streamKind, head, tail []byte) bool {
+	if longInBandError.Match(head) {
+		return true
+	}
+	switch kind {
+	case chatStream:
+		return longChatTerminal.Match(tail)
+	case responsesStream:
+		return longResponsesTerminal.Match(head)
+	}
+	return false
+}
+
 // streamErrorEvent is the dialect's error event for a truncated stream. The
 // message stays generic: the underlying read error can name upstream hosts.
 func streamErrorEvent(kind streamKind) []byte {
-	message := ErrStreamIncomplete.Error()
+	message := streaming.ErrStreamIncomplete.Error()
 	var out bytes.Buffer
 	out.WriteString("\n")
 	var payload any

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"errors"
+	"context"
 	"io"
 	"strings"
 	"syscall"
@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/enterpilot/gomodel/internal/streaming"
 )
 
 // chunkedStream serves body one chunk per Read, then ends with err.
@@ -89,7 +91,7 @@ func TestGuardStreamCompletion_TruncatedStreamsEndWithErrorEvent(t *testing.T) {
 			path:      "/v1/chat/completions",
 			chunks:    []string{"data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\n"},
 			readErr:   io.EOF,
-			wantErr:   ErrStreamIncomplete,
+			wantErr:   io.ErrUnexpectedEOF,
 			wantEvent: "\ndata: {\"error\":{\"code\":\"stream_incomplete\",\"message\":\"provider stream ended before completion\",\"param\":null,\"type\":\"provider_error\"}}\n\n",
 		},
 		{
@@ -97,7 +99,7 @@ func TestGuardStreamCompletion_TruncatedStreamsEndWithErrorEvent(t *testing.T) {
 			path:      "/v1/chat/completions",
 			chunks:    []string{"data: {\"id\":\"c1\",\"choices\":[{\"delta\":{\"content\":\"hel\n\n"},
 			readErr:   io.EOF,
-			wantErr:   ErrStreamIncomplete,
+			wantErr:   io.ErrUnexpectedEOF,
 			wantEvent: "\"code\":\"stream_incomplete\"",
 		},
 		{
@@ -112,7 +114,7 @@ func TestGuardStreamCompletion_TruncatedStreamsEndWithErrorEvent(t *testing.T) {
 			name:      "empty chat stream",
 			path:      "/v1/chat/completions",
 			readErr:   io.EOF,
-			wantErr:   ErrStreamIncomplete,
+			wantErr:   io.ErrUnexpectedEOF,
 			wantEvent: "\"code\":\"stream_incomplete\"",
 		},
 		{
@@ -120,7 +122,7 @@ func TestGuardStreamCompletion_TruncatedStreamsEndWithErrorEvent(t *testing.T) {
 			path:      "/v1/chat/completions",
 			chunks:    []string{"data: {\"choices\":[{\"delta\":{\"content\":\"a\"},\"finish_reason\":null}]}\n\n"},
 			readErr:   io.EOF,
-			wantErr:   ErrStreamIncomplete,
+			wantErr:   io.ErrUnexpectedEOF,
 			wantEvent: "\"code\":\"stream_incomplete\"",
 		},
 		{
@@ -136,8 +138,8 @@ func TestGuardStreamCompletion_TruncatedStreamsEndWithErrorEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := readGuarded(t, tt.path, &chunkedStream{chunks: append([]string(nil), tt.chunks...), err: tt.readErr})
-			require.Error(t, err)
-			assert.True(t, errors.Is(err, tt.wantErr), "got %v, want %v", err, tt.wantErr)
+			require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+			require.ErrorIs(t, err, tt.wantErr)
 			body := strings.Join(tt.chunks, "")
 			require.True(t, strings.HasPrefix(got, body), "upstream bytes must pass through unchanged")
 			assert.Contains(t, got[len(body):], tt.wantEvent)
@@ -145,9 +147,83 @@ func TestGuardStreamCompletion_TruncatedStreamsEndWithErrorEvent(t *testing.T) {
 	}
 }
 
-func TestGuardStreamCompletion_LongContentLineIsNotTerminal(t *testing.T) {
-	body := "data: {\"choices\":[{\"delta\":{\"content\":\"" + strings.Repeat("a", maxGuardLineBytes) + "\"},\"finish_reason\":\"stop\"}]}\n\n"
-	got, err := readGuarded(t, "/v1/chat/completions", &chunkedStream{chunks: []string{body}, err: io.EOF})
-	require.ErrorIs(t, err, ErrStreamIncomplete)
-	assert.True(t, strings.HasPrefix(got, body))
+func TestGuardStreamCompletion_LargeEvents(t *testing.T) {
+	large := strings.Repeat("a", maxGuardLineBytes)
+	tests := []struct {
+		name     string
+		path     string
+		body     string
+		complete bool
+	}{
+		{
+			name:     "chat final chunk with finish_reason",
+			path:     "/v1/chat/completions",
+			body:     "data: {\"choices\":[{\"delta\":{\"content\":\"" + large + "\"},\"finish_reason\":\"stop\"}]}\n\n",
+			complete: true,
+		},
+		{
+			name:     "responses completed carrying the whole response",
+			path:     "/v1/responses",
+			body:     "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"" + large + "\"}]}]}}\n\n",
+			complete: true,
+		},
+		{
+			name:     "in-band error with a long message",
+			path:     "/v1/chat/completions",
+			body:     "data: {\"error\":{\"message\":\"" + large + "\"}}\n\n",
+			complete: true,
+		},
+		{
+			name: "chat content delta without finish",
+			path: "/v1/chat/completions",
+			body: "data: {\"choices\":[{\"delta\":{\"content\":\"" + large + "\"},\"finish_reason\":null}]}\n\n",
+		},
+		{
+			name: "chat content that quotes a finish_reason",
+			path: "/v1/chat/completions",
+			body: "data: {\"choices\":[{\"delta\":{\"content\":\"" + large + `\"finish_reason\":\"stop\"` + "\"}}]}\n\n",
+		},
+		{
+			name: "responses delta whose text quotes response.completed",
+			path: "/v1/responses",
+			body: "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"" + `\"type\":\"response.completed\"` + large + "\"}\n\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readGuarded(t, tt.path, &chunkedStream{chunks: []string{tt.body}, err: io.EOF})
+			require.True(t, strings.HasPrefix(got, tt.body), "upstream bytes must pass through unchanged")
+			if tt.complete {
+				require.NoError(t, err)
+				assert.Equal(t, tt.body, got)
+				return
+			}
+			require.ErrorIs(t, err, streaming.ErrStreamIncomplete)
+			assert.Contains(t, got[len(tt.body):], "stream_incomplete")
+		})
+	}
+}
+
+func TestClassifyStreamError_ProviderStreamFailures(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want string
+	}{
+		{name: "provider reset", ctx: context.Background(), err: streaming.IncompleteStreamError(syscall.ECONNRESET), want: "stream_error"},
+		{name: "provider closed early", ctx: context.Background(), err: streaming.IncompleteStreamError(io.EOF), want: "stream_error"},
+		{name: "client write reset", ctx: context.Background(), err: syscall.ECONNRESET, want: "client_disconnected"},
+		{name: "client went away mid provider read", ctx: canceled, err: streaming.IncompleteStreamError(context.Canceled), want: "client_disconnected"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, classifyStreamError(tt.ctx, tt.err))
+		})
+	}
 }

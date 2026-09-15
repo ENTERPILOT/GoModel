@@ -82,11 +82,18 @@ EOF. When a provider stream closes or fails before its terminal event
 (`data: [DONE]` or a `finish_reason` for chat completions, a terminal
 `response.*` event for `/v1/responses`, `message_stop` for `/v1/messages`),
 GoModel relays everything received so far and then sends one error event in
-the endpoint's format with the code `stream_incomplete` (for example
-`data: {"error":{"code":"stream_incomplete",...}}` on chat completions). This
-covers malformed chunks, a connection dropped in the middle of a tool call,
-and similar truncations, so a client never mistakes a partial answer for a
-complete one. The request log records the stream as a `stream_error`.
+the endpoint's format:
+
+- chat completions: `data: {"error":{"code":"stream_incomplete",...}}`
+- `/v1/responses`: an `error` event with `"code":"stream_incomplete"`
+- `/v1/messages`: an Anthropic `error` event with `error.type` set to
+  `api_error`
+
+This covers malformed chunks, a connection dropped in the middle of a tool
+call, and similar truncations, so a client never mistakes a partial answer for
+a complete one. A stream that already sent its terminal event stays complete
+even if the connection fails afterwards. The request log records a truncated
+stream as a `stream_error`.
 
 **The circuit breaker** counts transport errors and, by default, `429` and
 all `5xx` responses as failures. One exhausted retry sequence counts as one

@@ -1987,7 +1987,8 @@ func TestHandleStreamingResponse_RecordsStreamingError(t *testing.T) {
 	logged := logger.entries[0]
 	require.Equal(t, "stream_error", logged.ErrorType)
 	require.NotNil(t, logged.Data)
-	require.Equal(t, expectedErr.Error(), logged.Data.ErrorMessage)
+	// The provider read failure is recorded behind the incomplete-stream marker.
+	require.Equal(t, "provider stream ended before completion: "+expectedErr.Error(), logged.Data.ErrorMessage)
 }
 
 func TestHandleStreamingResponse_ClientDisconnectBeforeUpstream(t *testing.T) {

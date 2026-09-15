@@ -112,30 +112,24 @@ type streamConverter struct {
 	endErr error
 }
 
-// errStreamIncomplete is the message of the error event for an upstream chat
-// stream that stopped before it finished.
-const errStreamIncomplete = "provider stream ended before completion"
-
 // finish ends the converted stream when the upstream stops reading. An
 // upstream that signalled completion ([DONE] or a finish_reason) ends with
-// message_stop; one that stopped early, or failed, ends with an error event
-// instead, so a truncated answer is not presented as a finished turn.
+// message_stop, even when the connection fails after that; one that stopped
+// early ends with an error event instead, so a truncated answer is not
+// presented as a finished turn.
 func (sc *streamConverter) finish(err error) {
 	if sc.finalized {
 		return
 	}
-	if err == io.EOF && sc.stopReason != "" {
+	if sc.stopReason != "" {
 		sc.finalize()
 		return
 	}
 	sc.finalized = true
-	sc.endErr = err
-	if err == io.EOF {
-		sc.endErr = io.ErrUnexpectedEOF
-	}
+	sc.endErr = streaming.IncompleteStreamError(err)
 	sc.emit("error", map[string]any{
 		"type":  "error",
-		"error": map[string]any{"type": "api_error", "message": errStreamIncomplete},
+		"error": map[string]any{"type": "api_error", "message": streaming.ErrStreamIncomplete.Error()},
 	})
 }
 
