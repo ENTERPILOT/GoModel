@@ -28,9 +28,13 @@ const anthropicProviderType = "anthropic"
 // signatures, anthropic-beta headers), which Claude Code clients depend on.
 // Features that operate on the canonical translated request take precedence:
 // requests using guardrails patching, response caching, or failover stay on
-// the translated pipeline.
-func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow) bool {
+// the translated pipeline. So does a request replaying an unsigned thinking
+// block, which Anthropic rejects and only the translated pipeline can drop.
+func (s *translatedInferenceService) canForwardMessagesNatively(ctx context.Context, workflow *core.Workflow, unsignedThinking bool) bool {
 	if workflow == nil || strings.TrimSpace(workflow.ProviderType) != anthropicProviderType {
+		return false
+	}
+	if unsignedThinking {
 		return false
 	}
 	if s.translatedRequestPatcher != nil {

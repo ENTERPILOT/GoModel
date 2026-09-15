@@ -2,6 +2,8 @@ package config
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoad_PluginsSection(t *testing.T) {
@@ -17,16 +19,17 @@ plugins:
     - file: /opt/acme/guard.so
 `)
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
+		require.NoError(t, err)
+
 		p := result.Config.Plugins
-		if len(p.SearchPaths) != 2 || p.SearchPaths[0] != "/etc/gomodel/plugins" || p.SearchPaths[1] != "./plugins" {
-			t.Fatalf("SearchPaths = %v", p.SearchPaths)
-		}
-		if len(p.Load) != 2 || p.Load[0].File != "keyword_block.so" || p.Load[0].SHA256 != "abc" || p.Load[1].File != "/opt/acme/guard.so" || p.Load[1].SHA256 != "" {
-			t.Fatalf("Load = %+v", p.Load)
-		}
+		require.Len(t, p.SearchPaths, 2)
+		require.Equal(t, "/etc/gomodel/plugins", p.SearchPaths[0])
+		require.Equal(t, "./plugins", p.SearchPaths[1])
+		require.Len(t, p.Load, 2)
+		require.Equal(t, "keyword_block.so", p.Load[0].File)
+		require.Equal(t, "abc", p.Load[0].SHA256)
+		require.Equal(t, "/opt/acme/guard.so", p.Load[1].File)
+		require.Empty(t, p.Load[1].SHA256)
 	})
 }
 
@@ -35,24 +38,20 @@ func TestLoad_PluginsDefaultsAndEnv(t *testing.T) {
 	t.Setenv("PLUGINS_SEARCH_PATHS", "")
 	withTempDir(t, func(string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-		if len(result.Config.Plugins.SearchPaths) != 0 || len(result.Config.Plugins.Load) != 0 {
-			t.Fatalf("default Plugins = %+v, want empty", result.Config.Plugins)
-		}
+		require.NoError(t, err)
+		require.Empty(t, result.Config.Plugins.SearchPaths)
+		require.Empty(t, result.Config.Plugins.Load, "default Plugins = %+v, want empty", result.Config.Plugins)
 	})
 
 	t.Setenv("PLUGINS_SEARCH_PATHS", "/a, /b ,")
 	withTempDir(t, func(string) {
 		result, err := Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
+		require.NoError(t, err)
+
 		got := result.Config.Plugins.SearchPaths
-		if len(got) != 2 || got[0] != "/a" || got[1] != "/b" {
-			t.Fatalf("SearchPaths from env = %v, want [/a /b]", got)
-		}
+		require.Len(t, got, 2)
+		require.Equal(t, "/a", got[0])
+		require.Equal(t, "/b", got[1])
 	})
 }
 
@@ -81,12 +80,9 @@ func TestLoad_PluginsEnabledFlag(t *testing.T) {
 					writeConfigYAML(t, dir, tt.yaml)
 				}
 				result, err := Load()
-				if err != nil {
-					t.Fatalf("Load() error = %v", err)
-				}
-				if got := result.Config.Plugins.Enabled; got != tt.want {
-					t.Fatalf("Plugins.Enabled = %v, want %v", got, tt.want)
-				}
+				require.NoError(t, err)
+				got := result.Config.Plugins.Enabled
+				require.Equal(t, tt.want, got)
 			})
 		})
 	}

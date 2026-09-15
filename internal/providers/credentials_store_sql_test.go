@@ -2,20 +2,19 @@ package providers
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/require"
 )
 
 func runSQLCredentialStoreTest(t *testing.T, body func(t *testing.T, store *SQLCredentialStore)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLCredentialStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLCredentialStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		body(t, store)
 	})
 }
@@ -35,75 +34,54 @@ func TestSQLCredentialStoreRoundTrip(t *testing.T) {
 			Models:            []string{"gpt-4o", "gpt-4o-mini"},
 			Enabled:           true,
 		}
-		if err := store.Upsert(ctx, cred); err != nil {
-			t.Fatalf("Upsert() error = %v", err)
-		}
+		err := store.Upsert(ctx, cred)
+		require.NoError(t, err)
 
 		got, err := store.Get(ctx, "my-openai")
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got.Type != "openai" || got.BaseURL != cred.BaseURL || !got.Enabled {
-			t.Fatalf("Get() = %+v, want round-tripped row", got)
-		}
-		if len(got.APIKeys) != 2 || got.APIKeys[0] != "sk-one" || got.APIKeys[1] != "sk-two" {
-			t.Fatalf("Get().APIKeys = %v, want [sk-one sk-two]", got.APIKeys)
-		}
-		if len(got.Models) != 2 || got.Models[0] != "gpt-4o" {
-			t.Fatalf("Get().Models = %v, want [gpt-4o gpt-4o-mini]", got.Models)
-		}
-		if got.SessionStickyKeys == nil || *got.SessionStickyKeys {
-			t.Fatalf("Get().SessionStickyKeys = %v, want false", got.SessionStickyKeys)
-		}
-		if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
-			t.Fatalf("Get() timestamps = (%v, %v), want both stamped", got.CreatedAt, got.UpdatedAt)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "openai", got.Type)
+		require.Equal(t, cred.BaseURL, got.BaseURL)
+		require.True(t, got.Enabled, "Get() = %+v, want round-tripped row", got)
+		require.Len(t, got.APIKeys, 2)
+		require.Equal(t, "sk-one", got.APIKeys[0])
+		require.Equal(t, "sk-two", got.APIKeys[1])
+		require.Len(t, got.Models, 2)
+		require.Equal(t, "gpt-4o", got.Models[0])
+		require.NotNil(t, got.SessionStickyKeys)
+		require.False(t, *got.SessionStickyKeys)
+		require.False(t, got.CreatedAt.IsZero())
+		require.False(t, got.UpdatedAt.IsZero(), "Get() timestamps = (%v, %v), want both stamped", got.CreatedAt, got.UpdatedAt)
 
 		// Upsert again with a changed field; CreatedAt must be preserved by the
 		// caller passing it back (the store itself always stamps UpdatedAt).
 		cred.BaseURL = "https://api.openai.com/v2"
 		cred.CreatedAt = got.CreatedAt
-		if err := store.Upsert(ctx, cred); err != nil {
-			t.Fatalf("second Upsert() error = %v", err)
-		}
+		err = store.Upsert(ctx, cred)
+		require.NoError(t, err)
+
 		updated, err := store.Get(ctx, "my-openai")
-		if err != nil {
-			t.Fatalf("Get() after update error = %v", err)
-		}
-		if updated.BaseURL != "https://api.openai.com/v2" {
-			t.Fatalf("updated.BaseURL = %q, want the new value", updated.BaseURL)
-		}
-		if !updated.CreatedAt.Equal(got.CreatedAt) {
-			t.Fatalf("updated.CreatedAt = %v, want unchanged %v", updated.CreatedAt, got.CreatedAt)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "https://api.openai.com/v2", updated.BaseURL)
+		require.True(t, updated.CreatedAt.Equal(got.CreatedAt), "updated.CreatedAt = %v, want unchanged %v", updated.CreatedAt, got.CreatedAt)
 
 		list, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() error = %v", err)
-		}
-		if len(list) != 1 || list[0].Name != "my-openai" {
-			t.Fatalf("List() = %+v, want one row named my-openai", list)
-		}
-
-		if err := store.Delete(ctx, "my-openai"); err != nil {
-			t.Fatalf("Delete() error = %v", err)
-		}
-		if _, err := store.Get(ctx, "my-openai"); !errors.Is(err, ErrCredentialNotFound) {
-			t.Fatalf("Get() after delete error = %v, want ErrCredentialNotFound", err)
-		}
-		if err := store.Delete(ctx, "my-openai"); !errors.Is(err, ErrCredentialNotFound) {
-			t.Fatalf("Delete() of already-deleted row error = %v, want ErrCredentialNotFound", err)
-		}
+		require.NoError(t, err)
+		require.Len(t, list, 1)
+		require.Equal(t, "my-openai", list[0].Name)
+		err = store.Delete(ctx, "my-openai")
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "my-openai")
+		require.ErrorIs(t, err, ErrCredentialNotFound)
+		err = store.Delete(ctx, "my-openai")
+		require.ErrorIs(t, err, ErrCredentialNotFound)
 	})
 }
 
 func TestSQLCredentialStoreGetMissing(t *testing.T) {
 	runSQLCredentialStoreTest(t, func(t *testing.T, store *SQLCredentialStore) {
 		ctx := context.Background()
-
-		if _, err := store.Get(ctx, "missing"); !errors.Is(err, ErrCredentialNotFound) {
-			t.Fatalf("Get() error = %v, want ErrCredentialNotFound", err)
-		}
+		_, err := store.Get(ctx, "missing")
+		require.ErrorIs(t, err, ErrCredentialNotFound)
 	})
 }
 
@@ -112,23 +90,17 @@ func TestSQLCredentialStoreListOrdersByName(t *testing.T) {
 		ctx := context.Background()
 
 		for _, name := range []string{"zeta", "alpha", "mid"} {
-			if err := store.Upsert(ctx, ManagedProviderCredential{Name: name, Type: "openai", Enabled: true}); err != nil {
-				t.Fatalf("Upsert(%q) error = %v", name, err)
-			}
+			err := store.Upsert(ctx, ManagedProviderCredential{Name: name, Type: "openai", Enabled: true})
+			require.NoError(t, err)
 		}
 
 		list, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List() error = %v", err)
-		}
-		if len(list) != 3 {
-			t.Fatalf("len(List()) = %d, want 3", len(list))
-		}
+		require.NoError(t, err)
+		require.Len(t, list, 3)
+
 		want := []string{"alpha", "mid", "zeta"}
 		for i, w := range want {
-			if list[i].Name != w {
-				t.Fatalf("List()[%d].Name = %q, want %q", i, list[i].Name, w)
-			}
+			require.Equal(t, w, list[i].Name)
 		}
 	})
 }

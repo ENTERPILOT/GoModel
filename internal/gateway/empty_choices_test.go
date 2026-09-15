@@ -2,13 +2,13 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDispatchChatCompletionEmptyChoices(t *testing.T) {
@@ -58,29 +58,15 @@ func TestDispatchChatCompletionEmptyChoices(t *testing.T) {
 			response, _, err := orchestrator.DispatchChatCompletion(context.Background(), workflow, &core.ChatRequest{Model: "model1"})
 
 			if tt.wantID != "" {
-				if err != nil {
-					t.Fatalf("DispatchChatCompletion() error = %v", err)
-				}
-				if response.ID != tt.wantID {
-					t.Fatalf("response ID = %q, want %q", response.ID, tt.wantID)
-				}
+				require.NoError(t, err)
+				require.Equal(t, tt.wantID, response.ID)
 			} else {
 				var gatewayErr *core.GatewayError
-				if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusBadGateway {
-					t.Fatalf("DispatchChatCompletion() error = %v, want 502 provider error", err)
-				}
-				if gatewayErr.Message != "provider returned no choices" {
-					t.Fatalf("error message = %q, want %q", gatewayErr.Message, "provider returned no choices")
-				}
+				require.ErrorAs(t, err, &gatewayErr)
+				require.Equal(t, http.StatusBadGateway, gatewayErr.HTTPStatusCode())
+				require.Equal(t, "provider returned no choices", gatewayErr.Message)
 			}
-			if len(calls) != len(tt.wantCalls) {
-				t.Fatalf("upstream calls = %v, want %v", calls, tt.wantCalls)
-			}
-			for i := range calls {
-				if calls[i] != tt.wantCalls[i] {
-					t.Fatalf("upstream calls = %v, want %v", calls, tt.wantCalls)
-				}
-			}
+			require.Equal(t, tt.wantCalls, calls)
 		})
 	}
 }

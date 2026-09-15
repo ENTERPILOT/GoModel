@@ -1,6 +1,10 @@
 package workflows
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestStoredScopeUserPath(t *testing.T) {
 	tests := []struct {
@@ -43,9 +47,8 @@ func TestStoredScopeUserPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := storedScopeUserPath(tt.scopeKey, tt.userPath); got != tt.want {
-				t.Fatalf("storedScopeUserPath(%q, %q) = %q, want %q", tt.scopeKey, tt.userPath, got, tt.want)
-			}
+			got := storedScopeUserPath(tt.scopeKey, tt.userPath)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

@@ -6,9 +6,13 @@ import (
 	"time"
 )
 
+// newTestRegistry pins the clock and shrinks the capacity: eviction is a
+// full-map scan, so filling the production 10,000 slots makes the capacity
+// tests quadratic.
 func newTestRegistry(now *time.Time) *CallRegistry {
 	r := NewCallRegistry()
 	r.now = func() time.Time { return *now }
+	r.capacity = 100
 	return r
 }
 
@@ -61,14 +65,14 @@ func TestCallRegistryEvictsAtCapacity(t *testing.T) {
 	now := time.Unix(1000, 0)
 	r := newTestRegistry(&now)
 
-	for i := range maxCalls {
+	for i := range r.capacity {
 		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
 		now = now.Add(time.Millisecond) // strictly ordered expiries
 	}
 	r.Register("rtc_new", CallRoute{Model: "m"})
 
-	if len(r.entries) > maxCalls {
-		t.Errorf("registry grew to %d entries, want capped at %d", len(r.entries), maxCalls)
+	if len(r.entries) > r.capacity {
+		t.Errorf("registry grew to %d entries, want capped at %d", len(r.entries), r.capacity)
 	}
 	if _, ok := r.Lookup("rtc_new"); !ok {
 		t.Error("newest call must survive eviction")
@@ -82,7 +86,7 @@ func TestCallRegistryReRegisterAtCapacityDoesNotEvict(t *testing.T) {
 	now := time.Unix(1000, 0)
 	r := newTestRegistry(&now)
 
-	for i := range maxCalls {
+	for i := range r.capacity {
 		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
 		now = now.Add(time.Millisecond)
 	}
@@ -96,7 +100,7 @@ func TestCallRegistryReRegisterAtCapacityDoesNotEvict(t *testing.T) {
 	if _, ok := r.Lookup("rtc_0"); !ok {
 		t.Error("re-registering an existing id must not evict an unrelated entry")
 	}
-	if len(r.entries) != maxCalls {
-		t.Errorf("registry has %d entries, want %d", len(r.entries), maxCalls)
+	if len(r.entries) != r.capacity {
+		t.Errorf("registry has %d entries, want %d", len(r.entries), r.capacity)
 	}
 }

@@ -3,6 +3,9 @@ package providers
 import (
 	"net/url"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOpenAIRealtimeURL(t *testing.T) {
@@ -27,61 +30,47 @@ func TestOpenAIRealtimeURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := OpenAIRealtimeURL(tt.baseURL, tt.model)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got %q", got)
-				}
+				require.Error(t, err)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
+
 			u, parseErr := url.Parse(got)
-			if parseErr != nil {
-				t.Fatalf("result is not a valid URL: %v", parseErr)
-			}
-			if base := u.Scheme + "://" + u.Host + u.Path; base != tt.wantBase {
-				t.Errorf("base = %q, want %q", base, tt.wantBase)
-			}
-			if u.Query().Get("model") != tt.model {
-				t.Errorf("model query = %q, want %q", u.Query().Get("model"), tt.model)
-			}
+			require.NoError(t, parseErr)
+			base := u.Scheme + "://" + u.Host + u.Path
+			assert.Equal(t, tt.wantBase, base)
+			assert.Equal(t, tt.model, u.Query().Get("model"))
 		})
 	}
 }
 
 func TestOpenAIRealtimeURLTrimsModel(t *testing.T) {
 	got, err := OpenAIRealtimeURL("https://api.openai.com/v1", "  gpt-realtime  ")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	u, _ := url.Parse(got)
-	if m := u.Query().Get("model"); m != "gpt-realtime" {
-		t.Errorf("model query = %q, want trimmed %q", m, "gpt-realtime")
-	}
+	m := u.Query().Get("model")
+	assert.Equal(t, "gpt-realtime", m)
 }
 
 func TestOpenAIRealtimeAttachURL(t *testing.T) {
 	got, err := OpenAIRealtimeAttachURL("https://api.openai.com/v1", "rtc_123")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err)
+
 	u, _ := url.Parse(got)
-	if base := u.Scheme + "://" + u.Host + u.Path; base != "wss://api.openai.com/v1/realtime" {
-		t.Errorf("base = %q, want wss realtime endpoint", base)
-	}
-	if id := u.Query().Get("call_id"); id != "rtc_123" {
-		t.Errorf("call_id query = %q, want %q", id, "rtc_123")
-	}
-	// An attach targets an existing call, which already owns a model.
-	if _, present := u.Query()["model"]; present {
-		t.Error("model query must be absent on sideband attach URLs")
-	}
+	base := u.Scheme + "://" + u.Host + u.Path
+	assert.Equal(t, "wss://api.openai.com/v1/realtime", base)
+	id := u.Query().Get("call_id")
+	assert.Equal(t, "rtc_123", id)
+	_, present := // An attach targets an existing call, which already owns a model.
+		u.Query()["model"]
+	assert.False(t, present)
 }
 
 func TestOpenAIRealtimeAttachURLRequiresCallID(t *testing.T) {
-	if _, err := OpenAIRealtimeAttachURL("https://api.openai.com/v1", "  "); err == nil {
-		t.Fatal("expected error for missing call_id")
-	}
+	_, err := OpenAIRealtimeAttachURL("https://api.openai.com/v1", "  ")
+	require.Error(t, err)
 }
 
 func TestOpenAIRealtimeHTTPURL(t *testing.T) {
@@ -105,17 +94,12 @@ func TestOpenAIRealtimeHTTPURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := OpenAIRealtimeHTTPURL(tt.baseURL, tt.endpoint)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got %q", got)
-				}
+				require.Error(t, err)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("url = %q, want %q", got, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -138,26 +122,20 @@ func TestOpenAIRealtimeTranslationURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := OpenAIRealtimeTranslationURL(tt.baseURL, tt.model)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got %q", got)
-				}
+				require.Error(t, err)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
+
 			u, parseErr := url.Parse(got)
-			if parseErr != nil {
-				t.Fatalf("result is not a valid URL: %v", parseErr)
-			}
-			if base := u.Scheme + "://" + u.Host + u.Path; base != tt.wantBase {
-				t.Errorf("base = %q, want %q", base, tt.wantBase)
-			}
-			// Unlike transcription sessions, translation sessions keep the model
-			// in the URL.
-			if got := u.Query().Get("model"); got != tt.model {
-				t.Errorf("model = %q, want %q", got, tt.model)
-			}
+			require.NoError(t, parseErr)
+			base := u.Scheme + "://" + u.Host + u.Path
+			assert.Equal(t, tt.wantBase, base)
+			got = // Unlike transcription sessions, translation sessions keep the model
+				// in the URL.
+				u.Query().Get("model")
+			assert.Equal(t, tt.model, got)
 		})
 	}
 }
@@ -179,24 +157,16 @@ func TestOpenAIRealtimeTranscriptionURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := OpenAIRealtimeTranscriptionURL(tt.baseURL)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got %q", got)
-				}
+				require.Error(t, err)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("url = %q, want %q", got, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+
 			u, parseErr := url.Parse(got)
-			if parseErr != nil {
-				t.Fatalf("result is not a valid URL: %v", parseErr)
-			}
-			if u.Query().Has("model") {
-				t.Errorf("url %q carries a model parameter; transcription sessions must not send one", got)
-			}
+			require.NoError(t, parseErr)
+			assert.False(t, u.Query().Has("model"), "url %q carries a model parameter; transcription sessions must not send one", got)
 		})
 	}
 }

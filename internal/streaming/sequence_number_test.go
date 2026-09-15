@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // responsesSeqFixture is a well-formed Responses stream numbered 0..9.
@@ -41,12 +43,10 @@ func sequenceNumbers(t *testing.T, out []byte) ([]int, string) {
 			Type           string `json:"type"`
 			SequenceNumber *int   `json:"sequence_number"`
 		}
-		if err := json.Unmarshal([]byte(data), &view); err != nil {
-			t.Fatalf("decode %q: %v", data, err)
-		}
-		if view.SequenceNumber == nil {
-			t.Fatalf("event %q has no sequence_number:\n%s", view.Type, out)
-		}
+		err := json.Unmarshal([]byte(data), &view)
+		require.NoError(t, err, "decode %q", data)
+		require.NotNil(t, view.SequenceNumber, "event %q has no sequence_number:\n%s", view.Type, out)
+
 		numbers = append(numbers, *view.SequenceNumber)
 		last = view.Type
 	}
@@ -56,13 +56,10 @@ func sequenceNumbers(t *testing.T, out []byte) ([]int, string) {
 func assertContiguous(t *testing.T, out []byte) {
 	t.Helper()
 	numbers, _ := sequenceNumbers(t, out)
-	if len(numbers) == 0 {
-		t.Fatalf("no numbered events:\n%s", out)
-	}
+	require.NotEmpty(t, numbers, "no numbered events:\n%s", out)
+
 	for i, n := range numbers {
-		if n != i {
-			t.Fatalf("sequence numbers = %v, want 0..%d contiguous:\n%s", numbers, len(numbers)-1, out)
-		}
+		require.Equal(t, i, n)
 	}
 }
 
@@ -149,17 +146,12 @@ func TestTransformedSSEStream_ResponsesSequenceNumbersStayContiguous(t *testing.
 			tr := &funcTransformer{onEvent: tc.onEvent}
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(responsesSeqFixture)), ResponsesCodec(), tr, tc.opts)
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			assertContiguous(t, got)
 			_, last := sequenceNumbers(t, got)
-			if last != tc.lastType {
-				t.Errorf("last numbered event = %s, want %s:\n%s", last, tc.lastType, got)
-			}
-			if !strings.HasSuffix(string(got), "data: [DONE]\n\n") {
-				t.Errorf("stream does not end with [DONE]:\n%s", got)
-			}
+			assert.Equal(t, tc.lastType, last)
+			assert.True(t, strings.HasSuffix(string(got), "data: [DONE]\n\n"), "stream does not end with [DONE]:\n%s", got)
 		})
 	}
 }
@@ -178,9 +170,8 @@ func TestTransformedSSEStream_ResponsesRenumbersMalformedUpstream(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(tc.input)), ResponsesCodec(), &funcTransformer{}, TransformOptions{})
 			got, err := io.ReadAll(stream)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			assertContiguous(t, got)
 		})
 	}
@@ -191,10 +182,6 @@ func TestTransformedSSEStream_ResponsesRenumbersMalformedUpstream(t *testing.T) 
 func TestTransformedSSEStream_ChatPassThroughUnnumbered(t *testing.T) {
 	stream := NewTransformedSSEStream(io.NopCloser(strings.NewReader(chatFixture)), ChatCodec(), &funcTransformer{}, TransformOptions{})
 	got, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != chatFixture {
-		t.Fatalf("chat pass-through changed bytes:\n%s", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, chatFixture, string(got), "chat pass-through changed bytes")
 }

@@ -2,12 +2,11 @@ package workflows
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/guardrails"
+	"github.com/stretchr/testify/require"
 )
 
 func systemPromptGuardrail(name string) guardrails.Definition {
@@ -30,21 +29,15 @@ func TestCompilerCompile_Guardrails(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Compile() error = %v", err)
-	}
-	if compiled == nil || compiled.Chains == nil {
-		t.Fatal("Compile() returned nil chains")
-	}
-	if compiled.Chains.Prompt.Len() != 1 || !compiled.Chains.Response.Empty() {
-		t.Fatalf("chains = %+v, want one prompt step from the v1 payload", compiled.Chains)
-	}
-	if compiled.Policy == nil || compiled.Policy.GuardrailsHash == "" {
-		t.Fatal("compiled guardrails hash is empty")
-	}
-	if compiled.Policy.ChainHashes["prompt"] != compiled.Policy.GuardrailsHash || len(compiled.Policy.ChainHashes) != 1 {
-		t.Fatalf("chain hashes = %v", compiled.Policy.ChainHashes)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, compiled)
+	require.NotNil(t, compiled.Chains)
+	require.Equal(t, 1, compiled.Chains.Prompt.Len())
+	require.True(t, compiled.Chains.Response.Empty(), "chains = %+v, want one prompt step from the v1 payload", compiled.Chains)
+	require.NotNil(t, compiled.Policy)
+	require.NotEmpty(t, compiled.Policy.GuardrailsHash)
+	require.Equal(t, compiled.Policy.GuardrailsHash, compiled.Policy.ChainHashes["prompt"])
+	require.Len(t, compiled.Policy.ChainHashes, 1)
 }
 
 func TestCompilerCompile_PhasesFromV2Steps(t *testing.T) {
@@ -63,15 +56,11 @@ func TestCompilerCompile_PhasesFromV2Steps(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Compile() error = %v", err)
-	}
-	if compiled.Chains.Prompt.Len() != 1 || compiled.Chains.Response.Len() != 1 || !compiled.Chains.Stream.Empty() {
-		t.Fatalf("chains = %+v", compiled.Chains)
-	}
-	if len(compiled.Policy.ChainHashes) != 2 {
-		t.Fatalf("chain hashes = %v", compiled.Policy.ChainHashes)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, compiled.Chains.Prompt.Len())
+	require.Equal(t, 1, compiled.Chains.Response.Len())
+	require.True(t, compiled.Chains.Stream.Empty(), "chains = %+v", compiled.Chains)
+	require.Len(t, compiled.Policy.ChainHashes, 2)
 
 	_, err = NewCompilerWithFeatureCaps(registry, core.DefaultWorkflowFeatures()).Compile(Version{
 		ID: "workflow-3", Name: "global",
@@ -81,9 +70,7 @@ func TestCompilerCompile_PhasesFromV2Steps(t *testing.T) {
 			Steps:         []Step{{Ref: "privacy", Phase: PhaseStream, Step: 10}},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "does not support the stream phase") {
-		t.Fatalf("Compile(stream) error = %v, want unsupported phase", err)
-	}
+	require.ErrorContains(t, err, "does not support the stream phase")
 }
 
 func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
@@ -107,33 +94,17 @@ func TestCompilerCompile_AppliesProcessFeatureCaps(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Compile() error = %v", err)
-	}
-	if compiled == nil || compiled.Policy == nil {
-		t.Fatal("Compile() returned nil policy")
-	}
-	if compiled.Policy.Features.Cache {
-		t.Fatal("Policy.Features.Cache = true, want false")
-	}
-	if !compiled.Policy.Features.Audit {
-		t.Fatal("Policy.Features.Audit = false, want true")
-	}
-	if compiled.Policy.Features.Usage {
-		t.Fatal("Policy.Features.Usage = true, want false")
-	}
-	if compiled.Policy.Features.Guardrails {
-		t.Fatal("Policy.Features.Guardrails = true, want false")
-	}
-	if compiled.Policy.Features.Failover {
-		t.Fatal("Policy.Features.Failover = true, want false")
-	}
-	if compiled.Chains != nil {
-		t.Fatal("compiled chains are not nil")
-	}
-	if compiled.Policy.GuardrailsHash != "" || compiled.Policy.ChainHashes != nil {
-		t.Fatalf("compiled guardrails hash = %q / %v, want empty", compiled.Policy.GuardrailsHash, compiled.Policy.ChainHashes)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, compiled)
+	require.NotNil(t, compiled.Policy)
+	require.False(t, compiled.Policy.Features.Cache)
+	require.True(t, compiled.Policy.Features.Audit)
+	require.False(t, compiled.Policy.Features.Usage)
+	require.False(t, compiled.Policy.Features.Guardrails)
+	require.False(t, compiled.Policy.Features.Failover)
+	require.Nil(t, compiled.Chains)
+	require.Empty(t, compiled.Policy.GuardrailsHash)
+	require.Nil(t, compiled.Policy.ChainHashes)
 }
 
 func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
@@ -147,12 +118,8 @@ func TestCompilerCompile_DefaultsFailoverEnabledWhenUnset(t *testing.T) {
 			Features:      FeatureFlags{Cache: true, Audit: true, Usage: true, Guardrails: false},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Compile() error = %v", err)
-	}
-	if !compiled.Policy.Features.Failover {
-		t.Fatal("Policy.Features.Failover = false, want true by default")
-	}
+	require.NoError(t, err)
+	require.True(t, compiled.Policy.Features.Failover)
 }
 
 func TestCompilerCompile_RejectsGuardrailsWithoutRegistry(t *testing.T) {
@@ -165,9 +132,9 @@ func TestCompilerCompile_RejectsGuardrailsWithoutRegistry(t *testing.T) {
 		},
 	})
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != 502 {
-		t.Fatalf("Compile() error = %v, want 502 gateway error", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, 502, gatewayErr.HTTPStatusCode())
+
 	_, err = NewCompilerWithFeatureCaps(newGuardrailService(t, nil), core.DefaultWorkflowFeatures()).Compile(Version{
 		ID: "workflow-1", Name: "global",
 		Payload: Payload{
@@ -176,9 +143,8 @@ func TestCompilerCompile_RejectsGuardrailsWithoutRegistry(t *testing.T) {
 			Guardrails:    []GuardrailStep{{Ref: "policy-system", Step: 10}},
 		},
 	})
-	if !errors.As(err, &gatewayErr) || !strings.Contains(err.Error(), "no guardrails are loaded") {
-		t.Fatalf("Compile() with empty registry error = %v", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.ErrorContains(t, err, "no guardrails are loaded")
 }
 
 func TestCompilerCompile_WrapsBuildChainsErrorsAsGatewayErrors(t *testing.T) {
@@ -192,7 +158,7 @@ func TestCompilerCompile_WrapsBuildChainsErrorsAsGatewayErrors(t *testing.T) {
 		},
 	})
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != 502 || !strings.Contains(err.Error(), "unknown guardrail ref") {
-		t.Fatalf("Compile() error = %v, want wrapped unknown ref error", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, 502, gatewayErr.HTTPStatusCode())
+	require.ErrorContains(t, err, "unknown guardrail ref")
 }

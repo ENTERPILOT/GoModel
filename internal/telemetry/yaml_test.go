@@ -8,6 +8,7 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/stretchr/testify/require"
 )
 
 // YAML settings must reach the SDK: the exporter uses the configured endpoint
@@ -36,22 +37,16 @@ func TestNewAppliesYAMLSettingsToExporter(t *testing.T) {
 		Headers:         map[string]string{"authorization": "Bearer top secret"},
 		MetricsExporter: "none",
 	}, "/metrics", "")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	hooks := service.Hooks()
 	call := llmclient.RequestInfo{Provider: "openai", Model: "gpt-5", Operation: "chat"}
 	hooks.OnRequestEnd(hooks.OnRequestStart(t.Context(), call), llmclient.ResponseInfo{Provider: "openai", Model: "gpt-5", Operation: "chat", StatusCode: http.StatusOK})
-	if err := service.Close(); err != nil {
-		t.Fatalf("Close() = %v", err)
-	}
+	err = service.Close()
+	require.NoError(t, err)
 
 	mu.Lock()
 	defer mu.Unlock()
-	if received == nil {
-		t.Fatal("no spans reached the YAML-configured endpoint")
-	}
-	if got := received.Get("Authorization"); got != "Bearer top secret" {
-		t.Fatalf("Authorization header = %q, want the YAML value with the space decoded", got)
-	}
+	require.NotNil(t, received)
+	require.Equal(t, "Bearer top secret", received.Get("Authorization"))
 }

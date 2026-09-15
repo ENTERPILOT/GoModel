@@ -196,6 +196,11 @@ var providerMappings = map[string][]tokenCostMapping{
 	"openrouter": openAICompatibleTokenCostMappings,
 	"anthropic": {
 		{rawDataKey: "cache_read_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
+		// The Responses surface reports cache reads in the OpenAI shape
+		// (input_tokens_details.cached_tokens), which usage extraction turns
+		// into prompt_cached_tokens. Price it like the Anthropic-named count so
+		// a cache hit replayed from a stored response body keeps its rate.
+		{rawDataKey: "prompt_cached_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CachedInputPerMtok }, side: sideInput, unit: unitPerMtok},
 		{rawDataKey: "cache_creation_input_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.CacheWritePerMtok }, side: sideInput, unit: unitPerMtok},
 		{rawDataKey: "completion_reasoning_tokens", pricingField: func(p *core.ModelPricing) *float64 { return p.ReasoningOutputPerMtok }, side: sideOutput, unit: unitPerMtok, includedInBase: true},
 	},

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 func candidate(qualified string, inputPrice float64) pluginapi.RouteCandidate {
@@ -34,21 +35,20 @@ func report(p *Plugin, qualified string, n int, success bool, latency time.Durat
 func newPlugin(t *testing.T) *Plugin {
 	t.Helper()
 	p := New()
-	if err := p.Init(context.Background(), json.RawMessage(`{}`), nil); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	err := p.Init(context.Background(), json.RawMessage(`{}`), nil)
+	require.NoError(t, err)
+
 	return p.(*Plugin)
 }
 
 func TestManifest(t *testing.T) {
 	m := New().Manifest()
-	if m.Name != Name || len(m.Kinds) != 1 || m.Kinds[0] != pluginapi.KindRoute {
-		t.Fatalf("manifest = %+v", m)
-	}
+	require.Equal(t, Name, m.Name)
+	require.Len(t, m.Kinds, 1)
+	require.Equal(t, pluginapi.KindRoute, m.Kinds[0])
+
 	for _, field := range m.ConfigSchema {
-		if field.Scope != pluginapi.ScopeRoute {
-			t.Fatalf("field %q scope = %q, want route", field.Key, field.Scope)
-		}
+		require.Equal(t, pluginapi.ScopeRoute, field.Scope, "field %q scope = %q, want route", field.Key, field.Scope)
 	}
 }
 
@@ -165,21 +165,17 @@ func TestSelect(t *testing.T) {
 			choice, err := p.Select(context.Background(), pluginapi.RouteRequest{
 				Source: "smart", SessionTarget: tc.session, Candidates: tc.candidates, Config: json.RawMessage(tc.config),
 			})
-			if err != nil {
-				t.Fatalf("Select: %v", err)
-			}
-			if choice.Qualified != tc.want {
-				t.Fatalf("Select = %q (%s), want %q", choice.Qualified, choice.Reason, tc.want)
-			}
-			if tc.wantReason != "" && !strings.Contains(choice.Reason, tc.wantReason) {
-				t.Fatalf("reason = %q, want containing %q", choice.Reason, tc.wantReason)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, choice.Qualified, "Select = %q (%s), want %q", choice.Qualified, choice.Reason, tc.want)
+
+			if tc.wantReason != "" {
+				require.Contains(t, choice.Reason, tc.wantReason)
 			}
 		})
 	}
 }
 
 func TestSelectRejectsEmptyCandidates(t *testing.T) {
-	if _, err := newPlugin(t).Select(context.Background(), pluginapi.RouteRequest{}); err == nil {
-		t.Fatal("Select() error = nil, want error for no candidates")
-	}
+	_, err := newPlugin(t).Select(context.Background(), pluginapi.RouteRequest{})
+	require.Error(t, err)
 }

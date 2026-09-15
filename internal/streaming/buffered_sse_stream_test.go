@@ -10,37 +10,31 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBufferedSSEStream_ReplayUnchanged(t *testing.T) {
 	var got []Event
 	finish := func(events []Event, raw []byte) ([]byte, error) {
 		got = events
-		if string(raw) != chatFixture {
-			t.Errorf("finisher raw differs:\n%s", raw)
-		}
+		assert.Equal(t, chatFixture, string(raw))
+
 		return nil, nil
 	}
 	stream := NewBufferedSSEStream(context.Background(), io.NopCloser(strings.NewReader(chatFixture)), ChatCodec(), finish, BufferOptions{})
 	out, err := readAllSmall(t, stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(out) != chatFixture {
-		t.Errorf("replay differs from upstream:\n%s", out)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, chatFixture, string(out))
+
 	want := []EventKind{KindOther, KindTextDelta, KindTextDelta, KindTextDelta, KindFinish, KindUsage, KindDone}
-	if strings.Join(kindStrings(kinds(got)), ",") != strings.Join(kindStrings(want), ",") {
-		t.Errorf("finisher saw %v, want %v", kinds(got), want)
-	}
+	assert.Equal(t, kindStrings(want), kindStrings(kinds(got)))
+
 	for i, ev := range got {
-		if ev.Seq != i {
-			t.Errorf("event %d Seq = %d", i, ev.Seq)
-		}
+		assert.Equal(t, i, ev.Seq)
 	}
-	if err := stream.Close(); err != nil {
-		t.Fatal(err)
-	}
+	err = stream.Close()
+	require.NoError(t, err)
 }
 
 func TestBufferedSSEStream_SynthesizedReplay(t *testing.T) {
@@ -54,19 +48,15 @@ func TestBufferedSSEStream_SynthesizedReplay(t *testing.T) {
 	}
 	stream := NewBufferedSSEStream(context.Background(), io.NopCloser(strings.NewReader(chatFixture)), ChatCodec(), finish, BufferOptions{})
 	out, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(out), "555-") || !strings.Contains(string(out), `"content":"replaced"`) {
-		t.Errorf("synthesized replay not served:\n%s", out)
-	}
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "555-")
+	assert.Contains(t, string(out), `"content":"replaced"`, "synthesized replay not served:\n%s", out)
+
 	resp, err := AssembleChatResponse(decodeChatEvents(t, out))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Choices[0].Message.Content != "replaced" || resp.Usage.TotalTokens != 3 || resp.ID != "c1" {
-		t.Errorf("assembled replay = %+v", resp)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "replaced", resp.Choices[0].Message.Content)
+	assert.Equal(t, 3, resp.Usage.TotalTokens)
+	assert.Equal(t, "c1", resp.ID, "assembled replay = %+v", resp)
 }
 
 func TestBufferedSSEStream_KeepAliveWhileDraining(t *testing.T) {
@@ -75,25 +65,21 @@ func TestBufferedSSEStream_KeepAliveWhileDraining(t *testing.T) {
 
 	buf := make([]byte, 64)
 	n, err := stream.Read(buf)
-	if err != nil || string(buf[:n]) != ": hold\n\n" {
-		t.Fatalf("first Read = %q, %v; want keep-alive comment", buf[:n], err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, ": hold\n\n", string(buf[:n]), "first Read: want keep-alive comment")
 
 	go func() {
 		_, _ = pw.Write([]byte(chatFixture))
 		_ = pw.Close()
 	}()
 	out, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	trimmed := strings.TrimPrefix(string(out), ": hold\n\n")
 	for strings.HasPrefix(trimmed, ": hold\n\n") {
 		trimmed = strings.TrimPrefix(trimmed, ": hold\n\n")
 	}
-	if trimmed != chatFixture {
-		t.Errorf("replay after keep-alives differs:\n%s", out)
-	}
+	assert.Equal(t, chatFixture, trimmed)
 }
 
 func TestBufferedSSEStream_MaxBytesFailsClosed(t *testing.T) {
@@ -105,24 +91,13 @@ func TestBufferedSSEStream_MaxBytesFailsClosed(t *testing.T) {
 		return nil, nil
 	}, BufferOptions{MaxBytes: 200, KeepAliveInterval: -1, OnError: func(err error) { reported = err }})
 	out, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if finisherCalled {
-		t.Error("finisher must not run when the limit is exceeded")
-	}
-	if !errors.Is(reported, ErrBufferLimit) {
-		t.Errorf("reported = %v", reported)
-	}
-	if !strings.Contains(string(out), `"code":"response_too_large"`) || !strings.HasSuffix(string(out), "data: [DONE]\n\n") {
-		t.Errorf("fail-closed replay = %s", out)
-	}
-	if strings.Contains(string(out), "Hello") {
-		t.Errorf("buffered content leaked: %s", out)
-	}
-	if !upstream.closed {
-		t.Error("upstream not closed")
-	}
+	require.NoError(t, err)
+	assert.False(t, finisherCalled)
+	assert.ErrorIs(t, reported, ErrBufferLimit)
+	assert.Contains(t, string(out), `"code":"response_too_large"`)
+	assert.True(t, strings.HasSuffix(string(out), "data: [DONE]\n\n"), "fail-closed replay = %s", out)
+	assert.NotContains(t, string(out), "Hello", "buffered content leaked: %s", out)
+	assert.True(t, upstream.closed)
 }
 
 func TestBufferedSSEStream_FinisherErrorFailsClosed(t *testing.T) {
@@ -132,15 +107,10 @@ func TestBufferedSSEStream_FinisherErrorFailsClosed(t *testing.T) {
 		return nil, boom
 	}, BufferOptions{OnError: func(err error) { reported = err }})
 	out, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !errors.Is(reported, boom) {
-		t.Errorf("reported = %v", reported)
-	}
-	if !strings.Contains(string(out), `"code":"plugin_failure"`) || strings.Contains(string(out), "Hello") {
-		t.Errorf("fail-closed replay = %s", out)
-	}
+	require.NoError(t, err)
+	assert.ErrorIs(t, reported, boom)
+	assert.Contains(t, string(out), `"code":"plugin_failure"`)
+	assert.NotContains(t, string(out), "Hello", "fail-closed replay = %s", out)
 }
 
 // blockingReader blocks Read until Close is called.
@@ -177,43 +147,35 @@ func TestBufferedSSEStream_ContextCancelStopsDrain(t *testing.T) {
 		cancel()
 	}()
 	_, err := stream.Read(make([]byte, 16))
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Read err = %v, want context.Canceled", err)
-	}
+	require.ErrorIs(t, err, context.Canceled)
+
 	select {
 	case <-upstream.closed:
 	case <-time.After(time.Second):
 		t.Fatal("upstream was not closed after cancellation")
 	}
-	if finisherCalled {
-		t.Error("finisher must not run for a cancelled request")
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatal(err)
-	}
+	assert.False(t, finisherCalled)
+	err = stream.Close()
+	require.NoError(t, err)
 }
 
 func TestBufferedSSEStream_CloseDuringDrain(t *testing.T) {
 	upstream := newBlockingReader()
 	stream := NewBufferedSSEStream(context.Background(), upstream, ChatCodec(), nil, BufferOptions{KeepAliveInterval: 5 * time.Millisecond})
 	buf := make([]byte, 64)
-	if _, err := stream.Read(buf); err != nil {
-		t.Fatalf("keep-alive read: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatal("second Close must be a no-op")
-	}
+	_, err := stream.Read(buf)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
+	require.NoError(t, stream.Close())
+
 	select {
 	case <-upstream.closed:
 	case <-time.After(time.Second):
 		t.Fatal("upstream was not closed")
 	}
-	if _, err := stream.Read(buf); err != ErrStreamClosed {
-		t.Errorf("Read after Close err = %v", err)
-	}
+	_, err = stream.Read(buf)
+	assert.Equal(t, ErrStreamClosed, err)
 }
 
 func TestBufferedSSEStream_UpstreamErrorReturnedAfterReplay(t *testing.T) {
@@ -225,12 +187,9 @@ func TestBufferedSSEStream_UpstreamErrorReturnedAfterReplay(t *testing.T) {
 		return nil, nil
 	}, BufferOptions{KeepAliveInterval: -1})
 	out, err := io.ReadAll(stream)
-	if err != io.ErrUnexpectedEOF {
-		t.Errorf("err = %v, want ErrUnexpectedEOF", err)
-	}
-	if string(out) != partial || len(seen) != 1 {
-		t.Errorf("replay = %q, finisher saw %d events", out, len(seen))
-	}
+	assert.Equal(t, io.ErrUnexpectedEOF, err)
+	assert.Equal(t, partial, string(out))
+	assert.Len(t, seen, 1)
 }
 
 func TestBufferedSSEStream_ResponsesReplay(t *testing.T) {
@@ -248,16 +207,12 @@ func TestBufferedSSEStream_ResponsesReplay(t *testing.T) {
 		return SynthesizeResponsesStream(assembled), nil
 	}, BufferOptions{KeepAliveInterval: -1})
 	out, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	got, err := AssembleResponsesResponse(decodeResponsesEvents(t, out))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Output[0].Content[0].Text != "bye" || got.ID != "r1" {
-		t.Errorf("assembled replay = %+v", got)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "bye", got.Output[0].Content[0].Text)
+	assert.Equal(t, "r1", got.ID, "assembled replay = %+v", got)
 }
 
 // Close may run on another goroutine while the first Read, which starts
@@ -271,9 +226,10 @@ func TestBufferedSSEStream_CloseRacesFirstRead(t *testing.T) {
 		defer close(read)
 		_, _ = stream.Read(make([]byte, 64))
 	}()
-	time.Sleep(10 * time.Millisecond) // let Read pass its closed check and start the drain
-	if err := stream.Close(); err != nil {
-		t.Fatal(err)
-	}
+	time.Sleep(10 * time.Millisecond)
+	// let Read pass its closed check and start the drain
+	err := stream.Close()
+	require.NoError(t, err)
+
 	<-read
 }

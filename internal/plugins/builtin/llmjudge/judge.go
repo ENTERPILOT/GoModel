@@ -16,6 +16,12 @@ const (
 	Code = "llm_judge_block"
 	// CodeUnclear marks a judge reply that could not be parsed.
 	CodeUnclear = "llm_judge_unclear"
+	// CodeNoVerdict marks a judge call that produced no verdict at all
+	// because the completion ended first: the reply was cut off
+	// (finish_reason "length") or the judge model spent it on reasoning.
+	// It is recorded apart from CodeUnclear because the remedy is a higher
+	// max_tokens or a non-reasoning judge model, not a different policy.
+	CodeNoVerdict = "llm_judge_no_verdict"
 )
 
 // choiceSeparator joins the text of several completion choices for the
@@ -96,15 +102,17 @@ func (p *Plugin) judge(ctx context.Context, x *pluginapi.Exchange, content strin
 			return p.decide(cached, true), nil
 		}
 	}
-	reply, finish, err := p.ask(ctx, content)
+	reply, err := p.ask(ctx, content)
 	if err != nil {
 		return pluginapi.Decision{}, err
 	}
-	v := parseVerdict(reply)
+	v := parseVerdict(reply.text)
 	// A reply the model did not finish (max_tokens reached, a filter cut
-	// it) is not a verdict even when its visible part reads like one.
-	if finish != "" && finish != "stop" {
-		v = verdict{Verdict: VerdictUnclear, Reason: "judge reply was cut off (finish_reason " + finish + ")"}
+	// it) is not a verdict even when its visible part reads like one, and
+	// neither is a completion the judge spent entirely on reasoning.
+	if reason := reply.noVerdictReason(); reason != "" {
+		v = verdict{Verdict: VerdictUnclear, Reason: reason, NoVerdict: true}
+		p.logNoVerdict(reason)
 	}
 	if x.Values != nil {
 		x.Values.Set(key, v)
@@ -112,9 +120,47 @@ func (p *Plugin) judge(ctx context.Context, x *pluginapi.Exchange, content strin
 	return p.decide(v, false), nil
 }
 
-// ask runs the judge call and returns the reply text with its finish
-// reason; the finish reason is "" when the completion has no choice.
-func (p *Plugin) ask(ctx context.Context, content string) (string, string, error) {
+// judgeReply is what the judge model returned: its visible text, the finish
+// reason ("" when the completion has no choice), and whether the model
+// emitted reasoning before it.
+type judgeReply struct {
+	text      string
+	finish    string
+	reasoning bool
+}
+
+// noVerdictReason reports why the reply carries no verdict at all, or "" when
+// the reply is complete and the parser decides.
+func (r judgeReply) noVerdictReason() string {
+	switch {
+	case r.finish != "" && r.finish != "stop":
+		if r.reasoning {
+			return "judge spent the completion on reasoning and was cut off before the verdict (finish_reason " + r.finish + "); raise max_tokens"
+		}
+		return "judge reply was cut off (finish_reason " + r.finish + ")"
+	case r.reasoning && strings.TrimSpace(r.text) == "":
+		return "judge returned reasoning only, with no verdict; raise max_tokens"
+	}
+	return ""
+}
+
+// logNoVerdict records that the judge decided nothing. The instance keeps
+// running under on_unclear, so without this line an operator sees only a
+// warn header on a guardrail that has stopped enforcing.
+func (p *Plugin) logNoVerdict(reason string) {
+	if p.host == nil {
+		return
+	}
+	p.host.Logger().Warn(Name+": judge returned no verdict",
+		"judge_model", p.model,
+		"detail", reason,
+		"max_tokens", p.maxTokens,
+		"on_unclear", p.onUnclear,
+	)
+}
+
+// ask runs the judge call and returns the judge's reply.
+func (p *Plugin) ask(ctx context.Context, content string) (judgeReply, error) {
 	temperature := p.temperature
 	completion, err := p.host.Inference().Complete(ctx, pluginapi.InferenceRequest{
 		Model:    p.model,
@@ -127,12 +173,26 @@ func (p *Plugin) ask(ctx context.Context, content string) (string, string, error
 		Temperature: &temperature,
 	})
 	if err != nil {
-		return "", "", fmt.Errorf("%s: judge call failed: %w", Name, err)
+		return judgeReply{}, fmt.Errorf("%s: judge call failed: %w", Name, err)
 	}
 	if completion == nil || len(completion.Choices) == 0 {
-		return "", "", nil
+		return judgeReply{}, nil
 	}
-	return completion.Text(0), strings.TrimSpace(completion.Choices[0].FinishReason), nil
+	return judgeReply{
+		text:      completion.Text(0),
+		finish:    strings.TrimSpace(completion.Choices[0].FinishReason),
+		reasoning: hasReasoning(completion.Choices[0]),
+	}, nil
+}
+
+// hasReasoning reports whether the choice carries reasoning text.
+func hasReasoning(choice pluginapi.Choice) bool {
+	for _, part := range choice.Message.Parts {
+		if part.Kind == pluginapi.PartReasoning && strings.TrimSpace(part.Text) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // wrapContent puts the content between <CONTENT> tags, neutralizing a
@@ -159,12 +219,16 @@ func (p *Plugin) decide(v verdict, cached bool) pluginapi.Decision {
 	case VerdictBlock:
 		return p.enforcement.Enforce(Code, detail)
 	}
+	code, note := CodeUnclear, "judge verdict unclear"
+	if v.NoVerdict {
+		code, note = CodeNoVerdict, "judge returned no verdict"
+	}
 	switch p.onUnclear {
 	case UnclearAllow:
 		return pluginapi.Decision{Action: pluginapi.ActionAllow, Detail: detail}
 	case UnclearBlock:
-		return p.enforcement.Enforce(CodeUnclear, detail)
+		return p.enforcement.Enforce(code, detail)
 	default:
-		return pluginapi.Warn(CodeUnclear, "judge verdict unclear", detail)
+		return pluginapi.Warn(code, note, detail)
 	}
 }

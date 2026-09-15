@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestIsCredentialHeader(t *testing.T) {
 	tests := []struct {
@@ -17,8 +21,7 @@ func TestIsCredentialHeader(t *testing.T) {
 		{name: "", want: false},
 	}
 	for _, tt := range tests {
-		if got := IsCredentialHeader(tt.name); got != tt.want {
-			t.Errorf("IsCredentialHeader(%q) = %v, want %v", tt.name, got, tt.want)
-		}
+		got := IsCredentialHeader(tt.name)
+		assert.Equal(t, tt.want, got, "IsCredentialHeader(%q)", tt.name)
 	}
 }

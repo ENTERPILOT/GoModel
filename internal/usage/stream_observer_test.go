@@ -2,13 +2,14 @@ package usage
 
 import (
 	"io"
-	"math"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/streaming"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // trackingLogger tracks written entries for testing.
@@ -52,6 +53,19 @@ func (r *streamPricingCaptureResolver) ResolvePricing(model, provider string) *c
 	return r.pricing
 }
 
+// chatUsageEvent is a minimal chat completion chunk carrying 10/5/15 usage
+// tokens, shared by the observer tests that only care about entry metadata.
+func chatUsageEvent() map[string]any {
+	return map[string]any{
+		"id": "chatcmpl-123",
+		"usage": map[string]any{
+			"prompt_tokens":     float64(10),
+			"completion_tokens": float64(5),
+			"total_tokens":      float64(15),
+		},
+	}
+}
+
 func TestStreamUsageObserverChatCompletionStream(t *testing.T) {
 	streamData := `data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
 
@@ -67,36 +81,20 @@ data: [DONE]
 	)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Fatalf("stream passthrough mismatch")
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.InputTokens != 10 {
-		t.Errorf("InputTokens = %d, want 10", entry.InputTokens)
-	}
-	if entry.OutputTokens != 5 {
-		t.Errorf("OutputTokens = %d, want 5", entry.OutputTokens)
-	}
-	if entry.TotalTokens != 15 {
-		t.Errorf("TotalTokens = %d, want 15", entry.TotalTokens)
-	}
-	if entry.ProviderID != "chatcmpl-123" {
-		t.Errorf("ProviderID = %s, want chatcmpl-123", entry.ProviderID)
-	}
-	if entry.Model != "gpt-4" {
-		t.Errorf("Model = %s, want gpt-4", entry.Model)
-	}
+	assert.Equal(t, 10, entry.InputTokens)
+	assert.Equal(t, 5, entry.OutputTokens)
+	assert.Equal(t, 15, entry.TotalTokens)
+	assert.Equal(t, "chatcmpl-123", entry.ProviderID)
+	assert.Equal(t, "gpt-4", entry.Model)
 }
 
 func TestStreamUsageObserverPricesRequestedModelWhenEventModelIsVersioned(t *testing.T) {
@@ -121,23 +119,16 @@ func TestStreamUsageObserverPricesRequestedModelWhenEventModelIsVersioned(t *tes
 	})
 	observer.OnStreamClose()
 
-	if resolver.model != "gpt-4o-mini" {
-		t.Fatalf("pricing model = %q, want gpt-4o-mini", resolver.model)
-	}
-	if resolver.provider != "openai" {
-		t.Fatalf("pricing provider = %q, want openai", resolver.provider)
-	}
+	require.Equal(t, "gpt-4o-mini", resolver.model)
+	require.Equal(t, "openai", resolver.provider)
+
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.Model != "gpt-4o-mini-2024-07-18" {
-		t.Fatalf("usage model = %q, want provider event model", entry.Model)
-	}
-	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-perRequest) > 0.0000001 {
-		t.Fatalf("total cost = %v, want %f", entry.TotalCost, perRequest)
-	}
+	require.Equal(t, "gpt-4o-mini-2024-07-18", entry.Model)
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, perRequest, *entry.TotalCost, 0.0000001)
 }
 
 func TestStreamUsageObserverWithExtendedUsage(t *testing.T) {
@@ -161,25 +152,14 @@ func TestStreamUsageObserverWithExtendedUsage(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.InputTokens != 100 {
-		t.Errorf("InputTokens = %d, want 100", entry.InputTokens)
-	}
-	if entry.OutputTokens != 50 {
-		t.Errorf("OutputTokens = %d, want 50", entry.OutputTokens)
-	}
-	if entry.RawData == nil {
-		t.Fatal("expected RawData to be set")
-	}
-	if entry.RawData["prompt_cached_tokens"] != 20 {
-		t.Errorf("RawData[prompt_cached_tokens] = %v, want 20", entry.RawData["prompt_cached_tokens"])
-	}
-	if entry.RawData["completion_reasoning_tokens"] != 10 {
-		t.Errorf("RawData[completion_reasoning_tokens] = %v, want 10", entry.RawData["completion_reasoning_tokens"])
-	}
+	assert.Equal(t, 100, entry.InputTokens)
+	assert.Equal(t, 50, entry.OutputTokens)
+	require.NotNil(t, entry.RawData)
+	assert.Equal(t, 20, entry.RawData["prompt_cached_tokens"])
+	assert.Equal(t, 10, entry.RawData["completion_reasoning_tokens"])
 }
 
 func TestStreamUsageObserverOpenRouterCreditCost(t *testing.T) {
@@ -202,25 +182,18 @@ func TestStreamUsageObserverOpenRouterCreditCost(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.RawData == nil || entry.RawData["cost"] != 0.00014 {
-		t.Fatalf("RawData[cost] = %#v, want 0.00014", entry.RawData["cost"])
-	}
-	if entry.TotalCost == nil || *entry.TotalCost != 0.00014 {
-		t.Fatalf("TotalCost = %v, want 0.00014", entry.TotalCost)
-	}
-	if entry.InputCost == nil || *entry.InputCost != 0.00010 {
-		t.Fatalf("InputCost = %v, want 0.00010", entry.InputCost)
-	}
-	if entry.OutputCost == nil || *entry.OutputCost != 0.00004 {
-		t.Fatalf("OutputCost = %v, want 0.00004", entry.OutputCost)
-	}
-	if entry.CostSource != CostSourceOpenRouterCredits {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceOpenRouterCredits)
-	}
+	require.NotNil(t, entry.RawData)
+	require.Equal(t, 0.00014, entry.RawData["cost"])
+	require.NotNil(t, entry.TotalCost)
+	require.Equal(t, 0.00014, *entry.TotalCost)
+	require.NotNil(t, entry.InputCost)
+	require.Equal(t, 0.00010, *entry.InputCost)
+	require.NotNil(t, entry.OutputCost)
+	require.Equal(t, 0.00004, *entry.OutputCost)
+	require.Equal(t, CostSourceOpenRouterCredits, entry.CostSource)
 }
 
 func TestStreamUsageObserverXAITickCost(t *testing.T) {
@@ -242,22 +215,16 @@ func TestStreamUsageObserverXAITickCost(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.RawData == nil || entry.RawData["cost_in_usd_ticks"] != 158_500.0 {
-		t.Fatalf("RawData[cost_in_usd_ticks] = %#v, want 158500", entry.RawData["cost_in_usd_ticks"])
-	}
-	if entry.TotalCost == nil || math.Abs(*entry.TotalCost-0.00001585) > 1e-12 {
-		t.Fatalf("TotalCost = %v, want 0.00001585", entry.TotalCost)
-	}
-	if entry.InputCost != nil || entry.OutputCost != nil {
-		t.Fatalf("InputCost/OutputCost = %v/%v, want nil without response split", entry.InputCost, entry.OutputCost)
-	}
-	if entry.CostSource != CostSourceXAITicks {
-		t.Fatalf("CostSource = %q, want %q", entry.CostSource, CostSourceXAITicks)
-	}
+	require.NotNil(t, entry.RawData)
+	require.Equal(t, 158_500.0, entry.RawData["cost_in_usd_ticks"])
+	require.NotNil(t, entry.TotalCost)
+	require.InDelta(t, 0.00001585, *entry.TotalCost, 1e-12)
+	require.Nil(t, entry.InputCost)
+	require.Nil(t, entry.OutputCost)
+	require.Equal(t, CostSourceXAITicks, entry.CostSource)
 }
 
 func TestStreamUsageObserverNoUsage(t *testing.T) {
@@ -276,142 +243,74 @@ data: [DONE]
 	_ = stream.Close()
 
 	entries := logger.getEntries()
-	if len(entries) != 0 {
-		t.Errorf("expected 0 entries (no usage), got %d", len(entries))
-	}
+	assert.Empty(t, entries)
 }
 
 func TestStreamUsageObserverIncludesUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/alpha")
 	observer.SetSessionID(" scoped-session ")
-	observer.OnJSONEvent(map[string]any{
-		"id": "chatcmpl-123",
-		"usage": map[string]any{
-			"prompt_tokens":     float64(10),
-			"completion_tokens": float64(5),
-			"total_tokens":      float64(15),
-		},
-	})
+	observer.OnJSONEvent(chatUsageEvent())
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if got := entries[0].UserPath; got != "/team/alpha" {
-		t.Fatalf("UserPath = %q, want /team/alpha", got)
-	}
-	if got := entries[0].SessionID; got != "scoped-session" {
-		t.Fatalf("SessionID = %q, want scoped-session", got)
-	}
+	require.Len(t, entries, 1)
+	require.Equal(t, "/team/alpha", entries[0].UserPath)
+	require.Equal(t, "scoped-session", entries[0].SessionID)
 }
 
 func TestStreamUsageObserverNoUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
-	observer.OnJSONEvent(map[string]any{
-		"id": "chatcmpl-123",
-		"usage": map[string]any{
-			"prompt_tokens":     float64(10),
-			"completion_tokens": float64(5),
-			"total_tokens":      float64(15),
-		},
-	})
+	observer.OnJSONEvent(chatUsageEvent())
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if got := entries[0].UserPath; got != "/" {
-		t.Fatalf("UserPath = %q, want /", got)
-	}
+	require.Len(t, entries, 1)
+	require.Equal(t, "/", entries[0].UserPath)
 
 	explicitEmptyLogger := &trackingLogger{enabled: true}
 	explicitEmptyObserver := NewStreamUsageObserver(explicitEmptyLogger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "")
-	explicitEmptyObserver.OnJSONEvent(map[string]any{
-		"id": "chatcmpl-123",
-		"usage": map[string]any{
-			"prompt_tokens":     float64(10),
-			"completion_tokens": float64(5),
-			"total_tokens":      float64(15),
-		},
-	})
+	explicitEmptyObserver.OnJSONEvent(chatUsageEvent())
 	explicitEmptyObserver.OnStreamClose()
 
 	explicitEmptyEntries := explicitEmptyLogger.getEntries()
-	if len(explicitEmptyEntries) != 1 {
-		t.Fatalf("explicit empty len(entries) = %d, want 1", len(explicitEmptyEntries))
-	}
-	if got := explicitEmptyEntries[0].UserPath; got != "/" {
-		t.Fatalf("explicit empty UserPath = %q, want /", got)
-	}
+	require.Len(t, explicitEmptyEntries, 1)
+	require.Equal(t, "/", explicitEmptyEntries[0].UserPath)
 }
 
 func TestStreamUsageObserverNormalizesUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, " team//alpha/ ")
-	observer.OnJSONEvent(map[string]any{
-		"id": "chatcmpl-123",
-		"usage": map[string]any{
-			"prompt_tokens":     float64(10),
-			"completion_tokens": float64(5),
-			"total_tokens":      float64(15),
-		},
-	})
+	observer.OnJSONEvent(chatUsageEvent())
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if got := entries[0].UserPath; got != "/team/alpha" {
-		t.Fatalf("UserPath = %q, want /team/alpha", got)
-	}
+	require.Len(t, entries, 1)
+	require.Equal(t, "/team/alpha", entries[0].UserPath)
 }
 
 func TestStreamUsageObserverFallsBackToRootForInvalidUserPath(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil, "/team/../alpha")
-	observer.OnJSONEvent(map[string]any{
-		"id": "chatcmpl-123",
-		"usage": map[string]any{
-			"prompt_tokens":     float64(10),
-			"completion_tokens": float64(5),
-			"total_tokens":      float64(15),
-		},
-	})
+	observer.OnJSONEvent(chatUsageEvent())
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if got := entries[0].UserPath; got != "/" {
-		t.Fatalf("UserPath = %q, want /", got)
-	}
+	require.Len(t, entries, 1)
+	require.Equal(t, "/", entries[0].UserPath)
 }
 
 func TestStreamUsageObserverDoubleClose(t *testing.T) {
 	logger := &trackingLogger{enabled: true}
 	observer := NewStreamUsageObserver(logger, "gpt-4", "openai", "req-123", "/v1/chat/completions", nil)
-	observer.OnJSONEvent(map[string]any{
-		"id": "chatcmpl-123",
-		"usage": map[string]any{
-			"prompt_tokens":     float64(10),
-			"completion_tokens": float64(5),
-			"total_tokens":      float64(15),
-		},
-	})
+	observer.OnJSONEvent(chatUsageEvent())
 
 	observer.OnStreamClose()
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Errorf("expected 1 entry (not 2 from double close), got %d", len(entries))
-	}
+	assert.Len(t, entries, 1)
 }
 
 func TestStreamUsageObserverResponsesAPI(t *testing.T) {
@@ -437,36 +336,20 @@ data: [DONE]
 	)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(data), len(streamData))
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.InputTokens != 15 {
-		t.Errorf("InputTokens = %d, want 15", entry.InputTokens)
-	}
-	if entry.OutputTokens != 8 {
-		t.Errorf("OutputTokens = %d, want 8", entry.OutputTokens)
-	}
-	if entry.TotalTokens != 23 {
-		t.Errorf("TotalTokens = %d, want 23", entry.TotalTokens)
-	}
-	if entry.ProviderID != "resp-123" {
-		t.Errorf("ProviderID = %s, want resp-123", entry.ProviderID)
-	}
-	if entry.Model != "gpt-5" {
-		t.Errorf("Model = %s, want gpt-5", entry.Model)
-	}
+	assert.Equal(t, 15, entry.InputTokens)
+	assert.Equal(t, 8, entry.OutputTokens)
+	assert.Equal(t, 23, entry.TotalTokens)
+	assert.Equal(t, "resp-123", entry.ProviderID)
+	assert.Equal(t, "gpt-5", entry.Model)
 }
 
 // TestStreamUsageObserverResponsesAPIIncomplete verifies usage is still logged
@@ -490,25 +373,19 @@ data: [DONE]
 		io.NopCloser(strings.NewReader(streamData)),
 		NewStreamUsageObserver(logger, "gpt-5", "openai", "req-resp-2", "/v1/responses", nil),
 	)
-
-	if _, err := io.ReadAll(stream); err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	_, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.InputTokens != 15 || entry.OutputTokens != 2 || entry.TotalTokens != 17 {
-		t.Errorf("usage = %d/%d/%d, want 15/2/17", entry.InputTokens, entry.OutputTokens, entry.TotalTokens)
-	}
-	if entry.ProviderID != "resp-123" {
-		t.Errorf("ProviderID = %s, want resp-123", entry.ProviderID)
-	}
+	assert.Equal(t, 15, entry.InputTokens)
+	assert.Equal(t, 2, entry.OutputTokens)
+	assert.Equal(t, 17, entry.TotalTokens)
+	assert.Equal(t, "resp-123", entry.ProviderID)
 }
 
 func TestStreamUsageObserverResponsesAPIWithDetailedUsage(t *testing.T) {
@@ -536,22 +413,15 @@ func TestStreamUsageObserverResponsesAPIWithDetailedUsage(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.RawData == nil {
-		t.Fatal("expected RawData to be set")
-	}
-	if entry.RawData["prompt_cached_tokens"] != 98 {
-		t.Fatalf("RawData[prompt_cached_tokens] = %v, want 98", entry.RawData["prompt_cached_tokens"])
-	}
-	if entry.RawData["completion_reasoning_tokens"] != 7 {
-		t.Fatalf("RawData[completion_reasoning_tokens] = %v, want 7", entry.RawData["completion_reasoning_tokens"])
-	}
-	if got, ok := numericFloat(entry.RawData["cost_in_usd_ticks"]); !ok || got != 158500 {
-		t.Fatalf("RawData[cost_in_usd_ticks] = %v, want 158500", entry.RawData["cost_in_usd_ticks"])
-	}
+	require.NotNil(t, entry.RawData)
+	require.Equal(t, 98, entry.RawData["prompt_cached_tokens"])
+	require.Equal(t, 7, entry.RawData["completion_reasoning_tokens"])
+	got, ok := numericFloat(entry.RawData["cost_in_usd_ticks"])
+	require.True(t, ok)
+	require.Equal(t, float64(158500), got)
 }
 
 func TestStreamUsageObserverAnthropicCacheFields(t *testing.T) {
@@ -570,19 +440,12 @@ func TestStreamUsageObserverAnthropicCacheFields(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.RawData == nil {
-		t.Fatal("expected RawData to be set")
-	}
-	if entry.RawData["cache_read_input_tokens"] != 6 {
-		t.Fatalf("RawData[cache_read_input_tokens] = %v, want 6", entry.RawData["cache_read_input_tokens"])
-	}
-	if entry.RawData["cache_creation_input_tokens"] != 4 {
-		t.Fatalf("RawData[cache_creation_input_tokens] = %v, want 4", entry.RawData["cache_creation_input_tokens"])
-	}
+	require.NotNil(t, entry.RawData)
+	require.Equal(t, 6, entry.RawData["cache_read_input_tokens"])
+	require.Equal(t, 4, entry.RawData["cache_creation_input_tokens"])
 }
 
 func TestStreamUsageObserverLargeResponsesDone(t *testing.T) {
@@ -602,9 +465,7 @@ data: [DONE]
 	doneEventStart := strings.Index(streamData, `data: {"type":"response.completed"`)
 	doneEventEnd := strings.Index(streamData[doneEventStart:], "\n\n")
 	doneEventSize := doneEventEnd
-	if doneEventSize <= 8192 {
-		t.Fatalf("test setup error: response.completed event is only %d bytes, need >8192", doneEventSize)
-	}
+	require.Greater(t, doneEventSize, 8192)
 
 	logger := &trackingLogger{enabled: true}
 	stream := streaming.NewObservedSSEStream(
@@ -613,33 +474,19 @@ data: [DONE]
 	)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(data), len(streamData))
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d (usage was lost from large response.completed event)", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.InputTokens != 100 {
-		t.Errorf("InputTokens = %d, want 100", entry.InputTokens)
-	}
-	if entry.OutputTokens != 500 {
-		t.Errorf("OutputTokens = %d, want 500", entry.OutputTokens)
-	}
-	if entry.TotalTokens != 600 {
-		t.Errorf("TotalTokens = %d, want 600", entry.TotalTokens)
-	}
-	if entry.ProviderID != "resp-large" {
-		t.Errorf("ProviderID = %s, want resp-large", entry.ProviderID)
-	}
+	assert.Equal(t, 100, entry.InputTokens)
+	assert.Equal(t, 500, entry.OutputTokens)
+	assert.Equal(t, 600, entry.TotalTokens)
+	assert.Equal(t, "resp-large", entry.ProviderID)
 }
 
 func TestStreamUsageObserverSmallReads(t *testing.T) {
@@ -664,32 +511,20 @@ data: [DONE]
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
-			t.Fatalf("Read error: %v", err)
-		}
+		require.NoError(t, err)
 	}
 
-	if string(allData) != streamData {
-		t.Errorf("data mismatch: got %d bytes, want %d bytes", len(allData), len(streamData))
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	assert.Equal(t, streamData, string(allData))
+	err := stream.Close()
+	require.NoError(t, err)
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.InputTokens != 5 {
-		t.Errorf("InputTokens = %d, want 5", entry.InputTokens)
-	}
-	if entry.OutputTokens != 3 {
-		t.Errorf("OutputTokens = %d, want 3", entry.OutputTokens)
-	}
-	if entry.TotalTokens != 8 {
-		t.Errorf("TotalTokens = %d, want 8", entry.TotalTokens)
-	}
+	assert.Equal(t, 5, entry.InputTokens)
+	assert.Equal(t, 3, entry.OutputTokens)
+	assert.Equal(t, 8, entry.TotalTokens)
 }
 
 func TestStreamUsageObserverRecordsRewriteSavings(t *testing.T) {
@@ -707,27 +542,19 @@ data: [DONE]
 	observer.SetRewriteTokensSaved(500_000)
 
 	stream := streaming.NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
-	if _, err := io.ReadAll(stream); err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	_, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.RewriteTokensSaved != 500_000 {
-		t.Errorf("RewriteTokensSaved = %d, want 500000", entry.RewriteTokensSaved)
-	}
-	if entry.RewriteCostSaved == nil {
-		t.Fatal("expected RewriteCostSaved with resolvable pricing")
-	}
-	if got, want := *entry.RewriteCostSaved, 1.0; math.Abs(got-want) > 1e-9 {
-		t.Errorf("RewriteCostSaved = %v, want %v (500k tokens at $2/Mtok)", got, want)
-	}
+	assert.Equal(t, 500_000, entry.RewriteTokensSaved)
+	require.NotNil(t, entry.RewriteCostSaved)
+
+	assert.InDelta(t, 1.0, *entry.RewriteCostSaved, 1e-9, "500k tokens at $2/Mtok")
 }
 
 func TestStreamUsageObserverRewriteSavingsWithoutPricing(t *testing.T) {
@@ -741,23 +568,15 @@ data: [DONE]
 	observer.SetRewriteTokensSaved(40)
 
 	stream := streaming.NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
-	if _, err := io.ReadAll(stream); err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	_, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if entries[0].RewriteTokensSaved != 40 {
-		t.Errorf("RewriteTokensSaved = %d, want 40", entries[0].RewriteTokensSaved)
-	}
-	if entries[0].RewriteCostSaved != nil {
-		t.Errorf("RewriteCostSaved = %v, want nil without pricing", *entries[0].RewriteCostSaved)
-	}
+	require.Len(t, entries, 1)
+	assert.Equal(t, 40, entries[0].RewriteTokensSaved)
+	assert.Nil(t, entries[0].RewriteCostSaved)
 }
 
 func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
@@ -788,26 +607,13 @@ func TestStreamUsageObserverAnthropicNativeEvents(t *testing.T) {
 	observer.OnStreamClose()
 
 	entries := logger.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
+	require.Len(t, entries, 1)
+
 	entry := entries[0]
-	if entry.InputTokens != 19560 {
-		t.Errorf("InputTokens = %d, want 19560", entry.InputTokens)
-	}
-	if entry.OutputTokens != 31 {
-		t.Errorf("OutputTokens = %d, want 31", entry.OutputTokens)
-	}
-	if entry.TotalTokens != 19591 {
-		t.Errorf("TotalTokens = %d, want 19591", entry.TotalTokens)
-	}
-	if entry.ProviderID != "msg_native" {
-		t.Errorf("ProviderID = %q, want msg_native", entry.ProviderID)
-	}
-	if entry.RawData["cache_creation_input_tokens"] != 100 {
-		t.Errorf("cache_creation_input_tokens = %v, want 100", entry.RawData["cache_creation_input_tokens"])
-	}
-	if entry.RawData["cache_read_input_tokens"] != 200 {
-		t.Errorf("cache_read_input_tokens = %v, want 200", entry.RawData["cache_read_input_tokens"])
-	}
+	assert.Equal(t, 19560, entry.InputTokens)
+	assert.Equal(t, 31, entry.OutputTokens)
+	assert.Equal(t, 19591, entry.TotalTokens)
+	assert.Equal(t, "msg_native", entry.ProviderID)
+	assert.Equal(t, 100, entry.RawData["cache_creation_input_tokens"])
+	assert.Equal(t, 200, entry.RawData["cache_read_input_tokens"])
 }

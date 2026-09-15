@@ -2,13 +2,13 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 // stubFailoverResolver returns a fixed selector list regardless of input.
@@ -50,15 +50,9 @@ func TestTryFailoverResponseSkipsWhenContextCanceled(t *testing.T) {
 
 	_, meta, err := tryFailoverResponse(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if called {
-		t.Fatal("tryFailoverResponse invoked a failover provider on a canceled context; it must short-circuit")
-	}
-	if meta.UsedFailover {
-		t.Fatalf("didFailover = true, want false when context is canceled")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want the primary error wrapping context.Canceled", err)
-	}
+	require.False(t, called)
+	require.False(t, meta.UsedFailover)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 // The guard is scoped to a done context: a live request still attempts failover.
@@ -74,12 +68,10 @@ func TestTryFailoverResponseAttemptsWhenContextLive(t *testing.T) {
 
 	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if !called {
-		t.Fatal("tryFailoverResponse did not attempt failover on a live context")
-	}
-	if !meta.UsedFailover || err != nil || resp != "ok" {
-		t.Fatalf("failover result = (resp:%q didFailover:%v err:%v), want (ok true <nil>)", resp, meta.UsedFailover, err)
-	}
+	require.True(t, called)
+	require.True(t, meta.UsedFailover)
+	require.NoError(t, err)
+	require.Equal(t, "ok", resp)
 }
 
 // blockingRouteGate refuses the listed qualified models.
@@ -110,12 +102,12 @@ func TestTryFailoverResponseSkipsRateLimitedTargets(t *testing.T) {
 
 	resp, meta, err := tryFailoverResponse(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if len(attempted) != 1 || attempted[0] != "anthropic/claude" {
-		t.Fatalf("attempted = %v, want only anthropic/claude (rate-limited target skipped)", attempted)
-	}
-	if !meta.UsedFailover || err != nil || resp != "ok" || meta.FailoverModel != "anthropic/claude" {
-		t.Fatalf("failover result = (resp:%q model:%q didFailover:%v err:%v), want anthropic success", resp, meta.FailoverModel, meta.UsedFailover, err)
-	}
+	require.Len(t, attempted, 1)
+	require.Equal(t, "anthropic/claude", attempted[0])
+	require.True(t, meta.UsedFailover)
+	require.NoError(t, err)
+	require.Equal(t, "ok", resp)
+	require.Equal(t, "anthropic/claude", meta.FailoverModel)
 }
 
 // The stream sweep shares the route-gate skip with the response sweep.
@@ -136,12 +128,12 @@ func TestTryFailoverStreamSkipsRateLimitedTargets(t *testing.T) {
 
 	stream, meta, err := tryFailoverStream(context.Background(), o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if len(attempted) != 1 || attempted[0] != "anthropic/claude" {
-		t.Fatalf("attempted = %v, want only anthropic/claude (rate-limited target skipped)", attempted)
-	}
-	if err != nil || stream == nil || meta.FailoverModel != "anthropic/claude" {
-		t.Fatalf("failover result = (stream:%v model:%q err:%v), want anthropic success", stream != nil, meta.FailoverModel, err)
-	}
+	require.Len(t, attempted, 1)
+	require.Equal(t, "anthropic/claude", attempted[0])
+	require.NoError(t, err)
+	require.NotNil(t, stream)
+	require.Equal(t, "anthropic/claude", meta.FailoverModel)
+
 	stream.Close()
 }
 
@@ -160,15 +152,9 @@ func TestTryFailoverStreamSkipsWhenContextCanceled(t *testing.T) {
 
 	stream, _, err := tryFailoverStream(ctx, o, workflow, "openai/gpt-4o", "openai", primaryErr, call)
 
-	if called {
-		t.Fatal("tryFailoverStream invoked a failover provider on a canceled context; it must short-circuit")
-	}
-	if stream != nil {
-		t.Fatal("tryFailoverStream returned a stream on a canceled context")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want the primary error wrapping context.Canceled", err)
-	}
+	require.False(t, called)
+	require.Nil(t, stream)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestShouldAttemptFailover(t *testing.T) {
@@ -213,9 +199,8 @@ func TestShouldAttemptFailover(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := core.NewProviderError("anthropic", tt.status, tt.message, nil)
-			if got := ShouldAttemptFailover(err); got != tt.want {
-				t.Fatalf("ShouldAttemptFailover(%d, %q) = %v, want %v", tt.status, tt.message, got, tt.want)
-			}
+			got := ShouldAttemptFailover(err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -233,19 +218,18 @@ func TestExecuteTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
 		func(_ context.Context, req string) (string, string, error) {
 			calls = append(calls, req)
-			if req == "req" {
-				t.Fatal("saturated primary route reached the provider")
-			}
+			require.NotEqual(t, "req", req)
+
 			return "ok", "openai", nil
 		},
 	)
 
-	if len(calls) != 1 || calls[0] != "openai/gpt-5" {
-		t.Fatalf("provider calls = %v, want only the failover target", calls)
-	}
-	if !meta.UsedFailover || err != nil || resp != "ok" || meta.FailoverModel != "openai/gpt-5" {
-		t.Fatalf("result = (resp:%q model:%q didFailover:%v err:%v), want failover success", resp, meta.FailoverModel, meta.UsedFailover, err)
-	}
+	require.Len(t, calls, 1)
+	require.Equal(t, "openai/gpt-5", calls[0])
+	require.True(t, meta.UsedFailover)
+	require.NoError(t, err)
+	require.Equal(t, "ok", resp)
+	require.Equal(t, "openai/gpt-5", meta.FailoverModel)
 }
 
 // When every failover target is also unavailable, the client receives the
@@ -265,13 +249,11 @@ func TestExecuteTranslatedSaturatedPrimarySurfaces429WhenNoTargetRemains(t *test
 		},
 	)
 
-	if meta.UsedFailover {
-		t.Fatal("didFailover = true, want false")
-	}
+	require.False(t, meta.UsedFailover)
+
 	var gatewayErr *core.GatewayError
-	if !errors.As(err, &gatewayErr) || gatewayErr.HTTPStatusCode() != http.StatusTooManyRequests {
-		t.Fatalf("err = %v, want the original 429", err)
-	}
+	require.ErrorAs(t, err, &gatewayErr)
+	require.Equal(t, http.StatusTooManyRequests, gatewayErr.HTTPStatusCode())
 }
 
 // The stream path shares the skip.
@@ -287,18 +269,18 @@ func TestStreamTranslatedSkipsSaturatedPrimaryAndFailsOver(t *testing.T) {
 		func(req string, selector core.ModelSelector) string { return selector.QualifiedModel() },
 		func(_ context.Context, req string) (io.ReadCloser, error) {
 			calls = append(calls, req)
-			if req == "req" {
-				t.Fatal("saturated primary route reached the provider")
-			}
+			require.NotEqual(t, "req", req)
+
 			return io.NopCloser(strings.NewReader("data")), nil
 		},
 	)
 
-	if len(calls) != 1 || calls[0] != "openai/gpt-5" {
-		t.Fatalf("provider calls = %v, want only the failover target", calls)
-	}
-	if err != nil || stream == nil || !meta.UsedFailover || meta.FailoverModel != "openai/gpt-5" {
-		t.Fatalf("result = (stream:%v model:%q usedFailover:%v err:%v), want failover success", stream != nil, meta.FailoverModel, meta.UsedFailover, err)
-	}
+	require.Len(t, calls, 1)
+	require.Equal(t, "openai/gpt-5", calls[0])
+	require.NoError(t, err)
+	require.NotNil(t, stream)
+	require.True(t, meta.UsedFailover)
+	require.Equal(t, "openai/gpt-5", meta.FailoverModel)
+
 	stream.Close()
 }

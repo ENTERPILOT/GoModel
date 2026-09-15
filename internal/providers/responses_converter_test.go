@@ -3,10 +3,11 @@ package providers
 import (
 	"encoding/json"
 	"io"
-	"reflect"
-	"slices"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testSSEEvent struct {
@@ -31,9 +32,7 @@ data: [DONE]
 	converter := NewOpenAIResponsesStreamConverter(reader, "test-model", "groq")
 
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	foundAdded := false
@@ -67,18 +66,12 @@ data: [DONE]
 		}
 	}
 
-	if !foundAdded {
-		t.Fatal("expected response.output_item.added for function_call")
-	}
-	if len(argumentDeltas) != 2 || argumentDeltas[0] != "{\"city\":\"War" || argumentDeltas[1] != "saw\"}" {
-		t.Fatalf("response.function_call_arguments.delta sequence = %#v, want two ordered fragments", argumentDeltas)
-	}
-	if !foundArgumentsDone {
-		t.Fatal("expected response.function_call_arguments.done for function_call")
-	}
-	if !foundItemDone {
-		t.Fatal("expected response.output_item.done for function_call")
-	}
+	require.True(t, foundAdded)
+	require.Len(t, argumentDeltas, 2)
+	require.Equal(t, "{\"city\":\"War", argumentDeltas[0])
+	require.Equal(t, "saw\"}", argumentDeltas[1])
+	require.True(t, foundArgumentsDone)
+	require.True(t, foundItemDone)
 }
 
 // TestOpenAIResponsesStreamConverter_ToolCallExtraContent keeps a provider's
@@ -94,9 +87,7 @@ data: [DONE]
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	want := map[string]any{"google": map[string]any{"thought_signature": "sig-1"}}
 	seen := 0
@@ -109,13 +100,10 @@ data: [DONE]
 			continue
 		}
 		seen++
-		if got := item["extra_content"]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s extra_content = %#v, want %#v", event.Name, got, want)
-		}
+		got := item["extra_content"]
+		require.Equal(t, want, got)
 	}
-	if seen != 2 {
-		t.Fatalf("function_call item events = %d, want added and done", seen)
-	}
+	require.Equal(t, 2, seen)
 }
 
 // TestOpenAIResponsesStreamConverter_NullExtraContentDeltaKeepsSignature: a
@@ -133,9 +121,7 @@ data: [DONE]
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	want := map[string]any{"google": map[string]any{"thought_signature": "sig-1"}}
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -146,9 +132,9 @@ data: [DONE]
 		if item["type"] != "function_call" {
 			continue
 		}
-		if got := item["extra_content"]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("extra_content after null delta = %#v, want %#v", got, want)
-		}
+		got := item["extra_content"]
+		require.Equal(t, want, got)
+
 		return
 	}
 	t.Fatal("expected a function_call output_item.done event")
@@ -177,9 +163,8 @@ data: [DONE]
 	converter := NewOpenAIResponsesStreamConverter(reader, "deepseek-v4-pro", "deepseek")
 
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	rawStr := string(raw)
 
 	events := parseTestSSEEvents(t, rawStr)
@@ -202,15 +187,11 @@ data: [DONE]
 			if item["type"] == "reasoning" {
 				reasoningItemID = id
 				summary, ok := item["summary"].([]any)
-				if !ok || len(summary) != 0 {
-					t.Fatalf("reasoning output_item.added must carry an empty summary array, got %#v", item["summary"])
-				}
-				if item["status"] != "in_progress" {
-					t.Fatalf("reasoning output_item.added status = %#v, want in_progress", item["status"])
-				}
-				if idx, _ := event.Payload["output_index"].(float64); idx != 0 {
-					t.Fatalf("reasoning output_index = %v, want 0", event.Payload["output_index"])
-				}
+				require.True(t, ok)
+				require.Empty(t, summary)
+				require.Equal(t, "in_progress", item["status"])
+				idx, _ := event.Payload["output_index"].(float64)
+				require.Equal(t, float64(0), idx, "reasoning output_index = %v, want 0", event.Payload["output_index"])
 			}
 			if item["type"] == "message" {
 				messageOutputIndex, _ = event.Payload["output_index"].(float64)
@@ -220,30 +201,24 @@ data: [DONE]
 			id, _ := item["id"].(string)
 			if item["type"] == "reasoning" {
 				content, _ := item["content"].([]any)
-				if len(content) != 1 {
-					t.Fatalf("completed reasoning content = %#v, want one reasoning_text part", item["content"])
-				}
+				require.Len(t, content, 1)
+
 				part, _ := content[0].(map[string]any)
-				if part["type"] != "reasoning_text" || part["text"] != "Thinking..." {
-					t.Fatalf("completed reasoning part = %#v", part)
-				}
+				require.Equal(t, "reasoning_text", part["type"])
+				require.Equal(t, "Thinking...", part["text"], "completed reasoning part = %#v", part)
 			}
 			delete(activeItems, id)
 		case "response.reasoning_text.delta":
 			itemID, _ := event.Payload["item_id"].(string)
-			if !activeItems[itemID] {
-				t.Fatalf("%s referenced item %q before its response.output_item.added", event.Name, itemID)
-			}
+			require.True(t, activeItems[itemID], "%s referenced item %q before its response.output_item.added", event.Name, itemID)
+
 			delta, _ := event.Payload["delta"].(string)
 			reasoningDeltas.WriteString(delta)
 		case "response.reasoning_text.done":
 			itemID, _ := event.Payload["item_id"].(string)
-			if !activeItems[itemID] {
-				t.Fatalf("%s referenced item %q after it closed", event.Name, itemID)
-			}
-			if event.Payload["text"] != "Thinking..." {
-				t.Fatalf("reasoning_text.done text = %#v", event.Payload["text"])
-			}
+			require.True(t, activeItems[itemID], "%s referenced item %q after it closed", event.Name, itemID)
+			require.Equal(t, "Thinking...", event.Payload["text"])
+
 			sawReasoningDone = true
 		case "response.reasoning_summary_part.added", "response.reasoning_summary_text.delta",
 			"response.reasoning_summary_text.done", "response.reasoning_summary_part.done":
@@ -256,21 +231,12 @@ data: [DONE]
 		}
 	}
 
-	if reasoningItemID == "" {
-		t.Fatal("expected a reasoning output_item.added event")
-	}
-	if messageOutputIndex != 1 {
-		t.Fatalf("message output_index = %v, want 1 (after the reasoning item at index 0)", messageOutputIndex)
-	}
-	if reasoningDeltas.String() != "Thinking..." || !sawReasoningDone {
-		t.Fatalf("reasoning stream = %q, done=%v", reasoningDeltas.String(), sawReasoningDone)
-	}
-	if sawSummaryEvent {
-		t.Fatalf("raw reasoning_content must not emit reasoning summary events:\n%s", rawStr)
-	}
-	if len(activeItems) != 0 {
-		t.Fatalf("expected every output item to close by end of stream, still open: %#v", activeItems)
-	}
+	require.NotEmpty(t, reasoningItemID)
+	require.Equal(t, float64(1), messageOutputIndex)
+	require.Equal(t, "Thinking...", reasoningDeltas.String())
+	require.True(t, sawReasoningDone)
+	require.False(t, sawSummaryEvent, "raw reasoning_content must not emit reasoning summary events:\n%s", rawStr)
+	require.Empty(t, activeItems)
 }
 
 func TestOpenAIResponsesStreamConverter_DropsLateReasoningWithoutCorruptingIndexes(t *testing.T) {
@@ -283,14 +249,11 @@ data: [DONE]
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
-		if strings.HasPrefix(event.Name, "response.reasoning_") {
-			t.Fatalf("late reasoning produced %s:\n%s", event.Name, raw)
-		}
+		require.False(t, strings.HasPrefix(event.Name, "response.reasoning_"), "late reasoning produced %s:\n%s", event.Name, raw)
+
 		if event.Name != "response.output_item.added" && event.Name != "response.output_item.done" {
 			continue
 		}
@@ -340,9 +303,7 @@ data: [DONE]
 		t.Run(tt.name, func(t *testing.T) {
 			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(tt.mockStream)), "test-model", "mock")
 			raw, err := io.ReadAll(converter)
-			if err != nil {
-				t.Fatalf("ReadAll() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			addedIndexes := make(map[string]float64)
 			var addedSequence []string
@@ -365,20 +326,13 @@ data: [DONE]
 				}
 			}
 
-			if len(addedIndexes) != len(tt.wantIndexes) {
-				t.Fatalf("output indexes = %#v, want %#v", addedIndexes, tt.wantIndexes)
-			}
+			require.Len(t, addedIndexes, len(tt.wantIndexes), "want indexes %#v", tt.wantIndexes)
+
 			for itemType, wantIndex := range tt.wantIndexes {
-				if addedIndexes[itemType] != wantIndex {
-					t.Fatalf("%s output_index = %v, want %v", itemType, addedIndexes[itemType], wantIndex)
-				}
+				require.Equal(t, wantIndex, addedIndexes[itemType], "%s output_index", itemType)
 			}
-			if !slices.Equal(addedSequence, tt.wantSequence) {
-				t.Fatalf("output item sequence = %#v, want %#v", addedSequence, tt.wantSequence)
-			}
-			if !reasoningDoneBeforeTool {
-				t.Fatal("expected the reasoning item to close before the function_call item opened")
-			}
+			require.Equal(t, tt.wantSequence, addedSequence, "output item sequence")
+			require.True(t, reasoningDoneBeforeTool)
 		})
 	}
 }
@@ -401,9 +355,7 @@ data: [DONE]
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var output []any
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -414,41 +366,35 @@ data: [DONE]
 		output, _ = response["output"].([]any)
 	}
 
-	if len(output) != 3 {
-		t.Fatalf("response.completed output has %d items, want 3: %#v", len(output), output)
-	}
+	require.Len(t, output, 3)
 
 	reasoning, _ := output[0].(map[string]any)
-	if reasoning["type"] != "reasoning" || reasoning["status"] != "completed" {
-		t.Fatalf("output[0] = %#v, want completed reasoning item", reasoning)
-	}
+	require.Equal(t, "reasoning", reasoning["type"])
+	require.Equal(t, "completed", reasoning["status"], "output[0] = %#v, want completed reasoning item", reasoning)
+
 	reasoningContent, _ := reasoning["content"].([]any)
-	if len(reasoningContent) != 1 {
-		t.Fatalf("reasoning content = %#v, want one reasoning_text part", reasoning["content"])
-	}
-	if part, _ := reasoningContent[0].(map[string]any); part["type"] != "reasoning_text" || part["text"] != "Need the weather." {
-		t.Fatalf("reasoning part = %#v, want reasoning_text %q", reasoningContent[0], "Need the weather.")
-	}
+	require.Len(t, reasoningContent, 1, "reasoning content = %#v, want one reasoning_text part", reasoning["content"])
+	part, _ := reasoningContent[0].(map[string]any)
+	require.Equal(t, "reasoning_text", part["type"])
+	require.Equal(t, "Need the weather.", part["text"], "reasoning part = %#v, want reasoning_text %q", reasoningContent[0], "Need the weather.")
 
 	message, _ := output[1].(map[string]any)
-	if message["type"] != "message" || message["role"] != "assistant" || message["status"] != "completed" {
-		t.Fatalf("output[1] = %#v, want completed assistant message", message)
-	}
+	require.Equal(t, "message", message["type"])
+	require.Equal(t, "assistant", message["role"])
+	require.Equal(t, "completed", message["status"], "output[1] = %#v, want completed assistant message", message)
+
 	messageContent, _ := message["content"].([]any)
-	if len(messageContent) != 1 {
-		t.Fatalf("message content = %#v, want one output_text part", message["content"])
-	}
-	if part, _ := messageContent[0].(map[string]any); part["type"] != "output_text" || part["text"] != "Checking." {
-		t.Fatalf("message part = %#v, want output_text %q", messageContent[0], "Checking.")
-	}
+	require.Len(t, messageContent, 1, "message content = %#v, want one output_text part", message["content"])
+	part, _ = messageContent[0].(map[string]any)
+	require.Equal(t, "output_text", part["type"])
+	require.Equal(t, "Checking.", part["text"], "message part = %#v, want output_text %q", messageContent[0], "Checking.")
 
 	toolCall, _ := output[2].(map[string]any)
-	if toolCall["type"] != "function_call" || toolCall["status"] != "completed" {
-		t.Fatalf("output[2] = %#v, want completed function_call", toolCall)
-	}
-	if toolCall["call_id"] != "call_1" || toolCall["name"] != "lookup_weather" || toolCall["arguments"] != `{"city":"Warsaw"}` {
-		t.Fatalf("function_call = %#v, want call_1 lookup_weather with recorded arguments", toolCall)
-	}
+	require.Equal(t, "function_call", toolCall["type"])
+	require.Equal(t, "completed", toolCall["status"], "output[2] = %#v, want completed function_call", toolCall)
+	require.Equal(t, "call_1", toolCall["call_id"])
+	require.Equal(t, "lookup_weather", toolCall["name"])
+	require.Equal(t, `{"city":"Warsaw"}`, toolCall["arguments"], "function_call = %#v, want call_1 lookup_weather with recorded arguments", toolCall)
 }
 
 // TestOpenAIResponsesStreamConverter_CompletedEmptyOutputIsArray verifies a
@@ -459,9 +405,7 @@ func TestOpenAIResponsesStreamConverter_CompletedEmptyOutputIsArray(t *testing.T
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	found := false
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -471,16 +415,10 @@ func TestOpenAIResponsesStreamConverter_CompletedEmptyOutputIsArray(t *testing.T
 		found = true
 		response, _ := event.Payload["response"].(map[string]any)
 		output, ok := response["output"].([]any)
-		if !ok {
-			t.Fatalf("response.completed output = %#v, want an array", response["output"])
-		}
-		if len(output) != 0 {
-			t.Fatalf("response.completed output = %#v, want empty array", output)
-		}
+		require.True(t, ok, "response.completed output = %#v, want an array", response["output"])
+		require.Empty(t, output)
 	}
-	if !found {
-		t.Fatal("expected response.completed event")
-	}
+	require.True(t, found)
 }
 
 // TestOpenAIResponsesStreamConverter_TruncatedStreamEndsIncomplete covers an
@@ -495,9 +433,7 @@ data: {"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	itemDoneStatus := ""
 	foundCompleted := false
@@ -505,9 +441,8 @@ data: {"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}
 	sawDone := false
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		if event.Done {
-			if response == nil {
-				t.Fatal("[DONE] arrived before the response.incomplete terminal event")
-			}
+			require.NotNil(t, response)
+
 			sawDone = true
 			continue
 		}
@@ -524,40 +459,26 @@ data: {"choices":[{"delta":{"content":"lo"},"finish_reason":null}]}
 		}
 	}
 
-	if foundCompleted {
-		t.Fatal("truncated stream must not end with response.completed")
-	}
-	if response == nil {
-		t.Fatal("expected response.incomplete terminal event on truncated stream")
-	}
-	if !sawDone {
-		t.Fatal("expected trailing [DONE] after response.incomplete")
-	}
-	if itemDoneStatus != "incomplete" {
-		t.Fatalf("message output_item.done status = %q, want %q", itemDoneStatus, "incomplete")
-	}
-	if response["status"] != "incomplete" {
-		t.Fatalf("response.status = %v, want incomplete", response["status"])
-	}
+	require.False(t, foundCompleted)
+	require.NotNil(t, response)
+	require.True(t, sawDone)
+	require.Equal(t, "incomplete", itemDoneStatus)
+	require.Equal(t, "incomplete", response["status"])
+
 	details, _ := response["incomplete_details"].(map[string]any)
-	if details["reason"] != "interrupted" {
-		t.Fatalf("incomplete_details = %#v, want reason interrupted", response["incomplete_details"])
-	}
+	require.Equal(t, "interrupted", details["reason"], "incomplete_details = %#v, want reason interrupted", response["incomplete_details"])
+
 	output, _ := response["output"].([]any)
-	if len(output) != 1 {
-		t.Fatalf("response.incomplete output has %d items, want 1: %#v", len(output), output)
-	}
+	require.Len(t, output, 1)
+
 	message, _ := output[0].(map[string]any)
-	if message["type"] != "message" || message["status"] != "incomplete" {
-		t.Fatalf("output[0] = %#v, want incomplete assistant message", message)
-	}
+	require.Equal(t, "message", message["type"])
+	require.Equal(t, "incomplete", message["status"], "output[0] = %#v, want incomplete assistant message", message)
+
 	messageContent, _ := message["content"].([]any)
-	if len(messageContent) != 1 {
-		t.Fatalf("message content = %#v, want one output_text part", message["content"])
-	}
-	if part, _ := messageContent[0].(map[string]any); part["text"] != "Hello" {
-		t.Fatalf("partial text = %#v, want %q", part["text"], "Hello")
-	}
+	require.Len(t, messageContent, 1, "message content = %#v, want one output_text part", message["content"])
+	part, _ := messageContent[0].(map[string]any)
+	require.Equal(t, "Hello", part["text"])
 }
 
 // failingReadCloser returns its data on the first read and the configured
@@ -591,9 +512,7 @@ func TestOpenAIResponsesStreamConverter_NonEOFReadErrorEndsIncomplete(t *testing
 
 	converter := NewOpenAIResponsesStreamConverter(reader, "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != io.ErrUnexpectedEOF {
-		t.Fatalf("ReadAll() error = %v, want io.ErrUnexpectedEOF surfaced after terminal events", err)
-	}
+	require.Equal(t, io.ErrUnexpectedEOF, err)
 
 	var response map[string]any
 	sawDone := false
@@ -607,15 +526,9 @@ func TestOpenAIResponsesStreamConverter_NonEOFReadErrorEndsIncomplete(t *testing
 		}
 	}
 
-	if response == nil {
-		t.Fatal("expected response.incomplete terminal event before the read error")
-	}
-	if !sawDone {
-		t.Fatal("expected trailing [DONE] before the read error")
-	}
-	if response["status"] != "incomplete" {
-		t.Fatalf("response.status = %v, want incomplete", response["status"])
-	}
+	require.NotNil(t, response)
+	require.True(t, sawDone)
+	require.Equal(t, "incomplete", response["status"])
 }
 
 // TestOpenAIResponsesStreamConverter_IgnoresDeltaAfterToolCallClosed covers a
@@ -634,9 +547,7 @@ data: [DONE]
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	doneArguments := ""
 	var output []any
@@ -656,15 +567,10 @@ data: [DONE]
 		}
 	}
 
-	if doneArguments != `{"city":"Warsaw"}` {
-		t.Fatalf("output_item.done arguments = %q, want %q", doneArguments, `{"city":"Warsaw"}`)
-	}
-	if len(output) != 1 {
-		t.Fatalf("response.completed output has %d items, want 1: %#v", len(output), output)
-	}
-	if toolCall, _ := output[0].(map[string]any); toolCall["arguments"] != `{"city":"Warsaw"}` {
-		t.Fatalf("terminal output arguments = %v, want the arguments the done event declared", toolCall["arguments"])
-	}
+	require.Equal(t, `{"city":"Warsaw"}`, doneArguments)
+	require.Len(t, output, 1)
+	toolCall, _ := output[0].(map[string]any)
+	require.Equal(t, `{"city":"Warsaw"}`, toolCall["arguments"])
 }
 
 // TestOpenAIResponsesStreamConverter_FinishReasonWithoutDoneCompletes covers
@@ -679,9 +585,7 @@ data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	var response map[string]any
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -691,19 +595,13 @@ data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
 		response, _ = event.Payload["response"].(map[string]any)
 	}
 
-	if response == nil {
-		t.Fatal("expected response.completed when the stream ends after finish_reason without [DONE]")
-	}
-	if response["status"] != "completed" {
-		t.Fatalf("response.status = %v, want completed", response["status"])
-	}
+	require.NotNil(t, response)
+	require.Equal(t, "completed", response["status"])
+
 	output, _ := response["output"].([]any)
-	if len(output) != 1 {
-		t.Fatalf("response.completed output has %d items, want 1: %#v", len(output), output)
-	}
-	if message, _ := output[0].(map[string]any); message["status"] != "completed" {
-		t.Fatalf("output[0] = %#v, want completed assistant message", message)
-	}
+	require.Len(t, output, 1)
+	message, _ := output[0].(map[string]any)
+	require.Equal(t, "completed", message["status"], "output[0] = %#v, want completed assistant message", message)
 }
 
 func TestOpenAIResponsesStreamConverter_OutOfOrderToolCallsKeepUniqueIndexes(t *testing.T) {
@@ -722,9 +620,7 @@ data: [DONE]
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "mock")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("ReadAll() error = %v", err)
-	}
+	require.NoError(t, err)
 
 	indexes := make(map[float64]string)
 	callIndexes := make(map[string]float64)
@@ -734,14 +630,13 @@ data: [DONE]
 			continue
 		}
 		index, ok := event.Payload["output_index"].(float64)
-		if !ok {
-			t.Fatalf("output_index = %#v, want number", event.Payload["output_index"])
-		}
+		require.True(t, ok, "output_index = %#v, want number", event.Payload["output_index"])
+
 		item, _ := event.Payload["item"].(map[string]any)
 		itemID, _ := item["id"].(string)
-		if previous, exists := indexes[index]; exists {
-			t.Fatalf("output_index %v reused by %q and %q", index, previous, itemID)
-		}
+		previous, exists := indexes[index]
+		require.False(t, exists, "output_index %v reused by %q and %q", index, previous, itemID)
+
 		addedIndexes = append(addedIndexes, index)
 		indexes[index] = itemID
 		if callID, _ := item["call_id"].(string); callID != "" {
@@ -749,15 +644,10 @@ data: [DONE]
 		}
 	}
 
-	if len(indexes) != 4 {
-		t.Fatalf("output items = %#v, want reasoning, two calls, and message", indexes)
-	}
-	if !slices.Equal(addedIndexes, []float64{0, 1, 2, 3}) {
-		t.Fatalf("output indexes = %#v, want [0 1 2 3]", addedIndexes)
-	}
-	if callIndexes["call_second"] != 1 || callIndexes["call_first"] != 3 {
-		t.Fatalf("function-call indexes = %#v, want emission-order indexes 1 and 3", callIndexes)
-	}
+	require.Len(t, indexes, 4)
+	require.Equal(t, []float64{0, 1, 2, 3}, addedIndexes, "output indexes")
+	require.Equal(t, float64(1), callIndexes["call_second"])
+	require.Equal(t, float64(3), callIndexes["call_first"], "function-call indexes = %#v, want emission-order indexes 1 and 3", callIndexes)
 }
 
 func TestOpenAIResponsesStreamConverter_WithTextBeforeToolCall(t *testing.T) {
@@ -774,9 +664,7 @@ data: [DONE]
 	converter := NewOpenAIResponsesStreamConverter(reader, "test-model", "groq")
 
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	foundTextDelta := false
@@ -809,18 +697,10 @@ data: [DONE]
 		}
 	}
 
-	if !foundTextDelta {
-		t.Fatal("expected response.output_text.delta for assistant preamble")
-	}
-	if !foundAssistantAdded {
-		t.Fatal("expected assistant message response.output_item.added at output_index 0")
-	}
-	if !foundAssistantDone {
-		t.Fatal("expected assistant message response.output_item.done at output_index 0")
-	}
-	if !foundToolAddedAtIndexOne {
-		t.Fatal("expected function_call output_index to be 1 after assistant text")
-	}
+	require.True(t, foundTextDelta)
+	require.True(t, foundAssistantAdded)
+	require.True(t, foundAssistantDone)
+	require.True(t, foundToolAddedAtIndexOne)
 }
 
 func TestOpenAIResponsesStreamConverter_WaitsForToolMetadata(t *testing.T) {
@@ -837,9 +717,7 @@ data: [DONE]
 	converter := NewOpenAIResponsesStreamConverter(reader, "test-model", "groq")
 
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	addedCount := 0
@@ -854,12 +732,8 @@ data: [DONE]
 			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] == "function_call" {
 				addedCount++
-				if item["call_id"] != "call_123" {
-					t.Fatalf("function_call call_id = %v, want call_123", item["call_id"])
-				}
-				if item["name"] != "lookup_weather" {
-					t.Fatalf("function_call name = %v, want lookup_weather", item["name"])
-				}
+				require.Equal(t, "call_123", item["call_id"])
+				require.Equal(t, "lookup_weather", item["name"])
 			}
 		case "response.function_call_arguments.delta":
 			if delta, _ := event.Payload["delta"].(string); delta != "" {
@@ -868,12 +742,9 @@ data: [DONE]
 		}
 	}
 
-	if addedCount != 1 {
-		t.Fatalf("function_call added event count = %d, want 1", addedCount)
-	}
-	if len(argumentDeltas) != 1 || argumentDeltas[0] != `{"city":"Warsaw"}` {
-		t.Fatalf("response.function_call_arguments.delta = %#v, want buffered JSON after metadata", argumentDeltas)
-	}
+	require.Equal(t, 1, addedCount)
+	require.Len(t, argumentDeltas, 1)
+	require.Equal(t, `{"city":"Warsaw"}`, argumentDeltas[0])
 }
 
 func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
@@ -904,9 +775,8 @@ func parseTestSSEEvents(t *testing.T, raw string) []testSSEEvent {
 		}
 
 		var payload map[string]any
-		if err := json.Unmarshal([]byte(data), &payload); err != nil {
-			t.Fatalf("failed to unmarshal SSE payload %q: %v", data, err)
-		}
+		err := json.Unmarshal([]byte(data), &payload)
+		require.NoError(t, err, "failed to unmarshal SSE payload %q: %v", data, err)
 
 		events = append(events, testSSEEvent{
 			Name:    currentEventName,
@@ -937,9 +807,7 @@ data: [DONE]
 
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	events := parseTestSSEEvents(t, string(raw))
 	var completed map[string]any
@@ -959,30 +827,21 @@ data: [DONE]
 		}
 	}
 
-	if completed == nil {
-		t.Fatal("expected response.completed event")
-	}
+	require.NotNil(t, completed)
+
 	usage, ok := completed["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("response.completed usage = %#v, want object captured from off-spec chunk", completed["usage"])
-	}
-	if usage["total_tokens"] != float64(7) {
-		t.Fatalf("usage total_tokens = %v, want 7", usage["total_tokens"])
-	}
-	if usage["input_tokens"] != float64(3) || usage["output_tokens"] != float64(4) {
-		t.Fatalf("Responses usage counts = %#v", usage)
-	}
+	require.True(t, ok, "response.completed usage = %#v, want object captured from off-spec chunk", completed["usage"])
+	require.Equal(t, float64(7), usage["total_tokens"])
+	require.Equal(t, float64(3), usage["input_tokens"])
+	require.Equal(t, float64(4), usage["output_tokens"], "Responses usage counts = %#v", usage)
+
 	inputDetails, _ := usage["input_tokens_details"].(map[string]any)
 	outputDetails, _ := usage["output_tokens_details"].(map[string]any)
-	if inputDetails["cached_tokens"] != float64(2) || outputDetails["reasoning_tokens"] != float64(1) {
-		t.Fatalf("Responses usage details = %#v", usage)
-	}
-	if _, present := usage["prompt_tokens"]; present {
-		t.Fatalf("usage retained Chat field names: %#v", usage)
-	}
-	if !foundToolAdded {
-		t.Fatal("expected function_call output item from float-index tool call delta")
-	}
+	require.Equal(t, float64(2), inputDetails["cached_tokens"])
+	require.Equal(t, float64(1), outputDetails["reasoning_tokens"], "Responses usage details = %#v", usage)
+	_, present := usage["prompt_tokens"]
+	require.False(t, present, "usage retained Chat field names: %#v", usage)
+	require.True(t, foundToolAdded)
 }
 
 func TestOpenAIResponsesStreamConverter_DropsInvalidUsage(t *testing.T) {
@@ -1003,21 +862,17 @@ data: [DONE]
 `
 			converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "groq")
 			raw, err := io.ReadAll(converter)
-			if err != nil {
-				t.Fatalf("ReadAll() error = %v", err)
-			}
+			require.NoError(t, err)
 
 			for _, event := range parseTestSSEEvents(t, string(raw)) {
 				if event.Done || event.Name != "response.completed" {
 					continue
 				}
 				response, _ := event.Payload["response"].(map[string]any)
-				if response == nil {
-					t.Fatal("response.completed missing response object")
-				}
-				if usage, present := response["usage"]; present {
-					t.Fatalf("invalid usage leaked into response.completed: %#v", usage)
-				}
+				require.NotNil(t, response)
+				usage, present := response["usage"]
+				require.False(t, present, "invalid usage leaked into response.completed: %#v", usage)
+
 				return
 			}
 			t.Fatal("expected response.completed event")
@@ -1067,9 +922,7 @@ data: [DONE]
 				"cohere",
 			)
 			raw, err := io.ReadAll(converter)
-			if err != nil {
-				t.Fatalf("failed to read from converter: %v", err)
-			}
+			require.NoError(t, err)
 
 			var failed map[string]any
 			for _, event := range parseTestSSEEvents(t, string(raw)) {
@@ -1080,17 +933,13 @@ data: [DONE]
 					failed, _ = event.Payload["response"].(map[string]any)
 				}
 			}
-			if failed == nil {
-				t.Fatalf("stream missing response.failed event:\n%s", raw)
-			}
-			if failed["status"] != "failed" || failed["provider"] != "cohere" {
-				t.Fatalf("response.failed response = %#v", failed)
-			}
+			require.NotNil(t, failed)
+			require.Equal(t, "failed", failed["status"])
+			require.Equal(t, "cohere", failed["provider"], "response.failed response = %#v", failed)
+
 			responseErr, _ := failed["error"].(map[string]any)
-			if responseErr["code"] != tt.wantCode ||
-				responseErr["message"] != tt.wantMessage {
-				t.Fatalf("response.failed error = %#v", responseErr)
-			}
+			require.Equal(t, tt.wantCode, responseErr["code"])
+			require.Equal(t, tt.wantMessage, responseErr["message"])
 		})
 	}
 }
@@ -1111,9 +960,7 @@ data: [DONE]
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "gemini-3.5-flash", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
 
 	want := map[string]any{"google": map[string]any{"thought_signature": "sig-text"}}
 	sawDone := false
@@ -1123,31 +970,26 @@ data: [DONE]
 		}
 		switch event.Name {
 		case "response.output_item.added":
-			if item, _ := event.Payload["item"].(map[string]any); item["type"] == "reasoning" {
-				t.Error("a text turn with no reasoning text must not gain a reasoning item")
-			}
+			item, _ := event.Payload["item"].(map[string]any)
+			assert.NotEqual(t, "reasoning", item["type"])
+
 		case "response.output_item.done":
 			item, _ := event.Payload["item"].(map[string]any)
 			if item["type"] != "message" {
 				continue
 			}
 			sawDone = true
-			if got := item["extra_content"]; !reflect.DeepEqual(got, want) {
-				t.Errorf("message output_item.done extra_content = %#v, want %#v", got, want)
-			}
+			got := item["extra_content"]
+			assert.Equal(t, want, got)
+
 		case "response.completed":
 			output, _ := event.Payload["response"].(map[string]any)["output"].([]any)
-			if len(output) != 1 {
-				t.Fatalf("terminal output = %#v, want the message item alone", output)
-			}
-			if got := output[0].(map[string]any)["extra_content"]; !reflect.DeepEqual(got, want) {
-				t.Errorf("terminal message extra_content = %#v, want %#v", got, want)
-			}
+			require.Len(t, output, 1)
+			got := output[0].(map[string]any)["extra_content"]
+			assert.Equal(t, want, got)
 		}
 	}
-	if !sawDone {
-		t.Fatal("expected a message output_item.done event")
-	}
+	require.True(t, sawDone)
 }
 
 // The tolerant decode path, taken for off-spec chunks, must carry the member
@@ -1161,21 +1003,18 @@ data: [DONE]
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "gemini-3.5-flash", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	want := map[string]any{"google": map[string]any{"thought_signature": "sig-text"}}
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		if event.Name != "response.completed" {
 			continue
 		}
 		output, _ := event.Payload["response"].(map[string]any)["output"].([]any)
-		if len(output) != 1 {
-			t.Fatalf("terminal output = %#v, want the message item alone", output)
-		}
-		if got := output[0].(map[string]any)["extra_content"]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("terminal message extra_content = %#v, want %#v", got, want)
-		}
+		require.Len(t, output, 1)
+		got := output[0].(map[string]any)["extra_content"]
+		require.Equal(t, want, got)
+
 		return
 	}
 	t.Fatal("expected a response.completed event")
@@ -1193,21 +1032,20 @@ data: [DONE]
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "gemini-3.5-flash", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		if event.Name != "response.completed" {
 			continue
 		}
 		output, _ := event.Payload["response"].(map[string]any)["output"].([]any)
-		if len(output) != 1 || output[0].(map[string]any)["type"] != "function_call" {
-			t.Fatalf("terminal output = %#v, want the function_call alone", output)
-		}
+		require.Len(t, output, 1)
+		require.Equal(t, "function_call", output[0].(map[string]any)["type"])
+
 		want := map[string]any{"google": map[string]any{"thought_signature": "sig-1"}}
-		if got := output[0].(map[string]any)["extra_content"]; !reflect.DeepEqual(got, want) {
-			t.Errorf("function_call extra_content = %#v, want its own signature", got)
-		}
+		got := output[0].(map[string]any)["extra_content"]
+		assert.Equal(t, want, got)
+
 		return
 	}
 	t.Fatal("expected a response.completed event")
@@ -1226,9 +1064,8 @@ data: [DONE]
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "gemini-3.5-flash", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	want := map[string]any{"google": map[string]any{"thought_signature": "sig-text"}}
 	for _, event := range parseTestSSEEvents(t, string(raw)) {
 		if event.Name != "response.output_item.done" {
@@ -1238,9 +1075,9 @@ data: [DONE]
 		if item["type"] != "message" {
 			continue
 		}
-		if got := item["extra_content"]; !reflect.DeepEqual(got, want) {
-			t.Fatalf("message output_item.done extra_content = %#v, want %#v", got, want)
-		}
+		got := item["extra_content"]
+		require.Equal(t, want, got)
+
 		return
 	}
 	t.Fatal("expected a message output_item.done event")
@@ -1266,37 +1103,29 @@ func eventNames(events []testSSEEvent) []string {
 // response.in_progress, and the type member matching the SSE event name.
 func requireNormalizedResponsesStream(t *testing.T, events []testSSEEvent) {
 	t.Helper()
-	if len(events) < 3 {
-		t.Fatalf("events = %v, want at least created, in_progress and a terminal event", eventNames(events))
-	}
-	if events[0].Name != "response.created" || events[1].Name != "response.in_progress" {
-		t.Fatalf("stream opens with %v, want response.created then response.in_progress", eventNames(events)[:2])
-	}
+	require.GreaterOrEqual(t, len(events), 3, "events = %v, want at least created, in_progress and a terminal event", eventNames(events))
+	require.Equal(t, "response.created", events[0].Name)
+	require.Equal(t, "response.in_progress", events[1].Name, "stream opens with %v, want response.created then response.in_progress", eventNames(events)[:2])
+
 	for i, name := range []string{"response.created", "response.in_progress"} {
 		response, _ := events[i].Payload["response"].(map[string]any)
-		if response["status"] != "in_progress" {
-			t.Fatalf("%s response.status = %#v, want in_progress", name, response["status"])
-		}
-		// SDK stream helpers snapshot this object and append output items to it.
-		if output, ok := response["output"].([]any); !ok || len(output) != 0 {
-			t.Fatalf("%s response.output = %#v, want empty array", name, response["output"])
-		}
+		require.Equal(t, "in_progress", response["status"], "%s response.status = %#v, want in_progress", name, response["status"])
+		output, ok := // SDK stream helpers snapshot this object and append output items to it.
+			response["output"].([]any)
+		require.True(t, ok)
+		require.Empty(t, output)
 	}
 	next := 0
 	for _, event := range events {
 		if event.Done {
 			continue
 		}
-		if event.Payload["type"] != event.Name {
-			t.Fatalf("event %s carries type %#v", event.Name, event.Payload["type"])
-		}
+		require.Equal(t, event.Name, event.Payload["type"])
+
 		seq, ok := event.Payload["sequence_number"].(float64)
-		if !ok {
-			t.Fatalf("event %s has no sequence_number: %v", event.Name, event.Payload)
-		}
-		if int(seq) != next {
-			t.Fatalf("event %s sequence_number = %d, want %d", event.Name, int(seq), next)
-		}
+		require.True(t, ok, "event %s has no sequence_number: %v", event.Name, event.Payload)
+		require.Equal(t, next, int(seq), "event %s sequence_number", event.Name)
+
 		next++
 	}
 }
@@ -1315,9 +1144,8 @@ data: [DONE]
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := parseTestSSEEvents(t, string(raw))
 	requireNormalizedResponsesStream(t, events)
 
@@ -1334,40 +1162,30 @@ data: [DONE]
 		"response.completed",
 		"[DONE]",
 	}
-	if got := eventNames(events); !reflect.DeepEqual(got, want) {
-		t.Fatalf("event order = %v, want %v", got, want)
-	}
+	got := eventNames(events)
+	require.Equal(t, want, got)
 
 	item, _ := events[2].Payload["item"].(map[string]any)
 	itemID, _ := item["id"].(string)
-	if itemID == "" {
-		t.Fatalf("output_item.added item has no id: %v", item)
-	}
+	require.NotEmpty(t, itemID, "output_item.added item has no id: %v", item)
+
 	for _, event := range events[3:8] {
-		if event.Payload["item_id"] != itemID {
-			t.Fatalf("%s item_id = %#v, want %q", event.Name, event.Payload["item_id"], itemID)
-		}
-		if event.Payload["output_index"] != float64(0) || event.Payload["content_index"] != float64(0) {
-			t.Fatalf("%s indexes = %#v/%#v, want 0/0", event.Name, event.Payload["output_index"], event.Payload["content_index"])
-		}
+		require.Equal(t, itemID, event.Payload["item_id"], "%s item_id", event.Name)
+		require.Equal(t, float64(0), event.Payload["output_index"])
+		require.Equal(t, float64(0), event.Payload["content_index"], "%s indexes = %#v/%#v, want 0/0", event.Name, event.Payload["output_index"], event.Payload["content_index"])
 	}
 	partAdded, _ := events[3].Payload["part"].(map[string]any)
-	if partAdded["type"] != "output_text" || partAdded["text"] != "" {
-		t.Fatalf("content_part.added part = %#v, want empty output_text", partAdded)
-	}
-	if events[4].Payload["delta"] != "Hello" || events[5].Payload["delta"] != " world" {
-		t.Fatalf("deltas = %#v, %#v", events[4].Payload["delta"], events[5].Payload["delta"])
-	}
-	if events[6].Payload["text"] != "Hello world" {
-		t.Fatalf("output_text.done text = %#v, want %q", events[6].Payload["text"], "Hello world")
-	}
+	require.Equal(t, "output_text", partAdded["type"])
+	require.Empty(t, partAdded["text"], "content_part.added part = %#v, want empty output_text", partAdded)
+	require.Equal(t, "Hello", events[4].Payload["delta"])
+	require.Equal(t, " world", events[5].Payload["delta"])
+	require.Equal(t, "Hello world", events[6].Payload["text"])
+
 	partDone, _ := events[7].Payload["part"].(map[string]any)
-	if partDone["type"] != "output_text" || partDone["text"] != "Hello world" {
-		t.Fatalf("content_part.done part = %#v, want full output_text", partDone)
-	}
-	if _, ok := partDone["annotations"].([]any); !ok {
-		t.Fatalf("content_part.done part has no annotations array: %#v", partDone)
-	}
+	require.Equal(t, "output_text", partDone["type"])
+	require.Equal(t, "Hello world", partDone["text"], "content_part.done part = %#v, want full output_text", partDone)
+	_, ok := partDone["annotations"].([]any)
+	require.True(t, ok, "content_part.done part has no annotations array: %#v", partDone)
 }
 
 // TestOpenAIResponsesStreamConverter_NormalizedToolCallStream keeps the
@@ -1384,9 +1202,8 @@ data: [DONE]
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := parseTestSSEEvents(t, string(raw))
 	requireNormalizedResponsesStream(t, events)
 
@@ -1404,9 +1221,8 @@ data: [DONE]
 		"response.completed",
 		"[DONE]",
 	}
-	if got := eventNames(events); !reflect.DeepEqual(got, want) {
-		t.Fatalf("event order = %v, want %v", got, want)
-	}
+	got := eventNames(events)
+	require.Equal(t, want, got)
 }
 
 // TestOpenAIResponsesStreamConverter_InterruptedStreamClosesContentPart
@@ -1418,9 +1234,8 @@ func TestOpenAIResponsesStreamConverter_InterruptedStreamClosesContentPart(t *te
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := parseTestSSEEvents(t, string(raw))
 	requireNormalizedResponsesStream(t, events)
 
@@ -1436,16 +1251,12 @@ func TestOpenAIResponsesStreamConverter_InterruptedStreamClosesContentPart(t *te
 		"response.incomplete",
 		"[DONE]",
 	}
-	if got := eventNames(events); !reflect.DeepEqual(got, want) {
-		t.Fatalf("event order = %v, want %v", got, want)
-	}
-	if events[5].Payload["text"] != "Hel" {
-		t.Fatalf("output_text.done text = %#v, want partial text", events[5].Payload["text"])
-	}
+	got := eventNames(events)
+	require.Equal(t, want, got)
+	require.Equal(t, "Hel", events[5].Payload["text"])
+
 	item, _ := events[7].Payload["item"].(map[string]any)
-	if item["status"] != "incomplete" {
-		t.Fatalf("message item status = %#v, want incomplete", item["status"])
-	}
+	require.Equal(t, "incomplete", item["status"])
 }
 
 // TestOpenAIResponsesStreamConverter_FailedEventIsSequenced keeps the
@@ -1456,13 +1267,11 @@ func TestOpenAIResponsesStreamConverter_FailedEventIsSequenced(t *testing.T) {
 `
 	converter := NewOpenAIResponsesStreamConverter(io.NopCloser(strings.NewReader(mockStream)), "test-model", "gemini")
 	raw, err := io.ReadAll(converter)
-	if err != nil {
-		t.Fatalf("failed to read from converter: %v", err)
-	}
+	require.NoError(t, err)
+
 	events := parseTestSSEEvents(t, string(raw))
 	requireNormalizedResponsesStream(t, events)
 	want := []string{"response.created", "response.in_progress", "response.failed", "[DONE]"}
-	if got := eventNames(events); !reflect.DeepEqual(got, want) {
-		t.Fatalf("event order = %v, want %v", got, want)
-	}
+	got := eventNames(events)
+	require.Equal(t, want, got)
 }

@@ -2,11 +2,11 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWaitForInferenceSlowdown(t *testing.T) {
@@ -32,14 +32,11 @@ func TestWaitForInferenceSlowdown(t *testing.T) {
 			started := time.Now()
 			err := waitForInferenceSlowdown(tt.ctx, tt.workflow, tt.inference)
 			elapsed := time.Since(started)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("waitForInferenceSlowdown() error = %v, want %v", err, tt.wantErr)
-			}
-			if elapsed < tt.wantMin {
-				t.Fatalf("waitForInferenceSlowdown() waited %v, want at least %v", elapsed, tt.wantMin)
-			}
-			if tt.wantMax > 0 && elapsed > tt.wantMax {
-				t.Fatalf("waitForInferenceSlowdown() waited %v, want at most %v", elapsed, tt.wantMax)
+			require.ErrorIs(t, err, tt.wantErr)
+			require.GreaterOrEqual(t, elapsed, tt.wantMin)
+
+			if tt.wantMax > 0 {
+				require.LessOrEqual(t, elapsed, tt.wantMax, "waitForInferenceSlowdown() waited too long")
 			}
 		})
 	}

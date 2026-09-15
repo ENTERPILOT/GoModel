@@ -218,6 +218,54 @@ func (failingPlugin) OnPrompt(context.Context, *pluginapi.Exchange) (pluginapi.D
 	return pluginapi.Decision{}, errors.New("classifier unreachable")
 }
 
+// A chained Responses request only needs its stored history expanded into the
+// input when a prompt plugin rewrites content; a classifier leaves the native
+// passthrough (and the provider's own history) alone.
+func TestWorkflowRequestPatcherEditsPromptContent(t *testing.T) {
+	catalog := testCatalog(t)
+	if err := catalog.Register(func() pluginapi.Plugin { return &decisionPlugin{} }, plugins.SourceRegistered); err != nil {
+		t.Fatal(err)
+	}
+	store := newTestStore(
+		Definition{Name: "classify", Type: "decide"},
+		systemPromptDefinition("inject", "be safe"),
+		Definition{Name: "replace", Type: "string_replace", Config: json.RawMessage(`{"rules":"secret => [redacted]"}`)},
+		Definition{Name: "flag", Type: "string_replace", Config: json.RawMessage(`{"rules":"secret => [redacted]","on_match":"warn"}`)},
+	)
+	service, err := NewService(store, catalog, plugins.HostDeps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		steps []StepReference
+		want  bool
+	}{
+		{name: "no chain", want: false},
+		{name: "classifier only", steps: []StepReference{{Ref: "classify", Step: 1}}, want: false},
+		{name: "rewriting plugin", steps: []StepReference{{Ref: "classify", Step: 1}, {Ref: "inject", Step: 2}}, want: true},
+		{name: "rewriting instance", steps: []StepReference{{Ref: "replace", Step: 1}}, want: true},
+		// The plugin can edit, but this instance only flags its matches.
+		{name: "flagging instance", steps: []StepReference{{Ref: "flag", Step: 1}}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var chains *plugins.Chains
+			if len(tt.steps) > 0 {
+				chains = chainsFor(t, service, tt.steps...)
+			}
+			patcher := NewWorkflowRequestPatcher(staticChains{chains})
+			if got := patcher.EditsPromptContent(context.Background()); got != tt.want {
+				t.Fatalf("EditsPromptContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWorkflowRequestPatcherFailModes(t *testing.T) {
 	for _, tt := range []struct {
 		failMode string

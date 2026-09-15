@@ -48,6 +48,38 @@ or normalize custom client values to `high` or `max` before calling GoModel.
 To disable reasoning, omit the `reasoning` field entirely; any provided
 `reasoning.effort`, including `low`, is mapped and enables reasoning.
 
+## Tool calls and reasoning
+
+In thinking mode, DeepSeek requires `reasoning_content` on every earlier
+assistant turn whenever the request includes `tools`, even turns without tool
+calls. GoModel keeps the value a client sends and fills in a single space when
+it is missing, so clients that don't know DeepSeek serves the request (for
+example through a virtual model) keep working.
+
+## Structured outputs
+
+DeepSeek accepts `response_format: {"type": "json_object"}` but not
+`json_schema`. For `json_schema` requests (including `text.format` on
+`/v1/responses`), GoModel follows `DEEPSEEK_JSON_SCHEMA_MODE`:
+
+| Value | Behavior |
+| ----- | -------- |
+| `downgrade` (default) | Sends `json_object` and adds the schema to the conversation as a system message. |
+| `error` | Returns `invalid_request_error` naming the provider and model. |
+
+```bash
+DEEPSEEK_JSON_SCHEMA_MODE=error
+```
+
+<Note>
+  Downgraded output is valid JSON aimed at the schema, but DeepSeek does not
+  enforce it. Validate the result if you depend on the exact shape, or set
+  `error` when clients must never receive unenforced output.
+</Note>
+
+Both rules also apply to DeepSeek models served by
+[OpenCode Go](/providers/opencode-go).
+
 ## Not supported by DeepSeek
 
 - Embeddings (returns `invalid_request_error`).
