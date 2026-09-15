@@ -36,7 +36,8 @@ const ResponsesJSON = `{
 	"object":"response",
 	"model":"` + Model + `",
 	"status":"completed",
-	"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + Reply + `"}]}]
+	"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + Reply + `"}]}],
+	"usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}
 }`
 
 // ResponsesSSE is a one-delta Responses API stream ending in [DONE].
@@ -126,6 +127,9 @@ func AssertChatCompatible(t *testing.T, p ChatCompatible) {
 		assert.Equal(t, Model, resp.Model)
 		require.Len(t, resp.Choices, 1)
 		assert.Equal(t, Reply, resp.Choices[0].Message.Content)
+		assert.Equal(t, 5, resp.Usage.PromptTokens, "usage prompt tokens")
+		assert.Equal(t, 1, resp.Usage.CompletionTokens, "usage completion tokens")
+		assert.Equal(t, 6, resp.Usage.TotalTokens, "usage total tokens")
 	})
 
 	if p.Registration.Discovery.AllowAPIKeyless {
@@ -261,6 +265,7 @@ func responsesRequest() *core.ResponsesRequest {
 
 func readAll(t testing.TB, stream io.ReadCloser) []byte {
 	t.Helper()
+	require.NotNil(t, stream, "stream")
 	defer stream.Close()
 	body, err := io.ReadAll(stream)
 	require.NoError(t, err)
@@ -296,13 +301,19 @@ func assertResponsesRequest(t testing.TB, sent map[string]any, stream bool) {
 	}
 }
 
-// assertResponse checks a completed Responses API reply that says Reply.
+// assertResponse checks a completed Responses API reply that says Reply,
+// including the normalized model and token usage both fixtures carry.
 func assertResponse(t testing.TB, resp *core.ResponsesResponse) {
 	t.Helper()
 	require.NotNil(t, resp)
 	assert.Equal(t, "response", resp.Object)
 	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, Model, resp.Model)
 	assert.Equal(t, Reply, outputText(resp))
+	require.NotNil(t, resp.Usage, "usage")
+	assert.Equal(t, 5, resp.Usage.InputTokens, "usage input tokens")
+	assert.Equal(t, 1, resp.Usage.OutputTokens, "usage output tokens")
+	assert.Equal(t, 6, resp.Usage.TotalTokens, "usage total tokens")
 }
 
 // assertStreamBody checks that each expected fragment appears in the stream.
