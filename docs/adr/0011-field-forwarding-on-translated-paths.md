@@ -104,8 +104,9 @@ a provider starts accepting a field.
 | `reasoning.budget_tokens` | Gemini, DeepSeek | 4 | dropped |
 | `cache_control` | providers without Anthropic request shapes | 4 | dropped |
 | `response_format` of type `text` | Anthropic | 4 | dropped |
-| `response_format` of type `json_schema` | Anthropic | 5 | rejected |
-| `verbosity` | Anthropic | 5 | rejected |
+| `response_format` of type `json_schema` | Anthropic | 3 | sent as `output_config.format` |
+| `response_format` of type `json_object` | Anthropic | 3 | sent as a system-prompt instruction |
+| `verbosity` | Anthropic | 4 | dropped |
 | `temperature` together with `top_p` | Anthropic | 4 | `top_p` dropped, `temperature` kept |
 | `metadata` | xAI `/responses` | 4 | dropped |
 | `stream_options.include_usage` | any | reserved | set by the gateway when usage tracking is on |

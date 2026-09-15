@@ -244,9 +244,9 @@ when the upstream provider does not support response retrieval. If the SDK sends
   native upstream provider that supports those tool payloads. Chat-translated
   providers such as Anthropic and Gemini reject those tools unless GoModel adds
   explicit provider capability mapping for them.
-- Anthropic does not currently accept translated structured-output
-  `response_format` or `text.verbosity` settings. GoModel rejects those fields
-  instead of silently ignoring them.
+- On Anthropic, `text.format` is served by Claude's native structured outputs
+  (`json_schema`) or a system-prompt instruction (`json_object`), and
+  `text.verbosity` is dropped with a warning — Anthropic has no equivalent.
 - `previous_response_id` is forwarded to native Responses providers. For
   chat-translated providers GoModel resolves it from its stored responses and
   replays the previous turn's input and output, so the previous response must
