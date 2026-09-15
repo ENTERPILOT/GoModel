@@ -74,9 +74,10 @@ func TestNoHandRolledAssertions(t *testing.T) {
 
 func TestHandRolledAssertionsDetection(t *testing.T) {
 	tests := []struct {
-		name string
-		src  string
-		want int
+		name   string
+		header string
+		src    string
+		want   int
 	}{
 		{name: "test failing in an if", src: `func TestX(t *testing.T) { if a != b { t.Fatalf("x") } }`, want: 1},
 		{name: "any receiver name", src: `func TestX(x *testing.T) { if a != b { x.Errorf("x") } }`, want: 1},
@@ -90,12 +91,18 @@ func TestHandRolledAssertionsDetection(t *testing.T) {
 		{name: "if with else", src: `func TestX(t *testing.T) { if a { t.Fatal("x") } else { ok() } }`, want: 0},
 		{name: "local shadows the test in an if initializer", src: `func TestX(t *testing.T) { if t := other(); t.Bad() { t.Error("x") } }`, want: 0},
 		{name: "local shadows the test in a nested block", src: `func TestX(t *testing.T) { { t := fake{}; if a { t.Fatal("x") } } }`, want: 0},
+		{name: "aliased testing import", header: `import stdtesting "testing"`, src: `func TestX(t *stdtesting.T) { if a != b { t.Fatal("x") } }`, want: 1},
+		{name: "dot testing import", header: `import . "testing"`, src: `func TestX(t *T) { if a != b { t.Fatal("x") } }`, want: 1},
 		{name: "closure shadowing leaves the outer test checked", src: `func TestX(t *testing.T) { f := func() { t := fake{}; if a { t.Fatal("x") } }; _ = f; if b { t.Fatal("y") } }`, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, "x_test.go", "package x\nimport \"testing\"\n"+tt.src, parser.SkipObjectResolution)
+			header := tt.header
+			if header == "" {
+				header = `import "testing"`
+			}
+			file, err := parser.ParseFile(fset, "x_test.go", "package x\n"+header+"\n"+tt.src, parser.SkipObjectResolution)
 			require.NoError(t, err)
 			assert.Len(t, handRolledAssertions(fset, file), tt.want)
 		})
@@ -106,17 +113,33 @@ func TestHandRolledAssertionsDetection(t *testing.T) {
 // that only fails a test or test helper.
 func handRolledAssertions(fset *token.FileSet, file *ast.File) []token.Position {
 	var found []token.Position
-	ast.Walk(finder{fset: fset, found: &found}, file)
+	ast.Walk(finder{fset: fset, testingPkg: testingImportName(file), found: &found}, file)
 	return found
+}
+
+// testingImportName returns the name file refers to the testing package by:
+// its alias, "." for a dot import, or "" when file does not import it.
+func testingImportName(file *ast.File) string {
+	for _, spec := range file.Imports {
+		if spec.Path.Value != `"testing"` {
+			continue
+		}
+		if spec.Name == nil {
+			return "testing"
+		}
+		return spec.Name.Name
+	}
+	return ""
 }
 
 // finder walks a file while tracking which identifiers in scope are
 // *testing.T or testing.TB parameters, so exemptions follow the declared
 // type rather than the variable name.
 type finder struct {
-	fset   *token.FileSet
-	params map[string]string
-	found  *[]token.Position
+	fset       *token.FileSet
+	testingPkg string
+	params     map[string]string
+	found      *[]token.Position
 }
 
 func (f finder) Visit(n ast.Node) ast.Visitor {
@@ -143,7 +166,7 @@ func (f finder) withParams(fn *ast.FuncType, body *ast.BlockStmt) finder {
 		params = map[string]string{}
 	}
 	for _, field := range fn.Params.List {
-		kind := testingType(field.Type)
+		kind := f.testingType(field.Type)
 		for _, name := range field.Names {
 			if kind == "" {
 				delete(params, name.Name)
@@ -238,18 +261,21 @@ func (f finder) onlyFailsTest(body *ast.BlockStmt) bool {
 	return false
 }
 
-// testingType returns T, B, TB, or F for a testing parameter type, or "".
-func testingType(expr ast.Expr) string {
+// testingType returns T, B, TB, or F for a parameter typed with the file's
+// testing package, however it is imported, or "".
+func (f finder) testingType(expr ast.Expr) string {
 	if star, ok := expr.(*ast.StarExpr); ok {
 		expr = star.X
 	}
-	sel, ok := expr.(*ast.SelectorExpr)
-	if !ok {
-		return ""
+	switch x := expr.(type) {
+	case *ast.SelectorExpr:
+		if pkg, ok := x.X.(*ast.Ident); ok && f.testingPkg != "" && pkg.Name == f.testingPkg {
+			return x.Sel.Name
+		}
+	case *ast.Ident:
+		if f.testingPkg == "." {
+			return x.Name
+		}
 	}
-	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || pkg.Name != "testing" {
-		return ""
-	}
-	return sel.Sel.Name
+	return ""
 }
