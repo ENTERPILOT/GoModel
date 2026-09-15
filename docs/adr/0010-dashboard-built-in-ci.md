@@ -82,3 +82,16 @@ attention as changes to `go.sum`.
 - The `frontend` job needs a secret for any reason. That would undo the
   property this decision exists for and should be treated as a design
   problem, not a configuration change.
+
+## Amendment (2026-09): test jobs embed a stub
+
+The CI test jobs (unit shards, e2e, integration, race) no longer wait for the
+`frontend` job. They run `make frontend-stub`, which writes a placeholder
+`static/dist` with an `index.html` that references hashed assets, and embed
+that. The three tests that read the bundle only check that shape. Removing the
+dependency took the dashboard build off the critical path of every test job.
+
+The Build job, the Docker image, and the release workflow still download the
+artifact from the secretless `frontend` job; the stub never ships. Locally,
+`make frontend-stub` refuses to overwrite an existing bundle, and the stub page
+itself says it is a stub and how to build the real one.
