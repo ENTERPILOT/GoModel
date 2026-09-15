@@ -34,7 +34,7 @@ func TestOpen_Fixture(t *testing.T) {
 	assert.Equal(t, wantBuild, m.BuiltWith)
 
 	a, b := loaded.Factory(), loaded.Factory()
-	require.NotEqual(t, b, a)
+	require.NotSame(t, a, b)
 
 	type serial interface{ Serial() int }
 	sa, sb := a.(serial).Serial(), b.(serial).Serial()

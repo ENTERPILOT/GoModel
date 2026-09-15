@@ -78,5 +78,5 @@ func TestFailedConstructionDoesNotRebindAuthenticationEventRecorder(t *testing.T
 		t.Fatal("New succeeded with a missing semantic-cache embedder provider")
 	}
 	require.Contains(t, err.Error(), "failed to initialize response cache")
-	require.Equal(t, previous, authenticator.recorder)
+	require.Same(t, previous, authenticator.recorder, "failed construction replaced the still-serving generation's authentication event recorder")
 }

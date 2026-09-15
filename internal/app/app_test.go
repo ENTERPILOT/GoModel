@@ -711,7 +711,7 @@ func TestExtensionAuthenticationDetectionAndRecorderBinding(t *testing.T) {
 
 	recorder := &appAuthenticationEventRecorder{}
 	bindAuthenticationEventRecorders(registry, recorder)
-	require.Equal(t, recorder, authenticator.recorder)
+	require.Same(t, recorder, authenticator.recorder)
 }
 
 func TestLogStartupInfoTreatsExtensionAuthenticatorAsEffectiveAuth(t *testing.T) {

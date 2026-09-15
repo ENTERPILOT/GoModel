@@ -172,7 +172,7 @@ func TestServiceEnvironmentLockIgnoresStoredValue(t *testing.T) {
 	got := service.List()[0].Value
 	require.Equal(t, "none", got)
 	_, err = service.Update(ctx, "pro.compression.level", "high")
-	require.Equal(t, ErrLocked, err)
+	require.ErrorIs(t, err, ErrLocked)
 }
 
 func TestServiceUpdateRollsBackWhenPersistenceFails(t *testing.T) {
@@ -181,7 +181,7 @@ func TestServiceUpdateRollsBackWhenPersistenceFails(t *testing.T) {
 	service := testService(setting, &stubStore{setErr: persistErr})
 
 	_, err := service.Update(context.Background(), "pro.compression.level", "medium")
-	require.Equal(t, persistErr, err)
+	require.ErrorIs(t, err, persistErr)
 	got := setting.Descriptor().Value
 	require.Equal(t, "high", got)
 	applies := setting.applyCount()
@@ -267,5 +267,5 @@ func (s *optionlessSetting) Apply(value string) error { return s.testSetting.App
 func TestNilServiceUpdateReturnsNotFound(t *testing.T) {
 	var service *Service
 	_, err := service.Update(context.Background(), "missing", "high")
-	require.Equal(t, ErrNotFound, err)
+	require.ErrorIs(t, err, ErrNotFound)
 }

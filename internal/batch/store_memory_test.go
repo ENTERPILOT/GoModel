@@ -73,7 +73,7 @@ func TestMemoryStoreDelete(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
 	err := store.Delete(ctx, "missing")
-	require.Equal(t, ErrNotFound, err)
+	require.ErrorIs(t, err, ErrNotFound)
 
 	b := &StoredBatch{Batch: &core.BatchResponse{ID: "batch-1", Object: "batch", Status: "completed"}}
 	err = store.Create(ctx, b)
@@ -81,5 +81,5 @@ func TestMemoryStoreDelete(t *testing.T) {
 	err = store.Delete(ctx, "batch-1")
 	require.NoError(t, err)
 	_, err = store.Get(ctx, "batch-1")
-	require.Equal(t, ErrNotFound, err)
+	require.ErrorIs(t, err, ErrNotFound)
 }
