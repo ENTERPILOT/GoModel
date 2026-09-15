@@ -2,13 +2,12 @@ package providers
 
 import (
 	"math"
-	"reflect"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var globalRetry = config.RetryConfig{
@@ -99,15 +98,9 @@ func TestBuildProviderConfig_InheritsGlobal(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk-test"}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if got.Type != "openai" {
-		t.Errorf("Type = %q, want openai", got.Type)
-	}
-	if !reflect.DeepEqual(got.Resilience.Retry, globalRetry) {
-		t.Errorf("expected global retry to be inherited\ngot:  %+v\nwant: %+v", got.Resilience.Retry, globalRetry)
-	}
-	if !got.SessionStickyKeys {
-		t.Error("SessionStickyKeys = false, want default true")
-	}
+	assert.Equal(t, "openai", got.Type)
+	assert.Equal(t, globalRetry, got.Resilience.Retry)
+	assert.True(t, got.SessionStickyKeys)
 }
 
 func TestBuildProviderConfig_LLMDControlDefaults(t *testing.T) {
@@ -137,12 +130,8 @@ func TestBuildProviderConfig_LLMDControlDefaults(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := buildProviderConfig(tt.raw, globalResilience)
-			if got.InferenceObjective != tt.wantObjective {
-				t.Errorf("InferenceObjective = %q, want %q", got.InferenceObjective, tt.wantObjective)
-			}
-			if got.FairnessFromUserPath != tt.wantFair {
-				t.Errorf("FairnessFromUserPath = %v, want %v", got.FairnessFromUserPath, tt.wantFair)
-			}
+			assert.Equal(t, tt.wantObjective, got.InferenceObjective)
+			assert.Equal(t, tt.wantFair, got.FairnessFromUserPath)
 		})
 	}
 }
@@ -154,18 +143,14 @@ func TestBuildProviderConfig_CanDisableSessionStickyKeys(t *testing.T) {
 		APIKey:            "sk-test",
 		SessionStickyKeys: &disabled,
 	}, globalResilience)
-	if got.SessionStickyKeys {
-		t.Error("SessionStickyKeys = true, want explicit false")
-	}
+	assert.False(t, got.SessionStickyKeys)
 }
 
 func TestBuildProviderConfig_NilResilience(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk", Resilience: nil}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if !reflect.DeepEqual(got.Resilience.Retry, globalRetry) {
-		t.Error("nil Resilience should inherit global")
-	}
+	assert.Equal(t, globalRetry, got.Resilience.Retry)
 }
 
 func TestBuildProviderConfig_NilRetry(t *testing.T) {
@@ -176,9 +161,7 @@ func TestBuildProviderConfig_NilRetry(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if !reflect.DeepEqual(got.Resilience.Retry, globalRetry) {
-		t.Error("nil Retry should inherit global")
-	}
+	assert.Equal(t, globalRetry, got.Resilience.Retry)
 }
 
 func TestBuildProviderConfig_PartialOverride(t *testing.T) {
@@ -193,15 +176,9 @@ func TestBuildProviderConfig_PartialOverride(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if got.Resilience.Retry.MaxRetries != 10 {
-		t.Errorf("MaxRetries = %d, want 10", got.Resilience.Retry.MaxRetries)
-	}
-	if got.Resilience.Retry.InitialBackoff != globalRetry.InitialBackoff {
-		t.Errorf("InitialBackoff should be inherited, got %v", got.Resilience.Retry.InitialBackoff)
-	}
-	if got.Resilience.Retry.JitterFactor != globalRetry.JitterFactor {
-		t.Errorf("JitterFactor should be inherited, got %f", got.Resilience.Retry.JitterFactor)
-	}
+	assert.Equal(t, 10, got.Resilience.Retry.MaxRetries)
+	assert.Equal(t, globalRetry.InitialBackoff, got.Resilience.Retry.InitialBackoff)
+	assert.Equal(t, globalRetry.JitterFactor, got.Resilience.Retry.JitterFactor)
 }
 
 func TestBuildProviderConfig_FullOverride(t *testing.T) {
@@ -221,21 +198,11 @@ func TestBuildProviderConfig_FullOverride(t *testing.T) {
 	got := buildProviderConfig(raw, globalResilience)
 
 	r := got.Resilience.Retry
-	if r.MaxRetries != 7 {
-		t.Errorf("MaxRetries = %d, want 7", r.MaxRetries)
-	}
-	if r.InitialBackoff != 500*time.Millisecond {
-		t.Errorf("InitialBackoff = %v, want 500ms", r.InitialBackoff)
-	}
-	if r.MaxBackoff != 10*time.Second {
-		t.Errorf("MaxBackoff = %v, want 10s", r.MaxBackoff)
-	}
-	if r.BackoffFactor != 1.5 {
-		t.Errorf("BackoffFactor = %f, want 1.5", r.BackoffFactor)
-	}
-	if r.JitterFactor != 0.3 {
-		t.Errorf("JitterFactor = %f, want 0.3", r.JitterFactor)
-	}
+	assert.Equal(t, 7, r.MaxRetries)
+	assert.Equal(t, 500*time.Millisecond, r.InitialBackoff)
+	assert.Equal(t, 10*time.Second, r.MaxBackoff)
+	assert.Equal(t, 1.5, r.BackoffFactor)
+	assert.Equal(t, 0.3, r.JitterFactor)
 }
 
 func TestBuildProviderConfig_ZeroValueOverride(t *testing.T) {
@@ -250,9 +217,7 @@ func TestBuildProviderConfig_ZeroValueOverride(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if got.Resilience.Retry.MaxRetries != 0 {
-		t.Errorf("explicit 0 should override global (3), got %d", got.Resilience.Retry.MaxRetries)
-	}
+	assert.Equal(t, 0, got.Resilience.Retry.MaxRetries)
 }
 
 func TestBuildProviderConfig_PreservesFields(t *testing.T) {
@@ -271,36 +236,17 @@ func TestBuildProviderConfig_PreservesFields(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, globalResilience)
 
-	if got.APIKey != "sk-key" {
-		t.Errorf("APIKey = %q, want sk-key", got.APIKey)
-	}
-	if got.BaseURL != "https://custom.endpoint.com" {
-		t.Errorf("BaseURL = %q, want https://custom.endpoint.com", got.BaseURL)
-	}
-	if got.Backend != "vertex" {
-		t.Errorf("Backend = %q, want vertex", got.Backend)
-	}
-	if got.AuthType != "gcp_adc" {
-		t.Errorf("AuthType = %q, want gcp_adc", got.AuthType)
-	}
-	if got.APIMode != "native" {
-		t.Errorf("APIMode = %q, want native", got.APIMode)
-	}
-	if got.VertexProject != "prod-ai" {
-		t.Errorf("VertexProject = %q, want prod-ai", got.VertexProject)
-	}
-	if got.VertexLocation != "us-central1" {
-		t.Errorf("VertexLocation = %q, want us-central1", got.VertexLocation)
-	}
-	if got.ServiceAccountFile != "/secrets/vertex.json" {
-		t.Errorf("ServiceAccountFile = %q, want /secrets/vertex.json", got.ServiceAccountFile)
-	}
-	if got.GCPScope != "scope-a" {
-		t.Errorf("GCPScope = %q, want scope-a", got.GCPScope)
-	}
-	if len(got.Models) != 2 || got.Models[0] != "gpt-4" {
-		t.Errorf("Models = %v, want [gpt-4 gpt-3.5-turbo]", got.Models)
-	}
+	assert.Equal(t, "sk-key", got.APIKey)
+	assert.Equal(t, "https://custom.endpoint.com", got.BaseURL)
+	assert.Equal(t, "vertex", got.Backend)
+	assert.Equal(t, "gcp_adc", got.AuthType)
+	assert.Equal(t, "native", got.APIMode)
+	assert.Equal(t, "prod-ai", got.VertexProject)
+	assert.Equal(t, "us-central1", got.VertexLocation)
+	assert.Equal(t, "/secrets/vertex.json", got.ServiceAccountFile)
+	assert.Equal(t, "scope-a", got.GCPScope)
+	require.Len(t, got.Models, 2)
+	assert.Equal(t, "gpt-4", got.Models[0])
 }
 
 func TestBuildProviderConfig_NormalizesLegacyGeminiVertexType(t *testing.T) {
@@ -314,12 +260,8 @@ func TestBuildProviderConfig_NormalizesLegacyGeminiVertexType(t *testing.T) {
 
 	got := buildProviderConfig(raw, globalResilience)
 
-	if got.Type != "vertex" {
-		t.Fatalf("Type = %q, want vertex", got.Type)
-	}
-	if got.Backend != "vertex" {
-		t.Fatalf("Backend = %q, want vertex", got.Backend)
-	}
+	require.Equal(t, "vertex", got.Type)
+	require.Equal(t, "vertex", got.Backend)
 }
 
 // --- buildProviderConfigs ---
@@ -339,22 +281,15 @@ func TestBuildProviderConfigs_MultipleProviders(t *testing.T) {
 
 	got := buildProviderConfigs(raw, globalResilience)
 
-	if got["openai"].Resilience.Retry.MaxRetries != 10 {
-		t.Errorf("openai MaxRetries = %d, want 10", got["openai"].Resilience.Retry.MaxRetries)
-	}
-	if got["anthropic"].Resilience.Retry.MaxRetries != globalRetry.MaxRetries {
-		t.Errorf("anthropic MaxRetries = %d, want %d (global)", got["anthropic"].Resilience.Retry.MaxRetries, globalRetry.MaxRetries)
-	}
-	if got["openai"].Name != "openai" || got["anthropic"].Name != "anthropic" {
-		t.Fatalf("provider names = %q/%q, want map keys", got["openai"].Name, got["anthropic"].Name)
-	}
+	assert.Equal(t, 10, got["openai"].Resilience.Retry.MaxRetries)
+	assert.Equal(t, globalRetry.MaxRetries, got["anthropic"].Resilience.Retry.MaxRetries)
+	require.Equal(t, "openai", got["openai"].Name)
+	require.Equal(t, "anthropic", got["anthropic"].Name)
 }
 
 func TestBuildProviderConfigs_EmptyMap(t *testing.T) {
 	got := buildProviderConfigs(map[string]config.RawProviderConfig{}, globalResilience)
-	if len(got) != 0 {
-		t.Errorf("expected empty result, got %d entries", len(got))
-	}
+	assert.Empty(t, got)
 }
 
 // --- filterEmptyProviders ---
@@ -365,13 +300,10 @@ func TestFilterEmptyProviders_RemovesEmptyAPIKey(t *testing.T) {
 		"anthropic": {Type: "anthropic", APIKey: "sk-ant"},
 	}
 	got := filterEmptyProviders(raw, testDiscoveryConfigs)
-
-	if _, exists := got["openai"]; exists {
-		t.Error("expected openai with empty API key to be removed")
-	}
-	if _, exists := got["anthropic"]; !exists {
-		t.Error("expected anthropic to be kept")
-	}
+	_, exists := got["openai"]
+	assert.False(t, exists)
+	_, exists = got["anthropic"]
+	assert.True(t, exists)
 }
 
 func TestFilterEmptyProviders_RemovesUnresolvedPlaceholder(t *testing.T) {
@@ -380,13 +312,10 @@ func TestFilterEmptyProviders_RemovesUnresolvedPlaceholder(t *testing.T) {
 		"anthropic": {Type: "anthropic", APIKey: "sk-real"},
 	}
 	got := filterEmptyProviders(raw, testDiscoveryConfigs)
-
-	if _, exists := got["openai"]; exists {
-		t.Error("expected openai with unresolved placeholder to be removed")
-	}
-	if _, exists := got["anthropic"]; !exists {
-		t.Error("expected anthropic to survive filtering")
-	}
+	_, exists := got["openai"]
+	assert.False(t, exists)
+	_, exists = got["anthropic"]
+	assert.True(t, exists)
 }
 
 func TestFilterEmptyProviders_RemovesPartialPlaceholder(t *testing.T) {
@@ -394,10 +323,8 @@ func TestFilterEmptyProviders_RemovesPartialPlaceholder(t *testing.T) {
 		"openai": {Type: "openai", APIKey: "prefix-${UNRESOLVED}"},
 	}
 	got := filterEmptyProviders(raw, testDiscoveryConfigs)
-
-	if _, exists := got["openai"]; exists {
-		t.Error("expected provider with partial placeholder to be removed")
-	}
+	_, exists := got["openai"]
+	assert.False(t, exists)
 }
 
 func TestFilterEmptyProviders_OllamaAlwaysKept(t *testing.T) {
@@ -412,9 +339,8 @@ func TestFilterEmptyProviders_OllamaAlwaysKept(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := filterEmptyProviders(map[string]config.RawProviderConfig{"ollama": tc.raw}, testDiscoveryConfigs)
-			if _, exists := got["ollama"]; !exists {
-				t.Errorf("expected ollama to be kept (%s)", tc.name)
-			}
+			_, exists := got["ollama"]
+			assert.True(t, exists, "expected ollama to be kept (%s)", tc.name)
 		})
 	}
 }
@@ -423,18 +349,16 @@ func TestFilterEmptyProviders_VLLMAllowsKeylessConfig(t *testing.T) {
 	got := filterEmptyProviders(map[string]config.RawProviderConfig{
 		"vllm": {Type: "vllm", BaseURL: "http://localhost:8000/v1"},
 	}, testDiscoveryConfigs)
-	if _, exists := got["vllm"]; !exists {
-		t.Fatal("expected vllm to be kept without an API key")
-	}
+	_, exists := got["vllm"]
+	require.True(t, exists)
 }
 
 func TestFilterEmptyProvidersSGLangAllowsKeylessConfig(t *testing.T) {
 	got := filterEmptyProviders(map[string]config.RawProviderConfig{
 		"sglang": {Type: "sglang", BaseURL: "http://localhost:30000/v1"},
 	}, testDiscoveryConfigs)
-	if _, exists := got["sglang"]; !exists {
-		t.Fatal("expected sglang to be kept without an API key")
-	}
+	_, exists := got["sglang"]
+	require.True(t, exists)
 }
 
 func TestSkippedProviderNames_ListsDeclaredButUnresolved(t *testing.T) {
@@ -446,10 +370,7 @@ func TestSkippedProviderNames_ListsDeclaredButUnresolved(t *testing.T) {
 	resolved := filterEmptyProviders(declared, testDiscoveryConfigs)
 
 	got := skippedProviderNames(declared, resolved)
-	want := []string{"openai"}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("skippedProviderNames() = %v, want %v", got, want)
-	}
+	require.Equal(t, []string{"openai"}, got)
 }
 
 func TestProviderOrigins_SplitsConfigFileFromEnv(t *testing.T) {
@@ -466,31 +387,21 @@ func TestProviderOrigins_SplitsConfigFileFromEnv(t *testing.T) {
 	}
 
 	fromFile, fromEnv := providerOrigins(declared, resolved)
-	if want := []string{"openai", "vllm-b"}; !slices.Equal(fromFile, want) {
-		t.Fatalf("fromFile = %v, want %v", fromFile, want)
-	}
-	if want := []string{"groq"}; !slices.Equal(fromEnv, want) {
-		t.Fatalf("fromEnv = %v, want %v", fromEnv, want)
-	}
+	require.Equal(t, []string{"openai", "vllm-b"}, fromFile)
+	require.Equal(t, []string{"groq"}, fromEnv)
 }
 
 // A misindented providers: section yields no config-file providers, which is the
 // signal an operator needs to see at boot.
 func TestProviderOrigins_NoDeclaredProviders(t *testing.T) {
 	fromFile, fromEnv := providerOrigins(nil, map[string]ProviderConfig{"openai": {Type: "openai"}})
-	if len(fromFile) != 0 {
-		t.Fatalf("fromFile = %v, want empty", fromFile)
-	}
-	if want := []string{"openai"}; !slices.Equal(fromEnv, want) {
-		t.Fatalf("fromEnv = %v, want %v", fromEnv, want)
-	}
+	require.Empty(t, fromFile)
+	require.Equal(t, []string{"openai"}, fromEnv)
 }
 
 func TestFilterEmptyProviders_EmptyMap(t *testing.T) {
 	got := filterEmptyProviders(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-	if len(got) != 0 {
-		t.Errorf("expected empty result, got %d entries", len(got))
-	}
+	assert.Empty(t, got)
 }
 
 func TestFilterEmptyProviders_RemovesAzureByTypeWithoutBaseURL(t *testing.T) {
@@ -499,10 +410,8 @@ func TestFilterEmptyProviders_RemovesAzureByTypeWithoutBaseURL(t *testing.T) {
 	}
 
 	got := filterEmptyProviders(raw, testDiscoveryConfigs)
-
-	if _, exists := got["my-azure"]; exists {
-		t.Fatal("expected azure provider without base URL to be removed regardless of map key")
-	}
+	_, exists := got["my-azure"]
+	require.False(t, exists)
 }
 
 func TestFilterEmptyProviders_RemovesOracleByTypeWithoutBaseURL(t *testing.T) {
@@ -511,10 +420,8 @@ func TestFilterEmptyProviders_RemovesOracleByTypeWithoutBaseURL(t *testing.T) {
 	}
 
 	got := filterEmptyProviders(raw, testDiscoveryConfigs)
-
-	if _, exists := got["oracle-primary"]; exists {
-		t.Fatal("expected oracle provider without base URL to be removed regardless of map key")
-	}
+	_, exists := got["oracle-primary"]
+	require.False(t, exists)
 }
 
 func TestFilterEmptyProviders_LLMDRequiresBaseURLButNotAPIKey(t *testing.T) {
@@ -524,12 +431,10 @@ func TestFilterEmptyProviders_LLMDRequiresBaseURLButNotAPIKey(t *testing.T) {
 	}
 
 	got := filterEmptyProviders(raw, testDiscoveryConfigs)
-	if _, exists := got["missing-endpoint"]; exists {
-		t.Fatal("llmd without base URL must be removed")
-	}
-	if _, exists := got["router"]; !exists {
-		t.Fatal("keyless llmd with base URL must be retained")
-	}
+	_, exists := got["missing-endpoint"]
+	require.False(t, exists)
+	_, exists = got["router"]
+	require.True(t, exists)
 }
 
 // --- applyProviderEnvVars ---
@@ -540,15 +445,9 @@ func TestApplyProviderEnvVars_DiscoversFromAPIKey(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["openai"]
-	if !exists {
-		t.Fatal("expected openai to be discovered from env var")
-	}
-	if p.APIKey != "sk-from-env" {
-		t.Errorf("APIKey = %q, want sk-from-env", p.APIKey)
-	}
-	if p.Type != "openai" {
-		t.Errorf("Type = %q, want openai", p.Type)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "sk-from-env", p.APIKey)
+	assert.Equal(t, "openai", p.Type)
 }
 
 func TestApplyProviderEnvVars_LLMDControls(t *testing.T) {
@@ -572,15 +471,10 @@ func TestApplyProviderEnvVars_LLMDControls(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			provider := got[tt.provider]
-			if provider.BaseURL != tt.baseURL {
-				t.Errorf("BaseURL = %q, want %q", provider.BaseURL, tt.baseURL)
-			}
-			if provider.InferenceObjective != tt.objective {
-				t.Errorf("InferenceObjective = %q, want %q", provider.InferenceObjective, tt.objective)
-			}
-			if provider.FairnessFromUserPath == nil || *provider.FairnessFromUserPath {
-				t.Fatalf("FairnessFromUserPath = %v, want false", provider.FairnessFromUserPath)
-			}
+			assert.Equal(t, tt.baseURL, provider.BaseURL)
+			assert.Equal(t, tt.objective, provider.InferenceObjective)
+			require.NotNil(t, provider.FairnessFromUserPath)
+			require.False(t, *provider.FairnessFromUserPath)
 		})
 	}
 }
@@ -641,14 +535,12 @@ func TestApplyProviderEnvVars_SessionStickyKeys(t *testing.T) {
 			got := applyProviderEnvVars(tt.raw, testDiscoveryConfigs)
 			sticky := got[tt.provider].SessionStickyKeys
 			if tt.wantNil {
-				if sticky != nil {
-					t.Fatalf("SessionStickyKeys = %v, want nil", *sticky)
-				}
+				require.Nil(t, sticky)
+
 				return
 			}
-			if sticky == nil || *sticky != tt.want {
-				t.Fatalf("SessionStickyKeys = %v, want %v", sticky, tt.want)
-			}
+			require.NotNil(t, sticky)
+			require.Equal(t, tt.want, *sticky)
 		})
 	}
 }
@@ -659,12 +551,8 @@ func TestApplyProviderEnvVars_DiscoversFromBaseURL(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["ollama"]
-	if !exists {
-		t.Fatal("expected ollama to be discovered from base URL env var")
-	}
-	if p.BaseURL != "http://localhost:11434/v1" {
-		t.Errorf("BaseURL = %q, want http://localhost:11434/v1", p.BaseURL)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "http://localhost:11434/v1", p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOllamaProvidersFromBaseURLs(t *testing.T) {
@@ -674,125 +562,41 @@ func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOllamaProvidersFromBaseUR
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	providerA, exists := got["ollama-a"]
-	if !exists {
-		t.Fatal("expected ollama-a to be discovered from OLLAMA_A_BASE_URL")
-	}
-	if providerA.Type != "ollama" {
-		t.Fatalf("ollama-a Type = %q, want ollama", providerA.Type)
-	}
-	if providerA.BaseURL != "http://localhost:11434/v1" {
-		t.Fatalf("ollama-a BaseURL = %q, want http://localhost:11434/v1", providerA.BaseURL)
-	}
+	require.True(t, exists)
+	require.Equal(t, "ollama", providerA.Type)
+	require.Equal(t, "http://localhost:11434/v1", providerA.BaseURL)
 
 	providerB, exists := got["ollama-b"]
-	if !exists {
-		t.Fatal("expected ollama-b to be discovered from OLLAMA_B_BASE_URL")
-	}
-	if providerB.Type != "ollama" {
-		t.Fatalf("ollama-b Type = %q, want ollama", providerB.Type)
-	}
-	if providerB.BaseURL != "http://localhost:11435/v1" {
-		t.Fatalf("ollama-b BaseURL = %q, want http://localhost:11435/v1", providerB.BaseURL)
-	}
+	require.True(t, exists)
+	require.Equal(t, "ollama", providerB.Type)
+	require.Equal(t, "http://localhost:11435/v1", providerB.BaseURL)
 }
 
-func TestApplyProviderEnvVars_DiscoversOpenRouterFromAPIKey(t *testing.T) {
-	t.Setenv("OPENROUTER_API_KEY", "sk-openrouter")
+func TestApplyProviderEnvVars_DiscoversTypeFromAPIKeyWithDefaultBaseURL(t *testing.T) {
+	tests := []struct {
+		providerType string
+		envVar       string
+		apiKey       string
+	}{
+		{providerType: "openrouter", envVar: "OPENROUTER_API_KEY", apiKey: "sk-openrouter"},
+		{providerType: "kilo", envVar: "KILO_API_KEY", apiKey: "kilo-key"},
+		{providerType: "deepseek", envVar: "DEEPSEEK_API_KEY", apiKey: "deepseek-key"},
+		{providerType: "chutes", envVar: "CHUTES_API_KEY", apiKey: "cpk_test"},
+		{providerType: "zai", envVar: "ZAI_API_KEY", apiKey: "zai-key"},
+	}
 
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
+	for _, tt := range tests {
+		t.Run(tt.providerType, func(t *testing.T) {
+			t.Setenv(tt.envVar, tt.apiKey)
 
-	p, exists := got["openrouter"]
-	if !exists {
-		t.Fatal("expected openrouter to be discovered from env var")
-	}
-	if p.APIKey != "sk-openrouter" {
-		t.Errorf("APIKey = %q, want sk-openrouter", p.APIKey)
-	}
-	if p.Type != "openrouter" {
-		t.Errorf("Type = %q, want openrouter", p.Type)
-	}
-	if p.BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
-	}
-}
+			got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
-func TestApplyProviderEnvVars_DiscoversKiloFromAPIKey(t *testing.T) {
-	t.Setenv("KILO_API_KEY", "kilo-key")
-
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	p, exists := got["kilo"]
-	if !exists {
-		t.Fatal("expected kilo to be discovered from env var")
-	}
-	if p.APIKey != "kilo-key" {
-		t.Errorf("APIKey = %q, want kilo-key", p.APIKey)
-	}
-	if p.Type != "kilo" {
-		t.Errorf("Type = %q, want kilo", p.Type)
-	}
-	if p.BaseURL != testDiscoveryConfigs["kilo"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["kilo"].DefaultBaseURL)
-	}
-}
-
-func TestApplyProviderEnvVars_DiscoversDeepSeekFromAPIKey(t *testing.T) {
-	t.Setenv("DEEPSEEK_API_KEY", "deepseek-key")
-
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	p, exists := got["deepseek"]
-	if !exists {
-		t.Fatal("expected deepseek to be discovered from env var")
-	}
-	if p.APIKey != "deepseek-key" {
-		t.Errorf("APIKey = %q, want deepseek-key", p.APIKey)
-	}
-	if p.Type != "deepseek" {
-		t.Errorf("Type = %q, want deepseek", p.Type)
-	}
-	if p.BaseURL != testDiscoveryConfigs["deepseek"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["deepseek"].DefaultBaseURL)
-	}
-}
-
-func TestApplyProviderEnvVars_DiscoversChutesFromAPIKey(t *testing.T) {
-	t.Setenv("CHUTES_API_KEY", "cpk_test")
-
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	p, exists := got["chutes"]
-	if !exists {
-		t.Fatal("expected chutes to be discovered from env var")
-	}
-	if p.APIKey != "cpk_test" {
-		t.Errorf("APIKey = %q, want cpk_test", p.APIKey)
-	}
-	if p.Type != "chutes" {
-		t.Errorf("Type = %q, want chutes", p.Type)
-	}
-	if p.BaseURL != testDiscoveryConfigs["chutes"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["chutes"].DefaultBaseURL)
-	}
-}
-
-func TestApplyProviderEnvVars_DiscoversZAIFromAPIKey(t *testing.T) {
-	t.Setenv("ZAI_API_KEY", "zai-key")
-
-	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	p, exists := got["zai"]
-	if !exists {
-		t.Fatal("expected zai to be discovered from env var")
-	}
-	if p.APIKey != "zai-key" {
-		t.Errorf("APIKey = %q, want zai-key", p.APIKey)
-	}
-	if p.Type != "zai" {
-		t.Errorf("Type = %q, want zai", p.Type)
-	}
-	if p.BaseURL != testDiscoveryConfigs["zai"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["zai"].DefaultBaseURL)
+			p, exists := got[tt.providerType]
+			require.True(t, exists)
+			assert.Equal(t, tt.apiKey, p.APIKey)
+			assert.Equal(t, tt.providerType, p.Type)
+			assert.Equal(t, testDiscoveryConfigs[tt.providerType].DefaultBaseURL, p.BaseURL)
+		})
 	}
 }
 
@@ -804,18 +608,10 @@ func TestApplyProviderEnvVars_DiscoversZAIWithExplicitBaseURL(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["zai"]
-	if !exists {
-		t.Fatal("expected zai to be discovered from env var")
-	}
-	if p.APIKey != "zai-key" {
-		t.Errorf("APIKey = %q, want zai-key", p.APIKey)
-	}
-	if p.Type != "zai" {
-		t.Errorf("Type = %q, want zai", p.Type)
-	}
-	if p.BaseURL != explicitBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, explicitBaseURL)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "zai-key", p.APIKey)
+	assert.Equal(t, "zai", p.Type)
+	assert.Equal(t, explicitBaseURL, p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_DiscoversVertexProviderFromEnvAlias(t *testing.T) {
@@ -828,27 +624,14 @@ func TestApplyProviderEnvVars_DiscoversVertexProviderFromEnvAlias(t *testing.T) 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["vertex"]
-	if !exists {
-		t.Fatal("expected vertex to be discovered from VERTEX_* env vars")
-	}
-	if p.Type != "vertex" {
-		t.Fatalf("Type = %q, want vertex", p.Type)
-	}
-	if p.VertexProject != "prod-ai" {
-		t.Fatalf("VertexProject = %q, want prod-ai", p.VertexProject)
-	}
-	if p.VertexLocation != "us-central1" {
-		t.Fatalf("VertexLocation = %q, want us-central1", p.VertexLocation)
-	}
-	if p.AuthType != "gcp_adc" {
-		t.Fatalf("AuthType = %q, want gcp_adc", p.AuthType)
-	}
-	if p.APIMode != "native" {
-		t.Fatalf("APIMode = %q, want native", p.APIMode)
-	}
-	if len(p.Models) != 1 || p.Models[0].ID != "google/gemini-2.5-flash" {
-		t.Fatalf("Models = %v, want [google/gemini-2.5-flash]", p.Models)
-	}
+	require.True(t, exists)
+	require.Equal(t, "vertex", p.Type)
+	require.Equal(t, "prod-ai", p.VertexProject)
+	require.Equal(t, "us-central1", p.VertexLocation)
+	require.Equal(t, "gcp_adc", p.AuthType)
+	require.Equal(t, "native", p.APIMode)
+	require.Len(t, p.Models, 1)
+	require.Equal(t, "google/gemini-2.5-flash", p.Models[0].ID)
 }
 
 func TestApplyProviderEnvVars_DiscoversSuffixedVertexProvider(t *testing.T) {
@@ -862,29 +645,16 @@ func TestApplyProviderEnvVars_DiscoversSuffixedVertexProvider(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["vertex-us"]
-	if !exists {
-		t.Fatal("expected vertex-us to be discovered from VERTEX_US_* env vars")
-	}
-	if p.Type != "vertex" {
-		t.Fatalf("Type = %q, want vertex", p.Type)
-	}
-	if p.ServiceAccountFile != "/secrets/vertex.json" {
-		t.Fatalf("ServiceAccountFile = %q, want /secrets/vertex.json", p.ServiceAccountFile)
-	}
+	require.True(t, exists)
+	require.Equal(t, "vertex", p.Type)
+	require.Equal(t, "/secrets/vertex.json", p.ServiceAccountFile)
 
 	bedrock, exists := got["bedrock-us"]
-	if !exists {
-		t.Fatal("expected bedrock-us to be discovered from BEDROCK_US_* env vars")
-	}
-	if bedrock.Type != "bedrock" {
-		t.Fatalf("Bedrock Type = %q, want bedrock", bedrock.Type)
-	}
-	if bedrock.BaseURL != "us-east-1" {
-		t.Fatalf("Bedrock BaseURL = %q, want us-east-1", bedrock.BaseURL)
-	}
-	if len(bedrock.Models) != 1 || bedrock.Models[0].ID != "anthropic.claude-3-5-haiku-20241022-v1:0" {
-		t.Fatalf("Bedrock Models = %v, want [anthropic.claude-3-5-haiku-20241022-v1:0]", bedrock.Models)
-	}
+	require.True(t, exists)
+	require.Equal(t, "bedrock", bedrock.Type)
+	require.Equal(t, "us-east-1", bedrock.BaseURL)
+	require.Len(t, bedrock.Models, 1)
+	require.Equal(t, "anthropic.claude-3-5-haiku-20241022-v1:0", bedrock.Models[0].ID)
 }
 
 func TestApplyProviderEnvVars_DiscoversBedrockMantle(t *testing.T) {
@@ -895,15 +665,14 @@ func TestApplyProviderEnvVars_DiscoversBedrockMantle(t *testing.T) {
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 	p, exists := got["bedrock-mantle"]
-	if !exists {
-		t.Fatal("expected bedrock-mantle to be discovered from BEDROCK_MANTLE_* env vars")
-	}
-	if p.Type != "bedrock-mantle" || p.APIKey != "ABSK-test" || p.BaseURL != "us-east-2" || p.APIMode != "auto" {
-		t.Fatalf("bedrock-mantle config = %+v", p)
-	}
-	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-5.6-sol" || p.Models[1].ID != "openai.gpt-5.6-terra" {
-		t.Fatalf("bedrock-mantle models = %v", p.Models)
-	}
+	require.True(t, exists)
+	require.Equal(t, "bedrock-mantle", p.Type)
+	require.Equal(t, "ABSK-test", p.APIKey)
+	require.Equal(t, "us-east-2", p.BaseURL)
+	require.Equal(t, "auto", p.APIMode, "bedrock-mantle config = %+v", p)
+	require.Len(t, p.Models, 2)
+	require.Equal(t, "openai.gpt-5.6-sol", p.Models[0].ID)
+	require.Equal(t, "openai.gpt-5.6-terra", p.Models[1].ID)
 }
 
 func TestResolveProviders_FiltersVertexWithoutProjectOrLocation(t *testing.T) {
@@ -911,13 +680,10 @@ func TestResolveProviders_FiltersVertexWithoutProjectOrLocation(t *testing.T) {
 	t.Setenv("VERTEX_AUTH_TYPE", "gcp_adc")
 
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
-
-	if _, exists := got["vertex"]; exists {
-		t.Fatal("expected vertex without location to be filtered")
-	}
-	if _, exists := filteredRaw["vertex"]; exists {
-		t.Fatal("expected raw vertex without location to be filtered")
-	}
+	_, exists := got["vertex"]
+	require.False(t, exists)
+	_, exists = filteredRaw["vertex"]
+	require.False(t, exists)
 }
 
 func TestResolveProviders_KeepsVertexWithProjectAndLocationUsingDefaultADC(t *testing.T) {
@@ -927,15 +693,10 @@ func TestResolveProviders_KeepsVertexWithProjectAndLocationUsingDefaultADC(t *te
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 
 	p, exists := got["vertex"]
-	if !exists {
-		t.Fatal("expected vertex with project and location to be resolved")
-	}
-	if p.Type != "vertex" {
-		t.Fatalf("Type = %q, want vertex", p.Type)
-	}
-	if _, exists := filteredRaw["vertex"]; !exists {
-		t.Fatal("expected raw vertex with project and location to be retained")
-	}
+	require.True(t, exists)
+	require.Equal(t, "vertex", p.Type)
+	_, exists = filteredRaw["vertex"]
+	require.True(t, exists)
 }
 
 func TestResolveProviders_KeepsVertexWithBaseURLWithoutProjectLocation(t *testing.T) {
@@ -945,18 +706,11 @@ func TestResolveProviders_KeepsVertexWithBaseURLWithoutProjectLocation(t *testin
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 
 	p, exists := got["vertex"]
-	if !exists {
-		t.Fatal("expected vertex with resolved base URL to be resolved")
-	}
-	if p.Type != "vertex" {
-		t.Fatalf("Type = %q, want vertex", p.Type)
-	}
-	if p.BaseURL != "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google" {
-		t.Fatalf("BaseURL = %q, want custom Vertex base URL", p.BaseURL)
-	}
-	if _, exists := filteredRaw["vertex"]; !exists {
-		t.Fatal("expected raw vertex with resolved base URL to be retained")
-	}
+	require.True(t, exists)
+	require.Equal(t, "vertex", p.Type)
+	require.Equal(t, "https://proxy.example.com/v1/projects/prod-ai/locations/us-central1/publishers/google", p.BaseURL)
+	_, exists = filteredRaw["vertex"]
+	require.True(t, exists)
 }
 
 func TestResolveProviders_FiltersVertexServiceAccountWithoutCredentials(t *testing.T) {
@@ -965,13 +719,10 @@ func TestResolveProviders_FiltersVertexServiceAccountWithoutCredentials(t *testi
 	t.Setenv("VERTEX_AUTH_TYPE", "gcp_service_account")
 
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
-
-	if _, exists := got["vertex"]; exists {
-		t.Fatal("expected vertex service account provider without credentials to be filtered")
-	}
-	if _, exists := filteredRaw["vertex"]; exists {
-		t.Fatal("expected raw vertex service account provider without credentials to be filtered")
-	}
+	_, exists := got["vertex"]
+	require.False(t, exists)
+	_, exists = filteredRaw["vertex"]
+	require.False(t, exists)
 }
 
 func TestResolveProviders_FiltersVertexWithUnresolvedProjectPlaceholder(t *testing.T) {
@@ -985,13 +736,10 @@ func TestResolveProviders_FiltersVertexWithUnresolvedProjectPlaceholder(t *testi
 	}
 
 	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
-
-	if _, exists := got["vertex"]; exists {
-		t.Fatal("expected vertex with unresolved project placeholder to be filtered")
-	}
-	if _, exists := filteredRaw["vertex"]; exists {
-		t.Fatal("expected raw vertex with unresolved project placeholder to be filtered")
-	}
+	_, exists := got["vertex"]
+	require.False(t, exists)
+	_, exists = filteredRaw["vertex"]
+	require.False(t, exists)
 }
 
 func TestResolveProviders_FiltersVertexWithUnresolvedServiceAccountPlaceholder(t *testing.T) {
@@ -1006,13 +754,10 @@ func TestResolveProviders_FiltersVertexWithUnresolvedServiceAccountPlaceholder(t
 	}
 
 	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
-
-	if _, exists := got["vertex"]; exists {
-		t.Fatal("expected vertex with unresolved service account placeholder to be filtered")
-	}
-	if _, exists := filteredRaw["vertex"]; exists {
-		t.Fatal("expected raw vertex with unresolved service account placeholder to be filtered")
-	}
+	_, exists := got["vertex"]
+	require.False(t, exists)
+	_, exists = filteredRaw["vertex"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_GeminiIgnoresVertexSpecificEnv(t *testing.T) {
@@ -1025,24 +770,12 @@ func TestApplyProviderEnvVars_GeminiIgnoresVertexSpecificEnv(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["gemini"]
-	if !exists {
-		t.Fatal("expected gemini to be discovered from GEMINI_API_KEY")
-	}
-	if p.Type != "gemini" {
-		t.Fatalf("Type = %q, want gemini", p.Type)
-	}
-	if p.VertexProject != "" {
-		t.Fatalf("VertexProject = %q, want empty", p.VertexProject)
-	}
-	if p.VertexLocation != "" {
-		t.Fatalf("VertexLocation = %q, want empty", p.VertexLocation)
-	}
-	if p.GCPScope != "" {
-		t.Fatalf("GCPScope = %q, want empty", p.GCPScope)
-	}
-	if p.ServiceAccountFile != "" {
-		t.Fatalf("ServiceAccountFile = %q, want empty", p.ServiceAccountFile)
-	}
+	require.True(t, exists)
+	require.Equal(t, "gemini", p.Type)
+	require.Empty(t, p.VertexProject)
+	require.Empty(t, p.VertexLocation)
+	require.Empty(t, p.GCPScope)
+	require.Empty(t, p.ServiceAccountFile)
 }
 
 func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T) {
@@ -1051,18 +784,10 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromBaseURLWithoutAPIKey(t *testing.T
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["vllm"]
-	if !exists {
-		t.Fatal("expected vllm to be discovered from base URL env var")
-	}
-	if p.APIKey != "" {
-		t.Errorf("APIKey = %q, want empty", p.APIKey)
-	}
-	if p.Type != "vllm" {
-		t.Errorf("Type = %q, want vllm", p.Type)
-	}
-	if p.BaseURL != "http://localhost:8000/v1" {
-		t.Errorf("BaseURL = %q, want http://localhost:8000/v1", p.BaseURL)
-	}
+	require.True(t, exists)
+	assert.Empty(t, p.APIKey)
+	assert.Equal(t, "vllm", p.Type)
+	assert.Equal(t, "http://localhost:8000/v1", p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
@@ -1095,12 +820,10 @@ func TestApplyProviderEnvVars_DiscoversSGLang(t *testing.T) {
 
 			got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 			p, exists := got["sglang"]
-			if !exists {
-				t.Fatal("expected sglang to be discovered")
-			}
-			if p.Type != "sglang" || p.APIKey != tt.wantAPIKey || p.BaseURL != tt.wantBaseURL {
-				t.Fatalf("sglang config = %+v, want api_key=%q base_url=%q", p, tt.wantAPIKey, tt.wantBaseURL)
-			}
+			require.True(t, exists)
+			require.Equal(t, "sglang", p.Type)
+			require.Equal(t, tt.wantAPIKey, p.APIKey)
+			require.Equal(t, tt.wantBaseURL, p.BaseURL, "sglang config = %+v, want api_key=%q base_url=%q", p, tt.wantAPIKey, tt.wantBaseURL)
 		})
 	}
 }
@@ -1112,26 +835,14 @@ func TestApplyProviderEnvVars_DiscoversUnsuffixedAndSuffixedVLLMProvidersFromBas
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	primary, exists := got["vllm"]
-	if !exists {
-		t.Fatal("expected vllm to be discovered from VLLM_BASE_URL")
-	}
-	if primary.Type != "vllm" {
-		t.Fatalf("vllm Type = %q, want vllm", primary.Type)
-	}
-	if primary.BaseURL != "http://localhost:8000/v1" {
-		t.Fatalf("vllm BaseURL = %q, want http://localhost:8000/v1", primary.BaseURL)
-	}
+	require.True(t, exists)
+	require.Equal(t, "vllm", primary.Type)
+	require.Equal(t, "http://localhost:8000/v1", primary.BaseURL)
 
 	suffixed, exists := got["vllm-test"]
-	if !exists {
-		t.Fatal("expected vllm-test to be discovered from VLLM_TEST_BASE_URL")
-	}
-	if suffixed.Type != "vllm" {
-		t.Fatalf("vllm-test Type = %q, want vllm", suffixed.Type)
-	}
-	if suffixed.BaseURL != "http://localhost:8000/v1" {
-		t.Fatalf("vllm-test BaseURL = %q, want http://localhost:8000/v1", suffixed.BaseURL)
-	}
+	require.True(t, exists)
+	require.Equal(t, "vllm", suffixed.Type)
+	require.Equal(t, "http://localhost:8000/v1", suffixed.BaseURL)
 }
 
 func TestApplyProviderEnvVars_DiscoversVLLMFromAPIKeyWithDefaultBaseURL(t *testing.T) {
@@ -1140,15 +851,9 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromAPIKeyWithDefaultBaseURL(t *testi
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["vllm"]
-	if !exists {
-		t.Fatal("expected vllm to be discovered from API key env var")
-	}
-	if p.APIKey != "vllm-key" {
-		t.Errorf("APIKey = %q, want vllm-key", p.APIKey)
-	}
-	if p.BaseURL != testDiscoveryConfigs["vllm"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["vllm"].DefaultBaseURL)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "vllm-key", p.APIKey)
+	assert.Equal(t, testDiscoveryConfigs["vllm"].DefaultBaseURL, p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_DiscoversVLLMFromModelsEnv(t *testing.T) {
@@ -1157,15 +862,10 @@ func TestApplyProviderEnvVars_DiscoversVLLMFromModelsEnv(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["vllm"]
-	if !exists {
-		t.Fatal("expected VLLM_MODELS to discover keyless vllm provider")
-	}
-	if p.Type != "vllm" {
-		t.Fatalf("Type = %q, want vllm", p.Type)
-	}
-	if len(p.Models) != 1 || p.Models[0].ID != "meta-llama/Llama-3.1-8B-Instruct" {
-		t.Fatalf("Models = %v, want [meta-llama/Llama-3.1-8B-Instruct]", p.Models)
-	}
+	require.True(t, exists)
+	require.Equal(t, "vllm", p.Type)
+	require.Len(t, p.Models, 1)
+	require.Equal(t, "meta-llama/Llama-3.1-8B-Instruct", p.Models[0].ID)
 }
 
 func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOpenAIProviders(t *testing.T) {
@@ -1177,35 +877,18 @@ func TestApplyProviderEnvVars_DiscoversMultipleSuffixedOpenAIProviders(t *testin
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	east, exists := got["openai-east"]
-	if !exists {
-		t.Fatal("expected openai-east to be discovered from suffixed env vars")
-	}
-	if east.Type != "openai" {
-		t.Errorf("openai-east Type = %q, want openai", east.Type)
-	}
-	if east.APIKey != "sk-east" {
-		t.Errorf("openai-east APIKey = %q, want sk-east", east.APIKey)
-	}
-	if east.BaseURL != "https://east.example.com/v1" {
-		t.Errorf("openai-east BaseURL = %q, want https://east.example.com/v1", east.BaseURL)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "openai", east.Type)
+	assert.Equal(t, "sk-east", east.APIKey)
+	assert.Equal(t, "https://east.example.com/v1", east.BaseURL)
 
 	west, exists := got["openai-west"]
-	if !exists {
-		t.Fatal("expected openai-west to be discovered from suffixed env vars")
-	}
-	if west.Type != "openai" {
-		t.Errorf("openai-west Type = %q, want openai", west.Type)
-	}
-	if west.APIKey != "sk-west" {
-		t.Errorf("openai-west APIKey = %q, want sk-west", west.APIKey)
-	}
-	if west.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
-		t.Errorf("openai-west BaseURL = %q, want %q", west.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
-	}
-	if _, exists := got["openai"]; exists {
-		t.Fatal("expected suffixed OpenAI env vars not to create unsuffixed openai provider")
-	}
+	require.True(t, exists)
+	assert.Equal(t, "openai", west.Type)
+	assert.Equal(t, "sk-west", west.APIKey)
+	assert.Equal(t, testDiscoveryConfigs["openai"].DefaultBaseURL, west.BaseURL)
+	_, exists = got["openai"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t *testing.T) {
@@ -1229,26 +912,18 @@ func TestApplyProviderEnvVars_DiscoversSuffixedProvidersForEveryRegisteredType(t
 		}
 		name := providerType + separator + "east"
 		p, exists := got[name]
-		if !exists {
-			t.Fatalf("expected %s to be discovered from suffixed env vars", name)
-		}
-		if p.Type != providerType {
-			t.Errorf("%s Type = %q, want %q", name, p.Type, providerType)
-		}
-		if p.APIKey != "key-"+providerType {
-			t.Errorf("%s APIKey = %q, want %q", name, p.APIKey, "key-"+providerType)
-		}
+		require.True(t, exists, "expected %s to be discovered from suffixed env vars", name)
+		assert.Equal(t, providerType, p.Type, "%s Type", name)
+		assert.Equal(t, "key-"+providerType, p.APIKey, "%s APIKey", name)
+
 		if spec.RequireBaseURL {
-			wantBaseURL := "https://" + providerType + ".example.com/v1"
-			if p.BaseURL != wantBaseURL {
-				t.Errorf("%s BaseURL = %q, want %q", name, p.BaseURL, wantBaseURL)
-			}
-		} else if spec.DefaultBaseURL != "" && p.BaseURL != spec.DefaultBaseURL {
-			t.Errorf("%s BaseURL = %q, want %q", name, p.BaseURL, spec.DefaultBaseURL)
+			assert.Equal(t, "https://"+providerType+".example.com/v1", p.BaseURL, "%s BaseURL", name)
+		} else if spec.DefaultBaseURL != "" {
+			assert.Equal(t, spec.DefaultBaseURL, p.BaseURL, "%s BaseURL", name)
 		}
-		if len(p.Models) != 2 || p.Models[0].ID != "model-a-"+providerType || p.Models[1].ID != "model-b-"+providerType {
-			t.Errorf("%s Models = %v, want [model-a-%s model-b-%s]", name, p.Models, providerType, providerType)
-		}
+		require.Len(t, p.Models, 2)
+		assert.Equal(t, "model-a-"+providerType, p.Models[0].ID)
+		assert.Equal(t, "model-b-"+providerType, p.Models[1].ID, "%s Models", name)
 	}
 }
 
@@ -1259,18 +934,10 @@ func TestApplyProviderEnvVars_DiscoversAzureFromExplicitEnvVars(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["azure"]
-	if !exists {
-		t.Fatal("expected azure to be discovered from env vars")
-	}
-	if p.APIKey != "sk-azure" {
-		t.Errorf("APIKey = %q, want sk-azure", p.APIKey)
-	}
-	if p.Type != "azure" {
-		t.Errorf("Type = %q, want azure", p.Type)
-	}
-	if p.BaseURL != "https://example-resource.openai.azure.com/openai/deployments/gpt-4o" {
-		t.Errorf("BaseURL = %q, want Azure API base", p.BaseURL)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "sk-azure", p.APIKey)
+	assert.Equal(t, "azure", p.Type)
+	assert.Equal(t, "https://example-resource.openai.azure.com/openai/deployments/gpt-4o", p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_AzureAPIVersionEnvWins(t *testing.T) {
@@ -1281,12 +948,8 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWins(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["azure"]
-	if !exists {
-		t.Fatal("expected azure to be discovered from env vars")
-	}
-	if p.APIVersion != "2025-04-01-preview" {
-		t.Errorf("APIVersion = %q, want 2025-04-01-preview", p.APIVersion)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "2025-04-01-preview", p.APIVersion)
 }
 
 func TestApplyProviderEnvVars_AzureAPIVersionEnvWinsWithoutOtherAzureEnvVars(t *testing.T) {
@@ -1303,19 +966,15 @@ func TestApplyProviderEnvVars_AzureAPIVersionEnvWinsWithoutOtherAzureEnvVars(t *
 
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
-	if got["azure"].APIVersion != "2025-04-01-preview" {
-		t.Fatalf("APIVersion = %q, want 2025-04-01-preview", got["azure"].APIVersion)
-	}
+	require.Equal(t, "2025-04-01-preview", got["azure"].APIVersion)
 }
 
 func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithoutBaseURL(t *testing.T) {
 	t.Setenv("AZURE_API_KEY", "sk-azure")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	if _, exists := got["azure"]; exists {
-		t.Fatal("expected azure not to be discovered without AZURE_BASE_URL")
-	}
+	_, exists := got["azure"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_DiscoversSuffixedAzureWithAPIVersion(t *testing.T) {
@@ -1326,31 +985,19 @@ func TestApplyProviderEnvVars_DiscoversSuffixedAzureWithAPIVersion(t *testing.T)
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["azure-gpt4o"]
-	if !exists {
-		t.Fatal("expected azure-gpt4o to be discovered from suffixed env vars")
-	}
-	if p.Type != "azure" {
-		t.Errorf("Type = %q, want azure", p.Type)
-	}
-	if p.APIKey != "sk-azure" {
-		t.Errorf("APIKey = %q, want sk-azure", p.APIKey)
-	}
-	if p.BaseURL != "https://example-resource.openai.azure.com/openai/deployments/gpt-4o" {
-		t.Errorf("BaseURL = %q, want Azure API base", p.BaseURL)
-	}
-	if p.APIVersion != "2025-04-01-preview" {
-		t.Errorf("APIVersion = %q, want 2025-04-01-preview", p.APIVersion)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "azure", p.Type)
+	assert.Equal(t, "sk-azure", p.APIKey)
+	assert.Equal(t, "https://example-resource.openai.azure.com/openai/deployments/gpt-4o", p.BaseURL)
+	assert.Equal(t, "2025-04-01-preview", p.APIVersion)
 }
 
 func TestApplyProviderEnvVars_DoesNotDiscoverSuffixedAzureWithoutBaseURL(t *testing.T) {
 	t.Setenv("AZURE_EAST_API_KEY", "sk-azure")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	if _, exists := got["azure-east"]; exists {
-		t.Fatal("expected azure-east not to be discovered without AZURE_EAST_BASE_URL")
-	}
+	_, exists := got["azure-east"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
@@ -1361,21 +1008,13 @@ func TestApplyProviderEnvVars_DiscoversOracleFromExplicitEnvVars(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["oracle"]
-	if !exists {
-		t.Fatal("expected oracle to be discovered from env vars")
-	}
-	if p.APIKey != "oracle-key" {
-		t.Errorf("APIKey = %q, want oracle-key", p.APIKey)
-	}
-	if p.Type != "oracle" {
-		t.Errorf("Type = %q, want oracle", p.Type)
-	}
-	if p.BaseURL != "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" {
-		t.Errorf("BaseURL = %q, want Oracle base URL", p.BaseURL)
-	}
-	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-oss-120b" || p.Models[1].ID != "xai.grok-3" {
-		t.Errorf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "oracle-key", p.APIKey)
+	assert.Equal(t, "oracle", p.Type)
+	assert.Equal(t, "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1", p.BaseURL)
+	require.Len(t, p.Models, 2)
+	assert.Equal(t, "openai.gpt-oss-120b", p.Models[0].ID)
+	assert.Equal(t, "xai.grok-3", p.Models[1].ID)
 }
 
 func TestApplyProviderEnvVars_DiscoversSuffixedOracleModels(t *testing.T) {
@@ -1386,31 +1025,21 @@ func TestApplyProviderEnvVars_DiscoversSuffixedOracleModels(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["oracle-region"]
-	if !exists {
-		t.Fatal("expected oracle-region to be discovered from suffixed env vars")
-	}
-	if p.Type != "oracle" {
-		t.Errorf("Type = %q, want oracle", p.Type)
-	}
-	if p.APIKey != "oracle-key" {
-		t.Errorf("APIKey = %q, want oracle-key", p.APIKey)
-	}
-	if p.BaseURL != "https://oracle.example.com/v1" {
-		t.Errorf("BaseURL = %q, want https://oracle.example.com/v1", p.BaseURL)
-	}
-	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-oss-120b" || p.Models[1].ID != "xai.grok-3" {
-		t.Errorf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "oracle", p.Type)
+	assert.Equal(t, "oracle-key", p.APIKey)
+	assert.Equal(t, "https://oracle.example.com/v1", p.BaseURL)
+	require.Len(t, p.Models, 2)
+	assert.Equal(t, "openai.gpt-oss-120b", p.Models[0].ID)
+	assert.Equal(t, "xai.grok-3", p.Models[1].ID)
 }
 
 func TestApplyProviderEnvVars_DoesNotDiscoverOracleWithoutBaseURL(t *testing.T) {
 	t.Setenv("ORACLE_API_KEY", "oracle-key")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	if _, exists := got["oracle"]; exists {
-		t.Fatal("expected oracle not to be discovered without ORACLE_BASE_URL")
-	}
+	_, exists := got["oracle"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_OracleModelsEnvWinsOverYAMLWithoutOtherOracleEnvVars(t *testing.T) {
@@ -1427,15 +1056,11 @@ func TestApplyProviderEnvVars_OracleModelsEnvWinsOverYAMLWithoutOtherOracleEnvVa
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	p := got["oracle"]
-	if p.APIKey != "oracle-key" {
-		t.Fatalf("APIKey = %q, want oracle-key", p.APIKey)
-	}
-	if p.BaseURL != "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1" {
-		t.Fatalf("BaseURL = %q, want Oracle base URL", p.BaseURL)
-	}
-	if len(p.Models) != 2 || p.Models[0].ID != "openai.gpt-oss-120b" || p.Models[1].ID != "xai.grok-3" {
-		t.Fatalf("Models = %v, want [openai.gpt-oss-120b xai.grok-3]", p.Models)
-	}
+	require.Equal(t, "oracle-key", p.APIKey)
+	require.Equal(t, "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/20231130/actions/v1", p.BaseURL)
+	require.Len(t, p.Models, 2)
+	require.Equal(t, "openai.gpt-oss-120b", p.Models[0].ID)
+	require.Equal(t, "xai.grok-3", p.Models[1].ID)
 }
 
 func TestApplyProviderEnvVars_EnvWinsOverYAML(t *testing.T) {
@@ -1446,12 +1071,8 @@ func TestApplyProviderEnvVars_EnvWinsOverYAML(t *testing.T) {
 	}
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
-	if got["openai"].APIKey != "sk-env-key" {
-		t.Errorf("APIKey = %q, want sk-env-key (env should win over YAML)", got["openai"].APIKey)
-	}
-	if got["openai"].BaseURL != "https://custom.api.com" {
-		t.Error("BaseURL from YAML should be preserved when env var is absent")
-	}
+	assert.Equal(t, "sk-env-key", got["openai"].APIKey)
+	assert.Equal(t, "https://custom.api.com", got["openai"].BaseURL)
 }
 
 func TestApplyProviderEnvVars_SingleCustomNamedProviderUsesTypeEnvVars(t *testing.T) {
@@ -1463,18 +1084,11 @@ func TestApplyProviderEnvVars_SingleCustomNamedProviderUsesTypeEnvVars(t *testin
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	provider, exists := got["openai_name"]
-	if !exists {
-		t.Fatal("expected custom-named openai provider to be preserved")
-	}
-	if provider.APIKey != "sk-env-key" {
-		t.Errorf("APIKey = %q, want sk-env-key", provider.APIKey)
-	}
-	if provider.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", provider.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
-	}
-	if _, exists := got["openai"]; exists {
-		t.Fatal("expected no duplicate auto-discovered openai provider")
-	}
+	require.True(t, exists)
+	assert.Equal(t, "sk-env-key", provider.APIKey)
+	assert.Equal(t, testDiscoveryConfigs["openai"].DefaultBaseURL, provider.BaseURL)
+	_, exists = got["openai"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_AmbiguousCustomNamedProvidersSkipTypeEnvOverlay(t *testing.T) {
@@ -1486,15 +1100,10 @@ func TestApplyProviderEnvVars_AmbiguousCustomNamedProvidersSkipTypeEnvOverlay(t 
 	}
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
-	if got["openai-east"].APIKey != "east-key" {
-		t.Errorf("openai-east APIKey = %q, want east-key", got["openai-east"].APIKey)
-	}
-	if got["openai-west"].APIKey != "west-key" {
-		t.Errorf("openai-west APIKey = %q, want west-key", got["openai-west"].APIKey)
-	}
-	if _, exists := got["openai"]; exists {
-		t.Fatal("expected no duplicate auto-discovered openai provider when multiple YAML providers share the type")
-	}
+	assert.Equal(t, "east-key", got["openai-east"].APIKey)
+	assert.Equal(t, "west-key", got["openai-west"].APIKey)
+	_, exists := got["openai"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_BaseURLEnvWinsOverYAML(t *testing.T) {
@@ -1505,9 +1114,7 @@ func TestApplyProviderEnvVars_BaseURLEnvWinsOverYAML(t *testing.T) {
 	}
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
-	if got["openai"].BaseURL != "https://env-override.com" {
-		t.Errorf("BaseURL = %q, want https://env-override.com", got["openai"].BaseURL)
-	}
+	assert.Equal(t, "https://env-override.com", got["openai"].BaseURL)
 }
 
 func TestApplyProviderEnvVars_DefaultBaseReplacesPlaceholderYAMLBaseURL(t *testing.T) {
@@ -1519,9 +1126,7 @@ func TestApplyProviderEnvVars_DefaultBaseReplacesPlaceholderYAMLBaseURL(t *testi
 
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
-	if got["openrouter"].BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
-		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
-	}
+	require.Equal(t, testDiscoveryConfigs["openrouter"].DefaultBaseURL, got["openrouter"].BaseURL)
 }
 
 func TestApplyProviderEnvVars_PlaceholderBaseURLEnvFallsBackToDefault(t *testing.T) {
@@ -1530,9 +1135,7 @@ func TestApplyProviderEnvVars_PlaceholderBaseURLEnvFallsBackToDefault(t *testing
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
-	if got["openrouter"].BaseURL != testDiscoveryConfigs["openrouter"].DefaultBaseURL {
-		t.Fatalf("BaseURL = %q, want %q", got["openrouter"].BaseURL, testDiscoveryConfigs["openrouter"].DefaultBaseURL)
-	}
+	require.Equal(t, testDiscoveryConfigs["openrouter"].DefaultBaseURL, got["openrouter"].BaseURL)
 }
 
 func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithPlaceholderBaseURL(t *testing.T) {
@@ -1540,10 +1143,8 @@ func TestApplyProviderEnvVars_DoesNotDiscoverAzureWithPlaceholderBaseURL(t *test
 	t.Setenv("AZURE_BASE_URL", "${AZURE_BASE_URL}")
 
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-
-	if _, exists := got["azure"]; exists {
-		t.Fatal("expected azure not to be discovered with placeholder AZURE_BASE_URL")
-	}
+	_, exists := got["azure"]
+	require.False(t, exists)
 }
 
 func TestApplyProviderEnvVars_PreservesYAMLResilience(t *testing.T) {
@@ -1561,12 +1162,9 @@ func TestApplyProviderEnvVars_PreservesYAMLResilience(t *testing.T) {
 	}
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
-	if got["openai"].Resilience == nil || got["openai"].Resilience.Retry == nil {
-		t.Fatal("expected YAML resilience to be preserved after env var overlay")
-	}
-	if *got["openai"].Resilience.Retry.MaxRetries != 10 {
-		t.Errorf("MaxRetries = %d, want 10", *got["openai"].Resilience.Retry.MaxRetries)
-	}
+	require.NotNil(t, got["openai"].Resilience)
+	require.NotNil(t, got["openai"].Resilience.Retry)
+	assert.Equal(t, 10, *got["openai"].Resilience.Retry.MaxRetries)
 }
 
 func TestApplyProviderEnvVars_SuffixedEnvOverlaysMatchingYAMLProvider(t *testing.T) {
@@ -1588,18 +1186,11 @@ func TestApplyProviderEnvVars_SuffixedEnvOverlaysMatchingYAMLProvider(t *testing
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	p := got["openai-east"]
-	if p.APIKey != "sk-env-key" {
-		t.Errorf("APIKey = %q, want sk-env-key", p.APIKey)
-	}
-	if p.BaseURL != "https://env.example.com/v1" {
-		t.Errorf("BaseURL = %q, want https://env.example.com/v1", p.BaseURL)
-	}
-	if p.Resilience == nil || p.Resilience.Retry == nil {
-		t.Fatal("expected YAML resilience to be preserved after suffixed env var overlay")
-	}
-	if *p.Resilience.Retry.MaxRetries != 10 {
-		t.Errorf("MaxRetries = %d, want 10", *p.Resilience.Retry.MaxRetries)
-	}
+	assert.Equal(t, "sk-env-key", p.APIKey)
+	assert.Equal(t, "https://env.example.com/v1", p.BaseURL)
+	require.NotNil(t, p.Resilience)
+	require.NotNil(t, p.Resilience.Retry)
+	assert.Equal(t, 10, *p.Resilience.Retry.MaxRetries)
 }
 
 // providerEnvNames mirrors the env-var naming convention applied by
@@ -1633,9 +1224,7 @@ func TestApplyProviderEnvVars_SkipsWhenNoEnvVars(t *testing.T) {
 		}
 	}
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
-	if len(got) != 0 {
-		t.Errorf("expected empty result when no env vars set, got %d entries", len(got))
-	}
+	assert.Empty(t, got)
 }
 
 func TestApplyProviderEnvVars_PreservesUnknownYAMLProviders(t *testing.T) {
@@ -1643,10 +1232,8 @@ func TestApplyProviderEnvVars_PreservesUnknownYAMLProviders(t *testing.T) {
 		"custom-provider": {Type: "custom", APIKey: "sk-custom"},
 	}
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
-
-	if _, exists := got["custom-provider"]; !exists {
-		t.Error("expected custom (non-registered) YAML provider to be preserved")
-	}
+	_, exists := got["custom-provider"]
+	assert.True(t, exists)
 }
 
 // --- buildProviderConfig: circuit breaker ---
@@ -1662,10 +1249,7 @@ func TestBuildProviderConfig_CircuitBreaker_InheritsGlobal(t *testing.T) {
 	raw := config.RawProviderConfig{Type: "openai", APIKey: "sk"}
 	got := buildProviderConfig(raw, global)
 
-	if !reflect.DeepEqual(got.Resilience.CircuitBreaker, global.CircuitBreaker) {
-		t.Errorf("expected global circuit breaker to be inherited\ngot:  %+v\nwant: %+v",
-			got.Resilience.CircuitBreaker, global.CircuitBreaker)
-	}
+	assert.Equal(t, global.CircuitBreaker, got.Resilience.CircuitBreaker)
 }
 
 func TestBuildProviderConfig_CircuitBreaker_NilOverride(t *testing.T) {
@@ -1678,9 +1262,7 @@ func TestBuildProviderConfig_CircuitBreaker_NilOverride(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, global)
 
-	if !reflect.DeepEqual(got.Resilience.CircuitBreaker, global.CircuitBreaker) {
-		t.Error("nil CircuitBreaker override should inherit global")
-	}
+	assert.Equal(t, global.CircuitBreaker, got.Resilience.CircuitBreaker)
 }
 
 func TestBuildProviderConfig_CircuitBreaker_PartialOverride(t *testing.T) {
@@ -1699,15 +1281,9 @@ func TestBuildProviderConfig_CircuitBreaker_PartialOverride(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, global)
 
-	if got.Resilience.CircuitBreaker.FailureThreshold != 10 {
-		t.Errorf("FailureThreshold = %d, want 10", got.Resilience.CircuitBreaker.FailureThreshold)
-	}
-	if got.Resilience.CircuitBreaker.SuccessThreshold != global.CircuitBreaker.SuccessThreshold {
-		t.Errorf("SuccessThreshold should be inherited, got %d", got.Resilience.CircuitBreaker.SuccessThreshold)
-	}
-	if got.Resilience.CircuitBreaker.Timeout != global.CircuitBreaker.Timeout {
-		t.Errorf("Timeout should be inherited, got %v", got.Resilience.CircuitBreaker.Timeout)
-	}
+	assert.Equal(t, 10, got.Resilience.CircuitBreaker.FailureThreshold)
+	assert.Equal(t, global.CircuitBreaker.SuccessThreshold, got.Resilience.CircuitBreaker.SuccessThreshold)
+	assert.Equal(t, global.CircuitBreaker.Timeout, got.Resilience.CircuitBreaker.Timeout)
 }
 
 func TestBuildProviderConfig_CircuitBreaker_FullOverride(t *testing.T) {
@@ -1732,15 +1308,9 @@ func TestBuildProviderConfig_CircuitBreaker_FullOverride(t *testing.T) {
 	got := buildProviderConfig(raw, global)
 
 	cb := got.Resilience.CircuitBreaker
-	if cb.FailureThreshold != 3 {
-		t.Errorf("FailureThreshold = %d, want 3", cb.FailureThreshold)
-	}
-	if cb.SuccessThreshold != 1 {
-		t.Errorf("SuccessThreshold = %d, want 1", cb.SuccessThreshold)
-	}
-	if cb.Timeout != 10*time.Second {
-		t.Errorf("Timeout = %v, want 10s", cb.Timeout)
-	}
+	assert.Equal(t, 3, cb.FailureThreshold)
+	assert.Equal(t, 1, cb.SuccessThreshold)
+	assert.Equal(t, 10*time.Second, cb.Timeout)
 }
 
 func TestBuildProviderConfig_CircuitBreaker_ZeroValueOverride(t *testing.T) {
@@ -1759,9 +1329,7 @@ func TestBuildProviderConfig_CircuitBreaker_ZeroValueOverride(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, global)
 
-	if got.Resilience.CircuitBreaker.FailureThreshold != 0 {
-		t.Errorf("explicit 0 should override global, got %d", got.Resilience.CircuitBreaker.FailureThreshold)
-	}
+	assert.Equal(t, 0, got.Resilience.CircuitBreaker.FailureThreshold)
 }
 
 func TestBuildProviderConfig_CircuitBreaker_EnabledOverride(t *testing.T) {
@@ -1780,20 +1348,15 @@ func TestBuildProviderConfig_CircuitBreaker_EnabledOverride(t *testing.T) {
 	}
 	got := buildProviderConfig(raw, global)
 
-	if got.Resilience.CircuitBreaker.Enabled {
-		t.Error("explicit enabled: false should override global")
-	}
-	if got.Resilience.CircuitBreaker.FailureThreshold != global.CircuitBreaker.FailureThreshold {
-		t.Errorf("FailureThreshold should be inherited, got %d", got.Resilience.CircuitBreaker.FailureThreshold)
-	}
+	assert.False(t, got.Resilience.CircuitBreaker.Enabled)
+	assert.Equal(t, global.CircuitBreaker.FailureThreshold, got.Resilience.CircuitBreaker.FailureThreshold)
 
 	// A globally disabled breaker can be re-enabled for one provider.
 	global.CircuitBreaker.Enabled = false
 	enabled := true
 	raw.Resilience.CircuitBreaker.Enabled = &enabled
-	if got := buildProviderConfig(raw, global); !got.Resilience.CircuitBreaker.Enabled {
-		t.Error("explicit enabled: true should override a disabled global")
-	}
+	got = buildProviderConfig(raw, global)
+	assert.True(t, got.Resilience.CircuitBreaker.Enabled)
 }
 
 // --- resolveProviders (integration of all three stages) ---
@@ -1817,28 +1380,15 @@ func TestResolveProviders_EndToEnd(t *testing.T) {
 	}
 
 	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
-
-	if _, exists := got["bad"]; exists {
-		t.Error("expected provider with unresolved placeholder to be filtered out")
-	}
-	if got["openai"].Resilience.Retry.MaxRetries != 10 {
-		t.Errorf("openai MaxRetries = %d, want 10", got["openai"].Resilience.Retry.MaxRetries)
-	}
-	if got["anthropic"].APIKey != "sk-ant-env" {
-		t.Errorf("anthropic APIKey = %q, want sk-ant-env", got["anthropic"].APIKey)
-	}
-	if got["anthropic"].Resilience.Retry.MaxRetries != globalRetry.MaxRetries {
-		t.Errorf("anthropic should inherit global MaxRetries=%d, got %d", globalRetry.MaxRetries, got["anthropic"].Resilience.Retry.MaxRetries)
-	}
-	if _, ok := filteredRaw["bad"]; ok {
-		t.Error("expected filtered raw map to omit bad provider")
-	}
-	if filteredRaw["openai"].APIKey != "sk-openai-yaml" {
-		t.Errorf("filteredRaw openai APIKey = %q", filteredRaw["openai"].APIKey)
-	}
-	if filteredRaw["anthropic"].APIKey != "sk-ant-env" {
-		t.Errorf("filteredRaw anthropic APIKey = %q, want sk-ant-env", filteredRaw["anthropic"].APIKey)
-	}
+	_, exists := got["bad"]
+	assert.False(t, exists)
+	assert.Equal(t, 10, got["openai"].Resilience.Retry.MaxRetries)
+	assert.Equal(t, "sk-ant-env", got["anthropic"].APIKey)
+	assert.Equal(t, globalRetry.MaxRetries, got["anthropic"].Resilience.Retry.MaxRetries)
+	_, ok := filteredRaw["bad"]
+	assert.False(t, ok)
+	assert.Equal(t, "sk-openai-yaml", filteredRaw["openai"].APIKey)
+	assert.Equal(t, "sk-ant-env", filteredRaw["anthropic"].APIKey)
 }
 
 func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
@@ -1846,12 +1396,8 @@ func TestResolveProviders_EmptyRaw_OnlyEnvVars(t *testing.T) {
 
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 
-	if got["groq"].APIKey != "sk-groq" {
-		t.Errorf("groq APIKey = %q, want sk-groq", got["groq"].APIKey)
-	}
-	if filteredRaw["groq"].APIKey != "sk-groq" {
-		t.Errorf("filteredRaw groq APIKey = %q, want sk-groq", filteredRaw["groq"].APIKey)
-	}
+	assert.Equal(t, "sk-groq", got["groq"].APIKey)
+	assert.Equal(t, "sk-groq", filteredRaw["groq"].APIKey)
 }
 
 func TestResolveProviders_EmptyRaw_SuffixedEnvVars(t *testing.T) {
@@ -1862,42 +1408,20 @@ func TestResolveProviders_EmptyRaw_SuffixedEnvVars(t *testing.T) {
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
 
 	east, exists := got["openai-east"]
-	if !exists {
-		t.Fatal("expected openai-east in resolved providers")
-	}
-	if east.Type != "openai" {
-		t.Errorf("openai-east Type = %q, want openai", east.Type)
-	}
-	if east.APIKey != "sk-east" {
-		t.Errorf("openai-east APIKey = %q, want sk-east", east.APIKey)
-	}
-	if east.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
-		t.Errorf("openai-east BaseURL = %q, want %q", east.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "openai", east.Type)
+	assert.Equal(t, "sk-east", east.APIKey)
+	assert.Equal(t, testDiscoveryConfigs["openai"].DefaultBaseURL, east.BaseURL)
 
 	west, exists := got["openai-west"]
-	if !exists {
-		t.Fatal("expected openai-west in resolved providers")
-	}
-	if west.Type != "openai" {
-		t.Errorf("openai-west Type = %q, want openai", west.Type)
-	}
-	if west.APIKey != "sk-west" {
-		t.Errorf("openai-west APIKey = %q, want sk-west", west.APIKey)
-	}
-	if west.BaseURL != "https://west.example.com/v1" {
-		t.Errorf("openai-west BaseURL = %q, want https://west.example.com/v1", west.BaseURL)
-	}
-
-	if filteredRaw["openai-east"].APIKey != "sk-east" {
-		t.Errorf("filteredRaw openai-east APIKey = %q, want sk-east", filteredRaw["openai-east"].APIKey)
-	}
-	if filteredRaw["openai-west"].BaseURL != "https://west.example.com/v1" {
-		t.Errorf("filteredRaw openai-west BaseURL = %q, want https://west.example.com/v1", filteredRaw["openai-west"].BaseURL)
-	}
-	if _, exists := got["openai"]; exists {
-		t.Fatal("expected no unsuffixed openai provider from suffixed env vars")
-	}
+	require.True(t, exists)
+	assert.Equal(t, "openai", west.Type)
+	assert.Equal(t, "sk-west", west.APIKey)
+	assert.Equal(t, "https://west.example.com/v1", west.BaseURL)
+	assert.Equal(t, "sk-east", filteredRaw["openai-east"].APIKey)
+	assert.Equal(t, "https://west.example.com/v1", filteredRaw["openai-west"].BaseURL)
+	_, exists = got["openai"]
+	require.False(t, exists)
 }
 
 func TestResolveProviders_SingleCustomNamedProviderDoesNotDuplicateTypeKey(t *testing.T) {
@@ -1910,31 +1434,19 @@ func TestResolveProviders_SingleCustomNamedProviderDoesNotDuplicateTypeKey(t *te
 	got, filteredRaw := resolveProviders(raw, globalResilience, testDiscoveryConfigs)
 
 	provider, exists := got["openai_name"]
-	if !exists {
-		t.Fatal("expected openai_name provider in resolved providers")
-	}
-	if provider.APIKey != "sk-openai" {
-		t.Errorf("APIKey = %q, want sk-openai", provider.APIKey)
-	}
-	if provider.BaseURL != testDiscoveryConfigs["openai"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", provider.BaseURL, testDiscoveryConfigs["openai"].DefaultBaseURL)
-	}
-	if _, exists := got["openai"]; exists {
-		t.Fatal("expected no duplicate openai provider in resolved providers")
-	}
-	if _, exists := filteredRaw["openai"]; exists {
-		t.Fatal("expected no duplicate openai provider in filtered raw providers")
-	}
+	require.True(t, exists)
+	assert.Equal(t, "sk-openai", provider.APIKey)
+	assert.Equal(t, testDiscoveryConfigs["openai"].DefaultBaseURL, provider.BaseURL)
+	_, exists = got["openai"]
+	require.False(t, exists)
+	_, exists = filteredRaw["openai"]
+	require.False(t, exists)
 }
 
 func TestResolveProviders_NoProvidersNoEnvVars(t *testing.T) {
 	got, filteredRaw := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
-	if len(got) != 0 {
-		t.Errorf("expected empty result, got %d entries", len(got))
-	}
-	if len(filteredRaw) != 0 {
-		t.Errorf("expected empty filtered raw, got %d entries", len(filteredRaw))
-	}
+	assert.Empty(t, got)
+	assert.Empty(t, filteredRaw)
 }
 
 func TestBuildProviderConfig_Hetzner_ResolvesBaseURL(t *testing.T) {
@@ -1946,18 +1458,10 @@ func TestBuildProviderConfig_Hetzner_ResolvesBaseURL(t *testing.T) {
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	p, exists := got["hetzner"]
-	if !exists {
-		t.Fatal("hetzner not discovered by config parser")
-	}
-	if p.Type != "hetzner" {
-		t.Errorf("Type = %q, want hetzner", p.Type)
-	}
-	if p.APIKey != "hetzner-test-key" {
-		t.Errorf("APIKey = %q, want hetzner-test-key", p.APIKey)
-	}
-	if p.BaseURL != testDiscoveryConfigs["hetzner"].DefaultBaseURL {
-		t.Errorf("BaseURL = %q, want %q", p.BaseURL, testDiscoveryConfigs["hetzner"].DefaultBaseURL)
-	}
+	require.True(t, exists)
+	assert.Equal(t, "hetzner", p.Type)
+	assert.Equal(t, "hetzner-test-key", p.APIKey)
+	assert.Equal(t, testDiscoveryConfigs["hetzner"].DefaultBaseURL, p.BaseURL)
 }
 
 func TestApplyProviderEnvVars_ModelFilter(t *testing.T) {
@@ -1969,18 +1473,11 @@ func TestApplyProviderEnvVars_ModelFilter(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	p, exists := got["openrouter"]
-	if !exists {
-		t.Fatal("expected openrouter to be discovered from env var")
-	}
-	if want := []string{"*:free", "*:nitro"}; !slices.Equal(p.ModelFilter.Include, want) {
-		t.Errorf("Include = %v, want %v", p.ModelFilter.Include, want)
-	}
-	if want := []string{"*-preview:free"}; !slices.Equal(p.ModelFilter.Exclude, want) {
-		t.Errorf("Exclude = %v, want %v", p.ModelFilter.Exclude, want)
-	}
-	if p.ModelFilter.MaxPricePerMtok == nil || *p.ModelFilter.MaxPricePerMtok != 0 {
-		t.Errorf("MaxPricePerMtok = %v, want 0", p.ModelFilter.MaxPricePerMtok)
-	}
+	require.True(t, exists)
+	assert.Equal(t, []string{"*:free", "*:nitro"}, p.ModelFilter.Include)
+	assert.Equal(t, []string{"*-preview:free"}, p.ModelFilter.Exclude)
+	require.NotNil(t, p.ModelFilter.MaxPricePerMtok)
+	assert.Equal(t, float64(0), *p.ModelFilter.MaxPricePerMtok)
 }
 
 // Each filter rule overlays independently so an env price cap can narrow a YAML
@@ -1998,12 +1495,9 @@ func TestApplyProviderEnvVars_ModelFilterOverlaysYAMLPerRule(t *testing.T) {
 	got := applyProviderEnvVars(raw, testDiscoveryConfigs)
 
 	filter := got["openrouter"].ModelFilter
-	if want := []string{"qwen/*"}; !slices.Equal(filter.Include, want) {
-		t.Errorf("Include = %v, want %v preserved from YAML", filter.Include, want)
-	}
-	if filter.MaxPricePerMtok == nil || *filter.MaxPricePerMtok != 0.5 {
-		t.Errorf("MaxPricePerMtok = %v, want 0.5 from env", filter.MaxPricePerMtok)
-	}
+	assert.Equal(t, []string{"qwen/*"}, filter.Include, "Include preserved from YAML")
+	require.NotNil(t, filter.MaxPricePerMtok)
+	assert.Equal(t, 0.5, *filter.MaxPricePerMtok)
 }
 
 // A malformed cap must not resolve to a silent zero (hiding every paid model)
@@ -2016,12 +1510,9 @@ func TestApplyProviderEnvVars_ModelFilterRejectsMalformedPrice(t *testing.T) {
 	got := applyProviderEnvVars(map[string]config.RawProviderConfig{}, testDiscoveryConfigs)
 
 	limit := got["openrouter"].ModelFilter.MaxPricePerMtok
-	if limit == nil || !math.IsNaN(*limit) {
-		t.Fatalf("MaxPricePerMtok = %v, want NaN so validation rejects it", limit)
-	}
-	if err := got["openrouter"].ModelFilter.Validate("providers.openrouter.model_filter"); err == nil {
-		t.Error("Validate() = nil, want an error for a malformed price cap")
-	}
+	require.NotNil(t, limit)
+	require.True(t, math.IsNaN(*limit))
+	assert.Error(t, got["openrouter"].ModelFilter.Validate("providers.openrouter.model_filter"))
 }
 
 // The malformed value must survive the whole resolution path, not just the env
@@ -2032,17 +1523,12 @@ func TestResolveProviders_RejectsMalformedModelFilterPrice(t *testing.T) {
 	t.Setenv("OPENROUTER_MODEL_FILTER_MAX_PRICE_PER_MTOK", "cheap")
 
 	resolved, _ := resolveProviders(map[string]config.RawProviderConfig{}, globalResilience, testDiscoveryConfigs)
+	_, ok := resolved["openrouter"]
+	require.True(t, ok)
 
-	if _, ok := resolved["openrouter"]; !ok {
-		t.Fatal("openrouter was not resolved, want it present so validation can reject its cap")
-	}
 	err := validateProviderModelFilters(resolved)
-	if err == nil {
-		t.Fatal("validateProviderModelFilters() = nil, want an error")
-	}
-	if !strings.Contains(err.Error(), "providers.openrouter.model_filter.max_price_per_mtok") {
-		t.Errorf("error = %q, want it to name the offending field", err)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "providers.openrouter.model_filter.max_price_per_mtok")
 }
 
 func TestBuildProviderConfig_NormalizesModelFilter(t *testing.T) {
@@ -2051,10 +1537,7 @@ func TestBuildProviderConfig_NormalizesModelFilter(t *testing.T) {
 		APIKey:      "sk-openrouter",
 		ModelFilter: config.ModelFilter{Include: []string{" *:free ", "", "  "}},
 	}, globalResilience)
-
-	if want := []string{"*:free"}; !slices.Equal(resolved.ModelFilter.Include, want) {
-		t.Errorf("Include = %v, want %v", resolved.ModelFilter.Include, want)
-	}
+	assert.Equal(t, []string{"*:free"}, resolved.ModelFilter.Include)
 }
 
 // A price cap that parses but cannot express a real limit must fail startup:
@@ -2079,12 +1562,11 @@ func TestValidateProviderModelFilters(t *testing.T) {
 			err := validateProviderModelFilters(map[string]ProviderConfig{
 				"openrouter": {Type: "openrouter", ModelFilter: tt.filter},
 			})
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("validateProviderModelFilters() error = %v, wantErr %v", err, tt.wantErr)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
 			}
-			if err != nil && !strings.Contains(err.Error(), "providers.openrouter.model_filter") {
-				t.Errorf("error = %q, want it to name the offending provider", err)
-			}
+			require.ErrorContains(t, err, "providers.openrouter.model_filter", "error should name the offending provider")
 		})
 	}
 }

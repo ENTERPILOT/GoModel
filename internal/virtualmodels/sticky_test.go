@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func upsertBalancedVM(t *testing.T, svc *Service, strategy string, affinity *bool) {
 	t.Helper()
-	if err := svc.Upsert(context.Background(), VirtualModel{
+	err := svc.Upsert(context.Background(), VirtualModel{
 		Source:          "smart",
 		Strategy:        strategy,
 		SessionAffinity: affinity,
@@ -22,18 +23,16 @@ func upsertBalancedVM(t *testing.T, svc *Service, strategy string, affinity *boo
 			{Provider: "groq", Model: "llama"},
 		},
 		Enabled: true,
-	}); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
+	})
+	require.NoError(t, err)
 }
 
 // resolveSession resolves source once with a session id and returns the chosen target.
 func resolveSession(t *testing.T, svc *Service, source, sessionID string) string {
 	t.Helper()
 	resolution, _, err := svc.resolveRequested(context.Background(), core.NewRequestedModelSelector(source, ""), "", false, sessionID)
-	if err != nil {
-		t.Fatalf("resolveRequested() error = %v", err)
-	}
+	require.NoError(t, err)
+
 	return resolution.Resolved.QualifiedModel()
 }
 
@@ -46,9 +45,8 @@ func TestSticky_SameSessionSameTarget(t *testing.T) {
 
 			first := resolveSession(t, svc, "smart", "sess-a")
 			for i := range 5 {
-				if got := resolveSession(t, svc, "smart", "sess-a"); got != first {
-					t.Fatalf("resolution %d = %q, want pinned %q", i, got, first)
-				}
+				got := resolveSession(t, svc, "smart", "sess-a")
+				require.Equal(t, first, got, "resolution %d: want pinned %q", i, first)
 			}
 		})
 	}
@@ -62,15 +60,11 @@ func TestSticky_SessionsDistributeAcrossTargets(t *testing.T) {
 	// Distinct sessions land on rotating targets; each stays pinned.
 	a := resolveSession(t, svc, "smart", "sess-a")
 	b := resolveSession(t, svc, "smart", "sess-b")
-	if a == b {
-		t.Fatalf("two fresh sessions landed on the same target %q, want rotation", a)
-	}
-	if got := resolveSession(t, svc, "smart", "sess-a"); got != a {
-		t.Fatalf("sess-a moved from %q to %q", a, got)
-	}
-	if got := resolveSession(t, svc, "smart", "sess-b"); got != b {
-		t.Fatalf("sess-b moved from %q to %q", b, got)
-	}
+	require.NotEqual(t, b, a)
+	got := resolveSession(t, svc, "smart", "sess-a")
+	require.Equal(t, a, got)
+	got = resolveSession(t, svc, "smart", "sess-b")
+	require.Equal(t, b, got)
 }
 
 func TestSticky_AffinityDisabledRestoresRotation(t *testing.T) {
@@ -83,9 +77,7 @@ func TestSticky_AffinityDisabledRestoresRotation(t *testing.T) {
 	for range 3 {
 		seen[resolveSession(t, svc, "smart", "sess-a")] = true
 	}
-	if len(seen) != 3 {
-		t.Fatalf("with affinity off, one session saw %d targets, want 3 (rotation)", len(seen))
-	}
+	require.Len(t, seen, 3)
 }
 
 func TestSticky_EmptySessionDoesNotPin(t *testing.T) {
@@ -94,9 +86,8 @@ func TestSticky_EmptySessionDoesNotPin(t *testing.T) {
 	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
 
 	resolveSession(t, svc, "smart", "")
-	if got := len(svc.sticky.entries); got != 0 {
-		t.Fatalf("sticky entries = %d after sessionless resolution, want 0", got)
-	}
+	got := len(svc.sticky.entries)
+	require.Equal(t, 0, got)
 }
 
 func TestSticky_RepinsWhenPinnedTargetLosesCapacity(t *testing.T) {
@@ -111,14 +102,12 @@ func TestSticky_RepinsWhenPinnedTargetLosesCapacity(t *testing.T) {
 	saturated[pinned] = true
 
 	repinned := resolveSession(t, svc, "smart", "sess-a")
-	if repinned == pinned {
-		t.Fatalf("session stayed on saturated target %q", pinned)
-	}
+	require.NotEqual(t, pinned, repinned)
+
 	// The new pin holds even after the original target regains capacity.
 	saturated[pinned] = false
-	if got := resolveSession(t, svc, "smart", "sess-a"); got != repinned {
-		t.Fatalf("session moved from re-pinned %q to %q", repinned, got)
-	}
+	got := resolveSession(t, svc, "smart", "sess-a")
+	require.Equal(t, repinned, got)
 }
 
 func TestSticky_SaturatedFallbackDoesNotPin(t *testing.T) {
@@ -126,15 +115,12 @@ func TestSticky_SaturatedFallbackDoesNotPin(t *testing.T) {
 	svc := newBalancingService(t)
 	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
 	svc.SetTargetCapacity(func(string) bool { return false })
-
 	// Every target saturated: the first declared target serves the honest-429
 	// path and must not become the session's pin.
-	if got := resolveSession(t, svc, "smart", "sess-a"); got != "openai/gpt-4o" {
-		t.Fatalf("saturated fallback = %q, want first declared target", got)
-	}
-	if got := len(svc.sticky.entries); got != 0 {
-		t.Fatalf("sticky entries = %d after saturated fallback, want 0", got)
-	}
+	got := resolveSession(t, svc, "smart", "sess-a")
+	require.Equal(t, "openai/gpt-4o", got)
+
+	require.Empty(t, svc.sticky.entries, "saturated fallback must not pin")
 }
 
 func TestSticky_SaturatedFallbackPreservesExistingPin(t *testing.T) {
@@ -147,21 +133,17 @@ func TestSticky_SaturatedFallbackPreservesExistingPin(t *testing.T) {
 
 	resolveSession(t, svc, "smart", "sess-a") // consume the first round-robin target
 	pinned := resolveSession(t, svc, "smart", "sess-b")
-	if pinned != "anthropic/claude" {
-		t.Fatalf("initial pin = %q, want anthropic/claude", pinned)
-	}
+	require.Equal(t, "anthropic/claude", pinned)
 
 	for _, target := range []string{"openai/gpt-4o", "anthropic/claude", "groq/llama"} {
 		saturated[target] = true
 	}
-	if got := resolveSession(t, svc, "smart", "sess-b"); got != "openai/gpt-4o" {
-		t.Fatalf("saturated fallback = %q, want first declared target", got)
-	}
+	got := resolveSession(t, svc, "smart", "sess-b")
+	require.Equal(t, "openai/gpt-4o", got)
 
 	clear(saturated)
-	if got := resolveSession(t, svc, "smart", "sess-b"); got != pinned {
-		t.Fatalf("session moved from %q to %q after capacity recovered", pinned, got)
-	}
+	got = resolveSession(t, svc, "smart", "sess-b")
+	require.Equal(t, pinned, got)
 }
 
 func TestSticky_TTLExpiry(t *testing.T) {
@@ -174,12 +156,10 @@ func TestSticky_TTLExpiry(t *testing.T) {
 
 	pinned := resolveSession(t, svc, "smart", "sess-a")
 	current = current.Add(stickySessionTTL + time.Minute)
-
 	// The expired pin is dropped: the strategy picks fresh (round robin has
 	// advanced once, so the next pick differs from the original).
-	if got := resolveSession(t, svc, "smart", "sess-a"); got == pinned {
-		t.Fatalf("expired session still pinned to %q", pinned)
-	}
+	got := resolveSession(t, svc, "smart", "sess-a")
+	require.NotEqual(t, pinned, got)
 }
 
 // stickyProbe resolves without picking: it reports the existing viable pin or
@@ -206,13 +186,12 @@ func TestSticky_ResolveRefreshesTTL(t *testing.T) {
 	stickyAssign(sticky, "smart", "sess-a", "openai/gpt-4o")
 	// Touch the pin just before expiry, then advance past the original TTL.
 	current = current.Add(stickySessionTTL - time.Minute)
-	if got := stickyProbe(sticky, "smart", "sess-a"); got == "" {
-		t.Fatal("pin expired early")
-	}
+	got := stickyProbe(sticky, "smart", "sess-a")
+	require.NotEmpty(t, got)
+
 	current = current.Add(stickySessionTTL - time.Minute)
-	if got := stickyProbe(sticky, "smart", "sess-a"); got == "" {
-		t.Fatal("refreshed pin expired: resolve must extend the TTL")
-	}
+	got = stickyProbe(sticky, "smart", "sess-a")
+	require.NotEmpty(t, got)
 }
 
 // Concurrent first requests of one session must agree on a single target even
@@ -240,12 +219,8 @@ func TestSticky_ConcurrentFirstRequestsAgree(t *testing.T) {
 	wg.Wait()
 
 	for i := range workers {
-		if errs[i] != nil {
-			t.Fatalf("resolveRequested() error = %v", errs[i])
-		}
-		if results[i] != results[0] {
-			t.Fatalf("concurrent resolutions disagree: %q vs %q", results[i], results[0])
-		}
+		require.NoError(t, errs[i])
+		require.Equal(t, results[0], results[i])
 	}
 }
 
@@ -253,16 +228,14 @@ func TestSticky_PinnedRequestsDoNotAdvanceRoundRobin(t *testing.T) {
 	t.Parallel()
 	svc := newBalancingService(t)
 	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
+	got := resolveSession(t, svc, "smart", "sess-a")
+	require.Equal(t, "openai/gpt-4o", got)
 
-	if got := resolveSession(t, svc, "smart", "sess-a"); got != "openai/gpt-4o" {
-		t.Fatalf("first session target = %q, want openai/gpt-4o", got)
-	}
 	for range 2 {
 		resolveSession(t, svc, "smart", "sess-a")
 	}
-	if got := resolveSession(t, svc, "smart", "sess-b"); got != "anthropic/claude" {
-		t.Fatalf("second session target = %q, want anthropic/claude", got)
-	}
+	got = resolveSession(t, svc, "smart", "sess-b")
+	require.Equal(t, "anthropic/claude", got)
 }
 
 func TestSticky_PruneDropsDeletedSources(t *testing.T) {
@@ -271,15 +244,11 @@ func TestSticky_PruneDropsDeletedSources(t *testing.T) {
 	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
 
 	resolveSession(t, svc, "smart", "sess-a")
-	if len(svc.sticky.entries) != 1 {
-		t.Fatalf("sticky entries = %d, want 1", len(svc.sticky.entries))
-	}
-	if err := svc.Delete(context.Background(), "smart"); err != nil {
-		t.Fatalf("Delete() error = %v", err)
-	}
-	if got := len(svc.sticky.entries); got != 0 {
-		t.Fatalf("sticky entries = %d after source deletion, want 0", got)
-	}
+	require.Len(t, svc.sticky.entries, 1)
+	err := svc.Delete(context.Background(), "smart")
+	require.NoError(t, err)
+	got := len(svc.sticky.entries)
+	require.Equal(t, 0, got)
 }
 
 func TestSticky_EvictsSoonestAtCapacity(t *testing.T) {
@@ -292,20 +261,15 @@ func TestSticky_EvictsSoonestAtCapacity(t *testing.T) {
 		stickyAssign(sticky, "smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
-	if len(sticky.entries) != maxStickySessions {
-		t.Fatalf("entries = %d, want %d", len(sticky.entries), maxStickySessions)
-	}
+	require.Equal(t, maxStickySessions, len(sticky.entries))
+
 	stickyAssign(sticky, "smart", "one-more", "openai/gpt-4o")
-	if len(sticky.entries) != maxStickySessions {
-		t.Fatalf("entries = %d after eviction, want %d", len(sticky.entries), maxStickySessions)
-	}
+	require.Equal(t, maxStickySessions, len(sticky.entries))
 	// The oldest pin was evicted; the newest survives.
-	if got := stickyProbe(sticky, "smart", "one-more"); got == "" {
-		t.Fatal("newest pin missing after eviction")
-	}
-	if got := stickyProbe(sticky, "smart", "sess-0"); got != "" {
-		t.Fatal("soonest-expiring pin survived eviction")
-	}
+	got := stickyProbe(sticky, "smart", "one-more")
+	require.NotEmpty(t, got)
+	got = stickyProbe(sticky, "smart", "sess-0")
+	require.Empty(t, got)
 }
 
 // A multi-target redirect with only one target momentarily available must
@@ -316,26 +280,21 @@ func TestSticky_PinsWhenOnlyOneTargetSupported(t *testing.T) {
 	catalog := balancingCatalog()
 	catalog.stale = map[string]bool{"anthropic/claude": true, "groq/llama": true}
 	svc, err := NewService(newSQLVMStore(t), catalog, true)
-	if err != nil {
-		t.Fatalf("NewService() error = %v", err)
-	}
-	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
+	require.NoError(t, err)
 
-	if got := resolveSession(t, svc, "smart", "sess-a"); got != "openai/gpt-4o" {
-		t.Fatalf("sole supported target = %q, want openai/gpt-4o", got)
-	}
-	if got := len(svc.sticky.entries); got != 1 {
-		t.Fatalf("sticky entries = %d, want the sole viable target pinned", got)
-	}
+	upsertBalancedVM(t, svc, StrategyRoundRobin, nil)
+	got := resolveSession(t, svc, "smart", "sess-a")
+	require.Equal(t, "openai/gpt-4o", got)
+
+	require.Len(t, svc.sticky.entries, 1, "the sole viable target must be pinned")
 
 	// The other targets recover (the service shares the stale map): the
 	// session stays where it was served.
 	delete(catalog.stale, "anthropic/claude")
 	delete(catalog.stale, "groq/llama")
 	for i := range 4 {
-		if got := resolveSession(t, svc, "smart", "sess-a"); got != "openai/gpt-4o" {
-			t.Fatalf("resolution %d = %q, session moved after targets recovered", i, got)
-		}
+		got := resolveSession(t, svc, "smart", "sess-a")
+		require.Equal(t, "openai/gpt-4o", got, "resolution %d: session moved after targets recovered", i)
 	}
 }
 
@@ -351,12 +310,9 @@ func TestSticky_RepinRespectsCapacity(t *testing.T) {
 		sticky.repin("smart", "sess-"+strconv.Itoa(i), "", "openai/gpt-4o")
 		current = current.Add(time.Millisecond)
 	}
-	if len(sticky.entries) != maxStickySessions {
-		t.Fatalf("entries = %d, want capped at %d", len(sticky.entries), maxStickySessions)
-	}
-	if got := stickyProbe(sticky, "smart", "sess-0"); got != "" {
-		t.Fatal("soonest-expiring pin survived eviction")
-	}
+	require.Equal(t, maxStickySessions, len(sticky.entries))
+	got := stickyProbe(sticky, "smart", "sess-0")
+	require.Empty(t, got)
 }
 
 // Re-pinning an existing session overwrites in place. Every request of an
@@ -374,17 +330,14 @@ func TestSticky_RepinOverwritesInPlace(t *testing.T) {
 	current = current.Add(stickySessionTTL + time.Minute)
 
 	sticky.repin("smart", "sess-a", "openai/gpt-4o", "anthropic/claude")
-	if got := stickyProbe(sticky, "smart", "sess-a"); got != "anthropic/claude" {
-		t.Fatalf("re-pinned target = %q, want anthropic/claude", got)
-	}
-	if len(sticky.entries) != 2 {
-		t.Fatalf("entries = %d, want the overwrite to leave the map untouched", len(sticky.entries))
-	}
+	got := stickyProbe(sticky, "smart", "sess-a")
+	require.Equal(t, "anthropic/claude", got)
+	require.Len(t, sticky.entries, 2)
+
 	// The expired pin is still collected by the normal sweeps.
 	sticky.prune(map[string]*redirectEntry{"smart": {}})
-	if _, ok := sticky.entries[stickyKey{source: "smart", session: "sess-b"}]; ok {
-		t.Fatal("expired pin survived prune")
-	}
+	_, ok := sticky.entries[stickyKey{source: "smart", session: "sess-b"}]
+	require.False(t, ok)
 }
 
 // An empty target is not a pin: the adaptive path must not record one when
@@ -393,7 +346,5 @@ func TestSticky_RepinIgnoresEmptyTarget(t *testing.T) {
 	t.Parallel()
 	sticky := &stickySessions{}
 	sticky.repin("smart", "sess-a", "", "")
-	if len(sticky.entries) != 0 {
-		t.Fatalf("entries = %d, want no pin recorded", len(sticky.entries))
-	}
+	require.Empty(t, sticky.entries)
 }

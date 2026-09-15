@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,33 +11,32 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/llmclient"
+	"github.com/enterpilot/gomodel/internal/providers/providertest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func newTTSServer(t *testing.T, audioBase64 string) (*httptest.Server, *[]byte) {
+func newTTSServer(t *testing.T, audioBase64 string) (*httptest.Server, *providertest.Capture) {
 	t.Helper()
-	var gotBody []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		gotBody, err = io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "read error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-tts","created":1677652288,"model":"mimo-v2.5-tts",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"","audio":{"id":"a1","data":"` + audioBase64 + `","format":"wav"}},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":10,"completion_tokens":50,"total_tokens":60}
-		}`))
-	}))
-	return server, &gotBody
+	return providertest.JSONServer(t, http.StatusOK, `{
+		"id":"chatcmpl-tts","created":1677652288,"model":"mimo-v2.5-tts",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"","audio":{"id":"a1","data":"`+audioBase64+`","format":"wav"}},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":10,"completion_tokens":50,"total_tokens":60}
+	}`)
+}
+
+func newASRServer(t *testing.T, text string) (*httptest.Server, *providertest.Capture) {
+	t.Helper()
+	return providertest.JSONServer(t, http.StatusOK, `{
+		"id":"chatcmpl-asr","created":1677652288,"model":"mimo-v2.5-asr",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"`+text+`"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23}
+	}`)
 }
 
 func TestCreateSpeech_TranslatesToMiMoChatTTS(t *testing.T) {
 	wavBytes := []byte("RIFF-fake-wav")
-	server, gotBody := newTTSServer(t, base64.StdEncoding.EncodeToString(wavBytes))
-	defer server.Close()
-
+	server, capture := newTTSServer(t, base64.StdEncoding.EncodeToString(wavBytes))
 	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
@@ -47,15 +45,9 @@ func TestCreateSpeech_TranslatesToMiMoChatTTS(t *testing.T) {
 		Voice:        "Chloe",
 		Instructions: "Bright bouncy tone",
 	})
-	if err != nil {
-		t.Fatalf("CreateSpeech() error = %v", err)
-	}
-	if resp.ContentType != "audio/wav" {
-		t.Fatalf("ContentType = %q, want audio/wav", resp.ContentType)
-	}
-	if string(resp.Data) != string(wavBytes) {
-		t.Fatalf("Data = %q, want decoded wav bytes", resp.Data)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "audio/wav", resp.ContentType)
+	assert.Equal(t, string(wavBytes), string(resp.Data))
 
 	var sent struct {
 		Model    string `json:"model"`
@@ -65,49 +57,32 @@ func TestCreateSpeech_TranslatesToMiMoChatTTS(t *testing.T) {
 		} `json:"messages"`
 		Audio map[string]string `json:"audio"`
 	}
-	if err := json.Unmarshal(*gotBody, &sent); err != nil {
-		t.Fatalf("failed to decode upstream body: %v", err)
-	}
-	if sent.Model != "mimo-v2.5-tts" {
-		t.Fatalf("model = %q, want mimo-v2.5-tts", sent.Model)
-	}
-	if len(sent.Messages) != 2 || sent.Messages[0].Role != "user" || sent.Messages[1].Role != "assistant" {
-		t.Fatalf("messages = %+v, want user instructions + assistant text", sent.Messages)
-	}
-	if sent.Messages[1].Content != "Hello world" {
-		t.Fatalf("assistant content = %q, want synthesis text", sent.Messages[1].Content)
-	}
-	if sent.Audio["format"] != "wav" || sent.Audio["voice"] != "Chloe" {
-		t.Fatalf("audio = %+v, want format=wav voice=Chloe", sent.Audio)
-	}
+	require.NoError(t, json.Unmarshal(capture.Last(t).Body, &sent))
+	assert.Equal(t, "mimo-v2.5-tts", sent.Model)
+	require.Len(t, sent.Messages, 2)
+	assert.Equal(t, "user", sent.Messages[0].Role)
+	assert.Equal(t, "assistant", sent.Messages[1].Role)
+	assert.Equal(t, "Hello world", sent.Messages[1].Content)
+	assert.Equal(t, "wav", sent.Audio["format"])
+	assert.Equal(t, "Chloe", sent.Audio["voice"])
 }
 
 func TestCreateSpeech_MapsPCMAndRejectsUnsupportedFormats(t *testing.T) {
-	server, gotBody := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("pcm")))
-	defer server.Close()
-
+	server, capture := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("pcm")))
 	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: "pcm",
 	})
-	if err != nil {
-		t.Fatalf("CreateSpeech(pcm) error = %v", err)
-	}
-	if resp.ContentType != "audio/pcm" {
-		t.Fatalf("ContentType = %q, want audio/pcm", resp.ContentType)
-	}
-	if !strings.Contains(string(*gotBody), `"format":"pcm16"`) {
-		t.Fatalf("upstream body should request pcm16, got: %s", *gotBody)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "audio/pcm", resp.ContentType)
+	assert.Contains(t, string(capture.Last(t).Body), `"format":"pcm16"`)
 
 	for _, format := range []string{"opus", "aac", "flac"} {
 		_, err = provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 			Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: format,
 		})
-		if err == nil {
-			t.Fatalf("CreateSpeech(%s) succeeded, want unsupported-format error", format)
-		}
+		assert.Error(t, err, "format %q", format)
 	}
 }
 
@@ -116,34 +91,24 @@ func TestCreateSpeech_MapsPCMAndRejectsUnsupportedFormats(t *testing.T) {
 // with wav, exactly like an omitted response_format.
 func TestCreateSpeech_TreatsMP3AsUnspecified(t *testing.T) {
 	for _, format := range []string{"", "mp3", "MP3", " mp3 ", "wav"} {
-		server, gotBody := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("wav")))
-		provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
+		t.Run(format, func(t *testing.T) {
+			server, capture := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("wav")))
+			provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
-		resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
-			Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: format,
+			resp, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+				Model: "mimo-v2.5-tts", Input: "hi", ResponseFormat: format,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, "audio/wav", resp.ContentType)
+			assert.Contains(t, string(capture.Last(t).Body), `"format":"wav"`)
 		})
-		if err != nil {
-			server.Close()
-			t.Fatalf("CreateSpeech(%q) error = %v", format, err)
-		}
-		if resp.ContentType != "audio/wav" {
-			server.Close()
-			t.Fatalf("CreateSpeech(%q) ContentType = %q, want audio/wav", format, resp.ContentType)
-		}
-		if !strings.Contains(string(*gotBody), `"format":"wav"`) {
-			server.Close()
-			t.Fatalf("CreateSpeech(%q) upstream body should request wav, got: %s", format, *gotBody)
-		}
-		server.Close()
 	}
 }
 
 func TestCreateSpeech_RequiresInput(t *testing.T) {
 	provider := NewWithHTTPClient("mimo-key", "", nil, llmclient.Hooks{})
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{Model: "mimo-v2.5-tts"})
-	if err == nil {
-		t.Fatal("CreateSpeech() succeeded, want input-required error")
-	}
+	require.Error(t, err)
 }
 
 func TestCreateSpeech_RejectsSpeedControl(t *testing.T) {
@@ -151,38 +116,18 @@ func TestCreateSpeech_RejectsSpeedControl(t *testing.T) {
 	_, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "mimo-v2.5-tts", Input: "hi", Speed: 1.5,
 	})
-	if err == nil {
-		t.Fatal("CreateSpeech(speed=1.5) succeeded, want unsupported-speed error")
-	}
+	require.Error(t, err)
 
 	server, _ := newTTSServer(t, base64.StdEncoding.EncodeToString([]byte("wav")))
-	defer server.Close()
 	provider = NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
-	if _, err := provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
+	_, err = provider.CreateSpeech(context.Background(), &core.AudioSpeechRequest{
 		Model: "mimo-v2.5-tts", Input: "hi", Speed: 1,
-	}); err != nil {
-		t.Fatalf("CreateSpeech(speed=1) error = %v, want default speed accepted", err)
-	}
+	})
+	require.NoError(t, err)
 }
 
 func TestCreateTranscription_TranslatesToMiMoChatASR(t *testing.T) {
-	var gotBody []byte
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var err error
-		gotBody, err = io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "read error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-asr","created":1677652288,"model":"mimo-v2.5-asr",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"hello there"},"finish_reason":"stop"}],
-			"usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23}
-		}`))
-	}))
-	defer server.Close()
-
+	server, capture := newASRServer(t, "hello there")
 	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	audio := []byte("RIFF-fake-wav")
@@ -193,56 +138,34 @@ func TestCreateTranscription_TranslatesToMiMoChatASR(t *testing.T) {
 		Language:    "auto",
 		Temperature: "0.2",
 	})
-	if err != nil {
-		t.Fatalf("CreateTranscription() error = %v", err)
-	}
-	if resp.ContentType != "application/json" {
-		t.Fatalf("ContentType = %q, want application/json", resp.ContentType)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "application/json", resp.ContentType)
+
 	var out struct {
 		Text string `json:"text"`
 	}
-	if err := json.Unmarshal(resp.Data, &out); err != nil || out.Text != "hello there" {
-		t.Fatalf("Data = %s, want {\"text\":\"hello there\"}", resp.Data)
-	}
+	require.NoError(t, json.Unmarshal(resp.Data, &out))
+	assert.Equal(t, "hello there", out.Text)
 
 	wantDataURI := "data:audio/wav;base64," + base64.StdEncoding.EncodeToString(audio)
-	body := string(gotBody)
-	if !strings.Contains(body, `"type":"input_audio"`) || !strings.Contains(body, wantDataURI) {
-		t.Fatalf("upstream body missing input_audio data URI, got: %s", body)
-	}
-	if strings.Contains(body, `"format"`) {
-		t.Fatalf("upstream body should not contain a format field, got: %s", body)
-	}
-	if !strings.Contains(body, `"asr_options":{"language":"auto"}`) {
-		t.Fatalf("upstream body missing asr_options, got: %s", body)
-	}
-	if !strings.Contains(body, `"temperature":0.2`) {
-		t.Fatalf("upstream body missing forwarded temperature, got: %s", body)
-	}
+	body := string(capture.Last(t).Body)
+	assert.Contains(t, body, `"type":"input_audio"`)
+	assert.Contains(t, body, wantDataURI)
+	assert.NotContains(t, body, `"format"`)
+	assert.Contains(t, body, `"asr_options":{"language":"auto"}`)
+	assert.Contains(t, body, `"temperature":0.2`)
 }
 
 func TestCreateTranscription_TextFormatAndValidation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id":"chatcmpl-asr","created":1677652288,"model":"mimo-v2.5-asr",
-			"choices":[{"index":0,"message":{"role":"assistant","content":"plain text"},"finish_reason":"stop"}]
-		}`))
-	}))
-	defer server.Close()
-
+	server, _ := newASRServer(t, "plain text")
 	provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 	resp, err := provider.CreateTranscription(context.Background(), &core.AudioTranscriptionRequest{
 		Model: "mimo-v2.5-asr", Filename: "clip.wav", File: []byte("audio"), ResponseFormat: "text",
 	})
-	if err != nil {
-		t.Fatalf("CreateTranscription(text) error = %v", err)
-	}
-	if string(resp.Data) != "plain text" || !strings.HasPrefix(resp.ContentType, "text/plain") {
-		t.Fatalf("got %q (%s), want plain text body", resp.Data, resp.ContentType)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "plain text", string(resp.Data))
+	assert.True(t, strings.HasPrefix(resp.ContentType, "text/plain"), "ContentType = %q, want text/plain", resp.ContentType)
 
 	for _, unsupported := range []core.AudioTranscriptionRequest{
 		{Model: "mimo-v2.5-asr", File: []byte("audio"), ResponseFormat: "srt"},
@@ -253,9 +176,8 @@ func TestCreateTranscription_TextFormatAndValidation(t *testing.T) {
 		{Model: "mimo-v2.5-asr"},
 	} {
 		req := unsupported
-		if _, err := provider.CreateTranscription(context.Background(), &req); err == nil {
-			t.Fatalf("CreateTranscription(%+v) succeeded, want validation error", req)
-		}
+		_, err := provider.CreateTranscription(context.Background(), &req)
+		assert.Error(t, err, "request %+v", req)
 	}
 }
 
@@ -277,14 +199,7 @@ func TestCreateTranscription_FileReaderAndMIMEInference(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var gotBody []byte
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotBody, _ = io.ReadAll(r.Body)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"x","model":"mimo-v2.5-asr","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
-			}))
-			defer server.Close()
-
+			server, capture := newASRServer(t, "ok")
 			provider := NewWithHTTPClient("mimo-key", server.URL, server.Client(), llmclient.Hooks{})
 
 			audio := []byte("audio-bytes-" + tc.name)
@@ -298,15 +213,11 @@ func TestCreateTranscription_FileReaderAndMIMEInference(t *testing.T) {
 			} else {
 				req.File = audio
 			}
-
-			if _, err := provider.CreateTranscription(context.Background(), req); err != nil {
-				t.Fatalf("CreateTranscription() error = %v", err)
-			}
+			_, err := provider.CreateTranscription(context.Background(), req)
+			require.NoError(t, err)
 
 			wantData := tc.wantDataPrefix + base64.StdEncoding.EncodeToString(audio)
-			if !strings.Contains(string(gotBody), wantData) {
-				t.Fatalf("upstream body missing %q, got: %s", wantData, gotBody)
-			}
+			assert.Contains(t, string(capture.Last(t).Body), wantData)
 		})
 	}
 }

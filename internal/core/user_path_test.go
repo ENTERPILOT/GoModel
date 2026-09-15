@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestNormalizeUserPath(t *testing.T) {
@@ -28,17 +30,11 @@ func TestNormalizeUserPath(t *testing.T) {
 
 			got, err := NormalizeUserPath(tt.raw)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("NormalizeUserPath() error = nil, want error")
-				}
+				require.Error(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("NormalizeUserPath() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("NormalizeUserPath() = %q, want %q", got, tt.want)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -46,10 +42,8 @@ func TestNormalizeUserPath(t *testing.T) {
 func TestUserPathFromContext_PrefersEffectiveOverride(t *testing.T) {
 	ctx := WithRequestSnapshot(context.Background(), &RequestSnapshot{UserPath: "/team/from-header"})
 	ctx = WithEffectiveUserPath(ctx, "/team/from-auth-key")
-
-	if got := UserPathFromContext(ctx); got != "/team/from-auth-key" {
-		t.Fatalf("UserPathFromContext() = %q, want /team/from-auth-key", got)
-	}
+	got := UserPathFromContext(ctx)
+	require.Equal(t, "/team/from-auth-key", got)
 }
 
 func TestUserPathHeaderName(t *testing.T) {
@@ -69,30 +63,24 @@ func TestUserPathHeaderName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			if got := UserPathHeaderName(tt.raw); got != tt.want {
-				t.Fatalf("UserPathHeaderName(%q) = %q, want %q", tt.raw, got, tt.want)
-			}
+			got := UserPathHeaderName(tt.raw)
+			require.Equal(t, tt.want, got, "UserPathHeaderName(%q)", tt.raw)
 		})
 	}
 }
 
 func TestUserPathHeaderNameFromContext(t *testing.T) {
 	t.Parallel()
-
-	if got := UserPathHeaderNameFromContext(context.Background()); got != UserPathHeader {
-		t.Fatalf("UserPathHeaderNameFromContext(empty) = %q, want %q", got, UserPathHeader)
-	}
+	got := UserPathHeaderNameFromContext(context.Background())
+	require.Equal(t, UserPathHeader, got)
 
 	customCtx := WithUserPathHeaderName(context.Background(), "x-tenant-path")
-	if got := UserPathHeaderNameFromContext(customCtx); got != "X-Tenant-Path" {
-		t.Fatalf("UserPathHeaderNameFromContext(custom) = %q, want X-Tenant-Path", got)
-	}
+	got = UserPathHeaderNameFromContext(customCtx)
+	require.Equal(t, "X-Tenant-Path", got)
 
 	defaultCtx := WithUserPathHeaderName(customCtx, UserPathHeader)
-	if got := UserPathHeaderNameFromContext(defaultCtx); got != "X-Tenant-Path" {
-		t.Fatalf("UserPathHeaderNameFromContext(default no-op) = %q, want X-Tenant-Path", got)
-	}
+	got = UserPathHeaderNameFromContext(defaultCtx)
+	require.Equal(t, "X-Tenant-Path", got)
 }
 
 func TestUserPathAncestors(t *testing.T) {
@@ -101,26 +89,15 @@ func TestUserPathAncestors(t *testing.T) {
 	got := UserPathAncestors("/team/a/user")
 	want := []string{"/team/a/user", "/team/a", "/team", "/"}
 
-	if len(got) != len(want) {
-		t.Fatalf("len(UserPathAncestors()) = %d, want %d (%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("UserPathAncestors()[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
+	require.Equal(t, want, got)
 }
 
 func TestUserPathAncestors_Root(t *testing.T) {
 	t.Parallel()
 
 	got := UserPathAncestors("/")
-	if len(got) != 1 {
-		t.Fatalf("len(UserPathAncestors(\"/\")) = %d, want 1 (%v)", len(got), got)
-	}
-	if got[0] != "/" {
-		t.Fatalf("UserPathAncestors(\"/\")[0] = %q, want /", got[0])
-	}
+	require.Len(t, got, 1)
+	require.Equal(t, "/", got[0])
 }
 
 func TestUserPathChild(t *testing.T) {
@@ -142,9 +119,8 @@ func TestUserPathChild(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got, matched := UserPathChild(tt.base, tt.path)
-			if got != tt.want || matched != tt.wantMatch {
-				t.Fatalf("UserPathChild(%q, %q) = %q, %v; want %q, %v", tt.base, tt.path, got, matched, tt.want, tt.wantMatch)
-			}
+			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.wantMatch, matched)
 		})
 	}
 }

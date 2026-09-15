@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 )
@@ -39,22 +41,18 @@ func TestNormalizeChatResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var msg core.ResponseMessage
-			if err := json.Unmarshal([]byte(tt.message), &msg); err != nil {
-				t.Fatalf("unmarshal message: %v", err)
-			}
+			err := json.Unmarshal([]byte(tt.message), &msg)
+			require.NoError(t, err)
+
 			resp := &core.ChatResponse{Choices: []core.Choice{{Message: msg}}}
 
 			normalizeChatResponse(resp)
 
 			encoded, err := json.Marshal(resp.Choices[0].Message)
-			if err != nil {
-				t.Fatalf("marshal message: %v", err)
-			}
-			if !strings.Contains(string(encoded), tt.want) {
-				t.Errorf("message = %s, want it to contain %s", encoded, tt.want)
-			}
-			if tt.absent != "" && strings.Contains(string(encoded), tt.absent) {
-				t.Errorf("message = %s, want it to drop %s", encoded, tt.absent)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), tt.want)
+			if tt.absent != "" {
+				assert.NotContains(t, string(encoded), tt.absent)
 			}
 		})
 	}
@@ -115,18 +113,13 @@ func TestNormalizeChatStream(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := io.ReadAll(normalizeChatStream(io.NopCloser(strings.NewReader(tt.in))))
-			if err != nil {
-				t.Fatalf("read stream: %v", err)
-			}
-			if string(got) != tt.want {
-				t.Errorf("stream = %q, want %q", got, tt.want)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, string(got))
 		})
 	}
 }
 
 func TestNormalizeChatStreamNilIsSafe(t *testing.T) {
-	if got := normalizeChatStream(nil); got != nil {
-		t.Errorf("normalizeChatStream(nil) = %v, want nil", got)
-	}
+	got := normalizeChatStream(nil)
+	assert.Nil(t, got)
 }

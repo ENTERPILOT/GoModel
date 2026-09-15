@@ -13,8 +13,11 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/realtime"
 	"github.com/enterpilot/gomodel/internal/usage"
 )
@@ -28,21 +31,13 @@ func TestRealtimeTranslationsRouteSetsIntent(t *testing.T) {
 	}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/realtime/translations?model=gpt-realtime-translate", nil)
-	rec := httptest.NewRecorder()
-	c := echo.New().NewContext(req, rec)
+	c, rec := echotest.Get(t, "/v1/realtime/translations?model=gpt-realtime-translate")
 
 	_ = handler.RealtimeTranslations(c)
 
-	if mock.capturedRealtime == nil {
-		t.Fatalf("router received no request (status %d, body %s)", rec.Code, rec.Body.String())
-	}
-	if mock.capturedRealtime.Intent != core.RealtimeIntentTranslation {
-		t.Errorf("intent = %q, want %q", mock.capturedRealtime.Intent, core.RealtimeIntentTranslation)
-	}
-	if mock.capturedRealtime.Model != "gpt-realtime-translate" {
-		t.Errorf("model = %q, want the resolved model", mock.capturedRealtime.Model)
-	}
+	require.NotNil(t, mock.capturedRealtime, "router received no request (status %d, body %s)", rec.Code, rec.Body.String())
+	assert.Equal(t, core.RealtimeIntentTranslation, mock.capturedRealtime.Intent)
+	assert.Equal(t, "gpt-realtime-translate", mock.capturedRealtime.Model)
 }
 
 func TestRealtimeTranslationSignalingRoutesSetIntent(t *testing.T) {
@@ -62,31 +57,21 @@ func TestRealtimeTranslationSignalingRoutesSetIntent(t *testing.T) {
 	}
 	handler := newRealtimeTestHandler(mock, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/realtime/translations/calls?model=gpt-realtime-translate", strings.NewReader("v=0 offer"))
-	req.Header.Set("Content-Type", "application/sdp")
-	rec := httptest.NewRecorder()
-	if err := handler.RealtimeTranslationCalls(echo.New().NewContext(req, rec)); err != nil {
-		t.Fatalf("RealtimeTranslationCalls returned error: %v", err)
-	}
-	if mock.capturedCall == nil || mock.capturedCall.Intent != core.RealtimeIntentTranslation {
-		t.Errorf("call request = %+v, want the translation intent", mock.capturedCall)
-	}
+	c, rec := echotest.Post(t, "/v1/realtime/translations/calls?model=gpt-realtime-translate", "v=0 offer", echotest.WithContentType("application/sdp"))
+	err := handler.RealtimeTranslationCalls(c)
+	require.NoError(t, err)
+	require.NotNil(t, mock.capturedCall)
+	assert.Equal(t, core.RealtimeIntentTranslation, mock.capturedCall.Intent)
 	// A translation call lives under its own path, so the relayed Location must
 	// address it there.
-	if got := rec.Header().Get("Location"); got != "/v1/realtime/translations/calls/rtc_x" {
-		t.Errorf("Location = %q, want the translation calls path", got)
-	}
+	assert.Equal(t, "/v1/realtime/translations/calls/rtc_x", rec.Header().Get("Location"))
 
-	req = httptest.NewRequest(http.MethodPost, "/v1/realtime/translations/client_secrets",
-		strings.NewReader(`{"session":{"model":"gpt-realtime-translate","audio":{"output":{"language":"es"}}}}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	if err := handler.RealtimeTranslationClientSecrets(echo.New().NewContext(req, rec)); err != nil {
-		t.Fatalf("RealtimeTranslationClientSecrets returned error: %v", err)
-	}
-	if mock.capturedSecret == nil || mock.capturedSecret.Intent != core.RealtimeIntentTranslation {
-		t.Errorf("client secret request = %+v, want the translation intent", mock.capturedSecret)
-	}
+	c, _ = echotest.Post(t, "/v1/realtime/translations/client_secrets",
+		`{"session":{"model":"gpt-realtime-translate","audio":{"output":{"language":"es"}}}}`)
+	err = handler.RealtimeTranslationClientSecrets(c)
+	require.NoError(t, err)
+	require.NotNil(t, mock.capturedSecret)
+	assert.Equal(t, core.RealtimeIntentTranslation, mock.capturedSecret.Intent)
 }
 
 func TestPassthroughRealtimeTranslationsSetsIntent(t *testing.T) {
@@ -109,29 +94,18 @@ func TestPassthroughRealtimeTranslationsSetsIntent(t *testing.T) {
 			handler := newRealtimeTestHandler(mock, nil)
 			handler.setEnabledPassthroughProviders([]string{"openai"})
 
-			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
-			req.Header.Set("Connection", "Upgrade")
-			req.Header.Set("Upgrade", "websocket")
-			rec := httptest.NewRecorder()
-			c := echo.New().NewContext(req, rec)
+			c, rec := echotest.Get(t, tt.path, echotest.WithHeader("Connection", "Upgrade"), echotest.WithHeader("Upgrade", "websocket"))
 
 			_ = handler.ProviderPassthrough(c)
 
 			if !tt.wantRouted {
-				if mock.capturedRealtime != nil {
-					t.Fatalf("router received %+v, want the request rejected", mock.capturedRealtime)
-				}
-				if rec.Code != http.StatusNotFound {
-					t.Errorf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
-				}
+				require.Nil(t, mock.capturedRealtime)
+				assert.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+
 				return
 			}
-			if mock.capturedRealtime == nil {
-				t.Fatalf("router received no request (status %d, body %s)", rec.Code, rec.Body.String())
-			}
-			if mock.capturedRealtime.Intent != tt.wantIntent {
-				t.Errorf("intent = %q, want %q", mock.capturedRealtime.Intent, tt.wantIntent)
-			}
+			require.NotNil(t, mock.capturedRealtime, "router received no request (status %d, body %s)", rec.Code, rec.Body.String())
+			assert.Equal(t, tt.wantIntent, mock.capturedRealtime.Intent)
 		})
 	}
 }
@@ -161,9 +135,8 @@ func TestRealtimeMeteredSessionRecordsAudioDuration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/v1/realtime/translations?model=gpt-realtime-translate", nil)
-	if err != nil {
-		t.Fatalf("client dial failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	// Audio frames are far larger than the library default read limit; a real
 	// realtime client raises it the same way the relay does.
 	client.SetReadLimit(realtime.MaxFrameBytes)
@@ -173,36 +146,26 @@ func TestRealtimeMeteredSessionRecordsAudioDuration(t *testing.T) {
 		"type":  "session.input_audio_buffer.append",
 		"audio": base64.StdEncoding.EncodeToString(make([]byte, 24000*2)),
 	})
-	if err != nil {
-		t.Fatalf("failed to build frame: %v", err)
-	}
+	require.NoError(t, err)
+
 	// Each echo confirms the relay consumed the frame the client sent, so the
 	// close below cannot outrun the metering of either second of audio.
 	for range 2 {
-		if err := client.Write(ctx, websocket.MessageText, frame); err != nil {
-			t.Fatalf("client write failed: %v", err)
-		}
-		if _, _, err := client.Read(ctx); err != nil {
-			t.Fatalf("client read failed: %v", err)
-		}
+		err := client.Write(ctx, websocket.MessageText, frame)
+		require.NoError(t, err)
+		_, _, err = client.Read(ctx)
+		require.NoError(t, err)
 	}
 	_ = client.Close(websocket.StatusNormalClosure, "done")
 
 	entries := waitForUsageEntries(t, usageLogger, 1)
 	entry := entries[0]
-	if entry.Endpoint != "/v1/realtime/translations" {
-		t.Errorf("endpoint = %q, want the translation surface", entry.Endpoint)
-	}
-	if entry.Model != "gpt-realtime-translate" {
-		t.Errorf("model = %q, want the routed model", entry.Model)
-	}
+	assert.Equal(t, "/v1/realtime/translations", entry.Endpoint)
+	assert.Equal(t, "gpt-realtime-translate", entry.Model)
+
 	seconds, ok := entry.RawData["audio_seconds"].(float64)
-	if !ok {
-		t.Fatalf("raw data = %v, want metered audio seconds", entry.RawData)
-	}
-	if math.Abs(seconds-2) > 1e-9 {
-		t.Errorf("audio seconds = %v, want 2", seconds)
-	}
+	require.True(t, ok, "raw data = %v, want metered audio seconds", entry.RawData)
+	assert.LessOrEqual(t, math.Abs(seconds-2), 1e-9, "audio seconds = %v, want 2", seconds)
 }
 
 func TestRealtimeUnmeteredSessionRecordsNoDurationEntry(t *testing.T) {
@@ -227,9 +190,8 @@ func TestRealtimeUnmeteredSessionRecordsNoDurationEntry(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(gateway.URL, "http")+"/v1/realtime?model=gpt-realtime", nil)
-	if err != nil {
-		t.Fatalf("client dial failed: %v", err)
-	}
+	require.NoError(t, err)
+
 	// Audio frames are far larger than the library default read limit; a real
 	// realtime client raises it the same way the relay does.
 	client.SetReadLimit(realtime.MaxFrameBytes)
@@ -237,15 +199,12 @@ func TestRealtimeUnmeteredSessionRecordsNoDurationEntry(t *testing.T) {
 		"type":  "input_audio_buffer.append",
 		"audio": base64.StdEncoding.EncodeToString(make([]byte, 24000*2)),
 	})
-	if err != nil {
-		t.Fatalf("failed to build frame: %v", err)
-	}
-	if err := client.Write(ctx, websocket.MessageText, frame); err != nil {
-		t.Fatalf("client write failed: %v", err)
-	}
-	if _, _, err := client.Read(ctx); err != nil {
-		t.Fatalf("client read failed: %v", err)
-	}
+	require.NoError(t, err)
+	err = client.Write(ctx, websocket.MessageText, frame)
+	require.NoError(t, err)
+	_, _, err = client.Read(ctx)
+	require.NoError(t, err)
+
 	_ = client.Close(websocket.StatusNormalClosure, "done")
 
 	// The session has ended once the upstream sees the connection close.
@@ -254,9 +213,8 @@ func TestRealtimeUnmeteredSessionRecordsNoDurationEntry(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream session did not end")
 	}
-	if entries := usageLogger.Entries(); len(entries) != 0 {
-		t.Errorf("usage entries = %d, want none for an unmetered session", len(entries))
-	}
+	entries := usageLogger.Entries()
+	assert.Empty(t, entries)
 }
 
 // realtimeUpstream is a websocket server that echoes every frame it receives and
@@ -301,14 +259,11 @@ func waitForUsageEntries(t *testing.T, logger *usageCaptureLogger, want int) []*
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if entries := logger.Entries(); len(entries) >= want {
-			if len(entries) != want {
-				t.Fatalf("usage entries = %d, want exactly %d: %+v", len(entries), want, entries)
-			}
+			require.Len(t, entries, want)
 			return entries
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("usage entries = %d, want %d before timeout", len(logger.Entries()), want)
-		}
+		require.False(t, time.Now().After(deadline), "usage entries = %d, want %d before timeout", len(logger.Entries()), want)
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }

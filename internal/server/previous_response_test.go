@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 	"github.com/enterpilot/gomodel/internal/responsestore"
 )
 
@@ -34,31 +33,24 @@ func previousResponseTestProvider(t *testing.T, providerType string) *translated
 
 func waitForStoredResponse(t *testing.T, store responsestore.Store, id string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := store.Get(context.Background(), id); err == nil {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("response %s was not stored in time", id)
+	require.Eventually(t, func() bool {
+		_, err := store.Get(context.Background(), id)
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "response %s was not stored in time", id)
 }
 
 func forwardedInputItems(t *testing.T, provider *capturingProvider) []map[string]any {
 	t.Helper()
-	if provider.capturedResponsesReq == nil {
-		t.Fatal("provider did not receive a responses request")
-	}
+	require.NotNil(t, provider.capturedResponsesReq)
+
 	raw, ok := provider.capturedResponsesReq.Input.([]any)
-	if !ok {
-		t.Fatalf("forwarded input = %#v, want []any", provider.capturedResponsesReq.Input)
-	}
+	require.True(t, ok, "forwarded input = %#v, want []any", provider.capturedResponsesReq.Input)
+
 	items := make([]map[string]any, 0, len(raw))
 	for _, item := range raw {
 		m, ok := item.(map[string]any)
-		if !ok {
-			t.Fatalf("forwarded item = %#v, want object", item)
-		}
+		require.True(t, ok, "forwarded item = %#v, want object", item)
+
 		items = append(items, m)
 	}
 	return items
@@ -69,35 +61,26 @@ func TestResponsesWithPreviousResponseID_ResolvesFromStoreForTranslatedProvider(
 	srv := New(provider, nil)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("first responses status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	waitForStoredResponse(t, srv.handler.currentResponseStore(), "resp_conv_1")
 
 	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_conv_1"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("chained responses status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"previous_response_id":"resp_conv_1"`) {
-		t.Fatalf("chained response must echo previous_response_id: %s", rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"previous_response_id":"resp_conv_1"`)
+
 	forwarded := provider.capturedResponsesReq
-	if forwarded.PreviousResponseID != "" {
-		t.Fatalf("previous_response_id must be stripped before dispatch, got %q", forwarded.PreviousResponseID)
-	}
+	require.Empty(t, forwarded.PreviousResponseID)
+
 	items := forwardedInputItems(t, provider.capturingProvider)
-	if len(items) != 3 {
-		t.Fatalf("forwarded %d items, want previous input + previous output + new input: %#v", len(items), items)
-	}
-	if items[0]["role"] != "user" || items[1]["role"] != "assistant" || items[2]["role"] != "user" {
-		t.Fatalf("forwarded roles = %v/%v/%v, want user/assistant/user", items[0]["role"], items[1]["role"], items[2]["role"])
-	}
-	if _, hasID := items[0]["id"]; hasID {
-		t.Fatalf("stored item id must be stripped before dispatch, got %#v", items[0])
-	}
-	if text, _ := json.Marshal(items[1]["content"]); !strings.Contains(string(text), "the word is zebra") {
-		t.Fatalf("previous output not replayed: %#v", items[1])
-	}
+	require.Len(t, items, 3)
+	require.Equal(t, "user", items[0]["role"])
+	require.Equal(t, "assistant", items[1]["role"])
+	require.Equal(t, "user", items[2]["role"])
+	_, hasID := items[0]["id"]
+	require.False(t, hasID, "stored item id must be stripped before dispatch, got %#v", items[0])
+	text, _ := json.Marshal(items[1]["content"])
+	require.Contains(t, string(text), "the word is zebra", "previous output not replayed: %#v", items[1])
 }
 
 // TestResponsesWithPreviousResponseID_ChainCarriesFullHistory covers a third
@@ -107,59 +90,45 @@ func TestResponsesWithPreviousResponseID_ChainCarriesFullHistory(t *testing.T) {
 	provider := previousResponseTestProvider(t, "anthropic")
 	srv := New(provider, nil)
 	store := srv.handler.currentResponseStore()
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"turn one"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"turn one"}`); rec.Code != http.StatusOK {
-		t.Fatalf("turn one status = %d (%s)", rec.Code, rec.Body.String())
-	}
 	waitForStoredResponse(t, store, "resp_conv_1")
 
 	provider.responsesResponse.ID = "resp_conv_2"
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"turn two","previous_response_id":"resp_conv_1"}`); rec.Code != http.StatusOK {
-		t.Fatalf("turn two status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	waitForStoredResponse(t, store, "resp_conv_2")
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"turn two","previous_response_id":"resp_conv_1"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"turn three","previous_response_id":"resp_conv_2"}`); rec.Code != http.StatusOK {
-		t.Fatalf("turn three status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	waitForStoredResponse(t, store, "resp_conv_2")
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"turn three","previous_response_id":"resp_conv_2"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	items := forwardedInputItems(t, provider.capturingProvider)
-	if len(items) != 5 {
-		t.Fatalf("turn three forwarded %d items, want 5 (two full turns + new input): %#v", len(items), items)
-	}
-	if text, _ := json.Marshal(items[2]["content"]); !strings.Contains(string(text), "turn two") {
-		t.Fatalf("history is not oldest first: %#v", items)
-	}
+	require.Len(t, items, 5)
+	text, _ := json.Marshal(items[2]["content"])
+	require.Contains(t, string(text), "turn two", "history is not oldest first: %#v", items)
 
 	// Each snapshot keeps only its own input and links to its predecessor.
 	second, err := store.Get(context.Background(), "resp_conv_2")
-	if err != nil {
-		t.Fatalf("load turn two: %v", err)
-	}
-	if second.Response.PreviousResponseID != "resp_conv_1" || len(second.InputItems) != 1 {
-		t.Fatalf("turn two snapshot previous=%q input items=%d, want resp_conv_1 and 1", second.Response.PreviousResponseID, len(second.InputItems))
-	}
+	require.NoError(t, err)
+	require.Equal(t, "resp_conv_1", second.Response.PreviousResponseID)
+	require.Len(t, second.InputItems, 1)
 }
 
 func TestResponsesWithPreviousResponseID_StreamingChainedTurn(t *testing.T) {
 	provider := previousResponseTestProvider(t, "anthropic")
 	provider.streamData = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_s\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\ndata: [DONE]\n\n"
 	srv := New(provider, nil)
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra"}`); rec.Code != http.StatusOK {
-		t.Fatalf("first responses status = %d (%s)", rec.Code, rec.Body.String())
-	}
 	waitForStoredResponse(t, srv.handler.currentResponseStore(), "resp_conv_1")
 
-	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_conv_1","stream":true}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("chained streaming status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	if provider.capturedResponsesReq.PreviousResponseID != "" {
-		t.Fatal("previous_response_id must be stripped before a streaming dispatch")
-	}
-	if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
-		t.Fatalf("streaming chained turn forwarded %d items, want 3", len(items))
-	}
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_conv_1","stream":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Empty(t, provider.capturedResponsesReq.PreviousResponseID)
+	items := forwardedInputItems(t, provider.capturingProvider)
+	require.Len(t, items, 3)
 }
 
 func TestResponsesWithPreviousResponseID_NativeProviderKeepsForwarding(t *testing.T) {
@@ -167,23 +136,20 @@ func TestResponsesWithPreviousResponseID_NativeProviderKeepsForwarding(t *testin
 	srv := New(provider, nil)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"hello","previous_response_id":"resp_native_1"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	forwarded := provider.capturedResponsesReq
-	if forwarded == nil || forwarded.PreviousResponseID != "resp_native_1" {
-		t.Fatalf("native provider must receive previous_response_id untouched, got %#v", forwarded)
-	}
-	if _, ok := forwarded.Input.(string); !ok {
-		t.Fatalf("native provider input must be untouched, got %#v", forwarded.Input)
-	}
+	require.NotNil(t, forwarded)
+	require.Equal(t, "resp_native_1", forwarded.PreviousResponseID)
+	_, ok := forwarded.Input.(string)
+	require.True(t, ok, "native provider input must be untouched, got %#v", forwarded.Input)
 }
 
 // storeChainedResponse records a response the gateway served for providerType,
 // the way a finished turn is snapshotted.
 func storeChainedResponse(t *testing.T, store responsestore.Store, id, providerType, userPath string) {
 	t.Helper()
-	if err := store.Create(context.Background(), &responsestore.StoredResponse{
+	err := store.Create(context.Background(), &responsestore.StoredResponse{
 		Response: &core.ResponsesResponse{
 			ID: id, Object: "response", Status: "completed",
 			Output: []core.ResponsesOutputItem{{ID: "msg_1", Type: "message", Role: "assistant", Content: []core.ResponsesContentItem{{Type: "output_text", Text: "the word is zebra"}}}},
@@ -191,9 +157,8 @@ func storeChainedResponse(t *testing.T, store responsestore.Store, id, providerT
 		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"remember: zebra"}]}`)},
 		Provider:   providerType,
 		UserPath:   userPath,
-	}); err != nil {
-		t.Fatalf("store %s: %v", id, err)
-	}
+	})
+	require.NoError(t, err, "store %s: %v", id, err)
 }
 
 // A response the gateway minted for a chat-translated provider exists only in
@@ -219,29 +184,22 @@ func TestResponsesWithPreviousResponseID_NativeProviderReplaysGatewayMintedChain
 			storeChainedResponse(t, srv.handler.currentResponseStore(), "resp_stored", tt.providerType, "")
 
 			rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_stored"}`)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-			}
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 			forwarded := provider.capturedResponsesReq
-			if forwarded.PreviousResponseID != tt.wantID {
-				t.Fatalf("forwarded previous_response_id = %q, want %q", forwarded.PreviousResponseID, tt.wantID)
-			}
+			require.Equal(t, tt.wantID, forwarded.PreviousResponseID)
+
 			if tt.wantItems == 0 {
-				if _, ok := forwarded.Input.(string); !ok {
-					t.Fatalf("native input must be untouched, got %#v", forwarded.Input)
-				}
+				_, ok := forwarded.Input.(string)
+				require.True(t, ok, "native input must be untouched, got %#v", forwarded.Input)
+
 				return
 			}
 			items := forwardedInputItems(t, provider.capturingProvider)
-			if len(items) != tt.wantItems {
-				t.Fatalf("forwarded %d items, want %d: %#v", len(items), tt.wantItems, items)
-			}
-			if text, _ := json.Marshal(items[1]["content"]); !strings.Contains(string(text), "the word is zebra") {
-				t.Fatalf("stored output not replayed: %#v", items[1])
-			}
-			if !strings.Contains(rec.Body.String(), `"previous_response_id":"resp_stored"`) {
-				t.Fatalf("chained response must echo previous_response_id: %s", rec.Body.String())
-			}
+			require.Len(t, items, tt.wantItems)
+			text, _ := json.Marshal(items[1]["content"])
+			require.Contains(t, string(text), "the word is zebra", "stored output not replayed: %#v", items[1])
+			require.Contains(t, rec.Body.String(), `"previous_response_id":"resp_stored"`)
 		})
 	}
 }
@@ -282,20 +240,19 @@ func TestResponsesWithPreviousResponseID_NativeProviderEnforcesOwnership(t *test
 			s := newService(t)
 			replay, err := s.nativePreviousResponse(tt.ctx, tt.id)
 			if tt.wantErr {
-				if err == nil || !strings.Contains(err.Error(), "not found") {
-					t.Fatalf("error = %v, want not found", err)
-				}
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "not found")
+
 				return
 			}
-			if err != nil || replay != tt.wantReplay {
-				t.Fatalf("nativePreviousResponse() = %v, %v, want %v, nil", replay, err, tt.wantReplay)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantReplay, replay)
+
 			// Every dispatch attempt re-checks, so a native attempt of any
 			// request is covered even when the history was not expanded.
 			req := &core.ResponsesRequest{Model: "gpt-5-mini", Input: "again?", PreviousResponseID: tt.id}
-			if _, err := s.PatchResponsesAttempt(tt.ctx, req, "openai"); err != nil {
-				t.Fatalf("PatchResponsesAttempt() error = %v", err)
-			}
+			_, err = s.PatchResponsesAttempt(tt.ctx, req, "openai")
+			require.NoError(t, err)
 		})
 	}
 }
@@ -309,23 +266,13 @@ func TestResponsesWithPreviousResponseID_ForeignTenantChainReturns404(t *testing
 		storeChainedResponse(t, srv.handler.currentResponseStore(), "resp_owned", "openai", "/tenant-b")
 
 		body := `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_owned","stream":` + map[bool]string{false: "false", true: "true"}[stream] + `}`
-		req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		c := echo.New().NewContext(req, rec)
-		c.SetRequest(req.WithContext(core.WithAccessScope(req.Context(), core.AccessScope{UserPath: "/tenant-a"})))
-		if err := srv.handler.Responses(c); err != nil {
-			t.Fatalf("stream=%v handler.Responses() error = %v", stream, err)
-		}
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("stream=%v status = %d (%s), want 404", stream, rec.Code, rec.Body.String())
-		}
-		if !strings.Contains(rec.Body.String(), "Previous response with id 'resp_owned' not found.") {
-			t.Fatalf("stream=%v body = %s, want the not-found message", stream, rec.Body.String())
-		}
-		if provider.capturedResponsesReq != nil {
-			t.Fatalf("stream=%v another tenant's chain must not reach the provider", stream)
-		}
+		c, rec := echotest.Post(t, "/v1/responses", body)
+		c.SetRequest(c.Request().WithContext(core.WithAccessScope(c.Request().Context(), core.AccessScope{UserPath: "/tenant-a"})))
+		err := srv.handler.Responses(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNotFound, rec.Code, "stream=%v status = %d (%s), want 404", stream, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), "Previous response with id 'resp_owned' not found.", "stream=%v body = %s, want the not-found message", stream, rec.Body.String())
+		require.Nil(t, provider.capturedResponsesReq, "stream=%v another tenant's chain must not reach the provider", stream)
 	}
 }
 
@@ -334,15 +281,9 @@ func TestResponsesWithPreviousResponseID_UnknownIDReturns404(t *testing.T) {
 	srv := New(provider, nil)
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"hello","previous_response_id":"resp_missing"}`)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d (%s), want 404", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "Previous response with id 'resp_missing' not found.") {
-		t.Fatalf("body = %s, want OpenAI-shaped not-found message", rec.Body.String())
-	}
-	if provider.capturedResponsesReq != nil {
-		t.Fatal("a missing previous response must not reach the provider")
-	}
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "Previous response with id 'resp_missing' not found.")
+	require.Nil(t, provider.capturedResponsesReq)
 }
 
 // TestPatchResponsesAttempt_ScopedTenantCannotChainAcrossScopes
@@ -350,35 +291,31 @@ func TestResponsesWithPreviousResponseID_UnknownIDReturns404(t *testing.T) {
 func TestPatchResponsesAttempt_ScopedTenantCannotChainAcrossScopes(t *testing.T) {
 	store := responsestore.NewMemoryStore()
 	defer func() { _ = store.Close() }()
-	if err := store.Create(context.Background(), &responsestore.StoredResponse{
+	err := store.Create(context.Background(), &responsestore.StoredResponse{
 		Response: &core.ResponsesResponse{
 			ID: "resp_t", Object: "response", Status: "completed",
 			Output: []core.ResponsesOutputItem{{ID: "msg_1", Type: "message", Role: "assistant", Content: []core.ResponsesContentItem{{Type: "output_text", Text: "zebra"}}}},
 		},
 		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"remember"}]}`)},
 		UserPath:   "/tenant-b",
-	}); err != nil {
-		t.Fatalf("store: %v", err)
-	}
+	})
+	require.NoError(t, err)
+
 	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: store}
 	req := &core.ResponsesRequest{Model: "gpt-5-mini", Input: "again?", PreviousResponseID: "resp_t"}
 
 	foreign := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-a"})
-	if _, err := s.PatchResponsesAttempt(foreign, req, "anthropic"); err == nil || !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("foreign scope error = %v, want not found", err)
-	}
+	_, err = s.PatchResponsesAttempt(foreign, req, "anthropic")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
 
 	owner := core.WithAccessScope(context.Background(), core.AccessScope{UserPath: "/tenant-b"})
 	patched, err := s.PatchResponsesAttempt(owner, req, "anthropic")
-	if err != nil {
-		t.Fatalf("owner scope: %v", err)
-	}
-	if patched.PreviousResponseID != "" {
-		t.Fatalf("previous_response_id = %q, want stripped", patched.PreviousResponseID)
-	}
-	if items, ok := patched.Input.([]any); !ok || len(items) != 3 {
-		t.Fatalf("patched input = %#v, want 3 items", patched.Input)
-	}
+	require.NoError(t, err)
+	require.Empty(t, patched.PreviousResponseID)
+	items, ok := patched.Input.([]any)
+	require.True(t, ok)
+	require.Len(t, items, 3)
 }
 
 func streamedResponseData(id, text string) string {
@@ -403,53 +340,37 @@ func TestResponsesWithPreviousResponseID_StreamedPredecessorChains(t *testing.T)
 	store := srv.handler.currentResponseStore()
 
 	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra","stream":true}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("turn one status = %d (%s)", rec.Code, rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), "previous_response_id") {
-		t.Fatalf("an unchained stream must not name a predecessor: %s", rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.NotContains(t, rec.Body.String(), "previous_response_id", "an unchained stream must not name a predecessor: %s", rec.Body.String())
+
 	waitForStoredResponse(t, store, "resp_s1")
 	stored, err := store.Get(context.Background(), "resp_s1")
-	if err != nil {
-		t.Fatalf("get resp_s1: %v", err)
-	}
-	if len(stored.InputItems) != 1 || len(stored.Response.Output) != 1 {
-		t.Fatalf("streamed snapshot holds %d input items and %d output items, want 1 and 1", len(stored.InputItems), len(stored.Response.Output))
-	}
+	require.NoError(t, err)
+	require.Len(t, stored.InputItems, 1)
+	require.Len(t, stored.Response.Output, 1)
 
 	provider.streamData = streamedResponseData("resp_s2", "still zebra")
 	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"sure?","previous_response_id":"resp_s1","stream":true}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("turn two status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	// The client sees the link on the streamed response, as on a buffered one.
-	if !strings.Contains(rec.Body.String(), `"previous_response_id":"resp_s1"`) {
-		t.Fatalf("streamed chained response must name its predecessor: %s", rec.Body.String())
-	}
+	require.Contains(t, rec.Body.String(), `"previous_response_id":"resp_s1"`)
+
 	waitForStoredResponse(t, store, "resp_s2")
 	stored, err = store.Get(context.Background(), "resp_s2")
-	if err != nil {
-		t.Fatalf("get resp_s2: %v", err)
-	}
-	if stored.Response.PreviousResponseID != "resp_s1" {
-		t.Fatalf("streamed chained snapshot links to %q, want resp_s1", stored.Response.PreviousResponseID)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "resp_s1", stored.Response.PreviousResponseID)
 
 	provider.capturedResponsesReq = nil
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_s2"}`); rec.Code != http.StatusOK {
-		t.Fatalf("turn three status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"what is the word?","previous_response_id":"resp_s2"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
 	items := forwardedInputItems(t, provider.capturingProvider)
-	if len(items) != 5 {
-		t.Fatalf("forwarded %d items, want two streamed turns plus the new input: %#v", len(items), items)
-	}
-	if items[1]["role"] != "assistant" || items[3]["role"] != "assistant" {
-		t.Fatalf("forwarded roles = %v/%v, want assistant at 1 and 3", items[1]["role"], items[3]["role"])
-	}
-	if text, _ := json.Marshal(items[1]["content"]); !strings.Contains(string(text), "the word is zebra") {
-		t.Fatalf("streamed output not replayed: %#v", items[1])
-	}
+	require.Len(t, items, 5)
+	require.Equal(t, "assistant", items[1]["role"])
+	require.Equal(t, "assistant", items[3]["role"])
+	text, _ := json.Marshal(items[1]["content"])
+	require.Contains(t, string(text), "the word is zebra", "streamed output not replayed: %#v", items[1])
 }
 
 // TestResponsesWithPreviousResponseID_StreamedTerminalEventsAreStored covers
@@ -465,26 +386,19 @@ func TestResponsesWithPreviousResponseID_StreamedTerminalEventsAreStored(t *test
 			provider.streamData = streamedTerminalData(tc.event, tc.status, "resp_t", "partial")
 			srv := New(provider, nil)
 			store := srv.handler.currentResponseStore()
+			rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"go","stream":true}`)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-			if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"go","stream":true}`); rec.Code != http.StatusOK {
-				t.Fatalf("streaming status = %d (%s)", rec.Code, rec.Body.String())
-			}
 			waitForStoredResponse(t, store, "resp_t")
 			stored, err := store.Get(context.Background(), "resp_t")
-			if err != nil {
-				t.Fatalf("get resp_t: %v", err)
-			}
-			if stored.Response.Status != tc.status {
-				t.Fatalf("stored status = %q, want %q", stored.Response.Status, tc.status)
-			}
+			require.NoError(t, err)
+			require.Equal(t, tc.status, stored.Response.Status)
 
 			provider.capturedResponsesReq = nil
-			if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"continue","previous_response_id":"resp_t"}`); rec.Code != http.StatusOK {
-				t.Fatalf("chained status = %d (%s)", rec.Code, rec.Body.String())
-			}
-			if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
-				t.Fatalf("forwarded %d items, want 3", len(items))
-			}
+			rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"continue","previous_response_id":"resp_t"}`)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			items := forwardedInputItems(t, provider.capturingProvider)
+			require.Len(t, items, 3)
 		})
 	}
 }
@@ -493,19 +407,14 @@ func TestResponsesWithPreviousResponseID_StreamedWithStoreFalseIsNotStored(t *te
 	provider := previousResponseTestProvider(t, "anthropic")
 	provider.streamData = streamedResponseData("resp_s", "not kept")
 	srv := New(provider, nil)
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"streamed","stream":true,"store":false}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"streamed","stream":true,"store":false}`); rec.Code != http.StatusOK {
-		t.Fatalf("streaming status = %d (%s)", rec.Code, rec.Body.String())
-	}
 	provider.capturedResponsesReq = nil
 
-	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_s"}`)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d (%s), want 404: store:false responses are not stored", rec.Code, rec.Body.String())
-	}
-	if provider.capturedResponsesReq != nil {
-		t.Fatal("a chained turn on an unstored id must not reach the provider")
-	}
+	rec = postResponses(t, srv, `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_s"}`)
+	require.Equal(t, http.StatusNotFound, rec.Code, rec.Body.String())
+	require.Nil(t, provider.capturedResponsesReq)
 }
 
 // heldSnapshotStore holds every Create until released, standing in for a
@@ -528,10 +437,8 @@ func TestResponsesWithPreviousResponseID_WaitsForPendingSnapshot(t *testing.T) {
 	srv := New(provider, nil)
 	store := &heldSnapshotStore{Store: responsestore.NewMemoryStore(), release: make(chan struct{})}
 	srv.handler.SetResponseStore(store)
-
-	if rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra"}`); rec.Code != http.StatusOK {
-		t.Fatalf("first responses status = %d (%s)", rec.Code, rec.Body.String())
-	}
+	rec := postResponses(t, srv, `{"model":"gpt-5-mini","input":"remember: zebra"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	type outcome struct {
 		code int
@@ -549,12 +456,9 @@ func TestResponsesWithPreviousResponseID_WaitsForPendingSnapshot(t *testing.T) {
 	}
 	close(store.release)
 	got := <-result
-	if got.code != http.StatusOK {
-		t.Fatalf("chained status = %d (%s), want 200 after the snapshot landed", got.code, got.body)
-	}
-	if items := forwardedInputItems(t, provider.capturingProvider); len(items) != 3 {
-		t.Fatalf("chained turn forwarded %d items, want 3", len(items))
-	}
+	require.Equal(t, http.StatusOK, got.code, "chained status = %d (%s), want 200 after the snapshot landed", got.code, got.body)
+	items := forwardedInputItems(t, provider.capturingProvider)
+	require.Len(t, items, 3)
 }
 
 // chainingFailoverProvider records the request each attempt received and
@@ -603,15 +507,15 @@ func newChainingFailoverHandler(t *testing.T) (*Handler, *chainingFailoverProvid
 	}, nil)
 	store := responsestore.NewMemoryStore()
 	handler.SetResponseStore(store)
-	if err := store.Create(context.Background(), &responsestore.StoredResponse{
+	err := store.Create(context.Background(), &responsestore.StoredResponse{
 		Response: &core.ResponsesResponse{
 			ID: "resp_native", Object: "response", Status: "completed",
 			Output: []core.ResponsesOutputItem{{ID: "msg_1", Type: "message", Role: "assistant", Content: []core.ResponsesContentItem{{Type: "output_text", Text: "zebra"}}}},
 		},
 		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"remember"}]}`)},
-	}); err != nil {
-		t.Fatalf("store: %v", err)
-	}
+	})
+	require.NoError(t, err)
+
 	return handler, provider
 }
 
@@ -620,20 +524,18 @@ func newChainingFailoverHandler(t *testing.T) (*Handler, *chainingFailoverProvid
 func assertResolvedPerAttempt(t *testing.T, provider *chainingFailoverProvider) {
 	t.Helper()
 	primary := provider.requests["gpt-5-mini"]
-	if primary == nil || primary.PreviousResponseID != "resp_native" {
-		t.Fatalf("native primary request = %#v, want previous_response_id kept", primary)
-	}
-	if _, ok := primary.Input.(string); !ok {
-		t.Fatalf("native primary input must be untouched, got %#v", primary.Input)
-	}
+	require.NotNil(t, primary)
+	require.Equal(t, "resp_native", primary.PreviousResponseID)
+	_, ok := primary.Input.(string)
+	require.True(t, ok, "native primary input must be untouched, got %#v", primary.Input)
+
 	fallback := provider.requests["anthropic/claude"]
-	if fallback == nil || fallback.PreviousResponseID != "" {
-		t.Fatalf("translated failover request = %#v, want previous_response_id resolved and stripped", fallback)
-	}
+	require.NotNil(t, fallback)
+	require.Empty(t, fallback.PreviousResponseID)
+
 	items, ok := fallback.Input.([]any)
-	if !ok || len(items) != 3 {
-		t.Fatalf("translated failover input = %#v, want replayed history + new input (3 items)", fallback.Input)
-	}
+	require.True(t, ok)
+	require.Len(t, items, 3)
 }
 
 // TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt keeps the id
@@ -650,17 +552,13 @@ func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T
 			if stream {
 				body = `{"model":"gpt-5-mini","input":"again?","previous_response_id":"resp_native","stream":true}`
 			}
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			if err := handler.Responses(echo.New().NewContext(req, rec)); err != nil {
-				t.Fatalf("handler.Responses() error = %v", err)
-			}
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
-			}
-			if stream && !strings.Contains(rec.Body.String(), "response.completed") {
-				t.Fatalf("streaming fallback body = %s, want the fallback stream", rec.Body.String())
+			c, rec := echotest.Post(t, "/v1/responses", body)
+			err := handler.Responses(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+			if stream {
+				require.Contains(t, rec.Body.String(), "response.completed", "want the fallback stream")
 			}
 			assertResolvedPerAttempt(t, provider)
 		})
@@ -670,7 +568,7 @@ func TestResponsesWithPreviousResponseID_ResolvedPerFailoverAttempt(t *testing.T
 func TestPatchResponsesAttempt_SkipsEmptyReplayText(t *testing.T) {
 	store := responsestore.NewMemoryStore()
 	defer func() { _ = store.Close() }()
-	if err := store.Create(context.Background(), &responsestore.StoredResponse{
+	err := store.Create(context.Background(), &responsestore.StoredResponse{
 		Response: &core.ResponsesResponse{
 			ID: "resp_e", Object: "response", Status: "completed",
 			Output: []core.ResponsesOutputItem{
@@ -679,21 +577,17 @@ func TestPatchResponsesAttempt_SkipsEmptyReplayText(t *testing.T) {
 			},
 		},
 		InputItems: []json.RawMessage{json.RawMessage(`{"id":"in_1","type":"message","role":"user","content":[{"type":"input_text","text":"look it up"}]}`)},
-	}); err != nil {
-		t.Fatalf("store: %v", err)
-	}
+	})
+	require.NoError(t, err)
+
 	s := &translatedInferenceService{provider: previousResponseTestProvider(t, "anthropic"), responseStore: store}
 	patched, err := s.PatchResponsesAttempt(context.Background(), &core.ResponsesRequest{Model: "gpt-5-mini", Input: "and?", PreviousResponseID: "resp_e"}, "anthropic")
-	if err != nil {
-		t.Fatalf("apply: %v", err)
-	}
+	require.NoError(t, err)
+
 	items, _ := patched.Input.([]any)
-	if len(items) != 3 {
-		t.Fatalf("patched input has %d items, want input + function_call + new input (empty message dropped): %#v", len(items), patched.Input)
-	}
-	if call, _ := items[1].(map[string]any); call["type"] != "function_call" {
-		t.Fatalf("second item = %#v, want the function_call kept", items[1])
-	}
+	require.Len(t, items, 3)
+	call, _ := items[1].(map[string]any)
+	require.Equal(t, "function_call", call["type"], "second item = %#v, want the function_call kept", items[1])
 }
 
 // TestPatchResponsesAttempt_PendingSnapshotWaitFollowsAccessScope
@@ -722,13 +616,10 @@ func TestPatchResponsesAttempt_PendingSnapshotWaitFollowsAccessScope(t *testing.
 			}()
 			select {
 			case <-finished:
-				if tt.wantWait {
-					t.Fatal("request did not wait for the pending snapshot")
-				}
+				require.False(t, tt.wantWait)
+
 			case <-time.After(time.Second):
-				if !tt.wantWait {
-					t.Fatal("request waited on a pending snapshot outside its access scope")
-				}
+				require.True(t, tt.wantWait)
 			}
 			s.finishPendingSnapshot("resp_t", done)
 			<-finished

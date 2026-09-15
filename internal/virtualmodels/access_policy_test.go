@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 type denyAllPolicy struct{ calls int }
@@ -21,40 +22,26 @@ func TestService_AccessPolicyNarrowsAfterModelSideRows(t *testing.T) {
 	selector := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
 
 	// Without a policy the model-side rows alone decide.
-	if !svc.AllowsModel(ctx, selector) {
-		t.Fatal("AllowsModel() = false before installing a policy, want true")
-	}
+	require.True(t, svc.AllowsModel(ctx, selector))
 
 	policy := &denyAllPolicy{}
 	svc.SetAccessPolicy(policy)
 
-	if svc.AllowsModel(ctx, selector) {
-		t.Fatal("AllowsModel() = true, want false from the subject-side policy")
-	}
-	err := svc.ValidateModelAccess(ctx, selector)
-	if err == nil {
-		t.Fatal("ValidateModelAccess() error = nil, want model_access_denied")
-	}
-	if gatewayErr, ok := err.(*core.GatewayError); !ok || gatewayErr.Code == nil || *gatewayErr.Code != "model_access_denied" {
-		t.Fatalf("ValidateModelAccess() error = %v, want model_access_denied", err)
-	}
-	if policy.calls != 2 {
-		t.Fatalf("policy consulted %d times, want 2", policy.calls)
-	}
+	require.False(t, svc.AllowsModel(ctx, selector))
 
+	err := svc.ValidateModelAccess(ctx, selector)
+	require.Error(t, err)
+	gatewayErr, ok := err.(*core.GatewayError)
+	require.True(t, ok)
+	require.NotNil(t, gatewayErr.Code)
+	require.Equal(t, "model_access_denied", *gatewayErr.Code)
+	require.Equal(t, 2, policy.calls)
 	// A model the model-side rows already deny never reaches the policy.
-	if err := svc.Upsert(ctx, VirtualModel{Source: "openai/gpt-4o", UserPaths: []string{"/team"}, Enabled: true}); err != nil {
-		t.Fatalf("Upsert(policy) error = %v", err)
-	}
-	if svc.AllowsModel(ctx, selector) {
-		t.Fatal("AllowsModel() = true, want false from the model-side row")
-	}
-	if policy.calls != 2 {
-		t.Fatalf("policy consulted %d times after model-side denial, want 2", policy.calls)
-	}
+	err = svc.Upsert(ctx, VirtualModel{Source: "openai/gpt-4o", UserPaths: []string{"/team"}, Enabled: true})
+	require.NoError(t, err)
+	require.False(t, svc.AllowsModel(ctx, selector))
+	require.Equal(t, 2, policy.calls)
 
 	models := svc.FilterPublicModels(core.WithEffectiveUserPath(ctx, "/team"), []core.Model{{ID: "openai/gpt-4o"}})
-	if len(models) != 0 {
-		t.Fatalf("FilterPublicModels() = %v, want empty", models)
-	}
+	require.Empty(t, models)
 }

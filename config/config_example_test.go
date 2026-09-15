@@ -3,6 +3,9 @@ package config
 import (
 	"os"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoad_FromEnvironment(t *testing.T) {
@@ -12,11 +15,6 @@ func TestLoad_FromEnvironment(t *testing.T) {
 	}()
 
 	result, err := Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if result.Config.Server.Port != "9090" {
-		t.Errorf("expected port 9090, got %s", result.Config.Server.Port)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "9090", result.Config.Server.Port)
 }

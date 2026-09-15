@@ -2,12 +2,13 @@ package auditlog
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/labstack/echo/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/enterpilot/gomodel/internal/echotest"
 )
 
 type sessionUpdatePublisher struct {
@@ -39,8 +40,7 @@ func TestEnrichEntryWithSessionID(t *testing.T) {
 			var c *echo.Context
 			publisher := &sessionUpdatePublisher{}
 			if tc.context {
-				e := echo.New()
-				c = e.NewContext(httptest.NewRequest(http.MethodPost, "/v1/responses", nil), httptest.NewRecorder())
+				c, _ = echotest.Post(t, "/v1/responses", nil)
 				if tc.entry != nil {
 					c.Set(string(LogEntryKey), tc.entry)
 				}
@@ -48,14 +48,12 @@ func TestEnrichEntryWithSessionID(t *testing.T) {
 			}
 
 			EnrichEntryWithSessionID(c, tc.sessionID)
-			if tc.entry != nil && tc.entry.SessionID != tc.wantSession {
-				t.Fatalf("session id = %q, want %q", tc.entry.SessionID, tc.wantSession)
+			if tc.entry != nil {
+				require.Equal(t, tc.wantSession, tc.entry.SessionID)
 			}
-			if len(publisher.events) != tc.wantEvents {
-				t.Fatalf("events = %v, want %d", publisher.events, tc.wantEvents)
-			}
-			if tc.wantEvents == 1 && publisher.events[0] != LiveEventAuditUpdated {
-				t.Fatalf("event = %q, want %q", publisher.events[0], LiveEventAuditUpdated)
+			require.Len(t, publisher.events, tc.wantEvents)
+			if tc.wantEvents == 1 {
+				require.Equal(t, LiveEventAuditUpdated, publisher.events[0])
 			}
 		})
 	}
@@ -97,8 +95,7 @@ func TestEnrichEntryWithGatewayError(t *testing.T) {
 			var c *echo.Context
 			publisher := &sessionUpdatePublisher{}
 			if tc.context {
-				e := echo.New()
-				c = e.NewContext(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), httptest.NewRecorder())
+				c, _ = echotest.Post(t, "/v1/chat/completions", nil)
 				if tc.entry != nil {
 					c.Set(string(LogEntryKey), tc.entry)
 				}
@@ -106,27 +103,16 @@ func TestEnrichEntryWithGatewayError(t *testing.T) {
 			}
 
 			EnrichEntryWithGatewayError(c, tc.err)
-			if len(publisher.events) != tc.wantEvents {
-				t.Fatalf("events = %v, want %d", publisher.events, tc.wantEvents)
-			}
+			require.Len(t, publisher.events, tc.wantEvents)
+
 			if tc.entry == nil || tc.err == nil {
 				return
 			}
-			if tc.entry.ErrorType != tc.wantType {
-				t.Fatalf("ErrorType = %q, want %q", tc.entry.ErrorType, tc.wantType)
-			}
-			if tc.entry.Data == nil {
-				t.Fatal("expected log data to be allocated")
-			}
-			if tc.entry.Data.ErrorMessage != tc.wantMessage {
-				t.Fatalf("ErrorMessage = %q, want %q", tc.entry.Data.ErrorMessage, tc.wantMessage)
-			}
-			if tc.entry.Data.ErrorCode != tc.wantCode {
-				t.Fatalf("ErrorCode = %q, want %q", tc.entry.Data.ErrorCode, tc.wantCode)
-			}
-			if tc.entry.Data.ErrorProvider != tc.wantProvider {
-				t.Fatalf("ErrorProvider = %q, want %q", tc.entry.Data.ErrorProvider, tc.wantProvider)
-			}
+			require.Equal(t, tc.wantType, tc.entry.ErrorType)
+			require.NotNil(t, tc.entry.Data)
+			require.Equal(t, tc.wantMessage, tc.entry.Data.ErrorMessage)
+			require.Equal(t, tc.wantCode, tc.entry.Data.ErrorCode)
+			require.Equal(t, tc.wantProvider, tc.entry.Data.ErrorProvider)
 		})
 	}
 }
@@ -143,17 +129,12 @@ func TestHasRecordedError(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e := echo.New()
-			c := e.NewContext(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil), httptest.NewRecorder())
+			c, _ := echotest.Post(t, "/v1/chat/completions", nil)
 			if tc.entry != nil {
 				c.Set(string(LogEntryKey), tc.entry)
 			}
-			if got := HasRecordedError(c); got != tc.want {
-				t.Fatalf("HasRecordedError() = %v, want %v", got, tc.want)
-			}
+			require.Equal(t, tc.want, HasRecordedError(c))
 		})
 	}
-	if HasRecordedError(nil) {
-		t.Fatal("HasRecordedError(nil) = true, want false")
-	}
+	require.False(t, HasRecordedError(nil))
 }

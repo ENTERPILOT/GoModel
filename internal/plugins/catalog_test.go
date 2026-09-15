@@ -1,10 +1,10 @@
 package plugins
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/pluginapi"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCatalogRegister(t *testing.T) {
@@ -45,61 +45,46 @@ func TestCatalogRegister(t *testing.T) {
 			catalog := NewCatalog()
 			err := catalog.Register(factoryOf(tt.plugin), SourceBuiltin)
 			if tt.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-					t.Fatalf("Register() error = %v, want containing %q", err, tt.wantErr)
-				}
+				require.ErrorContains(t, err, tt.wantErr)
 				return
 			}
-			if err != nil {
-				t.Fatalf("Register() error = %v", err)
-			}
+			require.NoError(t, err)
+
 			entry, ok := catalog.Lookup(tt.plugin.Manifest().Name)
-			if !ok {
-				t.Fatal("Lookup() = false, want entry")
-			}
-			if len(entry.Kinds) != len(tt.kinds) {
-				t.Fatalf("Kinds = %v, want %v", entry.Kinds, tt.kinds)
-			}
+			require.True(t, ok)
+			require.Len(t, entry.Kinds, len(tt.kinds))
+
 			for i := range tt.kinds {
-				if entry.Kinds[i] != tt.kinds[i] {
-					t.Fatalf("Kinds = %v, want %v", entry.Kinds, tt.kinds)
-				}
+				require.Equal(t, tt.kinds[i], entry.Kinds[i])
 			}
-			if entry.Health != "ok" || entry.Source != SourceBuiltin {
-				t.Fatalf("entry = %+v, want ok/builtin", entry)
-			}
+			require.Equal(t, "ok", entry.Health)
+			require.Equal(t, SourceBuiltin, entry.Source, "entry = %+v, want ok/builtin", entry)
 		})
 	}
 }
 
 func TestCatalogDuplicateAndFailed(t *testing.T) {
 	catalog := NewCatalog()
-	if err := catalog.Register(factoryOf(&fakePlugin{name: "a"}), SourceBuiltin); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.Register(factoryOf(&fakePlugin{name: "a"}), SourceRegistered); err == nil {
-		t.Fatal("duplicate Register() error = nil")
-	}
+	err := catalog.Register(factoryOf(&fakePlugin{name: "a"}), SourceBuiltin)
+	require.NoError(t, err)
+	require.Error(t, catalog.Register(factoryOf(&fakePlugin{name: "a"}), SourceRegistered))
+
 	catalog.RegisterFailed("broken", Source("/tmp/broken.so"), errFake)
-	if _, ok := catalog.Lookup("broken"); ok {
-		t.Fatal("Lookup(broken) = true, want false for a failed entry")
-	}
-	if names := catalog.Names(); len(names) != 1 || names[0] != "a" {
-		t.Fatalf("Names() = %v, want [a]", names)
-	}
+	_, ok := catalog.Lookup("broken")
+	require.False(t, ok)
+	names := catalog.Names()
+	require.Len(t, names, 1)
+	require.Equal(t, "a", names[0])
+
 	entries := catalog.Entries()
-	if len(entries) != 2 || entries[1].Health != "error" || entries[1].Err == nil {
-		t.Fatalf("Entries() = %+v, want a and failed broken", entries)
-	}
-	if catalog.Len() != 1 {
-		t.Fatalf("Len() = %d, want 1", catalog.Len())
-	}
+	require.Len(t, entries, 2)
+	require.Equal(t, "error", entries[1].Health)
+	require.Error(t, entries[1].Err)
+	require.Equal(t, 1, catalog.Len())
 }
 
 func TestCatalogRegisterRecoversPanic(t *testing.T) {
 	catalog := NewCatalog()
 	err := catalog.Register(func() pluginapi.Plugin { panic("boom") }, SourceBuiltin)
-	if err == nil || !strings.Contains(err.Error(), "panicked") {
-		t.Fatalf("Register() error = %v, want panic error", err)
-	}
+	require.ErrorContains(t, err, "panicked")
 }

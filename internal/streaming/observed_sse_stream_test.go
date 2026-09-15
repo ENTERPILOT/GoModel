@@ -5,6 +5,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type trackingObserver struct {
@@ -39,26 +41,15 @@ data: [DONE]
 	stream := NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), first, second)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Fatalf("stream passthrough mismatch")
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
 
 	for i, observer := range []*trackingObserver{first, second} {
-		if observer.eventCount != 2 {
-			t.Fatalf("observer %d eventCount = %d, want 2", i, observer.eventCount)
-		}
-		if observer.lastID != "chatcmpl-2" {
-			t.Fatalf("observer %d lastID = %q, want chatcmpl-2", i, observer.lastID)
-		}
-		if !observer.closed {
-			t.Fatalf("observer %d was not closed", i)
-		}
+		require.Equal(t, 2, observer.eventCount, "observer %d", i)
+		require.Equal(t, "chatcmpl-2", observer.lastID, "observer %d", i)
+		require.True(t, observer.closed, "observer %d was not closed", i)
 	}
 }
 
@@ -68,24 +59,13 @@ func TestObservedSSEStream_ParsesFragmentedFinalEventOnClose(t *testing.T) {
 	stream := NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Fatalf("stream passthrough mismatch")
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
-	if observer.eventCount != 1 {
-		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
-	}
-	if observer.lastID != "chatcmpl-frag" {
-		t.Fatalf("lastID = %q, want chatcmpl-frag", observer.lastID)
-	}
-	if !observer.closed {
-		t.Fatal("observer was not closed")
-	}
+	require.NoError(t, err)
+	require.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
+	require.Equal(t, 1, observer.eventCount)
+	require.Equal(t, "chatcmpl-frag", observer.lastID)
+	require.True(t, observer.closed)
 }
 
 func TestObservedSSEStream_ReassemblesMultilineDataEvent(t *testing.T) {
@@ -96,29 +76,17 @@ func TestObservedSSEStream_ReassemblesMultilineDataEvent(t *testing.T) {
 	stream := NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Fatalf("stream passthrough mismatch")
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
+	require.Equal(t, 1, observer.eventCount)
+	require.Equal(t, "chatcmpl-multiline", observer.lastID)
 
-	if observer.eventCount != 1 {
-		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
-	}
-	if observer.lastID != "chatcmpl-multiline" {
-		t.Fatalf("lastID = %q, want chatcmpl-multiline", observer.lastID)
-	}
 	usage, ok := observer.lastPayload["usage"].(map[string]any)
-	if !ok {
-		t.Fatalf("usage = %#v, want object", observer.lastPayload["usage"])
-	}
-	if got := usage["total_tokens"]; got != float64(3) {
-		t.Fatalf("usage.total_tokens = %#v, want 3", got)
-	}
+	require.True(t, ok, "usage = %#v, want object", observer.lastPayload["usage"])
+	got := usage["total_tokens"]
+	require.Equal(t, float64(3), got)
 }
 
 func TestObservedSSEStream_DetectsBoundarySplitAcrossReads(t *testing.T) {
@@ -130,15 +98,9 @@ func TestObservedSSEStream_DetectsBoundarySplitAcrossReads(t *testing.T) {
 	s.processChunk([]byte("data:{\"id\":\"chatcmpl-1\"}\r\n\r"))
 	s.processChunk([]byte("\ndata:{\"id\":\"chatcmpl-2\"}\r\n\r\n"))
 
-	if observer.eventCount != 2 {
-		t.Fatalf("eventCount = %d, want 2", observer.eventCount)
-	}
-	if observer.lastID != "chatcmpl-2" {
-		t.Fatalf("lastID = %q, want chatcmpl-2", observer.lastID)
-	}
-	if len(s.pending) != 0 {
-		t.Fatalf("pending length = %d, want 0", len(s.pending))
-	}
+	require.Equal(t, 2, observer.eventCount)
+	require.Equal(t, "chatcmpl-2", observer.lastID)
+	require.Empty(t, s.pending)
 }
 
 func TestObservedSSEStream_DiscardsOversizedPendingDataWithoutTailCapping(t *testing.T) {
@@ -148,13 +110,9 @@ func TestObservedSSEStream_DiscardsOversizedPendingDataWithoutTailCapping(t *tes
 	data := bytes.Repeat([]byte("b"), maxPendingEventBytes+1024)
 
 	s.processChunk(data)
-
-	if got := len(s.pending); got != 0 {
-		t.Fatalf("pending length = %d, want 0", got)
-	}
-	if !s.discarding {
-		t.Fatal("discarding = false, want true")
-	}
+	got := len(s.pending)
+	require.Equal(t, 0, got)
+	require.True(t, s.discarding)
 }
 
 func TestObservedSSEStream_DropsOversizedBufferedEventAndResumesWithinSameChunk(t *testing.T) {
@@ -179,12 +137,8 @@ func TestObservedSSEStream_DropsOversizedBufferedEventAndResumesWithinSameChunk(
 
 	s.processChunk(data)
 
-	if observer.eventCount != 1 {
-		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
-	}
-	if observer.lastID != "fresh" {
-		t.Fatalf("lastID = %q, want fresh", observer.lastID)
-	}
+	require.Equal(t, 1, observer.eventCount)
+	require.Equal(t, "fresh", observer.lastID)
 }
 
 func TestObservedSSEStream_ResumesAfterDiscardWhenBoundarySplitsAcrossReads(t *testing.T) {
@@ -204,15 +158,9 @@ func TestObservedSSEStream_ResumesAfterDiscardWhenBoundarySplitsAcrossReads(t *t
 	s.processChunk(oversized)
 	s.processChunk([]byte("\ndata:{\"id\":\"fresh\"}\r\n\r\n"))
 
-	if observer.eventCount != 1 {
-		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
-	}
-	if observer.lastID != "fresh" {
-		t.Fatalf("lastID = %q, want fresh", observer.lastID)
-	}
-	if s.discarding {
-		t.Fatal("discarding = true, want false")
-	}
+	require.Equal(t, 1, observer.eventCount)
+	require.Equal(t, "fresh", observer.lastID)
+	require.False(t, s.discarding)
 }
 
 func TestObservedSSEStream_DropsOversizedPendingPrefixBeforeCombining(t *testing.T) {
@@ -227,15 +175,9 @@ func TestObservedSSEStream_DropsOversizedPendingPrefixBeforeCombining(t *testing
 
 	s.processChunk([]byte("\n\ndata: {\"id\":\"fresh\"}\n\n"))
 
-	if observer.eventCount != 1 {
-		t.Fatalf("eventCount = %d, want 1", observer.eventCount)
-	}
-	if observer.lastID != "fresh" {
-		t.Fatalf("lastID = %q, want fresh", observer.lastID)
-	}
-	if len(s.pending) != 0 {
-		t.Fatalf("pending length = %d, want 0", len(s.pending))
-	}
+	require.Equal(t, 1, observer.eventCount)
+	require.Equal(t, "fresh", observer.lastID)
+	require.Empty(t, s.pending)
 }
 
 func TestObservedSSEStream_HandlesCRLFAndDataWithoutSpace(t *testing.T) {
@@ -244,24 +186,13 @@ func TestObservedSSEStream_HandlesCRLFAndDataWithoutSpace(t *testing.T) {
 	stream := NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Fatalf("stream passthrough mismatch")
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
-	if observer.eventCount != 2 {
-		t.Fatalf("eventCount = %d, want 2", observer.eventCount)
-	}
-	if observer.lastID != "chatcmpl-2" {
-		t.Fatalf("lastID = %q, want chatcmpl-2", observer.lastID)
-	}
-	if !observer.closed {
-		t.Fatal("observer was not closed")
-	}
+	require.NoError(t, err)
+	require.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
+	require.Equal(t, 2, observer.eventCount)
+	require.Equal(t, "chatcmpl-2", observer.lastID)
+	require.True(t, observer.closed)
 }
 
 func TestObservedSSEStream_ParsesCRLFBufferedEventsOnClose(t *testing.T) {
@@ -270,24 +201,13 @@ func TestObservedSSEStream_ParsesCRLFBufferedEventsOnClose(t *testing.T) {
 	stream := NewObservedSSEStream(io.NopCloser(strings.NewReader(streamData)), observer)
 
 	data, err := io.ReadAll(stream)
-	if err != nil {
-		t.Fatalf("ReadAll error: %v", err)
-	}
-	if string(data) != streamData {
-		t.Fatalf("stream passthrough mismatch")
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
-	if observer.eventCount != 2 {
-		t.Fatalf("eventCount = %d, want 2", observer.eventCount)
-	}
-	if observer.lastID != "chatcmpl-2" {
-		t.Fatalf("lastID = %q, want chatcmpl-2", observer.lastID)
-	}
-	if !observer.closed {
-		t.Fatal("observer was not closed")
-	}
+	require.NoError(t, err)
+	require.Equal(t, streamData, string(data))
+	err = stream.Close()
+	require.NoError(t, err)
+	require.Equal(t, 2, observer.eventCount)
+	require.Equal(t, "chatcmpl-2", observer.lastID)
+	require.True(t, observer.closed)
 }
 
 func TestJoinedSuffix(t *testing.T) {
@@ -329,9 +249,7 @@ func TestJoinedSuffix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := joinedSuffix(tt.prefix, tt.data, tt.n)
-			if !bytes.Equal(got, tt.want) {
-				t.Fatalf("joinedSuffix() = %q, want %q", got, tt.want)
-			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -354,19 +272,13 @@ func TestObservedSSEStreamSkipsDecodingWhenNoObserverWantsEvent(t *testing.T) {
 		io.NopCloser(strings.NewReader("data: {\"a\":1}\n\ndata: {\"b\":2}\n\ndata: [DONE]\n\n")),
 		uninterested,
 	)
-	if _, err := io.Copy(io.Discard, stream); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-
-	if got := uninterested.eventCount; got != 0 {
-		t.Fatalf("uninterested observer received %d events, want 0", got)
-	}
-	if !uninterested.closed {
-		t.Fatal("observer OnStreamClose not called")
-	}
+	_, err := io.Copy(io.Discard, stream)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
+	got := uninterested.eventCount
+	require.Equal(t, 0, got)
+	require.True(t, uninterested.closed)
 }
 
 func TestObservedSSEStreamDeliversToAllObserversWhenAnyWantsEvent(t *testing.T) {
@@ -382,12 +294,10 @@ func TestObservedSSEStreamDeliversToAllObserversWhenAnyWantsEvent(t *testing.T) 
 		)),
 		uninterested, selective, plain,
 	)
-	if _, err := io.Copy(io.Discard, stream); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
+	_, err := io.Copy(io.Discard, stream)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
 
 	// The unfiltered observer forces decoding of every event, so all three
 	// observers see both payloads: filters gate decoding, not delivery.
@@ -396,9 +306,8 @@ func TestObservedSSEStreamDeliversToAllObserversWhenAnyWantsEvent(t *testing.T) 
 		"selective":    &selective.trackingObserver,
 		"plain":        plain,
 	} {
-		if got := observer.eventCount; got != 2 {
-			t.Fatalf("%s observer received %d events, want 2", name, got)
-		}
+		got := observer.eventCount
+		require.Equal(t, 2, got, "%s observer", name)
 	}
 }
 
@@ -413,17 +322,12 @@ func TestObservedSSEStreamDecodesOnlyWantedEventsForFilteredObservers(t *testing
 		)),
 		selective,
 	)
-	if _, err := io.Copy(io.Discard, stream); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	if err := stream.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-
-	if got := selective.eventCount; got != 1 {
-		t.Fatalf("selective observer received %d events, want only the usage event", got)
-	}
-	if _, ok := selective.lastPayload["usage"]; !ok {
-		t.Fatalf("delivered event = %#v, want the usage payload", selective.lastPayload)
-	}
+	_, err := io.Copy(io.Discard, stream)
+	require.NoError(t, err)
+	err = stream.Close()
+	require.NoError(t, err)
+	got := selective.eventCount
+	require.Equal(t, 1, got)
+	_, ok := selective.lastPayload["usage"]
+	require.True(t, ok, "delivered event = %#v, want the usage payload", selective.lastPayload)
 }
