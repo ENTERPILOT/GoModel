@@ -85,10 +85,12 @@ attention as changes to `go.sum`.
 
 ## Amendment (2026-09): test jobs embed a stub
 
-The CI test jobs (unit shards, e2e, integration, race) no longer wait for the
-`frontend` job. They run `make frontend-stub`, which writes a placeholder
-`static/dist` with an `index.html` that references hashed assets, and embed
-that. The three tests that read the bundle only check that shape. Removing the
+The CI test jobs (unit, e2e, integration) no longer wait for the `frontend`
+job. They run `make frontend-stub`, which copies `tools/fixtures/dashboard-stub`
+into `static/dist`, and embed that. The stub's `index.html` references
+`assets/index-stub.js` and `assets/index-stub.css`; the three tests that read
+the bundle only check for an `index-*.js` and `index-*.css` reference that
+resolves, so the stub satisfies them. Removing the
 dependency took the dashboard build off the critical path of every test job.
 
 The Build job, the Docker image, and the release workflow still download the
