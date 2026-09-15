@@ -6,10 +6,20 @@ linters:
     - govet
     - ineffassign
     - staticcheck
+    - testifylint
     - unused
   settings:
     dupl:
       threshold: 100
+    testifylint:
+      enable-all: true
+      disable:
+        # Exact byte comparisons of JSON are intentional: the gateway preserves
+        # unknown fields and key order, which JSONEq would stop checking.
+        - encoded-compare
+        # Exact float literals in tests are intentional; InDelta would hide
+        # real mismatches.
+        - float-compare
   exclusions:
     rules:
       - linters:

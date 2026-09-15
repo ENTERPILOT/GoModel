@@ -100,9 +100,7 @@ func TestOpenAIReplayListModels(t *testing.T) {
 }
 
 func TestOpenAIReplayResponses(t *testing.T) {
-	if !goldenFileExists(t, "openai/responses.json") {
-		t.Fatalf("missing golden file openai/responses.json; run `make record-api` to create/update contract fixtures")
-	}
+	require.True(t, goldenFileExists(t, "openai/responses.json"), "missing golden file openai/responses.json; run `make record-api` to create/update contract fixtures")
 
 	provider := newOpenAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): jsonFixtureRoute(t, "openai/responses.json"),
@@ -119,9 +117,7 @@ func TestOpenAIReplayResponses(t *testing.T) {
 }
 
 func TestOpenAIReplayStreamResponses(t *testing.T) {
-	if !goldenFileExists(t, "openai/responses_stream.txt") {
-		t.Fatalf("missing golden file openai/responses_stream.txt; run `make record-api` to create/update contract fixtures")
-	}
+	require.True(t, goldenFileExists(t, "openai/responses_stream.txt"), "missing golden file openai/responses_stream.txt; run `make record-api` to create/update contract fixtures")
 
 	provider := newOpenAIReplayProvider(t, map[string]replayRoute{
 		replayKey(http.MethodPost, "/responses"): sseFixtureRoute(t, "openai/responses_stream.txt"),
@@ -136,7 +132,6 @@ func TestOpenAIReplayStreamResponses(t *testing.T) {
 	raw := readAllStream(t, stream)
 	events := parseResponsesStream(t, raw)
 	require.NotEmpty(t, events)
-
 	require.True(t, hasResponsesEvent(events, "response.created"))
 	require.True(t, hasResponsesEvent(events, "response.output_text.delta"))
 	require.True(t, hasResponsesEvent(events, "response.completed"))
