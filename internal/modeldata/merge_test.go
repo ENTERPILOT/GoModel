@@ -4,34 +4,30 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMergeMetadata_BothNil(t *testing.T) {
-	if got := MergeMetadata(nil, nil); got != nil {
-		t.Errorf("got %+v, want nil", got)
-	}
+	got := MergeMetadata(nil, nil)
+	assert.Nil(t, got)
 }
 
 func TestMergeMetadata_NilOverride(t *testing.T) {
 	base := &core.ModelMetadata{DisplayName: "Base", ContextWindow: new(1024)}
 	got := MergeMetadata(base, nil)
-	if got == nil || got.DisplayName != "Base" || *got.ContextWindow != 1024 {
-		t.Errorf("got %+v", got)
-	}
-	if got == base {
-		t.Error("expected a clone, got same pointer")
-	}
+	require.NotNil(t, got)
+	assert.Equal(t, "Base", got.DisplayName)
+	assert.Equal(t, 1024, *got.ContextWindow)
+	assert.NotSame(t, base, got)
 }
 
 func TestMergeMetadata_NilBase(t *testing.T) {
 	override := &core.ModelMetadata{DisplayName: "Override"}
 	got := MergeMetadata(nil, override)
-	if got == nil || got.DisplayName != "Override" {
-		t.Errorf("got %+v", got)
-	}
-	if got == override {
-		t.Error("expected a clone, got same pointer")
-	}
+	require.NotNil(t, got)
+	assert.Equal(t, "Override", got.DisplayName)
+	assert.NotSame(t, override, got)
 }
 
 func TestMergeMetadata_OverrideWinsPerField(t *testing.T) {
@@ -50,30 +46,18 @@ func TestMergeMetadata_OverrideWinsPerField(t *testing.T) {
 		Capabilities:  map[string]bool{"tools": true},
 	}
 	got := MergeMetadata(base, override)
-	if got.DisplayName != "Overridden" {
-		t.Errorf("DisplayName = %q, want Overridden", got.DisplayName)
-	}
-	if got.Description != "base desc" {
-		t.Errorf("Description = %q, want base desc (preserved)", got.Description)
-	}
-	if got.ContextWindow == nil || *got.ContextWindow != 131072 {
-		t.Errorf("ContextWindow = %v, want 131072", got.ContextWindow)
-	}
-	if got.MaxOutputTokens == nil || *got.MaxOutputTokens != 256 {
-		t.Errorf("MaxOutputTokens = %v, want 256 (preserved)", got.MaxOutputTokens)
-	}
-	if len(got.Modes) != 1 || got.Modes[0] != "chat" {
-		t.Errorf("Modes = %v, want [chat] (preserved)", got.Modes)
-	}
-	if !got.Capabilities["tools"] {
-		t.Errorf("Capabilities[tools] = false, want true (override)")
-	}
-	if !got.Capabilities["vision"] {
-		t.Errorf("Capabilities[vision] = false, want true (preserved)")
-	}
-	if got.Pricing == nil || got.Pricing.Currency != "USD" {
-		t.Errorf("Pricing = %+v, want USD (preserved)", got.Pricing)
-	}
+	assert.Equal(t, "Overridden", got.DisplayName)
+	assert.Equal(t, "base desc", got.Description)
+	require.NotNil(t, got.ContextWindow)
+	assert.Equal(t, 131072, *got.ContextWindow)
+	require.NotNil(t, got.MaxOutputTokens)
+	assert.Equal(t, 256, *got.MaxOutputTokens)
+	require.Len(t, got.Modes, 1)
+	assert.Equal(t, "chat", got.Modes[0])
+	assert.True(t, got.Capabilities["tools"])
+	assert.True(t, got.Capabilities["vision"])
+	require.NotNil(t, got.Pricing)
+	assert.Equal(t, "USD", got.Pricing.Currency)
 }
 
 func TestMergeMetadata_DoesNotMutateInputs(t *testing.T) {
@@ -88,9 +72,7 @@ func TestMergeMetadata_DoesNotMutateInputs(t *testing.T) {
 	if base.Capabilities["tools"] {
 		t.Error("base.Capabilities[tools] mutated")
 	}
-	if !override.Capabilities["tools"] {
-		t.Error("override.Capabilities[tools] mutated")
-	}
+	assert.True(t, override.Capabilities["tools"])
 }
 
 func TestMergeMetadata_PassthroughDoesNotAlias(t *testing.T) {
@@ -104,27 +86,17 @@ func TestMergeMetadata_PassthroughDoesNotAlias(t *testing.T) {
 	}
 
 	got := MergeMetadata(base, nil)
-	if got == base {
-		t.Fatal("expected a clone, got same pointer")
-	}
+	require.NotSame(t, base, got)
 
 	got.Modes[0] = "mutated"
 	got.Capabilities["tools"] = false
 	*got.ContextWindow = 0
 	got.Pricing.Currency = "EUR"
 
-	if base.Modes[0] != "chat" {
-		t.Errorf("base.Modes mutated through clone: %v", base.Modes)
-	}
-	if !base.Capabilities["tools"] {
-		t.Error("base.Capabilities mutated through clone")
-	}
-	if *base.ContextWindow != 4096 {
-		t.Errorf("base.ContextWindow mutated through clone: %d", *base.ContextWindow)
-	}
-	if base.Pricing.Currency != "USD" {
-		t.Errorf("base.Pricing mutated through clone: %q", base.Pricing.Currency)
-	}
+	assert.Equal(t, "chat", base.Modes[0], "base.Modes mutated through clone: %v", base.Modes)
+	assert.True(t, base.Capabilities["tools"])
+	assert.Equal(t, 4096, *base.ContextWindow)
+	assert.Equal(t, "USD", base.Pricing.Currency)
 }
 
 func TestMergeMetadata_MergedResultDoesNotAliasBase(t *testing.T) {
@@ -146,18 +118,10 @@ func TestMergeMetadata_MergedResultDoesNotAliasBase(t *testing.T) {
 	*got.ContextWindow = 0
 	got.Pricing.Currency = "EUR"
 
-	if base.Modes[0] != "chat" {
-		t.Errorf("base.Modes aliased: %v", base.Modes)
-	}
-	if !base.Capabilities["tools"] {
-		t.Error("base.Capabilities aliased")
-	}
-	if *base.ContextWindow != 4096 {
-		t.Errorf("base.ContextWindow aliased: %d", *base.ContextWindow)
-	}
-	if base.Pricing.Currency != "USD" {
-		t.Errorf("base.Pricing aliased: %q", base.Pricing.Currency)
-	}
+	assert.Equal(t, "chat", base.Modes[0], "base.Modes aliased: %v", base.Modes)
+	assert.True(t, base.Capabilities["tools"])
+	assert.Equal(t, 4096, *base.ContextWindow)
+	assert.Equal(t, "USD", base.Pricing.Currency)
 }
 
 func TestMergeMetadata_OverrideRankingsDoNotAlias(t *testing.T) {
@@ -184,18 +148,10 @@ func TestMergeMetadata_OverrideRankingsDoNotAlias(t *testing.T) {
 	*got.Rankings["base-only"].Elo = 0
 	*got.Rankings["base-only"].Rank = 0
 
-	if *override.Rankings["overridden"].Elo != 2000.0 {
-		t.Errorf("override.Rankings.Elo mutated: %v", *override.Rankings["overridden"].Elo)
-	}
-	if *override.Rankings["overridden"].Rank != 1 {
-		t.Errorf("override.Rankings.Rank mutated: %v", *override.Rankings["overridden"].Rank)
-	}
-	if *base.Rankings["base-only"].Elo != 1500.0 {
-		t.Errorf("base.Rankings.Elo mutated: %v", *base.Rankings["base-only"].Elo)
-	}
-	if *base.Rankings["base-only"].Rank != 3 {
-		t.Errorf("base.Rankings.Rank mutated: %v", *base.Rankings["base-only"].Rank)
-	}
+	assert.Equal(t, 2000.0, *override.Rankings["overridden"].Elo)
+	assert.Equal(t, 1, *override.Rankings["overridden"].Rank)
+	assert.Equal(t, 1500.0, *base.Rankings["base-only"].Elo)
+	assert.Equal(t, 3, *base.Rankings["base-only"].Rank)
 }
 
 func TestMergeMetadata_OverridePricingReplaces(t *testing.T) {
@@ -208,11 +164,10 @@ func TestMergeMetadata_OverridePricingReplaces(t *testing.T) {
 		Pricing: &core.ModelPricing{Currency: "USD", InputPerMtok: &overPrice},
 	}
 	got := MergeMetadata(base, override)
-	if got.Pricing == nil || got.Pricing.InputPerMtok == nil || *got.Pricing.InputPerMtok != 0.0 {
-		t.Errorf("Pricing = %+v", got.Pricing)
-	}
+	require.NotNil(t, got.Pricing)
+	require.NotNil(t, got.Pricing.InputPerMtok)
+	assert.Equal(t, 0.0, *got.Pricing.InputPerMtok)
+
 	// Ensure we didn't mutate the override's pricing pointer into base's or vice versa.
-	if got.Pricing == override.Pricing {
-		t.Error("expected a clone of override.Pricing, got same pointer")
-	}
+	assert.NotSame(t, override.Pricing, got.Pricing)
 }

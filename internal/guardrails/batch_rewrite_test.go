@@ -2,11 +2,10 @@ package guardrails
 
 import (
 	"encoding/json"
-	"errors"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRewriteGuardedChatBatchBody(t *testing.T) {
@@ -19,9 +18,8 @@ func TestRewriteGuardedChatBatchBody(t *testing.T) {
 
 	originalBody := func(req *core.ChatRequest) json.RawMessage {
 		body, err := json.Marshal(req)
-		if err != nil {
-			t.Fatalf("marshal helper: %v", err)
-		}
+		require.NoError(t, err)
+
 		return body
 	}
 
@@ -83,24 +81,17 @@ func TestRewriteGuardedChatBatchBody(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			body, err := rewriteGuardedChatBatchBody(tt.originalBody(tt.original), tt.original, tt.modified)
 			if tt.wantErrIs != "" {
-				if err == nil {
-					t.Fatalf("expected error type %q, got nil", tt.wantErrIs)
-				}
+				require.Error(t, err)
+
 				var gwErr *core.GatewayError
-				if !errors.As(err, &gwErr) {
-					t.Fatalf("expected *core.GatewayError, got %T: %v", err, err)
-				}
-				if gwErr.Type != tt.wantErrIs {
-					t.Fatalf("expected error type %q, got %q", tt.wantErrIs, gwErr.Type)
-				}
+				require.ErrorAs(t, err, &gwErr)
+				require.Equal(t, tt.wantErrIs, gwErr.Type)
+
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if !strings.Contains(string(body), tt.wantBodyHas) {
-				t.Fatalf("expected body to contain %q, got %s", tt.wantBodyHas, body)
-			}
+			require.NoError(t, err)
+			require.Contains(t, string(body), tt.wantBodyHas, "expected body to contain %q, got %s", tt.wantBodyHas, body)
+
 		})
 	}
 }

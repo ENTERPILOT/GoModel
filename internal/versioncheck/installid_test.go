@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // useTempDataDir points platformdir's project-local data directory at a fresh
@@ -16,18 +18,17 @@ import (
 func useTempDataDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, "data"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	err := os.Mkdir(filepath.Join(dir, "data"), 0o755)
+	require.NoError(t, err)
+
 	t.Chdir(dir)
 	return filepath.Join(dir, "data", installIDFile)
 }
 
 func writeFile(t *testing.T, path, id string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(id+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	err := os.WriteFile(path, []byte(id+"\n"), 0o600)
+	require.NoError(t, err)
 }
 
 func readFile(t *testing.T, path string) string {
@@ -104,23 +105,17 @@ func TestResolveInstallIDGeneratesAndPersistsEverywhere(t *testing.T) {
 
 	id, source := resolveInstallID(context.Background(), store, "")
 
-	if source != SourceGenerated {
-		t.Fatalf("source = %q, want %q", source, SourceGenerated)
-	}
-	if _, err := uuid.Parse(id); err != nil {
-		t.Fatalf("id %q is not a UUID: %v", id, err)
-	}
-	if got := store.value(InstallIDKey); got != id {
-		t.Errorf("database holds %q, want %q", got, id)
-	}
-	if got := readFile(t, path); got != id+"\n" {
-		t.Errorf("file holds %q, want %q", got, id+"\n")
-	}
+	require.Equal(t, SourceGenerated, source)
+	_, err := uuid.Parse(id)
+	require.NoError(t, err, "id %q is not a UUID: %v", id, err)
+	got := store.value(InstallIDKey)
+	assert.Equal(t, id, got)
+	got = readFile(t, path)
+	assert.Equal(t, id+"\n", got)
 
 	again, source := resolveInstallID(context.Background(), store, "")
-	if again != id || source != SourceDatabase {
-		t.Errorf("second resolve = %q (%s), want %q (%s)", again, source, id, SourceDatabase)
-	}
+	assert.Equal(t, id, again)
+	assert.Equal(t, SourceDatabase, source)
 }
 
 func TestResolveInstallIDMigratesExistingFileToDatabaseUnchanged(t *testing.T) {
@@ -130,12 +125,10 @@ func TestResolveInstallIDMigratesExistingFileToDatabaseUnchanged(t *testing.T) {
 
 	id, source := resolveInstallID(context.Background(), store, "secret")
 
-	if id != existingID || source != SourceFile {
-		t.Fatalf("resolve = %q (%s), want the file's id from %s", id, source, SourceFile)
-	}
-	if got := store.value(InstallIDKey); got != id {
-		t.Errorf("database holds %q after migration, want %q", got, id)
-	}
+	require.Equal(t, existingID, id)
+	require.Equal(t, SourceFile, source)
+	got := store.value(InstallIDKey)
+	assert.Equal(t, id, got)
 }
 
 func TestResolveInstallIDDatabaseWinsOverRegeneratedFile(t *testing.T) {
@@ -146,12 +139,10 @@ func TestResolveInstallIDDatabaseWinsOverRegeneratedFile(t *testing.T) {
 
 	id, source := resolveInstallID(context.Background(), store, "")
 
-	if id != existingID || source != SourceDatabase {
-		t.Fatalf("resolve = %q (%s), want the database's id", id, source)
-	}
-	if got := readFile(t, path); got != id+"\n" {
-		t.Errorf("file not restored from database: %q", got)
-	}
+	require.Equal(t, existingID, id)
+	require.Equal(t, SourceDatabase, source)
+	got := readFile(t, path)
+	assert.Equal(t, id+"\n", got)
 }
 
 func TestResolveInstallIDKeepsFileWhenDatabaseErrors(t *testing.T) {
@@ -162,12 +153,9 @@ func TestResolveInstallIDKeepsFileWhenDatabaseErrors(t *testing.T) {
 
 	id, source := resolveInstallID(context.Background(), store, "secret")
 
-	if id != existingID || source != SourceFile {
-		t.Fatalf("resolve = %q (%s), want the file's id; a failing store must never mint a new one", id, source)
-	}
-	if store.sets != 0 {
-		t.Errorf("wrote to a failing store %d times", store.sets)
-	}
+	require.Equal(t, existingID, id)
+	require.Equal(t, SourceFile, source)
+	assert.Equal(t, 0, store.sets)
 }
 
 func TestResolveInstallIDKeepsFileWhenDatabaseWriteFails(t *testing.T) {
@@ -176,18 +164,14 @@ func TestResolveInstallIDKeepsFileWhenDatabaseWriteFails(t *testing.T) {
 	store.fail(nil, errors.New("read-only transaction"))
 
 	id, source := resolveInstallID(context.Background(), store, "")
-	if source != SourceGenerated {
-		t.Fatalf("source = %q, want %q", source, SourceGenerated)
-	}
-	if got := readFile(t, path); got != id+"\n" {
-		t.Fatalf("file holds %q after a failed database write, want %q", got, id)
-	}
+	require.Equal(t, SourceGenerated, source)
+	got := readFile(t, path)
+	require.Equal(t, id+"\n", got, "file holds %q after a failed database write, want %q", got, id)
 
 	// The file is what survives; a later start without the database reads it.
 	again, source := resolveInstallID(context.Background(), nil, "")
-	if again != id || source != SourceFile {
-		t.Errorf("later resolve = %q (%s), want %q (%s)", again, source, id, SourceFile)
-	}
+	assert.Equal(t, id, again)
+	assert.Equal(t, SourceFile, source)
 }
 
 func TestResolveInstallIDNeverAdoptsBlankDatabaseValue(t *testing.T) {
@@ -200,9 +184,9 @@ func TestResolveInstallIDNeverAdoptsBlankDatabaseValue(t *testing.T) {
 
 	id, source := resolveInstallID(context.Background(), store, "secret")
 
-	if id == "" || id == " " || source != SourceDerived {
-		t.Fatalf("resolve = %q (%s), want the derived candidate", id, source)
-	}
+	require.NotEmpty(t, id)
+	require.NotEqual(t, " ", id)
+	require.Equal(t, SourceDerived, source)
 }
 
 func TestIdentityRecoversDatabaseIDAfterOutage(t *testing.T) {
@@ -215,21 +199,17 @@ func TestIdentityRecoversDatabaseIDAfterOutage(t *testing.T) {
 	// No file, database down: a provisional id is the best available, and it
 	// must stay the same provisional id while the outage lasts.
 	provisional, source := identity.Resolve(context.Background())
-	if source != SourceDerived || provisional == existingID {
-		t.Fatalf("during outage: %q (%s), want a derived provisional id", provisional, source)
-	}
-	if again := identity.ID(context.Background()); again != provisional {
-		t.Fatalf("provisional id changed during outage: %q then %q", provisional, again)
-	}
+	require.Equal(t, SourceDerived, source)
+	require.NotEqual(t, existingID, provisional)
+	again := identity.ID(context.Background())
+	require.Equal(t, provisional, again)
 
 	store.fail(nil, nil)
 	id, source := identity.Resolve(context.Background())
-	if id != existingID || source != SourceDatabase {
-		t.Fatalf("after outage: %q (%s), want the database's id", id, source)
-	}
-	if got := store.value(InstallIDKey); got != existingID {
-		t.Errorf("database overwritten with the provisional id: %q", got)
-	}
+	require.Equal(t, existingID, id)
+	require.Equal(t, SourceDatabase, source)
+	got := store.value(InstallIDKey)
+	assert.Equal(t, existingID, got)
 }
 
 func TestIdentityConvergesConcurrentFirstStarts(t *testing.T) {
@@ -251,9 +231,7 @@ func TestIdentityConvergesConcurrentFirstStarts(t *testing.T) {
 
 	winner := store.value(InstallIDKey)
 	for r, id := range ids {
-		if id != winner {
-			t.Errorf("replica %d kept %q, database holds %q", r, id, winner)
-		}
+		assert.Equal(t, winner, id, "replica %d kept %q, database holds %q", r, id, winner)
 	}
 }
 
@@ -261,40 +239,29 @@ func TestResolveInstallIDDerivesFromSecretWhenNothingStored(t *testing.T) {
 	useTempDataDir(t)
 
 	first, source := resolveInstallID(context.Background(), nil, "operator-secret")
-	if source != SourceDerived {
-		t.Fatalf("source = %q, want %q", source, SourceDerived)
-	}
-	if _, err := uuid.Parse(first); err != nil {
-		t.Fatalf("derived id %q is not a UUID: %v", first, err)
-	}
+	require.Equal(t, SourceDerived, source)
+	_, err := uuid.Parse(first)
+	require.NoError(t, err, "derived id %q is not a UUID: %v", first, err)
 
 	// A recreated container: no file, same secret, same id.
 	useTempDataDir(t)
 	second, _ := resolveInstallID(context.Background(), nil, "operator-secret")
-	if second != first {
-		t.Errorf("same secret derived %q then %q", first, second)
-	}
+	assert.Equal(t, first, second)
 
 	useTempDataDir(t)
 	other, _ := resolveInstallID(context.Background(), nil, "another-secret")
-	if other == first {
-		t.Error("different secrets derived the same id")
-	}
+	assert.NotEqual(t, first, other)
 }
 
 func TestResolveInstallIDWithoutStoreUsesFile(t *testing.T) {
 	path := useTempDataDir(t)
 
 	id, source := resolveInstallID(context.Background(), nil, "")
-	if source != SourceGenerated {
-		t.Fatalf("source = %q, want %q", source, SourceGenerated)
-	}
-	if got := readFile(t, path); got != id+"\n" {
-		t.Fatalf("file holds %q, want %q", got, id)
-	}
+	require.Equal(t, SourceGenerated, source)
+	got := readFile(t, path)
+	require.Equal(t, id+"\n", got, "file holds %q, want %q", got, id)
 
 	again, source := resolveInstallID(context.Background(), nil, "")
-	if again != id || source != SourceFile {
-		t.Errorf("second resolve = %q (%s), want %q (%s)", again, source, id, SourceFile)
-	}
+	assert.Equal(t, id, again)
+	assert.Equal(t, SourceFile, source)
 }

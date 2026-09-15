@@ -7,6 +7,8 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // A configuration built in code (tests, embedders) skips config.Load, so
@@ -22,9 +24,8 @@ func TestPluginsEnabled_HonoursGuardrailsWithoutLoad(t *testing.T) {
 		{"plugins", &config.Config{Plugins: config.PluginsConfig{Enabled: true}}, true},
 		{"guardrails", &config.Config{Guardrails: config.GuardrailsConfig{Enabled: true}}, true},
 	} {
-		if got := pluginsEnabled(tt.cfg); got != tt.want {
-			t.Errorf("%s: pluginsEnabled = %v, want %v", tt.name, got, tt.want)
-		}
+		got := pluginsEnabled(tt.cfg)
+		assert.Equal(t, tt.want, got, "%s: pluginsEnabled = %v, want %v", tt.name, got, tt.want)
 	}
 }
 
@@ -54,24 +55,22 @@ func TestNew_PluginSystemFlag(t *testing.T) {
 				t.Setenv(key, value)
 			}
 			loaded, err := config.Load()
-			if err != nil {
-				t.Fatalf("config.Load: %v", err)
-			}
+			require.NoError(t, err)
+
 			ctx := context.Background()
 			app, err := New(ctx, Config{AppConfig: loaded, Factory: providers.NewProviderFactory()})
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			require.NoError(t, err)
+
 			defer func() {
-				if err := app.Shutdown(ctx); err != nil {
-					t.Errorf("Shutdown: %v", err)
-				}
+				err := app.Shutdown(ctx)
+				assert.NoError(t, err)
+
 			}()
 			got := app.pluginCatalog != nil
-			if got != tt.want || (app.routeStrategies != nil) != tt.want || (app.guardrails != nil) != tt.want {
-				t.Fatalf("catalog=%v resolver=%v guardrails=%v, want all %v",
-					app.pluginCatalog != nil, app.routeStrategies != nil, app.guardrails != nil, tt.want)
-			}
+			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.want, app.routeStrategies != nil)
+			require.Equal(t, tt.want, app.guardrails != nil, "catalog=%v resolver=%v guardrails=%v, want all %v", app.pluginCatalog != nil, app.routeStrategies != nil, app.guardrails != nil, tt.want)
+
 			if tt.want && app.guardrails.Service == nil {
 				t.Fatal("guardrails service missing with the plugin system on")
 			}

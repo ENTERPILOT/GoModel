@@ -8,27 +8,23 @@ import (
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewEmbedder_EmptyProvider(t *testing.T) {
 	_, err := NewEmbedder(config.EmbedderConfig{}, map[string]config.RawProviderConfig{})
-	if err == nil {
-		t.Fatal("expected error for empty provider")
-	}
+	require.Error(t, err)
 }
 
 func TestNewEmbedder_LocalRejected(t *testing.T) {
 	_, err := NewEmbedder(config.EmbedderConfig{Provider: "local"}, map[string]config.RawProviderConfig{"local": {}})
-	if err == nil {
-		t.Fatal("expected error for local provider")
-	}
+	require.Error(t, err)
 }
 
 func TestNewEmbedder_UnknownProvider(t *testing.T) {
 	_, err := NewEmbedder(config.EmbedderConfig{Provider: "nonexistent-provider"}, map[string]config.RawProviderConfig{})
-	if err == nil {
-		t.Fatal("expected error for unknown provider")
-	}
+	require.Error(t, err)
 }
 
 func TestNewEmbedder_APIEmbedder(t *testing.T) {
@@ -43,17 +39,12 @@ func TestNewEmbedder_APIEmbedder(t *testing.T) {
 		Provider: "openai",
 		Model:    "text-embedding-3-small",
 	}, rawProviders)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
+	require.NoError(t, err)
+
 	defer emb.Close()
 	a, ok := emb.(*apiEmbedder)
-	if !ok {
-		t.Fatalf("expected *apiEmbedder, got %T", emb)
-	}
-	if a.endpointURL != "https://api.openai.com/v1/embeddings" {
-		t.Fatalf("endpointURL = %q", a.endpointURL)
-	}
+	require.True(t, ok, "expected *apiEmbedder, got %T", emb)
+	require.Equal(t, "https://api.openai.com/v1/embeddings", a.endpointURL)
 }
 
 func TestAPIEmbedder_SessionStickyKeys(t *testing.T) {
@@ -85,29 +76,26 @@ func TestAPIEmbedder_SessionStickyKeys(t *testing.T) {
 					SessionStickyKeys: tt.stickySetting,
 				},
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
+
 			defer emb.Close()
 
 			ctx := core.WithSessionID(context.Background(), "same-session")
 			for range 3 {
-				if _, err := emb.Embed(ctx, "hello"); err != nil {
-					t.Fatal(err)
-				}
+				_, err := emb.Embed(ctx, "hello")
+				require.NoError(t, err)
 			}
 			got := []string{<-seen, <-seen, <-seen}
 			if tt.wantSticky {
-				if got[0] == "" || got[1] != got[0] || got[2] != got[0] {
-					t.Fatalf("authorization sequence = %v, want one sticky key", got)
-				}
+				require.NotEmpty(t, got[0])
+				require.Equal(t, got[0], got[1])
+				require.Equal(t, got[0], got[2], "authorization sequence = %v, want one sticky key", got)
+
 				return
 			}
 			want := []string{"Bearer key-1", "Bearer key-2", "Bearer key-1"}
 			for i := range want {
-				if got[i] != want[i] {
-					t.Fatalf("authorization sequence = %v, want %v", got, want)
-				}
+				require.Equal(t, want[i], got[i], "authorization sequence = %v, want %v", got, want)
 			}
 		})
 	}
@@ -126,21 +114,15 @@ func TestNewEmbedder_GeminiUsesProviderBaseURL(t *testing.T) {
 		Provider: "gemini",
 		Model:    "text-embedding-004",
 	}, rawProviders)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer emb.Close()
 	a, ok := emb.(*apiEmbedder)
-	if !ok {
-		t.Fatalf("expected *apiEmbedder, got %T", emb)
-	}
+	require.True(t, ok, "expected *apiEmbedder, got %T", emb)
+
 	wantURL := geminiOpenAICompat + "/v1/embeddings"
-	if a.endpointURL != wantURL {
-		t.Fatalf("endpointURL = %q, want %q", a.endpointURL, wantURL)
-	}
-	if a.model != "gemini-embedding-001" {
-		t.Fatalf("model = %q, want gemini-embedding-001 (text-embedding-* is not valid on Gemini OpenAI compat)", a.model)
-	}
+	require.Equal(t, wantURL, a.endpointURL)
+	require.Equal(t, "gemini-embedding-001", a.model)
 }
 
 func TestNewEmbedder_GeminiEmptyModelDefault(t *testing.T) {
@@ -152,31 +134,23 @@ func TestNewEmbedder_GeminiEmptyModelDefault(t *testing.T) {
 		},
 	}
 	emb, err := NewEmbedder(config.EmbedderConfig{Provider: "gemini", Model: ""}, rawProviders)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+
 	defer emb.Close()
 	a := emb.(*apiEmbedder)
-	if a.model != "gemini-embedding-001" {
-		t.Fatalf("model = %q", a.model)
-	}
+	require.Equal(t, "gemini-embedding-001", a.model)
 }
 
 func TestOpenAIEmbeddingsEndpointURL_BaseURLTrimAndJoin(t *testing.T) {
 	got, err := openAIEmbeddingsEndpointURL("https://example.com/custom/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "https://example.com/custom/v1/embeddings"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
+	require.NoError(t, err)
+	want := "https://example.com/custom/v1/embeddings"
+	require.Equal(t, want, got)
+
 	got2, err := openAIEmbeddingsEndpointURL("https://api.openai.com/v1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want2 := "https://api.openai.com/v1/embeddings"; got2 != want2 {
-		t.Fatalf("got %q, want %q", got2, want2)
-	}
+	require.NoError(t, err)
+	want2 := "https://api.openai.com/v1/embeddings"
+	require.Equal(t, want2, got2)
 }
 
 func TestAPIEmbedder_UsesProviderCredentials(t *testing.T) {
@@ -191,17 +165,12 @@ func TestAPIEmbedder_UsesProviderCredentials(t *testing.T) {
 		Provider: "groq",
 		Model:    "nomic-embed-text-v1_5",
 	}, rawProviders)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
+	require.NoError(t, err)
+
 	a, ok := emb.(*apiEmbedder)
-	if !ok {
-		t.Fatalf("expected *apiEmbedder, got %T", emb)
-	}
-	if got := a.keys.Primary(); got != "gsk-abc" {
-		t.Errorf("expected primary key gsk-abc, got %q", got)
-	}
-	if want := "https://api.groq.com/openai/v1/embeddings"; a.endpointURL != want {
-		t.Errorf("endpointURL = %q, want %q", a.endpointURL, want)
-	}
+	require.True(t, ok, "expected *apiEmbedder, got %T", emb)
+	got := a.keys.Primary()
+	assert.Equal(t, "gsk-abc", got)
+	want := "https://api.groq.com/openai/v1/embeddings"
+	assert.Equal(t, want, a.endpointURL)
 }

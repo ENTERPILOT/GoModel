@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/storage"
+	"github.com/stretchr/testify/require"
 )
 
 type testSetting struct {
@@ -125,9 +125,8 @@ func testService(setting ext.RuntimeSetting, store Store) *Service {
 func newTestStorage(t *testing.T) storage.Storage {
 	t.Helper()
 	backend, err := storage.NewSQLite(storage.SQLiteConfig{Path: filepath.Join(t.TempDir(), "settings.db")})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = backend.Close() })
 	return backend
 }
@@ -138,24 +137,20 @@ func TestServicePersistsAndRestoresSetting(t *testing.T) {
 
 	first := &testSetting{value: "high"}
 	service, err := New(ctx, backend, []ext.RuntimeSetting{first})
-	if err != nil {
-		t.Fatalf("create service: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = service.Close() })
 	updated, err := service.Update(ctx, "pro.compression.level", "medium")
-	if err != nil || updated.Value != "medium" {
-		t.Fatalf("update = %+v, %v", updated, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "medium", updated.Value, "update = %+v, %v", updated, err)
 
 	restarted := &testSetting{value: "high"}
 	reloaded, err := New(ctx, backend, []ext.RuntimeSetting{restarted})
-	if err != nil {
-		t.Fatalf("reload service: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = reloaded.Close() })
-	if got := reloaded.List()[0].Value; got != "medium" {
-		t.Fatalf("reloaded value = %q, want medium", got)
-	}
+	got := reloaded.List()[0].Value
+	require.Equal(t, "medium", got)
 }
 
 func TestServiceEnvironmentLockIgnoresStoredValue(t *testing.T) {
@@ -164,26 +159,20 @@ func TestServiceEnvironmentLockIgnoresStoredValue(t *testing.T) {
 
 	editable := &testSetting{value: "high"}
 	service, err := New(ctx, backend, []ext.RuntimeSetting{editable})
-	if err != nil {
-		t.Fatalf("create service: %v", err)
-	}
+	require.NoError(t, err)
+
 	editableService := service
 	t.Cleanup(func() { _ = editableService.Close() })
-	if _, err := service.Update(ctx, "pro.compression.level", "medium"); err != nil {
-		t.Fatalf("persist medium: %v", err)
-	}
+	_, err = service.Update(ctx, "pro.compression.level", "medium")
+	require.NoError(t, err)
 
 	locked := &testSetting{value: "none", locked: true}
 	service, err = New(ctx, backend, []ext.RuntimeSetting{locked})
-	if err != nil {
-		t.Fatalf("reload locked service: %v", err)
-	}
-	if got := service.List()[0].Value; got != "none" {
-		t.Fatalf("locked value = %q, want none", got)
-	}
-	if _, err := service.Update(ctx, "pro.compression.level", "high"); err != ErrLocked {
-		t.Fatalf("locked update error = %v, want ErrLocked", err)
-	}
+	require.NoError(t, err)
+	got := service.List()[0].Value
+	require.Equal(t, "none", got)
+	_, err = service.Update(ctx, "pro.compression.level", "high")
+	require.Equal(t, ErrLocked, err)
 }
 
 func TestServiceUpdateRollsBackWhenPersistenceFails(t *testing.T) {
@@ -192,15 +181,11 @@ func TestServiceUpdateRollsBackWhenPersistenceFails(t *testing.T) {
 	service := testService(setting, &stubStore{setErr: persistErr})
 
 	_, err := service.Update(context.Background(), "pro.compression.level", "medium")
-	if err != persistErr {
-		t.Fatalf("update error = %v, want %v", err, persistErr)
-	}
-	if got := setting.Descriptor().Value; got != "high" {
-		t.Fatalf("value after rollback = %q, want high", got)
-	}
-	if applies := setting.applyCount(); applies != 2 {
-		t.Fatalf("Apply calls = %d, want update and rollback", applies)
-	}
+	require.Equal(t, persistErr, err)
+	got := setting.Descriptor().Value
+	require.Equal(t, "high", got)
+	applies := setting.applyCount()
+	require.Equal(t, 2, applies)
 }
 
 func TestServiceSynchronizesChangedValuesAcrossInstances(t *testing.T) {
@@ -210,32 +195,25 @@ func TestServiceSynchronizesChangedValuesAcrossInstances(t *testing.T) {
 	first := &testSetting{value: "high"}
 	second := &testSetting{value: "high"}
 	writer, err := New(ctx, backend, []ext.RuntimeSetting{first})
-	if err != nil {
-		t.Fatalf("create writer service: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() { _ = writer.Close() })
 	peer, err := New(ctx, backend, []ext.RuntimeSetting{second})
-	if err != nil {
-		t.Fatalf("create peer service: %v", err)
-	}
-	t.Cleanup(func() { _ = peer.Close() })
+	require.NoError(t, err)
 
-	if _, err := writer.Update(ctx, "pro.compression.level", "medium"); err != nil {
-		t.Fatalf("writer update: %v", err)
-	}
-	if err := peer.sync(ctx); err != nil {
-		t.Fatalf("peer sync: %v", err)
-	}
-	if got := second.Descriptor().Value; got != "medium" {
-		t.Fatalf("peer value = %q, want medium", got)
-	}
+	t.Cleanup(func() { _ = peer.Close() })
+	_, err = writer.Update(ctx, "pro.compression.level", "medium")
+	require.NoError(t, err)
+	err = peer.sync(ctx)
+	require.NoError(t, err)
+	got := second.Descriptor().Value
+	require.Equal(t, "medium", got)
+
 	applies := second.applyCount()
-	if err := peer.sync(ctx); err != nil {
-		t.Fatalf("unchanged peer sync: %v", err)
-	}
-	if after := second.applyCount(); after != applies {
-		t.Fatalf("unchanged sync called Apply: before=%d after=%d", applies, after)
-	}
+	err = peer.sync(ctx)
+	require.NoError(t, err)
+	after := second.applyCount()
+	require.Equal(t, applies, after)
 }
 
 func TestServiceSyncContinuesAfterSettingFailures(t *testing.T) {
@@ -259,24 +237,21 @@ func TestServiceSyncContinuesAfterSettingFailures(t *testing.T) {
 	}
 
 	err := service.sync(context.Background())
-	if !errors.Is(err, getErr) || !errors.Is(err, applyErr) {
-		t.Fatalf("sync error = %v, want both read and apply errors", err)
-	}
-	if got := err.Error(); !strings.Contains(got, `"a.read"`) || !strings.Contains(got, `"b.apply"`) {
-		t.Fatalf("sync error = %q, want failing setting keys", got)
-	}
-	if got := success.Descriptor().Value; got != "medium" {
-		t.Fatalf("later setting value = %q, want medium", got)
-	}
+	require.ErrorIs(t, err, getErr)
+	require.ErrorIs(t, err, applyErr)
+	got := err.Error()
+	require.Contains(t, got, `"a.read"`)
+	require.Contains(t, got, `"b.apply"`)
+	got = success.Descriptor().Value
+	require.Equal(t, "medium", got)
 }
 
 func TestServiceRejectsEditableSettingWithoutOptions(t *testing.T) {
 	backend := newTestStorage(t)
 
 	empty := &optionlessSetting{testSetting: &testSetting{value: "high"}}
-	if _, err := New(context.Background(), backend, []ext.RuntimeSetting{empty}); err == nil {
-		t.Fatal("expected registration without options to fail")
-	}
+	_, err := New(context.Background(), backend, []ext.RuntimeSetting{empty})
+	require.Error(t, err)
 }
 
 type optionlessSetting struct{ testSetting *testSetting }
@@ -291,7 +266,6 @@ func (s *optionlessSetting) Apply(value string) error { return s.testSetting.App
 
 func TestNilServiceUpdateReturnsNotFound(t *testing.T) {
 	var service *Service
-	if _, err := service.Update(context.Background(), "missing", "high"); err != ErrNotFound {
-		t.Fatalf("nil service update error = %v, want ErrNotFound", err)
-	}
+	_, err := service.Update(context.Background(), "missing", "high")
+	require.Equal(t, ErrNotFound, err)
 }

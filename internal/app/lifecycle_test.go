@@ -3,12 +3,12 @@ package app
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/require"
 )
 
 // TestNewThenShutdown covers the whole lifecycle: every subsystem is built on
@@ -28,27 +28,20 @@ func TestNewThenShutdown(t *testing.T) {
 	t.Setenv("MCP_ENABLED", "false")
 
 	loaded, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctx := context.Background()
 	app, err := New(ctx, Config{
 		AppConfig: loaded,
 		Factory:   providers.NewProviderFactory(),
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	if err := app.Shutdown(ctx); err != nil {
-		t.Fatalf("Shutdown: %v", err)
-	}
-	// Shutdown is idempotent: the process may call it from both the signal
-	// handler and the normal exit path.
-	if err := app.Shutdown(ctx); err != nil {
-		t.Fatalf("second Shutdown: %v", err)
-	}
+	require.NoError(t, err)
+	err = app.Shutdown(ctx)
+	require.NoError(t, err)
+	err = // Shutdown is idempotent: the process may call it from both the signal
+		// handler and the normal exit path.
+		app.Shutdown(ctx)
+	require.NoError(t, err)
 }
 
 func TestFailedConstructionDoesNotRebindAuthenticationEventRecorder(t *testing.T) {
@@ -60,9 +53,8 @@ func TestFailedConstructionDoesNotRebindAuthenticationEventRecorder(t *testing.T
 	t.Setenv("MCP_ENABLED", "false")
 
 	loaded, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	require.NoError(t, err)
+
 	// Force a failure late in construction, after the replacement audit logger
 	// exists. This models a rejected reload while an older generation serves.
 	enabled := true
@@ -85,10 +77,6 @@ func TestFailedConstructionDoesNotRebindAuthenticationEventRecorder(t *testing.T
 		_ = application.Shutdown(context.Background())
 		t.Fatal("New succeeded with a missing semantic-cache embedder provider")
 	}
-	if !strings.Contains(err.Error(), "failed to initialize response cache") {
-		t.Fatalf("New failed before the intended late construction step: %v", err)
-	}
-	if authenticator.recorder != previous {
-		t.Fatal("failed construction replaced the still-serving generation's authentication event recorder")
-	}
+	require.Contains(t, err.Error(), "failed to initialize response cache")
+	require.Equal(t, previous, authenticator.recorder)
 }

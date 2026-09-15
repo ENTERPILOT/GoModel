@@ -4,13 +4,13 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestResolve_NilList(t *testing.T) {
 	meta := Resolve(nil, "openai", "gpt-4o")
-	if meta != nil {
-		t.Error("expected nil for nil list")
-	}
+	assert.Nil(t, meta)
 }
 
 func TestResolve_NoMatch(t *testing.T) {
@@ -19,9 +19,7 @@ func TestResolve_NoMatch(t *testing.T) {
 		ProviderModels: map[string]ProviderModelEntry{},
 	}
 	meta := Resolve(list, "openai", "nonexistent-model")
-	if meta != nil {
-		t.Error("expected nil for no match")
-	}
+	assert.Nil(t, meta)
 }
 
 func TestResolve_DirectModelMatch(t *testing.T) {
@@ -56,49 +54,27 @@ func TestResolve_DirectModelMatch(t *testing.T) {
 		return
 	}
 
-	if meta.DisplayName != "GPT-4o" {
-		t.Errorf("DisplayName = %s, want GPT-4o", meta.DisplayName)
-	}
-	if meta.Description != "Flagship model" {
-		t.Errorf("Description = %s, want 'Flagship model'", meta.Description)
-	}
-	if meta.Family != "gpt-4o" {
-		t.Errorf("Family = %s, want gpt-4o", meta.Family)
-	}
-	if len(meta.Modes) != 1 || meta.Modes[0] != "chat" {
-		t.Errorf("Modes = %v, want [chat]", meta.Modes)
-	}
-	if len(meta.Tags) != 2 {
-		t.Errorf("Tags len = %d, want 2", len(meta.Tags))
-	}
-	if *meta.ContextWindow != 128000 {
-		t.Errorf("ContextWindow = %d, want 128000", *meta.ContextWindow)
-	}
-	if *meta.MaxOutputTokens != 16384 {
-		t.Errorf("MaxOutputTokens = %d, want 16384", *meta.MaxOutputTokens)
-	}
-	if !meta.Capabilities["function_calling"] {
-		t.Error("expected function_calling capability")
-	}
+	assert.Equal(t, "GPT-4o", meta.DisplayName)
+	assert.Equal(t, "Flagship model", meta.Description)
+	assert.Equal(t, "gpt-4o", meta.Family)
+	require.Len(t, meta.Modes, 1)
+	assert.Equal(t, "chat", meta.Modes[0])
+	assert.Len(t, meta.Tags, 2)
+	assert.Equal(t, 128000, *meta.ContextWindow)
+	assert.Equal(t, 16384, *meta.MaxOutputTokens)
+	assert.True(t, meta.Capabilities["function_calling"])
+
 	if meta.Pricing == nil {
 		t.Fatal("expected non-nil pricing")
 		return
 	}
-	if meta.Pricing.Currency != "USD" {
-		t.Errorf("Currency = %s, want USD", meta.Pricing.Currency)
-	}
-	if *meta.Pricing.InputPerMtok != 2.50 {
-		t.Errorf("InputPerMtok = %f, want 2.50", *meta.Pricing.InputPerMtok)
-	}
-	if *meta.Pricing.OutputPerMtok != 10.00 {
-		t.Errorf("OutputPerMtok = %f, want 10.00", *meta.Pricing.OutputPerMtok)
-	}
-	if got := meta.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
-		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
-	}
-	if got := meta.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
-		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
-	}
+	assert.Equal(t, "USD", meta.Pricing.Currency)
+	assert.Equal(t, 2.50, *meta.Pricing.InputPerMtok)
+	assert.Equal(t, 10.00, *meta.Pricing.OutputPerMtok)
+	got := meta.PricingSources["input_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceModelRegistry, got)
+	got = meta.PricingSources["output_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceModelRegistry, got)
 }
 
 func TestResolve_ProviderModelOverride(t *testing.T) {
@@ -137,30 +113,21 @@ func TestResolve_ProviderModelOverride(t *testing.T) {
 	}
 
 	// Provider model should override context_window
-	if *meta.ContextWindow != 64000 {
-		t.Errorf("ContextWindow = %d, want 64000 (override)", *meta.ContextWindow)
-	}
+	assert.Equal(t, 64000, *meta.ContextWindow)
+
 	// max_output_tokens should come from base model (not overridden)
-	if *meta.MaxOutputTokens != 16384 {
-		t.Errorf("MaxOutputTokens = %d, want 16384 (base)", *meta.MaxOutputTokens)
-	}
+	assert.Equal(t, 16384, *meta.MaxOutputTokens)
+
 	// Pricing should be overridden
-	if *meta.Pricing.InputPerMtok != 5.00 {
-		t.Errorf("InputPerMtok = %f, want 5.00 (override)", *meta.Pricing.InputPerMtok)
-	}
-	if *meta.Pricing.OutputPerMtok != 15.00 {
-		t.Errorf("OutputPerMtok = %f, want 15.00 (override)", *meta.Pricing.OutputPerMtok)
-	}
-	if got := meta.PricingSources["input_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
-		t.Errorf("PricingSources[input_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
-	}
-	if got := meta.PricingSources["output_per_mtok"]; got != core.ModelPricingSourceModelRegistry {
-		t.Errorf("PricingSources[output_per_mtok] = %q, want %q", got, core.ModelPricingSourceModelRegistry)
-	}
+	assert.Equal(t, 5.00, *meta.Pricing.InputPerMtok)
+	assert.Equal(t, 15.00, *meta.Pricing.OutputPerMtok)
+	got := meta.PricingSources["input_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceModelRegistry, got)
+	got = meta.PricingSources["output_per_mtok"]
+	assert.Equal(t, core.ModelPricingSourceModelRegistry, got)
+
 	// DisplayName from base model
-	if meta.DisplayName != "GPT-4o" {
-		t.Errorf("DisplayName = %s, want GPT-4o (base)", meta.DisplayName)
-	}
+	assert.Equal(t, "GPT-4o", meta.DisplayName)
 }
 
 func TestResolve_MapsRankingsIntoMetadata(t *testing.T) {
@@ -187,18 +154,12 @@ func TestResolve_MapsRankingsIntoMetadata(t *testing.T) {
 		return
 	}
 	ranking, ok := meta.Rankings["chatbot_arena"]
-	if !ok {
-		t.Fatal("expected chatbot_arena ranking in metadata")
-	}
-	if ranking.Elo == nil || *ranking.Elo != 1287.0 {
-		t.Fatalf("ranking.Elo = %v, want 1287.0", ranking.Elo)
-	}
-	if ranking.Rank == nil || *ranking.Rank != 3 {
-		t.Fatalf("ranking.Rank = %v, want 3", ranking.Rank)
-	}
-	if ranking.AsOf != "2026-02-01" {
-		t.Fatalf("ranking.AsOf = %q, want %q", ranking.AsOf, "2026-02-01")
-	}
+	require.True(t, ok)
+	require.NotNil(t, ranking.Elo)
+	require.Equal(t, 1287.0, *ranking.Elo)
+	require.NotNil(t, ranking.Rank)
+	require.Equal(t, 3, *ranking.Rank)
+	require.Equal(t, "2026-02-01", ranking.AsOf)
 }
 
 func TestResolve_ProviderModelWithoutBaseModel(t *testing.T) {
@@ -224,12 +185,8 @@ func TestResolve_ProviderModelWithoutBaseModel(t *testing.T) {
 		return
 	}
 
-	if *meta.ContextWindow != 32000 {
-		t.Errorf("ContextWindow = %d, want 32000", *meta.ContextWindow)
-	}
-	if *meta.Pricing.InputPerMtok != 1.00 {
-		t.Errorf("InputPerMtok = %f, want 1.00", *meta.Pricing.InputPerMtok)
-	}
+	assert.Equal(t, 32000, *meta.ContextWindow)
+	assert.Equal(t, 1.00, *meta.Pricing.InputPerMtok)
 }
 
 func TestResolve_NilPricing(t *testing.T) {
@@ -248,9 +205,7 @@ func TestResolve_NilPricing(t *testing.T) {
 		t.Fatal("expected non-nil metadata")
 		return
 	}
-	if meta.Pricing != nil {
-		t.Error("expected nil pricing for model without pricing")
-	}
+	assert.Nil(t, meta.Pricing)
 }
 
 func TestResolve_SetsCategoriesFromModes(t *testing.T) {
@@ -293,13 +248,10 @@ func TestResolve_SetsCategoriesFromModes(t *testing.T) {
 				t.Fatal("expected non-nil metadata")
 				return
 			}
-			if len(meta.Categories) != len(tt.wantCats) {
-				t.Fatalf("Categories = %v, want %v", meta.Categories, tt.wantCats)
-			}
+			require.Equal(t, len(tt.wantCats), len(meta.Categories), "Categories = %v, want %v", meta.Categories, tt.wantCats)
+
 			for i, c := range meta.Categories {
-				if c != tt.wantCats[i] {
-					t.Errorf("Categories[%d] = %q, want %q", i, c, tt.wantCats[i])
-				}
+				assert.Equal(t, tt.wantCats[i], c, "Categories[%d] = %q, want %q", i, c, tt.wantCats[i])
 			}
 		})
 	}
@@ -351,9 +303,7 @@ func TestResolve_ThreeLayerMerge(t *testing.T) {
 		t.Fatal("expected non-nil metadata")
 		return
 	}
-	if *meta.MaxOutputTokens != 16384 {
-		t.Errorf("MaxOutputTokens = %d, want 16384 (base)", *meta.MaxOutputTokens)
-	}
+	assert.Equal(t, 16384, *meta.MaxOutputTokens)
 
 	// Bedrock - should override max_output_tokens
 	meta = Resolve(list, "bedrock", "claude-sonnet-4-20250514")
@@ -361,13 +311,10 @@ func TestResolve_ThreeLayerMerge(t *testing.T) {
 		t.Fatal("expected non-nil metadata for bedrock")
 		return
 	}
-	if *meta.MaxOutputTokens != 8192 {
-		t.Errorf("MaxOutputTokens = %d, want 8192 (bedrock override)", *meta.MaxOutputTokens)
-	}
+	assert.Equal(t, 8192, *meta.MaxOutputTokens)
+
 	// DisplayName should still come from base
-	if meta.DisplayName != "Claude Sonnet 4" {
-		t.Errorf("DisplayName = %s, want 'Claude Sonnet 4'", meta.DisplayName)
-	}
+	assert.Equal(t, "Claude Sonnet 4", meta.DisplayName)
 }
 
 func TestResolve_ReverseCustomModelIDLookup(t *testing.T) {
@@ -400,16 +347,13 @@ func TestResolve_ReverseCustomModelIDLookup(t *testing.T) {
 		t.Fatal("expected non-nil metadata via reverse lookup")
 		return
 	}
-	if meta.DisplayName != "GPT-4o" {
-		t.Errorf("DisplayName = %s, want GPT-4o", meta.DisplayName)
-	}
+	assert.Equal(t, "GPT-4o", meta.DisplayName)
+
 	if meta.Pricing == nil {
 		t.Fatal("expected non-nil pricing via reverse lookup")
 		return
 	}
-	if *meta.Pricing.InputPerMtok != 2.50 {
-		t.Errorf("InputPerMtok = %f, want 2.50", *meta.Pricing.InputPerMtok)
-	}
+	assert.Equal(t, 2.50, *meta.Pricing.InputPerMtok)
 }
 
 func TestResolve_ReverseIndexNotBuilt(t *testing.T) {
@@ -431,9 +375,7 @@ func TestResolve_ReverseIndexNotBuilt(t *testing.T) {
 	}
 
 	meta := Resolve(list, "openai", "gpt-4o-blue")
-	if meta != nil {
-		t.Error("expected nil when reverse index is not built")
-	}
+	assert.Nil(t, meta)
 }
 
 func TestResolve_ReleaseDateSuffixFallback(t *testing.T) {
@@ -475,18 +417,12 @@ func TestResolve_ReleaseDateSuffixFallback(t *testing.T) {
 	} {
 		t.Run(modelID, func(t *testing.T) {
 			meta := Resolve(list, "openrouter", modelID)
-			if meta == nil {
-				t.Fatal("expected metadata via release-date suffix fallback")
-			}
-			if meta.Pricing == nil || meta.Pricing.CachedInputPerMtok == nil {
-				t.Fatal("expected OpenRouter provider pricing via fallback")
-			}
-			if *meta.Pricing.InputPerMtok != 1.05 {
-				t.Errorf("InputPerMtok = %f, want 1.05", *meta.Pricing.InputPerMtok)
-			}
-			if *meta.Pricing.CachedInputPerMtok != 0.525 {
-				t.Errorf("CachedInputPerMtok = %f, want 0.525", *meta.Pricing.CachedInputPerMtok)
-			}
+			require.NotNil(t, meta)
+			require.NotNil(t, meta.Pricing)
+			require.NotNil(t, meta.Pricing.CachedInputPerMtok)
+			assert.Equal(t, 1.05, *meta.Pricing.InputPerMtok)
+			assert.Equal(t, 0.525, *meta.Pricing.CachedInputPerMtok)
+
 		})
 	}
 }
@@ -522,12 +458,10 @@ func TestResolve_ReleaseDateSuffixFallbackExactMatchWins(t *testing.T) {
 	}
 
 	meta := Resolve(list, "openrouter", "z-ai/glm-5.1-20260406")
-	if meta == nil || meta.Pricing == nil || meta.Pricing.InputPerMtok == nil {
-		t.Fatal("expected exact provider-model pricing")
-	}
-	if *meta.Pricing.InputPerMtok != 2.00 {
-		t.Errorf("InputPerMtok = %f, want exact dated provider price 2.00", *meta.Pricing.InputPerMtok)
-	}
+	require.NotNil(t, meta)
+	require.NotNil(t, meta.Pricing)
+	require.NotNil(t, meta.Pricing.InputPerMtok)
+	assert.Equal(t, 2.00, *meta.Pricing.InputPerMtok)
 }
 
 func TestResolve_ReverseIndexWithProviderModelOverride(t *testing.T) {
@@ -570,12 +504,8 @@ func TestResolve_ReverseIndexWithProviderModelOverride(t *testing.T) {
 		return
 	}
 	// Should use the provider_model override, not the base model pricing
-	if *meta.Pricing.InputPerMtok != 3.00 {
-		t.Errorf("InputPerMtok = %f, want 3.00 (provider override)", *meta.Pricing.InputPerMtok)
-	}
-	if *meta.Pricing.OutputPerMtok != 12.00 {
-		t.Errorf("OutputPerMtok = %f, want 12.00 (provider override)", *meta.Pricing.OutputPerMtok)
-	}
+	assert.Equal(t, 3.00, *meta.Pricing.InputPerMtok)
+	assert.Equal(t, 12.00, *meta.Pricing.OutputPerMtok)
 }
 
 func TestResolve_ModelAliasUsesProviderOverride(t *testing.T) {
@@ -615,15 +545,12 @@ func TestResolve_ModelAliasUsesProviderOverride(t *testing.T) {
 		t.Fatal("expected non-nil metadata via model alias")
 		return
 	}
-	if meta.DisplayName != "Claude 4 Opus" {
-		t.Fatalf("DisplayName = %q, want Claude 4 Opus", meta.DisplayName)
-	}
-	if meta.ContextWindow == nil || *meta.ContextWindow != 200000 {
-		t.Fatalf("ContextWindow = %v, want 200000", meta.ContextWindow)
-	}
-	if meta.Pricing == nil || meta.Pricing.InputPerMtok == nil || *meta.Pricing.InputPerMtok != 12.00 {
-		t.Fatalf("InputPerMtok = %#v, want 12.00", meta.Pricing)
-	}
+	require.Equal(t, "Claude 4 Opus", meta.DisplayName)
+	require.NotNil(t, meta.ContextWindow)
+	require.Equal(t, 200000, *meta.ContextWindow)
+	require.NotNil(t, meta.Pricing)
+	require.NotNil(t, meta.Pricing.InputPerMtok)
+	require.Equal(t, 12.00, *meta.Pricing.InputPerMtok)
 }
 
 func TestResolve_AmbiguousModelAliasReturnsNil(t *testing.T) {
@@ -645,9 +572,7 @@ func TestResolve_AmbiguousModelAliasReturnsNil(t *testing.T) {
 	list.buildReverseIndex()
 
 	meta := Resolve(list, "openai", "shared-alias")
-	if meta != nil {
-		t.Fatalf("expected nil for ambiguous alias, got %+v", meta)
-	}
+	require.Nil(t, meta)
 }
 
 func TestResolve_RoutingSuffixFallback(t *testing.T) {
@@ -678,15 +603,11 @@ func TestResolve_RoutingSuffixFallback(t *testing.T) {
 	} {
 		t.Run(modelID, func(t *testing.T) {
 			meta := Resolve(list, "openrouter", modelID)
-			if meta == nil {
-				t.Fatal("Resolve() = nil, want metadata of the unsuffixed model")
-			}
-			if meta.DisplayName != "GPT-5.6 Luna Pro" {
-				t.Errorf("display name = %q", meta.DisplayName)
-			}
-			if meta.ContextWindow == nil || *meta.ContextWindow != 1050000 {
-				t.Errorf("context window = %v", meta.ContextWindow)
-			}
+			require.NotNil(t, meta)
+			assert.Equal(t, "GPT-5.6 Luna Pro", meta.DisplayName)
+			require.NotNil(t, meta.ContextWindow)
+			assert.Equal(t, 1050000, *meta.ContextWindow)
+
 		})
 	}
 }
@@ -709,13 +630,10 @@ func TestResolve_RoutingSuffixDoesNotShadowExplicitEntry(t *testing.T) {
 	list.buildReverseIndex()
 
 	meta := Resolve(list, "openrouter", "deepseek/deepseek-r1:free")
-	if meta == nil {
-		t.Fatal("Resolve() = nil")
-	}
+	require.NotNil(t, meta)
+
 	// The suffixed ID has an entry of its own, so the fallback must not run.
-	if meta.DisplayName != "DeepSeek R1 (free)" {
-		t.Errorf("display name = %q, want the explicit suffixed entry", meta.DisplayName)
-	}
+	assert.Equal(t, "DeepSeek R1 (free)", meta.DisplayName)
 }
 
 func TestResolve_UnknownSuffixDoesNotBorrowMetadata(t *testing.T) {
@@ -729,12 +647,10 @@ func TestResolve_UnknownSuffixDoesNotBorrowMetadata(t *testing.T) {
 		},
 	}
 	list.buildReverseIndex()
-
-	// Bedrock encodes a model version after the colon; ":0" is not a routing
-	// variant, so the fallback must not resolve it to the unsuffixed entry.
-	if meta := Resolve(list, "bedrock", "anthropic.claude-3-5-haiku-20241022-v1:0"); meta != nil {
-		t.Fatalf("Resolve() = %+v, want nil for an unknown suffix", meta)
-	}
+	meta := // Bedrock encodes a model version after the colon; ":0" is not a routing
+		// variant, so the fallback must not resolve it to the unsuffixed entry.
+		Resolve(list, "bedrock", "anthropic.claude-3-5-haiku-20241022-v1:0")
+	require.Nil(t, meta)
 }
 
 func TestResolve_RoutingSuffixComposesWithReleaseDate(t *testing.T) {
@@ -752,12 +668,8 @@ func TestResolve_RoutingSuffixComposesWithReleaseDate(t *testing.T) {
 	// The ID carries both a release date and a routing variant; each layer
 	// strips its own and the base entry is still found.
 	meta := Resolve(list, "openrouter", "z-ai/glm-5.1-20260406:free")
-	if meta == nil {
-		t.Fatal("Resolve() = nil, want metadata of the base model")
-	}
-	if meta.DisplayName != "GLM-5.1" {
-		t.Errorf("display name = %q", meta.DisplayName)
-	}
+	require.NotNil(t, meta)
+	assert.Equal(t, "GLM-5.1", meta.DisplayName)
 }
 
 func TestStripRoutingSuffix(t *testing.T) {
@@ -781,9 +693,9 @@ func TestStripRoutingSuffix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.modelID, func(t *testing.T) {
 			base, ok := stripRoutingSuffix(tc.modelID)
-			if ok != tc.ok || base != tc.base {
-				t.Errorf("stripRoutingSuffix(%q) = (%q, %v), want (%q, %v)", tc.modelID, base, ok, tc.base, tc.ok)
-			}
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.base, base)
+
 		})
 	}
 }

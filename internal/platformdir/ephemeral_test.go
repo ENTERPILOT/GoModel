@@ -3,6 +3,8 @@ package platformdir
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // A trimmed mountinfo from a container with a volume at /app/data and a
@@ -30,17 +32,15 @@ func TestMountFilesystem(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got, ok := mountFilesystem(strings.NewReader(containerMountinfo), tc.dir)
-		if !ok || got != tc.want {
-			t.Errorf("mountFilesystem(%q) = %q, %v; want %q", tc.dir, got, ok, tc.want)
-		}
+		assert.True(t, ok)
+		assert.Equal(t, tc.want, got, "mountFilesystem(%q) = %q, %v; want %q", tc.dir, got, ok, tc.want)
 	}
 }
 
 func TestMountFilesystemIgnoresMalformedLines(t *testing.T) {
 	got, ok := mountFilesystem(strings.NewReader("garbage\n1 2 3 4\n"), "/app")
-	if ok || got != "" {
-		t.Errorf("mountFilesystem on garbage = %q, %v; want no match", got, ok)
-	}
+	assert.False(t, ok)
+	assert.Empty(t, got)
 }
 
 func TestUnescapeMountPath(t *testing.T) {
@@ -52,8 +52,7 @@ func TestUnescapeMountPath(t *testing.T) {
 		`/not\xyz`:       `/not\xyz`,
 	}
 	for in, want := range cases {
-		if got := unescapeMountPath(in); got != want {
-			t.Errorf("unescapeMountPath(%q) = %q, want %q", in, got, want)
-		}
+		got := unescapeMountPath(in)
+		assert.Equal(t, want, got)
 	}
 }

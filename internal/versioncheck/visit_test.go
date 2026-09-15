@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSplitVisit(t *testing.T) {
@@ -31,9 +33,9 @@ func TestSplitVisit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			date, id := SplitVisit(tt.value)
-			if date != tt.wantDate || id != tt.wantID {
-				t.Fatalf("SplitVisit(%q) = (%q, %q), want (%q, %q)", tt.value, date, id, tt.wantDate, tt.wantID)
-			}
+			require.Equal(t, tt.wantDate, date)
+			require.Equal(t, tt.wantID, id, "SplitVisit(%q) = (%q, %q), want (%q, %q)", tt.value, date, id, tt.wantDate, tt.wantID)
+
 		})
 	}
 }
@@ -54,9 +56,9 @@ func TestDueToday(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := DueToday(tt.value, now); got != tt.want {
-				t.Fatalf("DueToday(%q) = %v, want %v", tt.value, got, tt.want)
-			}
+			got := DueToday(tt.value, now)
+			require.Equal(t, tt.want, got, "DueToday(%q) = %v, want %v", tt.value, got, tt.want)
+
 		})
 	}
 }
@@ -65,16 +67,12 @@ func TestNewVisitKeepsTheBrowserID(t *testing.T) {
 	now := time.Date(2026, 8, 26, 9, 30, 0, 0, time.UTC)
 
 	value := NewVisit("3f2504e0-4f89-11d3-9a0c-0305e82c3301", now)
-	if value != "2026-08-26-3f2504e0-4f89-11d3-9a0c-0305e82c3301" {
-		t.Fatalf("NewVisit = %q, want the id carried into today", value)
-	}
+	require.Equal(t, "2026-08-26-3f2504e0-4f89-11d3-9a0c-0305e82c3301", value)
 
 	minted := NewVisit("", now)
 	date, id := SplitVisit(minted)
-	if date != "2026-08-26" || id == "" {
-		t.Fatalf("NewVisit with no id = %q, want a fresh id stamped today", minted)
-	}
-	if other := NewVisit("", now); other == minted {
-		t.Fatal("expected a distinct id for each first visit")
-	}
+	require.Equal(t, "2026-08-26", date)
+	require.NotEmpty(t, id)
+	other := NewVisit("", now)
+	require.NotEqual(t, minted, other)
 }

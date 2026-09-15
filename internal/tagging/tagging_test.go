@@ -3,8 +3,9 @@ package tagging
 import (
 	"context"
 	"net/http"
-	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractLabels(t *testing.T) {
@@ -73,9 +74,8 @@ func TestExtractLabels(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ExtractLabels(tt.rules, tt.headers)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("ExtractLabels() = %#v, want %#v", got, tt.want)
-			}
+			require.Equal(t, tt.want, got)
+
 		})
 	}
 }
@@ -85,15 +85,11 @@ func TestNormalizeRules(t *testing.T) {
 		{Header: "x-team "},
 		{Header: "X-Cost-Center", Delimiter: ";"},
 	}
-	if err := NormalizeRules(rules); err != nil {
-		t.Fatalf("NormalizeRules() error = %v", err)
-	}
-	if rules[0].Header != "X-Team" || rules[0].Delimiter != DefaultDelimiter {
-		t.Fatalf("rule not normalized: %#v", rules[0])
-	}
-	if rules[1].Delimiter != ";" {
-		t.Fatalf("explicit delimiter overwritten: %#v", rules[1])
-	}
+	err := NormalizeRules(rules)
+	require.NoError(t, err)
+	require.Equal(t, "X-Team", rules[0].Header)
+	require.Equal(t, DefaultDelimiter, rules[0].Delimiter, "rule not normalized: %#v", rules[0])
+	require.Equal(t, ";", rules[1].Delimiter, "explicit delimiter overwritten: %#v", rules[1])
 
 	for name, rules := range map[string][]Rule{
 		"empty header":      {{Header: ""}},
@@ -103,12 +99,8 @@ func TestNormalizeRules(t *testing.T) {
 		"api key header":    {{Header: "x-api-key"}},
 	} {
 		err := NormalizeRules(rules)
-		if err == nil {
-			t.Fatalf("%s: expected error", name)
-		}
-		if !IsValidationError(err) {
-			t.Fatalf("%s: error %v must be a ValidationError", name, err)
-		}
+		require.Error(t, err)
+		require.True(t, IsValidationError(err), "%s: error %v must be a ValidationError", name, err)
 	}
 }
 
@@ -118,15 +110,11 @@ func TestStripHeaderSet(t *testing.T) {
 		{Header: "X-Keep"},
 	}
 	strip := StripHeaderSet(rules)
-	if _, ok := strip["X-Team"]; !ok {
-		t.Fatalf("X-Team missing from strip set: %#v", strip)
-	}
-	if _, ok := strip["X-Keep"]; ok {
-		t.Fatalf("X-Keep should not be stripped: %#v", strip)
-	}
-	if StripHeaderSet(nil) != nil {
-		t.Fatal("empty rules should produce nil strip set")
-	}
+	_, ok := strip["X-Team"]
+	require.True(t, ok, "X-Team missing from strip set: %#v", strip)
+	_, ok = strip["X-Keep"]
+	require.False(t, ok, "X-Keep should not be stripped: %#v", strip)
+	require.Nil(t, StripHeaderSet(nil))
 }
 
 type fakeStore struct {
@@ -146,28 +134,21 @@ func TestServiceMergesConfigOverStore(t *testing.T) {
 		{Header: "X-Env"},
 	}}
 	service := NewService([]Rule{{Header: "X-Team", Prefix: "team-", DoNotPass: true}}, store)
-	if err := service.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
+	err := service.Refresh(context.Background())
+	require.NoError(t, err)
 
 	rules := service.Rules()
-	if len(rules) != 2 {
-		t.Fatalf("rules len = %d, want 2: %#v", len(rules), rules)
-	}
-	if rules[0].Header != "X-Team" || rules[0].Prefix != "team-" || !rules[0].Managed {
-		t.Fatalf("config rule did not win: %#v", rules[0])
-	}
-	if rules[1].Header != "X-Env" || rules[1].Managed {
-		t.Fatalf("store rule wrong: %#v", rules[1])
-	}
+	require.Len(t, rules, 2)
+	require.Equal(t, "X-Team", rules[0].Header)
+	require.Equal(t, "team-", rules[0].Prefix)
+	require.True(t, rules[0].Managed, "config rule did not win: %#v", rules[0])
+	require.Equal(t, "X-Env", rules[1].Header)
+	require.False(t, rules[1].Managed, "store rule wrong: %#v", rules[1])
 
 	labels := service.ExtractLabels(http.Header{"X-Team": {"team-alpha"}, "X-Env": {"prod"}})
-	if !reflect.DeepEqual(labels, []string{"alpha", "prod"}) {
-		t.Fatalf("ExtractLabels() = %#v", labels)
-	}
-	if _, ok := service.StripHeaders()["X-Team"]; !ok {
-		t.Fatalf("strip set missing X-Team: %#v", service.StripHeaders())
-	}
+	require.Equal(t, []string{"alpha", "prod"}, labels)
+	_, ok := service.StripHeaders()["X-Team"]
+	require.True(t, ok, "strip set missing X-Team: %#v", service.StripHeaders())
 }
 
 func TestServiceSaveRules(t *testing.T) {
@@ -175,28 +156,21 @@ func TestServiceSaveRules(t *testing.T) {
 	service := NewService([]Rule{{Header: "X-Managed"}}, store)
 
 	merged, err := service.SaveRules(context.Background(), []Rule{{Header: "x-cost-center", Prefix: "cc-"}})
-	if err != nil {
-		t.Fatalf("SaveRules() error = %v", err)
-	}
-	if len(merged) != 2 || merged[1].Header != "X-Cost-Center" {
-		t.Fatalf("merged view wrong: %#v", merged)
-	}
-	if len(store.rules) != 1 || store.rules[0].Header != "X-Cost-Center" {
-		t.Fatalf("store not updated: %#v", store.rules)
-	}
-
-	if _, err := service.SaveRules(context.Background(), []Rule{{Header: "X-Managed"}}); err == nil || !IsValidationError(err) {
-		t.Fatalf("managed header: err = %v, want ValidationError", err)
-	}
-	if _, err := service.SaveRules(context.Background(), []Rule{{Header: "bad header"}}); err == nil || !IsValidationError(err) {
-		t.Fatalf("invalid header: err = %v, want ValidationError", err)
-	}
+	require.NoError(t, err)
+	require.Len(t, merged, 2)
+	require.Equal(t, "X-Cost-Center", merged[1].Header)
+	require.Len(t, store.rules, 1)
+	require.Equal(t, "X-Cost-Center", store.rules[0].Header)
+	_, err = service.SaveRules(context.Background(), []Rule{{Header: "X-Managed"}})
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
+	_, err = service.SaveRules(context.Background(), []Rule{{Header: "bad header"}})
+	require.Error(t, err)
+	require.True(t, IsValidationError(err))
 
 	unavailable := NewService(nil, nil)
-	if _, err := unavailable.SaveRules(context.Background(), []Rule{{Header: "X-A"}}); err == nil || IsValidationError(err) {
-		t.Fatalf("storage-unavailable: err = %v, want non-validation error", err)
-	}
-	if unavailable.Editable() {
-		t.Fatal("service without store must not be editable")
-	}
+	_, err = unavailable.SaveRules(context.Background(), []Rule{{Header: "X-A"}})
+	require.Error(t, err)
+	require.False(t, IsValidationError(err))
+	require.False(t, unavailable.Editable())
 }

@@ -4,12 +4,12 @@ import (
 	"testing"
 
 	"github.com/enterpilot/gomodel/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewDetectorFromConfigDisabled(t *testing.T) {
-	if d := NewDetectorFromConfig(config.SessionConfig{Enabled: false}); d != nil {
-		t.Fatal("disabled config must yield a nil detector")
-	}
+	d := NewDetectorFromConfig(config.SessionConfig{Enabled: false})
+	require.Nil(t, d)
 }
 
 func TestNewDetectorFromConfigOverridesBuiltinHeader(t *testing.T) {
@@ -24,18 +24,16 @@ func TestNewDetectorFromConfigOverridesBuiltinHeader(t *testing.T) {
 
 	// The overridden builtin now requires the transform to match.
 	plain := chatSnapshot(map[string][]string{"X-Session-Id": {"plain-value"}}, `{}`)
-	if got := detector.Detect(plain, ""); got != "" {
-		t.Fatalf("overridden rule must apply the transform, got %q", got)
-	}
+	got := detector.Detect(plain, "")
+	require.Empty(t, got)
+
 	embedded := chatSnapshot(map[string][]string{"X-Session-Id": {"user_x_session_12345678-1234-1234-1234-123456789012"}}, `{}`)
-	if got := detector.Detect(embedded, ""); got != "12345678-1234-1234-1234-123456789012" {
-		t.Fatalf("Detect() = %q, want extracted uuid", got)
-	}
+	got = detector.Detect(embedded, "")
+	require.Equal(t, "12345678-1234-1234-1234-123456789012", got)
 
 	custom := chatSnapshot(map[string][]string{"X-My-Conversation": {"conv-9"}}, `{}`)
-	if got := detector.Detect(custom, ""); got != "conv-9" {
-		t.Fatalf("Detect() = %q, want custom header value", got)
-	}
+	got = detector.Detect(custom, "")
+	require.Equal(t, "conv-9", got)
 }
 
 func TestNewDetectorFromConfigWithoutBuiltins(t *testing.T) {
@@ -44,11 +42,10 @@ func TestNewDetectorFromConfigWithoutBuiltins(t *testing.T) {
 		Headers: []config.SessionHeaderConfig{{Header: "X-My-Session"}},
 	})
 	builtin := chatSnapshot(map[string][]string{"X-Session-Id": {"ignored"}}, `{}`)
-	if got := detector.Detect(builtin, ""); got != "" {
-		t.Fatalf("builtin rules disabled, got %q", got)
-	}
+	got := detector.Detect(builtin, "")
+	require.Empty(t, got)
+
 	custom := chatSnapshot(map[string][]string{"X-My-Session": {"mine"}}, `{}`)
-	if got := detector.Detect(custom, ""); got != "mine" {
-		t.Fatalf("Detect() = %q, want configured header value", got)
-	}
+	got = detector.Detect(custom, "")
+	require.Equal(t, "mine", got)
 }

@@ -3,27 +3,25 @@ package users
 import (
 	"context"
 	"errors"
-	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	store, err := NewSQLStore(context.Background(), sqlxtest.NewSQLite(t))
-	if err != nil {
-		t.Fatalf("NewSQLStore: %v", err)
-	}
+	require.NoError(t, err)
+
 	svc, err := NewService(store, testCatalog{"openai", "anthropic"})
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	if err := svc.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
+	require.NoError(t, err)
+	err = svc.Refresh(context.Background())
+	require.NoError(t, err)
+
 	return svc
 }
 
@@ -43,30 +41,22 @@ func TestService_NoPoliciesAllowEverything(t *testing.T) {
 	svc := newTestService(t)
 	gpt := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
 
-	if !svc.AllowsModel(context.Background(), gpt) {
-		t.Fatal("AllowsModel(no key, no path) = false, want true")
-	}
-	if !svc.AllowsModel(requestCtx("/acme/eng/alice"), gpt) {
-		t.Fatal("AllowsModel(path without policies) = false, want true")
-	}
+	require.True(t, svc.AllowsModel(context.Background(), gpt))
+	require.True(t, svc.AllowsModel(requestCtx("/acme/eng/alice"), gpt))
 }
 
 func TestService_PathAllowlistsIntersectDownTheChain(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
 	ctx := context.Background()
-
-	if _, err := svc.Upsert(ctx, User{UserPath: "acme", AllowedModels: []string{"openai/*", "anthropic/*"}}); err != nil {
-		t.Fatalf("Upsert(/acme): %v", err)
-	}
-	if _, err := svc.Upsert(ctx, User{UserPath: "/acme/eng", AllowedModels: []string{"anthropic/*"}}); err != nil {
-		t.Fatalf("Upsert(/acme/eng): %v", err)
-	}
-	// A child that tries to widen its group's restriction still gets the
-	// intersection: the group's allowlist must match too.
-	if _, err := svc.Upsert(ctx, User{UserPath: "/acme/eng/bob", AllowedModels: []string{"openai/gpt-4o", "anthropic/claude-sonnet-4-6"}}); err != nil {
-		t.Fatalf("Upsert(/acme/eng/bob): %v", err)
-	}
+	_, err := svc.Upsert(ctx, User{UserPath: "acme", AllowedModels: []string{"openai/*", "anthropic/*"}})
+	require.NoError(t, err)
+	_, err = svc.Upsert(ctx, User{UserPath: "/acme/eng", AllowedModels: []string{"anthropic/*"}})
+	require.NoError(t, err)
+	_, err = // A child that tries to widen its group's restriction still gets the
+		// intersection: the group's allowlist must match too.
+		svc.Upsert(ctx, User{UserPath: "/acme/eng/bob", AllowedModels: []string{"openai/gpt-4o", "anthropic/claude-sonnet-4-6"}})
+	require.NoError(t, err)
 
 	gpt := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
 	claude := core.ModelSelector{Provider: "anthropic", Model: "claude-sonnet-4-6"}
@@ -93,9 +83,9 @@ func TestService_PathAllowlistsIntersectDownTheChain(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := svc.AllowsModel(tc.ctx, tc.selector); got != tc.want {
-				t.Fatalf("AllowsModel(%s) = %v, want %v", tc.selector.QualifiedModel(), got, tc.want)
-			}
+			got := svc.AllowsModel(tc.ctx, tc.selector)
+			require.Equal(t, tc.want, got, "AllowsModel(%s) = %v, want %v", tc.selector.QualifiedModel(), got, tc.want)
+
 		})
 	}
 
@@ -104,43 +94,33 @@ func TestService_PathAllowlistsIntersectDownTheChain(t *testing.T) {
 	for _, c := range constraints {
 		paths = append(paths, c.UserPath)
 	}
-	if want := []string{"/acme", "/acme/eng", "/acme/eng/bob"}; !reflect.DeepEqual(paths, want) {
-		t.Fatalf("Constraints = %v, want %v", paths, want)
-	}
+	want := []string{"/acme", "/acme/eng", "/acme/eng/bob"}
+	require.Equal(t, want, paths)
 }
 
 func TestService_UpsertValidatesAndDeleteRemoves(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
 	ctx := context.Background()
-
-	if _, err := svc.Upsert(ctx, User{UserPath: "", AllowedModels: []string{"openai/*"}}); !IsValidationError(err) {
-		t.Fatalf("Upsert(empty path) error = %v, want validation error", err)
-	}
-	if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"nope/*"}}); !IsValidationError(err) {
-		t.Fatalf("Upsert(unknown provider) error = %v, want validation error", err)
-	}
+	_, err := svc.Upsert(ctx, User{UserPath: "", AllowedModels: []string{"openai/*"}})
+	require.True(t, IsValidationError(err))
+	_, err = svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"nope/*"}})
+	require.True(t, IsValidationError(err))
 
 	stored, err := svc.Upsert(ctx, User{UserPath: "acme/eng/", AllowedModels: []string{"anthropic/*", " "}, Description: " eng "})
-	if err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-	if stored.UserPath != "/acme/eng" || stored.Description != "eng" || !reflect.DeepEqual(stored.AllowedModels, []string{"anthropic/"}) {
-		t.Fatalf("stored = %#v", stored)
-	}
-	if got := svc.List(); len(got) != 1 || got[0].UserPath != "/acme/eng" {
-		t.Fatalf("List = %#v, want one /acme/eng row", got)
-	}
-
-	if err := svc.Delete(ctx, "/acme/eng"); err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if err := svc.Delete(ctx, "/acme/eng"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Delete(missing) error = %v, want ErrNotFound", err)
-	}
-	if got := svc.List(); len(got) != 0 {
-		t.Fatalf("List after delete = %#v, want empty", got)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "/acme/eng", stored.UserPath)
+	require.Equal(t, "eng", stored.Description)
+	require.Equal(t, []string{"anthropic/"}, stored.AllowedModels, "stored = %#v", stored)
+	got := svc.List()
+	require.Len(t, got, 1)
+	require.Equal(t, "/acme/eng", got[0].UserPath)
+	err = svc.Delete(ctx, "/acme/eng")
+	require.NoError(t, err)
+	err = svc.Delete(ctx, "/acme/eng")
+	require.ErrorIs(t, err, ErrNotFound)
+	got = svc.List()
+	require.Empty(t, got)
 }
 
 // flakyStore persists writes but can be told to fail List after the initial
@@ -161,36 +141,27 @@ func TestService_FailedRefreshStillAppliesMutation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	inner, err := NewSQLStore(ctx, sqlxtest.NewSQLite(t))
-	if err != nil {
-		t.Fatalf("NewSQLStore: %v", err)
-	}
+	require.NoError(t, err)
+
 	store := &flakyStore{Store: inner}
 	svc, err := NewService(store, testCatalog{"openai", "anthropic"})
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
-	if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"openai/*"}}); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
+	require.NoError(t, err)
+	_, err = svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"openai/*"}})
+	require.NoError(t, err)
+
 	gpt := core.ModelSelector{Provider: "openai", Model: "gpt-4o"}
 	claude := core.ModelSelector{Provider: "anthropic", Model: "claude-sonnet-4-6"}
 
 	store.failList = true
-	if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"anthropic/*"}}); err != nil {
-		t.Fatalf("Upsert with failing refresh: %v", err)
-	}
-	if svc.AllowsModel(requestCtx("/acme"), gpt) || !svc.AllowsModel(requestCtx("/acme"), claude) {
-		t.Fatal("restrictive upsert not enforced after failed refresh")
-	}
-	if err := svc.Delete(ctx, "/acme"); err != nil {
-		t.Fatalf("Delete with failing refresh: %v", err)
-	}
-	if !svc.AllowsModel(requestCtx("/acme"), gpt) {
-		t.Fatal("deleted restriction still enforced after failed refresh")
-	}
-	if got := svc.List(); len(got) != 0 {
-		t.Fatalf("List after delete = %#v, want empty", got)
-	}
+	_, err = svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"anthropic/*"}})
+	require.NoError(t, err)
+	require.False(t, svc.AllowsModel(requestCtx("/acme"), gpt))
+	require.True(t, svc.AllowsModel(requestCtx("/acme"), claude))
+	err = svc.Delete(ctx, "/acme")
+	require.NoError(t, err)
+	require.True(t, svc.AllowsModel(requestCtx("/acme"), gpt))
+	got := svc.List()
+	require.Empty(t, got)
 }
 
 // Concurrent writes to one path, with every post-write refresh failing, must
@@ -200,14 +171,11 @@ func TestService_ConcurrentWritesKeepSnapshotAndStoreInSync(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	inner, err := NewSQLStore(ctx, sqlxtest.NewSQLite(t))
-	if err != nil {
-		t.Fatalf("NewSQLStore: %v", err)
-	}
+	require.NoError(t, err)
+
 	store := &flakyStore{Store: inner, failList: true}
 	svc, err := NewService(store, testCatalog{"openai", "anthropic"})
-	if err != nil {
-		t.Fatalf("NewService: %v", err)
-	}
+	require.NoError(t, err)
 
 	var wg sync.WaitGroup
 	for i := range 16 {
@@ -218,55 +186,45 @@ func TestService_ConcurrentWritesKeepSnapshotAndStoreInSync(t *testing.T) {
 			if i%2 == 1 {
 				allowed = []string{"anthropic/*"}
 			}
-			if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: allowed}); err != nil {
-				t.Errorf("Upsert(%d): %v", i, err)
-			}
+			_, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: allowed})
+			assert.NoError(t, err, "Upsert(%d): %v", i, err)
+
 		}(i)
 	}
 	wg.Wait()
 
 	rows, err := inner.List(ctx)
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("stored rows = %#v, want one", rows)
-	}
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
 	live, ok := svc.Get("/acme")
-	if !ok || !reflect.DeepEqual(live.AllowedModels, rows[0].AllowedModels) {
-		t.Fatalf("live snapshot %v != stored %v", live.AllowedModels, rows[0].AllowedModels)
-	}
+	require.True(t, ok)
+	require.Equal(t, rows[0].AllowedModels, live.AllowedModels)
 }
 
 func TestService_ConfigUsersShadowStoreAndAreReadOnly(t *testing.T) {
 	t.Parallel()
 	svc := newTestService(t)
 	ctx := context.Background()
+	_, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"openai/*"}, Description: "stored"})
+	require.NoError(t, err)
 
-	if _, err := svc.Upsert(ctx, User{UserPath: "/acme", AllowedModels: []string{"openai/*"}, Description: "stored"}); err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
 	svc.SetConfigUsers([]User{{UserPath: "acme", AllowedModels: []string{"anthropic/*"}, Description: "declared"}})
-	if err := svc.ValidateManagedConfig([]string{"anthropic"}); err != nil {
-		t.Fatalf("ValidateManagedConfig: %v", err)
-	}
-	if err := svc.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
+	err = svc.ValidateManagedConfig([]string{"anthropic"})
+	require.NoError(t, err)
+	err = svc.Refresh(ctx)
+	require.NoError(t, err)
 
 	got, ok := svc.Get("/acme")
-	if !ok || !got.Managed || got.Description != "declared" || !reflect.DeepEqual(got.AllowedModels, []string{"anthropic/"}) {
-		t.Fatalf("Get(/acme) = %#v, want managed declared row", got)
-	}
-	if _, err := svc.Upsert(ctx, User{UserPath: "/acme"}); !errors.Is(err, ErrManaged) {
-		t.Fatalf("Upsert(managed) error = %v, want ErrManaged", err)
-	}
-	if err := svc.Delete(ctx, "/acme"); !errors.Is(err, ErrManaged) {
-		t.Fatalf("Delete(managed) error = %v, want ErrManaged", err)
-	}
+	require.True(t, ok)
+	require.True(t, got.Managed)
+	require.Equal(t, "declared", got.Description)
+	require.Equal(t, []string{"anthropic/"}, got.AllowedModels, "Get(/acme) = %#v, want managed declared row", got)
+	_, err = svc.Upsert(ctx, User{UserPath: "/acme"})
+	require.ErrorIs(t, err, ErrManaged)
+	err = svc.Delete(ctx, "/acme")
+	require.ErrorIs(t, err, ErrManaged)
 
 	svc.SetConfigUsers([]User{{UserPath: "/acme", AllowedModels: []string{"missing/*"}}})
-	if err := svc.ValidateManagedConfig([]string{"anthropic"}); err == nil {
-		t.Fatal("ValidateManagedConfig(unknown provider) error = nil, want error")
-	}
+	require.Error(t, svc.ValidateManagedConfig([]string{"anthropic"}))
 }

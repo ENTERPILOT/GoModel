@@ -1,6 +1,10 @@
 package version
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestChannelFor(t *testing.T) {
 	tests := []struct {
@@ -16,9 +20,9 @@ func TestChannelFor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.app, func(t *testing.T) {
-			if got := ChannelFor(tt.app); got != tt.want {
-				t.Fatalf("ChannelFor(%q) = %q, want %q", tt.app, got, tt.want)
-			}
+			got := ChannelFor(tt.app)
+			require.Equal(t, tt.want, got, "ChannelFor(%q) = %q, want %q", tt.app, got, tt.want)
+
 		})
 	}
 }
@@ -30,11 +34,8 @@ func TestChannelFollowsApp(t *testing.T) {
 	t.Cleanup(func() { App = original })
 
 	App = AppPro
-	if Channel() != "pro" {
-		t.Fatalf("Channel() = %q with App=%q", Channel(), App)
-	}
+	require.Equal(t, "pro", Channel())
+
 	App = AppCore
-	if Channel() != "core" {
-		t.Fatalf("Channel() = %q with App=%q", Channel(), App)
-	}
+	require.Equal(t, "core", Channel())
 }

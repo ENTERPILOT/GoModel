@@ -2,13 +2,12 @@ package conversationstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
@@ -21,9 +20,8 @@ func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		t.Cleanup(func() { _ = store.Close() })
 		body(t, store)
 	})
@@ -47,73 +45,55 @@ func testStoredConversation(id string) *StoredConversation {
 func TestSQLConversationCreateGetRoundtrip(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
-
-		if err := store.Create(ctx, testStoredConversation("conv-1")); err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		err := store.Create(ctx, testStoredConversation("conv-1"))
+		require.NoError(t, err)
 
 		got, err := store.Get(ctx, "conv-1")
-		if err != nil {
-			t.Fatalf("get: %v", err)
-		}
-		if got.Conversation == nil || got.Conversation.ID != "conv-1" {
-			t.Fatalf("conversation = %+v, want id conv-1", got.Conversation)
-		}
-		if got.Conversation.Metadata["topic"] != "testing" {
-			t.Fatalf("metadata = %v, want topic=testing", got.Conversation.Metadata)
-		}
-		if len(got.Items) != 1 || !strings.Contains(string(got.Items[0]), "first") {
-			t.Fatalf("items = %v, want original item", got.Items)
-		}
-		if got.UserPath != "/team-a" || got.RequestID != "req-1" {
-			t.Fatalf("metadata = %+v, want user path and request id preserved", got)
-		}
-		if got.StoredAt.IsZero() || got.ExpiresAt.IsZero() {
-			t.Fatalf("retention not stamped: stored %v expires %v", got.StoredAt, got.ExpiresAt)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, got.Conversation)
+		require.Equal(t, "conv-1", got.Conversation.ID)
+		require.Equal(t, "testing", got.Conversation.Metadata["topic"], "metadata = %v, want topic=testing", got.Conversation.Metadata)
+		require.Len(t, got.Items, 1)
+		require.Contains(t, string(got.Items[0]), "first")
+		require.Equal(t, "/team-a", got.UserPath)
+		require.Equal(t, "req-1", got.RequestID, "metadata = %+v, want user path and request id preserved", got)
+		require.False(t, got.StoredAt.IsZero())
+		require.False(t, got.ExpiresAt.IsZero(), "retention not stamped: stored %v expires %v", got.StoredAt, got.ExpiresAt)
+
 	})
 }
 
 func TestSQLConversationAppendItemsPreservesOrder(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
-
-		if err := store.Create(ctx, testStoredConversation("conv-1")); err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		err := store.Create(ctx, testStoredConversation("conv-1"))
+		require.NoError(t, err)
 
 		// A multi-item append exercises the chained '$[#]' json_insert paths.
-		err := store.AppendItems(ctx, "conv-1", []json.RawMessage{
+		err = store.AppendItems(ctx, "conv-1", []json.RawMessage{
 			json.RawMessage(`{"type":"message","role":"assistant","content":"second"}`),
 			json.RawMessage(`{"type":"message","role":"user","content":"third","nested":{"n":1}}`),
 		})
-		if err != nil {
-			t.Fatalf("append: %v", err)
-		}
-		if err := store.AppendItems(ctx, "conv-1", []json.RawMessage{
+		require.NoError(t, err)
+		err = store.AppendItems(ctx, "conv-1", []json.RawMessage{
 			json.RawMessage(`{"type":"message","role":"assistant","content":"fourth"}`),
-		}); err != nil {
-			t.Fatalf("second append: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		got, err := store.Get(ctx, "conv-1")
-		if err != nil {
-			t.Fatalf("get: %v", err)
-		}
-		if len(got.Items) != 4 {
-			t.Fatalf("items len = %d, want 4", len(got.Items))
-		}
+		require.NoError(t, err)
+		require.Len(t, got.Items, 4)
+
 		for i, want := range []string{"first", "second", "third", "fourth"} {
-			if !strings.Contains(string(got.Items[i]), want) {
-				t.Fatalf("items[%d] = %s, want to contain %q", i, got.Items[i], want)
-			}
+			require.Contains(t, string(got.Items[i]), want)
 		}
 		var nested struct {
 			Nested map[string]int `json:"nested"`
 		}
-		if err := json.Unmarshal(got.Items[2], &nested); err != nil || nested.Nested["n"] != 1 {
-			t.Fatalf("items[2] nested = %s (err %v), want nested.n=1", got.Items[2], err)
-		}
+		err = json.Unmarshal(got.Items[2], &nested)
+		require.NoError(t, err)
+		require.Equal(t, 1, nested.Nested["n"])
+
 	})
 }
 
@@ -122,9 +102,8 @@ func TestSQLConversationAppendItemsMissingReturnsNotFound(t *testing.T) {
 		err := store.AppendItems(context.Background(), "missing", []json.RawMessage{
 			json.RawMessage(`{"type":"message"}`),
 		})
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("append missing err = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, ErrNotFound)
+
 	})
 }
 
@@ -133,23 +112,18 @@ func TestSQLConversationAppendItemsRejectsDuplicateID(t *testing.T) {
 		ctx := context.Background()
 		conv := testStoredConversation("conv-duplicate-items")
 		conv.Items = []json.RawMessage{json.RawMessage(`{"id":"msg_existing","type":"message"}`)}
-		if err := store.Create(ctx, conv); err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		err := store.Create(ctx, conv)
+		require.NoError(t, err)
 
-		err := store.AppendItems(ctx, conv.Conversation.ID, []json.RawMessage{
+		err = store.AppendItems(ctx, conv.Conversation.ID, []json.RawMessage{
 			json.RawMessage(`{"id":"msg_existing","type":"message","content":"duplicate"}`),
 		})
-		if !errors.Is(err, ErrDuplicateItem) {
-			t.Fatalf("append duplicate err = %v, want ErrDuplicateItem", err)
-		}
+		require.ErrorIs(t, err, ErrDuplicateItem)
+
 		got, err := store.Get(ctx, conv.Conversation.ID)
-		if err != nil {
-			t.Fatalf("get: %v", err)
-		}
-		if len(got.Items) != 1 {
-			t.Fatalf("stored items = %d, want unchanged length 1", len(got.Items))
-		}
+		require.NoError(t, err)
+		require.Len(t, got.Items, 1)
+
 	})
 }
 
@@ -162,26 +136,22 @@ func TestSQLConversationMergeMetadataAndDeleteItem(t *testing.T) {
 			json.RawMessage(`{"id":"msg_1","type":"message"}`),
 			json.RawMessage(`{"id":"msg_2","type":"message"}`),
 		}
-		if err := store.Create(ctx, conv); err != nil {
-			t.Fatalf("create: %v", err)
-		}
+		err := store.Create(ctx, conv)
+		require.NoError(t, err)
+
 		merged, err := store.MergeMetadata(ctx, "conv-items", map[string]string{"new": "value"})
-		if err != nil {
-			t.Fatalf("merge metadata: %v", err)
-		}
-		if merged.Conversation.Metadata["existing"] != "kept" || merged.Conversation.Metadata["new"] != "value" || len(merged.Items) != 2 {
-			t.Fatalf("merged = %+v, want merged metadata and preserved items", merged)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "kept", merged.Conversation.Metadata["existing"])
+		require.Equal(t, "value", merged.Conversation.Metadata["new"])
+		require.Len(t, merged.Items, 2, "merged = %+v, want merged metadata and preserved items", merged)
+
 		updated, err := store.DeleteItem(ctx, "conv-items", "msg_1")
-		if err != nil {
-			t.Fatalf("delete item: %v", err)
-		}
-		if len(updated.Items) != 1 || itemID(updated.Items[0]) != "msg_2" {
-			t.Fatalf("items = %s, want msg_2 only", updated.Items)
-		}
-		if _, err := store.DeleteItem(ctx, "conv-items", "missing"); !errors.Is(err, ErrItemNotFound) {
-			t.Fatalf("delete missing item error = %v, want ErrItemNotFound", err)
-		}
+		require.NoError(t, err)
+		require.Len(t, updated.Items, 1)
+		require.Equal(t, "msg_2", itemID(updated.Items[0]))
+		_, err = store.DeleteItem(ctx, "conv-items", "missing")
+		require.ErrorIs(t, err, ErrItemNotFound)
+
 	})
 }
 
@@ -192,75 +162,58 @@ func TestSQLConversationMergeMetadataRejectsOversizedResult(t *testing.T) {
 		for index := range core.MaxConversationMetadataPairs {
 			conv.Conversation.Metadata[fmt.Sprintf("key_%d", index)] = "value"
 		}
-		if err := store.Create(context.Background(), conv); err != nil {
-			t.Fatalf("Create() error = %v", err)
-		}
+		err := store.Create(context.Background(), conv)
+		require.NoError(t, err)
+		_, err = store.MergeMetadata(context.Background(), conv.Conversation.ID, map[string]string{"extra": "value"})
+		require.ErrorIs(t, err, ErrMetadataLimitExceeded)
 
-		if _, err := store.MergeMetadata(context.Background(), conv.Conversation.ID, map[string]string{"extra": "value"}); !errors.Is(err, ErrMetadataLimitExceeded) {
-			t.Fatalf("MergeMetadata() error = %v, want ErrMetadataLimitExceeded", err)
-		}
 		got, err := store.Get(context.Background(), conv.Conversation.ID)
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if len(got.Conversation.Metadata) != core.MaxConversationMetadataPairs {
-			t.Fatalf("metadata size = %d, want %d", len(got.Conversation.Metadata), core.MaxConversationMetadataPairs)
-		}
+		require.NoError(t, err)
+		require.Equal(t, core.MaxConversationMetadataPairs, len(got.Conversation.Metadata))
+
 	})
 }
 
 func TestSQLConversationCreateRejectsDuplicates(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
-
-		if err := store.Create(ctx, testStoredConversation("conv-1")); err != nil {
-			t.Fatalf("create: %v", err)
-		}
 		err := store.Create(ctx, testStoredConversation("conv-1"))
-		if err == nil || !strings.Contains(err.Error(), "already exists") {
-			t.Fatalf("duplicate create err = %v, want already exists", err)
-		}
+		require.NoError(t, err)
+
+		err = store.Create(ctx, testStoredConversation("conv-1"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "already exists")
+
 	})
 }
 
 func TestSQLConversationDeleteAndExpiry(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore) {
 		ctx := context.Background()
-
-		if err := store.Create(ctx, testStoredConversation("conv-1")); err != nil {
-			t.Fatalf("create: %v", err)
-		}
-		if err := store.Delete(ctx, "conv-1"); err != nil {
-			t.Fatalf("delete: %v", err)
-		}
-		if _, err := store.Get(ctx, "conv-1"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("get after delete err = %v, want ErrNotFound", err)
-		}
-
-		if err := store.Create(ctx, testStoredConversation("conv-2")); err != nil {
-			t.Fatalf("create conv-2: %v", err)
-		}
-		if _, err := store.db.Exec(ctx,
+		err := store.Create(ctx, testStoredConversation("conv-1"))
+		require.NoError(t, err)
+		err = store.Delete(ctx, "conv-1")
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "conv-1")
+		require.ErrorIs(t, err, ErrNotFound)
+		err = store.Create(ctx, testStoredConversation("conv-2"))
+		require.NoError(t, err)
+		_, err = store.db.Exec(ctx,
 			"UPDATE conversation_snapshots SET expires_at = ? WHERE id = ?",
 			time.Now().Add(-time.Minute).Unix(), "conv-2",
-		); err != nil {
-			t.Fatalf("expire row: %v", err)
-		}
-		if _, err := store.Get(ctx, "conv-2"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("get expired err = %v, want ErrNotFound", err)
-		}
-		if err := store.AppendItems(ctx, "conv-2", []json.RawMessage{json.RawMessage(`{}`)}); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("append expired err = %v, want ErrNotFound", err)
-		}
-		if err := store.DeleteExpired(ctx); err != nil {
-			t.Fatalf("delete expired: %v", err)
-		}
+		)
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "conv-2")
+		require.ErrorIs(t, err, ErrNotFound)
+		err = store.AppendItems(ctx, "conv-2", []json.RawMessage{json.RawMessage(`{}`)})
+		require.ErrorIs(t, err, ErrNotFound)
+		err = store.DeleteExpired(ctx)
+		require.NoError(t, err)
+
 		var count int
-		if err := store.db.QueryRow(ctx, "SELECT COUNT(*) FROM conversation_snapshots").Scan(&count); err != nil {
-			t.Fatalf("count rows: %v", err)
-		}
-		if count != 0 {
-			t.Fatalf("rows after sweep = %d, want 0", count)
-		}
+		err = store.db.QueryRow(ctx, "SELECT COUNT(*) FROM conversation_snapshots").Scan(&count)
+		require.NoError(t, err)
+		require.Equal(t, 0, count)
+
 	})
 }

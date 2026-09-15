@@ -10,6 +10,8 @@ import (
 	"github.com/enterpilot/gomodel/config"
 	"github.com/enterpilot/gomodel/ext"
 	"github.com/enterpilot/gomodel/internal/providers"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type lifecycleRuntimeSetting struct{}
@@ -45,9 +47,7 @@ func newFullyWiredApp(t *testing.T) *App {
 	t.Setenv("OTEL_METRICS_EXPORTER", "none")
 
 	loaded, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
+	require.NoError(t, err)
 
 	extensions := &ext.Registry{}
 	extensions.RegisterSetting(&lifecycleRuntimeSetting{})
@@ -56,13 +56,12 @@ func newFullyWiredApp(t *testing.T) *App {
 		Factory:    providers.NewProviderFactory(),
 		Extensions: extensions,
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
-		if err := application.Shutdown(context.Background()); err != nil {
-			t.Errorf("Shutdown: %v", err)
-		}
+		err := application.Shutdown(context.Background())
+		assert.NoError(t, err)
+
 	})
 	return application
 }
@@ -85,10 +84,9 @@ func TestShutdownOrderCoversEveryRegisteredSubsystem(t *testing.T) {
 		if registered.owner != ownedByShutdown {
 			continue
 		}
-		if !slices.Contains(ordered, registered.name) {
-			t.Errorf("subsystem %q is registered as ownedByShutdown but missing from shutdownOrder: "+
-				"it would be released on startup failure and leaked on shutdown", registered.name)
-		}
+		assert.True(t, slices.Contains(ordered, registered.name), "subsystem %q is registered as ownedByShutdown but missing from shutdownOrder: "+
+			"it would be released on startup failure and leaked on shutdown", registered.name)
+
 	}
 }
 
@@ -100,9 +98,9 @@ func TestShutdownStopsRuntimeSettingsBeforeProviders(t *testing.T) {
 	providersIndex := slices.IndexFunc(order, func(subsystem registeredSubsystem) bool {
 		return subsystem.name == subsystemProviders
 	})
-	if runtimeSettingsIndex < 0 || providersIndex < 0 || runtimeSettingsIndex >= providersIndex {
-		t.Fatalf("shutdown order must stop runtime settings before providers")
-	}
+	require.GreaterOrEqual(t, runtimeSettingsIndex, 0)
+	require.GreaterOrEqual(t, providersIndex, 0)
+	require.Less(t, runtimeSettingsIndex, providersIndex)
 }
 
 // The mirror of the check above: an entry in shutdownOrder that nothing
@@ -113,11 +111,11 @@ func TestShutdownOrderHasNoUnregisteredEntries(t *testing.T) {
 
 	registered := make(map[string]closerOwner, len(application.registered))
 	for _, subsystem := range application.registered {
-		// Keying by name collapses duplicates, which would let two registrations
-		// share one shutdown-order entry and pass the coverage check below.
-		if _, duplicate := registered[subsystem.name]; duplicate {
-			t.Errorf("subsystem %q is registered more than once, so the coverage check below cannot see the duplicate", subsystem.name)
-		}
+		_, duplicate := // Keying by name collapses duplicates, which would let two registrations
+			// share one shutdown-order entry and pass the coverage check below.
+			registered[subsystem.name]
+		assert.False(t, duplicate)
+
 		registered[subsystem.name] = subsystem.owner
 	}
 
@@ -133,9 +131,7 @@ func TestShutdownOrderHasNoUnregisteredEntries(t *testing.T) {
 			t.Errorf("shutdownOrder closes unregistered subsystem %q", subsystem.name)
 			continue
 		}
-		if owner != ownedByShutdown {
-			t.Errorf("subsystem %q is closed by shutdownOrder but registered as owner %d", subsystem.name, owner)
-		}
+		assert.Equal(t, ownedByShutdown, owner)
 	}
 }
 
@@ -151,9 +147,7 @@ func TestEverySubsystemRegistersExactlyOnce(t *testing.T) {
 		counts[subsystem.name]++
 	}
 	for name, count := range counts {
-		if count > 1 {
-			t.Errorf("subsystem %q is registered %d times; unwind would close it %d times on startup failure", name, count, count)
-		}
+		assert.LessOrEqual(t, count, 1, "subsystem %q is registered %d times; unwind would close it %d times on startup failure", name, count, count)
 	}
 }
 
@@ -180,9 +174,7 @@ func TestNonShutdownOwnedSubsystemsAreRegisteredButNotInShutdownOrder(t *testing
 			t.Errorf("subsystem %q is never registered", name)
 			continue
 		}
-		if owner != wantOwner {
-			t.Errorf("subsystem %q registered with owner %d, want %d", name, owner, wantOwner)
-		}
+		assert.Equal(t, wantOwner, owner)
 	}
 }
 
@@ -197,13 +189,10 @@ func TestUnwindClosesInReverseRegistrationOrder(t *testing.T) {
 			return nil
 		})
 	}
-
-	if err := application.unwind(); err != nil {
-		t.Fatalf("unwind: %v", err)
-	}
-	if want := []string{"third", "second", "first"}; !slices.Equal(closed, want) {
-		t.Errorf("closed %v, want %v", closed, want)
-	}
+	err := application.unwind()
+	require.NoError(t, err)
+	want := []string{"third", "second", "first"}
+	assert.True(t, slices.Equal(closed, want), "closed %v, want %v", closed, want)
 }
 
 // One failing closer must not strand the rest: unwind runs every registered
@@ -221,10 +210,7 @@ func TestUnwindClosesEveryEntryAndJoinsErrors(t *testing.T) {
 	application.register("nothing-to-close", ownedByShutdown, nil)
 
 	err := application.unwind()
-	if closed != 3 {
-		t.Errorf("closed %d subsystems, want 3", closed)
-	}
-	if !errors.Is(err, firstErr) || !errors.Is(err, secondErr) {
-		t.Errorf("unwind error %v does not carry both close failures", err)
-	}
+	assert.Equal(t, 3, closed)
+	assert.ErrorIs(t, err, firstErr)
+	assert.ErrorIs(t, err, secondErr)
 }

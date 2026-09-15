@@ -2,20 +2,20 @@ package guardrails
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore, db sqlx.DB)) {
 	t.Helper()
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		store, err := NewSQLStore(context.Background(), db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+
 		body(t, store, db)
 	})
 }
@@ -25,7 +25,7 @@ func runSQLStoreTest(t *testing.T, body func(t *testing.T, store *SQLStore, db s
 func TestNewSQLStoreAddsMissingUserPathColumn(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE guardrail_definitions (
 				name TEXT PRIMARY KEY,
 				type TEXT NOT NULL,
@@ -33,32 +33,25 @@ func TestNewSQLStoreAddsMissingUserPathColumn(t *testing.T) {
 				config `+sqlx.TypeJSON+` NOT NULL,
 				created_at `+sqlx.TypeInt64+` NOT NULL,
 				updated_at `+sqlx.TypeInt64+` NOT NULL
-			)`); err != nil {
-			t.Fatalf("create pre-migration table: %v", err)
-		}
+			)`)
+		require.NoError(t, err)
 
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
+		require.NoError(t, err)
+		err = // Round-tripping a user path proves the column arrived, without
+			// reaching for engine-specific schema introspection.
+			store.Upsert(ctx, Definition{
+				Name:     "after-migration",
+				Type:     "system_prompt",
+				UserPath: "/team/alpha",
+				Config:   []byte(`{"content":"be concise"}`),
+			})
+		require.NoError(t, err)
 
-		// Round-tripping a user path proves the column arrived, without
-		// reaching for engine-specific schema introspection.
-		if err := store.Upsert(ctx, Definition{
-			Name:     "after-migration",
-			Type:     "system_prompt",
-			UserPath: "/team/alpha",
-			Config:   []byte(`{"content":"be concise"}`),
-		}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
 		got, err := store.Get(ctx, "after-migration")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.UserPath != "/team/alpha" {
-			t.Errorf("UserPath = %q, want /team/alpha", got.UserPath)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "/team/alpha", got.UserPath)
+
 	})
 }
 
@@ -68,9 +61,8 @@ func TestNewSQLStoreIsIdempotent(t *testing.T) {
 		// Every restart re-runs the constructor, including the already-applied
 		// user_path migration.
 		for range 3 {
-			if _, err := NewSQLStore(ctx, db); err != nil {
-				t.Fatalf("NewSQLStore: %v", err)
-			}
+			_, err := NewSQLStore(ctx, db)
+			require.NoError(t, err)
 		}
 	})
 }
@@ -82,57 +74,41 @@ func TestSQLStoreUpsertAndListRoundTripsUserPath(t *testing.T) {
 		scoped := Definition{Name: "scoped", Type: "system_prompt", UserPath: "/team/alpha", Config: []byte(`{"content":"x"}`)}
 		global := Definition{Name: "global", Type: "system_prompt", Config: []byte(`{"content":"y"}`)}
 		for _, definition := range []Definition{scoped, global} {
-			if err := store.Upsert(ctx, definition); err != nil {
-				t.Fatalf("Upsert(%s): %v", definition.Name, err)
-			}
+			err := store.Upsert(ctx, definition)
+			require.NoError(t, err, "Upsert(%s): %v", definition.Name, err)
 		}
 
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 2 {
-			t.Fatalf("len = %d, want 2", len(definitions))
-		}
+		require.NoError(t, err)
+		require.Len(t, definitions, 2)
+
 		// Ordered by name ascending.
-		if definitions[0].Name != "global" || definitions[1].Name != "scoped" {
-			t.Fatalf("names = %s, %s; want global, scoped", definitions[0].Name, definitions[1].Name)
-		}
-		if definitions[0].UserPath != "" {
-			t.Errorf("global UserPath = %q, want empty", definitions[0].UserPath)
-		}
-		if definitions[1].UserPath != "/team/alpha" {
-			t.Errorf("scoped UserPath = %q, want /team/alpha", definitions[1].UserPath)
-		}
+		require.Equal(t, "global", definitions[0].Name)
+		require.Equal(t, "scoped", definitions[1].Name)
+		assert.Empty(t, definitions[0].UserPath)
+		assert.Equal(t, "/team/alpha", definitions[1].UserPath)
+
 	})
 }
 
 func TestSQLStoreUpsertPreservesCreatedAt(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
 		ctx := context.Background()
+		err := store.Upsert(ctx, Definition{Name: "g", Type: "system_prompt", Config: []byte(`{"content":"c"}`)})
+		require.NoError(t, err)
 
-		if err := store.Upsert(ctx, Definition{Name: "g", Type: "system_prompt", Config: []byte(`{"content":"c"}`)}); err != nil {
-			t.Fatalf("first Upsert: %v", err)
-		}
 		created, err := store.Get(ctx, "g")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
+		require.NoError(t, err)
+		err = store.Upsert(ctx, Definition{Name: "g", Type: "llm_based_altering", Config: []byte(`{"model":"openai/gpt-4o"}`)})
+		require.NoError(t, err)
 
-		if err := store.Upsert(ctx, Definition{Name: "g", Type: "llm_based_altering", Config: []byte(`{"model":"openai/gpt-4o"}`)}); err != nil {
-			t.Fatalf("second Upsert: %v", err)
-		}
 		updated, err := store.Get(ctx, "g")
-		if err != nil {
-			t.Fatalf("Get after update: %v", err)
-		}
-		if updated.Type != "llm_based_altering" {
-			t.Errorf("Type = %q, want llm_based_altering", updated.Type)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "llm_based_altering", updated.Type)
+
 		// created_at is excluded from the ON CONFLICT update list.
-		if !updated.CreatedAt.Equal(created.CreatedAt) {
-			t.Errorf("CreatedAt = %v, want %v preserved", updated.CreatedAt, created.CreatedAt)
-		}
+		assert.True(t, updated.CreatedAt.Equal(created.CreatedAt), "CreatedAt = %v, want %v preserved", updated.CreatedAt, created.CreatedAt)
+
 	})
 }
 
@@ -146,66 +122,53 @@ func TestSQLStoreUpsertManyIsAtomic(t *testing.T) {
 			{Name: "valid", Type: "system_prompt", Config: []byte(`{"content":"c"}`)},
 			{Name: "", Type: "system_prompt", Config: []byte(`{"content":"c"}`)},
 		})
-		if err == nil {
-			t.Fatal("UpsertMany with an invalid definition succeeded, want failure")
-		}
+		require.Error(t, err)
 
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 0 {
-			t.Errorf("len = %d after failed batch, want 0", len(definitions))
-		}
+		require.NoError(t, err)
+		assert.Empty(t, definitions)
+
 	})
 }
 
 func TestSQLStoreUpsertManyCommits(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
 		ctx := context.Background()
-
-		if err := store.UpsertMany(ctx, []Definition{
+		err := store.UpsertMany(ctx, []Definition{
 			{Name: "a", Type: "system_prompt", Config: []byte(`{"content":"c"}`)},
 			{Name: "b", Type: "system_prompt", Config: []byte(`{"content":"c"}`)},
-		}); err != nil {
-			t.Fatalf("UpsertMany: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		definitions, err := store.List(ctx)
-		if err != nil {
-			t.Fatalf("List: %v", err)
-		}
-		if len(definitions) != 2 {
-			t.Errorf("len = %d, want 2", len(definitions))
-		}
+		require.NoError(t, err)
+		assert.Len(t, definitions, 2)
+
 	})
 }
 
 func TestSQLStoreGetAndDeleteMissingReturnNotFound(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
 		ctx := context.Background()
-		if _, err := store.Get(ctx, "absent"); !errors.Is(err, ErrNotFound) {
-			t.Errorf("Get error = %v, want ErrNotFound", err)
-		}
-		if err := store.Delete(ctx, "absent"); !errors.Is(err, ErrNotFound) {
-			t.Errorf("Delete error = %v, want ErrNotFound", err)
-		}
+		_, err := store.Get(ctx, "absent")
+		assert.ErrorIs(t, err, ErrNotFound)
+		err = store.Delete(ctx, "absent")
+		assert.ErrorIs(t, err, ErrNotFound)
+
 	})
 }
 
 func TestSQLStoreDeleteRemovesDefinition(t *testing.T) {
 	runSQLStoreTest(t, func(t *testing.T, store *SQLStore, _ sqlx.DB) {
 		ctx := context.Background()
-		if err := store.Upsert(ctx, Definition{Name: "g", Type: "system_prompt", Config: []byte(`{"content":"c"}`)}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
-		// Names are trimmed on the way in, so a padded delete must still match.
-		if err := store.Delete(ctx, "  g  "); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		if _, err := store.Get(ctx, "g"); !errors.Is(err, ErrNotFound) {
-			t.Errorf("Get after Delete = %v, want ErrNotFound", err)
-		}
+		err := store.Upsert(ctx, Definition{Name: "g", Type: "system_prompt", Config: []byte(`{"content":"c"}`)})
+		require.NoError(t, err)
+		err = // Names are trimmed on the way in, so a padded delete must still match.
+			store.Delete(ctx, "  g  ")
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "g")
+		assert.ErrorIs(t, err, ErrNotFound)
+
 	})
 }
 
@@ -214,7 +177,7 @@ func TestSQLStoreDeleteRemovesDefinition(t *testing.T) {
 func TestSQLStoreRoundTripsFailModeAndTimeout(t *testing.T) {
 	sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 		ctx := context.Background()
-		if err := db.Schema(ctx, `
+		err := db.Schema(ctx, `
 			CREATE TABLE guardrail_definitions (
 				name TEXT PRIMARY KEY,
 				type TEXT NOT NULL,
@@ -223,34 +186,29 @@ func TestSQLStoreRoundTripsFailModeAndTimeout(t *testing.T) {
 				config `+sqlx.TypeJSON+` NOT NULL,
 				created_at `+sqlx.TypeInt64+` NOT NULL,
 				updated_at `+sqlx.TypeInt64+` NOT NULL
-			)`); err != nil {
-			t.Fatalf("create pre-migration table: %v", err)
-		}
+			)`)
+		require.NoError(t, err)
+
 		store, err := NewSQLStore(ctx, db)
-		if err != nil {
-			t.Fatalf("NewSQLStore: %v", err)
-		}
-		if err := store.Upsert(ctx, Definition{
+		require.NoError(t, err)
+		err = store.Upsert(ctx, Definition{
 			Name:      "timed",
 			Type:      "system_prompt",
 			FailMode:  "open",
 			TimeoutMS: 1500,
 			Config:    []byte(`{"content":"be concise"}`),
-		}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
+		})
+		require.NoError(t, err)
+
 		got, err := store.Get(ctx, "timed")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.FailMode != "open" || got.TimeoutMS != 1500 {
-			t.Fatalf("fail_mode/timeout_ms = %q/%d, want open/1500", got.FailMode, got.TimeoutMS)
-		}
-		if err := store.Upsert(ctx, Definition{Name: "timed", Type: "system_prompt", Config: []byte(`{"content":"x"}`)}); err != nil {
-			t.Fatalf("Upsert(reset): %v", err)
-		}
-		if got, _ := store.Get(ctx, "timed"); got.FailMode != "" || got.TimeoutMS != 0 {
-			t.Fatalf("after reset fail_mode/timeout_ms = %q/%d, want defaults", got.FailMode, got.TimeoutMS)
-		}
+		require.NoError(t, err)
+		require.Equal(t, "open", got.FailMode)
+		require.Equal(t, 1500, got.TimeoutMS)
+		err = store.Upsert(ctx, Definition{Name: "timed", Type: "system_prompt", Config: []byte(`{"content":"x"}`)})
+		require.NoError(t, err)
+		got, _ = store.Get(ctx, "timed")
+		require.Empty(t, got.FailMode)
+		require.Equal(t, 0, got.TimeoutMS)
+
 	})
 }

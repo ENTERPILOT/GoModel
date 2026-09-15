@@ -1,6 +1,10 @@
 package modelselectors
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 type selectorTestCatalog struct{ names []string }
 
@@ -97,19 +101,16 @@ func TestNormalizeInputUsesCatalogProviderNames(t *testing.T) {
 }
 
 func TestProviderNames(t *testing.T) {
-	if got := ProviderNames(nil); got != nil {
-		t.Fatalf("ProviderNames(nil) = %#v, want nil", got)
-	}
+	got := ProviderNames(nil)
+	require.Nil(t, got)
 
 	names := []string{"prov"}
-	got := ProviderNames(selectorTestCatalog{names: names})
-	if len(got) != 1 || got[0] != "prov" {
-		t.Fatalf("ProviderNames() = %#v, want [prov]", got)
-	}
+	got = ProviderNames(selectorTestCatalog{names: names})
+	require.Len(t, got, 1)
+	require.Equal(t, "prov", got[0])
+
 	got[0] = "changed"
-	if names[0] != "prov" {
-		t.Fatalf("ProviderNames() did not return a copy; original names = %#v", names)
-	}
+	require.Equal(t, "prov", names[0], "ProviderNames() did not return a copy; original names = %#v", names)
 }
 
 func TestNormalizeStored(t *testing.T) {
@@ -192,9 +193,9 @@ func TestParseStoredParts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			providerName, model := ParseStoredParts(tt.selector)
-			if providerName != tt.wantProvider || model != tt.wantModel {
-				t.Fatalf("ParseStoredParts() = (%q, %q), want (%q, %q)", providerName, model, tt.wantProvider, tt.wantModel)
-			}
+			require.Equal(t, tt.wantProvider, providerName)
+			require.Equal(t, tt.wantModel, model)
+
 		})
 	}
 }
@@ -209,9 +210,9 @@ func TestSelectorHelpers(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				if got := String(tt.providerName, tt.model); got != tt.want {
-					t.Fatalf("String() = %q, want %q", got, tt.want)
-				}
+				got := String(tt.providerName, tt.model)
+				require.Equal(t, tt.want, got)
+
 			})
 		}
 	})
@@ -222,9 +223,8 @@ func TestSelectorHelpers(t *testing.T) {
 			want bool
 		}{{raw: "/", want: true}, {raw: " / ", want: true}, {raw: ""}, {raw: "prov/"}}
 		for _, tt := range tests {
-			if got := IsGlobal(tt.raw); got != tt.want {
-				t.Fatalf("IsGlobal(%q) = %v, want %v", tt.raw, got, tt.want)
-			}
+			got := IsGlobal(tt.raw)
+			require.Equal(t, tt.want, got, "IsGlobal(%q) = %v, want %v", tt.raw, got, tt.want)
 		}
 	})
 
@@ -243,9 +243,9 @@ func TestSelectorHelpers(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				if got := ScopeKindFor(tt.selector, tt.providerName, tt.model); got != tt.want {
-					t.Fatalf("ScopeKindFor() = %q, want %q", got, tt.want)
-				}
+				got := ScopeKindFor(tt.selector, tt.providerName, tt.model)
+				require.Equal(t, tt.want, got)
+
 			})
 		}
 	})
@@ -259,9 +259,9 @@ func TestSelectorHelpers(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				if got := ExactMatchKey(tt.providerName, tt.model); got != tt.want {
-					t.Fatalf("ExactMatchKey() = %q, want %q", got, tt.want)
-				}
+				got := ExactMatchKey(tt.providerName, tt.model)
+				require.Equal(t, tt.want, got)
+
 			})
 		}
 	})
@@ -282,9 +282,10 @@ func TestSelectorHelpers(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				prefix, rest, ok := splitFirst(tt.value)
-				if prefix != tt.wantPrefix || rest != tt.wantRest || ok != tt.wantOK {
-					t.Fatalf("splitFirst() = (%q, %q, %v), want (%q, %q, %v)", prefix, rest, ok, tt.wantPrefix, tt.wantRest, tt.wantOK)
-				}
+				require.Equal(t, tt.wantPrefix, prefix)
+				require.Equal(t, tt.wantRest, rest)
+				require.Equal(t, tt.wantOK, ok)
+
 			})
 		}
 	})
@@ -293,27 +294,19 @@ func TestSelectorHelpers(t *testing.T) {
 func assertNormalizeResult(t *testing.T, got Selector, err error, tt selectorCase) {
 	t.Helper()
 	if tt.wantErr {
-		if err == nil {
-			t.Fatal("normalize error = nil, want error")
-		}
-		if !IsValidationError(err) {
-			t.Fatalf("normalize error = %T %v, want validation error", err, err)
-		}
+		require.Error(t, err)
+		require.True(t, IsValidationError(err))
+
 		return
 	}
-	if err != nil {
-		t.Fatalf("normalize error = %v", err)
-	}
-	if got != tt.want {
-		t.Fatalf("selector = %+v, want %+v", got, tt.want)
-	}
+	require.NoError(t, err)
+	require.Equal(t, tt.want, got)
+
 	if got.Selector != String(got.ProviderName, got.Model) && !IsGlobal(got.Selector) {
 		t.Fatalf("selector string = %q, want canonical %q", got.Selector, String(got.ProviderName, got.Model))
 	}
-	if scope := ScopeKindFor(got.Selector, got.ProviderName, got.Model); scope != tt.wantScope {
-		t.Fatalf("scope = %q, want %q", scope, tt.wantScope)
-	}
-	if key := ExactMatchKey(got.ProviderName, got.Model); key != tt.wantExactKey {
-		t.Fatalf("exact key = %q, want %q", key, tt.wantExactKey)
-	}
+	scope := ScopeKindFor(got.Selector, got.ProviderName, got.Model)
+	require.Equal(t, tt.wantScope, scope)
+	key := ExactMatchKey(got.ProviderName, got.Model)
+	require.Equal(t, tt.wantExactKey, key)
 }

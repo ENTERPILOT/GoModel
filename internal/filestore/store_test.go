@@ -2,7 +2,6 @@ package filestore
 
 import (
 	"context"
-	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -14,6 +13,8 @@ import (
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // runStoreSuite exercises the behaviour every Store implementation owes its
@@ -28,9 +29,8 @@ func runStoreSuite(t *testing.T, suite func(t *testing.T, store Store)) {
 	t.Run("sql", func(t *testing.T) {
 		sqlxtest.Run(t, func(t *testing.T, db sqlx.DB) {
 			store, err := NewSQLStore(context.Background(), db)
-			if err != nil {
-				t.Fatalf("NewSQLStore: %v", err)
-			}
+			require.NoError(t, err)
+
 			suite(t, store)
 		})
 	})
@@ -49,9 +49,8 @@ func newMongoTestStore(t *testing.T) Store {
 	}
 	ctx := context.Background()
 	client, err := mongo.Connect(options.Client().ApplyURI(dsn))
-	if err != nil {
-		t.Fatalf("mongo.Connect: %v", err)
-	}
+	require.NoError(t, err)
+
 	// MongoDB rejects database names of 64 bytes or more, and the prefix plus
 	// a timestamp already spends 48 of them, so the test name is bounded
 	// rather than concatenated whole.
@@ -84,8 +83,7 @@ func mongoTestDatabaseName(testName string) string {
 func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-
-		if err := store.Upsert(ctx, &StoredFile{
+		err := store.Upsert(ctx, &StoredFile{
 			ID:           "file-1",
 			ProviderType: "openai",
 			Purpose:      "batch",
@@ -93,10 +91,9 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 			Bytes:        10,
 			CreatedAt:    111,
 			UserPath:     "/v1/files",
-		}); err != nil {
-			t.Fatalf("initial Upsert: %v", err)
-		}
-		if err := store.Upsert(ctx, &StoredFile{
+		})
+		require.NoError(t, err)
+		err = store.Upsert(ctx, &StoredFile{
 			ID:           "file-1",
 			ProviderType: "anthropic",
 			Purpose:      "fine-tune",
@@ -104,71 +101,57 @@ func TestStoreUpsertPreservesCreatedAt(t *testing.T) {
 			Bytes:        20,
 			CreatedAt:    222,
 			UserPath:     "/v1/files?provider=anthropic",
-		}); err != nil {
-			t.Fatalf("second Upsert: %v", err)
-		}
+		})
+		require.NoError(t, err)
 
 		stored, err := store.Get(ctx, "file-1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
+		require.NoError(t, err)
+
 		// created_at is deliberately absent from the ON CONFLICT update list:
 		// a re-upsert refreshes provider ownership without rewriting when the
 		// file was first seen.
-		if stored.CreatedAt != 111 {
-			t.Errorf("CreatedAt = %d, want 111 preserved", stored.CreatedAt)
-		}
-		if stored.ProviderType != "anthropic" {
-			t.Errorf("ProviderType = %q, want anthropic", stored.ProviderType)
-		}
-		if stored.Filename != "updated.jsonl" {
-			t.Errorf("Filename = %q, want updated.jsonl", stored.Filename)
-		}
+		assert.Equal(t, int64(111), stored.CreatedAt)
+		assert.Equal(t, "anthropic", stored.ProviderType)
+		assert.Equal(t, "updated.jsonl", stored.Filename)
+
 	})
 }
 
 func TestStoreGetMissingReturnsNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		_, err := store.Get(context.Background(), "absent")
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Get error = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, ErrNotFound)
+
 	})
 }
 
 func TestStoreDeleteMissingReturnsNotFound(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		err := store.Delete(context.Background(), "absent")
-		if !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Delete error = %v, want ErrNotFound", err)
-		}
+		require.ErrorIs(t, err, ErrNotFound)
+
 	})
 }
 
 func TestStoreDeleteRemovesMapping(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-		if err := store.Upsert(ctx, &StoredFile{ID: "file-1", ProviderType: "openai"}); err != nil {
-			t.Fatalf("Upsert: %v", err)
-		}
-		if err := store.Delete(ctx, "file-1"); err != nil {
-			t.Fatalf("Delete: %v", err)
-		}
-		if _, err := store.Get(ctx, "file-1"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("Get after Delete = %v, want ErrNotFound", err)
-		}
+		err := store.Upsert(ctx, &StoredFile{ID: "file-1", ProviderType: "openai"})
+		require.NoError(t, err)
+		err = store.Delete(ctx, "file-1")
+		require.NoError(t, err)
+		_, err = store.Get(ctx, "file-1")
+		require.ErrorIs(t, err, ErrNotFound)
+
 	})
 }
 
 func TestStoreRejectsIncompleteMapping(t *testing.T) {
 	runStoreSuite(t, func(t *testing.T, store Store) {
 		ctx := context.Background()
-		if err := store.Upsert(ctx, &StoredFile{ProviderType: "openai"}); err == nil {
-			t.Error("Upsert without an id succeeded, want failure")
-		}
-		if err := store.Upsert(ctx, &StoredFile{ID: "file-1"}); err == nil {
-			t.Error("Upsert without a provider type succeeded, want failure")
-		}
+		assert.Error(t, store.Upsert(ctx, &StoredFile{ProviderType: "openai"}))
+		assert.Error(t, store.Upsert(ctx, &StoredFile{ID: "file-1"}))
+
 	})
 }
 
@@ -195,9 +178,8 @@ func TestStoreListFiltersByUserPathSubtree(t *testing.T) {
 			{"file-legacy", "", "openai", "batch", 1},
 		}
 		for _, row := range rows {
-			if err := store.Upsert(ctx, &StoredFile{ID: row.id, ProviderType: row.provider, Purpose: row.purpose, UserPath: row.userPath, CreatedAt: row.createdAt}); err != nil {
-				t.Fatalf("upsert %s: %v", row.id, err)
-			}
+			err := store.Upsert(ctx, &StoredFile{ID: row.id, ProviderType: row.provider, Purpose: row.purpose, UserPath: row.userPath, CreatedAt: row.createdAt})
+			require.NoError(t, err, "upsert %s: %v", row.id, err)
 		}
 
 		tests := []struct {
@@ -220,26 +202,21 @@ func TestStoreListFiltersByUserPathSubtree(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				got, err := store.List(ctx, tt.filter, 10, tt.after)
 				if tt.notFnd {
-					if !errors.Is(err, ErrNotFound) {
-						t.Fatalf("err = %v, want ErrNotFound", err)
-					}
+					require.ErrorIs(t, err, ErrNotFound)
+
 					return
 				}
-				if err != nil {
-					t.Fatalf("List: %v", err)
-				}
-				if ids := fileIDs(got); !slices.Equal(ids, tt.want) {
-					t.Fatalf("ids = %v, want %v", ids, tt.want)
-				}
+				require.NoError(t, err)
+				ids := fileIDs(got)
+				require.True(t, slices.Equal(ids, tt.want), "ids = %v, want %v", ids, tt.want)
+
 			})
 		}
 
 		page, err := store.List(ctx, ListFilter{UserPath: "/team/alpha"}, 2, "")
-		if err != nil {
-			t.Fatalf("List page: %v", err)
-		}
-		if ids := fileIDs(page); !slices.Equal(ids, []string{"file-alpha-new", "file-alpha-anthropic"}) {
-			t.Fatalf("page ids = %v", ids)
-		}
+		require.NoError(t, err)
+		ids := fileIDs(page)
+		require.True(t, slices.Equal(ids, []string{"file-alpha-new", "file-alpha-anthropic"}), "page ids = %v", ids)
+
 	})
 }
