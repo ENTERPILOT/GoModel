@@ -17,7 +17,44 @@ func applyEnvOverrides(cfg *Config) error {
 	}
 	normalizeModelListURL(cfg)
 	applyOfflineMode(cfg)
+	applyPluginsLoadEnv(cfg)
 	return nil
+}
+
+// applyPluginsLoadEnv appends PLUGINS_LOAD entries to plugins.load. The
+// generic env overlay cannot express a list of structs, so this variable is
+// applied explicitly: a comma-separated list of .so file names, each entry
+// optionally "file=sha256hex" to pin the digest. Entries already present in
+// plugins.load (by file name) are skipped, so config.yaml and the env
+// variable compose instead of duplicating.
+func applyPluginsLoadEnv(cfg *Config) {
+	v := strings.TrimSpace(os.Getenv("PLUGINS_LOAD"))
+	if v == "" {
+		return
+	}
+	for _, item := range strings.Split(v, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		entry := PluginFileConfig{}
+		if file, sha, found := strings.Cut(item, "="); found {
+			entry.File = strings.TrimSpace(file)
+			entry.SHA256 = strings.TrimSpace(sha)
+		} else {
+			entry.File = item
+		}
+		dup := false
+		for _, existing := range cfg.Plugins.Load {
+			if existing.File == entry.File {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			cfg.Plugins.Load = append(cfg.Plugins.Load, entry)
+		}
+	}
 }
 
 // applyOfflineMode enforces the offline switch after every other source has
