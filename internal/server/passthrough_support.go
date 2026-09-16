@@ -271,16 +271,7 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 	}()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider passthrough error response", err))
-		}
-		gatewayErr := core.ParseProviderError(providerType, resp.StatusCode, body, nil)
-		headers := passthroughErrorResponseHeaders(providerType, resp.StatusCode, http.Header(resp.Headers))
-		if len(headers) == 0 {
-			return handleError(c, gatewayErr)
-		}
-		return handleError(c, &gatewayErrorWithResponseHeaders{GatewayError: gatewayErr, headers: headers})
+		return relayPassthroughError(c, providerType, resp)
 	}
 
 	copyPassthroughResponseHeaders(c.Response().Header(), http.Header(resp.Headers))
@@ -375,6 +366,90 @@ func proxyPassthroughResponse(c *echo.Context, logger auditlog.LoggerInterface, 
 		notifyObserversWithJSONBody(body, observers)
 	}
 	return nil
+}
+
+// maxRelayedPassthroughErrorBytes caps the provider-native error body relayed
+// verbatim. Provider error payloads are small; anything larger is answered
+// with the gateway's own envelope rather than buffered.
+const maxRelayedPassthroughErrorBytes = 1 << 20
+
+// relayPassthroughError answers a non-2xx passthrough response with the
+// provider's own error body, status and content type. That is the documented
+// passthrough contract: provider SDKs parse their native error envelope
+// (Anthropic's {"type":"error",...} with its request_id) and lose their typed
+// errors when the gateway rewrites it into the OpenAI envelope.
+//
+// Only the upstream's own failures reach here. Gateway-generated errors —
+// authentication, rate limits, budgets, unknown or disabled providers,
+// transport failures — are rendered by handleError before or instead of this
+// relay, so they keep the gateway's shape. Nothing but the body, its media
+// type and the small set of headers the gateway already relays on errors
+// crosses back, so upstream credentials, cookies and base URLs cannot leak.
+//
+// Bodies that are not a JSON payload within the cap (an intermediary's HTML
+// error page, for example) fall back to the gateway envelope, so a client
+// always receives a parseable error.
+func relayPassthroughError(c *echo.Context, providerType string, resp *core.PassthroughResponse) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRelayedPassthroughErrorBytes+1))
+	if err != nil {
+		return handleError(c, core.NewProviderError(providerType, http.StatusBadGateway, "failed to read provider passthrough error response", err))
+	}
+	gatewayErr := core.ParseProviderError(providerType, resp.StatusCode, body, nil)
+	headers := passthroughErrorResponseHeaders(providerType, resp.StatusCode, http.Header(resp.Headers))
+	if !isRelayablePassthroughErrorBody(body, resp.Headers) {
+		if len(headers) == 0 {
+			return handleError(c, gatewayErr)
+		}
+		return handleError(c, &gatewayErrorWithResponseHeaders{GatewayError: gatewayErr, headers: headers})
+	}
+
+	// The client receives the provider body; logs and the audit row still carry
+	// the classified gateway error, exactly as handleError would record it.
+	logHandledError(c, gatewayErr)
+	enrichAuditEntryWithProviderAttempts(c)
+	auditlog.EnrichEntryWithGatewayError(c, gatewayErr)
+
+	for key, values := range headers {
+		for _, value := range values {
+			c.Response().Header().Add(key, value)
+		}
+	}
+	c.Response().Header().Set("Content-Type", passthroughErrorContentType(resp.Headers))
+	c.Response().WriteHeader(resp.StatusCode)
+	if _, err := c.Response().Write(body); err != nil {
+		return err
+	}
+	if f, ok := c.Response().(http.Flusher); ok {
+		f.Flush()
+	}
+	return nil
+}
+
+// isRelayablePassthroughErrorBody reports whether an upstream error body can be
+// relayed to the client untouched: a non-empty, valid JSON document served
+// with a JSON content type and small enough to buffer.
+func isRelayablePassthroughErrorBody(body []byte, headers map[string][]string) bool {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || len(body) > maxRelayedPassthroughErrorBytes {
+		return false
+	}
+	return isJSONContentType(headers) && json.Valid(trimmed)
+}
+
+// passthroughErrorContentType returns the upstream JSON media type to relay
+// with an error body, defaulting to application/json.
+func passthroughErrorContentType(headers map[string][]string) string {
+	for key, values := range headers {
+		if !strings.EqualFold(key, "Content-Type") {
+			continue
+		}
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" && !strings.ContainsAny(value, "\r\n") {
+				return value
+			}
+		}
+	}
+	return "application/json"
 }
 
 // maxObservedJSONResponseBytes caps how much of a non-streaming JSON response

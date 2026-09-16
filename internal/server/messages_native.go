@@ -68,7 +68,7 @@ func (s *translatedInferenceService) dispatchMessagesNative(c *echo.Context, req
 	}
 	body, err = rewriteMessagesModel(body, req.Model)
 	if err != nil {
-		return handleError(c, core.NewInvalidRequestError("invalid request body: "+err.Error(), err))
+		return handleError(c, invalidRequestBodyError(c, err))
 	}
 
 	s.observeLiveProviderAttempts(c, workflow)
