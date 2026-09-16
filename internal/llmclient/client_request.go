@@ -292,6 +292,16 @@ func (c *Client) buildRequest(ctx context.Context, req Request) (*http.Request, 
 		}
 	}
 
+	// Forward the client's Idempotency-Key so the provider can deduplicate
+	// retries of this request, including this client's own. Gateway-internal
+	// calls (guardrails, plugins) share the request context but send their own
+	// body, so they never carry it; an explicit header is left alone.
+	if key := core.IdempotencyKey(ctx); key != "" &&
+		core.GetRequestOrigin(ctx) == core.RequestOriginExternal &&
+		httpReq.Header.Get(core.IdempotencyKeyHeader) == "" {
+		httpReq.Header.Set(core.IdempotencyKeyHeader, key)
+	}
+
 	return httpReq, nil
 }
 
