@@ -488,6 +488,19 @@ func TestHotPathPerfGuard(t *testing.T) {
 			maxBytes:  21056, // baseline ~19.6 KB
 		},
 		{
+			// The same shape with live logs on and no dashboard connected,
+			// which is how a running gateway is configured by default. The
+			// broker builds and retains an event for every lifecycle step of
+			// every request; the case above uses a stub audit logger and so
+			// cannot see any of it. Against that case this is the standing
+			// price of live logs: ~14us, ~22KB and 115 allocations per
+			// request, and the ceiling is what keeps it from growing back.
+			name:      "gateway_chat_completion_production_shape_live_broker",
+			bench:     BenchmarkGatewayHotPathProductionShapeLiveBroker,
+			maxAllocs: 280,   // baseline 275
+			maxBytes:  44032, // baseline ~41.5 KB
+		},
+		{
 			// Typed chunk decoding + reused read buffer keep this converter at a
 			// fraction of its former map[string]any-per-chunk cost (was 202/19.6KB).
 			// response.completed now carries the full output array, and the
