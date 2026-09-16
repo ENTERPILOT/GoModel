@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -46,11 +45,16 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 	catalog := h.userCatalog()
 	scope := requestScope(c)
 	response := make([]authKeyResponse, 0, len(views))
+	keyIDs := make([]string, 0, len(views))
+	byID := make(map[string]*authKeyResponse, len(views))
 	for _, view := range views {
 		if !scope.Allows(view.UserPath) {
 			continue
 		}
-		row := authKeyResponse{View: view, Restricted: len(view.AllowedModels) > 0}
+		response = append(response, authKeyResponse{View: view, Restricted: len(view.AllowedModels) > 0})
+		row := &response[len(response)-1]
+		byID[view.ID] = row
+		keyIDs = append(keyIDs, view.ID)
 		ctx := core.WithEffectiveUserPath(context.Background(), view.UserPath)
 		if len(view.AllowedModels) > 0 {
 			ctx = core.WithCredentialAllowedModels(ctx, view.AllowedModels)
@@ -59,7 +63,22 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 			row.Restricted = true
 		}
 		row.EffectiveModels = h.effectiveModels(ctx, catalog)
-		response = append(response, row)
+	}
+	// Last-used timestamps come from the audit log (the only write-time record
+	// of key activity). A lookup failure degrades to no last_used_at fields —
+	// the dashboard shows its honest fallback states instead.
+	if h.auditReader != nil && len(keyIDs) > 0 {
+		lastUsed, err := h.auditReader.GetLastUsedByAuthKeys(c.Request().Context(), keyIDs)
+		if err != nil {
+			slog.Warn("failed to load auth key last used", "error", err)
+		} else {
+			for id, ts := range lastUsed {
+				if row, ok := byID[id]; ok {
+					ts := ts.UTC()
+					row.LastUsedAt = &ts
+				}
+			}
+		}
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -206,53 +225,6 @@ func (h *Handler) updateAuthKey(c *echo.Context, req any, update func(ctx contex
 		return handleError(c, authKeyWriteError(err))
 	}
 	return c.JSON(http.StatusOK, view)
-}
-
-// authKeysLastUsedResponse is the per-key last-activity map derived from the
-// audit log, plus the audit retention window the derivation covers.
-type authKeysLastUsedResponse struct {
-	LastUsed      map[string]string `json:"last_used"`
-	RetentionDays int               `json:"retention_days"`
-}
-
-// GetAuthKeysLastUsed handles GET /admin/auth-keys/last-used. The timestamps
-// come from the audit log (the only write-time record of key activity, kept
-// for its retention window) — there is no stored last-used field. Keys without
-// audit entries are simply absent from last_used; retention_days tells the
-// dashboard how far the window reaches so it can render honest fallbacks.
-func (h *Handler) GetAuthKeysLastUsed(c *echo.Context) error {
-	if h.authKeys == nil || h.auditReader == nil {
-		return handleError(c, featureUnavailableError("auth keys feature is unavailable"))
-	}
-
-	views := h.authKeys.ListViews()
-	keyIDs := make([]string, 0, len(views))
-	for _, view := range views {
-		if requestScope(c).Allows(view.UserPath) {
-			keyIDs = append(keyIDs, view.ID)
-		}
-	}
-
-	lastUsed, err := h.auditReader.GetLastUsedByAuthKeys(c.Request().Context(), keyIDs)
-	if err != nil {
-		return handleError(c, core.NewProviderError("audit log", http.StatusServiceUnavailable, "failed to load auth key last used", err))
-	}
-
-	times := make(map[string]string, len(lastUsed))
-	for id, ts := range lastUsed {
-		times[id] = ts.UTC().Format(time.RFC3339)
-	}
-	return c.JSON(http.StatusOK, authKeysLastUsedResponse{LastUsed: times, RetentionDays: h.auditRetentionDays()})
-}
-
-// auditRetentionDays reads the audit retention window out of the dashboard
-// runtime config; 0 when it was never wired (unknown window).
-func (h *Handler) auditRetentionDays() int {
-	days, err := strconv.Atoi(strings.TrimSpace(h.runtimeConfig.LoggingRetentionDays))
-	if err != nil || days < 0 {
-		return 0
-	}
-	return days
 }
 
 // DeactivateAuthKey handles POST /admin/auth-keys/:id/deactivate

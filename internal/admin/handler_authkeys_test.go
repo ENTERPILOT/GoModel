@@ -101,9 +101,8 @@ func newAuthKeyHandler(t *testing.T, store authkeys.Store) *Handler {
 	return NewHandler(nil, nil, WithAuthKeys(service))
 }
 
-// newAuthKeyHandlerWithReader adds an audit reader and the dashboard runtime
-// config carrying the audit retention window, as initAdmin wires them.
-func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader auditlog.Reader, retentionDays string) *Handler {
+// newAuthKeyHandlerWithReader adds an audit reader, as initAdmin wires it.
+func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader auditlog.Reader) *Handler {
 	t.Helper()
 	service, err := authkeys.NewService(store)
 	require.NoError(t, err)
@@ -113,7 +112,6 @@ func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader audi
 	return NewHandler(nil, nil,
 		WithAuthKeys(service),
 		WithAuditReader(reader),
-		WithDashboardRuntimeConfig(DashboardConfigResponse{LoggingRetentionDays: retentionDays}),
 	)
 }
 
@@ -134,10 +132,6 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 
 	c, rec = echotest.Request(t, http.MethodPut, "/admin/auth-keys/test-key/labels", `{"labels":["a"]}`, echotest.WithPathValue("id", "test-key"))
 	require.NoError(t, h.UpdateAuthKeyLabels(c))
-	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
-
-	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
-	require.NoError(t, h.GetAuthKeysLastUsed(c))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
@@ -232,65 +226,52 @@ func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
-func TestGetAuthKeysLastUsed(t *testing.T) {
+func TestListAuthKeysIncludesLastUsed(t *testing.T) {
 	usedAt := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
 	reader := &mockAuditReader{}
-	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "30")
+	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
 	usedKey := createAuthKey(t, h, `{"name":"used"}`)
 	unusedKey := createAuthKey(t, h, `{"name":"unused"}`)
 	reader.lastUsed = map[string]time.Time{usedKey.ID: usedAt}
 
-	c, rec := echotest.Get(t, "/admin/auth-keys/last-used")
-	require.NoError(t, h.GetAuthKeysLastUsed(c))
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
 	require.Equal(t, http.StatusOK, rec.Code)
-	body := echotest.Decode[map[string]any](t, rec)
+	body := echotest.Decode[[]map[string]any](t, rec)
 
-	lastUsed, ok := body["last_used"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, usedAt.Format(time.RFC3339), lastUsed[usedKey.ID])
-	_, ok = lastUsed[unusedKey.ID]
+	rowsByID := make(map[string]map[string]any, len(body))
+	for _, row := range body {
+		rowsByID[row["id"].(string)] = row
+	}
+	assert.Equal(t, usedAt.Format(time.RFC3339), rowsByID[usedKey.ID]["last_used_at"])
+	_, ok := rowsByID[unusedKey.ID]["last_used_at"]
 	assert.False(t, ok)
-	assert.Equal(t, float64(30), body["retention_days"])
 
 	// Every listed key id reached the reader in one call.
 	assert.ElementsMatch(t, []string{usedKey.ID, unusedKey.ID}, reader.lastUsedKeyIDs)
 }
 
-func TestGetAuthKeysLastUsedShortCircuitsWithoutKeys(t *testing.T) {
-	reader := &mockAuditReader{}
-	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "30")
-
-	c, rec := echotest.Get(t, "/admin/auth-keys/last-used")
-	require.NoError(t, h.GetAuthKeysLastUsed(c))
-	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Empty(t, reader.lastUsedKeyIDs)
-
-	body := echotest.Decode[map[string]any](t, rec)
-	lastUsed, ok := body["last_used"].(map[string]any)
-	require.True(t, ok)
-	assert.Empty(t, lastUsed)
-	assert.Equal(t, float64(30), body["retention_days"])
-
-	// An unwired retention config surfaces 0; a configured 0 means retention is
-	// disabled (audit data kept forever), which is the same value the dashboard
-	// reads as "keep everything".
-	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "")
-	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
-	require.NoError(t, h.GetAuthKeysLastUsed(c))
-	assert.Equal(t, float64(0), echotest.Decode[map[string]any](t, rec)["retention_days"])
-
-	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "0")
-	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
-	require.NoError(t, h.GetAuthKeysLastUsed(c))
-	assert.Equal(t, float64(0), echotest.Decode[map[string]any](t, rec)["retention_days"])
-}
-
-func TestGetAuthKeysLastUsedReturns503OnReaderError(t *testing.T) {
-	reader := &mockAuditReader{lastUsedErr: errors.New("audit reader down")}
-	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "30")
+func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
+	// Without an audit reader the list still answers, without last_used_at.
+	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	createAuthKey(t, h, `{"name":"any"}`)
+	c, rec := echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body := echotest.Decode[[]map[string]any](t, rec)
+	require.Len(t, body, 1)
+	_, ok := body[0]["last_used_at"]
+	assert.False(t, ok)
 
-	c, rec := echotest.Get(t, "/admin/auth-keys/last-used")
-	require.NoError(t, h.GetAuthKeysLastUsed(c))
-	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	// A failing reader degrades the same way.
+	reader := &mockAuditReader{lastUsedErr: errors.New("audit reader down")}
+	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader)
+	createAuthKey(t, h, `{"name":"any"}`)
+	c, rec = echotest.Get(t, "/admin/auth-keys")
+	require.NoError(t, h.ListAuthKeys(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	body = echotest.Decode[[]map[string]any](t, rec)
+	require.Len(t, body, 1)
+	_, ok = body[0]["last_used_at"]
+	assert.False(t, ok)
 }

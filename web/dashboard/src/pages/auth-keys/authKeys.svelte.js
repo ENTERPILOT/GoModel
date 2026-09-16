@@ -2,12 +2,13 @@
 // on top of the shared admin API client (401s and stale-auth are handled by
 // the client).
 
-import { getJSON, isAbortError } from "$lib/api/client.js";
+
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
 import { access } from "$lib/stores/access.svelte.js";
 import { normalizeScopePath } from "$lib/stores/accessScope.js";
+import { runtimeConfig } from "$lib/stores/runtimeConfig.svelte.js";
 import * as m from "$lib/paraglide/messages.js";
 import { createCopyState } from "$lib/utils/clipboard.svelte.js";
 import { displayModelSelector } from "$lib/utils/modelSelectors.js";
@@ -18,6 +19,7 @@ import {
   filterAuthKeys,
   parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
+  retentionDaysFromConfig,
   sortAuthKeys,
 } from "./authKeysLogic.js";
 
@@ -36,14 +38,10 @@ class AuthKeysStore {
   // Load and in-form errors only; row-action feedback goes through the
   // flash store.
   error = $state("");
-  // Audit retention window in days, from the last-used endpoint. null means
-  // unknown (no lookup yet, request failed, old gateway without the route);
-  // 0 means retention is disabled and audit entries are kept forever, so a
-  // missing entry really means the key was never used.
-  retentionDays = $state(null);
-  // Guards against overlapping fetchLastUsed responses: a newer call bumps the
-  // generation, and stale results are discarded before touching state.
-  lastUsedGeneration = 0;
+  // Audit retention window in days, from the runtime-config store (0 means
+  // retention is disabled and audit entries are kept forever, so a missing
+  // entry really means the key was never used). null means unknown.
+  retentionDays = $derived(retentionDaysFromConfig(runtimeConfig.config.LOGGING_RETENTION_DAYS));
 
   // Toolbar: inactive keys (deactivated or expired) are hidden by default.
   filter = $state("");
@@ -101,35 +99,9 @@ class AuthKeysStore {
       }
       this.available = true;
       this.keys = outcome.items;
-      // A fresh key list discards the previous lookup's retention window.
-      this.retentionDays = null;
-      void this.fetchLastUsed();
     } finally {
       this.loading = false;
     }
-  }
-
-  // Last-used timestamps come from a separate endpoint derived from the audit
-  // log. Any failure (old gateway without the route, audit logging off) just
-  // leaves the keys without last_used_at — the table shows its honest
-  // fallback states instead.
-  async fetchLastUsed() {
-    const generation = ++this.lastUsedGeneration;
-    let result;
-    try {
-      result = await getJSON("/admin/auth-keys/last-used", { label: "auth key last used" });
-    } catch (e) {
-      if (!isAbortError(e)) {
-        console.error("Failed to fetch auth key last used:", e);
-      }
-      return;
-    }
-    if (generation !== this.lastUsedGeneration || result.stale || !result.ok || !result.data) {
-      return;
-    }
-    this.retentionDays = Math.max(0, Number(result.data.retention_days) || 0);
-    const lastUsed = result.data.last_used || {};
-    this.keys = this.keys.map((key) => ({ ...key, last_used_at: lastUsed[key.id] || null }));
   }
 
   // Cross-page entry points used by the Users page: land on API Keys either

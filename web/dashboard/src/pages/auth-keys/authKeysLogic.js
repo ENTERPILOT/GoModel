@@ -269,3 +269,14 @@ export function lastUsedCellState(lastUsedAt, retentionDays) {
   if (retentionDays > 0) return "outside";
   return "unknown";
 }
+
+// retentionDaysFromConfig parses the audit retention window from the runtime
+// config's LOGGING_RETENTION_DAYS value. Unknown or invalid values yield null;
+// 0 is meaningful — retention is disabled and audit data is kept forever.
+export function retentionDaysFromConfig(value) {
+  const n = Math.trunc(Number(value));
+  if (value === undefined || value === null || value === "" || !Number.isFinite(n) || n < 0) {
+    return null;
+  }
+  return n;
+}

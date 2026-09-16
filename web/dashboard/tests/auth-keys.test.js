@@ -17,6 +17,7 @@ import {
   normalizeAuthKeyUserPath,
   parseAuthKeyAllowedModels,
   parseAuthKeyLabels,
+  retentionDaysFromConfig,
   sortAuthKeys,
 } from "../src/pages/auth-keys/authKeysLogic.js";
 
@@ -320,4 +321,18 @@ test("lastUsedCellState: unknown retention keeps the state unknown", () => {
   assert.equal(lastUsedCellState(null, null), "unknown");
   assert.equal(lastUsedCellState(null, undefined), "unknown");
   assert.equal(lastUsedCellState(null, -1), "unknown");
+});
+
+test("retentionDaysFromConfig passes known windows and the forever marker through", () => {
+  assert.equal(retentionDaysFromConfig("30"), 30);
+  assert.equal(retentionDaysFromConfig("0"), 0);
+  assert.equal(retentionDaysFromConfig(7), 7);
+});
+
+test("retentionDaysFromConfig yields null for unknown or invalid values", () => {
+  assert.equal(retentionDaysFromConfig(undefined), null);
+  assert.equal(retentionDaysFromConfig(null), null);
+  assert.equal(retentionDaysFromConfig(""), null);
+  assert.equal(retentionDaysFromConfig("abc"), null);
+  assert.equal(retentionDaysFromConfig("-5"), null);
 });
