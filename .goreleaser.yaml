@@ -35,8 +35,6 @@ checksum:
 
 release:
   replace_existing_draft: true
-  # Links the release body to the diff against the previous tag, so readers
-  # see the actual code changes without running git themselves.
   footer: |
     {{- if .PreviousTag }}
     **Full Changelog**: https://github.com/ENTERPILOT/GoModel/compare/{{ .PreviousTag }}...{{ .Tag }}
