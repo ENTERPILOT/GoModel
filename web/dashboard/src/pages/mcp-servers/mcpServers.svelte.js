@@ -15,8 +15,10 @@ import {
   filterMcpServers,
   mcpServerFormFromServer,
   mcpServerSlug,
+  mcpServersNeedPolling,
   mcpServerStatus,
   normalizeMcpCatalog,
+  MCP_SERVERS_POLL_MS,
 } from "./mcp-servers.js";
 
 class McpServersState {
@@ -45,13 +47,18 @@ class McpServersState {
 
   filtered = $derived(filterMcpServers(this.servers, this.filter));
 
+  #pollTimer = null;
+
   // --- server list -------------------------------------------------------
 
-  async fetchServers() {
+  // background=true is the poll loop re-fetching: it leaves the loading flag
+  // alone so the settled list never flickers back to the spinner.
+  async fetchServers({ background = false } = {}) {
     // Wait for the shared runtime-config request before deciding whether the
     // MCP admin API is available.
     await runtimeConfig.ensureLoaded();
     if (!runtimeConfig.mcpVisible()) {
+      this.stopPolling();
       this.available = false;
       this.servers = [];
       this.error = "";
@@ -59,7 +66,10 @@ class McpServersState {
       return;
     }
 
-    this.loading = true;
+    this.#clearPoll();
+    if (!background) {
+      this.loading = true;
+    }
     this.error = "";
     try {
       const outcome = await loadAdminList("/admin/mcp-servers", {
@@ -81,15 +91,51 @@ class McpServersState {
         if (outcome.result) {
           this.available = true;
         }
+        // A failed background poll keeps the list it already has: a blip
+        // while waiting for a dial must not blank the table or replace it
+        // with an error the operator never asked for. The loop simply stops;
+        // the next page visit or row action reloads.
+        if (background) {
+          return;
+        }
         this.servers = [];
         this.error = outcome.error;
         return;
       }
       this.available = true;
       this.servers = outcome.items;
+      this.#schedulePoll();
     } finally {
-      this.loading = false;
+      if (!background) {
+        this.loading = false;
+      }
     }
+  }
+
+  // --- connect poll ------------------------------------------------------
+
+  #schedulePoll() {
+    this.#clearPoll();
+    if (!mcpServersNeedPolling(this.servers)) {
+      return;
+    }
+    this.#pollTimer = setTimeout(() => {
+      this.#pollTimer = null;
+      void this.fetchServers({ background: true });
+    }, MCP_SERVERS_POLL_MS);
+  }
+
+  #clearPoll() {
+    if (this.#pollTimer) {
+      clearTimeout(this.#pollTimer);
+      this.#pollTimer = null;
+    }
+  }
+
+  // stopPolling is called when the page is left, so a background timer never
+  // outlives it.
+  stopPolling() {
+    this.#clearPoll();
   }
 
   // --- editor form -------------------------------------------------------

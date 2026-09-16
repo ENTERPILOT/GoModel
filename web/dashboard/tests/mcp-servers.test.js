@@ -16,6 +16,7 @@ import {
   mcpHeadersToRows,
   mcpServerEndpointLabel,
   mcpServerFormFromServer,
+  mcpServersNeedPolling,
   mcpServerStatus,
   mcpServerStatusClass,
   mcpServerStatusTitle,
@@ -66,6 +67,31 @@ test("mcpServerStatusClass maps statuses to badge classes", () => {
 test("mcpServerStatus defaults to connecting", () => {
   assert.equal(mcpServerStatus({}), "connecting");
   assert.equal(mcpServerStatus({ status: " degraded " }), "degraded");
+});
+
+test("mcpServersNeedPolling stays on only while a server is still connecting", () => {
+  assert.equal(mcpServersNeedPolling([{ name: "a", status: "connecting" }]), true);
+  // A server saved a moment ago comes back without a status yet.
+  assert.equal(mcpServersNeedPolling([{ name: "a" }]), true);
+  assert.equal(
+    mcpServersNeedPolling([
+      { name: "a", status: "connected" },
+      { name: "b", status: "connecting" },
+    ]),
+    true,
+  );
+  // Degraded is terminal for the poll loop: the row already shows last_error
+  // and the gateway re-probes it on its own schedule.
+  assert.equal(
+    mcpServersNeedPolling([
+      { name: "a", status: "connected" },
+      { name: "b", status: "degraded" },
+      { name: "c", status: "disabled" },
+    ]),
+    false,
+  );
+  assert.equal(mcpServersNeedPolling([]), false);
+  assert.equal(mcpServersNeedPolling(null), false);
 });
 
 test("mcpServerStatusTitle surfaces last_error for degraded servers", () => {

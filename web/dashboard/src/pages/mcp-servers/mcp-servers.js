@@ -31,6 +31,17 @@ export function defaultMcpCatalog() {
   };
 }
 
+// A freshly saved server is returned before its first dial finishes, so the
+// list arrives as "connecting" and only the gateway's background connect
+// settles it. Re-poll until nothing is pending; without this the row reads
+// "connecting" until the operator reloads the page.
+export const MCP_SERVERS_POLL_MS = 3000;
+
+export function mcpServersNeedPolling(servers) {
+  const list = Array.isArray(servers) ? servers : [];
+  return list.some((server) => mcpServerStatus(server) === "connecting");
+}
+
 export function mcpServerSlug(server) {
   return String((server && (server.slug || server.name)) || "").trim();
 }
