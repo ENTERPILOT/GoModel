@@ -1150,19 +1150,31 @@ func TestBrokerCapsRetainedSizeAfterMerge(t *testing.T) {
 // Compaction empties the preview's data, but a single oversized top-level
 // field can still carry the event past the retention cap.
 func TestBrokerCapsRetainedEventsWithOversizedErrorMessage(t *testing.T) {
-	b := NewBroker(Config{Enabled: true})
+	cases := []struct {
+		name string
+		size int
+	}{
+		{name: "just over the cap", size: maxRetainedEventBytes + 1},
+		{name: "many times the cap", size: 3 * maxRetainedEventBytes},
+	}
 
-	b.PublishAuditEvent(EventAuditFailed, &auditlog.LogEntry{
-		ID:        "audit-1",
-		RequestID: "req-1",
-		Timestamp: time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC),
-		Data:      &auditlog.LogData{ErrorMessage: strings.Repeat("e", 3*maxRetainedEventBytes)},
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := NewBroker(Config{Enabled: true})
 
-	require.Len(t, b.events, 1)
-	assert.LessOrEqual(t, len(b.events[0].Data), maxRetainedEventBytes, "retained event exceeds the cap")
+			b.PublishAuditEvent(EventAuditFailed, &auditlog.LogEntry{
+				ID:        "audit-1",
+				RequestID: "req-1",
+				Timestamp: time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC),
+				Data:      &auditlog.LogData{ErrorMessage: strings.Repeat("e", tc.size)},
+			})
 
-	message, ok := eventPayload(t, b.events[0])["error_message"].(string)
-	require.True(t, ok, "error_message missing from the retained event")
-	assert.True(t, strings.HasSuffix(message, retainedTextTruncationMarker), "a truncated message should say so, got %q", message[max(0, len(message)-40):])
+			require.Len(t, b.events, 1)
+			assert.LessOrEqual(t, len(b.events[0].Data), maxRetainedEventBytes, "retained event exceeds the cap")
+
+			message, ok := eventPayload(t, b.events[0])["error_message"].(string)
+			require.True(t, ok, "error_message missing from the retained event")
+			assert.True(t, strings.HasSuffix(message, retainedTextTruncationMarker), "a truncated message should say so, got %q", message[max(0, len(message)-40):])
+		})
+	}
 }
