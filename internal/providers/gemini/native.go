@@ -417,7 +417,16 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 				MimeType: mimeTypeForAudioFormat(part.InputAudio.Format),
 				Data:     part.InputAudio.Data,
 			}})
-		case "file":
+		case "video_url":
+			if part.VideoURL == nil || strings.TrimSpace(part.VideoURL.URL) == "" {
+				return nil, core.NewInvalidRequestError("gemini native video content requires video_url.url", nil)
+			}
+			videoPart, err := geminiPartFromVideoURL(part.VideoURL)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, videoPart)
+		case "file", "input_file":
 			if part.File == nil {
 				continue
 			}
@@ -433,9 +442,61 @@ func geminiPartsFromContentParts(parts []core.ContentPart) ([]geminiPart, error)
 				return nil, err
 			}
 			out = append(out, geminiPart{InlineData: &geminiBlob{MimeType: mimeType, Data: data}})
+		default:
+			return nil, core.NewInvalidRequestError("unsupported gemini native content part type: "+part.Type, nil)
 		}
 	}
 	return out, nil
+}
+
+// geminiPartFromVideoURL projects a video_url part onto a Gemini part: inline
+// data: payloads become inline_data, while YouTube links and Gemini Files API
+// URIs become file_data. Gemini does not fetch arbitrary remote URLs, so those
+// are rejected rather than silently dropped.
+func geminiPartFromVideoURL(video *core.VideoURLContent) (geminiPart, error) {
+	rawURL := strings.TrimSpace(video.URL)
+	if strings.HasPrefix(rawURL, "data:") {
+		mimeType, data, err := parseDataURL(rawURL, "video_url")
+		if err != nil {
+			return geminiPart{}, err
+		}
+		if mimeType == "" {
+			mimeType = "video/mp4"
+		}
+		return geminiPart{InlineData: &geminiBlob{MimeType: mimeType, Data: data}}, nil
+	}
+
+	if isGeminiFileURI(rawURL) {
+		return geminiPart{FileData: &geminiFileData{FileURI: rawURL}}, nil
+	}
+
+	return geminiPart{}, core.NewInvalidRequestError(
+		"gemini native video_url supports only data: URLs, YouTube links, and Gemini Files API URIs; other remote URLs must be uploaded via the Gemini Files API",
+		nil,
+	)
+}
+
+// isGeminiFileURI reports whether a URL is one Gemini resolves server-side: a
+// YouTube video, a Files API resource, or a Cloud Storage object. The host is
+// matched exactly after parsing so a lookalike such as
+// https://example.com/generativelanguage.googleapis.com/v1beta/files/clip.mp4
+// is rejected rather than forwarded as a file reference.
+func isGeminiFileURI(rawURL string) bool {
+	if strings.HasPrefix(strings.ToLower(rawURL), "gs://") {
+		return true
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "generativelanguage.googleapis.com":
+		return strings.Contains(parsed.EscapedPath(), "/files/")
+	case "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be":
+		return true
+	default:
+		return false
+	}
 }
 
 func geminiPartFromImageURL(image *core.ImageURLContent) (geminiPart, error) {

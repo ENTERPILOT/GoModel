@@ -56,3 +56,14 @@ func TestVideoContentRejectsMissingURL(t *testing.T) {
 		require.Error(t, err)
 	}
 }
+
+func TestVideoURLContentMarshalRejectsBlankURL(t *testing.T) {
+	for _, video := range []VideoURLContent{{}, {URL: " \t "}, {URL: "", Detail: "high"}} {
+		_, err := json.Marshal(video)
+		require.Error(t, err)
+	}
+
+	encoded, err := json.Marshal(VideoURLContent{URL: "mm_file://clip"})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"url":"mm_file://clip"}`, string(encoded))
+}
