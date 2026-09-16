@@ -88,7 +88,7 @@ Override the auto-detection with `LOG_FORMAT`, and the verbosity with `LOG_LEVEL
 
 | Value     | Effect                                          |
 | --------- | ----------------------------------------------- |
-| _(unset)_ | Auto-detect: text+colors on TTY, JSON otherwise |
+| _(unset)_ | Auto-detect: text+colors on a character device, JSON for a file or a pipe |
 | `text`    | Always text (no colors if not a TTY)            |
 | `json`    | Always JSON, even on a TTY                      |
 
