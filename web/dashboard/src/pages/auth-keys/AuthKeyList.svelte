@@ -5,7 +5,8 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
-  import { authKeyDeactivated, authKeyExpired, labelChipStyle, lastUsedCellState } from "./authKeysLogic.js";  import { authKeysStore as store } from "./authKeys.svelte.js";
+  import { authKeyDeactivated, authKeyExpired, labelChipStyle, lastUsedCellState } from "./authKeysLogic.js";
+  import { authKeysStore as store } from "./authKeys.svelte.js";
   import { Boxes, Info, Pencil, Power, ShieldCheck, ShieldOff, TriangleAlert } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
@@ -110,7 +111,7 @@
           </td>
           <td>{timezone.formatTimestamp(key.created_at)}</td>
           <td>
-            {#if lastUsedCellState(key.last_used_at, store.retentionDays) === "used"}
+            {#if key.last_used_at}
               {timezone.formatTimestamp(key.last_used_at)}
             {:else if lastUsedCellState(key.last_used_at, store.retentionDays) === "never"}
               <span
