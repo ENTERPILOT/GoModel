@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lmittmann/tint"
+	"golang.org/x/term"
 )
 
 const (
@@ -26,20 +27,12 @@ func configureLogging(w io.Writer) error {
 	return nil
 }
 
-// detectTTY reports whether w is a character device, which is what decides
-// between human-readable and JSON logs. It treats every character device as a
-// terminal — writing logs to /dev/null gets the coloured handler — because the
-// only thing that rides on it is formatting.
 func detectTTY(w io.Writer) bool {
 	file, ok := w.(*os.File)
 	if !ok {
 		return false
 	}
-	info, err := file.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(file.Fd()))
 }
 
 func newLogHandler(w io.Writer, isTTY bool, format string, level slog.Level) slog.Handler {

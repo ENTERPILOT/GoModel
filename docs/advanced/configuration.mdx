@@ -91,7 +91,7 @@ bodies, headers), see [Audit Logging](#audit-logging) below.
 
 | Variable     | Description                                                                                                                                                                       | Default              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `LOG_FORMAT` | `text` for colorized human output, `json` for structured logs. Unset auto-detects: text when stdout is a character device (a terminal, and also `/dev/null`), JSON for a file or a pipe. Force `json` in production / CloudWatch / Datadog / GCP setups. | _(auto-detect)_      |
+| `LOG_FORMAT` | `text` for colorized human output, `json` for structured logs. Unset auto-detects: text on a TTY, JSON otherwise. Force `json` in production / CloudWatch / Datadog / GCP setups. | _(auto-detect)_      |
 | `LOG_LEVEL`  | Minimum log level: `debug`, `info`, `warn`, `error`. Aliases `dbg`, `inf`, `warning`, `err` are also accepted.                                                                    | `info`               |
 
 #### Cache

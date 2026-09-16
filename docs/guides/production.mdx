@@ -365,7 +365,7 @@ if the file size matters.
 - **OpenTelemetry export is off by default.** Set `OTEL_ENABLED=true` and
   `OTEL_EXPORTER_OTLP_ENDPOINT` to send traces and GenAI metrics to your
   collector. See the [OpenTelemetry guide](/guides/opentelemetry).
-- **Logs are JSON automatically when stdout is a file or a pipe**, so containers get
+- **Logs are JSON automatically when stdout is not a TTY**, so containers get
   structured logs with no configuration. Set `LOG_FORMAT` explicitly to override.
   `LOG_LEVEL` defaults to `info`; an invalid value fails startup.
 - **`gomodel_circuit_breaker_state`** is the gauge to alert on for provider
