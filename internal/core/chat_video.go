@@ -1,6 +1,11 @@
 package core
 
-import "github.com/goccy/go-json"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/goccy/go-json"
+)
 
 // VideoURLContent contains a video reference and optional processing settings.
 // Provider-specific settings are preserved in ExtraFields.
@@ -26,6 +31,9 @@ func (v *VideoURLContent) UnmarshalJSON(data []byte) error {
 }
 
 func (v VideoURLContent) MarshalJSON() ([]byte, error) {
+	if strings.TrimSpace(v.URL) == "" {
+		return nil, fmt.Errorf("video_url part is missing video_url.url")
+	}
 	return marshalWithUnknownJSONFields(struct {
 		URL    string `json:"url"`
 		Detail string `json:"detail,omitempty"`
