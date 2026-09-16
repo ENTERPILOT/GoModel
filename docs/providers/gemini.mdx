@@ -150,7 +150,7 @@ first and send the bytes to `generateContent`.
 | Mode | OpenAI-style `video_url` |
 | ---- | ----- |
 | `native` (default) | inline `data:` URLs, YouTube links, Gemini Files API URIs, and `gs://` objects |
-| `openai_compatible` | forwarded unchanged to Google's OpenAI-compatible endpoint |
+| `openai_compatible` | forwarded unchanged, but Google's OpenAI-compatible endpoint has no video input — use `native` |
 
 ```json
 {"type":"video_url","video_url":{"url":"https://www.youtube.com/watch?v=abc123"}}

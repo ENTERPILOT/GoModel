@@ -50,6 +50,31 @@ func TestGeminiPartsFromContentParts_VideoProjection(t *testing.T) {
 			wantFileURI: "gs://bucket/clip.mp4",
 		},
 		{name: "remote url", video: core.VideoURLContent{URL: "https://example.com/clip.mp4"}, wantErr: true},
+		{
+			name:    "lookalike files api host",
+			video:   core.VideoURLContent{URL: "https://example.com/generativelanguage.googleapis.com/v1beta/files/clip.mp4"},
+			wantErr: true,
+		},
+		{
+			name:    "files api host as subdomain suffix",
+			video:   core.VideoURLContent{URL: "https://generativelanguage.googleapis.com.example.com/v1beta/files/clip.mp4"},
+			wantErr: true,
+		},
+		{
+			name:    "lookalike youtube host",
+			video:   core.VideoURLContent{URL: "https://youtube.com.example.com/watch?v=abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "files api over http",
+			video:   core.VideoURLContent{URL: "http://generativelanguage.googleapis.com/v1beta/files/abc123"},
+			wantErr: true,
+		},
+		{
+			name:    "files api host without files path",
+			video:   core.VideoURLContent{URL: "https://generativelanguage.googleapis.com/v1beta/models/gemini"},
+			wantErr: true,
+		},
 		{name: "malformed data url", video: core.VideoURLContent{URL: "data:video/mp4;base64"}, wantErr: true},
 		{name: "blank url", video: core.VideoURLContent{URL: "   "}, wantErr: true},
 	}

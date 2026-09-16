@@ -477,18 +477,22 @@ func geminiPartFromVideoURL(video *core.VideoURLContent) (geminiPart, error) {
 }
 
 // isGeminiFileURI reports whether a URL is one Gemini resolves server-side: a
-// YouTube video, a Files API resource, or a Cloud Storage object.
+// YouTube video, a Files API resource, or a Cloud Storage object. The host is
+// matched exactly after parsing so a lookalike such as
+// https://example.com/generativelanguage.googleapis.com/v1beta/files/clip.mp4
+// is rejected rather than forwarded as a file reference.
 func isGeminiFileURI(rawURL string) bool {
-	lower := strings.ToLower(rawURL)
-	switch {
-	case strings.HasPrefix(lower, "gs://"):
+	if strings.HasPrefix(strings.ToLower(rawURL), "gs://") {
 		return true
-	case strings.Contains(lower, "generativelanguage.googleapis.com/") && strings.Contains(lower, "/files/"):
-		return true
-	case strings.HasPrefix(lower, "https://www.youtube.com/"),
-		strings.HasPrefix(lower, "https://youtube.com/"),
-		strings.HasPrefix(lower, "https://m.youtube.com/"),
-		strings.HasPrefix(lower, "https://youtu.be/"):
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "generativelanguage.googleapis.com":
+		return strings.Contains(parsed.EscapedPath(), "/files/")
+	case "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be":
 		return true
 	default:
 		return false
