@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,7 +58,7 @@ uranium-geryon-9b:
 				_, err := Load()
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.wantErr)
-				require.False(t, strings.Contains(err.Error(), "in type"))
+				require.NotContains(t, err.Error(), "in type")
 			})
 		})
 	}
@@ -173,7 +172,7 @@ func TestLoad_ConfigStrictFalseFailsWhenAnyErrorIsFatal(t *testing.T) {
 
 		_, err := Load()
 		require.Error(t, err)
-		require.False(t, strings.Contains(err.Error(), "bogus_section"))
+		require.NotContains(t, err.Error(), "bogus_section")
 	})
 }
 

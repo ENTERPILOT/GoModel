@@ -36,11 +36,8 @@ func compareGoldenJSON(t *testing.T, path string, value any) {
 	}
 
 	expected, err := os.ReadFile(fullPath)
-	if os.IsNotExist(err) {
-		t.Fatalf("missing golden file %s; run `make record-api` then `RECORD=1 go test -tags=contract -timeout=5m ./tests/contract/...`", filepath.Join(goldenOutputDir, path))
-	}
+	require.False(t, os.IsNotExist(err), "missing golden file %s; run `make record-api` then `RECORD=1 go test -tags=contract -timeout=5m ./tests/contract/...`", filepath.Join(goldenOutputDir, path))
 	require.NoError(t, err)
-
 	require.JSONEq(t, string(expected), string(actual), "golden mismatch for %s", filepath.Join(goldenOutputDir, path))
 }
 
