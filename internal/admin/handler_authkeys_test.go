@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/enterpilot/gomodel/internal/auditlog"
 	"github.com/enterpilot/gomodel/internal/authkeys"
 	"github.com/enterpilot/gomodel/internal/echotest"
 )
@@ -99,6 +100,22 @@ func newAuthKeyHandler(t *testing.T, store authkeys.Store) *Handler {
 	return NewHandler(nil, nil, WithAuthKeys(service))
 }
 
+// newAuthKeyHandlerWithReader adds an audit reader and the dashboard runtime
+// config carrying the audit retention window, as initAdmin wires them.
+func newAuthKeyHandlerWithReader(t *testing.T, store authkeys.Store, reader auditlog.Reader, retentionDays string) *Handler {
+	t.Helper()
+	service, err := authkeys.NewService(store)
+	require.NoError(t, err)
+	err = service.Refresh(context.Background())
+	require.NoError(t, err)
+
+	return NewHandler(nil, nil,
+		WithAuthKeys(service),
+		WithAuditReader(reader),
+		WithDashboardRuntimeConfig(DashboardConfigResponse{LoggingRetentionDays: retentionDays}),
+	)
+}
+
 func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 	h := NewHandler(nil, nil)
 
@@ -116,6 +133,10 @@ func TestAuthKeyEndpointsReturn503WhenServiceUnavailable(t *testing.T) {
 
 	c, rec = echotest.Request(t, http.MethodPut, "/admin/auth-keys/test-key/labels", `{"labels":["a"]}`, echotest.WithPathValue("id", "test-key"))
 	require.NoError(t, h.UpdateAuthKeyLabels(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
+	require.NoError(t, h.GetAuthKeysLastUsed(c))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
 
@@ -208,4 +229,50 @@ func TestCreateAuthKeyRejectsInvalidUserPath(t *testing.T) {
 	c, rec := echotest.Post(t, "/admin/auth-keys", `{"name":"primary","user_path":"/team/../alpha"}`)
 	require.NoError(t, h.CreateAuthKey(c))
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestGetAuthKeysLastUsed(t *testing.T) {
+	usedAt := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
+	reader := &mockAuditReader{}
+	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "30")
+	usedKey := createAuthKey(t, h, `{"name":"used"}`)
+	unusedKey := createAuthKey(t, h, `{"name":"unused"}`)
+	reader.lastUsed = map[string]time.Time{usedKey.ID: usedAt}
+
+	c, rec := echotest.Get(t, "/admin/auth-keys/last-used")
+	require.NoError(t, h.GetAuthKeysLastUsed(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := echotest.Decode[map[string]any](t, rec)
+
+	lastUsed, ok := body["last_used"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, usedAt.Format(time.RFC3339), lastUsed[usedKey.ID])
+	_, ok = lastUsed[unusedKey.ID]
+	assert.False(t, ok)
+	assert.Equal(t, float64(30), body["retention_days"])
+
+	// Every listed key id reached the reader in one call.
+	assert.ElementsMatch(t, []string{usedKey.ID, unusedKey.ID}, reader.lastUsedKeyIDs)
+}
+
+func TestGetAuthKeysLastUsedShortCircuitsWithoutKeys(t *testing.T) {
+	reader := &mockAuditReader{}
+	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "30")
+
+	c, rec := echotest.Get(t, "/admin/auth-keys/last-used")
+	require.NoError(t, h.GetAuthKeysLastUsed(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, reader.lastUsedKeyIDs)
+
+	body := echotest.Decode[map[string]any](t, rec)
+	lastUsed, ok := body["last_used"].(map[string]any)
+	require.True(t, ok)
+	assert.Empty(t, lastUsed)
+	assert.Equal(t, float64(30), body["retention_days"])
+
+	// An unwired retention config surfaces 0 (unknown window), not an error.
+	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "")
+	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
+	require.NoError(t, h.GetAuthKeysLastUsed(c))
+	assert.Equal(t, float64(0), echotest.Decode[map[string]any](t, rec)["retention_days"])
 }

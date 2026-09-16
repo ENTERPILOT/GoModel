@@ -10,6 +10,7 @@ import (
 	"github.com/enterpilot/gomodel/internal/storage/mongotest"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
 	"github.com/enterpilot/gomodel/internal/storage/sqlx/sqlxtest"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,5 +72,34 @@ func TestReader_GetLogByIDAndInteractionParent(t *testing.T) {
 		noParent, err := reader.GetInteractionParent(ctx, "absent")
 		require.NoError(t, err)
 		require.Nil(t, noParent)
+	})
+}
+
+func TestReader_GetLastUsedByAuthKeys(t *testing.T) {
+	runReaderSuite(t, func(t *testing.T, store LogStore, reader Reader) {
+		ctx := context.Background()
+
+		// An empty id list must not query at all and must not error.
+		empty, err := reader.GetLastUsedByAuthKeys(ctx, nil)
+		require.NoError(t, err)
+		assert.Empty(t, empty)
+
+		old := time.Date(2026, 1, 10, 8, 0, 0, 0, time.UTC)
+		recent := time.Date(2026, 1, 16, 12, 30, 0, 0, time.UTC)
+		err = store.WriteBatch(ctx, []*LogEntry{
+			{ID: "k1-old", Timestamp: old, AuthKeyID: "key-1", RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+			{ID: "k1-new", Timestamp: recent, AuthKeyID: "key-1", RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+			{ID: "k2-only", Timestamp: old.Add(time.Hour), AuthKeyID: "key-2", RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+			{ID: "anonymous", Timestamp: recent.Add(time.Hour), RequestedModel: "gpt-5", Provider: "openai", StatusCode: 200},
+		})
+		require.NoError(t, err)
+
+		lastUsed, err := reader.GetLastUsedByAuthKeys(ctx, []string{"key-1", "key-2", "key-unknown"})
+		require.NoError(t, err)
+		require.Len(t, lastUsed, 2)
+		assert.True(t, lastUsed["key-1"].Equal(recent), "key-1 last used = %v, want %v", lastUsed["key-1"], recent)
+		assert.True(t, lastUsed["key-2"].Equal(old.Add(time.Hour)), "key-2 last used = %v", lastUsed["key-2"])
+		_, ok := lastUsed["key-unknown"]
+		assert.False(t, ok)
 	})
 }

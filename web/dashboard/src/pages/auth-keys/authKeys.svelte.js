@@ -2,6 +2,7 @@
 // on top of the shared admin API client (401s and stale-auth are handled by
 // the client).
 
+import { getJSON, isAbortError } from "$lib/api/client.js";
 import { loadAdminList, sendAdminMutation } from "$lib/api/adminCrud.js";
 import { flash } from "$lib/stores/flash.svelte.js";
 import { router } from "$lib/stores/router.svelte.js";
@@ -35,6 +36,9 @@ class AuthKeysStore {
   // Load and in-form errors only; row-action feedback goes through the
   // flash store.
   error = $state("");
+  // Audit retention window in days, from the last-used endpoint; 0 means
+  // unknown (old gateway without the endpoint, or unwired config).
+  retentionDays = $state(0);
 
   // Toolbar: inactive keys (deactivated or expired) are hidden by default.
   filter = $state("");
@@ -92,9 +96,32 @@ class AuthKeysStore {
       }
       this.available = true;
       this.keys = outcome.items;
+      void this.fetchLastUsed();
     } finally {
       this.loading = false;
     }
+  }
+
+  // Last-used timestamps come from a separate endpoint derived from the audit
+  // log. Any failure (old gateway without the route, audit logging off) just
+  // leaves the keys without last_used_at — the table shows its honest
+  // fallback states instead.
+  async fetchLastUsed() {
+    let result;
+    try {
+      result = await getJSON("/admin/auth-keys/last-used", { label: "auth key last used" });
+    } catch (e) {
+      if (!isAbortError(e)) {
+        console.error("Failed to fetch auth key last used:", e);
+      }
+      return;
+    }
+    if (result.stale || !result.ok || !result.data) {
+      return;
+    }
+    this.retentionDays = Number(result.data.retention_days) || 0;
+    const lastUsed = result.data.last_used || {};
+    this.keys = this.keys.map((key) => ({ ...key, last_used_at: lastUsed[key.id] || null }));
   }
 
   // Cross-page entry points used by the Users page: land on API Keys either

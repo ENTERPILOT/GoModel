@@ -38,6 +38,7 @@
         </th>
         <th>{m.api_keys_expires()}</th>
         <th>{m.api_keys_column_created()}</th>
+        <th>{m.api_keys_column_last_used()}</th>
         <th class="col-actions" aria-label={m.api_keys_actions()}></th>
       </tr>
     </thead>
@@ -109,6 +110,18 @@
             {/if}
           </td>
           <td>{timezone.formatTimestamp(key.created_at)}</td>
+          <td>
+            {#if key.last_used_at}
+              {timezone.formatTimestamp(key.last_used_at)}
+            {:else if store.retentionDays > 0}
+              <span
+                class="auth-key-unrestricted"
+                title={m.api_keys_last_used_help({ days: store.retentionDays })}
+              >{m.api_keys_last_used_outside_retention({ days: store.retentionDays })}</span>
+            {:else}
+              <span class="auth-key-unrestricted">{m.api_keys_last_used_no_records()}</span>
+            {/if}
+          </td>
           <td class="auth-key-actions-cell col-actions">
             <div class="auth-key-row-actions">
               {#if key.active}
