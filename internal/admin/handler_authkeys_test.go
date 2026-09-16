@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -275,4 +276,14 @@ func TestGetAuthKeysLastUsedShortCircuitsWithoutKeys(t *testing.T) {
 	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
 	require.NoError(t, h.GetAuthKeysLastUsed(c))
 	assert.Equal(t, float64(0), echotest.Decode[map[string]any](t, rec)["retention_days"])
+}
+
+func TestGetAuthKeysLastUsedReturns503OnReaderError(t *testing.T) {
+	reader := &mockAuditReader{lastUsedErr: errors.New("audit reader down")}
+	h := newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "30")
+	createAuthKey(t, h, `{"name":"any"}`)
+
+	c, rec := echotest.Get(t, "/admin/auth-keys/last-used")
+	require.NoError(t, h.GetAuthKeysLastUsed(c))
+	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
