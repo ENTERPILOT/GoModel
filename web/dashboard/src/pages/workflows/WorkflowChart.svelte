@@ -78,7 +78,10 @@
     <span class="workflow-node-badge">{badge}</span>
   {/if}
   {#if status}
-    <span class="workflow-node-badge">{status}</span>
+    <!-- A verdict badge carries a guardrail code, which can be long enough to
+         push the Response node out of the row; it truncates and keeps the full
+         text in its tooltip. -->
+    <span class="workflow-node-badge workflow-node-status" title={status}>{status}</span>
   {/if}
   {#if sub}
     <span class="workflow-node-sub">{sub}</span>
@@ -393,6 +396,13 @@
     background: var(--bg);
     color: var(--text-muted);
     line-height: 1.5;
+  }
+
+  .workflow-node-status {
+    max-width: 132px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
   }
 
   /* ─── Endpoint nodes (Client / Response) ─── */
