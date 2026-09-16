@@ -171,8 +171,10 @@ func (s *translatedInferenceService) Messages(c *echo.Context) error {
 		}
 	}
 
+	defer releaseAdmission(c)
+
 	ctx := core.WithRequestDialect(promptEditCaptureContext(c, s.logger), core.RequestDialectAnthropicMessages)
-	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, ctx, req, translatedRequestMeta(c))
+	ctx, prepared, workflow, err := prepareChatCompletionRequest(s, ctx, req, s.guardedRequestMeta(c))
 	if err != nil {
 		if short := shortCircuitOf(err); short != nil {
 			attachPreparedWorkflow(c, prepareContext(c, ctx), workflow)
@@ -257,12 +259,10 @@ func (s *translatedInferenceService) dispatchMessages(c *echo.Context, req *core
 	ctx := c.Request().Context()
 	requestID := requestIDFromContextOrHeader(c.Request())
 
-	adm, err := enforceAdmission(c, s.rateLimiter, s.budgetChecker,
-		rateLimitRouteFromWorkflow(workflow).withFailovers(len(s.inference().FailoverSelectors(workflow))))
+	adm, err := admitOnce(c, s.rateLimiter, s.budgetChecker, s.admissionRoute(workflow))
 	if err != nil {
 		return handleError(c, err)
 	}
-	defer adm.release()
 	ctx = adm.dispatchContext(ctx)
 
 	if req.Stream {

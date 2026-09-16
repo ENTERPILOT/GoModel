@@ -104,6 +104,7 @@ type Config struct {
 	MCPGateway                      *mcpgateway.Service                    // MCP gateway service (nil if disabled or not wired)
 	EnabledPassthroughProviders     []string                               // Provider types enabled on /p/{provider}/... passthrough routes
 	AllowPassthroughV1Alias         *bool                                  // Allow /p/{provider}/v1/... aliases; nil defaults to true
+	AllowUnguardedPassthrough       bool                                   // Serve /p/{provider}/... to callers a guardrail workflow applies to; off by default, those requests are refused
 	UserPathHeader                  string                                 // Header carrying the request user path (default: X-GoModel-User-Path)
 	AdminEndpointsEnabled           bool                                   // Whether admin API endpoints are enabled
 	AdminUIEnabled                  bool                                   // Whether admin dashboard UI is enabled
@@ -208,6 +209,9 @@ func New(provider core.RoutableProvider, cfg *Config) *Server {
 	}
 	if cfg != nil && cfg.EnabledPassthroughProviders != nil {
 		handler.setEnabledPassthroughProviders(cfg.EnabledPassthroughProviders)
+	}
+	if cfg != nil {
+		handler.allowUnguardedPassthrough = cfg.AllowUnguardedPassthrough
 	}
 	// Mirror the route-registration default below: a nil config enables realtime
 	// so the documented default and the registered route stay consistent.

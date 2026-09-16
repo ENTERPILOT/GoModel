@@ -375,6 +375,26 @@ func (s *Service) ChainsForWorkflow(workflow *core.Workflow) *plugins.Chains {
 	return compiled.Chains
 }
 
+// HasGuardrailChains reports whether any active workflow runs a guardrail
+// chain. Callers that cannot resolve the workflow of a request precisely —
+// provider passthrough, whose selector has no model when the body is opaque —
+// use it to tell "this gateway configures no guardrails at all" from "a
+// guardrail workflow may apply and was not matched".
+func (s *Service) HasGuardrailChains() bool {
+	if s == nil {
+		return false
+	}
+	for compiled := range compiledSet(s.snapshot()) {
+		if compiled == nil || compiled.Chains == nil {
+			continue
+		}
+		if !compiled.Chains.Prompt.Empty() || !compiled.Chains.Response.Empty() || !compiled.Chains.Stream.Empty() {
+			return true
+		}
+	}
+	return false
+}
+
 // StartBackgroundRefresh periodically reloads active workflows until stopped.
 func (s *Service) StartBackgroundRefresh(interval time.Duration) func() {
 	if interval <= 0 {
