@@ -3,6 +3,8 @@ package virtualmodels
 import (
 	"sync"
 	"time"
+
+	"github.com/enterpilot/gomodel/internal/expiry"
 )
 
 const (
@@ -28,8 +30,11 @@ type stickyPin struct {
 // the round-robin counters it is per-instance state: after a restart (or on
 // another replica) the first request of a session simply re-pins.
 type stickySessions struct {
-	mu       sync.Mutex
-	entries  map[stickyKey]stickyPin
+	mu      sync.Mutex
+	entries map[stickyKey]stickyPin
+	// expiries orders pins by expiry, so a new session costs a heap pop
+	// rather than two sweeps of every pin held.
+	expiries expiry.Index[stickyKey]
 	capacity int              // 0 means maxStickySessions; tests lower it
 	now      func() time.Time // injectable for tests; nil means time.Now
 }
@@ -142,10 +147,15 @@ func (s *stickySessions) setLocked(key stickyKey, qualified string, now time.Tim
 	if len(s.entries) >= s.limit() {
 		s.evictSoonestLocked()
 	}
+	expires := now.Add(stickySessionTTL)
 	s.entries[key] = stickyPin{
 		qualified: qualified,
-		expires:   now.Add(stickySessionTTL),
+		expires:   expires,
 	}
+	// Only a new pin is tracked. Refreshing one extends its life in the map
+	// alone, which keeps the per-request path a single map write; the sweeps
+	// notice when the key surfaces.
+	s.expiries.Track(key, expires)
 }
 
 // prune drops expired pins and pins for redirect sources no longer present in
@@ -163,26 +173,59 @@ func (s *stickySessions) prune(active map[string]*redirectEntry) {
 			delete(s.entries, key)
 		}
 	}
+	if s.expiries.Stale(len(s.entries)) {
+		s.retrackLocked()
+	}
 }
 
+// pruneLocked drops expired pins, touching only the keys that are actually
+// due rather than sweeping every pin held.
 func (s *stickySessions) pruneLocked(now time.Time) {
-	for key, pin := range s.entries {
-		if !pin.expires.After(now) {
+	for {
+		key, tracked, ok := s.expiries.Expired(now)
+		if !ok {
+			break
+		}
+		pin, live := s.entries[key]
+		switch {
+		case !live:
+			// Already dropped by a lookup, a re-pin, or an earlier sweep.
+		case pin.expires.After(tracked):
+			// Refreshed since: it lives longer than the index recorded.
+			s.expiries.Track(key, pin.expires)
+		default:
 			delete(s.entries, key)
 		}
+	}
+	if s.expiries.Stale(len(s.entries)) {
+		s.retrackLocked()
 	}
 }
 
 func (s *stickySessions) evictSoonestLocked() {
-	var soonestKey stickyKey
-	var soonest time.Time
-	first := true
-	for key, pin := range s.entries {
-		if first || pin.expires.Before(soonest) {
-			soonestKey, soonest, first = key, pin.expires, false
+	for {
+		key, tracked, ok := s.expiries.Soonest()
+		if !ok {
+			return
+		}
+		pin, live := s.entries[key]
+		switch {
+		case !live:
+			continue
+		case pin.expires.After(tracked):
+			s.expiries.Track(key, pin.expires)
+		default:
+			delete(s.entries, key)
+			return
 		}
 	}
-	if !first {
-		delete(s.entries, soonestKey)
+}
+
+// retrackLocked rebuilds the index from the pins still held, dropping the
+// keys removed without the index ever seeing them.
+func (s *stickySessions) retrackLocked() {
+	s.expiries.Reset()
+	for key, pin := range s.entries {
+		s.expiries.Track(key, pin.expires)
 	}
 }

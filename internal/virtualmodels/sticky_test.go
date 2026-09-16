@@ -348,3 +348,49 @@ func TestSticky_RepinIgnoresEmptyTarget(t *testing.T) {
 	sticky.repin("smart", "sess-a", "", "")
 	require.Empty(t, sticky.entries)
 }
+
+// A pin refreshed after the expiry index recorded it lives longer than the
+// index thinks, and must not be evicted ahead of pins genuinely closer to
+// expiry.
+func TestSticky_RefreshedPinSurvivesEviction(t *testing.T) {
+	t.Parallel()
+	sticky := &stickySessions{capacity: 100}
+	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	sticky.now = func() time.Time { return current }
+
+	for i := range sticky.capacity {
+		stickyAssign(sticky, "smart", "sess-"+strconv.Itoa(i), "openai/gpt-4o")
+		current = current.Add(time.Millisecond) // strictly ordered expiries
+	}
+	// sess-0 expires soonest until a request touches it, which puts it last.
+	require.NotEmpty(t, stickyProbe(sticky, "smart", "sess-0"))
+	current = current.Add(time.Millisecond)
+
+	stickyAssign(sticky, "smart", "one-more", "openai/gpt-4o")
+
+	require.Len(t, sticky.entries, sticky.capacity)
+	require.NotEmpty(t, stickyProbe(sticky, "smart", "sess-0"), "the refreshed pin must outlive the eviction")
+	require.Empty(t, stickyProbe(sticky, "smart", "sess-1"), "the pin now closest to expiry should have been evicted")
+}
+
+// prune drops the pins of a redirect source the catalog no longer has,
+// without the expiry index seeing it, so the index must not keep growing with
+// keys that are long gone.
+func TestSticky_IndexDoesNotGrowAfterSourcePrune(t *testing.T) {
+	t.Parallel()
+	sticky := &stickySessions{capacity: 100}
+	current := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	sticky.now = func() time.Time { return current }
+
+	for round := range 5 {
+		for i := range sticky.capacity {
+			stickyAssign(sticky, "smart", "sess-"+strconv.Itoa(round)+"-"+strconv.Itoa(i), "openai/gpt-4o")
+		}
+		// The redirect source disappears from the catalog, taking its pins.
+		sticky.prune(map[string]*redirectEntry{})
+		require.Empty(t, sticky.entries)
+	}
+
+	require.LessOrEqual(t, sticky.expiries.Len(), 2*len(sticky.entries)+16,
+		"expiry index holds %d nodes for %d live pins", sticky.expiries.Len(), len(sticky.entries))
+}

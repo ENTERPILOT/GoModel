@@ -9,9 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestRegistry pins the clock and shrinks the capacity: eviction is a
-// full-map scan, so filling the production 10,000 slots makes the capacity
-// tests quadratic.
+// newTestRegistry pins the clock and shrinks the capacity, so the capacity
+// tests do not have to fill the production 10,000 slots to reach it.
 func newTestRegistry(now *time.Time) *CallRegistry {
 	r := NewCallRegistry()
 	r.now = func() time.Time { return *now }
@@ -92,4 +91,52 @@ func TestCallRegistryReRegisterAtCapacityDoesNotEvict(t *testing.T) {
 	_, ok = r.Lookup("rtc_0")
 	require.True(t, ok, "re-registering an existing id must not evict an unrelated entry")
 	require.Len(t, r.entries, r.capacity)
+}
+
+// A call re-registered after the expiry index recorded it lives longer than
+// the index thinks, and must not be evicted ahead of calls genuinely closer
+// to expiry.
+func TestCallRegistryReRegisteredCallSurvivesEviction(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+
+	for i := range r.capacity {
+		r.Register(fmt.Sprintf("rtc_%d", i), CallRoute{Model: "m"})
+		now = now.Add(time.Millisecond) // strictly ordered expiries
+	}
+	// rtc_0 expires soonest until it is re-registered, which puts it last.
+	r.Register("rtc_0", CallRoute{Model: "updated"})
+	now = now.Add(time.Millisecond)
+
+	r.Register("rtc_new", CallRoute{Model: "m"})
+
+	require.Len(t, r.entries, r.capacity)
+	route, ok := r.Lookup("rtc_0")
+	require.True(t, ok, "the re-registered call must outlive the eviction")
+	assert.Equal(t, "updated", route.Model)
+	_, ok = r.Lookup("rtc_1")
+	assert.False(t, ok, "the call now closest to expiry should have been evicted")
+}
+
+// Lookup drops an expired call without the expiry index seeing it, so the
+// index must not keep growing with ids that are long gone.
+func TestCallRegistryIndexDoesNotGrowWithExpiredLookups(t *testing.T) {
+	now := time.Unix(1000, 0)
+	r := newTestRegistry(&now)
+
+	for round := range 5 {
+		for i := range r.capacity {
+			r.Register(fmt.Sprintf("rtc_%d_%d", round, i), CallRoute{Model: "m"})
+		}
+		now = now.Add(DefaultCallTTL + time.Minute)
+		for i := range r.capacity {
+			_, ok := r.Lookup(fmt.Sprintf("rtc_%d_%d", round, i))
+			require.False(t, ok, "the call has expired")
+		}
+	}
+	// A registration sweeps, which is where dead ids leave the index.
+	r.Register("rtc_last", CallRoute{Model: "m"})
+
+	assert.LessOrEqual(t, r.expiries.Len(), 2*len(r.entries)+16,
+		"expiry index holds %d nodes for %d live calls", r.expiries.Len(), len(r.entries))
 }
