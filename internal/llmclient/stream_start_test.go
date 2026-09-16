@@ -148,6 +148,11 @@ func TestClient_DoStream_StreamStartReplaysHealthyStreams(t *testing.T) {
 			body:        "data: {\"choices\":[{\"delta\":{\"content\":\"" + strings.Repeat("a", maxStreamStartBytes+1024) + "\"}}]}\n\n",
 		},
 		{
+			name:        "event preamble longer than the hold-back limit",
+			contentType: "text/event-stream",
+			body:        strings.Repeat("id: 1\n", maxStreamStartBytes/6+10) + "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+		},
+		{
 			name:        "non-SSE stream",
 			contentType: "application/vnd.amazon.eventstream",
 			body:        "\x00\x00\x00binary",

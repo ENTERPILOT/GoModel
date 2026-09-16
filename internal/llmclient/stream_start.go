@@ -13,8 +13,8 @@ import (
 
 // maxStreamStartBytes bounds how much of an SSE stream is held back while
 // looking for its first data event. Comments and blank lines beyond it carry
-// no data and are dropped instead of held; a single line longer than it
-// streams through unchanged.
+// no data and are dropped instead of held; a single line or an event preamble
+// longer than it streams through unchanged.
 const maxStreamStartBytes = 64 * 1024
 
 // errEmptyStream marks a 200 stream that ended before delivering any event.
@@ -72,9 +72,11 @@ func interceptStreamStart(provider string, resp *http.Response) *core.GatewayErr
 // joined data payload. ended reports a stream that closed cleanly before any
 // data. While no data is pending, comment and blank lines beyond limit are
 // dropped, so a long run of keep-alives is still checked in bounded memory.
-// A single line longer than limit stops the inspection with nothing decided.
+// A single line, or an event preamble, longer than limit stops the inspection
+// with nothing decided.
 func readFirstSSEData(r *bufio.Reader, limit int) (head, payload []byte, ended bool, err error) {
 	var data [][]byte
+	fields := false // the pending event carries a field other than a comment
 	for {
 		lineStart := len(head)
 		line, readErr := r.ReadSlice('\n')
@@ -108,7 +110,20 @@ func readFirstSSEData(r *bufio.Reader, limit int) (head, payload []byte, ended b
 			}
 			continue
 		}
-		if len(head) > limit && (len(trimmed) == 0 || trimmed[0] == ':') {
+		switch {
+		case len(trimmed) == 0:
+			// A blank line ends a data-less event, so nothing held back so
+			// far belongs to the event that carries the first data.
+			fields = false
+		case trimmed[0] != ':':
+			fields = true
+		}
+		if len(head) > limit {
+			if fields {
+				// Holding back a preamble this long would grow without
+				// bound, and its fields cannot be dropped.
+				return head, nil, false, nil
+			}
 			head = head[:0]
 		}
 	}
