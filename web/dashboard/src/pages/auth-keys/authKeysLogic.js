@@ -259,17 +259,17 @@ export function countInactiveAuthKeys(keys, now = Date.now()) {
 export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";
 
 // lastUsedCellState picks the Last used column's state for one key. A key
-// with an audit entry shows its timestamp; when the lookup succeeded (even
-// empty) and retention is disabled (0 days = keep audit data forever) a
-// missing entry means the key was never used; with a retention window the
-// entry may have been purged; with an unavailable lookup or unknown window
-// the state stays unknown.
+// with an audit entry shows its timestamp; an unavailable lookup yields
+// "unavailable"; a successful lookup (even empty) with retention disabled
+// (0 days = keep audit data forever) means the key was never used; with a
+// retention window the entry may have been purged; with a known lookup but
+// unknown window the state is "no_records".
 export function lastUsedCellState(lastUsedAt, retentionDays, lastUsedAvailable) {
   if (lastUsedAt) return "used";
-  if (!lastUsedAvailable) return "unknown";
+  if (!lastUsedAvailable) return "unavailable";
   if (retentionDays === 0) return "never";
   if (retentionDays > 0) return "outside";
-  return "unknown";
+  return "no_records";
 }
 
 // retentionDaysFromConfig parses the audit retention window from the runtime

@@ -657,6 +657,8 @@
   "api_keys_last_used_help": "审计记录仅覆盖保留期；该密钥可能在更早之前使用过。",
   "api_keys_last_used_no_records": "无记录",
   "api_keys_last_used_never": "从未使用",
+  "api_keys_last_used_unknown": "未知",
+  "api_keys_last_used_unknown_help": "审计存储不可用；无法显示密钥使用情况。",
   "api_keys_actions": "操作",
   "api_keys_allowed": "已允许",
   "api_keys_denied": "已拒绝",

@@ -693,6 +693,8 @@
   "api_keys_last_used_help": "Audit records only cover the retention window; the key may have been used earlier.",
   "api_keys_last_used_no_records": "No records",
   "api_keys_last_used_never": "Never used",
+  "api_keys_last_used_unknown": "Unknown",
+  "api_keys_last_used_unknown_help": "The audit store is unavailable; key usage cannot be shown.",
   "api_keys_actions": "Actions",
   "api_keys_allowed": "Allowed",
   "api_keys_denied": "Denied",

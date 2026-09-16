@@ -317,16 +317,16 @@ test("lastUsedCellState: a retention window makes a missing entry possibly-outsi
   assert.equal(lastUsedCellState(null, 30, true), "outside");
 });
 
-test("lastUsedCellState: unknown retention keeps the state unknown", () => {
-  assert.equal(lastUsedCellState(null, null, true), "unknown");
-  assert.equal(lastUsedCellState(null, undefined, true), "unknown");
-  assert.equal(lastUsedCellState(null, -1, true), "unknown");
+test("lastUsedCellState: unknown retention keeps the state no_records", () => {
+  assert.equal(lastUsedCellState(null, null, true), "no_records");
+  assert.equal(lastUsedCellState(null, undefined, true), "no_records");
+  assert.equal(lastUsedCellState(null, -1, true), "no_records");
 });
 
-test("lastUsedCellState: an unavailable lookup stays unknown at any retention", () => {
-  assert.equal(lastUsedCellState(null, 0, false), "unknown");
-  assert.equal(lastUsedCellState(null, 30, false), "unknown");
-  assert.equal(lastUsedCellState(null, null, false), "unknown");
+test("lastUsedCellState: an unavailable lookup stays unavailable at any retention", () => {
+  assert.equal(lastUsedCellState(null, 0, false), "unavailable");
+  assert.equal(lastUsedCellState(null, 30, false), "unavailable");
+  assert.equal(lastUsedCellState(null, null, false), "unavailable");
 });
 
 test("retentionDaysFromConfig passes known windows and the forever marker through", () => {

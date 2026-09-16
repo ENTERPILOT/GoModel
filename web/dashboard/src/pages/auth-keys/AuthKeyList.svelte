@@ -113,6 +113,11 @@
           <td>
             {#if key.last_used_at}
               {timezone.formatTimestamp(key.last_used_at)}
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays, key.last_used_available) === "unavailable"}
+              <span
+                class="auth-key-unrestricted"
+                title={m.api_keys_last_used_unknown_help()}
+              >{m.api_keys_last_used_unknown()}</span>
             {:else if lastUsedCellState(key.last_used_at, store.retentionDays, key.last_used_available) === "never"}
               <span
                 class="auth-key-unrestricted"
