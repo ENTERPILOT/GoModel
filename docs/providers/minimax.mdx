@@ -140,3 +140,22 @@ option:
   `/v1/audio/transcriptions` is rejected.
 - Realtime voice-to-voice — MiniMax's conversational realtime schema is not
   OpenAI-compatible, so it is not exposed at `/v1/realtime`.
+
+## Image generation
+
+Use `image-01` or `image-01-live` with `/v1/images/generations`. GoModel translates
+requests to MiniMax's native `/v1/image_generation` endpoint using the configured
+base URL and returns generated images in `data`.
+
+```json
+{"model":"image-01","provider":"minimax","prompt":"A lighthouse at sunrise","aspect_ratio":"16:9","n":1}
+```
+
+The default response format is `url`; URLs expire after 24 hours. Use
+`response_format: "b64_json"` for inline images. Native `base64` is also accepted.
+`size: "1024x1024"` maps to `width` and `height`; omit `size` when supplying
+native dimensions or `aspect_ratio`. Native options such as `seed` and
+`prompt_optimizer` pass through. `quality` and streaming are unsupported.
+
+See the [MiniMax image API reference](https://platform.minimax.io/docs/api-reference/image-generation-t2i)
+for model-specific limits.
