@@ -257,3 +257,15 @@ export function countInactiveAuthKeys(keys, now = Date.now()) {
 
 // Label chips share the dashboard-wide palette and chip styling.
 export { labelChipStyle, labelColor } from "../../lib/utils/chartTheme.js";
+
+// lastUsedCellState picks the Last used column's state for one key. A key
+// with an audit entry shows its timestamp; with retention disabled (0 days =
+// keep audit data forever) a missing entry means the key was never used; with
+// a retention window the entry may have been purged; without any lookup the
+// state stays unknown.
+export function lastUsedCellState(lastUsedAt, retentionDays) {
+  if (lastUsedAt) return "used";
+  if (retentionDays === 0) return "never";
+  if (retentionDays > 0) return "outside";
+  return "unknown";
+}

@@ -5,8 +5,7 @@
   import { timezone } from "$lib/stores/timezone.svelte.js";
   import { formatDateUTC, formatTimestampUTC } from "$lib/utils/format.js";
   import { displayModelSelector } from "$lib/utils/modelSelectors.js";
-  import { authKeyDeactivated, authKeyExpired, labelChipStyle } from "./authKeysLogic.js";
-  import { authKeysStore as store } from "./authKeys.svelte.js";
+  import { authKeyDeactivated, authKeyExpired, labelChipStyle, lastUsedCellState } from "./authKeysLogic.js";  import { authKeysStore as store } from "./authKeys.svelte.js";
   import { Boxes, Info, Pencil, Power, ShieldCheck, ShieldOff, TriangleAlert } from "lucide";
   import * as m from "$lib/paraglide/messages.js";
 </script>
@@ -111,9 +110,14 @@
           </td>
           <td>{timezone.formatTimestamp(key.created_at)}</td>
           <td>
-            {#if key.last_used_at}
+            {#if lastUsedCellState(key.last_used_at, store.retentionDays) === "used"}
               {timezone.formatTimestamp(key.last_used_at)}
-            {:else if store.retentionDays > 0}
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays) === "never"}
+              <span
+                class="auth-key-unrestricted"
+                title={m.api_keys_last_used_help({ days: 0 })}
+              >{m.api_keys_last_used_never()}</span>
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays) === "outside"}
               <span
                 class="auth-key-unrestricted"
                 title={m.api_keys_last_used_help({ days: store.retentionDays })}

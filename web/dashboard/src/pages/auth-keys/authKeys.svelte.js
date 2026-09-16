@@ -36,9 +36,14 @@ class AuthKeysStore {
   // Load and in-form errors only; row-action feedback goes through the
   // flash store.
   error = $state("");
-  // Audit retention window in days, from the last-used endpoint; 0 means
-  // unknown (old gateway without the endpoint, or unwired config).
-  retentionDays = $state(0);
+  // Audit retention window in days, from the last-used endpoint. null means
+  // unknown (no lookup yet, request failed, old gateway without the route);
+  // 0 means retention is disabled and audit entries are kept forever, so a
+  // missing entry really means the key was never used.
+  retentionDays = $state(null);
+  // Guards against overlapping fetchLastUsed responses: a newer call bumps the
+  // generation, and stale results are discarded before touching state.
+  lastUsedGeneration = 0;
 
   // Toolbar: inactive keys (deactivated or expired) are hidden by default.
   filter = $state("");
@@ -96,6 +101,8 @@ class AuthKeysStore {
       }
       this.available = true;
       this.keys = outcome.items;
+      // A fresh key list discards the previous lookup's retention window.
+      this.retentionDays = null;
       void this.fetchLastUsed();
     } finally {
       this.loading = false;
@@ -107,6 +114,7 @@ class AuthKeysStore {
   // leaves the keys without last_used_at — the table shows its honest
   // fallback states instead.
   async fetchLastUsed() {
+    const generation = ++this.lastUsedGeneration;
     let result;
     try {
       result = await getJSON("/admin/auth-keys/last-used", { label: "auth key last used" });
@@ -116,10 +124,10 @@ class AuthKeysStore {
       }
       return;
     }
-    if (result.stale || !result.ok || !result.data) {
+    if (generation !== this.lastUsedGeneration || result.stale || !result.ok || !result.data) {
       return;
     }
-    this.retentionDays = Number(result.data.retention_days) || 0;
+    this.retentionDays = Math.max(0, Number(result.data.retention_days) || 0);
     const lastUsed = result.data.last_used || {};
     this.keys = this.keys.map((key) => ({ ...key, last_used_at: lastUsed[key.id] || null }));
   }

@@ -692,6 +692,7 @@
   "api_keys_last_used_outside_retention": "Keine Aktivität in den letzten {days} Tagen",
   "api_keys_last_used_help": "Audit-Aufzeichnungen decken nur das Aufbewahrungsfenster ab; der Schlüssel wurde möglicherweise früher verwendet.",
   "api_keys_last_used_no_records": "Keine Einträge",
+  "api_keys_last_used_never": "Nie verwendet",
   "api_keys_actions": "Aktionen",
   "api_keys_allowed": "Erlaubt",
   "api_keys_denied": "Verweigert",

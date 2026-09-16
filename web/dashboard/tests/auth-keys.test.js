@@ -12,6 +12,7 @@ import {
   defaultAuthKeyForm,
   filterAuthKeys,
   labelChipStyle,
+  lastUsedCellState,
   labelColor,
   normalizeAuthKeyUserPath,
   parseAuthKeyAllowedModels,
@@ -299,4 +300,24 @@ test("filterAuthKeys userPath keeps the path and its subtree on segment boundari
   assert.equal(filterAuthKeys(keys, { userPath: "" }).length, 5);
   assert.equal(authKeyUnderPath(authKey({ user_path: "/x" }), "/"), true);
   assert.equal(authKeyUnderPath(authKey({ user_path: "" }), "/acme"), false);
+});
+
+test("lastUsedCellState shows the timestamp whenever an audit entry exists", () => {
+  assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", null), "used");
+  assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 0), "used");
+  assert.equal(lastUsedCellState("2026-08-26T23:39:51Z", 30), "used");
+});
+
+test("lastUsedCellState: retention disabled (0 days) means a missing entry is never-used", () => {
+  assert.equal(lastUsedCellState(null, 0), "never");
+});
+
+test("lastUsedCellState: a retention window makes a missing entry possibly-outside", () => {
+  assert.equal(lastUsedCellState(null, 30), "outside");
+});
+
+test("lastUsedCellState: unknown retention keeps the state unknown", () => {
+  assert.equal(lastUsedCellState(null, null), "unknown");
+  assert.equal(lastUsedCellState(null, undefined), "unknown");
+  assert.equal(lastUsedCellState(null, -1), "unknown");
 });

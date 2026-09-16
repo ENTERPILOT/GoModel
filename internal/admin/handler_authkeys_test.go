@@ -271,8 +271,15 @@ func TestGetAuthKeysLastUsedShortCircuitsWithoutKeys(t *testing.T) {
 	assert.Empty(t, lastUsed)
 	assert.Equal(t, float64(30), body["retention_days"])
 
-	// An unwired retention config surfaces 0 (unknown window), not an error.
+	// An unwired retention config surfaces 0; a configured 0 means retention is
+	// disabled (audit data kept forever), which is the same value the dashboard
+	// reads as "keep everything".
 	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "")
+	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
+	require.NoError(t, h.GetAuthKeysLastUsed(c))
+	assert.Equal(t, float64(0), echotest.Decode[map[string]any](t, rec)["retention_days"])
+
+	h = newAuthKeyHandlerWithReader(t, newAuthKeyTestStore(), reader, "0")
 	c, rec = echotest.Get(t, "/admin/auth-keys/last-used")
 	require.NoError(t, h.GetAuthKeysLastUsed(c))
 	assert.Equal(t, float64(0), echotest.Decode[map[string]any](t, rec)["retention_days"])
