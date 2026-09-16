@@ -3,9 +3,11 @@ package auditlog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/enterpilot/gomodel/internal/storage/sqlx"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,4 +71,48 @@ func TestSQLReader_GetLastUsedByAuthKeys_Errors(t *testing.T) {
 		require.ErrorIs(t, err, probe)
 		require.ErrorContains(t, err, "error iterating auth key last used rows")
 	})
+}
+
+// batchRecordingDB counts Query calls and the argument count of each call, to
+// prove the last-used lookup batches its IN (...) parameters.
+type batchRecordingDB struct {
+	calls     int
+	maxArgs   int
+	totalArgs int
+	lastArgs  [][]any
+}
+
+func (db *batchRecordingDB) Exec(context.Context, string, ...any) (int64, error) { return 0, nil }
+
+func (db *batchRecordingDB) Query(_ context.Context, _ string, args ...any) (sqlx.Rows, error) {
+	db.calls++
+	db.maxArgs = max(db.maxArgs, len(args))
+	db.totalArgs += len(args)
+	db.lastArgs = append(db.lastArgs, args)
+	return &lastUsedFakeRows{}, nil
+}
+
+func (db *batchRecordingDB) QueryRow(context.Context, string, ...any) sqlx.Row    { return nil }
+func (db *batchRecordingDB) Dialect() sqlx.Dialect                                { return sqlx.SQLite }
+func (db *batchRecordingDB) Schema(context.Context, ...string) error              { return nil }
+func (db *batchRecordingDB) InTx(context.Context, func(sqlx.Querier) error) error { return nil }
+
+func TestSQLReader_GetLastUsedByAuthKeys_BatchesKeys(t *testing.T) {
+	ids := make([]string, 0, maxLastUsedKeysPerQuery+1)
+	for i := 0; i < maxLastUsedKeysPerQuery+1; i++ {
+		ids = append(ids, fmt.Sprintf("key-%d", i))
+	}
+
+	db := &batchRecordingDB{}
+	reader, err := NewSQLReader(db)
+	require.NoError(t, err)
+	result, err := reader.GetLastUsedByAuthKeys(context.Background(), ids)
+	require.NoError(t, err)
+	assert.Empty(t, result)
+
+	// Two batches: the full cap and the one-key remainder; every query stays
+	// under the SQLite variable limit.
+	require.Equal(t, 2, db.calls)
+	assert.LessOrEqual(t, db.maxArgs, maxLastUsedKeysPerQuery)
+	assert.Equal(t, len(ids), db.totalArgs)
 }
