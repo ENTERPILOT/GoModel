@@ -2,11 +2,13 @@
 package live
 
 import (
+	"maps"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 
@@ -106,8 +108,17 @@ type Broker struct {
 	events      []Event
 	head        int
 	subscribers map[uint64]chan Event
-	activeAudit map[string]Event
+	activeAudit map[string]auditSnapshot
 	activeUsage map[string]Event
+}
+
+// auditSnapshot is the accumulated live state of one in-flight request: the
+// event a fresh subscriber replays, and the typed preview it was encoded from
+// so the next event of the same request merges onto a struct rather than
+// decoding and re-encoding JSON.
+type auditSnapshot struct {
+	event   Event
+	preview auditPreview
 }
 
 // NewBroker creates a live event broker. A disabled broker is safe to use.
@@ -137,7 +148,7 @@ func NewBroker(cfg Config) *Broker {
 		subscriberBuffer: cfg.SubscriberBuffer,
 		heartbeat:        cfg.Heartbeat,
 		subscribers:      make(map[uint64]chan Event),
-		activeAudit:      make(map[string]Event),
+		activeAudit:      make(map[string]auditSnapshot),
 		activeUsage:      make(map[string]Event),
 	}
 }
@@ -253,8 +264,8 @@ func (b *Broker) eventAtLocked(i int) Event {
 
 func (b *Broker) activeSnapshotsLocked() []Event {
 	snapshots := make([]Event, 0, len(b.activeAudit)+len(b.activeUsage))
-	for _, event := range b.activeAudit {
-		snapshots = append(snapshots, event)
+	for _, snapshot := range b.activeAudit {
+		snapshots = append(snapshots, snapshot.event)
 	}
 	for _, event := range b.activeUsage {
 		snapshots = append(snapshots, event)
@@ -306,15 +317,13 @@ func (b *Broker) publish(eventType, entryID, requestID string, timestamp time.Ti
 	if err != nil {
 		return
 	}
-	b.publishEvent(eventType, entryID, requestID, timestamp, data, nil)
+	b.publishEvent(eventType, entryID, requestID, timestamp, data)
 }
 
-// publishEvent buffers the retained payload for replay and fans the event out
-// to subscribers. fanoutData, when non-nil, replaces the retained payload on
-// the copy sent to live subscribers — used to deliver request/response bodies
-// to connected dashboards without retaining them in the replay ring or active
-// snapshots, which outlive the request.
-func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp time.Time, retainedData, fanoutData json.RawMessage) {
+// publishEvent buffers a usage event for replay and fans it out to
+// subscribers. Audit events take publishAuditPreview instead, which
+// accumulates their active snapshot from the typed preview.
+func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp time.Time, data json.RawMessage) {
 	if b == nil || !b.enabled {
 		return
 	}
@@ -322,8 +331,30 @@ func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp ti
 	if eventType == "" {
 		return
 	}
-	if timestamp.IsZero() {
-		timestamp = time.Now().UTC()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	event := b.nextEventLocked(eventType, requestID, timestamp, data)
+	b.updateUsageSnapshotLocked(&event, entryID)
+	b.bufferAndFanoutLocked(event, nil)
+}
+
+// publishAuditPreview accumulates the retained preview onto the request's
+// active snapshot, encodes the result once, and buffers and fans out the
+// event. fanoutData, when non-nil, replaces the retained payload on the copy
+// sent to live subscribers — used to deliver request/response bodies to
+// connected dashboards without retaining them in the replay ring or active
+// snapshots, which outlive the request.
+func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPreview, fanoutData json.RawMessage) {
+	if b == nil || !b.enabled {
+		return
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return
 	}
 
 	b.mu.Lock()
@@ -332,18 +363,74 @@ func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp ti
 		return
 	}
 
-	// Invariant: every assigned sequence is buffered, so sequences inside the
-	// ring are gapless — replayAfterLocked's offset arithmetic depends on it.
-	// Do not return between the increment and the ring write below.
+	keys := auditActiveKeys(retained.RequestID, entryID)
+	terminal := auditEventTerminal(eventType)
+	if terminal {
+		deleteActiveSnapshot(b.activeAudit, keys)
+	} else if previous, ok := findActiveSnapshot(b.activeAudit, keys); ok {
+		retained = mergeAuditPreview(previous.preview, retained)
+	}
+
+	data, err := json.Marshal(retained)
+	if err != nil {
+		return
+	}
+	if len(data) > maxRetainedEventBytes {
+		// Only retention is size-capped. A connected dashboard still receives
+		// the whole event, which is what this encoding was before compaction.
+		if fanoutData == nil && len(b.subscribers) > 0 {
+			fanoutData = data
+		}
+		retained = compactAuditPreviewForRetention(retained)
+		if data, err = json.Marshal(retained); err != nil {
+			return
+		}
+		// Compaction only reduces Data. One oversized top-level field — an
+		// upstream error message is the realistic case — can still carry the
+		// event past the cap, so trim it too. Each pass removes at least the
+		// overflow; the bound is for escaping, which can only shrink further.
+		for range 3 {
+			if len(data) <= maxRetainedEventBytes || retained.ErrorMessage == "" {
+				break
+			}
+			retained.ErrorMessage = truncateRetainedText(retained.ErrorMessage, len(data)-maxRetainedEventBytes)
+			if data, err = json.Marshal(retained); err != nil {
+				return
+			}
+		}
+	}
+
+	event := b.nextEventLocked(eventType, retained.RequestID, retained.Timestamp, data)
+	if !terminal && keys.canonical != "" {
+		b.activeAudit[keys.canonical] = auditSnapshot{event: event, preview: retained}
+		deleteActiveSnapshotAliases(b.activeAudit, keys)
+	}
+	b.bufferAndFanoutLocked(event, fanoutData)
+}
+
+// nextEventLocked assigns the next stream sequence. Caller must hold b.mu.
+//
+// Invariant: every assigned sequence is buffered, so sequences inside the ring
+// are gapless — replayAfterLocked's offset arithmetic depends on it. Callers
+// must not return between this and bufferAndFanoutLocked.
+func (b *Broker) nextEventLocked(eventType, requestID string, timestamp time.Time, data json.RawMessage) Event {
+	if timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
 	b.nextSeq++
-	event := Event{
+	return Event{
 		Seq:       b.nextSeq,
 		Type:      eventType,
 		RequestID: strings.TrimSpace(requestID),
 		Timestamp: timestamp.UTC(),
-		Data:      retainedData,
+		Data:      data,
 	}
-	b.updateActiveSnapshotsLocked(&event, entryID)
+}
+
+// bufferAndFanoutLocked writes the event to the replay ring and sends it to
+// every subscriber, dropping the ones that cannot keep up. Caller must hold
+// b.mu.
+func (b *Broker) bufferAndFanoutLocked(event Event, fanoutData json.RawMessage) {
 	if len(b.events) < b.bufferSize {
 		b.events = append(b.events, event)
 	} else {
@@ -369,42 +456,23 @@ func (b *Broker) publishEvent(eventType, entryID, requestID string, timestamp ti
 	b.subscriberCount.Store(int64(len(b.subscribers)))
 }
 
-func (b *Broker) updateActiveSnapshotsLocked(event *Event, entryID string) {
-	if event == nil {
+func (b *Broker) updateUsageSnapshotLocked(event *Event, entryID string) {
+	if event == nil || !strings.HasPrefix(event.Type, "usage.") {
 		return
 	}
-	switch event.Type {
-	case EventAuditFailed, EventAuditFlushed, EventAuditRemoved:
-		deleteActiveSnapshot(b.activeAudit, auditActiveKeys(*event, entryID))
-		return
-	case EventUsageFailed, EventUsageFlushed:
-		deleteActiveSnapshot(b.activeUsage, usageActiveKeys(*event, entryID))
+	keys := usageActiveKeys(event.RequestID, entryID)
+	if event.Type == EventUsageFailed || event.Type == EventUsageFlushed {
+		deleteActiveSnapshot(b.activeUsage, keys)
 		return
 	}
-
-	if strings.HasPrefix(event.Type, "audit.") {
-		keys := auditActiveKeys(*event, entryID)
-		if keys.canonical == "" {
-			return
-		}
-		if previous, ok := findActiveSnapshot(b.activeAudit, keys); ok {
-			event.Data = mergeEventData(previous.Data, event.Data)
-		}
-		b.activeAudit[keys.canonical] = *event
-		deleteActiveSnapshotAliases(b.activeAudit, keys)
+	if keys.canonical == "" {
 		return
 	}
-	if strings.HasPrefix(event.Type, "usage.") {
-		keys := usageActiveKeys(*event, entryID)
-		if keys.canonical == "" {
-			return
-		}
-		if previous, ok := findActiveSnapshot(b.activeUsage, keys); ok {
-			event.Data = mergeEventData(previous.Data, event.Data)
-		}
-		b.activeUsage[keys.canonical] = *event
-		deleteActiveSnapshotAliases(b.activeUsage, keys)
+	if previous, ok := findActiveSnapshot(b.activeUsage, keys); ok {
+		event.Data = mergeEventData(previous.Data, event.Data)
 	}
+	b.activeUsage[keys.canonical] = *event
+	deleteActiveSnapshotAliases(b.activeUsage, keys)
 }
 
 type activeSnapshotKeys struct {
@@ -412,8 +480,8 @@ type activeSnapshotKeys struct {
 	aliases   []string
 }
 
-func auditActiveKeys(event Event, id string) activeSnapshotKeys {
-	requestID := strings.TrimSpace(event.RequestID)
+func auditActiveKeys(requestID, id string) activeSnapshotKeys {
+	requestID = strings.TrimSpace(requestID)
 	id = strings.TrimSpace(id)
 	keys := activeSnapshotKeys{}
 	if requestID != "" {
@@ -429,9 +497,9 @@ func auditActiveKeys(event Event, id string) activeSnapshotKeys {
 	return keys
 }
 
-func usageActiveKeys(event Event, id string) activeSnapshotKeys {
+func usageActiveKeys(requestID, id string) activeSnapshotKeys {
 	id = strings.TrimSpace(id)
-	requestID := strings.TrimSpace(event.RequestID)
+	requestID = strings.TrimSpace(requestID)
 	keys := activeSnapshotKeys{}
 	if id != "" {
 		keys.canonical = "id:" + id
@@ -446,19 +514,22 @@ func usageActiveKeys(event Event, id string) activeSnapshotKeys {
 	return keys
 }
 
-func findActiveSnapshot(snapshots map[string]Event, keys activeSnapshotKeys) (Event, bool) {
-	if event, ok := snapshots[keys.canonical]; ok {
-		return event, true
-	}
-	for _, key := range keys.aliases {
-		if event, ok := snapshots[key]; ok {
-			return event, true
+func findActiveSnapshot[T any](snapshots map[string]T, keys activeSnapshotKeys) (T, bool) {
+	if keys.canonical != "" {
+		if snapshot, ok := snapshots[keys.canonical]; ok {
+			return snapshot, true
 		}
 	}
-	return Event{}, false
+	for _, key := range keys.aliases {
+		if snapshot, ok := snapshots[key]; ok {
+			return snapshot, true
+		}
+	}
+	var zero T
+	return zero, false
 }
 
-func deleteActiveSnapshot(snapshots map[string]Event, keys activeSnapshotKeys) {
+func deleteActiveSnapshot[T any](snapshots map[string]T, keys activeSnapshotKeys) {
 	if keys.canonical != "" {
 		delete(snapshots, keys.canonical)
 	}
@@ -467,14 +538,177 @@ func deleteActiveSnapshot(snapshots map[string]Event, keys activeSnapshotKeys) {
 	}
 }
 
-func deleteActiveSnapshotAliases(snapshots map[string]Event, keys activeSnapshotKeys) {
+func deleteActiveSnapshotAliases[T any](snapshots map[string]T, keys activeSnapshotKeys) {
 	for _, key := range keys.aliases {
 		delete(snapshots, key)
 	}
 }
 
+// retainedTextTruncationMarker ends a field the retention cap had to cut, so a
+// dashboard shows a shortened message rather than one that stops mid-sentence.
+const retainedTextTruncationMarker = "… [truncated]"
+
+// truncateRetainedText shortens text by at least overflow bytes. It returns ""
+// when nothing meaningful would survive, and never splits a rune.
+func truncateRetainedText(text string, overflow int) string {
+	keep := len(text) - overflow - len(retainedTextTruncationMarker)
+	if keep <= 0 {
+		return ""
+	}
+	for keep > 0 && !utf8.RuneStart(text[keep]) {
+		keep--
+	}
+	if keep == 0 {
+		return ""
+	}
+	return text[:keep] + retainedTextTruncationMarker
+}
+
+// mergeAuditPreview accumulates patch onto base and returns the result.
+//
+// It replaces a JSON merge of the two encoded previews, which cost two decodes
+// and a re-encode on every audit event — the bulk of the broker's per-request
+// work, paid whether or not a dashboard is connected. The rule is the one that
+// merge implied: a member the patch omits leaves the base value in place, and
+// `omitempty` decides what the patch omits, so a zero field never erases what
+// an earlier event reported. Nested objects merge the same way; arrays and
+// scalars are replaced whole.
+//
+// Values the patch contributes are copied rather than referenced: the preview
+// is built from the live audit entry, which the request goes on mutating,
+// while a snapshot outlives it.
+func mergeAuditPreview(base, patch auditPreview) auditPreview {
+	merged := base
+	// id and timestamp carry no omitempty, so every patch supplies them.
+	merged.ID = patch.ID
+	merged.Timestamp = patch.Timestamp
+	overlay(&merged.RequestID, patch.RequestID)
+	overlay(&merged.DurationNs, patch.DurationNs)
+	overlay(&merged.RequestedModel, patch.RequestedModel)
+	overlay(&merged.ResolvedModel, patch.ResolvedModel)
+	overlay(&merged.Provider, patch.Provider)
+	overlay(&merged.ProviderName, patch.ProviderName)
+	overlay(&merged.AliasUsed, patch.AliasUsed)
+	overlay(&merged.WorkflowVersionID, patch.WorkflowVersionID)
+	overlay(&merged.CacheType, patch.CacheType)
+	overlay(&merged.StatusCode, patch.StatusCode)
+	overlay(&merged.AuthKeyID, patch.AuthKeyID)
+	overlay(&merged.AuthMethod, patch.AuthMethod)
+	overlay(&merged.ClientIP, patch.ClientIP)
+	overlay(&merged.Method, patch.Method)
+	overlay(&merged.Path, patch.Path)
+	overlay(&merged.UserPath, patch.UserPath)
+	overlay(&merged.SessionID, patch.SessionID)
+	overlay(&merged.Stream, patch.Stream)
+	overlay(&merged.ErrorType, patch.ErrorType)
+	overlay(&merged.ErrorMessage, patch.ErrorMessage)
+	overlay(&merged.LiveState, patch.LiveState)
+	overlay(&merged.LivePending, patch.LivePending)
+	merged.Data = mergeAuditPreviewData(base.Data, patch.Data)
+	return merged
+}
+
+func mergeAuditPreviewData(base, patch *auditPreviewData) *auditPreviewData {
+	if patch == nil {
+		return base
+	}
+	if base == nil {
+		data := *patch
+		data.RequestHeaders = cloneStringMap(patch.RequestHeaders)
+		data.ResponseHeaders = cloneStringMap(patch.ResponseHeaders)
+		data.WorkflowFeatures = clonePtr(patch.WorkflowFeatures)
+		data.Failover = clonePtr(patch.Failover)
+		return &data
+	}
+
+	merged := *base
+	overlay(&merged.UserAgent, patch.UserAgent)
+	overlay(&merged.APIKeyHash, patch.APIKeyHash)
+	overlay(&merged.ErrorMessage, patch.ErrorMessage)
+	overlay(&merged.ErrorCode, patch.ErrorCode)
+	overlay(&merged.RequestBodyTooBigToHandle, patch.RequestBodyTooBigToHandle)
+	overlay(&merged.ResponseBodyTooBigToHandle, patch.ResponseBodyTooBigToHandle)
+	overlay(&merged.ResponseBodyPartial, patch.ResponseBodyPartial)
+	overlay(&merged.RequestBodyCaptured, patch.RequestBodyCaptured)
+	overlay(&merged.ResponseBodyCaptured, patch.ResponseBodyCaptured)
+	if patch.Temperature != nil {
+		merged.Temperature = clonePtr(patch.Temperature)
+	}
+	if patch.MaxTokens != nil {
+		merged.MaxTokens = clonePtr(patch.MaxTokens)
+	}
+	if patch.WorkflowFeatures != nil {
+		// Every member of the snapshot is serialized, so the patch replaces it.
+		merged.WorkflowFeatures = clonePtr(patch.WorkflowFeatures)
+	}
+	if patch.Failover != nil {
+		failover := auditlog.FailoverSnapshot{}
+		if merged.Failover != nil {
+			failover = *merged.Failover
+		}
+		overlay(&failover.TargetModel, patch.Failover.TargetModel)
+		merged.Failover = &failover
+	}
+	if patch.RequestBody != nil {
+		merged.RequestBody = patch.RequestBody
+	}
+	if patch.ResponseBody != nil {
+		merged.ResponseBody = patch.ResponseBody
+	}
+	merged.RequestHeaders = mergeStringMap(base.RequestHeaders, patch.RequestHeaders)
+	merged.ResponseHeaders = mergeStringMap(base.ResponseHeaders, patch.ResponseHeaders)
+	// compactAttemptsForPreview and compactGuardrailsForPreview already hand
+	// out copies, and a patch reports the whole trail rather than the tail.
+	if len(patch.Attempts) > 0 {
+		merged.Attempts = patch.Attempts
+	}
+	if len(patch.Guardrails) > 0 {
+		merged.Guardrails = patch.Guardrails
+	}
+	return &merged
+}
+
+// overlay assigns patch over dst unless patch is the zero value, which is what
+// an `omitempty` member contributes to a JSON merge: nothing.
+func overlay[T comparable](dst *T, patch T) {
+	var zero T
+	if patch != zero {
+		*dst = patch
+	}
+}
+
+func clonePtr[T any](src *T) *T {
+	if src == nil {
+		return nil
+	}
+	value := *src
+	return &value
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	return maps.Clone(src)
+}
+
+func mergeStringMap(base, patch map[string]string) map[string]string {
+	if len(patch) == 0 {
+		return base
+	}
+	if len(base) == 0 {
+		return maps.Clone(patch)
+	}
+	merged := make(map[string]string, len(base)+len(patch))
+	maps.Copy(merged, base)
+	maps.Copy(merged, patch)
+	return merged
+}
+
 // mergeEventData recursively merges two JSON objects, with patch members
 // winning on conflict. Whenever either side is not a JSON object, patch wins.
+// Usage events, whose payload is one flat entry, still accumulate this way;
+// audit events take mergeAuditPreview.
 func mergeEventData(base, patch json.RawMessage) json.RawMessage {
 	var baseObject map[string]json.RawMessage
 	var patchObject map[string]json.RawMessage
@@ -509,32 +743,15 @@ func (b *Broker) PublishAuditEvent(eventType string, entry *auditlog.LogEntry) {
 		return
 	}
 	payload := auditPreviewFromEntry(eventType, entry)
-	retainedPreview, stripped := stripAuditPreviewBodies(payload)
-	retainedData, err := json.Marshal(retainedPreview)
-	if err != nil {
-		return
-	}
-	compacted := false
-	if len(retainedData) > maxRetainedEventBytes {
-		retainedData, err = json.Marshal(compactAuditPreviewForRetention(payload))
-		if err != nil {
-			return
-		}
-		compacted = true
-	}
-	if !stripped && !compacted {
-		// Nothing was reduced: retain and fan out the same payload.
-		b.publishEvent(eventType, entry.ID, entry.RequestID, entry.Timestamp, retainedData, nil)
-		return
-	}
+	retained, stripped := stripAuditPreviewBodies(payload)
 	var fanoutData json.RawMessage
-	if b.subscriberCount.Load() > 0 {
-		fanoutData, err = json.Marshal(payload)
-		if err != nil {
+	if stripped && b.subscriberCount.Load() > 0 {
+		var err error
+		if fanoutData, err = json.Marshal(payload); err != nil {
 			return
 		}
 	}
-	b.publishEvent(eventType, entry.ID, entry.RequestID, entry.Timestamp, retainedData, fanoutData)
+	b.publishAuditPreview(eventType, entry.ID, retained, fanoutData)
 }
 
 // stripAuditPreviewBodies returns a preview copy without request/response
@@ -562,14 +779,16 @@ func stripAuditPreviewBodies(preview auditPreview) (auditPreview, bool) {
 
 // compactAuditPreviewForRetention reduces a preview to its top-level fields
 // plus body-capture flags, for events whose remaining data (headers, error
-// payloads) still exceeds the retained-size cap.
+// payloads) still exceeds the retained-size cap. It runs after
+// stripAuditPreviewBodies, so a body is "captured" either because this preview
+// still carries one or because stripping already flagged it.
 func compactAuditPreviewForRetention(preview auditPreview) auditPreview {
 	if preview.Data == nil {
 		return preview
 	}
 	preview.Data = &auditPreviewData{
-		RequestBodyCaptured:        preview.Data.RequestBody != nil,
-		ResponseBodyCaptured:       preview.Data.ResponseBody != nil && !preview.Data.ResponseBodyPartial,
+		RequestBodyCaptured:        preview.Data.RequestBody != nil || preview.Data.RequestBodyCaptured,
+		ResponseBodyCaptured:       (preview.Data.ResponseBody != nil && !preview.Data.ResponseBodyPartial) || preview.Data.ResponseBodyCaptured,
 		RequestBodyTooBigToHandle:  preview.Data.RequestBodyTooBigToHandle,
 		ResponseBodyTooBigToHandle: preview.Data.ResponseBodyTooBigToHandle,
 	}
