@@ -3,6 +3,9 @@
 // and DOM/template cases are covered by the Svelte components and skipped.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   buildMcpServerPayload,
@@ -16,6 +19,8 @@ import {
   mcpHeadersToRows,
   mcpServerEndpointLabel,
   mcpServerFormFromServer,
+  mcpPollShouldRetry,
+  MCP_SERVERS_POLL_MAX_FAILURES,
   mcpServersNeedPolling,
   mcpServerStatus,
   mcpServerStatusClass,
@@ -92,6 +97,69 @@ test("mcpServersNeedPolling stays on only while a server is still connecting", (
   );
   assert.equal(mcpServersNeedPolling([]), false);
   assert.equal(mcpServersNeedPolling(null), false);
+});
+
+test("mcpPollShouldRetry keeps retrying a failing poll until the budget runs out", () => {
+  assert.equal(mcpPollShouldRetry(0), true);
+  assert.equal(mcpPollShouldRetry(MCP_SERVERS_POLL_MAX_FAILURES - 1), true);
+  assert.equal(mcpPollShouldRetry(MCP_SERVERS_POLL_MAX_FAILURES), false);
+  assert.equal(mcpPollShouldRetry(undefined), true);
+});
+
+// Guard for the poll loop's lifecycle contract (#1024). The store uses runes,
+// so it cannot be imported here; like editor-dialog.test.js, this asserts the
+// wiring on the source. Both halves are regressions the loop shipped with:
+// a failed background poll that never retried left the row it was waiting on
+// stuck on "connecting", and a response landing after the page was left
+// scheduled a timer that outlived it.
+test("the MCP connect poll retries failures and cannot outlive the page", () => {
+  const SRC = fileURLToPath(new URL("../src", import.meta.url));
+  const store = readFileSync(
+    join(SRC, "pages/mcp-servers/mcpServers.svelte.js"),
+    "utf8",
+  );
+
+  // Every scheduling path passes the generation captured when the request
+  // started, and the timer is only armed while that generation is current.
+  const schedule = store.match(/#schedulePoll\(generation\) \{[\s\S]*?\n  \}/);
+  assert.ok(schedule, "#schedulePoll(generation) missing");
+  assert.ok(
+    schedule[0].indexOf("generation !== this.#pollGeneration") <
+      schedule[0].indexOf("this.#clearPoll()"),
+    "a stale generation must return before clearing a newer timer",
+  );
+  assert.match(schedule[0], /setTimeout\(/);
+  assert.equal(
+    store.match(/this\.#schedulePoll\((?!generation\))/),
+    null,
+    "#schedulePoll must always be called with the request's generation",
+  );
+
+  // Leaving the page invalidates whatever is in flight.
+  const stop = store.match(/stopPolling\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(stop, "stopPolling missing");
+  assert.match(stop[0], /this\.#pollGeneration \+= 1;/);
+  assert.match(stop[0], /this\.#clearPoll\(\);/);
+
+  // A failed background poll retries on the budget instead of giving up.
+  const fetchServers = store.match(
+    /async fetchServers\(\{ background = false \} = \{\}\) \{[\s\S]*?\n  \}/,
+  );
+  assert.ok(fetchServers, "fetchServers missing");
+  const backgroundFailure = fetchServers[0].match(
+    /if \(background\) \{[\s\S]*?\n        \}/,
+  );
+  assert.ok(backgroundFailure, "background failure branch missing");
+  assert.match(backgroundFailure[0], /this\.#pollFailures \+= 1;/);
+  assert.match(
+    backgroundFailure[0],
+    /mcpPollShouldRetry\(this\.#pollFailures\)[\s\S]*?this\.#schedulePoll\(generation\)/,
+  );
+  assert.equal(
+    backgroundFailure[0].includes("this.servers = []"),
+    false,
+    "a failed background poll must keep the list it already has",
+  );
 });
 
 test("mcpServerStatusTitle surfaces last_error for degraded servers", () => {

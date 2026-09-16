@@ -14,6 +14,7 @@ import {
   deriveMcpServerSlug,
   filterMcpServers,
   mcpServerFormFromServer,
+  mcpPollShouldRetry,
   mcpServerSlug,
   mcpServersNeedPolling,
   mcpServerStatus,
@@ -48,6 +49,12 @@ class McpServersState {
   filtered = $derived(filterMcpServers(this.servers, this.filter));
 
   #pollTimer = null;
+  // stopPolling starts a new generation. A list request already in flight
+  // then belongs to the previous one: clearing the timer cannot cancel it, so
+  // the generation is what keeps its response from scheduling a fresh timer
+  // after the page is gone.
+  #pollGeneration = 0;
+  #pollFailures = 0;
 
   // --- server list -------------------------------------------------------
 
@@ -67,8 +74,10 @@ class McpServersState {
     }
 
     this.#clearPoll();
+    const generation = this.#pollGeneration;
     if (!background) {
       this.loading = true;
+      this.#pollFailures = 0;
     }
     this.error = "";
     try {
@@ -93,9 +102,14 @@ class McpServersState {
         }
         // A failed background poll keeps the list it already has: a blip
         // while waiting for a dial must not blank the table or replace it
-        // with an error the operator never asked for. The loop simply stops;
-        // the next page visit or row action reloads.
+        // with an error the operator never asked for. It retries, since the
+        // pending row is exactly what the loop is waiting on, until the
+        // failure budget runs out.
         if (background) {
+          this.#pollFailures += 1;
+          if (mcpPollShouldRetry(this.#pollFailures)) {
+            this.#schedulePoll(generation);
+          }
           return;
         }
         this.servers = [];
@@ -104,7 +118,8 @@ class McpServersState {
       }
       this.available = true;
       this.servers = outcome.items;
-      this.#schedulePoll();
+      this.#pollFailures = 0;
+      this.#schedulePoll(generation);
     } finally {
       if (!background) {
         this.loading = false;
@@ -114,7 +129,12 @@ class McpServersState {
 
   // --- connect poll ------------------------------------------------------
 
-  #schedulePoll() {
+  #schedulePoll(generation) {
+    // The generation check comes first: a response from a stopped loop must
+    // not clear a timer a newer load already scheduled.
+    if (generation !== this.#pollGeneration) {
+      return;
+    }
     this.#clearPoll();
     if (!mcpServersNeedPolling(this.servers)) {
       return;
@@ -132,9 +152,11 @@ class McpServersState {
     }
   }
 
-  // stopPolling is called when the page is left, so a background timer never
-  // outlives it.
+  // stopPolling is called when the page is left, so neither a timer nor an
+  // in-flight request outlives it.
   stopPolling() {
+    this.#pollGeneration += 1;
+    this.#pollFailures = 0;
     this.#clearPoll();
   }
 
