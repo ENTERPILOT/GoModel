@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 
@@ -384,6 +385,19 @@ func (b *Broker) publishAuditPreview(eventType, entryID string, retained auditPr
 		if data, err = json.Marshal(retained); err != nil {
 			return
 		}
+		// Compaction only reduces Data. One oversized top-level field — an
+		// upstream error message is the realistic case — can still carry the
+		// event past the cap, so trim it too. Each pass removes at least the
+		// overflow; the bound is for escaping, which can only shrink further.
+		for range 3 {
+			if len(data) <= maxRetainedEventBytes || retained.ErrorMessage == "" {
+				break
+			}
+			retained.ErrorMessage = truncateRetainedText(retained.ErrorMessage, len(data)-maxRetainedEventBytes)
+			if data, err = json.Marshal(retained); err != nil {
+				return
+			}
+		}
 	}
 
 	event := b.nextEventLocked(eventType, retained.RequestID, retained.Timestamp, data)
@@ -528,6 +542,26 @@ func deleteActiveSnapshotAliases[T any](snapshots map[string]T, keys activeSnaps
 	for _, key := range keys.aliases {
 		delete(snapshots, key)
 	}
+}
+
+// retainedTextTruncationMarker ends a field the retention cap had to cut, so a
+// dashboard shows a shortened message rather than one that stops mid-sentence.
+const retainedTextTruncationMarker = "… [truncated]"
+
+// truncateRetainedText shortens text by at least overflow bytes. It returns ""
+// when nothing meaningful would survive, and never splits a rune.
+func truncateRetainedText(text string, overflow int) string {
+	keep := len(text) - overflow - len(retainedTextTruncationMarker)
+	if keep <= 0 {
+		return ""
+	}
+	for keep > 0 && !utf8.RuneStart(text[keep]) {
+		keep--
+	}
+	if keep == 0 {
+		return ""
+	}
+	return text[:keep] + retainedTextTruncationMarker
 }
 
 // mergeAuditPreview accumulates patch onto base and returns the result.
