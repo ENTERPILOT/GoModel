@@ -132,6 +132,7 @@ func TestCreateSpeech_MapsNativeStatusCodes(t *testing.T) {
 			assert.Contains(t, gatewayErr.Message, tt.statusMsg)
 			assert.Contains(t, gatewayErr.Message, strconv.Itoa(tt.nativeStatus))
 			assert.Equal(t, "minimax", gatewayErr.Provider)
+			assert.JSONEq(t, string(body), string(gatewayErr.ResponseBody))
 		})
 	}
 }

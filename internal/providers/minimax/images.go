@@ -3,7 +3,6 @@ package minimax
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -89,7 +88,8 @@ func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationReq
 			Base64 []string `json:"image_base64"`
 		} `json:"data"`
 		BaseResponse *struct {
-			StatusCode int `json:"status_code"`
+			StatusCode int    `json:"status_code"`
+			StatusMsg  string `json:"status_msg"`
 		} `json:"base_resp"`
 	}
 	if err := json.Unmarshal(responseBody, &response); err != nil {
@@ -99,21 +99,7 @@ func (p *Provider) CreateImage(ctx context.Context, req *core.ImageGenerationReq
 		return nil, core.NewProviderError("minimax", http.StatusBadGateway, "image response contains no status", nil)
 	}
 	if code := response.BaseResponse.StatusCode; code != 0 {
-		message := fmt.Sprintf("minimax image request failed (status %d)", code)
-		switch code {
-		case 1002:
-			return nil, core.NewRateLimitError("minimax", message)
-		case 1004, 2049:
-			return nil, core.NewAuthenticationError("minimax", message)
-		case 1008:
-			return nil, core.NewProviderError("minimax", http.StatusPaymentRequired, message, nil)
-		case 1026, 2013:
-			gatewayErr := core.NewInvalidRequestError(message, nil)
-			gatewayErr.Provider = "minimax"
-			return nil, gatewayErr
-		default:
-			return nil, core.NewProviderError("minimax", http.StatusBadGateway, message, nil)
-		}
+		return nil, statusError("image", code, response.BaseResponse.StatusMsg, responseBody)
 	}
 	result := &core.ImageGenerationResponse{Created: time.Now().Unix()}
 	if format == "url" {

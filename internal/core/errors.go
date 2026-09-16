@@ -160,6 +160,14 @@ func (e *GatewayError) WithCode(code string) *GatewayError {
 	return e
 }
 
+// WithResponseBody attaches a bounded copy of the raw upstream response body
+// for auditing. Providers that report failures inside a 2xx body use this to
+// retain the same evidence ParseProviderError captures for non-2xx responses.
+func (e *GatewayError) WithResponseBody(body []byte) *GatewayError {
+	e.ResponseBody = captureGatewayErrorBody(body)
+	return e
+}
+
 // NewProviderError creates a new provider error (upstream 5xx)
 func NewProviderError(provider string, statusCode int, message string, err error) *GatewayError {
 	return &GatewayError{

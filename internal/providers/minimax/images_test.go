@@ -70,21 +70,29 @@ func TestCreateImageNativeDimensions(t *testing.T) {
 }
 
 func TestCreateImageErrors(t *testing.T) {
+	// nativeMessage is MiniMax's base_resp.status_msg; when set, the gateway
+	// error must carry it along with the raw upstream body for auditing.
 	for _, tc := range []struct {
-		name, body   string
-		status, want int
+		name, body    string
+		status, want  int
+		nativeMessage string
 	}{
-		{"rate limit", `{"base_resp":{"status_code":1002}}`, 200, 429},
-		{"authentication", `{"base_resp":{"status_code":1004}}`, 200, 401},
-		{"invalid key", `{"base_resp":{"status_code":2049}}`, 200, 401},
-		{"balance", `{"base_resp":{"status_code":1008}}`, 200, 402},
-		{"sensitive", `{"base_resp":{"status_code":1026}}`, 200, 400},
-		{"parameters", `{"base_resp":{"status_code":2013}}`, 200, 400},
-		{"unknown", `{"base_resp":{"status_code":9999}}`, 200, 502},
-		{"empty", `{"data":{"image_urls":[]},"base_resp":{"status_code":0}}`, 200, 502},
-		{"missing status", `{"data":{"image_urls":["https://example.com/image.png"]}}`, 200, 502},
-		{"malformed", `{`, 200, 502},
-		{"http error", `{"error":{"message":"invalid request"}}`, 400, 400},
+		{"rate limit", `{"base_resp":{"status_code":1002,"status_msg":"rate limit triggered"}}`, 200, 429, "rate limit triggered"},
+		{"token limit", `{"base_resp":{"status_code":1039,"status_msg":"token limit"}}`, 200, 429, "token limit"},
+		{"rate growth limit", `{"base_resp":{"status_code":2045,"status_msg":"rate growth limit"}}`, 200, 429, "rate growth limit"},
+		{"usage limit", `{"base_resp":{"status_code":2056,"status_msg":"usage limit exceeded"}}`, 200, 429, "usage limit exceeded"},
+		{"authentication", `{"base_resp":{"status_code":1004,"status_msg":"not authorized"}}`, 200, 401, "not authorized"},
+		{"invalid key", `{"base_resp":{"status_code":2049,"status_msg":"invalid API Key"}}`, 200, 401, "invalid API Key"},
+		{"balance", `{"base_resp":{"status_code":1008,"status_msg":"insufficient balance"}}`, 200, 402, "insufficient balance"},
+		{"sensitive", `{"base_resp":{"status_code":1026,"status_msg":"sensitive content"}}`, 200, 400, "sensitive content"},
+		{"invisible characters", `{"base_resp":{"status_code":1042,"status_msg":"invisible character ratio limit"}}`, 200, 400, "invisible character ratio limit"},
+		{"parameters", `{"base_resp":{"status_code":2013,"status_msg":"invalid params"}}`, 200, 400, "invalid params"},
+		{"unknown", `{"base_resp":{"status_code":9999,"status_msg":"unknown error"}}`, 200, 502, "unknown error"},
+		{"missing native message", `{"base_resp":{"status_code":2013}}`, 200, 400, ""},
+		{"empty", `{"data":{"image_urls":[]},"base_resp":{"status_code":0}}`, 200, 502, ""},
+		{"missing status", `{"data":{"image_urls":["https://example.com/image.png"]}}`, 200, 502, ""},
+		{"malformed", `{`, 200, 502, ""},
+		{"http error", `{"error":{"message":"invalid request"}}`, 400, 400, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server, _ := providertest.JSONServer(t, tc.status, tc.body)
@@ -93,8 +101,27 @@ func TestCreateImageErrors(t *testing.T) {
 			var gatewayErr *core.GatewayError
 			require.ErrorAs(t, err, &gatewayErr)
 			assert.Equal(t, tc.want, gatewayErr.HTTPStatusCode())
+			if tc.nativeMessage == "" {
+				return
+			}
+			assert.Equal(t, "minimax", gatewayErr.Provider)
+			assert.Contains(t, gatewayErr.Message, tc.nativeMessage)
+			assert.JSONEq(t, tc.body, string(gatewayErr.ResponseBody))
 		})
 	}
+}
+
+func TestCreateImageOmitsBlankNativeMessage(t *testing.T) {
+	const body = `{"base_resp":{"status_code":2013,"status_msg":"  "}}`
+	server, _ := providertest.JSONServer(t, http.StatusOK, body)
+	p := NewWithHTTPClient("test-key", server.URL, server.Client(), llmclient.Hooks{})
+
+	_, err := p.CreateImage(context.Background(), &core.ImageGenerationRequest{Model: "image-01", Prompt: "A lighthouse"})
+
+	var gatewayErr *core.GatewayError
+	require.ErrorAs(t, err, &gatewayErr)
+	assert.Equal(t, "minimax image request failed (status 2013)", gatewayErr.Message)
+	assert.JSONEq(t, body, string(gatewayErr.ResponseBody))
 }
 
 func TestCreateImageValidation(t *testing.T) {
