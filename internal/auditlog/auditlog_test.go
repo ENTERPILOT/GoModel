@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/andybalholm/brotli"
 	"github.com/labstack/echo/v5"
 )
 
@@ -1278,14 +1277,6 @@ func compressDeflate(data []byte) []byte {
 	return buf.Bytes()
 }
 
-func compressBrotli(data []byte) []byte {
-	var buf bytes.Buffer
-	w := brotli.NewWriter(&buf)
-	_, _ = w.Write(data)
-	_ = w.Close()
-	return buf.Bytes()
-}
-
 func TestDecompressBody(t *testing.T) {
 	originalData := []byte(`{"message": "hello world", "count": 42}`)
 
@@ -1320,10 +1311,13 @@ func TestDecompressBody(t *testing.T) {
 			shouldDecompress: true,
 		},
 		{
-			name:             "brotli encoding",
+			// The gateway drops a forwarded Accept-Encoding, so a response
+			// body never arrives brotli-compressed; an unreadable encoding is
+			// passed through rather than decoded.
+			name:             "brotli encoding is left alone",
 			encoding:         "br",
-			compressFunc:     compressBrotli,
-			shouldDecompress: true,
+			compressFunc:     func(b []byte) []byte { return b },
+			shouldDecompress: false,
 		},
 		{
 			name:             "gzip with extra spaces",
