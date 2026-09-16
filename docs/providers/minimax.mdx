@@ -157,5 +157,12 @@ The default response format is `url`; URLs expire after 24 hours. Use
 native dimensions or `aspect_ratio`. Native options such as `seed` and
 `prompt_optimizer` pass through. `quality` and streaming are unsupported.
 
+MiniMax reports image and speech failures as HTTP 200 with a non-zero
+`base_resp.status_code`. GoModel maps that code to the matching OpenAI error
+status — 429 for rate and usage limits, 401 for auth, 402 for balance, 400 for
+invalid or rejected input, 502 otherwise — and appends MiniMax's own
+`base_resp.status_msg` to the error message so the upstream diagnostic is not
+lost.
+
 See the [MiniMax image API reference](https://platform.minimax.io/docs/api-reference/image-generation-t2i)
 for model-specific limits.
