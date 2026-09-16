@@ -246,13 +246,16 @@ func TestListAuthKeysIncludesLastUsed(t *testing.T) {
 	assert.Equal(t, usedAt.Format(time.RFC3339), rowsByID[usedKey.ID]["last_used_at"])
 	_, ok := rowsByID[unusedKey.ID]["last_used_at"]
 	assert.False(t, ok)
+	// A successful lookup (even without entries) reports availability.
+	assert.Equal(t, true, rowsByID[usedKey.ID]["last_used_available"])
+	assert.Equal(t, true, rowsByID[unusedKey.ID]["last_used_available"])
 
 	// Every listed key id reached the reader in one call.
 	assert.ElementsMatch(t, []string{usedKey.ID, unusedKey.ID}, reader.lastUsedKeyIDs)
 }
 
 func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
-	// Without an audit reader the list still answers, without last_used_at.
+	// Without an audit reader the list still answers, with no last-used data.
 	h := newAuthKeyHandler(t, newAuthKeyTestStore())
 	createAuthKey(t, h, `{"name":"any"}`)
 	c, rec := echotest.Get(t, "/admin/auth-keys")
@@ -261,6 +264,8 @@ func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
 	body := echotest.Decode[[]map[string]any](t, rec)
 	require.Len(t, body, 1)
 	_, ok := body[0]["last_used_at"]
+	assert.False(t, ok)
+	_, ok = body[0]["last_used_available"]
 	assert.False(t, ok)
 
 	// A failing reader degrades the same way.
@@ -273,5 +278,7 @@ func TestListAuthKeysWorksWithoutLastUsedData(t *testing.T) {
 	body = echotest.Decode[[]map[string]any](t, rec)
 	require.Len(t, body, 1)
 	_, ok = body[0]["last_used_at"]
+	assert.False(t, ok)
+	_, ok = body[0]["last_used_available"]
 	assert.False(t, ok)
 }

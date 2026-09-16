@@ -35,6 +35,11 @@ type authKeyResponse struct {
 	// use — its user path, its allowlist, and the model-side policies applied
 	// through the same authorizer inference uses. Nil without a catalog.
 	EffectiveModels []string `json:"effective_models"`
+	// LastUsedAvailable reports whether the last-used lookup ran successfully
+	// for this response (even when it found no entries). Without it the
+	// dashboard cannot tell "audit has nothing for this key" from "audit data
+	// was unavailable".
+	LastUsedAvailable bool `json:"last_used_available,omitempty"`
 }
 
 func (h *Handler) ListAuthKeys(c *echo.Context) error {
@@ -65,13 +70,17 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 		row.EffectiveModels = h.effectiveModels(ctx, catalog)
 	}
 	// Last-used timestamps come from the audit log (the only write-time record
-	// of key activity). A lookup failure degrades to no last_used_at fields —
-	// the dashboard shows its honest fallback states instead.
+	// of key activity). The availability flag distinguishes a successful
+	// lookup with no entries from an unavailable audit store: a lookup failure
+	// degrades to no last_used_at fields — the dashboard shows its honest
+	// fallback states instead.
+	lastUsedAvailable := false
 	if h.auditReader != nil && len(keyIDs) > 0 {
 		lastUsed, err := h.auditReader.GetLastUsedByAuthKeys(c.Request().Context(), keyIDs)
 		if err != nil {
 			slog.Warn("failed to load auth key last used", "error", err)
 		} else {
+			lastUsedAvailable = true
 			for id, ts := range lastUsed {
 				if row, ok := byID[id]; ok {
 					ts := ts.UTC()
@@ -79,6 +88,9 @@ func (h *Handler) ListAuthKeys(c *echo.Context) error {
 				}
 			}
 		}
+	}
+	for i := range response {
+		response[i].LastUsedAvailable = lastUsedAvailable
 	}
 	return c.JSON(http.StatusOK, response)
 }

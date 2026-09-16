@@ -113,12 +113,12 @@
           <td>
             {#if key.last_used_at}
               {timezone.formatTimestamp(key.last_used_at)}
-            {:else if lastUsedCellState(key.last_used_at, store.retentionDays) === "never"}
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays, key.last_used_available) === "never"}
               <span
                 class="auth-key-unrestricted"
                 title={m.api_keys_last_used_help({ days: 0 })}
               >{m.api_keys_last_used_never()}</span>
-            {:else if lastUsedCellState(key.last_used_at, store.retentionDays) === "outside"}
+            {:else if lastUsedCellState(key.last_used_at, store.retentionDays, key.last_used_available) === "outside"}
               <span
                 class="auth-key-unrestricted"
                 title={m.api_keys_last_used_help({ days: store.retentionDays })}
