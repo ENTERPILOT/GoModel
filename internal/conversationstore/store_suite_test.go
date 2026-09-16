@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/enterpilot/gomodel/internal/core"
@@ -193,7 +192,7 @@ func TestConversationStoreConcurrentAppendsAllSurvive(t *testing.T) {
 		wg.Wait()
 		close(errs)
 		for err := range errs {
-			assert.NoError(t, err)
+			require.NoError(t, err)
 		}
 
 		got, err := store.Get(ctx, "conv-concurrent")
